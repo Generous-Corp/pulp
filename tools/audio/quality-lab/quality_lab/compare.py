@@ -29,7 +29,7 @@ from typing import Any, Callable
 import numpy as np
 
 from . import audio_io, schema
-from .dsp import hf_fraction_delta, relative_centroid_shift
+from .dsp import hf_fraction_delta, null_residual_db, relative_centroid_shift
 
 # Re-export the schema's compare vocabulary so the agent-facing API is one import.
 SCHEMA = schema.COMPARE_SCHEMA
@@ -41,9 +41,21 @@ VERDICT_INVALID = schema.COMPARE_VERDICT_INVALID
 STATUS_MEASURED = schema.COMPARE_STATUS_MEASURED
 STATUS_NOT_APPLICABLE = schema.COMPARE_STATUS_NOT_APPLICABLE
 STATUS_INVALID = schema.COMPARE_STATUS_INVALID
+CORROBORATED = schema.COMPARE_CORROBORATED
+NOT_CORROBORATED = schema.COMPARE_NOT_CORROBORATED
+CORROBORATION_NA = schema.COMPARE_CORROBORATION_NA
 
 _LTAS_N_FFT = 2048  # a valid LTAS needs at least this many samples
 _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
+
+# Above this level-matched, reference-relative residual, an algorithm-agnostic sample-domain
+# difference is present (the two renders are not effectively identical). Heuristic floor: -60 dB
+# rel means the residual is ~1/1000 of the signal RMS. It gates *materiality* only, never the
+# verdict — see `_corroboration`. A length mismatch needs NO separate threshold: null_residual_db
+# zero-pads the shorter signal, so a dropped/added tail with content raises the residual on its
+# own (and trailing silence does not), keeping the identity claim honest for any render length.
+_RESIDUAL_MATERIAL_DB = -60.0
+_RAW_NULL_TOOL = "quality-lab:null_residual"
 
 
 # ── Axis registry ───────────────────────────────────────────────────────────────────────
@@ -206,6 +218,77 @@ def _verdict(axis: _Axis, env: dict[str, Any], reference_role: str) -> str:
     return VERDICT_MATERIAL
 
 
+# ── Raw comparators + corroboration (advisory, off-gate — S4) ────────────────────────────
+
+def _corroboration(primary_exceeds: bool, residual_db: float, length: dict[str, Any]) -> dict[str, Any]:
+    """Materiality cross-check: does the deterministic null-residual ALSO register a material
+    change, agreeing with the primary axis's `exceeds`? This is NOT a trust/confidence score —
+    it only reports agreement about *whether a change exists*, under the same level-matched
+    global contract. Disagreement is legitimate: the raw residual is phase-sensitive and axis-
+    agnostic, so it and the axis measure genuinely different things. It never moves the verdict.
+
+    Length is already baked into `residual_db` (the shorter signal was zero-padded), so a
+    truncated/extended render with content raises the residual and can never read as identity."""
+    raw_material = residual_db >= _RESIDUAL_MATERIAL_DB
+    agree = primary_exceeds == raw_material
+    status = CORROBORATED if agree else NOT_CORROBORATED
+    length_differs = length["ref_samples"] != length["cand_samples"]
+    length_clause = ""
+    if length_differs:
+        length_clause = (f" The candidate also differs in duration "
+                         f"({length['cand_samples']} vs {length['ref_samples']} samples), which the "
+                         f"residual captures (the shorter signal is zero-padded).")
+    if agree and primary_exceeds:
+        detail = "an independent sample-domain residual also registers a material difference"
+    elif agree:
+        detail = "the sample-domain residual is near the identity floor, agreeing that nothing material changed"
+    elif primary_exceeds:
+        detail = ("the axis flags a change the sample-domain residual does not — a marginal or "
+                  "phase-only difference; treat the axis result with more caution")
+    else:
+        detail = ("a material sample-domain difference exists that this axis does not capture "
+                  "(e.g. a delay or a duration change) — try another profile")
+    note = (f"Materiality cross-check under the level-matched global contract, NOT a trust score: "
+            f"{detail}. Disagreement is legitimate — the raw residual (phase-sensitive) and the "
+            f"axis measure different things.{length_clause}")
+    return schema.compare_corroboration(
+        status, note,
+        basis={"raw_comparator": _RAW_NULL_TOOL, "residual_db": round(residual_db, 2),
+               "residual_material_floor_db": _RESIDUAL_MATERIAL_DB,
+               "axis_exceeds": bool(primary_exceeds), "raw_material": bool(raw_material),
+               "ref_samples": length["ref_samples"], "cand_samples": length["cand_samples"]},
+    )
+
+
+def _advisory_block(reference: np.ndarray, candidate: np.ndarray, primary_env: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the report's off-gate `advisory` namespace: the deterministic null-residual raw
+    comparator plus a materiality corroboration against the primary axis. Only meaningful when
+    the primary measurement succeeded (it reuses the same level-match contract). Returns None
+    otherwise, so a not_applicable/invalid report carries no misleading advisory."""
+    if primary_env.get("status") != STATUS_MEASURED:
+        return None
+    # null_residual_db does its own length-robust (common-region) level match — do NOT pre-match
+    # with the full-length audio_io.level_match, which trailing silence would distort.
+    nr = null_residual_db(reference, candidate)
+    if not np.isfinite(nr.residual_db):
+        return None  # fully silent reference — the primary path already gated this, guard anyway
+    length = {"ref_samples": int(reference.size), "cand_samples": int(candidate.size)}
+    raw = schema.compare_raw_comparator(
+        "null_residual", _RAW_NULL_TOOL, "db_rel_reference",
+        ("Sample-domain residual RMS relative to the reference (20*log10(rms(cand-ref)/rms(ref))); "
+         "lower = more identical. Level-matched over the common region, with the shorter signal "
+         "zero-padded so a dropped/added tail counts as residual — a truncated render cannot read "
+         "as identity. `level_match_applied` is false when the overlap was too quiet to define a "
+         "gain (the residual is then raw). Phase/delay-sensitive and alignment-free by contract: a "
+         "measure of materiality, not audibility."),
+        value=round(nr.residual_db, 2),
+        detail={"ref_samples": length["ref_samples"], "cand_samples": length["cand_samples"],
+                "level_match_applied": nr.level_matched},
+    )
+    exceeds = bool(primary_env["materiality"]["exceeds"])
+    return schema.compare_advisory([raw], _corroboration(exceeds, nr.residual_db, length))
+
+
 def _resolve(profile: str) -> _Axis:
     axis = _AXES.get(profile)
     if axis is None:
@@ -241,11 +324,15 @@ def compare_arrays(
 
     if not (bool(np.all(np.isfinite(reference))) and bool(np.all(np.isfinite(candidate)))):
         env = _measurement(axis, STATUS_INVALID, applicable=False, reason="non-finite samples (NaN/Inf)")
+        advisory = None
     else:
         env = _measure(axis, reference, candidate, sr, threshold)
+        advisory = _advisory_block(reference, candidate, env)
 
     verdict = _verdict(axis, env, reference_role)
-    return schema.compare_report(profile, reference_role, verdict, axis.summarize(verdict, env), [env])
+    return schema.compare_report(
+        profile, reference_role, verdict, axis.summarize(verdict, env), [env], advisory=advisory
+    )
 
 
 def _sha256(path: str) -> str:

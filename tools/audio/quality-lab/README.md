@@ -151,6 +151,21 @@ Each axis carries its own materiality default; `--threshold` overrides.
   for a judgment. The gate primitive remains `pulp audio validate compare`. Report shape is owned
   by `schema.py` (`quality_lab.compare.v1`); every envelope carries `status`/`applicable`/
   `materiality`/`provenance` so a reader never has to guess whether the number is trustworthy.
+- **Corroboration (off-gate `advisory`).** On a successful measurement the report adds an
+  `advisory` namespace: a deterministic `null_residual` raw comparator (level-matched sample-domain
+  residual RMS relative to the reference, `db_rel_reference`) and a `corroboration` status. This is
+  a **materiality cross-check, NOT a trust score** — it reports only whether that independent,
+  algorithm-agnostic residual *also* registers a material change (`corroborated` /
+  `not_corroborated`). Both are `experimental` / `participates_in_verdict: false` and never move the
+  verdict. Disagreement is the useful signal (a real difference the axis can't see, or a
+  phase-only change to distrust) and is legitimate — the residual is phase-sensitive and
+  alignment-free, so it measures materiality, not audibility. Length is handled honestly: the
+  candidate is level-matched over the common region and the shorter signal zero-padded, so a
+  dropped/added tail with content raises the residual (material) while trailing silence stays
+  immaterial — a truncated render is never mistaken for an identity match.
+  (Feature-extractor raw comparators —
+  GPL aubio / AGPL Essentia — are deliberately not built: never verdicts, and a license fence is
+  disproportionate to the value.)
 
 ### Real audio
 

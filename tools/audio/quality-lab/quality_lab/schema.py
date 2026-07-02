@@ -203,6 +203,14 @@ COMPARE_STATUS_MEASURED = "measured"
 COMPARE_STATUS_NOT_APPLICABLE = "not_applicable"
 COMPARE_STATUS_INVALID = "invalid"
 
+# Corroboration is a MATERIALITY cross-check, never a trust score (see compare.py and the
+# plan's "agreement != trust" non-goal). It reports only whether an independent, algorithm-
+# agnostic raw measure ALSO registers a material change — agreement/disagreement about
+# *materiality*, under the same level-matched global contract. It NEVER moves the verdict.
+COMPARE_CORROBORATED = "corroborated"
+COMPARE_NOT_CORROBORATED = "not_corroborated"
+COMPARE_CORROBORATION_NA = "not_applicable"
+
 
 def compare_measurement(
     axis: str,
@@ -235,6 +243,63 @@ def compare_measurement(
     return env
 
 
+def compare_raw_comparator(
+    name: str,
+    tool: str,
+    unit: str,
+    note: str,
+    *,
+    value: float | None = None,
+    ref_value: float | None = None,
+    cand_value: float | None = None,
+    delta: float | None = None,
+    detail: dict[str, Any] | None = None,
+    maturity: str = "experimental",
+) -> dict[str, Any]:
+    """One deterministic, off-gate raw measurement for the report's `advisory` namespace.
+
+    Raw comparators are algorithm-agnostic scalars (a relational `value` like a null-residual,
+    or a per-side `ref_value`/`cand_value` + `delta` like a tempo estimate). `detail` carries
+    measurement-specific metadata the reader needs to judge the scalar (e.g. how many samples a
+    null-residual actually compared, so a truncated render can't masquerade as an identity
+    match). They make NO good/bad judgment and NEVER participate in the verdict — `maturity`
+    defaults to `experimental` to make that explicit, mirroring the DetectorResult maturity gate."""
+    rc: dict[str, Any] = {"name": name, "tool": tool, "unit": unit, "maturity": maturity,
+                          "participates_in_verdict": False, "note": note}
+    if value is not None:
+        rc["value"] = value
+    if ref_value is not None:
+        rc["ref_value"] = ref_value
+    if cand_value is not None:
+        rc["cand_value"] = cand_value
+    if delta is not None:
+        rc["delta"] = delta
+    if detail is not None:
+        rc["detail"] = detail
+    return rc
+
+
+def compare_corroboration(status: str, note: str, *, basis: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A materiality cross-check result. `status` is one of COMPARE_CORROBORATED /
+    COMPARE_NOT_CORROBORATED / COMPARE_CORROBORATION_NA. `note` MUST state that this is a
+    materiality agreement under the level-matched global contract, not a trust score; `basis`
+    records the raw comparators consulted so the check is auditable."""
+    c: dict[str, Any] = {"status": status, "participates_in_verdict": False, "note": note}
+    if basis is not None:
+        c["basis"] = basis
+    return c
+
+
+def compare_advisory(
+    raw_comparators: list[dict[str, Any]] | None = None,
+    corroboration: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The report's non-gating namespace: deterministic raw comparators + an optional
+    materiality corroboration. Reserved and never consulted by the verdict — the compare peer
+    of `build_report`'s `advisory` block."""
+    return {"raw_comparators": raw_comparators or [], "corroboration": corroboration}
+
+
 def compare_report(
     profile: str,
     reference_role: str,
@@ -242,9 +307,12 @@ def compare_report(
     summary: str,
     measurements: list[dict[str, Any]],
     provenance: dict[str, Any] | None = None,
+    advisory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the agent-facing compare report envelope. `provenance` is attached whenever
-    available — including on `invalid` reports — so an agent can always trace what it read."""
+    available — including on `invalid` reports — so an agent can always trace what it read.
+    `advisory` (raw comparators + corroboration) is attached when present; it is off-gate and
+    never consulted by the verdict."""
     report: dict[str, Any] = {
         "schema": COMPARE_SCHEMA,
         "profile": profile,
@@ -253,6 +321,8 @@ def compare_report(
         "summary": summary,
         "measurements": measurements,
     }
+    if advisory is not None:
+        report["advisory"] = advisory
     if provenance is not None:
         report["provenance"] = provenance
     return report

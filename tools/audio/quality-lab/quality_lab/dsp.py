@@ -6,7 +6,19 @@ building blocks several detectors reuse.
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import numpy as np
+
+
+class NullResidual(NamedTuple):
+    """Result of :func:`null_residual_db`. `residual_db` is the reference-relative residual level
+    (or +inf when the reference can't be normalized); `ref_rms_db` is the reference's own RMS in
+    dB; `level_matched` is False when the common region was too quiet to define a level-match gain,
+    so the residual is raw (un-matched) — the reader must not read it as a calibrated difference."""
+    residual_db: float
+    ref_rms_db: float
+    level_matched: bool
 
 
 def highband(y: np.ndarray) -> np.ndarray:
@@ -117,6 +129,65 @@ def hf_fraction_delta(
     hf_ref = hf_energy_fraction(f, m_ref, cutoff_hz)
     hf_cand = hf_energy_fraction(f, m_cand, cutoff_hz)
     return hf_cand - hf_ref, hf_ref, hf_cand
+
+
+def null_residual_db(reference: np.ndarray, candidate: np.ndarray) -> NullResidual:
+    """Sample-domain null-difference residual of a candidate against the reference.
+
+    ``residual_db`` is ``20*log10(rms(candidate - reference) / rms(reference))`` — the residual
+    energy *relative to the reference's own level*. A very negative value (e.g. -80 dB) means the
+    two signals are nearly identical sample-for-sample; near 0 dB means they differ as much as the
+    signal itself.
+
+    Level: the candidate is RMS-matched to the reference over the **common region** (the overlap),
+    not the full length — length-robust, since matching over the full length would let trailing
+    silence on one side dilute its RMS and spuriously amplify the shared content. When the common
+    region is too quiet to define a gain (e.g. a full-render delay pushes content out of the
+    overlap, or a truncation keeps only a silent head), the residual is still computed with NO
+    level match and ``level_matched=False`` — never dropped, because that silent-overlap case is
+    exactly a material dropped/shifted tail the residual must surface.
+
+    Length: the shorter signal is **zero-padded to the longer length** (never truncated), so a
+    dropped/added tail is measured, not silently ignored. A candidate that is the first half of
+    the reference includes the missing second half as residual energy and reads as material; a
+    difference that is only trailing silence contributes ~0 residual and stays immaterial. This is
+    what lets the residual back a truthful identity claim regardless of render length.
+
+    This is a deterministic, algorithm-agnostic, global measure — it makes NO perceptual claim
+    and NO judgment of *which* signal is better. It is time-domain and phase-sensitive by
+    construction: a pure delay or all-pass/phase difference between two perceptually similar
+    renders inflates the residual, so it corroborates *materiality* (a real change exists), never
+    audibility. Only a fully silent reference (or empty input) yields ``residual_db=inf``; callers
+    treat that as not-applicable."""
+    ref = np.asarray(reference, dtype=np.float64)
+    cand = np.asarray(candidate, dtype=np.float64)
+    if ref.size == 0 or cand.size == 0:
+        return NullResidual(float("inf"), float("-inf"), False)
+    ref_rms = np.sqrt(np.mean(ref * ref))  # the reference's TRUE level (never diluted by padding)
+    if ref_rms <= 1e-12:
+        return NullResidual(float("inf"), float("-inf"), False)
+    n_common = min(ref.size, cand.size)
+    cand_common_rms = np.sqrt(np.mean(cand[:n_common] * cand[:n_common]))
+    ref_common_rms = np.sqrt(np.mean(ref[:n_common] * ref[:n_common]))
+    if cand_common_rms > 1e-12 and ref_common_rms > 1e-12:
+        gain, level_matched = ref_common_rms / cand_common_rms, True  # length-robust overlap match
+    else:
+        # Overlap too quiet to define a gain — the difference lives entirely outside the overlap
+        # (a shifted/dropped loud tail). Keep the residual RAW (no match) and flag it, rather than
+        # dropping the advisory exactly when a material tail needs surfacing.
+        gain, level_matched = 1.0, False
+    matched = cand * gain
+    n = max(ref.size, cand.size)
+    ref_p = np.zeros(n); ref_p[: ref.size] = ref
+    cand_p = np.zeros(n); cand_p[: matched.size] = matched
+    residual = cand_p - ref_p
+    res_rms = np.sqrt(np.mean(residual * residual))
+    ref_rms_db = 20.0 * np.log10(ref_rms)
+    if res_rms <= 1e-12:
+        # Bit-identical (or below the numeric floor) — report a deep, finite floor rather than
+        # -inf so the value stays JSON-friendly and orderable.
+        return NullResidual(-160.0, float(ref_rms_db), level_matched)
+    return NullResidual(float(20.0 * np.log10(res_rms / ref_rms)), float(ref_rms_db), level_matched)
 
 
 def normalized_correlate(long: np.ndarray, short: np.ndarray) -> np.ndarray:

@@ -377,6 +377,28 @@ harness or `ctest`.
   (`--threshold` overrides). Report shape (`quality_lab.compare.v1`) is owned by `schema.py`;
   every envelope carries `status`/`applicable`/`materiality`/`provenance`. Use this when an agent
   must weigh in on a DSP change with cited evidence rather than a bare pass/fail.
+
+  **Corroboration + raw comparators (`report["advisory"]`, off-gate).** When the primary
+  measurement succeeds, the report also carries an `advisory` namespace: a deterministic
+  `null_residual` raw comparator (level-matched sample-domain residual RMS relative to the
+  reference, `db_rel_reference`; lower = more identical) and a `corroboration` block. Corroboration
+  is a **materiality cross-check — NOT a trust score**: it reports only whether that independent,
+  algorithm-agnostic residual *also* registers a material change (`corroborated` /
+  `not_corroborated`), under the same level-matched global contract. Both are `maturity:
+  experimental`, `participates_in_verdict: false` — they NEVER move the verdict. The valuable
+  signal is disagreement: `not_corroborated` with `axis_exceeds:false, raw_material:true` means a
+  real sample-domain difference this axis can't see (e.g. a pure delay — try another profile);
+  `axis_exceeds:true, raw_material:false` means a marginal/phase-only change to treat with more
+  caution. Length is handled honestly: the candidate is level-matched over the **common region**
+  and the shorter signal **zero-padded** to the longer length, so a dropped/added tail *with
+  content* raises the residual on its own (reads material) while trailing *silence* contributes
+  ~0 (stays immaterial) — a truncated render can never masquerade as a near-identity match, and
+  the sample counts are reported in the comparator's `detail`. The residual is **phase/delay-sensitive and alignment-free by contract**, so it
+  corroborates *materiality*, never audibility. Cite it — never treat agreement as a confidence
+  score (the plan's explicit non-goal: agreement ≠ trust). Deliberately NOT built: the GPL aubio /
+  AGPL Essentia feature-extractor menu — feature extractors are never verdicts, and an env-path
+  license fence is disproportionate surface for the value; the pure-numpy residual carries the
+  corroboration story license-free.
 - **Shipped surfaces (same measurement, three entry points):** the Python `quality-lab compare`
   is the dev-loop surface; **`pulp audio compare <ref> <cand> [--profile …] [--reference-role …]
   [--json …]`** is the shipped CLI verb (thin delegator — `tools/cli/cmd_audio_compare.cpp` locates
