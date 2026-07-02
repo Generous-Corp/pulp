@@ -2057,7 +2057,9 @@ pulp_add_test_suite(pulp-test-convolver LIBRARIES pulp::signal)
 # Background-IR-swap tests for PartitionedConvolver. Lock-free
 # pointer-shuttle hand-off from worker thread → audio thread, including
 # a concurrent stage/swap hammer test.
-pulp_add_test_suite(pulp-test-convolver-bg-swap LIBRARIES pulp::signal pulp::runtime)
+pulp_add_test_suite(pulp-test-convolver-bg-swap
+    SOURCES test_convolver_bg_swap.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::runtime)
 
 # Non-uniform partitioned convolver tests. Two-stage Gardner-style
 # head (small block) + tail (K× larger block) with zero-latency mixing.
