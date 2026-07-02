@@ -1793,7 +1793,6 @@ public:
         };
 
         uint32_t max_hist_floats = 0;      // for the shared history-slide scratch
-        uint32_t max_headacc_floats = 0;   // for the zeroing scratch
         uint64_t woff = 0;
 
         for (uint32_t a = 0; a < num_arrays; ++a) {
@@ -1824,7 +1823,6 @@ public:
             if (!na.headacc || !na.headout) return false;
 
             max_hist_floats = std::max(max_hist_floats, C * PAD);
-            max_headacc_floats = std::max(max_headacc_floats, C * B);
 
             // rechannel offset (consumed first in the array).
             const uint32_t rc_w = static_cast<uint32_t>(woff);
@@ -1901,7 +1899,6 @@ public:
         plan.hist_temp = create_storage_buffer(hist_bytes, act_usage);
         if (!plan.hist_temp) return false;
 
-        wavenet_zero_.assign(std::max(max_headacc_floats, 1u), 0.0f);
         wavenet_plans_.insert_or_assign(B, std::move(plan));
         return true;
     }
@@ -1916,34 +1913,57 @@ public:
         const uint32_t blk_bytes = B * 4u;
 
         queue_.WriteBuffer(plan.input, 0, in_block, blk_bytes);
-        for (auto& na : plan.arrays)   // head accumulators start at zero each block
-            queue_.WriteBuffer(na.headacc, 0, wavenet_zero_.data(), na.channels * B * 4u);
 
         const uint32_t wg = (B + 255u) / 256u;
         wgpu::CommandEncoderDescriptor enc_desc{};
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
-        auto run = [&](const wgpu::ComputePipeline& pl, const wgpu::BindGroup& bg) {
-            wgpu::ComputePassDescriptor pd{};
-            auto pass = encoder.BeginComputePass(&pd);
-            pass.SetPipeline(pl);
-            pass.SetBindGroup(0, bg);
-            pass.DispatchWorkgroups(wg);
-            pass.End();
-        };
 
+        // Array 0's head accumulator starts at zero; every later array is seeded
+        // from the previous array's head output below, so only array 0 needs
+        // clearing. An on-GPU ClearBuffer replaces a per-block CPU→GPU upload of
+        // zeros for every array — the later uploads were dead work, immediately
+        // overwritten by the seed copy.
+        if (!plan.arrays.empty())
+            encoder.ClearBuffer(plan.arrays[0].headacc, 0,
+                                static_cast<uint64_t>(plan.arrays[0].channels) * B * 4u);
+
+        // One compute pass per array: rechannel → layers → head run as
+        // consecutive dispatches in a single pass (WebGPU orders storage
+        // read/write between dispatches within a pass), collapsing ~L+2 pass
+        // objects per array into one. The inter-array seed copy is an
+        // encoder-level command, so it sits between passes; rechannel writes
+        // only act[0] and the seed writes only headacc, so seeding before the
+        // pass is order-independent of rechannel.
         for (uint32_t a = 0; a < plan.arrays.size(); ++a) {
             WavenetArray& na = plan.arrays[a];
-            run(wavenet_rechannel_pipeline_, na.rechannel_bg);
             if (a > 0) {  // seed this array's head accumulator with the previous head output
                 const WavenetArray& prev = plan.arrays[a - 1];
                 encoder.CopyBufferToBuffer(prev.headout, 0, na.headacc, 0,
                                            static_cast<uint64_t>(na.channels) * B * 4u);
             }
-            for (uint32_t l = 0; l < na.num_layers; ++l)
-                run(wavenet_layer_pipeline_, na.layer_bg[l]);
-            run(wavenet_head_pipeline_, na.head_bg);
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(wavenet_rechannel_pipeline_);
+            pass.SetBindGroup(0, na.rechannel_bg);
+            pass.DispatchWorkgroups(wg);
+            for (uint32_t l = 0; l < na.num_layers; ++l) {
+                pass.SetPipeline(wavenet_layer_pipeline_);
+                pass.SetBindGroup(0, na.layer_bg[l]);
+                pass.DispatchWorkgroups(wg);
+            }
+            pass.SetPipeline(wavenet_head_pipeline_);
+            pass.SetBindGroup(0, na.head_bg);
+            pass.DispatchWorkgroups(wg);
+            pass.End();
         }
-        run(wavenet_scale_pipeline_, plan.scale_bg);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(wavenet_scale_pipeline_);
+            pass.SetBindGroup(0, plan.scale_bg);
+            pass.DispatchWorkgroups(wg);
+            pass.End();
+        }
         encoder.CopyBufferToBuffer(plan.output, 0, plan.readback, 0, blk_bytes);
 
         // Slide each array's activation windows: the most-recent PAD columns
@@ -2643,7 +2663,6 @@ private:
         std::vector<WavenetArray> arrays;
     };
     std::unordered_map<uint32_t, WavenetPlan> wavenet_plans_;
-    std::vector<float> wavenet_zero_;  // head-accumulator zeroing scratch (max C*B)
 
     // Host scratch for the spectral-stack 2n-complex readback (grown on demand;
     // the render path is non-RT so a resize here is fine).

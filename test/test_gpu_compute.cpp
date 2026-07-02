@@ -692,6 +692,29 @@ float wavenet_ref_1x1(float x, float Wre, float Wconv, float bconv, float Wmix,
     const float z = Wconv * layer_in + bconv + Wmix * x;
     return Whr * std::tanh(z) * head_scale;
 }
+
+// Two chained arrays (each channels=1/kernel=1/1 layer/ungated/head_size=1). The
+// point of coverage: array 1's head accumulator is SEEDED with array 0's head
+// output before it accumulates its own activation, and array 0's accumulator
+// starts cleared. If the seed were dropped (or array 0 not cleared) the result
+// changes grossly — so this pins the submission-diet's "clear array 0 only, seed
+// the rest" contract. rechannel of array 1 reads array 0's residual output; the
+// input mixin uses the original mono input for every array.
+float wavenet_ref_1x1_2arrays(float x,
+                              float Wre0, float Wconv0, float bconv0, float Wmix0,
+                              float W1x1_0, float b1x1_0, float Whr0,
+                              float Wre1, float Wconv1, float bconv1, float Wmix1,
+                              float Whr1, float head_scale) {
+    const float lin0 = Wre0 * x;
+    const float z0 = Wconv0 * lin0 + bconv0 + Wmix0 * x;
+    const float a0 = std::tanh(z0);
+    const float head0 = Whr0 * a0;                       // array 0 head output = the seed
+    const float res0 = lin0 + b1x1_0 + W1x1_0 * a0;      // residual → array 1 rechannel input
+    const float lin1 = Wre1 * res0;
+    const float z1 = Wconv1 * lin1 + bconv1 + Wmix1 * x;
+    const float headacc1 = head0 + std::tanh(z1);        // SEED + array 1 activation
+    return head_scale * (Whr1 * headacc1);
+}
 }  // namespace
 
 TEST_CASE("GpuCompute wavenet_forward matches a scalar reference",
@@ -764,6 +787,49 @@ TEST_CASE("GpuCompute wavenet_forward is deterministic across a gated multi-laye
     for (uint32_t i = 0; i < B; ++i) {
         REQUIRE(std::isfinite(a[i]));
         REQUIRE(a[i] == b[i]);
+    }
+}
+
+TEST_CASE("GpuCompute wavenet_forward chains two arrays through the head seed",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    // Two arrays, each channels=1/kernel=1/1 layer/ungated/head_size=1. This is
+    // the multi-array topology real .nam WaveNets use, and the one the submission
+    // diet optimizes: only array 0's head accumulator is cleared, and array 1's
+    // is seeded from array 0's head output. Weight blob is [array0 7][array1 7]
+    // [trailing head_scale] = 15 floats, laid out as prepare_wavenet consumes it.
+    const float Wre0 = 0.7f, Wconv0 = 1.3f, bconv0 = -0.2f, Wmix0 = 0.5f;
+    const float W1x1_0 = 0.9f, b1x1_0 = 0.1f, Whr0 = 1.1f;
+    const float Wre1 = 0.6f, Wconv1 = -0.8f, bconv1 = 0.15f, Wmix1 = 0.4f;
+    const float W1x1_1 = 0.5f, b1x1_1 = -0.05f, Whr1 = 0.95f;
+    const float head_scale = 0.8f;
+    std::vector<float> weights = {
+        Wre0, Wconv0, bconv0, Wmix0, W1x1_0, b1x1_0, Whr0,
+        Wre1, Wconv1, bconv1, Wmix1, W1x1_1, b1x1_1, Whr1,
+        head_scale};
+
+    std::vector<uint32_t> dilations = {1};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = 1;
+    spec.kernel = 1; spec.head_size = 1; spec.gated = 0; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = 1;
+    GpuCompute::WavenetLayerArraySpec specs[2] = {spec, spec};
+
+    const uint32_t B = 16;
+    REQUIRE(compute->prepare_wavenet(specs, 2, weights.data(),
+                                     static_cast<uint32_t>(weights.size()), B, head_scale));
+
+    std::vector<float> in(B), out(B, 0.0f);
+    for (uint32_t i = 0; i < B; ++i) in[i] = 0.3f * std::sin(0.2f * i) - 0.1f;
+    REQUIRE(compute->wavenet_forward(in.data(), out.data(), B));
+
+    for (uint32_t i = 0; i < B; ++i) {
+        const float expect = wavenet_ref_1x1_2arrays(
+            in[i], Wre0, Wconv0, bconv0, Wmix0, W1x1_0, b1x1_0, Whr0,
+            Wre1, Wconv1, bconv1, Wmix1, Whr1, head_scale);
+        REQUIRE(std::abs(out[i] - expect) < 5e-5f);
     }
 }
 
