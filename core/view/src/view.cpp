@@ -172,12 +172,13 @@ View::~View() {
     if (focused_input_ == this) focused_input_ = nullptr;
     // Cancel any running animate() tweens so their FrameClock callbacks (which
     // capture `this`) can't fire after this View is gone.
-    if (!animations_.empty()) {
-        if (FrameClock* fc = frame_clock()) {
-            for (const auto& a : animations_) fc->unsubscribe(a.clock_id);
-        }
-        animations_.clear();
+    // Unsubscribe against the CACHED clock (not frame_clock()): a child detached
+    // via remove_child has parent_==null, so frame_clock() would return null and
+    // leave the root's still-live subscription firing on freed memory.
+    for (const auto& a : animations_) {
+        if (a.clock) a.clock->unsubscribe(a.clock_id);
     }
+    animations_.clear();
 }
 
 int View::animate(std::function<void(float)> apply, float from, float to,
@@ -221,7 +222,7 @@ int View::animate(std::function<void(float)> apply, float from, float to,
             return true;
         });
     *id_slot = cid;
-    animations_.push_back({cid, tag});
+    animations_.push_back({cid, tag, fc});
     return cid;
 }
 
@@ -229,7 +230,7 @@ void View::cancel_animation(int id) {
     if (id < 0) return;
     for (int i = static_cast<int>(animations_.size()) - 1; i >= 0; --i) {
         if (animations_[i].clock_id == id) {
-            if (FrameClock* fc = frame_clock()) fc->unsubscribe(id);
+            if (animations_[i].clock) animations_[i].clock->unsubscribe(id);
             animations_.erase(animations_.begin() + i);
             return;
         }

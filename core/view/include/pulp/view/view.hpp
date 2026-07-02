@@ -1615,7 +1615,10 @@ private:
 
     // Running animate() tweens: our returned id is the FrameClock subscription
     // id; `tag` supports self-cancelling animations. Unsubscribed in ~View.
-    struct RunningAnimation { int clock_id = -1; std::string tag; };
+    // `clock` is cached at subscribe time so ~View can unsubscribe even after
+    // this view is detached (frame_clock() walks parent_, which a removed child
+    // has cleared to null — see the detached-child UAF the cache fixes).
+    struct RunningAnimation { int clock_id = -1; std::string tag; FrameClock* clock = nullptr; };
     std::vector<RunningAnimation> animations_;
     std::shared_ptr<canvas::ViewEffect> effect_;
     int bg_gradient_type_ = 0;  // 0=none, 1=linear, 2=radial, 3=conic

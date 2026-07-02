@@ -561,11 +561,14 @@ void DesignFrameView::set_element_enabled(int i, bool enabled) {
 void DesignFrameView::set_element_param_key(int i, std::string key) {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return;
     if (elements_[i].param_key == key) return;
-    // Release any live gesture/binding under the old key before re-keying, so a
-    // paged control doesn't leave a stale gesture open on the outgoing param.
-    if (HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
-        hp && !elements_[i].param_key.empty() && hp->has_param(elements_[i].param_key)) {
-        hp->end_gesture(elements_[i].param_key);
+    // Release the old key's gesture ONLY if one is actually open on this element
+    // (i.e. it is the element currently being dragged). Ending an idle param's
+    // gesture sends an unbalanced end_gesture — JUCE APVTS asserts on that.
+    if (drag_ == i) {
+        if (HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
+            hp && !elements_[i].param_key.empty() && hp->has_param(elements_[i].param_key)) {
+            hp->end_gesture(elements_[i].param_key);
+        }
     }
     elements_[i].param_key = std::move(key);
     // Notify an owning key->index registry (e.g. the embed facade) to rebuild.
@@ -1063,13 +1066,19 @@ void DesignFrameView::on_mouse_up(Point /*pos*/) {
         if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
             elements_[drag_].value = 0.0f;        // clear the key
             request_repaint();
-        } else if (elements_[drag_].kind == DesignFrameElement::Kind::toggle
-                   && elements_[drag_].flash) {
-            elements_[drag_].value = 0.0f;        // press-flash: clear on release
-            request_repaint();
-            emit_element_changed(drag_, 0.0f);
+            // Note-off: a momentary key is a MIDI note, NOT a param — route the
+            // raw callback only, never host_params (mirrors the note-on path in
+            // on_mouse_down, which returns before emit_gesture_begin).
+            if (on_gesture_end) on_gesture_end(drag_);
+        } else {
+            if (elements_[drag_].kind == DesignFrameElement::Kind::toggle
+                && elements_[drag_].flash) {
+                elements_[drag_].value = 0.0f;    // press-flash: clear on release
+                request_repaint();
+                emit_element_changed(drag_, 0.0f);
+            }
+            emit_gesture_end(drag_);  // end undo step (routes to host if bound)
         }
-        emit_gesture_end(drag_);  // note-off / end undo step
     }
     drag_ = -1;
 }

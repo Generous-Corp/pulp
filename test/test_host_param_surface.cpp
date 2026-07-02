@@ -401,6 +401,46 @@ TEST_CASE("Destroying a view mid-animation unsubscribes safely (P6.4)",
     REQUIRE(v == Catch::Approx(0.3f));   // unchanged
 }
 
+TEST_CASE("Detaching a child mid-animation then destroying it is safe (P6.4 regression)",
+          "[view][animate][issue-5230]") {
+    // Regression for the review-found UAF: a non-root child resolves the clock
+    // via its parent; once remove_child clears parent_, ~View could no longer
+    // reach the clock to unsubscribe, leaving the root's clock firing on freed
+    // memory. Fixed by caching the FrameClock* per animation.
+    view::FrameClock clock;
+    float v = 0.0f;
+    auto root = std::make_unique<view::View>();
+    root->set_frame_clock(&clock);
+    auto child = std::make_unique<view::View>();
+    view::View* cp = child.get();
+    root->add_child(std::move(child));
+
+    cp->animate([&](float x) { v = x; }, 0.0f, 1.0f, 1.0f);  // resolves clock via parent
+    REQUIRE(clock.has_active_subscribers());
+    clock.tick(0.3f);
+    REQUIRE(v == Catch::Approx(0.3f));
+
+    auto owned = root->remove_child(cp);  // parent_ -> null
+    owned.reset();                        // destroy the detached child
+    REQUIRE_FALSE(clock.has_active_subscribers());  // unsubscribed via cached clock
+    clock.tick(0.5f);                     // must NOT fire on freed child
+    REQUIRE(v == Catch::Approx(0.3f));    // unchanged
+}
+
+TEST_CASE("Re-keying an idle element does not emit an unbalanced end_gesture (regression)",
+          "[view][host-param][issue-5230]") {
+    DesignFrameView dfv = make_single_knob("slot0.gain");
+    FakeHostParamSurface params;
+    params.values["slot0.gain"] = 0.2;
+    params.values["slot1.gain"] = 0.9;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    // No drag is open — re-keying must not send end_gesture for the old key.
+    dfv.set_element_param_key(0, "slot1.gain");
+    REQUIRE(params.gesture_log.empty());
+}
+
 TEST_CASE("DesignFrameView forwards action clicks to the host action channel",
           "[view][host-action][issue-5230]") {
     const std::string svg =
