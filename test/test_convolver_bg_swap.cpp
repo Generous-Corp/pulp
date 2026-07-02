@@ -280,3 +280,202 @@ TEST_CASE("PartitionedConvolver: rapid swaps without drain refuse cleanly (#2881
     REQUIRE(conv.try_swap_ir(swapper));
     REQUIRE_FALSE(swapper.has_pending());
 }
+
+TEST_CASE("PartitionedConvolver swap preserves input history (no tail dip)",
+          "[signal][convolver][bg-swap]") {
+    // A multi-partition IR whose energy spans several partitions, so the output at
+    // steady state depends on many blocks of past input — exactly the history a
+    // naive whole-state swap would zero. Swapping to the SAME IR must therefore be
+    // inaudible: the block right after the swap has to match the steady-state block
+    // before it. (Before the input-FDL carry, the swap reset the delay line and the
+    // first post-swap block dipped toward the partition-0-only response.)
+    const std::size_t block = 64;
+    const std::size_t parts = 4;
+    std::vector<float> ir(block * parts, 0.0f);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.5f * std::exp(-2.0f * static_cast<float>(i) / static_cast<float>(ir.size()));
+
+    PartitionedConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block);
+
+    // Drive a constant (DC) input well past the receptive field so the output is at
+    // steady state and block-constant (= DC * sum(ir)).
+    const std::vector<float> in(block, 0.5f);
+    std::vector<float> before(block, 0.0f);
+    for (int b = 0; b < 40; ++b) conv.process(in.data(), before.data(), block);
+
+    // Swap to an identical IR mid-stream.
+    ConvolverIrSwapper swapper;
+    REQUIRE(swapper.stage_ir(ir.data(), ir.size(), block));
+    REQUIRE(conv.try_swap_ir(swapper));
+
+    // The next block, with history carried and the IR unchanged, must equal the
+    // pre-swap steady output sample-for-sample — no dip.
+    std::vector<float> after(block, 0.0f);
+    conv.process(in.data(), after.data(), block);
+    for (std::size_t i = 0; i < block; ++i)
+        REQUIRE_THAT(after[i], WithinAbs(before[i], 1e-4f));
+
+    (void)swapper.drain_old();
+}
+
+TEST_CASE("PartitionedConvolver swap to a shorter IR keeps recent history",
+          "[signal][convolver][bg-swap]") {
+    // Swapping a long IR for a shorter one must still carry the recent history the
+    // shorter IR needs. Build steady state on a long IR, swap to a short one, and
+    // compare against a reference convolver that ran the short IR on the same input
+    // from the start — after one block they must agree (the short IR's entire
+    // receptive field of history was preserved across the swap).
+    const std::size_t block = 64;
+    std::vector<float> long_ir(block * 6, 0.0f);
+    for (std::size_t i = 0; i < long_ir.size(); ++i)
+        long_ir[i] = 0.3f * std::cos(0.01f * static_cast<float>(i));
+    std::vector<float> short_ir(block * 2, 0.0f);
+    for (std::size_t i = 0; i < short_ir.size(); ++i)
+        short_ir[i] = 0.4f * std::exp(-3.0f * static_cast<float>(i) / static_cast<float>(short_ir.size()));
+
+    const std::vector<float> in(block, 0.5f);
+
+    // Reference: short IR from the start, run to steady state.
+    PartitionedConvolver ref;
+    ref.load_ir(short_ir.data(), short_ir.size(), block);
+    std::vector<float> ref_out(block, 0.0f);
+    for (int b = 0; b < 40; ++b) ref.process(in.data(), ref_out.data(), block);
+
+    // Under test: long IR to steady state, then swap to the short IR.
+    PartitionedConvolver conv;
+    conv.load_ir(long_ir.data(), long_ir.size(), block);
+    std::vector<float> out(block, 0.0f);
+    for (int b = 0; b < 40; ++b) conv.process(in.data(), out.data(), block);
+    ConvolverIrSwapper swapper;
+    REQUIRE(swapper.stage_ir(short_ir.data(), short_ir.size(), block));
+    REQUIRE(conv.try_swap_ir(swapper));
+    conv.process(in.data(), out.data(), block);
+
+    // The short IR's full 2-partition history was preserved, so the first post-swap
+    // block already matches the reference steady state.
+    for (std::size_t i = 0; i < block; ++i)
+        REQUIRE_THAT(out[i], WithinAbs(ref_out[i], 1e-4f));
+
+    (void)swapper.drain_old();
+}
+
+namespace {
+// A signal that differs every sample AND every block, so each history partition
+// holds a DISTINCT spectrum. Under a block-constant (DC) input every partition's
+// spectrum is identical and the partitioned sum is invariant to any permutation
+// of the input delay line — which means a DC test cannot tell a correct
+// age-alignment from a reversed or off-by-one one. This stream can.
+float distinct_sample_at(std::size_t n) {
+    const float x = static_cast<float>(n);
+    return 0.6f * std::sin(0.07f * x) + 0.4f * std::sin(0.021f * x + 0.9f) +
+           0.2f * std::sin(0.003f * x + 2.1f);
+}
+} // namespace
+
+TEST_CASE("PartitionedConvolver swap keeps history age-aligned (distinct-per-block signal)",
+          "[signal][convolver][bg-swap]") {
+    // Swapping to the SAME IR must be a functional no-op: the input delay line is
+    // IR-independent and the rebuilt IR spectra are bit-identical, so a convolver
+    // that swaps mid-stream must track a no-swap reference sample-for-sample on a
+    // signal whose partitions are all distinct. A reversed/off-by-one carry mapping
+    // would reorder the delay line and diverge here (it stays hidden under DC).
+    const std::size_t block = 64;
+    const std::size_t parts = 4;
+    std::vector<float> ir(block * parts, 0.0f);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.5f * std::exp(-2.0f * static_cast<float>(i) / static_cast<float>(ir.size()));
+
+    const int warm = 40, post = 5;
+
+    // Reference: run the whole distinct stream through the IR, no swap.
+    PartitionedConvolver ref;
+    ref.load_ir(ir.data(), ir.size(), block);
+    std::vector<std::vector<float>> ref_out;
+    for (int b = 0; b < warm + post; ++b) {
+        std::vector<float> in(block), o(block);
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        ref.process(in.data(), o.data(), block);
+        ref_out.push_back(std::move(o));
+    }
+
+    // Under test: identical stream, but swap to the same IR after `warm` blocks.
+    PartitionedConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block);
+    for (int b = 0; b < warm; ++b) {
+        std::vector<float> in(block), o(block);
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        conv.process(in.data(), o.data(), block);
+    }
+    ConvolverIrSwapper swapper;
+    REQUIRE(swapper.stage_ir(ir.data(), ir.size(), block));
+    REQUIRE(conv.try_swap_ir(swapper));
+
+    // Every post-swap block must match the no-swap reference for the same stream
+    // position — proving the carried delay line is aligned by age, not merely
+    // non-zero. Checked for several blocks so the whole ring ages through correctly.
+    for (int b = warm; b < warm + post; ++b) {
+        std::vector<float> in(block), o(block);
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        conv.process(in.data(), o.data(), block);
+        for (std::size_t i = 0; i < block; ++i)
+            REQUIRE_THAT(o[i], WithinAbs(ref_out[static_cast<std::size_t>(b)][i], 1e-4f));
+    }
+
+    (void)swapper.drain_old();
+}
+
+TEST_CASE("PartitionedConvolver swap to a shorter IR is age-aligned (distinct-per-block signal)",
+          "[signal][convolver][bg-swap]") {
+    // Same alignment guarantee for a shrinking IR (Q < P). The input delay line is
+    // IR-independent, so after the swap the convolver must match a reference that
+    // ran the short IR over the identical distinct stream from the start. A shorter
+    // IR needs only its own receptive field of history; the carry must hand over
+    // exactly those most-recent partitions, correctly aged.
+    const std::size_t block = 64;
+    std::vector<float> long_ir(block * 6, 0.0f);
+    for (std::size_t i = 0; i < long_ir.size(); ++i)
+        long_ir[i] = 0.3f * std::cos(0.01f * static_cast<float>(i));
+    std::vector<float> short_ir(block * 2, 0.0f);
+    for (std::size_t i = 0; i < short_ir.size(); ++i)
+        short_ir[i] = 0.4f * std::exp(-3.0f * static_cast<float>(i) / static_cast<float>(short_ir.size()));
+
+    const int warm = 40, post = 4;
+
+    PartitionedConvolver ref;
+    ref.load_ir(short_ir.data(), short_ir.size(), block);
+    std::vector<std::vector<float>> ref_out;
+    for (int b = 0; b < warm + post; ++b) {
+        std::vector<float> in(block), o(block);
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        ref.process(in.data(), o.data(), block);
+        ref_out.push_back(std::move(o));
+    }
+
+    PartitionedConvolver conv;
+    conv.load_ir(long_ir.data(), long_ir.size(), block);
+    for (int b = 0; b < warm; ++b) {
+        std::vector<float> in(block), o(block);
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        conv.process(in.data(), o.data(), block);
+    }
+    ConvolverIrSwapper swapper;
+    REQUIRE(swapper.stage_ir(short_ir.data(), short_ir.size(), block));
+    REQUIRE(conv.try_swap_ir(swapper));
+
+    for (int b = warm; b < warm + post; ++b) {
+        std::vector<float> in(block), o(block);
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        conv.process(in.data(), o.data(), block);
+        for (std::size_t i = 0; i < block; ++i)
+            REQUIRE_THAT(o[i], WithinAbs(ref_out[static_cast<std::size_t>(b)][i], 1e-4f));
+    }
+
+    (void)swapper.drain_old();
+}

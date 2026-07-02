@@ -81,8 +81,13 @@ public:
             return false;
 
         auto previous = std::move(state_);
+        // Carry the input delay line from the displaced IR into the incoming one so
+        // the swap doesn't truncate the convolver's history (the tail dip the class
+        // comment promises to avoid). The FDL is IR-independent; this copies the
+        // overlapping recent history and returns the ring cursor to resume at.
+        partition_index_ =
+            previous ? detail::carry_input_history(*previous, *next, partition_index_) : 0;
         state_ = std::move(next);
-        partition_index_ = 0;
 
         if (previous) {
             // We pre-checked capacity above (single-producer ring +
