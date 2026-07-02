@@ -1126,3 +1126,19 @@ carries both UI and DSP applies as ONE transaction (item 1.8b/2.5b). Notes:
 - Value-perfect widget-state restore across a rollback is a refinement (rollback
   re-runs the previous script; `reload_from`'s own snapshot/restore preserves
   matching widget values across the rebuild).
+
+## Custom widgets carry their own reload state (item 1.4b)
+
+`WidgetBridge` snapshots/restores BUILT-IN widget state by type across a scripted-
+UI reload (knob/fader/range/toggle/checkbox/togglebutton scalar; combo/segmented
+selection index; xy pad — `widget_bridge.cpp` `snapshot_values`/`restore_values`).
+A CUSTOM widget (a `View` subclass) opts into carrying its OWN state by overriding
+the `View` virtuals `save_reload_state(std::string&)` / `restore_reload_state(std::string_view)`
+(default return false → existing widgets unaffected). The bridge calls them for
+every widget in `widgets_` and stores the opaque blob in
+`WidgetReloadSnapshot::custom_state` keyed by script id; restore hands the blob
+back to the widget still living under that id (id/type change → no match, fail-
+safe). Note: `widgets_` is populated by the JS `createX` registrars (built-ins
+only today), so end-to-end coverage through a JS-created custom widget awaits a
+custom-widget registration path — the `View` hook + bridge wiring are in place for
+when one exists.

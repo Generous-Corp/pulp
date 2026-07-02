@@ -44,6 +44,9 @@ struct WidgetReloadSnapshot {
     std::unordered_map<std::string, float> scalar_values;
     struct XYValue { float x = 0; float y = 0; };
     std::unordered_map<std::string, XYValue> xy_values;
+    // Custom widget-declared state (item 1.4b): opaque per-widget blobs from
+    // View::save_reload_state, keyed by script id, restored via restore_reload_state.
+    std::unordered_map<std::string, std::string> custom_state;
     // Legacy compat
     std::unordered_map<std::string, float> values;
 };

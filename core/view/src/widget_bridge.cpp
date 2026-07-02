@@ -814,6 +814,12 @@ void WidgetBridge::snapshot_values(WidgetReloadSnapshot& out) const {
         else if (auto* combo = dynamic_cast<ComboBox*>(view)) out.scalar_values[id] = static_cast<float>(combo->selected());
         else if (auto* seg = dynamic_cast<SegmentedControl*>(view)) out.scalar_values[id] = static_cast<float>(seg->selected());
         else if (auto* xy = dynamic_cast<XYPad*>(view)) out.xy_values[id] = {.x = xy->x_value(), .y = xy->y_value()};
+        // Custom widget-declared state (item 1.4b): independent of the built-in
+        // type match above — a custom widget opts in via save_reload_state.
+        // Built-in widgets return false (View default), so this stays empty for
+        // them and adds no per-widget cost beyond one virtual call.
+        std::string blob;
+        if (view->save_reload_state(blob)) out.custom_state[id] = std::move(blob);
     }
 }
 
@@ -836,6 +842,15 @@ void WidgetBridge::restore_values(const WidgetReloadSnapshot& snapshot) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
         if (auto* xy = dynamic_cast<XYPad*>(it->second)) { xy->set_x(val.x); xy->set_y(val.y); }
+    }
+    // Custom widget-declared state (item 1.4b): hand each saved blob back to the
+    // widget that still lives under the same script id. A widget whose id/type
+    // changed across the reload simply won't match (find fails or the virtual
+    // ignores an unfamiliar blob) — fail-safe, no throw.
+    for (auto& [id, blob] : snapshot.custom_state) {
+        auto it = widgets_.find(id);
+        if (it == widgets_.end()) continue;
+        (void)it->second->restore_reload_state(blob);
     }
 }
 

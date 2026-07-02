@@ -12,6 +12,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace pulp::view {
 
@@ -65,6 +66,18 @@ public:
     View* child_at(size_t index) { return children_[index].get(); }
     const View* child_at(size_t index) const { return children_[index].get(); }
     View* parent() const { return parent_; }
+
+    // ── Reload state (live-swap item 1.4b) ───────────────────────────────
+    // A CUSTOM widget overrides these to carry its own state across a
+    // scripted-UI hot reload, beyond the built-in knob/fader/combo/segmented/
+    // toggle/checkbox/xy coverage the WidgetBridge snapshots by type.
+    // save_reload_state writes an opaque blob and returns true to OPT IN;
+    // restore_reload_state applies a blob previously written by the same widget
+    // type (matched by the script's widget id). Default: no custom state
+    // (returns false), so every existing widget is unaffected — the bridge only
+    // stores/restores a blob for widgets that opt in.
+    virtual bool save_reload_state(std::string& /*out_blob*/) const { return false; }
+    virtual bool restore_reload_state(std::string_view /*blob*/) { return false; }
 
     // ── Hit testing ──────────────────────────────────────────────────────
 
