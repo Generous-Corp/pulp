@@ -9,7 +9,9 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
+#include <algorithm>
 #include <chrono>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -687,5 +689,44 @@ TEST_CASE("ScriptedUiSession preserves ComboBox selection across reload (item 1.
     REQUIRE(combo2->selected() == 2);          // selection preserved across reload
     REQUIRE(session.bridge()->widget("added") != nullptr);  // reload really happened
 
+    fs::remove_all(temp_dir);
+}
+
+// item 1.2 baseline: publish scripted-UI (JS-axis) reload p50/p95 for a realistic
+// panel so regressions in the dev-loop latency are visible. Hidden [.benchmark].
+TEST_CASE("ScriptedUiSession reload latency baseline", "[view][scripted-ui][.benchmark]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-baseline");
+    const auto script_path = temp_dir / "panel.js";
+    std::string base;
+    for (int i = 0; i < 24; ++i)
+        base += "createKnob('k" + std::to_string(i) + "', " +
+                std::to_string(10 + (i % 6) * 52) + ", " +
+                std::to_string(10 + (i / 6) * 60) + ", 48, 48);\n";
+    write_text(script_path, base);
+
+    View root;
+    root.set_bounds({0, 0, 640, 480});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+
+    constexpr int kIters = 200;
+    std::vector<double> totals;
+    totals.reserve(kIters);
+    for (int i = 0; i < kIters; ++i) {
+        write_text(script_path, base + "createLabel('rev', 'v" + std::to_string(i) + "', '');\n");
+        REQUIRE(session.reload(&error));
+        totals.push_back(session.last_reload_ms());
+    }
+    std::sort(totals.begin(), totals.end());
+    const double p50 = totals[totals.size() / 2];
+    const double p95 = totals[static_cast<size_t>(totals.size() * 0.95)];
+    WARN("item 1.2 baseline — scripted-UI reload (24-knob panel): p50=" << p50
+         << "ms p95=" << p95 << "ms worst=" << totals.back() << "ms (60fps frame=16.7ms)");
+    CHECK(p50 >= 0.0);
     fs::remove_all(temp_dir);
 }
