@@ -274,6 +274,51 @@ TEST_CASE("set_element_param_key re-keys and re-binds without a remount",
     REQUIRE(rekey_calls == 1);
 }
 
+TEST_CASE("DesignFrameView tracks per-element hover (P6.2)", "[view][hover][issue-5230]") {
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    std::vector<std::pair<int, bool>> hover_log;
+    dfv.on_element_hover = [&](int i, bool entered) { hover_log.emplace_back(i, entered); };
+
+    REQUIRE(dfv.element_hovered() == -1);
+
+    // Hover onto the knob (center 20,20).
+    dfv.simulate_hover({20, 20});
+    REQUIRE(dfv.element_hovered() == 0);
+    REQUIRE(dfv.element_is_hovered(0));
+    REQUIRE(hover_log == std::vector<std::pair<int, bool>>{{0, true}});
+
+    // Hover off into empty panel space — the knob exits.
+    dfv.simulate_hover({90, 90});
+    REQUIRE(dfv.element_hovered() == -1);
+    REQUIRE(hover_log.back() == std::pair<int, bool>{0, false});
+
+    // A disabled element is never hovered.
+    dfv.set_element_enabled(0, false);
+    dfv.simulate_hover({20, 20});
+    REQUIRE(dfv.element_hovered() == -1);
+}
+
+TEST_CASE("A disabled element is not hit-testable (P6.2)", "[view][hover][issue-5230]") {
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    dfv.set_element_enabled(0, false);
+    REQUIRE_FALSE(dfv.element_enabled(0));
+    dfv.simulate_drag({20, 20}, {20, 5});  // drag over a disabled knob
+    REQUIRE(params.set_calls == 0);        // no gesture reached the host
+
+    // Re-enabling restores interaction.
+    dfv.set_element_enabled(0, true);
+    dfv.simulate_drag({20, 20}, {20, 5});
+    REQUIRE(params.set_calls >= 1);
+}
+
 TEST_CASE("DesignFrameView forwards action clicks to the host action channel",
           "[view][host-action][issue-5230]") {
     const std::string svg =

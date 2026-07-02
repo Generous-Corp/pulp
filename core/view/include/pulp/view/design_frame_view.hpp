@@ -68,6 +68,10 @@ struct DesignFrameElement {
     /// Lights with the tint on press and clears on release, instead of the
     /// default sticky on/off flip — the right feel for a momentary command.
     bool flash = false;
+    /// When false, the element is bypassed/disabled: hit-testing skips it (it
+    /// cannot be hovered, dragged, clicked, or gesture) and a subclass/painter
+    /// may dim it (see DesignFrameView::element_enabled). Defaults enabled.
+    bool enabled = true;
 
     // ── overlay controls (text_field / dropdown / tab_group / stepper) ────
     float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;  ///< element rect, SVG coords
@@ -406,6 +410,31 @@ public:
     void route_actions_to_host(bool enable) { route_actions_to_host_ = enable; }
     bool routes_actions_to_host() const { return route_actions_to_host_; }
 
+    // ── Per-element hover + enabled/bypass state (Phase 6 P6.2) ─────────────
+    // DesignFrameView had no hover concept; every faithful port needs one
+    // (hover affordances, EDIT overlays, bypass dimming). Hover is tracked by
+    // hit-testing pointer moves (drive it with simulate_hover / the host's
+    // mouse-move). One element is hovered at a time; a disabled element is never
+    // hovered and never hit.
+    //
+    // The state is exposed for a subclass or painter to honor visually (e.g.
+    // brighten the hovered element, desaturate a disabled one) — the base view
+    // tracks state + interaction gating; pixel-level SVG restyling rides on the
+    // fragment-handle primitive (P6.3). on_element_hover fires on the UI thread
+    // with the entered/exited index so a consumer can drive its own affordance.
+    int element_hovered() const { return hovered_element_; }
+    bool element_is_hovered(int i) const { return i >= 0 && i == hovered_element_; }
+    std::function<void(int index, bool entered)> on_element_hover;
+
+    // Enable/disable (bypass) element `i`. A disabled element is skipped by
+    // hit-testing — it cannot be hovered, dragged, clicked, or gesture — and if
+    // it was the hovered element the hover is cleared. Repaints. No-op out of
+    // range.
+    void set_element_enabled(int i, bool enabled);
+    bool element_enabled(int i) const {
+        return i >= 0 && i < static_cast<int>(elements_.size()) && elements_[i].enabled;
+    }
+
     // The panel is the view's natural size — a host should size its window to
     // this aspect so the design fills it with no letterbox (see paint()).
     float intrinsic_width() const override { return panel_w_; }
@@ -416,6 +445,8 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+    void on_hover_move(Point pos) override;  // hover-track the element under the pointer
+    void on_mouse_leave() override;          // clear hover on exit
 
 protected:
     // Called after the active frame changes (set_active_frame or the initial
@@ -491,6 +522,10 @@ private:
     int active_frame_ = 0;         ///< index into frames_ currently rendered
     bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()
     bool route_actions_to_host_ = false;  ///< forward action clicks to host_actions()
+    int hovered_element_ = -1;            ///< element under the pointer, or -1
+
+    // Set the hovered element (fires on_element_hover on change, repaints).
+    void set_hovered_element(int i);
 };
 
 // The native-overlay widget for a `tab_group` element: a compact segmented

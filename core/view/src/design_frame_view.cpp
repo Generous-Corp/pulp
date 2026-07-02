@@ -486,6 +486,35 @@ void DesignFrameView::sync_from_host_params() {
     }
 }
 
+// ── Per-element hover + enabled state (P6.2) ─────────────────────────────────
+
+void DesignFrameView::set_hovered_element(int i) {
+    if (i == hovered_element_) return;
+    const int prev = hovered_element_;
+    hovered_element_ = i;
+    if (on_element_hover) {
+        if (prev >= 0) on_element_hover(prev, false);
+        if (i >= 0) on_element_hover(i, true);
+    }
+    request_repaint();
+}
+
+void DesignFrameView::on_hover_move(Point pos) {
+    set_hovered_element(hit_element(pos));  // hit_element already skips disabled
+}
+
+void DesignFrameView::on_mouse_leave() {
+    set_hovered_element(-1);
+}
+
+void DesignFrameView::set_element_enabled(int i, bool enabled) {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return;
+    if (elements_[i].enabled == enabled) return;
+    elements_[i].enabled = enabled;
+    if (!enabled && hovered_element_ == i) set_hovered_element(-1);
+    request_repaint();
+}
+
 void DesignFrameView::set_element_param_key(int i, std::string key) {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return;
     if (elements_[i].param_key == key) return;
@@ -819,6 +848,7 @@ int DesignFrameView::hit_element(Point pos) const {
     // take precedence so a toggle/control never gets masked by a key region.
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
+        if (!e.enabled) continue;  // disabled/bypassed: not hit-testable
         if (e.kind != DesignFrameElement::Kind::swap &&
             e.kind != DesignFrameElement::Kind::action &&
             e.kind != DesignFrameElement::Kind::fader &&
@@ -830,6 +860,7 @@ int DesignFrameView::hit_element(Point pos) const {
     int key = -1; float key_area = std::numeric_limits<float>::max();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
+        if (!e.enabled) continue;
         if (e.kind != DesignFrameElement::Kind::momentary) continue;
         if (e.view_group != -1 && active_view_group_ != -1 && e.view_group != active_view_group_)
             continue;
@@ -845,6 +876,7 @@ int DesignFrameView::hit_element(Point pos) const {
     int best = -1; float bd = std::numeric_limits<float>::max();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         if (elements_[i].kind != DesignFrameElement::Kind::knob) continue;
+        if (!elements_[i].enabled) continue;
         const float dx = sx - elements_[i].cx, dy = sy - elements_[i].cy;
         const float d = std::sqrt(dx * dx + dy * dy);
         if (d < elements_[i].hit_radius && d < bd) { bd = d; best = i; }
