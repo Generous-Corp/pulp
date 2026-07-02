@@ -8,6 +8,19 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05500"></a>
+## [0.550.0] - 2026-07-02
+
+- feat(quality-lab): shipped `pulp audio compare` CLI + MCP tool + live recipe (S3) ([#5415](https://github.com/danielraffel/pulp/pull/5415))
+- feat(quality-lab): profile registry + added-hf axis for compare (Slice 2) ([#5414](https://github.com/danielraffel/pulp/pull/5414))
+- docs: document local signing/notarization credential location ([#5411](https://github.com/danielraffel/pulp/pull/5411))
+- feat(quality-lab): /audio-compare slash command + diff-integration (Slice 1b) ([#5413](https://github.com/danielraffel/pulp/pull/5413))
+- feat(quality-lab): agent-facing before/after compare→judge report (Slice 1) ([#5410](https://github.com/danielraffel/pulp/pull/5410))
+- ci(host_vitals): emit sampled_at in the JSON signal ([#5412](https://github.com/danielraffel/pulp/pull/5412))
+- fix/hot reload msvc symbol ([#5407](https://github.com/danielraffel/pulp/pull/5407))
+- ci/fork guard scheduled workflows ([#5409](https://github.com/danielraffel/pulp/pull/5409))
+- feature/host vitals preflight ([#5405](https://github.com/danielraffel/pulp/pull/5405))
+
 <a id="v05493"></a>
 ## [0.549.3] - 2026-07-01
 
@@ -5745,6 +5758,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.550.0]: https://github.com/danielraffel/pulp/releases/tag/v0.550.0
 [0.549.3]: https://github.com/danielraffel/pulp/releases/tag/v0.549.3
 [0.549.2]: https://github.com/danielraffel/pulp/releases/tag/v0.549.2
 [0.549.1]: https://github.com/danielraffel/pulp/releases/tag/v0.549.1
