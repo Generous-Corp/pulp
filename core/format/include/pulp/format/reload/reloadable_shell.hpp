@@ -71,6 +71,19 @@
 #include <unistd.h>    // getpid
 #endif
 
+// Ship-safety gate (live-swap item 1.12 / D5). The dev filesystem WATCHER — the
+// background thread that polls a source path and dlopen()s whatever compiled
+// artifact appears — is a development affordance, not something a shipped plugin
+// should carry. Define PULP_RELOAD_DEV_WATCHER=0 in a release build and the
+// watcher thread, its poll loop, and the raw-path ReloadController it drives are
+// compiled OUT entirely (no filesystem-watch / auto-dlopen entry point in the
+// binary — asserted by the symbol-absence test). The signed SwapTransaction
+// surface (`session_` / the hot-swap slot) is deliberately NOT gated: that is
+// the path a shipping app-store-style signed content swap would use.
+#if !defined(PULP_RELOAD_DEV_WATCHER)
+#define PULP_RELOAD_DEV_WATCHER 1
+#endif
+
 namespace pulp::format::reload {
 
 class ReloadableShell : public Processor {
@@ -158,10 +171,17 @@ public:
         // prepare context, and the running slot.
         {
             std::lock_guard<std::mutex> g(controller_mutex_);
+            // session_ is the signed SwapTransaction surface — always present so
+            // a shipping build can still adopt a signed content swap.
             session_.emplace(slot_, state(), current_build_fingerprint(), prepare_ctx_);
+#if PULP_RELOAD_DEV_WATCHER
+            // The raw-path controller (dev filesystem reload) is compiled out of
+            // a shipping build; without it reload_now() / the watcher have no
+            // path to dlopen an arbitrary on-disk artifact.
             controller_.emplace(*session_, logic_path_);
+#endif
         }
-        start_watcher();
+        start_watcher();  // no-op (compiled out) when the watcher is gated off
     }
 
     void release() override { stop_watcher(); }
@@ -313,15 +333,27 @@ private:
     }
 
     void start_watcher() {
+#if PULP_RELOAD_DEV_WATCHER
         if (running_.exchange(true)) return;  // already running
         watcher_ = std::thread([this] { watcher_loop(); });
+#endif
     }
 
     void stop_watcher() {
+#if PULP_RELOAD_DEV_WATCHER
         if (!running_.exchange(false)) return;
         if (watcher_.joinable()) watcher_.join();
+#endif
     }
 
+#if PULP_RELOAD_DEV_WATCHER
+    // PULP_RELOAD_SHIP_FIXTURE_MARK (test-only) force-emits this symbol so the
+    // ship-safety symbol-absence test has a deterministic marker: present in the
+    // dev fixture, gone from the gate-off ship fixture. Normal builds set nothing
+    // here — the method emits only when ODR-used, as usual.
+#if defined(PULP_RELOAD_SHIP_FIXTURE_MARK)
+    [[gnu::used]]
+#endif
     void watcher_loop() {
         while (running_.load(std::memory_order_relaxed)) {
             std::function<void()> on_reloaded;
@@ -343,6 +375,7 @@ private:
                 std::this_thread::sleep_for(kPollInterval / 10);
         }
     }
+#endif
 
     void record(const ReloadOutcome& outcome) {
         reload_attempts_.fetch_add(1, std::memory_order_relaxed);

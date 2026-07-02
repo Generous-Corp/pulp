@@ -1259,6 +1259,27 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(pulp-test-reloadable-shell PRIVATE Threads::Threads)
 
+# Ship-safety symbol-absence test (live-swap item 1.12 / D5): the dev filesystem
+# watcher must be compiled OUT of a shipping build. Two fixture binaries — a dev
+# build (watcher gated ON + force-emit mark) and a ship build
+# (PULP_RELOAD_DEV_WATCHER=0) — then an nm check asserts the watcher symbol is
+# present in dev and absent in ship. UNIX-only (uses nm).
+if(UNIX)
+    add_executable(pulp-reload-ship-fixture-dev fixtures/reload_ship_fixture.cpp)
+    target_link_libraries(pulp-reload-ship-fixture-dev PRIVATE pulp::format Threads::Threads ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-reload-ship-fixture-dev PRIVATE PULP_RELOAD_SHIP_FIXTURE_MARK=1)
+
+    add_executable(pulp-reload-ship-fixture-ship fixtures/reload_ship_fixture.cpp)
+    target_link_libraries(pulp-reload-ship-fixture-ship PRIVATE pulp::format Threads::Threads ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-reload-ship-fixture-ship PRIVATE PULP_RELOAD_DEV_WATCHER=0)
+
+    add_test(NAME pulp-reload-ship-symbol-absence
+        COMMAND ${CMAKE_COMMAND}
+            -DDEV_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-dev>
+            -DSHIP_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-ship>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/reload_ship_symbol_check.cmake)
+endif()
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
