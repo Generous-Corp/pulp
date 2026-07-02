@@ -1026,3 +1026,15 @@ plugin loads at runtime. Titles/descriptions are XML-escaped before they go into
 the distribution XML, so `&`/`<`/`>`/quotes in a human-readable title no longer
 corrupt the installer; the staging tree is removed via an `EXIT` trap on any exit
 (success, error, or signal).
+
+**Notarize works without `pulp-cpp` (standalone / submodule consumers).** The
+script prefers the in-tree `pulp-cpp ship notarize` when it exists, but a
+plugin repo that vendors Pulp as a *submodule* never builds `pulp-cpp` (the CLI
+is gated to top-level Pulp builds). In that case the notarize step falls back to
+`xcrun notarytool submit --wait` + `stapler staple` using the file-based
+`.p8` key from `~/.config/pulp/secrets/notary.env` (`PULP_NOTARY_KEY_ID` /
+`PULP_NOTARY_ISSUER_ID` / `PULP_NOTARY_KEY_PATH` — the same trio `pulp ship
+doctor` provisions). If neither `pulp-cpp` nor a notary key is available the step
+**fails loudly** (never ships a signed-but-unnotarized `.pkg`); pass
+`--no-notarize` to opt out deliberately. Always `stapler validate` +
+`spctl --assess --type install` the finished `.pkg` regardless of path.

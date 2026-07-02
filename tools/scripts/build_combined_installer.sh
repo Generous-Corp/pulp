@@ -156,7 +156,26 @@ XML
 PKG="$OUT/$NAME-$VERSION.pkg"
 productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" --sign "$INST_ID" "$PKG" >/dev/null
 if [[ "$NOTARIZE" == 1 ]]; then
-  "$CLI" ship notarize --path "$PKG"
+  if [[ -x "$CLI" ]]; then
+    # In-tree / top-level builds: the C++ CLI is built and drives notarize+staple.
+    "$CLI" ship notarize --path "$PKG"
+  else
+    # Submodule / standalone consumers never build pulp-cpp (it is gated to
+    # top-level Pulp builds), so fall back to notarytool directly using the
+    # file-based App Store Connect key. Secrets live in ~/.config/pulp/secrets.
+    source ~/.config/pulp/secrets/notary.env 2>/dev/null || true
+    : "${PULP_NOTARY_KEY_PATH:=$HOME/.config/pulp/secrets/AuthKey_${PULP_NOTARY_KEY_ID:-}.p8}"
+    if [[ -z "${PULP_NOTARY_KEY_ID:-}" || -z "${PULP_NOTARY_ISSUER_ID:-}" || ! -f "$PULP_NOTARY_KEY_PATH" ]]; then
+      echo "error: cannot notarize — pulp-cpp is not built and no notary key is configured." >&2
+      echo "  Build the Pulp CLI (top-level build) or set PULP_NOTARY_KEY_ID / PULP_NOTARY_ISSUER_ID" >&2
+      echo "  and place the .p8 in ~/.config/pulp/secrets/ (see 'pulp ship doctor'). Or pass --no-notarize." >&2
+      exit 1
+    fi
+    xcrun notarytool submit "$PKG" \
+      --key "$PULP_NOTARY_KEY_PATH" --key-id "$PULP_NOTARY_KEY_ID" \
+      --issuer "$PULP_NOTARY_ISSUER_ID" --wait
+    xcrun stapler staple "$PKG"
+  fi
   xcrun stapler validate "$PKG"
 fi
 echo "OK → $PKG"
