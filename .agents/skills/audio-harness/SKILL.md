@@ -399,6 +399,20 @@ harness or `ctest`.
   AGPL Essentia feature-extractor menu — feature extractors are never verdicts, and an env-path
   license fence is disproportionate surface for the value; the pure-numpy residual carries the
   corroboration story license-free.
+
+  **Honesty disclosures (what compare admits it can't see).** compare mean-**downmixes** every
+  input to mono, so a stereo/spatial change (widener, panner, M/S) is invisible to it. When a
+  file was multichannel the report says so: `provenance.ref_channels`/`cand_channels`, a
+  `downmix` note on the measurement envelope, and a one-line summary clause — a stereo-widener
+  whose mid is unchanged reads `no_material_change` but the report never hides that imaging was
+  discarded (a real stereo-width axis is future work). The **`added-hf`** axis reports
+  `not_applicable` (→ `inconclusive`) at low sample rates where the ≥8 kHz band collapses to a
+  degenerate handful of LTAS bins (e.g. sr = 16 kHz is the single Nyquist bin) instead of a
+  confident "no change" over nothing. A **DC offset** concentrates energy in LTAS bin 0 and drags
+  the centroid down — reading as false tonal "dulling" — so the advisory carries a `dc_offset`
+  raw comparator (per-signal means + `present` flag) and, when present, a summary sentence telling
+  you to high-pass before comparing rather than chase phantom dullness. All three are
+  presentation/advisory only — like corroboration, they never move the verdict.
 - **Shipped surfaces (same measurement, three entry points):** the Python `quality-lab compare`
   is the dev-loop surface; **`pulp audio compare <ref> <cand> [--profile …] [--reference-role …]
   [--json …]`** is the shipped CLI verb (thin delegator — `tools/cli/cmd_audio_compare.cpp` locates

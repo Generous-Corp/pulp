@@ -243,6 +243,20 @@ def compare_measurement(
     return env
 
 
+def compare_downmix_note(ref_channels: int, cand_channels: int) -> dict[str, Any]:
+    """Disclosure that multichannel input(s) were mean-downmixed to mono before measuring.
+
+    Attached to the measurement envelope whenever either input had more than one channel, so a
+    reader knows stereo/spatial changes were NOT compared (honesty-per-measurement: the report
+    states what it could not see, rather than silently returning 'no change'). Shape only."""
+    return {
+        "applied": True,
+        "ref_channels": int(ref_channels),
+        "cand_channels": int(cand_channels),
+        "note": "stereo/spatial image not compared — multichannel input(s) were downmixed to mono",
+    }
+
+
 def compare_raw_comparator(
     name: str,
     tool: str,
