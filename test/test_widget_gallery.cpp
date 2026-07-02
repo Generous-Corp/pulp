@@ -2,6 +2,7 @@
 #include <pulp/view/widget_gallery.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/theme_presets.hpp>
+#include <pulp/view/ui_components.hpp>
 
 using namespace pulp::view;
 
@@ -43,4 +44,27 @@ TEST_CASE("widget gallery renders to PNG in light and dark",
     auto png = render_to_png(*light, W, static_cast<uint32_t>(light->bounds().height),
                              1.0f, ScreenshotBackend::default_backend);
     REQUIRE_FALSE(png.empty());
+}
+
+TEST_CASE("scrolling widget gallery wraps the board and clamps scroll",
+          "[view][gallery]") {
+    const float vw = 480.0f, vh = 600.0f;
+    auto root = build_scrolling_widget_gallery(ink_signal(true), vw, vh);
+    REQUIRE(root != nullptr);
+    // Always a ScrollView with the full board as content — bigger than the
+    // viewport in both axes, so a small host can still reach every widget.
+    auto* sv = static_cast<ScrollView*>(root.get());
+    REQUIRE(root->bounds().width == vw);
+    REQUIRE(root->bounds().height == vh);
+    REQUIRE(sv->content_size().width >= GALLERY_WIDTH);
+    REQUIRE(sv->content_size().height > vh);
+
+    // Scrolling past the end clamps to (content - viewport); it never overscrolls
+    // past the content or below zero.
+    sv->set_scroll(1e6f, 1e6f);
+    sv->advance_animations(1.0f);
+    const float max_y = sv->content_size().height - vh;
+    REQUIRE(sv->scroll_y() >= 0.0f);
+    REQUIRE(sv->scroll_y() <= max_y + 1.0f);
+    REQUIRE(sv->scroll_y() > 0.0f);   // it did move toward the bottom
 }
