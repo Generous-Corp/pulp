@@ -17,7 +17,13 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <string>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 using namespace pulp;
 using namespace pulp::format::reload;
@@ -178,6 +184,45 @@ TEST_CASE("ReloadController stages per-instance unique names (no multi-instance 
             std::error_code ec; fs::remove(e.path(), ec);
         }
     }
+}
+
+// Startup housekeeping: reap staged copies left by DEAD processes, keep files
+// owned by a live process, and never touch non-matching names (item 1.11).
+TEST_CASE("reap_stale_staged removes dead-pid litter, keeps live + unrelated",
+          "[reload][controller][issue-p0-8]") {
+    const fs::path dir = fs::path(RELOAD_WATCH_DIR) / "pulp_reap_probe";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const std::string stem = "reaptest";
+    auto touch = [&](const std::string& name) { std::ofstream(dir / name) << "x"; };
+
+    const long dead = 999999;  // > macOS default PID_MAX (99998) => guaranteed ESRCH
+    const std::string dead_initial = stem + ".initial." + std::to_string(dead) + ".0.dylib";
+    const std::string dead_reload  = stem + ".reload."  + std::to_string(dead) + ".5.dylib";
+    const std::string unrelated    = stem + ".unrelated.dylib";
+    const std::string logic        = stem + ".dylib";
+    touch(dead_initial);
+    touch(dead_reload);
+    touch(unrelated);
+    touch(logic);
+#if !defined(_WIN32)
+    const std::string live_initial =
+        stem + ".initial." + std::to_string(static_cast<long>(::getpid())) + ".0.dylib";
+    touch(live_initial);
+#endif
+
+    reap_stale_staged(dir, stem);
+
+    CHECK_FALSE(fs::exists(dir / dead_initial));  // dead-pid staged → reaped
+    CHECK_FALSE(fs::exists(dir / dead_reload));   // dead-pid staged → reaped
+    CHECK(fs::exists(dir / unrelated));           // non-matching name → untouched
+    CHECK(fs::exists(dir / logic));               // the logic file itself → untouched
+#if !defined(_WIN32)
+    CHECK(fs::exists(dir / live_initial));        // live-pid staged → kept
+#endif
+
+    fs::remove_all(dir, ec);
 }
 
 TEST_CASE("ReloadController.reload_now forces a reload regardless of mtime",

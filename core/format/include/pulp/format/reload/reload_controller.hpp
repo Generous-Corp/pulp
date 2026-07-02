@@ -51,10 +51,56 @@
 #if defined(_WIN32)
 #include <process.h>
 #else
+#include <cerrno>
+#include <csignal>
 #include <unistd.h>
 #endif
 
 namespace pulp::format::reload {
+
+// True if `pid` names a live process. On POSIX, kill(pid,0) succeeds (0) or
+// fails with EPERM when the process exists but we lack permission; ESRCH means
+// it's gone. On Windows we have no cheap portable check, so we report "not
+// alive" and rely on the fact that a loaded module's file is locked — remove()
+// then fails harmlessly, so we never delete a live instance's mapped image.
+inline bool staged_pid_is_alive(long pid) {
+#if defined(_WIN32)
+    (void)pid;
+    return false;
+#else
+    if (::kill(static_cast<::pid_t>(pid), 0) == 0) return true;
+    return errno == EPERM;
+#endif
+}
+
+// Reap stale staged copies (`<stem>.initial.<pid>.*` / `<stem>.reload.<pid>.*`)
+// left by DEAD processes — dev-loop litter that accumulates because each run
+// stages under a unique pid+counter name (ReloadableShell::stage_initial and
+// ReloadController::stage_and_reload). Best-effort and startup-only. Files whose
+// embedded PID is still a live process are left untouched, so a concurrently
+// running instance's staged images are never removed.
+inline void reap_stale_staged(const std::filesystem::path& dir,
+                              const std::string& stem) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) return;
+    const std::string prefixes[2] = {stem + ".initial.", stem + ".reload."};
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string fn = it->path().filename().string();
+        std::size_t pos = std::string::npos;
+        for (const auto& p : prefixes)
+            if (fn.rfind(p, 0) == 0) { pos = p.size(); break; }
+        if (pos == std::string::npos) continue;
+        const std::size_t dot = fn.find('.', pos);          // pid runs up to the next '.'
+        if (dot == std::string::npos || dot == pos) continue;
+        long pid = 0;
+        const std::string pid_str = fn.substr(pos, dot - pos);
+        try { pid = std::stol(pid_str); } catch (...) { continue; }
+        if (pid <= 0 || staged_pid_is_alive(pid)) continue;  // keep live-owned files
+        std::error_code rm;
+        fs::remove(it->path(), rm);                          // best-effort
+    }
+}
 
 class ReloadController {
 public:
@@ -63,7 +109,12 @@ public:
     ReloadController(ReloadSession& session, std::filesystem::path logic_path,
                      std::filesystem::path stage_dir = {})
         : session_(session), path_(std::move(logic_path)),
-          stage_dir_(stage_dir.empty() ? path_.parent_path() : std::move(stage_dir)) {}
+          stage_dir_(stage_dir.empty() ? path_.parent_path() : std::move(stage_dir)) {
+        // Startup housekeeping: clear dead-process staged litter so a long dev
+        // history doesn't leave hundreds of <stem>.initial.*/<stem>.reload.*
+        // copies behind (bounds the item 1.11 accumulation across restarts).
+        reap_stale_staged(stage_dir_, path_.stem().string());
+    }
 
     /// Poll once. Returns the reload outcome if the file changed since the last
     /// poll (and exists), otherwise std::nullopt (no change / missing file /
