@@ -321,7 +321,9 @@ public:
                 for (std::size_t c = 0; c < channels_; ++c) {
                     auto& d = delays_[c];
                     d[write_pos_[c]] = input[c][input_consumed];
-                    write_pos_[c] = (write_pos_[c] + 1u) % taps_per_phase_;
+                    // write_pos_ stays in [0, taps), so a compare-and-reset is the
+                    // same result as the modulo without the per-input-sample divide.
+                    if (++write_pos_[c] >= taps_per_phase_) write_pos_[c] = 0u;
                 }
                 ++input_consumed;
                 phase_acc_ -= 1.0;
@@ -346,11 +348,22 @@ public:
                 // Convolve: y = sum_k h[k] * x[wp - 1 - k] (most recent first).
                 double acc0 = 0.0, acc1 = 0.0;
                 std::size_t idx = (wp == 0 ? taps_per_phase_ - 1u : wp - 1u);
-                for (std::size_t k = 0; k < taps_per_phase_; ++k) {
-                    const float xs = d[idx];
-                    acc0 += static_cast<double>(xs) * static_cast<double>(ph0[k]);
-                    acc1 += static_cast<double>(xs) * static_cast<double>(ph1[k]);
-                    idx = (idx == 0 ? taps_per_phase_ - 1u : idx - 1u);
+                if (frac != 0.0) {
+                    for (std::size_t k = 0; k < taps_per_phase_; ++k) {
+                        const float xs = d[idx];
+                        acc0 += static_cast<double>(xs) * static_cast<double>(ph0[k]);
+                        acc1 += static_cast<double>(xs) * static_cast<double>(ph1[k]);
+                        idx = (idx == 0 ? taps_per_phase_ - 1u : idx - 1u);
+                    }
+                } else {
+                    // Integer phase position (e.g. integer resample ratios): the
+                    // second phase is weighted by frac == 0, so it never reaches the
+                    // output — skip the redundant second MAC. y == acc0 exactly, so
+                    // this is bit-identical to evaluating both phases.
+                    for (std::size_t k = 0; k < taps_per_phase_; ++k) {
+                        acc0 += static_cast<double>(d[idx]) * static_cast<double>(ph0[k]);
+                        idx = (idx == 0 ? taps_per_phase_ - 1u : idx - 1u);
+                    }
                 }
                 const double y = acc0 + frac * (acc1 - acc0);
                 output[c][out_n] = static_cast<float>(y);
