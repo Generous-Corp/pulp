@@ -361,9 +361,41 @@ static void install_app_menu(NSString* appName) {
     return pt;
 }
 
+// Route an event at window-point `pt` to an open ComboBox popup when the point
+// is inside the popup's (flip/scroll/clamp-aware) menu rect — the single source
+// of truth shared with paint + hit_test. `configure` fills the event-specific
+// fields (button/is_down, or is_wheel + deltas). Returns the routed combo (for
+// drag-target bookkeeping) or nullptr when nothing was handled. Shared by
+// mouseDown and scrollWheel so an open menu takes precedence over sibling views
+// and any enclosing ScrollView (whose scroll would otherwise close the popup).
+- (pulp::view::ComboBox*)routeToOpenComboPopup:(pulp::view::Point)pt
+                                     configure:(void (^)(pulp::view::MouseEvent&))configure {
+    auto* combo = pulp::view::ComboBox::active_popup_;
+    if (!combo) return nullptr;
+    float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    pulp::view::MouseEvent me;
+    me.position = to_local(pt, combo, self.rootView);
+    me.window_position = pt;
+    if (configure) configure(me);
+    combo->on_mouse_event(me);
+    [self setNeedsDisplay:YES];
+    return combo;
+}
+
 - (void)scrollWheel:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
+
+    // An open ComboBox popup consumes the wheel to scroll its (clamped) item
+    // list, ahead of any enclosing ScrollView (whose scroll would close it).
+    if ([self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
+            me.is_wheel = true;
+            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+        }]) return;
+
     auto* target = self.rootView->hit_test(pt);
     if (!target) {
         // Hovering over empty background inside a scroll pane returns no hit
@@ -481,33 +513,18 @@ static void install_app_menu(NSString* appName) {
             }
         }
 
-        // Check if click is inside an active ComboBox dropdown overlay.
-        // The dropdown renders as a paint overlay with no view backing, so
-        // normal hit_test finds the view behind the dropdown. Route the click
-        // to the ComboBox instead so it can process the dropdown item selection.
-        if (pulp::view::ComboBox::active_popup_) {
-            auto* combo = pulp::view::ComboBox::active_popup_;
-            float abs_x = 0, abs_y = 0;
-            pulp::view::View* v = combo;
-            while (v) { abs_x += v->bounds().x; abs_y += v->bounds().y; v = v->parent(); }
-            float base_h = std::min(combo->local_bounds().height, 28.0f);
-            float dd_top = abs_y + base_h + 2;
-            float dd_w = combo->dropdown_width_hint();
-            float dd_h = static_cast<float>(combo->items().size()) * 24.0f;
-            if (pt.x >= abs_x && pt.x <= abs_x + dd_w &&
-                pt.y >= dd_top && pt.y <= dd_top + dd_h) {
-                _dragTarget = combo;
-                auto local = to_local(pt, combo, self.rootView);
-                pulp::view::MouseEvent me;
-                me.position = local;
-                me.window_position = pt;
+        // Route a click inside an active ComboBox dropdown overlay to the combo.
+        // The dropdown renders as a paint overlay with no view backing, so a
+        // normal hit_test would find the view behind it; the shared helper's
+        // flip/scroll/clamp-aware rect ensures a click never falls through to a
+        // sibling under the menu or misses a scrolled/flipped-up row.
+        if (auto* combo = [self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
                 me.button = pulp::view::MouseButton::left;
                 me.is_down = true;
                 me.click_count = 1;
-                combo->on_mouse_event(me);
-                [self setNeedsDisplay:YES];
-                return;
-            }
+            }]) {
+            _dragTarget = combo;
+            return;
         }
 
         // Generalized overlay-click routing for React popovers.

@@ -26,6 +26,8 @@
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/ui_components.hpp>       // ComboBox
+#include <pulp/view/design_frame_view.hpp>   // DesignStepper
 #include <utility>
 
 namespace pulp::view {
@@ -89,7 +91,10 @@ bind_parameter(XYPad& pad, state::StateStore& store, state::ParamID x_id, state:
         store.end_gesture(y_id);
     };
     return ParameterBinding(store.add_listener(
-        [x_id, y_id](state::ParamID, float) { (void)x_id; (void)y_id; },
+        [&pad, &store, x_id, y_id](state::ParamID changed, float) {
+            if (changed == x_id) pad.set_x(store.get_normalized(x_id));
+            if (changed == y_id) pad.set_y(store.get_normalized(y_id));
+        },
         state::ListenerThread::Main));
 }
 
@@ -103,6 +108,42 @@ bind_parameter(RangeSlider& slider, state::StateStore& store, state::ParamID id)
     return ParameterBinding(store.add_listener(
         [&slider, &store, id](state::ParamID changed, float) {
             if (changed == id) slider.set_value(store.get_normalized(id));
+        },
+        state::ListenerThread::Main));
+}
+
+/// ComboBox ↔ stepped/index parameter. A selection is a one-shot gesture so
+/// the host records the discrete change; automation playback drives the
+/// selection back (via set_selected_silent, so it does not re-fire on_change).
+[[nodiscard]] inline ParameterBinding
+bind_parameter(ComboBox& combo, state::StateStore& store, state::ParamID id) {
+    combo.set_selected_silent(static_cast<int>(store.get_value(id)));
+    combo.on_change = [&store, id](int index) {
+        store.begin_gesture(id);
+        store.set_value(id, static_cast<float>(index));
+        store.end_gesture(id);
+    };
+    return ParameterBinding(store.add_listener(
+        [&combo, &store, id](state::ParamID changed, float) {
+            if (changed == id) combo.set_selected_silent(static_cast<int>(store.get_value(id)));
+        },
+        state::ListenerThread::Main));
+}
+
+/// DesignStepper ↔ stepped/index parameter (same contract as ComboBox):
+/// user steps are one-shot gestures; automation playback drives the selection
+/// via set_selected_silent (which does not re-fire on_select).
+[[nodiscard]] inline ParameterBinding
+bind_parameter(DesignStepper& stepper, state::StateStore& store, state::ParamID id) {
+    stepper.set_selected_silent(static_cast<int>(store.get_value(id)));
+    stepper.on_select = [&store, id](int index) {
+        store.begin_gesture(id);
+        store.set_value(id, static_cast<float>(index));
+        store.end_gesture(id);
+    };
+    return ParameterBinding(store.add_listener(
+        [&stepper, &store, id](state::ParamID changed, float) {
+            if (changed == id) stepper.set_selected_silent(static_cast<int>(store.get_value(id)));
         },
         state::ListenerThread::Main));
 }

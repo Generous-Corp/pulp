@@ -143,10 +143,46 @@ static pulp::view::View* pulp_focus_under_root(pulp::view::View* root);
 // AppKit ObjC frame that delivered the event → undefined behavior / host crash.
 // Wrap each dispatch in try/catch, exactly as the standalone PulpView mouse
 // handlers do (window_host_mac.mm), so a throwing handler is contained.
+// Route an event at window-point `pt` to an open ComboBox popup when the point
+// falls inside its (flip/scroll/clamp-aware) menu rect. The dropdown paints as an
+// overlay OVER sibling views, so a plain hit_test lands on the sibling
+// underneath — this mirrors the standalone host's active_popup_ bypass so
+// dropdown selection + wheel-scroll work in an EMBEDDED plugin editor (Logic/AU
+// etc.), not just the standalone window. `configure` fills the event-specific
+// fields. Returns the routed combo, or nullptr when nothing was handled.
+pulp::view::ComboBox* pulp_plugin_route_to_open_popup(
+    pulp::view::View* root, pulp::view::Point pt,
+    const std::function<void(pulp::view::MouseEvent&)>& configure) {
+    auto* combo = pulp::view::ComboBox::active_popup_;
+    if (!combo || !root) return nullptr;
+    float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    pulp::view::MouseEvent me;
+    me.position = pulp::view::mac_geometry::to_local(pt, combo, root);
+    me.window_position = pt;
+    configure(me);
+    combo->on_mouse_event(me);
+    return combo;
+}
+
 void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
                             pulp::view::Point pt, pulp::view::View** drag_target) {
   try {
     if (!root) return;
+    // Route a click inside an open dropdown to the combo BEFORE hit_test (which
+    // would otherwise land on the sibling view the menu overlays).
+    if (auto* combo = pulp_plugin_route_to_open_popup(
+            root, pt, [&](pulp::view::MouseEvent& me) {
+                me.button = pulp::view::MouseButton::left;
+                me.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(
+                    event.modifierFlags);
+                me.is_down = true;
+                me.click_count = static_cast<int>(event.clickCount);
+            })) {
+        *drag_target = combo;
+        return;
+    }
     *drag_target = root->hit_test(pt);
     pulp::view::ComboBox::notify_global_click(*drag_target);
     if (!*drag_target) return;
@@ -257,6 +293,14 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
 void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* event) {
   try {
     if (!root) return;
+    // An open dropdown consumes the wheel to scroll its (clamped) item list,
+    // ahead of any enclosing ScrollView (whose scroll would close it).
+    if (pulp_plugin_route_to_open_popup(
+            root, pt, [&](pulp::view::MouseEvent& me) {
+                me.is_wheel = true;
+                me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+                me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+            })) return;
     auto* target = root->hit_test(pt);
     if (!target) return;
     pulp::view::MouseEvent me;
@@ -471,6 +515,15 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
 void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point local) {
   try {
     if (!root) return;
+    // Route hover over an OPEN dropdown to the combo so every row highlights —
+    // the menu overlays sibling views, so a plain hit_test/simulate_hover would
+    // land on the sibling under the lower rows and they'd never highlight.
+    if (auto* combo = pulp_plugin_route_to_open_popup(
+            root, local, [&](pulp::view::MouseEvent&) {})) {
+        (void)combo;
+        [[NSCursor arrowCursor] set];
+        return;
+    }
     root->simulate_hover(local);
     auto* target = root->hit_test(local);
     if (!target) { [[NSCursor arrowCursor] set]; return; }
