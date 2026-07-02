@@ -16,7 +16,9 @@
 #include <vector>
 
 #include <pulp/state/store.hpp>
+#include <pulp/view/animation.hpp>
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_param_surface.hpp>
 
 using namespace pulp;
@@ -317,6 +319,86 @@ TEST_CASE("A disabled element is not hit-testable (P6.2)", "[view][hover][issue-
     dfv.set_element_enabled(0, true);
     dfv.simulate_drag({20, 20}, {20, 5});
     REQUIRE(params.set_calls >= 1);
+}
+
+TEST_CASE("View::animate tweens via the frame clock and self-unsubscribes (P6.4)",
+          "[view][animate][issue-5230]") {
+    view::FrameClock clock;
+    auto root = std::make_unique<view::View>();
+    root->set_frame_clock(&clock);
+
+    float v = -99.0f;
+    bool done = false;
+    int id = root->animate([&](float x) { v = x; }, 0.0f, 1.0f, 1.0f,
+                           view::easing::linear, [&]() { done = true; });
+    REQUIRE(id >= 0);
+    REQUIRE(v == Catch::Approx(0.0f));               // start value seeded
+    REQUIRE(root->active_animation_count() == 1);
+
+    clock.tick(0.5f);
+    REQUIRE(v == Catch::Approx(0.5f));               // linear midpoint
+    REQUIRE_FALSE(done);
+
+    clock.tick(0.5f);
+    REQUIRE(v == Catch::Approx(1.0f));               // reached target
+    REQUIRE(done);
+    REQUIRE(root->active_animation_count() == 0);    // auto-unsubscribed
+    REQUIRE_FALSE(clock.has_active_subscribers());
+}
+
+TEST_CASE("View::animate returns -1 with no frame clock (preview path)",
+          "[view][animate][issue-5230]") {
+    auto root = std::make_unique<view::View>();
+    float v = 5.0f;
+    REQUIRE(root->animate([&](float x) { v = x; }, 0.0f, 1.0f, 1.0f) == -1);
+    REQUIRE(v == Catch::Approx(5.0f));  // untouched
+}
+
+TEST_CASE("A tagged animate cancels the prior one with the same tag (P6.4)",
+          "[view][animate][issue-5230]") {
+    view::FrameClock clock;
+    auto root = std::make_unique<view::View>();
+    root->set_frame_clock(&clock);
+    float v = 0.0f;
+    root->animate([&](float x) { v = x; }, 0.0f, 1.0f, 1.0f, {}, {}, "fade");
+    root->animate([&](float x) { v = x; }, 0.0f, 10.0f, 1.0f, {}, {}, "fade");
+    REQUIRE(root->active_animation_count() == 1);  // second replaced the first
+    clock.tick(1.0f);
+    REQUIRE(v == Catch::Approx(10.0f));            // the second animation won
+}
+
+TEST_CASE("cancel_animation stops a tween without firing on_done",
+          "[view][animate][issue-5230]") {
+    view::FrameClock clock;
+    auto root = std::make_unique<view::View>();
+    root->set_frame_clock(&clock);
+    float v = 0.0f;
+    bool done = false;
+    int id = root->animate([&](float x) { v = x; }, 0.0f, 1.0f, 1.0f, {},
+                           [&]() { done = true; });
+    clock.tick(0.25f);
+    REQUIRE(v == Catch::Approx(0.25f));
+    root->cancel_animation(id);
+    REQUIRE(root->active_animation_count() == 0);
+    clock.tick(1.0f);
+    REQUIRE(v == Catch::Approx(0.25f));  // frozen where cancelled
+    REQUIRE_FALSE(done);
+}
+
+TEST_CASE("Destroying a view mid-animation unsubscribes safely (P6.4)",
+          "[view][animate][issue-5230]") {
+    view::FrameClock clock;
+    float v = 0.0f;
+    {
+        auto root = std::make_unique<view::View>();
+        root->set_frame_clock(&clock);
+        root->animate([&](float x) { v = x; }, 0.0f, 1.0f, 1.0f);
+        clock.tick(0.3f);
+        REQUIRE(v == Catch::Approx(0.3f));
+    }  // view destroyed mid-animation — must unsubscribe its callback
+    REQUIRE_FALSE(clock.has_active_subscribers());
+    clock.tick(0.5f);                    // must not fire the dangling callback
+    REQUIRE(v == Catch::Approx(0.3f));   // unchanged
 }
 
 TEST_CASE("DesignFrameView forwards action clicks to the host action channel",

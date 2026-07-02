@@ -245,6 +245,27 @@ public:
     /// Get the frame clock (walks up parent chain to find it).
     FrameClock* frame_clock() const;
 
+    // ── Transient-animation glue (Phase 6 P6.2/P6.4) ────────────────────────
+    // Tween/easing already exist; what a faithful port re-rolls every time is
+    // the View-lifecycle glue — self-(un)subscribing a FrameClock callback and
+    // repainting. animate() does exactly that: it interpolates a float from
+    // `from` to `to` over `duration_s` seconds through `ease`, applies each
+    // step via `apply`, and repaints. It auto-unsubscribes on completion AND on
+    // View destruction (so a fade that outlives its view can't use-after-free).
+    // Returns an animation id, or -1 if no FrameClock is reachable yet
+    // (previews/screenshots — the caller should just set the final value).
+    // A non-empty `tag` makes the animation self-cancelling: starting a new one
+    // with the same tag cancels the prior (e.g. re-hovering before a fade ends).
+    // `on_done` fires once when the tween reaches `to`, never when cancelled.
+    int animate(std::function<void(float)> apply, float from, float to,
+                float duration_s, std::function<float(float)> ease = {},
+                std::function<void()> on_done = {}, const std::string& tag = {});
+
+    /// Cancel a running animation by id (no-op if already finished/unknown).
+    void cancel_animation(int id);
+    /// Number of animations currently running on this view. For tests.
+    int active_animation_count() const { return static_cast<int>(animations_.size()); }
+
     // ── Theme dimension resolution ──────────────────────────────────────
 
     /// Resolve a dimension token: check own theme, walk up to parent.
@@ -1591,6 +1612,11 @@ private:
     PluginViewHost* plugin_view_host_ = nullptr;
     HostParamSurface* host_params_ = nullptr;
     HostActionSurface* host_actions_ = nullptr;
+
+    // Running animate() tweens: our returned id is the FrameClock subscription
+    // id; `tag` supports self-cancelling animations. Unsubscribed in ~View.
+    struct RunningAnimation { int clock_id = -1; std::string tag; };
+    std::vector<RunningAnimation> animations_;
     std::shared_ptr<canvas::ViewEffect> effect_;
     int bg_gradient_type_ = 0;  // 0=none, 1=linear, 2=radial, 3=conic
     float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;
