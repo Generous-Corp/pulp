@@ -1,131 +1,54 @@
-# GPU NAM — Neural Amp Modeler support
+# GPU NAM — Neural Amp Modeler player (separate repo)
 
-GPU NAM is a Pulp example that loads open-source [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler)
-(`.nam`) capture files and runs them as a guitar-amp plugin (VST3 / AU / CLAP /
-Standalone). It exists to showcase Pulp's GPU audio runtime around a faithful
-recreation of the reference NeuralAmpModeler editor, and it doubles as the
-reference for **how to add NAM inference to your own Pulp project**.
+GPU NAM is a [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler)
+(`.nam`) player that runs amp captures on the GPU, built on Pulp. It used to live
+here under `examples/gpu-nam`. It has grown into a full plugin — its own `.nam` /
+Keras format loaders, a reference-faithful CPU oracle for five capture
+architectures, a recreated editor, format packaging, and bundled models — so it
+now lives in its **own repository** and consumes Pulp as an SDK:
 
-The neural inference is an **independent implementation** — written from the model
-math and the `.nam` file format, not ported from any existing implementation.
+> **https://github.com/danielraffel/pulp-gpu-nam**
 
-## What a `.nam` file is
+Keeping it out of the framework repo lets Pulp stay focused on reusable
+capabilities rather than one large, domain-specific plugin. It also makes GPU NAM
+a worked example of *building a real plugin against the Pulp SDK* — Pulp is
+vendored there as a git submodule, and the plugin depends only on Pulp's public
+targets (`pulp::render`, `pulp::gpu-audio`, `pulp::signal`, `pulp::view`,
+`pulp::canvas`, `pulp::runtime`).
 
-A `.nam` file is JSON: a model `architecture`, a `config` describing the network
-shape, a flat `weights` array, and the capture `sample_rate`. GPU NAM reads it,
-builds the matching network, and streams audio through it sample-by-sample.
+## Install
 
-## Supported architectures
+Download the signed, notarized macOS installer from the repo's
+[Releases](https://github.com/danielraffel/pulp-gpu-nam/releases) page. It offers a
+Customize pane to pick formats (AU / VST3 / CLAP / Standalone). A default capture
+ships in the bundle, so it makes sound immediately; load your own `.nam` for real
+amp tones.
 
-| Architecture | Status | Notes |
-|---|---|---|
-| **WaveNet (A1)** | Supported | The original/standard NAM capture. Runs on the CPU engine and, opt-in, on the fused GPU engine. |
-| **NAM Architecture 2 (A2)** | Supported | NAM's next-gen architecture (the default for new captures on TONE3000): LeakyReLU activations, a windowed convolutional head, mixed per-layer kernel sizes, and a `SlimmableContainer` of Full/Lite sizes selected at run time. CPU engine; validated bit-exact (max abs diff ~6e-8) against the reference inference engine on a real A2 capture. GPU forward not yet wired (CPU-only for now). |
-| **ConvNet** | Supported | Feedforward conv blocks (kernel 2, optional batch-norm, activation) + a linear head. CPU engine; validated bit-exact (~3e-8) against the reference. GPU forward not yet wired. |
-| **LSTM** | Supported | The recurrent NAM option. CPU engine (recurrence runs sequentially, so no GPU path); validated bit-approximately (~7e-8) against the reference. |
-| **Linear** | Supported | A single causal FIR + bias. CPU engine. |
-| Parametric / conditioned WaveNet (`condition_size > 1`) | Not modeled | Its extra condition channels come from host controls that aren't wired; rejected rather than mis-rendered. |
-| Experimental variants (grouped convolutions, FiLM conditioning, `head1x1`, active gating/secondary activation) | Not modeled | Research-stage knobs from the training tool; shipping captures leave them off. Rejected with a clear message rather than producing wrong audio. |
+## Build from source
 
-Each architecture is a self-contained header behind a `GPU_NAM_WITH_<ARCH>` CMake
-toggle (all on by default), so a project can build GPU NAM for just the subset it
-needs. An unsupported model fails to load with a specific reason (surfaced in the
-log and left as a dry pass-through) — it never silently mis-renders.
-
-### Where to get loadable models
-
-NAM's model library at [TONE3000](https://www.tone3000.com/search) hosts A1, A2,
-LSTM, and ConvNet captures — all of which GPU NAM loads. A2 (the default for new
-captures) runs on the CPU engine today; the opt-in GPU forward currently applies
-to WaveNet A1 (see below).
-
-## CPU oracle + opt-in GPU engine
-
-- **CPU engine (default).** The exact NAM forward runs inline on the audio
-  thread, re-blocked into fixed internal blocks. Always available and RT-safe.
-- **GPU engine (opt-in, WaveNet only).** The `Engine` control routes the same
-  fixed blocks through Pulp's GPU audio runtime (one fused GPU forward per
-  channel on a non-real-time worker, with a CPU fallback on any worker miss).
-  LSTM is recurrent and runs CPU-only; selecting a GPU device for an LSTM model
-  keeps the CPU engine.
-
-Both engines report one fixed latency for the prepared lifetime, so switching
-engines live keeps the host's delay compensation correct and the dry/wet blend
-phase-aligned.
-
-## Signal chain
-
-Input → **noise gate** (on the drive) → **neural model** → **tone stack**
-(Bass / Middle / Treble) → **cabinet IR** (optional convolution) → output, with a
-matched dry-path delay so a dry/wet blend stays aligned. The cabinet IR is loaded
-from a WAV / AIFF / FLAC file, summed to mono, resampled to the session rate, and
-unit-energy normalized (see [`read_impulse_response`](../reference/modules.md)).
-
-## Using it
-
-- **Load a model:** click the model slot in the editor and choose a `.nam` file,
-  or set `GPU_NAM_MODEL=/path/to/model.nam` before launch to override the
-  bundled default.
-- **Load a cabinet IR:** click the IR slot and choose an impulse-response file.
-- **Switch engines:** toggle `Engine` (CPU ↔ GPU) in the settings page.
-- **Normalize output:** toggle `Normalize` in the settings page to level captures
-  to a common loudness (using each model's `metadata.loudness`), so switching
-  models doesn't jump in volume. Off by default; a no-op for models without
-  loudness metadata.
-
-## Adding NAM inference to your own Pulp project
-
-The inference is self-contained and depends only on `choc` (JSON) plus the
-standard library — no Eigen, no external SDK. The headers under
-`examples/gpu-nam/` are the reusable substrate (each architecture stands alone
-behind a `GPU_NAM_WITH_<ARCH>` toggle):
-
-- `nam_model.hpp` — the WaveNet (A1) loader + CPU inference (`Conv` primitive).
-- `nam_a2.hpp` — WaveNet A2 (mixed kernels, LeakyReLU, windowed head, `SlimmableContainer`).
-- `nam_convnet.hpp` — ConvNet (conv blocks + batch-norm + linear head).
-- `nam_lstm.hpp` — the LSTM loader + CPU inference.
-- `nam_linear.hpp` — the Linear (FIR) loader + CPU inference.
-- `nam_runtime.hpp` — `NamRuntime`, which peeks the `architecture` field (and the
-  A2 shape) and presents one architecture-agnostic surface:
-  `load_nam_runtime(path, rt)`, then `rt.reset()` / `rt.process(in, out, n)` /
-  `rt.process_sample(x)`.
-- `keras_runtime.hpp` — `KerasRuntime`, a separate CPU engine for the
-  RTNeural/Keras `.json` model format (a common export for recurrent amp
-  captures). Supports a stack of GRU, LSTM, Dense, and activation layers;
-  validated bit-exact against the reference RTNeural inference. Kept separate
-  from `NamRuntime` because it is a different file format with a recurrent-only
-  weight layout, and it is CPU-only (recurrence is sequential over time). It is a
-  reusable engine — not yet wired into this plugin's model chooser, which loads
-  `.nam` today.
-
-A minimal integration inside a `Processor`:
-
-```cpp
-#include "nam_runtime.hpp"
-using pulp::examples::nam::NamRuntime;
-
-NamRuntime nam;
-std::string err;
-if (!load_nam_runtime(path, nam, &err))
-    /* log err; pass dry */;
-
-// In process(), per channel (keep one NamRuntime per channel for state):
-nam.process(drive, wet, num_samples);   // any architecture, transparently
+```bash
+git clone https://github.com/danielraffel/pulp-gpu-nam.git
+cd pulp-gpu-nam
+git submodule update --init --recursive
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target GpuNam_Standalone GpuNam_CLAP GpuNam_VST3 GpuNam_AU \
+      -j$(sysctl -n hw.ncpu)
 ```
 
-`NamRuntime::gpu_eligible()` tells you whether the fused GPU path applies (only
-WaveNet A1 today); `wavenet()` returns the concrete model for the GPU node to upload.
-Everything else — the noise gate, tone stack, cabinet IR, dry/wet delay, meters,
-and the GPU engine wiring — lives in `gpu_nam_processor.hpp` as a worked example
-you can lift patterns from.
+Full build, test, packaging, and architecture-support details are in that repo's
+README and `docs/nam-support.md`.
 
-## Honesty notes
+## What stayed in Pulp: the GPU WaveNet inference primitive
 
-- The rendering is GPU-accelerated in **both** GPU NAM (Skia Graphite on Dawn)
-  and the reference plugin (iPlug2's NanoVG backend); the recreation aims for
-  visual parity, not a rendering-speed claim. See
-  [`comparison.md`](../../examples/gpu-nam/docs/comparison.md) in the example.
-- GPU NAM is a **player**: it runs captures. Training `.nam` models is the job of
-  the [Neural Amp Modeler trainer](https://github.com/sdatkinson/neural-amp-modeler).
-- Performance claims are made only where measured; the comparison page documents
-  the method and the numbers.
+The one framework capability GPU NAM relies on remains part of the Pulp SDK: a
+fused, block-parallel, **conditioned-WaveNet GPU forward** —
+`pulp::render::GpuCompute::prepare_wavenet` / `wavenet_forward` (see
+[`core/render/include/pulp/render/gpu_compute.hpp`](https://github.com/danielraffel/pulp/blob/main/core/render/include/pulp/render/gpu_compute.hpp)).
+It is a general neural-inference primitive — a sequence of gated, dilated, causal
+1-D conv layer-arrays computed GPU-resident with the CPU↔GPU round-trip paid once
+per block — not specific to any capture format. GPU NAM's repo owns the `.nam`
+translation onto it.
+
+For the design rationale of running neural-amp inference on the GPU (why the naive
+per-sample approach loses and the fused block-parallel approach wins as models
+grow), see the honest write-up in the GPU NAM repo's README.
