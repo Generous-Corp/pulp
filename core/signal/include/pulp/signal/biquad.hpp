@@ -16,6 +16,17 @@ public:
 
     // Configure from type, frequency, Q, and optional gain (for peaking/shelf)
     void set_coefficients(Type type, float freq_hz, float q, float sample_rate, float gain_db = 0.0f) {
+        // Guard the inputs that would produce inf/NaN coefficients and wedge the
+        // filter state forever: sample_rate ≤ 0 (w0 = ∞), q ≤ 0 (alpha = ∞ at q=0,
+        // or a0 = 1+alpha crossing 0 for negative q), and non-finite freq/gain.
+        // Clamp only these — any finite positive q, however tiny, yields large but
+        // finite coefficients, so every legitimate retune stays bit-identical.
+        // Mirrors the input hardening in NoiseGate::set_params.
+        if (!(std::isfinite(sample_rate) && sample_rate > 0.0f)) sample_rate = 44100.0f;
+        if (!(std::isfinite(q) && q > 0.0f)) q = 1e-4f;
+        if (!std::isfinite(gain_db)) gain_db = 0.0f;
+        if (!(std::isfinite(freq_hz) && freq_hz > 0.0f)) freq_hz = 1000.0f;
+
         float w0 = 2.0f * pi * freq_hz / sample_rate;
         float cos_w0 = std::cos(w0);
         float sin_w0 = std::sin(w0);

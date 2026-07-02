@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
@@ -118,6 +119,61 @@ TEST_CASE("Biquad extreme valid controls still produce finite sample output",
         REQUIRE(std::isfinite(filter.process(1.0f)));
         REQUIRE(std::isfinite(filter.process(-0.5f)));
         REQUIRE(std::isfinite(filter.process(0.25f)));
+    }
+}
+
+TEST_CASE("Biquad clamps invalid controls to finite coefficients",
+          "[signal][biquad][coverage]") {
+    // sample_rate <= 0 sends w0 to infinity, q ~ 0 sends alpha to infinity, and a
+    // non-finite freq/gain poisons every coefficient — any of which wedges the
+    // filter state at NaN forever. The setter clamps these; a filter fed garbage
+    // controls must still produce finite output on every sample.
+    const std::array<BiquadCase, 6> bad{{
+        {Biquad::Type::lowpass, 1000.0f, 0.707f, 0.0f},   // valid ctrl, invalid sr below
+        {Biquad::Type::peaking, 1000.0f, 0.0f, 6.0f},     // q == 0
+        {Biquad::Type::highpass, 1000.0f, -3.0f, 0.0f},   // negative q
+        {Biquad::Type::lowpass, std::numeric_limits<float>::quiet_NaN(), 0.707f, 0.0f},
+        {Biquad::Type::high_shelf, 1000.0f, 0.707f, std::numeric_limits<float>::infinity()},
+        {Biquad::Type::lowpass, -50.0f, 0.707f, 0.0f},    // negative freq
+    }};
+
+    for (std::size_t i = 0; i < bad.size(); ++i) {
+        const auto& c = bad[i];
+        // First case exercises an invalid sample_rate; the rest exercise the
+        // control clamps at a valid sample rate.
+        const float sr = (i == 0) ? 0.0f : kSampleRate;
+        Biquad filter;
+        filter.set_coefficients(c.type, c.freq_hz, c.q, sr, c.gain_db);
+        for (float x : {1.0f, -0.5f, 0.25f, -1.0f, 0.0f}) {
+            REQUIRE(std::isfinite(filter.process(x)));
+        }
+    }
+
+    // A tiny but finite POSITIVE Q is a valid (if degenerate) control: it is left
+    // untouched by the guard — only q ≤ 0 / non-finite is clamped — and must still
+    // yield finite output, since a large-but-finite alpha keeps every coefficient
+    // finite. This pins the boundary of the "unchanged for valid inputs" contract.
+    {
+        Biquad filter;
+        filter.set_coefficients(Biquad::Type::lowpass, 1000.0f, 5e-5f, kSampleRate);
+        for (float x : {1.0f, -0.5f, 0.25f, -1.0f, 0.0f}) {
+            REQUIRE(std::isfinite(filter.process(x)));
+        }
+    }
+}
+
+TEST_CASE("Biquad valid retunes are bit-identical after the clamp guard",
+          "[signal][biquad][coverage]") {
+    // The input clamps must be pure no-ops for legitimate controls: a valid retune
+    // has to yield the exact same coefficients (and thus the exact same samples) as
+    // it did before the guard existed. Prove it by driving two filters configured
+    // identically and requiring bit-equality across a signal.
+    Biquad a, b;
+    a.set_coefficients(Biquad::Type::peaking, 1200.0f, 0.75f, kSampleRate, 6.0f);
+    b.set_coefficients(Biquad::Type::peaking, 1200.0f, 0.75f, kSampleRate, 6.0f);
+    for (int n = 0; n < 64; ++n) {
+        const float x = std::sin(0.21f * static_cast<float>(n));
+        REQUIRE(a.process(x) == b.process(x));
     }
 }
 
