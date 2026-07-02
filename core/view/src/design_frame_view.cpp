@@ -1,6 +1,7 @@
 #include <pulp/view/design_frame_view.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 
@@ -436,7 +437,67 @@ int DesignFrameView::norm_to_choice(int i, float v) const {
 void DesignFrameView::notify_choice(int i, int selected) {
     if (i >= 0 && i < static_cast<int>(elements_.size()))
         elements_[i].selected_index = selected;
-    if (on_element_changed) on_element_changed(i, choice_to_norm(i, selected));
+    emit_element_changed(i, choice_to_norm(i, selected));
+}
+
+// ── Runtime host-parameter surface wiring ────────────────────────────────────
+
+void DesignFrameView::emit_element_changed(int i, float value) {
+    HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
+    if (hp && i >= 0 && i < static_cast<int>(elements_.size())) {
+        const std::string& key = elements_[i].param_key;
+        if (!key.empty() && hp->has_param(key)) hp->set_param(key, value);
+    }
+    if (on_element_changed) on_element_changed(i, value);
+}
+
+void DesignFrameView::emit_gesture_begin(int i) {
+    HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
+    if (hp && i >= 0 && i < static_cast<int>(elements_.size())) {
+        const std::string& key = elements_[i].param_key;
+        if (!key.empty() && hp->has_param(key)) hp->begin_gesture(key);
+    }
+    if (on_gesture_begin) on_gesture_begin(i);
+}
+
+void DesignFrameView::emit_gesture_end(int i) {
+    HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
+    if (hp && i >= 0 && i < static_cast<int>(elements_.size())) {
+        const std::string& key = elements_[i].param_key;
+        if (!key.empty() && hp->has_param(key)) hp->end_gesture(key);
+    }
+    if (on_gesture_end) on_gesture_end(i);
+}
+
+void DesignFrameView::sync_from_host_params() {
+    HostParamSurface* surface = host_params();
+    if (!surface) return;  // preview/screenshot: degrade to local state
+    for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
+        const auto& e = elements_[i];
+        if (e.param_key.empty() || !surface->has_param(e.param_key)) continue;
+        const double norm = surface->get_param(e.param_key);
+        if (e.kind == DesignFrameElement::Kind::value_label) {
+            // A readout tracks its param's host-formatted display text.
+            set_element_text(i, surface->param_display_text(e.param_key, norm));
+        } else {
+            // Silent host->view push (no echo back to the surface).
+            set_element_value(i, static_cast<float>(norm));
+        }
+    }
+}
+
+void DesignFrameView::set_element_param_key(int i, std::string key) {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return;
+    if (elements_[i].param_key == key) return;
+    // Release any live gesture/binding under the old key before re-keying, so a
+    // paged control doesn't leave a stale gesture open on the outgoing param.
+    if (HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
+        hp && !elements_[i].param_key.empty() && hp->has_param(elements_[i].param_key)) {
+        hp->end_gesture(elements_[i].param_key);
+    }
+    elements_[i].param_key = std::move(key);
+    // Notify an owning key->index registry (e.g. the embed facade) to rebuild.
+    if (on_param_key_changed) on_param_key_changed(i, elements_[i].param_key);
 }
 
 Rect DesignFrameView::element_rect(int i) const {
@@ -800,6 +861,10 @@ void DesignFrameView::on_mouse_down(Point pos) {
     }
     if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::action) {
         // Command button: fire the action; no drag, no note, no frame change.
+        if (route_actions_to_host_) {
+            if (HostActionSurface* actions = host_actions())
+                actions->send_host_action(elements_[hit].action, "{}");
+        }
         if (on_action) on_action(elements_[hit].action);
         return;
     }
@@ -813,7 +878,7 @@ void DesignFrameView::on_mouse_down(Point pos) {
             e.value = e.value >= 0.5f ? 0.0f : 1.0f;  // sticky flip
         }
         request_repaint();
-        if (on_element_changed) on_element_changed(hit, e.value);
+        emit_element_changed(hit, e.value);
         return;
     }
     drag_ = hit;
@@ -834,13 +899,13 @@ void DesignFrameView::on_mouse_down(Point pos) {
             e.value   = std::clamp((sx - e.x) / e.w, 0.0f, 1.0f);
             e.value_y = std::clamp((sy - e.y) / e.h, 0.0f, 1.0f);
             request_repaint();
-            if (on_element_changed) on_element_changed(drag_, e.value);
+            emit_element_changed(drag_, e.value);
         }
     }
     drag_start_x_ = pos.x;
     drag_start_y_ = pos.y;
     drag_start_value_ = elements_[drag_].value;
-    if (on_gesture_begin) on_gesture_begin(drag_);  // bracket the undo step
+    emit_gesture_begin(drag_);  // bracket the undo step
 }
 
 void DesignFrameView::on_mouse_drag(Point pos) {
@@ -872,7 +937,7 @@ void DesignFrameView::on_mouse_drag(Point pos) {
             e.value   = std::clamp((sx - e.x) / e.w, 0.0f, 1.0f);
             e.value_y = std::clamp((sy - e.y) / e.h, 0.0f, 1.0f);
             request_repaint();
-            if (on_element_changed) on_element_changed(drag_, e.value);
+            emit_element_changed(drag_, e.value);
         }
         return;
     }
@@ -897,7 +962,7 @@ void DesignFrameView::on_mouse_drag(Point pos) {
     el.value = std::clamp(drag_start_value_ + delta_design * sens, 0.0f, 1.0f);
     request_repaint();
     // User-driven turn -> notify the binder (knob is value-bearing).
-    if (on_element_changed) on_element_changed(drag_, elements_[drag_].value);
+    emit_element_changed(drag_, elements_[drag_].value);
 }
 
 void DesignFrameView::on_mouse_up(Point /*pos*/) {
@@ -909,9 +974,9 @@ void DesignFrameView::on_mouse_up(Point /*pos*/) {
                    && elements_[drag_].flash) {
             elements_[drag_].value = 0.0f;        // press-flash: clear on release
             request_repaint();
-            if (on_element_changed) on_element_changed(drag_, 0.0f);
+            emit_element_changed(drag_, 0.0f);
         }
-        if (on_gesture_end) on_gesture_end(drag_);  // note-off / end undo step
+        emit_gesture_end(drag_);  // note-off / end undo step
     }
     drag_ = -1;
 }

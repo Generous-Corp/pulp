@@ -800,10 +800,26 @@ void View::set_plugin_view_host(PluginViewHost* host) {
     }
 }
 
+void View::set_host_params(HostParamSurface* surface) {
+    host_params_ = surface;
+    for (auto& child : children_) {
+        child->set_host_params(surface);
+    }
+}
+
+void View::set_host_actions(HostActionSurface* surface) {
+    host_actions_ = surface;
+    for (auto& child : children_) {
+        child->set_host_actions(surface);
+    }
+}
+
 void View::add_child(std::unique_ptr<View> child) {
     child->parent_ = this;
     child->set_window_host(window_host_);
     child->set_plugin_view_host(plugin_view_host_);
+    child->set_host_params(host_params_);
+    child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
     children_.back()->on_attached();
 }
@@ -816,6 +832,8 @@ std::unique_ptr<View> View::remove_child(View* child) {
     child->on_detached();
     child->set_window_host(nullptr);
     child->set_plugin_view_host(nullptr);
+    child->set_host_params(nullptr);
+    child->set_host_actions(nullptr);
     child->parent_ = nullptr;
     auto owned = std::move(*it);
     children_.erase(it);

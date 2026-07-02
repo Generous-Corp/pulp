@@ -355,6 +355,57 @@ public:
     // (octave/velocity/sustain/pitch-bend). UI thread.
     std::function<void(const std::string& action)> on_action;
 
+    // ── Runtime host-parameter surface (the "port once, three hosts" path) ──
+    // Beyond the bind-once path (a consumer wiring on_element_changed +
+    // element_for_param_key), a DesignFrameView can bind DIRECTLY to the SDK's
+    // framework-agnostic HostParamSurface (View::host_params()). This is what
+    // lets one view run unchanged embedded in JUCE (APVTS-backed), embedded in
+    // iPlug2 (IParams-backed), or native (StateStore-backed).
+    //
+    // Enable with route_changes_to_host_params(true): thereafter a user gesture
+    // on a param_key-tagged element drives host_params() directly
+    // (begin_gesture / set_param / end_gesture), and sync_from_host_params()
+    // pulls current values + display text back at tick. on_element_changed still
+    // fires as an additional observer, so existing consumers are unaffected. A
+    // control whose param_key is empty or unknown to the surface is left to
+    // local state (degrades exactly like a preview with a null surface). OFF by
+    // default — the embed/binder path is unchanged.
+    void route_changes_to_host_params(bool enable) { route_to_host_params_ = enable; }
+    bool routes_changes_to_host_params() const { return route_to_host_params_; }
+
+    // Host→UI snapshot, called once per tick (never from paint — see the
+    // HostParamSurface call-context contract). For every active-frame element
+    // with a non-empty param_key that host_params() resolves, pulls the current
+    // normalized value into the element (silently, via set_element_value) and,
+    // for Kind::value_label readouts whose `action` names a param key, pulls the
+    // formatted display text (via set_element_text). No-op when host_params() is
+    // null. This is the snapshot views paint from, so per-frame ABI/host calls
+    // never happen inside paint().
+    void sync_from_host_params();
+
+    // Dynamically re-key element `i` to a new host-parameter key (paged racks,
+    // tabbed effect slots). Updates the element's param_key, releases the old
+    // binding, and fires on_param_key_changed so an owning key→index registry
+    // (e.g. the embed facade's) can mark itself dirty and rebuild. The next
+    // sync_from_host_params() re-pulls the element under its new key. No-op if
+    // `i` is out of range or the key is unchanged.
+    void set_element_param_key(int i, std::string key);
+
+    // Fired by set_element_param_key after a successful re-key. A foreign-host
+    // embed uses this to invalidate its cached key→index registry; a native
+    // consumer can ignore it (sync_from_host_params resolves live). UI thread.
+    std::function<void(int index, const std::string& key)> on_param_key_changed;
+
+    // ── Host action/command channel (Phase 2) ──────────────────────────────
+    // When enabled, a Kind::action button click is ALSO forwarded to
+    // View::host_actions()->send_host_action(action, "{}") in addition to
+    // on_action. Lets a view trigger structural host commands (insert/remove/
+    // reorder rack slot, load preset) through the same framework-agnostic
+    // channel the import lane uses. OFF by default. args_json is "{}" here;
+    // richer payloads are the consumer's job via on_action.
+    void route_actions_to_host(bool enable) { route_actions_to_host_ = enable; }
+    bool routes_actions_to_host() const { return route_actions_to_host_; }
+
     // The panel is the view's natural size — a host should size its window to
     // this aspect so the design fills it with no letterbox (see paint()).
     float intrinsic_width() const override { return panel_w_; }
@@ -392,6 +443,14 @@ private:
     int   norm_to_choice(int i, float v) const;
     // Sync a user choice change (overlay widget -> element + on_element_changed).
     void  notify_choice(int i, int selected);
+
+    // User-gesture emit helpers: route to host_params() (when routing is on and
+    // the element carries a key the surface resolves) AND fire the public
+    // on_element_changed / on_gesture_* callback. Single funnel so every
+    // value-bearing gesture path stays consistent.
+    void emit_element_changed(int i, float value);
+    void emit_gesture_begin(int i);
+    void emit_gesture_end(int i);
     // Build the native-overlay child widgets (TextEditor / ComboBox / tabs) for
     // the non-knob elements of the active frame; called when a frame activates.
     void build_overlays();
@@ -430,6 +489,8 @@ private:
     int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered
+    bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()
+    bool route_actions_to_host_ = false;  ///< forward action clicks to host_actions()
 };
 
 // The native-overlay widget for a `tab_group` element: a compact segmented

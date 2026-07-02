@@ -17,6 +17,8 @@ namespace pulp::view {
 
 class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
+class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param accessor
+class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
 
 class FrameClock;
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
@@ -1250,6 +1252,20 @@ public:
     void set_plugin_view_host(PluginViewHost* host);
     PluginViewHost* plugin_view_host() const { return plugin_view_host_; }
 
+    /// The runtime host-parameter accessor for this view tree, or nullptr in
+    /// previews/screenshots (a view degrades to local state when null, exactly
+    /// like a sandboxed native view). Set by the host that owns the tree —
+    /// StateStore-backed natively, or ABI-backed under a foreign-host embed —
+    /// and propagated to children like window_host()/plugin_view_host(). See
+    /// pulp/view/host_param_surface.hpp for the tick-only call contract.
+    void set_host_params(HostParamSurface* surface);
+    HostParamSurface* host_params() const { return host_params_; }
+
+    /// The runtime host command channel for this view tree, or nullptr. Same
+    /// ownership/propagation/null-degradation semantics as host_params().
+    void set_host_actions(HostActionSurface* surface);
+    HostActionSurface* host_actions() const { return host_actions_; }
+
     /// Background gradient (CSS background: linear-gradient / radial-gradient)
     void set_background_gradient_linear(float x0, float y0, float x1, float y1,
                                          const std::vector<Color>& colors,
@@ -1573,6 +1589,8 @@ private:
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;
+    HostParamSurface* host_params_ = nullptr;
+    HostActionSurface* host_actions_ = nullptr;
     std::shared_ptr<canvas::ViewEffect> effect_;
     int bg_gradient_type_ = 0;  // 0=none, 1=linear, 2=radial, 3=conic
     float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;

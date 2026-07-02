@@ -5421,6 +5421,16 @@ target_link_libraries(pulp-test-design-frame-view
 catch_discover_tests(pulp-test-design-frame-view
     PROPERTIES LABELS "view")
 
+# HostParamSurface / HostActionSurface — the SDK runtime host-param + action
+# surfaces (JUCE port accelerator P1/P2): StateStore backing, DesignFrameView
+# sync/route/re-key, action forwarding, and cross-host binding via a fake.
+add_executable(pulp-test-host-param-surface
+    test_host_param_surface.cpp)
+target_link_libraries(pulp-test-host-param-surface
+    PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-host-param-surface
+    PROPERTIES LABELS "view")
+
 # MusicalTypingKeyboard — Ink & Signal catalog component (faithful Figma SVG
 # via DesignFrameView). Pins SVG load, headless render, catalog registration.
 add_executable(pulp-test-musical-typing-keyboard
