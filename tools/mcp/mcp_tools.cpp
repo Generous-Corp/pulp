@@ -1103,8 +1103,12 @@ std::string handle_audio_compare(const std::string& params_json) {
     std::string flags;
     auto profile = extract_string(params_json, "profile");
     if (!profile.empty()) {
-        if (profile != "tonal-balance" && profile != "added-hf")
-            return arg_error("Error: profile must be tonal-balance or added-hf");
+        // Passthrough: the valid profile SET lives in the Python `_AXES` registry (surfaced as the
+        // CLI's argparse `choices`), which is the single source of truth and grows as axes are
+        // added — so this mirror is not re-edited per new axis. Guard only that it is not an
+        // option-looking string; an unknown profile is rejected downstream by the delegated CLI.
+        if (profile.front() == '-')
+            return arg_error("Error: profile must be an axis name, not an option");
         flags += " --profile " + shell_quote(profile);
     }
     auto role = extract_string(params_json, "reference_role");

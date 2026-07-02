@@ -254,9 +254,16 @@ def main(argv: list[str] | None = None) -> int:
         help="advisory before/after judgment over two WAVs (agent-facing; not a gate)")
     cmp_.add_argument("reference", help="reference (before) WAV")
     cmp_.add_argument("candidate", help="candidate (after) WAV")
-    cmp_.add_argument("--profile", choices=list(compare.PROFILES), default="tonal-balance",
-                      help="measurement axis: tonal-balance (LTAS centroid shift) or "
-                           "added-hf (band-relative >=8kHz fraction ratio, dB)")
+    # NOTE: intentionally NO argparse `choices` — an unknown profile must reach `compare_files`,
+    # whose ValueError `_cmd_compare` catches into a clean structured `invalid` report. argparse
+    # `choices` would instead exit 2 before that, and a DELEGATING caller (the MCP tool) would read
+    # the empty report as "tool not installed". The Python `_AXES` registry stays the source of
+    # truth for the valid set; the help lists it for humans.
+    cmp_.add_argument("--profile", default="tonal-balance", metavar="AXIS",
+                      help="measurement axis (default: tonal-balance): tonal-balance (LTAS "
+                           "centroid), added-hf (band-relative >=8kHz dB), noise-roughness (HNR "
+                           "drop), graininess (spectral-flux rise). roughness/graininess are "
+                           "meaningful on tonal/sustained material")
     cmp_.add_argument("--reference-role", choices=["peer", "golden"], default="peer",
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "
