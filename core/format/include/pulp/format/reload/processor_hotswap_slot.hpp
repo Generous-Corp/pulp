@@ -103,6 +103,27 @@ public:
         std::unique_ptr<Processor> superseded;  // a collapsed prior fade-out
         {
             std::unique_lock<std::shared_mutex> lock(mutex_);
+            // DSP-state carry (item 1.6): holding the writer lock proves no audio
+            // reader is inside the old processor, so it is safe to serialize its
+            // DSP state (delay tails / filter history / phase) and restore it into
+            // the incoming one — off the audio thread. Opt-in + cold-start-safe:
+            // an empty blob or a false restore leaves `next` freshly prepared and
+            // never fails the swap. Skipped on the first install (no old to carry
+            // from). The blob is copied while the lock is held, so a plugin that
+            // opts in should keep it bounded (a longer copy → a few more audio
+            // passthrough blocks during the swap, which the crossfade masks).
+            if (active_ && next) {
+                // Best-effort: a THROW (not just a false return) must also degrade
+                // to cold-start, per the contract — otherwise a serialize/restore
+                // bug would reject the whole reload (and a throwing serialize on
+                // the already-live OLD processor would block every future reload).
+                try {
+                    const std::vector<std::byte> blob = active_->serialize_dsp_state();
+                    if (!blob.empty()) next->restore_dsp_state(blob);
+                } catch (...) {
+                    // Swallow: state-carry failed → `next` stays freshly prepared.
+                }
+            }
             if (!crossfade_ready()) {
                 displaced = std::move(active_);
                 active_ = std::move(next);

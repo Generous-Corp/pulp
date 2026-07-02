@@ -643,6 +643,33 @@ public:
     /// linear-phase EQs). Hosts use this for delay compensation.
     virtual int latency_samples() const { return 0; }
 
+    /// ── Opt-in DSP-state carry across a hot-reload (reload lane, item 1.6) ──
+    /// On a hot-reload the new processor binds to the live StateStore (params +
+    /// values preserved), but its DSP-internal state — delay lines, filter
+    /// history, reverb tails, oscillator phase — starts COLD. Override this pair
+    /// to carry that state so a delay's repeats or an LFO's phase survive the
+    /// swap seamlessly instead of resetting (the crossfade masks a cold start,
+    /// but the tail itself is otherwise lost).
+    ///
+    /// Contract:
+    ///   * `serialize_dsp_state()` returns an opaque blob of the OLD processor's
+    ///     DSP state (empty = "nothing to carry"; the default).
+    ///   * `restore_dsp_state(blob)` loads it into the NEW processor and returns
+    ///     true on success, false if the blob is unrecognized/incompatible.
+    ///   * The format is the PLUGIN's own private concern. It is only ever read
+    ///     back by the same plugin source across a hot-reload — the reload lane's
+    ///     build-fingerprint + parameter-contract gates guarantee the two sides
+    ///     are the same build, so a naive layout is safe (no versioning needed
+    ///     for the hot-reload case; version it if you also persist it elsewhere).
+    ///   * COLD-START FALLBACK IS ALWAYS SAFE: an empty blob or a `false` return
+    ///     just leaves the new processor freshly prepared — it must NEVER fail
+    ///     the swap. Called by ProcessorHotSwapSlot::swap() under its writer lock
+    ///     (no audio reader is inside the old processor), so both calls run
+    ///     off the audio thread; keep the blob bounded (it is copied while the
+    ///     lock is held, which briefly stalls the audio thread into passthrough).
+    virtual std::vector<std::byte> serialize_dsp_state() const { return {}; }
+    virtual bool restore_dsp_state(const std::vector<std::byte>& /*blob*/) { return false; }
+
     /// Proposed bus layout passed to is_bus_layout_supported().
     ///
     /// Each entry's index matches the descriptor's input_buses /
