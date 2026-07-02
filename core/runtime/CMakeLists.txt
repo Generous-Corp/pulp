@@ -23,14 +23,14 @@ set(PULP_VERSION "${PROJECT_VERSION}")
 set(PULP_GIT_SHA "")
 set(PULP_GIT_DIRTY "false")
 find_package(Git QUIET)
-if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+if(GIT_FOUND AND EXISTS "${PULP_ROOT_DIR}/.git")
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
+        COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse --short HEAD
         OUTPUT_VARIABLE PULP_GIT_SHA
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" status --porcelain
+        COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" status --porcelain
         OUTPUT_VARIABLE _pulp_git_porcelain
         ERROR_QUIET)
     if(NOT "${_pulp_git_porcelain}" STREQUAL "")

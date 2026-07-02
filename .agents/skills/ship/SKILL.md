@@ -1005,7 +1005,9 @@ tools/scripts/build_combined_installer.sh \
   --plugin vst3 build/VST3/MyPlugin.vst3 \
   --plugin clap build/CLAP/MyPlugin.clap \
   --app "Standalone app" build/examples/myplugin/MyPlugin.app \
-  --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements
+  --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements \
+  --content "Sample models" "Example .nam captures" \
+           "/Library/Application Support/MyPlugin/models" build/models
 ```
 
 It produces ONE component-selectable, notarized installer (Customize pane picks
@@ -1015,3 +1017,24 @@ so a build that only works on the build machine never ships. Identities are the
 `security find-identity` hashes from the dedicated `pulp-signing` keychain (NOT
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
+
+**`--content "Title" "Desc" DEST SRCDIR`** (repeatable) adds a selectable
+component that installs the *contents* of `SRCDIR` to an absolute `DEST` (e.g.
+sample models / IRs into `/Library/Application Support/<Plugin>/...`), rather than
+a plugin bundle or `/Applications` app. Use it to ship bundled demo content that a
+plugin loads at runtime. Titles/descriptions are XML-escaped before they go into
+the distribution XML, so `&`/`<`/`>`/quotes in a human-readable title no longer
+corrupt the installer; the staging tree is removed via an `EXIT` trap on any exit
+(success, error, or signal).
+
+**Notarize works without `pulp-cpp` (standalone / submodule consumers).** The
+script prefers the in-tree `pulp-cpp ship notarize` when it exists, but a
+plugin repo that vendors Pulp as a *submodule* never builds `pulp-cpp` (the CLI
+is gated to top-level Pulp builds). In that case the notarize step falls back to
+`xcrun notarytool submit --wait` + `stapler staple` using the file-based
+`.p8` key from `~/.config/pulp/secrets/notary.env` (`PULP_NOTARY_KEY_ID` /
+`PULP_NOTARY_ISSUER_ID` / `PULP_NOTARY_KEY_PATH` — the same trio `pulp ship
+doctor` provisions). If neither `pulp-cpp` nor a notary key is available the step
+**fails loudly** (never ships a signed-but-unnotarized `.pkg`); pass
+`--no-notarize` to opt out deliberately. Always `stapler validate` +
+`spctl --assess --type install` the finished `.pkg` regardless of path.

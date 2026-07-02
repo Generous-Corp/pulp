@@ -25,7 +25,7 @@ if(PULP_ENABLE_SCENE3D)
     )
     target_compile_definitions(pulp-render PUBLIC PULP_ENABLE_SCENE3D=1)
     target_include_directories(pulp-render PRIVATE
-        ${CMAKE_SOURCE_DIR}/core/scene/include
+        ${PULP_ROOT_DIR}/core/scene/include
     )
 
     add_executable(pulp-renderer3d-probe
@@ -37,7 +37,7 @@ if(PULP_ENABLE_SCENE3D)
     )
 
     add_executable(pulp-scene3d-inspect-native
-        ${CMAKE_SOURCE_DIR}/core/scene/src/scene3d_inspect.cpp
+        ${PULP_ROOT_DIR}/core/scene/src/scene3d_inspect.cpp
     )
     target_compile_definitions(pulp-scene3d-inspect-native PRIVATE
         PULP_SCENE3D_INSPECT_NATIVE_DRACO=1)

@@ -27,7 +27,8 @@ add_subdirectory(pulp-tone)
 add_subdirectory(pulp-effect)
 add_subdirectory(super-convolver)
 add_subdirectory(spectral-lab)
-add_subdirectory(gpu-nam)
+# GPU NAM (Neural Amp Modeler player) lives in its own repo and consumes Pulp as
+# an SDK: https://github.com/danielraffel/pulp-gpu-nam
 
 # PulpCompressor: sidechain compressor validating multi-bus
 add_subdirectory(pulp-compressor)
