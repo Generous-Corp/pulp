@@ -366,6 +366,17 @@ TEST_CASE("HotSwapSlot swap during a fade collapses the prior fade-out (no leak)
     REQUIRE(seq.back() == Catch::Approx(3.0f).margin(0.01));
     slot.reclaim();
     REQUIRE(live.load() == 1);                        // only ×3 remains
+
+    // item 1.7b contract: a mid-fade re-swap may STEP the output (single fade
+    // slot drops the older fade-out's residual — not click-free), but it must
+    // stay RT-SAFE + BOUNDED: every sample finite and within the processors'
+    // output envelope (inputs are ±1 through ×1..×3 gains → |out| ≤ 3), and it
+    // settles to the newest DSP (asserted above). We deliberately do NOT assert
+    // click-free here, unlike the single-fade tests.
+    for (float v : seq) {
+        REQUIRE(std::isfinite(v));
+        REQUIRE(std::abs(v) <= 3.0f + 1e-3f);
+    }
 }
 
 TEST_CASE("HotSwapSlot crossfades a MIDI-emitting DSP with bounded MIDI", "[hot-reload][slot][crossfade]") {

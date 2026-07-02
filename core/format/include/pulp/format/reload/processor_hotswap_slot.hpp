@@ -131,10 +131,22 @@ public:
                 // it out to be freed AFTER unlock (not under the lock — a slow
                 // ~Processor() would lengthen the audio thread's passthrough
                 // contention window, as the instant path already avoids).
-                // NOTE: collapsing an in-progress fade restarts at g=0, so a
-                // re-swap WITHIN the ~12ms fade window can step the output (not
-                // click-free). Hot-reload swaps are human-file-save paced (far
-                // wider than the window), so a single fade slot is sufficient.
+                // MID-FADE RE-SWAP CONTRACT (item 1.7b): with a SINGLE fade slot,
+                // a re-swap arriving WITHIN the ~12ms window can only keep one
+                // fade-out — the just-displaced processor — and must drop the
+                // older fade-out's residual contribution, so the output can STEP
+                // at the re-swap instant (bounded, not click-free). This is
+                // deliberate: click-free chaining of overlapping fades needs a
+                // SECOND fade-out slot + buffer (double the RT cost + memory) to
+                // handle an event that is human-file-save paced (far wider than
+                // the window) — not worth it. What IS guaranteed and tested
+                // (test_hotswap_slot "swap during a fade …"): RT-safe (no
+                // alloc/free/leak — the superseded fade-out is reclaimed on the
+                // control thread), output stays finite + bounded across the
+                // re-swap, and the fade always settles to the NEWEST processor.
+                // Restarting the new fade at g=0 (below) is the right single-slot
+                // choice: keeping the ramp position or seeding a partial gain both
+                // measured WORSE late in the fade (the common case). See 1.7b.
                 superseded = std::move(fading_out_);
                 fading_out_ = std::move(active_);   // keep the just-displaced DSP for the fade
                 active_ = std::move(next);
