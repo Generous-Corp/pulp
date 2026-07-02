@@ -454,6 +454,23 @@ harness or `ctest`.
   the MCP tool mirroring it (returns the report JSON). All three run the identical axis logic. The
   `/audio-compare` slash command wraps the CLI. Install the tool once: `pulp tool install
   audio-quality-lab`.
+- **Golden-render regression net (`quality_lab.regression_net`, `quality-lab regression-net
+  --manifest net.json`).** The daily-driver loop: keep a golden render per plugin/preset, `pulp
+  audio render --plugin …` the candidate, and `compare` across every wired axis, emitting a table
+  (plugin | profile | verdict | corroboration | flags). **Fail policy is the contract: the fail
+  signal keys off axis verdicts only — exit 1 iff an axis reports `regression_suspected`; a pair
+  that couldn't be measured (missing/corrupt render → `invalid`, or a bad manifest) is a separate
+  ERROR (exit 2), never greenlit as clean; exit 0 = all measured, none regressed. The corroboration
+  column is informational and never affects the exit code** — the modulated family
+  (chorus/phaser/flanger/tremolo/ring-mod) is time-variant
+  so it reads `not_corroborated` forever (the `expected_for:["time_variant_processing"]` flag). This
+  is advisory reporting attached to a change; gating proper stays `pulp audio validate compare`. The
+  module is the reusable REFERENCE — a plugin suite (pulp-classic-effects, bendr, GPU NAM) wires its
+  own renders into `run_net` and commits a portable manifest (paths resolve relative to it). Read
+  the change class, not the backend: timbral + modulated changes are valid through the net; bendr
+  *fixed-ratio* A/Bs are valid, but bendr ratio changes / tempo-sampler offsets are time-misaligned
+  (the residual false-alarms) → use the reference-free engine path instead. See the guide's
+  "Golden-render regression net" section.
 - **Live plugin before/after (measure a real plugin, then judge the change).** `compare` needs two
   WAVs; capture them from a live/hosted plugin with the existing steady-state tap, then judge:
   ```bash
