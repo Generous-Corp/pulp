@@ -1071,6 +1071,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `motion` | Trace and validate animations, transitions, scroll geometry, reduced motion, and motion fixtures |
 | `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
 | `packages` | Third-party audio package search, suggest, add, browse |
+| `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
