@@ -74,6 +74,30 @@ Then paste the printed lines into `core/view/CMakeLists.txt`, the
 `verify_region.py`. This is how Musical Typing, Channel Strip, and 7 specimen
 components were built — never hand-paint.
 
+**No-metadata source? Use the annotated-capture lane (`pulp-annotated-capture-import`).**
+`make_catalog_component.py` needs Figma as the source of truth — typed nodes,
+node ids, component names. A **bare SVG capture** (a vectorized screenshot, a
+hand-authored asset, or a JUCE UI run through an extractor) has none of that: it
+is just paths and rects. The annotated-capture lane (JUCE port accelerator P6.1,
+`tools/import-design/annotated_capture.{hpp,cpp}` + the
+`pulp-annotated-capture-import` CLI) is the no-metadata analog: feed it the bare
+SVG plus a **sidecar manifest** that supplies the missing semantics per element,
+and it emits the SAME artifacts (populated `DesignFrameElement` table +
+`DesignFrameView` subclass + `<snake>_svg.cpp` + CMake paste-ins).
+```bash
+build/tools/import-design/pulp-annotated-capture-import \
+  --svg capture.svg --manifest ui_manifest.json --class ReverbPanelView
+```
+The sidecar schema is intentionally aligned with **pulp-import-juce's
+`ui_manifest.json`** so a JUCE UI extractor (component-type → `kind`, bounds →
+`geometry`, parameterID → `param_key`) can emit a manifest this lane consumes
+directly. Each element declares `{selector, kind, param_key, geometry, needle,
+options, …}` (full field list in `annotated_capture.hpp`). When any element
+carries a `param_key`, the generated ctor calls
+`route_changes_to_host_params(true)` so the view runs unchanged embedded in
+JUCE / iPlug2 / native. Gotcha baked into a regression test: emitted float
+literals must be valid C++ (`120.f`, never the invalid `120f`).
+
 **Under the hood: a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
 See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
 `design_system.cpp` catalog entry: the class is

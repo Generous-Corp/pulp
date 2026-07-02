@@ -5435,8 +5435,9 @@ catch_discover_tests(pulp-test-host-param-surface
 # (SVG fragment handles, anchored popover, drag-to-reorder, paint-space painters).
 add_executable(pulp-test-faithful-port-toolkit
     test_faithful_port_toolkit.cpp)
+target_include_directories(pulp-test-faithful-port-toolkit PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-faithful-port-toolkit
-    PRIVATE pulp::view Catch2::Catch2WithMain)
+    PRIVATE pulp::view pulp-annotated-capture Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-faithful-port-toolkit
     PROPERTIES LABELS "view")
 

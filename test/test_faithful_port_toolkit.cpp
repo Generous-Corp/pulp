@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -615,4 +616,154 @@ TEST_CASE("paint_waveform strokes one segment per sample gap",
         paint::paint_waveform(empty, {0, 0, 100, 40}, nullptr, 8);
         CHECK(empty.command_count() == 0);
     }
+}
+
+// ── P6.1: Annotated-capture import lane ──────────────────────────────────────
+// Mode: parse + codegen assertions (generated stub is compile-SHAPED, not
+// compiled in-process). The manifest parse is the testable core; the generated
+// header/source are asserted for the class decl, the typed element table, and
+// the host-param wiring.
+
+#include "tools/import-design/annotated_capture.hpp"
+namespace impd = pulp::import_design;
+
+namespace {
+const char* kManifestJson = R"JSON({
+  "name": "Reverb Panel",
+  "class": "ReverbPanelView",
+  "elements": [
+    { "selector": "#mix", "kind": "knob", "param_key": "mix",
+      "geometry": {"cx": 120, "cy": 90, "hit_radius": 34, "value": 0.5},
+      "needle": "M120 90 L120 60" },
+    { "selector": "#gain", "kind": "fader", "param_key": "gain",
+      "geometry": {"x": 40, "y": 140, "w": 24, "h": 180, "cx": 52, "cy": 230},
+      "needle": "M52 230 L52 230" },
+    { "selector": "#type", "kind": "dropdown", "param_key": "type",
+      "geometry": {"x": 200, "y": 40, "w": 120, "h": 28},
+      "options": ["Hall", "Room", "Plate"], "selected_index": 1 },
+    { "selector": "#bypass", "kind": "toggle", "param_key": "bypass",
+      "geometry": {"x": 340, "y": 20, "w": 44, "h": 22} }
+  ]
+})JSON";
+}  // namespace
+
+TEST_CASE("parse_annotated_manifest builds the typed element table",
+          "[view][annotated-capture][issue-juce-port]") {
+    impd::AnnotatedCaptureManifest m;
+    std::string err;
+    REQUIRE(impd::parse_annotated_manifest(kManifestJson, m, err));
+    CHECK(err.empty());
+    CHECK(m.name == "Reverb Panel");
+    CHECK(m.class_name == "ReverbPanelView");
+    REQUIRE(m.elements.size() == 4);
+
+    // Kinds in order.
+    CHECK(m.elements[0].kind == DesignFrameElement::Kind::knob);
+    CHECK(m.elements[1].kind == DesignFrameElement::Kind::fader);
+    CHECK(m.elements[2].kind == DesignFrameElement::Kind::dropdown);
+    CHECK(m.elements[3].kind == DesignFrameElement::Kind::toggle);
+
+    // Geometry + attributes for the knob.
+    CHECK(m.elements[0].cx == Approx(120.0f));
+    CHECK(m.elements[0].cy == Approx(90.0f));
+    CHECK(m.elements[0].hit_radius == Approx(34.0f));
+    CHECK(m.elements[0].needle_d == "M120 90 L120 60");
+    CHECK(m.elements[0].param_key == "mix");
+    CHECK(m.elements[0].source_node_id == "#mix");
+
+    // Fader geometry.
+    CHECK(m.elements[1].x == Approx(40.0f));
+    CHECK(m.elements[1].h == Approx(180.0f));
+    CHECK(m.elements[1].param_key == "gain");
+
+    // Dropdown options + selection.
+    REQUIRE(m.elements[2].options.size() == 3);
+    CHECK(m.elements[2].options[2] == "Plate");
+    CHECK(m.elements[2].selected_index == 1);
+
+    CHECK(m.has_param_bindings());
+}
+
+TEST_CASE("parse_annotated_manifest reports errors",
+          "[view][annotated-capture][issue-juce-port]") {
+    impd::AnnotatedCaptureManifest m;
+    std::string err;
+    SECTION("invalid JSON") {
+        CHECK_FALSE(impd::parse_annotated_manifest("{not json", m, err));
+        CHECK_FALSE(err.empty());
+    }
+    SECTION("missing elements array") {
+        CHECK_FALSE(impd::parse_annotated_manifest(R"({"name":"x"})", m, err));
+        CHECK(err.find("elements") != std::string::npos);
+    }
+    SECTION("unknown kind") {
+        CHECK_FALSE(impd::parse_annotated_manifest(
+            R"({"elements":[{"kind":"frobnicator"}]})", m, err));
+        CHECK(err.find("frobnicator") != std::string::npos);
+    }
+}
+
+TEST_CASE("snake_case matches the generated-file convention",
+          "[view][annotated-capture][issue-juce-port]") {
+    CHECK(impd::snake_case("ReverbPanelView") == "reverb_panel_view");
+    CHECK(impd::snake_case("MyView") == "my_view");
+}
+
+TEST_CASE("generate_view_header emits a DesignFrameView subclass",
+          "[view][annotated-capture][issue-juce-port]") {
+    impd::AnnotatedCaptureManifest m;
+    std::string err;
+    REQUIRE(impd::parse_annotated_manifest(kManifestJson, m, err));
+    const std::string hpp = impd::generate_view_header(m);
+    CHECK(hpp.find("#pragma once") != std::string::npos);
+    CHECK(hpp.find("#include <pulp/view/design_frame_view.hpp>") != std::string::npos);
+    CHECK(hpp.find("class ReverbPanelView : public DesignFrameView") != std::string::npos);
+    CHECK(hpp.find("ReverbPanelView();") != std::string::npos);
+    CHECK(hpp.find("namespace pulp::view {") != std::string::npos);
+}
+
+TEST_CASE("generate_view_source emits the element table + host-param wiring",
+          "[view][annotated-capture][issue-juce-port]") {
+    impd::AnnotatedCaptureManifest m;
+    std::string err;
+    REQUIRE(impd::parse_annotated_manifest(kManifestJson, m, err));
+    const std::string cpp = impd::generate_view_source(
+        m, "pulp::view::detail::reverb_panel_view_svg_b64");
+
+    // Ctor + element-builder shape.
+    CHECK(cpp.find("ReverbPanelView::ReverbPanelView()") != std::string::npos);
+    CHECK(cpp.find("build_reverb_panel_view_elements()") != std::string::npos);
+    CHECK(cpp.find("decode_reverb_panel_view_svg()") != std::string::npos);
+
+    // Typed element table content.
+    CHECK(cpp.find("DesignFrameElement::Kind::knob") != std::string::npos);
+    CHECK(cpp.find("DesignFrameElement::Kind::dropdown") != std::string::npos);
+    CHECK(cpp.find("e.needle_d = \"M120 90 L120 60\";") != std::string::npos);
+    CHECK(cpp.find("e.param_key = \"mix\";") != std::string::npos);
+    // Float fields emit VALID C++ literals ("120.f", not the invalid "120f").
+    CHECK(cpp.find("e.cx = 120.f;") != std::string::npos);
+    CHECK(cpp.find("e.cx = 120f;") == std::string::npos);
+    CHECK(cpp.find("e.options = {\"Hall\", \"Room\", \"Plate\"};") != std::string::npos);
+    CHECK(cpp.find("e.selected_index = 1;") != std::string::npos);
+
+    // Host-param wiring is turned on because the manifest declares param_keys.
+    CHECK(cpp.find("route_changes_to_host_params(true);") != std::string::npos);
+
+    // Balanced braces (a coarse compile-shape guard).
+    const auto opens = std::count(cpp.begin(), cpp.end(), '{');
+    const auto closes = std::count(cpp.begin(), cpp.end(), '}');
+    CHECK(opens == closes);
+}
+
+TEST_CASE("generate_view_source omits host-param wiring when no keys are bound",
+          "[view][annotated-capture][issue-juce-port]") {
+    impd::AnnotatedCaptureManifest m;
+    std::string err;
+    REQUIRE(impd::parse_annotated_manifest(
+        R"({"class":"PlainView","elements":[{"kind":"value_label",
+             "geometry":{"x":1,"y":2,"w":3,"h":4},"text":"C2"}]})", m, err));
+    CHECK_FALSE(m.has_param_bindings());
+    const std::string cpp = impd::generate_view_source(m, "sym");
+    CHECK(cpp.find("route_changes_to_host_params") == std::string::npos);
+    CHECK(cpp.find("e.text = \"C2\";") != std::string::npos);
 }
