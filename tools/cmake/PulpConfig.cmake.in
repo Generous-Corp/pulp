@@ -89,6 +89,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpSdkGuards.cmake")
 # `webgpu` IMPORTED target + target_copy_webgpu_binaries() helper.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpWebGpuImportedTarget.cmake")
 
+# pulp_make_bundle_relocatable() / pulp_validate_bundle_relocatable() — a GPU
+# plugin built against the installed SDK bakes an @loader_path rpath and guards
+# against the libwgpu_native.dylib "false pass on the build machine" footgun.
+# The checker script rides along at lib/cmake/Pulp/scripts/ (installed next to
+# this module), which is where pulp_validate_bundle_relocatable resolves it via
+# CMAKE_CURRENT_FUNCTION_LIST_DIR.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpBundleRelocatable.cmake")
+
 if(EXISTS "${PULP_SDK_DIR}/external/skia-build")
     set(_pulp_saved_skia_dir "${SKIA_DIR}")
     set(SKIA_DIR "${PULP_SDK_DIR}/external/skia-build")

@@ -132,3 +132,26 @@ if(TARGET Pulp::gpu-audio)
         "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeGpuAudioProbe PRIVATE Pulp::gpu-audio)
 endif()
+
+# Bundle-relocatability helper reachability.
+#
+# A GPU plugin built against the installed SDK calls pulp_make_bundle_relocatable
+# + pulp_validate_bundle_relocatable — the @loader_path fix that stops the
+# libwgpu_native.dylib "false pass on the build machine, crash on any other Mac"
+# footgun. Those helpers live in PulpBundleRelocatable.cmake, which the SDK must
+# both INSTALL (to lib/cmake/Pulp, with its check script under scripts/) and
+# INCLUDE from PulpConfig. Assert both commands are defined by find_package(Pulp)
+# so a regression that drops the module from the installed SDK fails here rather
+# than in a downstream GPU plugin's configure with "Unknown CMake command".
+# (Deterministic — holds even in the GPU-off smoke, since the functions are
+# always defined and self-guard on APPLE internally.) Driving a real GPU bundle
+# through make/validate end-to-end is a separate GPU-build-gated check.
+if(NOT COMMAND pulp_make_bundle_relocatable
+   OR NOT COMMAND pulp_validate_bundle_relocatable)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: pulp_make_bundle_relocatable / "
+        "pulp_validate_bundle_relocatable are not defined by find_package(Pulp). "
+        "PulpBundleRelocatable.cmake must be installed to lib/cmake/Pulp and "
+        "included by PulpConfig.cmake for downstream GPU plugins to ship "
+        "self-contained bundles.")
+endif()
