@@ -1857,6 +1857,43 @@ TEST_CASE("Classic mode repitches across the keyboard", "[tempo-sampler][classic
     CHECK(oct_frames < root_frames * 3 / 4);   // an octave up plays notably shorter
 }
 
+// A One-Shot LOOP must STOP on note-off (One-Shot ignores note-off only for a
+// finite Loop=None one-shot; a loop needs a release path or it drones forever).
+TEST_CASE("One-Shot + LOOP releases on note-off (no stuck drone)",
+          "[tempo-sampler][one-shot]") {
+    auto tail_energy = [](bool note_off) -> double {
+        Fixture f;
+        f.store.set_value(kPlaybackMode, 1.0f);   // One-Shot
+        f.store.set_value(kTempoLoop, 1.0f);      // Loop on (Forward)
+        f.store.set_value(kLoopMode, 0.0f);
+        f.store.set_value(kOnsetSens, 0.0f);      // whole loop
+        f.store.set_value(kTempoRelease, 10.0f);  // 10 ms release → decays fast
+        auto buf = sine(220.0, 48000.0, 24000);
+        const float* ch[1] = {buf.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 24000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        f.proc->set_loop_bpm_for_test(120.0);
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+          process_midi(*f.proc, 120.0, m, l, r); }
+        for (int b = 0; b < 20; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        if (note_off) { midi::MidiBuffer m; m.add(midi::MidiEvent::note_off(0, kRoot));
+                        process_midi(*f.proc, 120.0, m, l, r); }
+        for (int b = 0; b < 60; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        double e = 0.0;
+        for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            for (float s : l) e += static_cast<double>(s) * s; }
+        return e;
+    };
+    const double held = tail_energy(false);      // no note-off: still looping (audible)
+    const double released = tail_energy(true);   // note-off: released (silent)
+    INFO("held energy=" << held << "  released energy=" << released);
+    CHECK(held > 1e-3);                 // the loop keeps going while held
+    CHECK(released < held * 0.05);      // note-off stopped it — not a stuck drone
+}
+
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
     Fixture f;
     auto loop = percussive_loop(48000, 4);

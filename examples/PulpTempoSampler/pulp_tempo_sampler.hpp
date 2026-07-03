@@ -83,11 +83,17 @@ struct SamplerVoice {
     // Classic/One-Shot non-root keys while LINK (follow-tempo) is on.
     bool keep_tempo = false;
     float transpose_semitones = 0.0f;
+    // A finite One-Shot (One-Shot mode + Loop=None) plays through to its end and
+    // IGNORES note-off. Captured per-voice at trigger so switching the global mode
+    // while a note is held can't strand it — a One-Shot LOOP still releases on
+    // note-off (or it would drone forever with no way to stop).
+    bool plays_through = false;
 
     void reset() {
         active = false; note = -1; velocity = 0.0f; sample = {}; released = false;
         sustained = false;
         base_rate = 1.0; keep_tempo = false; transpose_semitones = 0.0f;
+        plays_through = false;
         adsr.reset(); renderer.reset();
     }
     bool start(int n, float vel, double speed, float host_sample_rate,
@@ -1174,7 +1180,7 @@ public:
 
     /// Test-only: the [start,end) frame range region_for_note maps `note` to,
     /// over the currently published (tempo-matched) sample, for the given playback
-    /// mode (0 Classic, 1 Slice, 2 One-Shot). Returns {0,0} when the note maps to
+    /// mode (0 Classic, 1 One-Shot, 2 Slice). Returns {0,0} when the note maps to
     /// nothing (a Slice-mode key outside the slice range).
     std::pair<std::uint64_t, std::uint64_t>
     region_range_for_note_test(int note,
@@ -2430,24 +2436,30 @@ private:
             ? 1.0
             : std::pow(2.0, (static_cast<double>(note) - state().get_value(kRootNote)) / 12.0);
         target->start(note, velocity, base_rate, host_sample_rate_, sample, *region, sample.num_frames);
+        // Finite One-Shot (One-Shot + Loop=None) ignores note-off; a One-Shot LOOP
+        // does NOT (it must be stoppable, or it drones forever). Captured now so a
+        // later mode change can't strand this voice.
+        target->plays_through = (params.mode == TriggerMode::OneShot && !params.loop);
         last_note_ = note;  // most-recently-triggered note drives the playhead
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = velocity;
     }
 
     void release_note(int note) {
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = 0.0f;  // key up -> not held
-        // One-Shot mode: note-off is IGNORED — the whole sample plays through to
-        // its end (drum-machine behavior), regardless of Gate.
-        if (static_cast<int>(state().get_value(kPlaybackMode) + 0.5f) == 1) return;
-        // Gate off: key-up does NOT release — the slice plays through to its end
-        // (a looping voice keeps looping until LOOP is set to None).
-        if (state().get_value(kGate) < 0.5f) return;
+        // Per-voice release (uses the mode each voice was TRIGGERED with, not the
+        // current dropdown): a finite One-Shot plays through (ignore note-off);
+        // Gate-off likewise plays/loops through; otherwise key-up releases (or the
+        // sustain pedal defers it). This stops a One-Shot LOOP on note-off instead
+        // of leaving a stuck drone.
+        const bool gate = state().get_value(kGate) >= 0.5f;
         const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
-        for (auto& voice : voices_)
-            if (voice.active && voice.note == note && !voice.released) {
-                if (hold) voice.sustained = true;  // damper down: defer until the pedal lifts
-                else voice.release();
-            }
+        for (auto& voice : voices_) {
+            if (!(voice.active && voice.note == note && !voice.released)) continue;
+            if (voice.plays_through) continue;  // finite one-shot: note-off ignored
+            if (!gate) continue;                // Gate off: play/loop through
+            if (hold) voice.sustained = true;   // damper down: defer until the pedal lifts
+            else voice.release();
+        }
     }
 
     std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
