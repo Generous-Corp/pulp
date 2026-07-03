@@ -52,6 +52,7 @@ private:
                                 double step,
                                 bool& wrapped) const noexcept;
     double advance_position(double position, double step, bool& wrapped) noexcept;
+    void init_entry() noexcept;  // seed position + step_dir_ from the entry direction
     float fade_gain() noexcept;
     double effective_step() const noexcept;
 
@@ -66,6 +67,11 @@ private:
     bool active_ = false;
     bool stopping_ = false;
     int pingpong_dir_ = 1;  // PingPong only: +1 forward, -1 backward; flips at boundaries
+    // Current travel direction for OneShot / ReverseOnce / Forward / Reverse:
+    // starts from the entry direction (reverse_entry) and, for Forward/Reverse
+    // loops, switches to the loop's steady direction once the first pass reaches
+    // the far edge (two-phase). +1 forward, -1 backward.
+    int step_dir_ = 1;
 };
 
 }  // namespace pulp::audio

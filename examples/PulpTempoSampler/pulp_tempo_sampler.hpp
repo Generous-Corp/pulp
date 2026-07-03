@@ -1913,6 +1913,7 @@ private:
         signal::Adsr::Params adsr;
         bool loop = false;
         audio::LoopPlaybackMode loop_mode = audio::LoopPlaybackMode::OneShot;  // resolved loop/play mode
+        bool reverse_entry = false;  // first-pass direction for loop modes (Direction dropdown)
         TriggerMode mode = TriggerMode::Classic;  // Classic / One-Shot / Slice
     };
 
@@ -2273,19 +2274,23 @@ private:
             p.loop_mode = audio::LoopPlaybackMode::OneShot;
             return p;
         }
+        // Two-phase Direction × Loop (PlunderTube / Logic model):
+        //   Direction = the FIRST pass (reverse_entry); Loop = the steady-state
+        //   that takes over at the far edge and OVERRIDES the entry direction.
+        const bool rev = state().get_value(kDirection) >= 0.5f;
         p.loop = state().get_value(kTempoLoop) >= 0.5f;
-        // Direction + Loop -> engine mode (PlunderTube model). LOOP = None plays
-        // once in the Direction (Forward => OneShot, Reverse => ReverseOnce); else
-        // the loop shape (kLoopMode: 0 Forward, 1 Reverse, 2 Ping-Pong) governs it.
         if (!p.loop) {
-            const bool rev = state().get_value(kDirection) >= 0.5f;
+            // LOOP = None: play the region ONCE in the Direction, then stop.
+            // OneShot / ReverseOnce already encode the entry direction.
             p.loop_mode = rev ? audio::LoopPlaybackMode::ReverseOnce
                               : audio::LoopPlaybackMode::OneShot;
+            p.reverse_entry = false;
         } else {
             const int lm = std::clamp(static_cast<int>(state().get_value(kLoopMode) + 0.5f), 0, 2);
             p.loop_mode = (lm == 1) ? audio::LoopPlaybackMode::Reverse
                         : (lm == 2) ? audio::LoopPlaybackMode::PingPong
                                     : audio::LoopPlaybackMode::Forward;
+            p.reverse_entry = rev;  // Direction picks which way the first pass enters
         }
         return p;
     }
@@ -2393,8 +2398,9 @@ private:
 
     void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
                       const RenderParams& params) {
-        const auto region = region_for_note(note, sample, params.mode, params.loop_mode);
+        auto region = region_for_note(note, sample, params.mode, params.loop_mode);
         if (!region) return;  // note maps to no slice -> silent
+        region->reverse_entry = params.reverse_entry;  // Direction = first-pass entry
         SamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }
         if (target == nullptr) target = &voices_[0];

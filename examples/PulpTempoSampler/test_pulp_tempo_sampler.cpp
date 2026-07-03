@@ -1761,8 +1761,9 @@ TEST_CASE("Reverse mode plays the loop backwards", "[tempo-sampler][loop-mode]")
         REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
         REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
         f.proc->set_loop_bpm_for_test(bpm);
-        f.store.set_value(kTempoLoop, 1.0f);                     // loop on
-        f.store.set_value(kLoopMode, static_cast<float>(dir));   // loop shape: 0 Forward, 1 Reverse
+        // Direction (first-pass entry) is what plays the region backward. Loop=None
+        // so it plays ONCE in the Direction — the FIRST peak proves the entry dir.
+        f.store.set_value(kDirection, static_cast<float>(dir));  // 0 Forward, 1 Reverse
         std::vector<float> l(512), r(512);
         { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
         REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
