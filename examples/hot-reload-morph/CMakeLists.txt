@@ -34,8 +34,12 @@ target_compile_definitions(hot-reload-morph-logic-harsh PRIVATE MORPH_HARSH=1)
 
 # The standalone host (an executable that exports its SDK symbols so the thin
 # logic resolves them at dlopen).
+set(HRM_FORMATS VST3 CLAP Standalone)
+if(APPLE)
+    list(APPEND HRM_FORMATS AU)   # aufx effect; UI+DSP both hot-swap in the host
+endif()
 pulp_add_plugin(HotReloadMorph
-    FORMATS         Standalone
+    FORMATS         ${HRM_FORMATS}
     PLUGIN_NAME     "Pulp Hot-Reload Morph"
     BUNDLE_ID       "com.pulp.hot-reload-morph"
     MANUFACTURER    "Pulp"
@@ -43,10 +47,16 @@ pulp_add_plugin(HotReloadMorph
     CATEGORY        Effect
     PLUGIN_CODE     "PMrp"
     MANUFACTURER_CODE "Pulp")
-if(TARGET HotReloadMorph_Standalone)
-    add_dependencies(HotReloadMorph_Standalone hot-reload-morph-logic-warm hot-reload-morph-logic-harsh)
-    pulp_reload_host(HotReloadMorph_Standalone)
-endif()
+# The morph's thin logic references pulp::view symbols (Label/View for the editor),
+# so EVERY format host must export its symbols for the logic to resolve them at
+# dlopen — not just the standalone (unlike the tremolo demo, whose logic uses no
+# view symbols). pulp_reload_host applies the dynamic-export/link needed.
+foreach(_hrm_fmt VST3 CLAP Standalone AU)
+    if(TARGET HotReloadMorph_${_hrm_fmt})
+        add_dependencies(HotReloadMorph_${_hrm_fmt} hot-reload-morph-logic-warm hot-reload-morph-logic-harsh)
+        pulp_reload_host(HotReloadMorph_${_hrm_fmt})
+    endif()
+endforeach()
 
 # Headless A/B capture tool: renders each version's editor to a PNG and its DSP
 # to a WAV, driving the swap through the shell — proof that a reload changes both
