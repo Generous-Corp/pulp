@@ -73,10 +73,21 @@ struct SamplerVoice {
     audio::LoopRegion region;   // stored so the UI playhead can map position->progress
     bool released = false;
     bool sustained = false;     // note-off arrived but held by the sustain pedal
+    // Base playback rate for this voice (repitch across the keyboard when NOT
+    // keeping tempo; 1.0 when the pitch is done by the keep-tempo shifter). The
+    // per-chunk expression (pitch-bend/vibrato) multiplies onto this at render.
+    double base_rate = 1.0;
+    // Keep-tempo transposition: when true the voice plays at rate 1.0 (tempo
+    // preserved) and its output is pitch-shifted by transpose_semitones through
+    // the per-voice realtime pitch shifter (Logic Flex). Engaged only for
+    // Classic/One-Shot non-root keys while LINK (follow-tempo) is on.
+    bool keep_tempo = false;
+    float transpose_semitones = 0.0f;
 
     void reset() {
         active = false; note = -1; velocity = 0.0f; sample = {}; released = false;
         sustained = false;
+        base_rate = 1.0; keep_tempo = false; transpose_semitones = 0.0f;
         adsr.reset(); renderer.reset();
     }
     bool start(int n, float vel, double speed, float host_sample_rate,
@@ -86,6 +97,7 @@ struct SamplerVoice {
         if (!renderer.set_region(region_in, source_frames)) return false;
         region = region_in;
         note = n; velocity = vel; sample = sample_view; active = true;
+        base_rate = speed;
         adsr.set_sample_rate(host_sample_rate); adsr.note_on();
         renderer.set_playback_rate(speed); renderer.start();
         return true;
@@ -2371,16 +2383,20 @@ private:
         std::uint32_t rendered = 0;
         while (rendered < frames) {
             const auto chunk = std::min(frames - rendered, max_block_frames_);
-            const float rate = apply_expression_rate(chunk);
+            const float expr_rate = apply_expression_rate(chunk);
             audio::BufferView<float> scratch(voice_scratch_ptrs_.data(), out_ch, chunk);
-            for (auto& voice : voices_) {
+            for (int vi = 0; vi < kMaxVoices; ++vi) {
+                SamplerVoice& voice = voices_[static_cast<size_t>(vi)];
                 if (!voice.active) continue;
                 std::array<const float*, kMaxSampleChannels> sptrs{};
                 if (!store_.populate_channel_ptrs(voice.sample, sptrs.data(), sptrs.size())) { voice.reset(); continue; }
                 audio::BufferView<const float> source(sptrs.data(), voice.sample.num_channels,
                                                       static_cast<std::size_t>(voice.sample.num_frames));
                 voice.adsr.set_params(params.adsr);
-                voice.renderer.set_playback_rate(rate);
+                // Classic/One-Shot repitch across the keyboard: the voice's base
+                // rate (2^((note-root)/12)) times the per-chunk expression. Slice
+                // + the root play at 1.0. (keep_tempo shifter path is a follow-up.)
+                voice.renderer.set_playback_rate(voice.base_rate * expr_rate);
                 const auto loop_result = voice.renderer.render(source, scratch, chunk);
                 bool finished = false;
                 for (std::uint32_t i = 0; i < chunk; ++i) {

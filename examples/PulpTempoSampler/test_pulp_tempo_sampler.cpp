@@ -1789,6 +1789,42 @@ TEST_CASE("Reverse mode plays the loop backwards", "[tempo-sampler][loop-mode]")
     CHECK(rev_first > 0.2f);                 // it IS the weak impulse, not silence
 }
 
+// Classic mode pitches the WHOLE sample across the keyboard: the root plays at
+// rate 1.0, +12 semitones plays an octave up (rate 2x) so it finishes in ~half
+// the frames. Proves the per-voice base_rate reaches the renderer (it used to be
+// clobbered by the expression rate).
+TEST_CASE("Classic mode repitches across the keyboard", "[tempo-sampler][classic]") {
+    auto play_frames = [](int note) -> long {
+        Fixture f;
+        f.store.set_value(kPlaybackMode, 0.0f);   // Classic
+        f.store.set_value(kOnsetSens, 0.0f);      // whole sample (1 region)
+        f.store.set_value(kGate, 0.0f);           // play through (ignore note-off)
+        auto buf = sine(220.0, 48000.0, 48000);   // 1 s source
+        const float* ch[1] = {buf.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        f.proc->set_loop_bpm_for_test(120.0);
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, note, 110));
+          process_midi(*f.proc, 120.0, m, l, r); }
+        long frames = 0;
+        for (int blk = 0; blk < 600; ++blk) {
+            midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            double e = 0.0; for (float s : l) e += static_cast<double>(s) * s;
+            if (e < 1e-9 && frames > 2000) break;
+            frames += 512;
+        }
+        return frames;
+    };
+    const long root_frames = play_frames(kRoot);
+    const long oct_frames  = play_frames(kRoot + 12);
+    INFO("root plays " << root_frames << " frames, +12 plays " << oct_frames);
+    REQUIRE(root_frames > 4000);
+    CHECK(oct_frames < root_frames * 3 / 4);   // an octave up plays notably shorter
+}
+
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
     Fixture f;
     auto loop = percussive_loop(48000, 4);
