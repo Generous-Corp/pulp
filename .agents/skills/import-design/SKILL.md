@@ -416,6 +416,23 @@ mind when touching this:
 - **Recognized-widget gate.** Synthesis only fires when `audio_widget != none`.
   A generic/visual frame that happens to carry a `binding` attribute gets NO
   synthesized binding — it stays a generic node. Don't loosen this gate.
+- **Opt-in LAYER-NAME binding (`figma_binding_from_layer_name`).** A recognized
+  widget can declare its binding WITHOUT the explicit `binding` component
+  property, via a sigil-prefixed layer name — `param:`, `bind:`, or `meter:`
+  followed by `"<module>.<param>"` (e.g. a knob layer named
+  `param:filter.cutoff_hz`). `normalize_figma_plugin_binding` resolves the binding
+  from the `binding` attribute FIRST, then falls back to the layer-name sigil;
+  the rest of the lowering (module/param split, param-vs-meter routing by
+  `audio_widget`, `pulp*` synthesis) is identical either way. The **sigil is
+  load-bearing**: a bare/ordinary layer name is NEVER treated as a binding (no
+  false positives from names like "Big Cutoff Knob") — only a control the designer
+  explicitly tagged binds by name. An explicit `binding` attribute always wins
+  over the name. Case-insensitive on the sigil. This is the recognized-widget
+  path; binding a *geometry-detected* faithful-vector overlay (a knob the importer
+  found by geometry, not a Pulp Library component) by layer name is a separate
+  `param_key`-on-`IRInteractiveElement` path — keep the sigil convention identical
+  across both when you wire it. Pin any change with a
+  `[layer-name-binding]` case in `test_design_import_sources.cpp`.
 - **Name→kind resolution matches whole WORD TOKENS, not substrings — in ALL
   THREE lanes.** The C++ `detect_audio_widget`, the TS
   `audioWidgetKindFromName` (`extract-pure.ts`), and the Python
