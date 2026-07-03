@@ -1026,6 +1026,35 @@ macOS matrix leg by name, then exit as soon as that leg reports. Otherwise
 advisory Linux/Windows jobs can keep a green macOS leg from satisfying branch
 protection.
 
+**Flaky required-leg wedge + the rerun lock (recovery).** Even when the `macos`
+alias reports its failure promptly, a *flaky* failure on the required leg wedges
+auto-merge: the PR sits `mergeStateStatus: BLOCKED`, and `ghapp run rerun <run>
+--failed` refuses with **"cannot be rerun; This workflow is already running"**
+for as long as an advisory leg (Windows x64 / Coverage) keeps the run
+`in_progress`. So a slow advisory leg blocks the re-run of the flaky required
+leg. First confirm it's a flake, not the branch: the required `[local]` leg's
+log is NOT in the GHA store (`run view --job <id> --log` returns 0 lines), so
+read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
+`extract_keyboard_shortcuts does not catastrophically backtrack on large
+embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
+load). Recovery, once confirmed flaky: arm `gh pr merge <pr> --squash --auto`,
+then `ghapp run cancel <run>` (advisory legs are expendable), wait ~20–60s for
+`status: completed`, and `ghapp run rerun <run> --failed` — the flaky required
+leg reruns on the idle Studios, goes green, and the armed auto-merge fires. (Or
+`ghapp workflow run build.yml --ref <branch>` for a fresh run whose newer
+`macos` context supersedes the stale failure — do one or the other, not both.)
+
+**Prevention: retry transient flakes on the required leg.** `build.yml`'s
+non-Windows and Windows `ctest` steps run `--repeat until-pass:2` (mirroring
+`sanitizers.yml`), so a single timing-flake retries once and self-heals instead
+of reddening the required `macos` gate. This is the right tool for *transient*
+flakes; reserve the `--exclude-regex` quarantine (above) for tests that fail
+*consistently* on `main`, and the `PROCESSORS` reservation for RT-teardown
+starvation hangs. Each retry attempt is still bounded by `--timeout 120`. The
+deeper structural fix for the rerun lock — splitting the required macOS leg into
+its own workflow so advisory legs can never hold its run open — is a tracked
+follow-up.
+
 ### Gotcha: the macOS overflow busy-probe must count only *running* M1 legs (#2467)
 
 `build.yml`'s `resolve-provider` job has an inline-Python "busy probe"
