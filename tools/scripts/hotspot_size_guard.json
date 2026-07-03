@@ -27,8 +27,8 @@
     },
     {
       "path": "tools/local-ci/local_ci.py",
-      "max_loc": 8710,
-      "note": "local CI runner orchestration hotspot"
+      "max_loc": 81,
+      "note": "legacy local CI runner (superseded by Shipyard, #120); ratcheted down after the file was gutted to a thin stub"
     },
     {
       "path": "test/CMakeLists.txt",
@@ -52,8 +52,8 @@
     },
     {
       "path": "test/test_design_import_sources.cpp",
-      "max_loc": 1199,
-      "note": "design-import source parser test split; lowered after comment-hygiene cleanup"
+      "max_loc": 1370,
+      "note": "design-import source parser test split; +166 for the layer-name binding cases ([layer-name-binding])"
     },
     {
       "path": "test/test_renderer3d_shared.hpp",
@@ -97,8 +97,8 @@
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2200,
-      "note": "DesignIR serialization contract hotspot; net after extracting the analysis passes to design_ir_analysis.cpp (-) and parse_ir_node preserving component_key for the recognition resolver (+21)"
+      "max_loc": 2265,
+      "note": "DesignIR serialization contract hotspot; +59 for the opt-in layer-name binding helper + Gate-2/3 resolve in normalize_figma_plugin_binding"
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
