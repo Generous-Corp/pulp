@@ -243,6 +243,83 @@ TEST_CASE("DesignFrameView routes user gestures to the surface when enabled",
     }
 }
 
+namespace {
+// A foreign-host adapter (a JUCE/iPlug2 fork or a headless QA harness) subclasses
+// DesignFrameView to drive the editor from its own automation layer, calling the
+// protected emit_* funnel so synthetic input travels the SAME path a pointer
+// gesture does. Making emit_* protected upstream removes the need to patch the
+// header downstream.
+class ForeignHostDrivenFrameView : public DesignFrameView {
+public:
+    using DesignFrameView::DesignFrameView;
+    void drive_value(int i, float v) { emit_element_changed(i, v); }
+    void drive_gesture_begin(int i) { emit_gesture_begin(i); }
+    void drive_gesture_end(int i) { emit_gesture_end(i); }
+};
+
+ForeignHostDrivenFrameView make_driven_single_knob(const std::string& key) {
+    const std::string svg =
+        R"(<svg width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>)";
+    DesignFrameElement knob;
+    knob.kind = DesignFrameElement::Kind::knob;
+    knob.x = 10; knob.y = 10; knob.w = 20; knob.h = 20;
+    knob.cx = 20; knob.cy = 20; knob.hit_radius = 20.0f;
+    knob.value = 0.0f; knob.param_key = key;
+    return ForeignHostDrivenFrameView(svg, {knob}, 0, 0, 100, 100);
+}
+}  // namespace
+
+TEST_CASE("a subclass drives the emit_* funnel through routing + public callbacks",
+          "[view][host-param][design-import][frame]") {
+    ForeignHostDrivenFrameView dfv = make_driven_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    std::vector<std::pair<int, float>> cb_changes;
+    std::vector<std::string> cb_gestures;
+    dfv.on_element_changed = [&](int i, float v) { cb_changes.emplace_back(i, v); };
+    dfv.on_gesture_begin = [&](int i) { cb_gestures.push_back("begin:" + std::to_string(i)); };
+    dfv.on_gesture_end = [&](int i) { cb_gestures.push_back("end:" + std::to_string(i)); };
+
+    // Synthetic gesture: begin -> change -> end, exactly like a pointer drag.
+    dfv.drive_gesture_begin(0);
+    dfv.drive_value(0, 0.75f);
+    dfv.drive_gesture_end(0);
+
+    // The public callbacks fired...
+    REQUIRE(cb_changes.size() == 1);
+    CHECK(cb_changes.front().first == 0);
+    CHECK(cb_changes.front().second == Catch::Approx(0.75f));
+    REQUIRE(cb_gestures.size() == 2);
+    CHECK(cb_gestures.front() == "begin:0");
+    CHECK(cb_gestures.back() == "end:0");
+
+    // ...and the SAME funnel wrote through to the host-param surface, bracketed.
+    CHECK(params.values["gain"] == Catch::Approx(0.75));
+    REQUIRE(params.gesture_log.size() == 2);
+    CHECK(params.gesture_log.front() == "begin:gain");
+    CHECK(params.gesture_log.back() == "end:gain");
+    CHECK(params.set_calls == 1);
+}
+
+TEST_CASE("emit_element_changed on an out-of-range index skips routing, still fires the callback",
+          "[view][host-param][design-import][frame]") {
+    ForeignHostDrivenFrameView dfv = make_driven_single_knob("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    int cb = -1;
+    dfv.on_element_changed = [&](int i, float) { cb = i; };
+    dfv.drive_value(99, 0.5f);      // out of range
+    CHECK(cb == 99);                // callback still receives the raw index
+    CHECK(params.set_calls == 0);   // but no host write for an out-of-range element
+}
+
 TEST_CASE("set_element_param_key re-keys and re-binds without a remount",
           "[view][host-param][issue-5230]") {
     DesignFrameView dfv = make_single_knob("slot0.gain");

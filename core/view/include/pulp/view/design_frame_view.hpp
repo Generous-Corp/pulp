@@ -503,13 +503,26 @@ private:
     // Sync a user choice change (overlay widget -> element + on_element_changed).
     void  notify_choice(int i, int selected);
 
+protected:
     // User-gesture emit helpers: route to host_params() (when routing is on and
     // the element carries a key the surface resolves) AND fire the public
     // on_element_changed / on_gesture_* callback. Single funnel so every
     // value-bearing gesture path stays consistent.
+    //
+    // These are the supported subclass extension point. A foreign-host adapter
+    // (e.g. a JUCE/iPlug2 fork that drives the editor from its own automation or
+    // a headless QA harness) can call these to push a synthetic value or bracket
+    // a gesture through the *same* funnel a real pointer gesture uses — so
+    // host-param routing, the public callbacks, and undo bracketing all stay
+    // consistent with hand-driven input. `i` is an active-frame element index:
+    // host-param routing is skipped for an out-of-range index, while the public
+    // on_element_changed / on_gesture_* callback still receives `i` verbatim
+    // (callers own their own index validation). UI thread only.
     void emit_element_changed(int i, float value);
     void emit_gesture_begin(int i);
     void emit_gesture_end(int i);
+
+private:
     // Build the native-overlay child widgets (TextEditor / ComboBox / tabs) for
     // the non-knob elements of the active frame; called when a frame activates.
     void build_overlays();
