@@ -1253,6 +1253,10 @@ pulp_add_test_suite(pulp-test-swap-pack LIBRARIES pulp::format pulp::runtime)
 pulp_add_test_suite(pulp-test-hot-reload-synth LIBRARIES pulp::format)
 target_include_directories(pulp-test-hot-reload-synth PRIVATE
     ${CMAKE_SOURCE_DIR}/examples/hot-reload-synth)
+# Hot-reload MORPH demo (examples/hot-reload-morph) — one reload swaps UI + DSP.
+pulp_add_test_suite(pulp-test-hot-reload-morph LIBRARIES pulp::format pulp::view)
+target_include_directories(pulp-test-hot-reload-morph PRIVATE
+    ${CMAKE_SOURCE_DIR}/examples/hot-reload-morph)
 pulp_add_test_suite(pulp-test-reloadable-shell LIBRARIES pulp::format)
 add_dependencies(pulp-test-reloadable-shell
     pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
