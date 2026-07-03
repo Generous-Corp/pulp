@@ -3260,6 +3260,31 @@ int main(int argc, char* argv[]) {
     if (validate) {
         std::cout << "Validating render...\n";
 
+        // Honesty guard: --validate renders the generated JS (the native-
+        // materialized widget tree), NOT the embedded faithful SVG. For a
+        // faithful_svg scene the two are different renders — the widget tree can
+        // diverge badly (missing custom controls, placeholder art) while the 1:1
+        // faithful SVG is pixel-perfect. Reporting the native-materialize
+        // similarity without saying so has read as a failed import when the
+        // faithful render was fine. Detect faithful nodes and label the number.
+        std::function<bool(const pulp::view::IRNode&)> scene_has_faithful =
+            [&](const pulp::view::IRNode& node) -> bool {
+            if (node.render_mode == pulp::view::NodeRenderMode::faithful_svg)
+                return true;
+            for (const auto& child : node.children)
+                if (scene_has_faithful(child)) return true;
+            return false;
+        };
+        const bool faithful_scene = scene_has_faithful(ir.root);
+        if (faithful_scene) {
+            std::cout <<
+                "  NOTE: this scene uses faithful_svg render mode. --validate renders the\n"
+                "  native-materialized widget tree, NOT the 1:1 faithful SVG. The similarity\n"
+                "  below is native-materialize fidelity and will UNDERSTATE the true faithful\n"
+                "  render. Verify the faithful render with pulp-svg-probe on the embedded SVG\n"
+                "  (extract the data:image/svg+xml payload from the scene JSON first).\n";
+        }
+
         // Render the generated JS headlessly
         View render_root;
         render_root.set_theme(Theme::dark());

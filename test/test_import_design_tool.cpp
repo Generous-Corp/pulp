@@ -2144,6 +2144,69 @@ TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
     REQUIRE(r.stderr_output.find("--screenshot-backend must be") != std::string::npos);
 }
 
+// --validate renders the generated JS (native-materialized widget tree), not the
+// embedded faithful SVG. For a faithful_svg scene the reported similarity is the
+// native-materialize fidelity — which understates the true 1:1 render — so the
+// tool must SAY SO. The note prints before the render, so it appears regardless
+// of whether a headless Skia render is available in the test environment.
+TEST_CASE("pulp-import-design --validate labels faithful_svg fidelity honestly",
+          "[cli][import-design][tool][faithful-svg][validate]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    SECTION("faithful_svg scene prints the native-materialize caveat") {
+        TempDir tmp("pulp-validate-faithful");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                          R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                          R"("source_uri":"figma://x/1:1"},)"
+                          R"("root":{"type":"frame","name":"Faithful","figma_node_id":"1:1",)"
+                          R"("render_mode":"faithful_svg","svg_asset_id":"frame-svg"}})");
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--validate"});
+        REQUIRE_FALSE(r.timed_out);
+        // The honesty note fires on faithful_svg detection, before the render.
+        REQUIRE(r.stdout_output.find("faithful_svg render mode") != std::string::npos);
+        REQUIRE(r.stdout_output.find("native-materialize fidelity") != std::string::npos);
+        REQUIRE(r.stdout_output.find("pulp-svg-probe") != std::string::npos);
+    }
+
+    SECTION("a faithful_svg node nested below a normal root still triggers the caveat") {
+        // The detection is recursive; a normal root with a faithful child must
+        // still be flagged (a Figma frame wrapping a faithful panel).
+        TempDir tmp("pulp-validate-faithful-child");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                          R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                          R"("source_uri":"figma://x/1:1"},)"
+                          R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1",)"
+                          R"("children":[{"type":"frame","name":"Panel","figma_node_id":"1:2",)"
+                          R"("render_mode":"faithful_svg","svg_asset_id":"panel-svg"}]}})");
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--validate"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.stdout_output.find("native-materialize fidelity") != std::string::npos);
+    }
+
+    SECTION("a normal (non-faithful) scene prints no such caveat") {
+        TempDir tmp("pulp-validate-normal");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                          R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                          R"("source_uri":"figma://x/1:1"},)"
+                          R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--validate"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.stdout_output.find("native-materialize fidelity") == std::string::npos);
+    }
+}
+
 TEST_CASE("pulp-import-design validates style selector values",
           "[cli][import-design][tool][style]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }

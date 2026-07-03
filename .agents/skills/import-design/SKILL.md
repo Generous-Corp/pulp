@@ -72,7 +72,12 @@ SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
 (`build_native_view_tree`/codegen materialization), NOT the faithful SVG — so it
 mis-lays composite vectors (e.g. piano black keys grouped/dropped) and reports
 ~18/255 *even though the faithful render is pixel-perfect*. **Do not trust
-`--validate`'s number as the faithful fidelity.**
+`--validate`'s number as the faithful fidelity.** The CLI now DETECTS a
+`faithful_svg` scene and prints a caveat before the similarity number ("…renders
+the native-materialized widget tree, NOT the 1:1 faithful SVG… native-materialize
+fidelity… will UNDERSTATE the true faithful render. Verify with pulp-svg-probe"),
+so the trap is self-documenting — but the note is a signpost, not a fix: still run
+`pulp-svg-probe` for the real 1:1 number.
 
 **Validate the FAITHFUL render with `pulp-svg-probe`** (renders an SVG via
 `DesignFrameView`/SkSVGDOM, the real 1:1 path):

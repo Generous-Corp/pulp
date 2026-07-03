@@ -82,8 +82,8 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3414,
-      "note": "import-design CLI orchestration hotspot; grew with the recognition-resolver + installed-package custom-control wiring"
+      "max_loc": 3439,
+      "note": "import-design CLI orchestration hotspot; grew with the recognition-resolver + installed-package custom-control wiring, plus the --validate faithful_svg honesty caveat"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
