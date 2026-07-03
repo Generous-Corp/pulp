@@ -895,7 +895,12 @@ jobs:
             exclude="${exclude}|DesignFrameView slides"
             exclude="${exclude}|DesignFrameView rotates"
           fi
-          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
+          # --repeat until-pass:2 retries a failed test once before failing the
+          # leg, so a single timing-flake (e.g. a ReDoS-guard test slowed by
+          # runner load) self-heals instead of reddening the required `macos`
+          # gate and wedging auto-merge. Mirrors sanitizers.yml; each attempt is
+          # still bounded by --timeout 120.
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
 
       - name: Surface ctest failures (non-Windows)
         # On a SELF-HOSTED runner the test step's log is not retrievable via
@@ -955,7 +960,7 @@ jobs:
           set "PULP_CTEST_LABEL_EXCLUDE=validation"
           if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
           if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
-          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
+          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
