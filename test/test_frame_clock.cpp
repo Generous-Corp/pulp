@@ -250,3 +250,82 @@ TEST_CASE("FrameClock false-return compaction preserves later active subscribers
     REQUIRE(second == 2);
     REQUIRE(third == 1);
 }
+
+// ── Activity channel (wake-from-idle probes) ────────────────────────────────
+
+TEST_CASE("FrameClock activity probe fires on pump_activity, not tick",
+          "[view][frame_clock][activity]") {
+    FrameClock clock;
+    int activity_calls = 0;
+    float last_dt = -1;
+    clock.subscribe_activity([&](float dt) { activity_calls++; last_dt = dt; });
+
+    REQUIRE(clock.has_activity_subscribers());
+    // The key invariant: an activity probe is NOT render-liveness.
+    REQUIRE_FALSE(clock.has_active_subscribers());
+
+    clock.pump_activity(0.02f);
+    REQUIRE(activity_calls == 1);
+    REQUIRE_THAT(last_dt, WithinAbs(0.02, 0.001));
+
+    // tick() must NOT fire activity probes (they are a separate channel), and
+    // pump_activity must NOT advance the render clock.
+    clock.tick(0.016f);
+    REQUIRE(activity_calls == 1);
+    REQUIRE(clock.frame() == 1);
+    clock.pump_activity(0.02f);
+    REQUIRE(activity_calls == 2);
+    REQUIRE(clock.frame() == 1);  // pump_activity never advances frame/time
+    REQUIRE_THAT(clock.time(), WithinAbs(0.016, 0.001));
+}
+
+TEST_CASE("FrameClock render subscriber does not fire on pump_activity",
+          "[view][frame_clock][activity]") {
+    FrameClock clock;
+    int render_calls = 0;
+    clock.subscribe([&](float) { render_calls++; return true; });
+
+    clock.pump_activity(0.02f);
+    REQUIRE(render_calls == 0);       // render channel untouched by activity pump
+    clock.tick(0.016f);
+    REQUIRE(render_calls == 1);
+}
+
+TEST_CASE("FrameClock unsubscribe_activity removes the probe",
+          "[view][frame_clock][activity]") {
+    FrameClock clock;
+    int calls = 0;
+    int id = clock.subscribe_activity([&](float) { calls++; });
+    clock.pump_activity(0.02f);
+    REQUIRE(calls == 1);
+
+    clock.unsubscribe_activity(id);
+    REQUIRE_FALSE(clock.has_activity_subscribers());
+    clock.pump_activity(0.02f);
+    REQUIRE(calls == 1);              // no longer fired
+}
+
+TEST_CASE("FrameClock activity probe may unsubscribe itself during pump",
+          "[view][frame_clock][activity]") {
+    FrameClock clock;
+    int calls = 0;
+    int id = -1;
+    id = clock.subscribe_activity([&](float) {
+        calls++;
+        clock.unsubscribe_activity(id);  // re-entrant removal is safe
+    });
+    clock.pump_activity(0.02f);
+    REQUIRE(calls == 1);
+    clock.pump_activity(0.02f);
+    REQUIRE(calls == 1);              // compacted after the first pump
+    REQUIRE_FALSE(clock.has_activity_subscribers());
+}
+
+TEST_CASE("FrameClock reset clears activity probes",
+          "[view][frame_clock][activity]") {
+    FrameClock clock;
+    clock.subscribe_activity([](float) {});
+    REQUIRE(clock.has_activity_subscribers());
+    clock.reset();
+    REQUIRE_FALSE(clock.has_activity_subscribers());
+}

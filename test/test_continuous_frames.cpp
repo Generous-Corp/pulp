@@ -122,3 +122,46 @@ TEST_CASE("a running CSS animation keeps frames alive; paused does not",
     v.active_animations().front().active = false;
     REQUIRE_FALSE(needs_continuous_frames(&v));
 }
+
+// pump_view_frame ties the FrameClock activity channel to the repaint decision:
+// it pumps wake-from-idle probes, THEN reports whether this frame renders. This
+// is the seam that lets an embedded editor idle at 0 fps yet wake the moment a
+// probe flips continuous_repaint — without a per-View host-tick vtable hook.
+#include <pulp/view/frame_pump.hpp>
+#include <pulp/view/frame_clock.hpp>
+
+TEST_CASE("pump_view_frame wakes from idle via an activity probe",
+          "[view][continuous-frames][frame-pump]") {
+    View root;
+    FrameClock clock;
+    bool liveness = false;  // stands in for "a meter is moving"
+
+    // The view self-subscribes an activity probe that reflects liveness into
+    // continuous_repaint each tick — the recommended pattern (no View vtable hook).
+    clock.subscribe_activity([&](float) { root.set_continuous_repaint(liveness); });
+
+    // Idle: the probe runs every pump but reports not-moving, so no render. An
+    // activity subscription on its own is NOT render-liveness.
+    REQUIRE_FALSE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+    REQUIRE_FALSE(clock.has_active_subscribers());
+
+    // Live: the probe flips continuous_repaint on, so the SAME tick renders
+    // (pump runs before the gate — that ordering is the whole point).
+    liveness = true;
+    REQUIRE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+
+    // Back to idle: renders once more to clear, then idles.
+    liveness = false;
+    REQUIRE_FALSE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+}
+
+TEST_CASE("pump_view_frame honors the host's own needs_repaint flag",
+          "[view][continuous-frames][frame-pump]") {
+    View root;
+    FrameClock clock;
+    // No probes, static tree: needs_repaint short-circuits to a render.
+    REQUIRE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/true));
+    REQUIRE_FALSE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+    // Null-safe root.
+    REQUIRE_FALSE(pump_view_frame(nullptr, clock, 0.016f, /*needs_repaint=*/false));
+}
