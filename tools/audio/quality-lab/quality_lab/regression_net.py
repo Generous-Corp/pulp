@@ -29,9 +29,10 @@ from typing import Any
 
 from . import compare
 
-# The axes reachable through compare. A plugin picks the subset that fits its change class —
-# timbral effects want all four; a stereo widener wants none of these (compare is mono today).
-DEFAULT_PROFILES: tuple[str, ...] = compare.PROFILES
+# Default to the mono-safe axes so a mono comparison doesn't emit a spurious not_applicable row for
+# the stereo-width axis on every pair. A stereo suite adds "stereo-width" to its manifest's
+# `profiles` explicitly. A plugin picks whatever subset fits its change class.
+DEFAULT_PROFILES: tuple[str, ...] = compare.MONO_PROFILES
 
 VALID_REFERENCE_ROLES = ("peer", "golden")
 

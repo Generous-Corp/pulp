@@ -293,8 +293,9 @@ def main(argv: list[str] | None = None) -> int:
     cmp_.add_argument("--profile", default="tonal-balance", metavar="AXIS",
                       help="measurement axis (default: tonal-balance): tonal-balance (LTAS "
                            "centroid), added-hf (band-relative >=8kHz dB), noise-roughness (HNR "
-                           "drop), graininess (spectral-flux rise). roughness/graininess are "
-                           "meaningful on tonal/sustained material")
+                           "drop), graininess (spectral-flux rise), stereo-width (side/mid ratio + "
+                           "phase). roughness/graininess need tonal/sustained material; stereo-width "
+                           "needs 2-channel input")
     cmp_.add_argument("--reference-role", choices=["peer", "golden"], default="peer",
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "
