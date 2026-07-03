@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05610"></a>
+## [0.561.0] - 2026-07-03
+
+- feat(import-design): label faithful_svg fidelity honestly in --validate ([#5483](https://github.com/danielraffel/pulp/pull/5483))
+
 <a id="v05600"></a>
 ## [0.560.0] - 2026-07-03
 
@@ -5819,6 +5824,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.561.0]: https://github.com/danielraffel/pulp/releases/tag/v0.561.0
 [0.560.0]: https://github.com/danielraffel/pulp/releases/tag/v0.560.0
 [0.559.0]: https://github.com/danielraffel/pulp/releases/tag/v0.559.0
 [0.558.0]: https://github.com/danielraffel/pulp/releases/tag/v0.558.0
