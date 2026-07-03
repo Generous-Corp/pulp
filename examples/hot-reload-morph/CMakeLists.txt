@@ -55,6 +55,19 @@ foreach(_hrm_fmt VST3 CLAP Standalone AU)
     if(TARGET HotReloadMorph_${_hrm_fmt})
         add_dependencies(HotReloadMorph_${_hrm_fmt} hot-reload-morph-logic-warm hot-reload-morph-logic-harsh)
         pulp_reload_host(HotReloadMorph_${_hrm_fmt})
+        # NOTE (M2b, deferred): the morph's thin (RESOLVE_FROM_HOST) logic resolves
+        # pulp::view symbols (View/Label for its editor) from the host at dlopen,
+        # but the host dead-strips them (create_view lives in the logic, so nothing
+        # in the host references them) — so the editor won't render in a HOST
+        # (the standalone only "works" because it never opens the editor headless).
+        # A whole-archive `-force_load,pulp-view-core` does NOT fix it: on macOS it
+        # drags in sdl_window_host.cpp.o, which references init/shutdown_accessibility
+        # that have no mac impl (mac uses the Cocoa host) → link failure. A proper
+        # fix needs a TARGETED create_view-symbol-export (reference only the editor
+        # symbols the logic uses, or an SDK-provided keep-alive). Until then these
+        # plugin formats BUILD but their editor won't load in-host; the morph ships
+        # as STANDALONE only, and the UI+DSP swap is proven by the headless test
+        # (test_hot_reload_morph). See planning REVIEW-QUEUE M2b.
     endif()
 endforeach()
 
