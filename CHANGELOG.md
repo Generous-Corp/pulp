@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05560"></a>
+## [0.556.0] - 2026-07-03
+
+- feat(view): promote needs_continuous_frames to a public predicate ([#5465](https://github.com/danielraffel/pulp/pull/5465))
+
 <a id="v05540"></a>
 ## [0.554.0] - 2026-07-02
 
@@ -5789,6 +5794,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.556.0]: https://github.com/danielraffel/pulp/releases/tag/v0.556.0
 [0.554.0]: https://github.com/danielraffel/pulp/releases/tag/v0.554.0
 [0.553.0]: https://github.com/danielraffel/pulp/releases/tag/v0.553.0
 [0.552.0]: https://github.com/danielraffel/pulp/releases/tag/v0.552.0
