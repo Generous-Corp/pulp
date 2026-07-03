@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05570"></a>
+## [0.557.0] - 2026-07-03
+
+- feat(view): make DesignFrameView emit_* a supported protected extension point ([#5471](https://github.com/danielraffel/pulp/pull/5471))
+- docs(ci): lead flaky-required-wedge recovery with the shipyard rescue one-liner ([#5469](https://github.com/danielraffel/pulp/pull/5469))
+- ci: retry transient flakes on the required test legs ([#5467](https://github.com/danielraffel/pulp/pull/5467))
+
 <a id="v05560"></a>
 ## [0.556.0] - 2026-07-03
 
@@ -5794,6 +5801,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.557.0]: https://github.com/danielraffel/pulp/releases/tag/v0.557.0
 [0.556.0]: https://github.com/danielraffel/pulp/releases/tag/v0.556.0
 [0.554.0]: https://github.com/danielraffel/pulp/releases/tag/v0.554.0
 [0.553.0]: https://github.com/danielraffel/pulp/releases/tag/v0.553.0
