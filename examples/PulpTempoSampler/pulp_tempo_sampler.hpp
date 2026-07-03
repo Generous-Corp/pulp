@@ -286,15 +286,8 @@ private:
         std::vector<float> mono; float sr = 48000.0f; std::vector<long> slices;
         if (snapshot(mono, sr, slices) && !mono.empty()) {
             set_audio_data(mono.data(), static_cast<int>(mono.size()), sr);
-            clear_regions();
-            for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
-                view::WaveformRegion r;
-                r.start_sample = static_cast<int>(slices[i]);
-                r.end_sample = static_cast<int>(slices[i + 1]);
-                r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
-                add_region(r);
-            }
             slices_ = std::move(slices);
+            rebuild_regions();  // only draws the slice bands when show_slice_regions_
             total_samples_ = static_cast<long>(mono.size());
             set_visible_range(0, static_cast<int>(total_samples_));  // zoom-to-fit new sample
             has_audio_ = true;
@@ -302,6 +295,28 @@ private:
             slices_.clear();
             total_samples_ = 0;
             has_audio_ = false;
+        }
+    }
+    // Slice bands are a Slice-mode affordance: Classic/One-Shot play the whole
+    // sample (pitched across the keyboard), so their waveform shows NO slice
+    // divisions. The mode toggle calls set_show_slice_regions(); rebuild_regions()
+    // re-applies it against the current slices_ without re-snapshotting.
+public:
+    void set_show_slice_regions(bool v) {
+        if (show_slice_regions_ == v) return;
+        show_slice_regions_ = v;
+        rebuild_regions();
+    }
+private:
+    void rebuild_regions() {
+        clear_regions();
+        if (!show_slice_regions_) return;
+        for (std::size_t i = 0; i + 1 < slices_.size(); ++i) {
+            view::WaveformRegion r;
+            r.start_sample = static_cast<int>(slices_[i]);
+            r.end_sample = static_cast<int>(slices_[i + 1]);
+            r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
+            add_region(r);
         }
     }
     // Scroll wheel / two-finger: vertical -> zoom around the cursor, horizontal
@@ -381,6 +396,7 @@ private:
     std::vector<long> slices_;
     long total_samples_ = 0;
     std::uint64_t last_gen_ = ~0ull;  // force first refresh
+    bool show_slice_regions_ = true;  // slice bands only in Slice mode (set by the mode toggle)
     view::ValueAnimation flash_{0.0f};
     std::chrono::steady_clock::time_point last_paint_{};
 };
@@ -467,6 +483,14 @@ public:
     view::ComboBox* dir_combo_ = nullptr;
     view::View* loop_label_ = nullptr;
     view::ComboBox* loop_combo_ = nullptr;
+    // Slice-mode-ONLY controls — the tempo-slicing chrome. Classic/One-Shot play
+    // the whole sample (Quick Sampler has no slice count / tempo slider there —
+    // just LINK to follow host tempo), so these hide outside Slice mode.
+    WaveformDropView* wave_ = nullptr;      // to toggle the waveform slice bands
+    view::View* sens_label_ = nullptr;
+    view::Fader* sens_fader_ = nullptr;
+    view::View* slices_label_ = nullptr;    // "SLICES N" live readout
+    view::View* tempo_label_ = nullptr;     // tempo_fader + tempo_edit_ already members
     // Reflect the current trigger mode across the UI: highlight the selected mode
     // button and show/hide the Direction+Loop controls (hidden in Slice). Cheap;
     // wired to a kPlaybackMode listener + called once at build.
@@ -474,11 +498,23 @@ public:
         for (int i = 0; i < 3; ++i)
             if (mode_btns_[static_cast<size_t>(i)])
                 mode_btns_[static_cast<size_t>(i)]->set_on(i == mode);
-        const bool show = (mode != 2);  // 2 = Slice
+        const bool slice_mode = (mode == 2);  // 2 = Slice
+        const bool show = !slice_mode;
+        // Direction + Loop: apply to Classic/One-Shot, hidden in Slice.
         if (dir_label_) dir_label_->set_visible(show);
         if (dir_combo_) dir_combo_->set_visible(show);
         if (loop_label_) loop_label_->set_visible(show);
         if (loop_combo_) loop_combo_->set_visible(show);
+        // Slicing chrome (SENS, SLICES readout, TEMPO slider + its editor/label):
+        // Slice-mode ONLY. LINK stays visible in every mode (follow host tempo).
+        auto setv = [](view::View* w, bool v) { if (w) w->set_visible(v); };
+        setv(sens_label_, slice_mode);
+        setv(sens_fader_, slice_mode);
+        setv(slices_label_, slice_mode);
+        setv(tempo_label_, slice_mode);
+        setv(tempo_fader, slice_mode);
+        setv(tempo_edit_, slice_mode);
+        if (wave_) wave_->set_show_slice_regions(slice_mode);  // no slice bands off-Slice
     }
     view::View* detail_overlay_ = nullptr;   // Logic-style "Detail" page (Gate, Flex Speed, …)
     bool hosted_in_standalone_ = false;      // resolved on view-open
@@ -1307,7 +1343,7 @@ public:
         TextButton* openBtn = nullptr;
         {
             auto btn = std::make_unique<TextButton>("Open…");
-            place(*btn, 656, 14, 84, 28);
+            place(*btn, 652, 14, 88, 28);
             openBtn = btn.get();
             root->add_child(std::move(btn));
         }
@@ -1321,7 +1357,7 @@ public:
             // Hidden until update_standalone_chrome_affordances() confirms we are
             // hosted in the standalone settings chrome (no Audio/MIDI tab in a DAW).
             auto btn = std::make_unique<TextButton>("Settings");
-            place(*btn, 476, 14, 82, 28);
+            place(*btn, 448, 14, 84, 28);
             btn->set_visible(false);
             btn->on_click = [root_ptr] { format::open_standalone_settings(root_ptr); };
             root->settings_button = btn.get();
@@ -1329,7 +1365,7 @@ public:
         }
         {
             auto btn = std::make_unique<TextButton>("Keyboard");
-            place(*btn, 566, 14, 82, 28);
+            place(*btn, 540, 14, 104, 28);
             // The button AND ⌘K hit the SAME path: SamplerEditorRoot::on_toggle_keyboard,
             // which the processor points at toggle_keyboard_window() below.
             btn->on_click = [root_ptr] { root_ptr->toggle_keyboard(); };
@@ -1378,6 +1414,7 @@ public:
         wf->snapshot = [this](std::vector<float>& mono, float& sr, std::vector<long>& sl) {
             return snapshot_for_view(mono, sr, sl);
         };
+        root->wave_ = wf.get();
         root->add_child(std::move(wf));
 
         // Musical typing: the SDK MusicalTypingController turns the QWERTY row
@@ -1437,12 +1474,13 @@ public:
 
         // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
         // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        root->sens_label_ = label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
             place(*fader, 162, 322, 62, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
+            root->sens_fader_ = fader.get();
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
                 [this](state::ParamID id, float) {
@@ -1465,7 +1503,7 @@ public:
         auto norm_to_bpm = [](float v) {
             return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
         };
-        label(316, 324, 44, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        root->tempo_label_ = label(316, 324, 44, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
@@ -1554,6 +1592,7 @@ public:
             live->color = teal;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
             place(*live, 230, 320, 84, 18);
+            root->slices_label_ = live.get();
             root->add_child(std::move(live));
         }
 
@@ -1679,7 +1718,7 @@ public:
                 btnPtr->set_label(*shown ? "Main" : "Detail");
                 rp->request_repaint();
             };
-            place(*btn, 384, 14, 82, 28);
+            place(*btn, 350, 14, 82, 28);
             root->add_child(std::move(btn));
         }
 

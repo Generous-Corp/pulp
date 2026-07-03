@@ -1894,6 +1894,41 @@ TEST_CASE("One-Shot + LOOP releases on note-off (no stuck drone)",
     CHECK(released < held * 0.05);      // note-off stopped it — not a stuck drone
 }
 
+// The mode toggle gates the footer chrome: Classic/One-Shot play the whole sample
+// (no slices, no tempo slider — just LINK + Direction/Loop); Slice shows the
+// slicing chrome (SENS, SLICES, TEMPO) and hides Direction/Loop. The waveform
+// slice bands follow the same rule.
+TEST_CASE("mode toggle gates the slice chrome and Direction/Loop",
+          "[tempo-sampler][mode-ui]") {
+    Fixture f;
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->sens_fader_ != nullptr);
+    REQUIRE(root->slices_label_ != nullptr);
+    REQUIRE(root->tempo_fader != nullptr);
+    REQUIRE(root->dir_combo_ != nullptr);
+    REQUIRE(root->loop_combo_ != nullptr);
+
+    root->apply_mode_ui(0);  // Classic: slicing chrome hidden, Direction+Loop shown
+    CHECK_FALSE(root->sens_fader_->visible());
+    CHECK_FALSE(root->slices_label_->visible());
+    CHECK_FALSE(root->tempo_fader->visible());
+    CHECK(root->dir_combo_->visible());
+    CHECK(root->loop_combo_->visible());
+
+    root->apply_mode_ui(1);  // One-Shot: same gating as Classic
+    CHECK_FALSE(root->slices_label_->visible());
+    CHECK(root->dir_combo_->visible());
+
+    root->apply_mode_ui(2);  // Slice: slicing chrome shown, Direction+Loop hidden
+    CHECK(root->sens_fader_->visible());
+    CHECK(root->slices_label_->visible());
+    CHECK(root->tempo_fader->visible());
+    CHECK_FALSE(root->dir_combo_->visible());
+    CHECK_FALSE(root->loop_combo_->visible());
+}
+
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
     Fixture f;
     auto loop = percussive_loop(48000, 4);
