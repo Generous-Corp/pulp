@@ -1004,6 +1004,44 @@ function(pulp_reload_host target)
     endif()
 endfunction()
 
+# Like pulp_reload_host, but ALSO force-retains + exports the editor ABI surface
+# (View/Label/widgets) so a UI-carrying hot-reload logic (its create_view()
+# resolves pulp::view from the host at dlopen) can render its editor inside this
+# host. Use this instead of pulp_reload_host for a host that loads a logic which
+# builds its own UI. (Live-swap M2b — see planning/2026-07-03-m2b-...) The plain
+# host would dead-strip the editor symbols (nothing in the host references them);
+# force-loading pulp-view-reload-exports keeps them, and export_dynamic below
+# makes them resolvable by the dlopened logic. Force-loads ONLY the tiny
+# curated-surface lib, NOT all of view-core (which drags in the mac-incompatible
+# SDL-host TU).
+function(pulp_reload_host_ui target)
+    pulp_reload_host(${target})
+    if(TARGET pulp-view-reload-exports)
+        target_link_libraries(${target} PRIVATE pulp-view-reload-exports)
+        if(APPLE)
+            target_link_options(${target} PRIVATE
+                "-Wl,-force_load,$<TARGET_FILE:pulp-view-reload-exports>"
+                # The plugin's -exported_symbols_list exports only the entry point
+                # and localizes everything else, defeating -export_dynamic for the
+                # SDK symbols a THIN (RESOLVE_FROM_HOST) logic resolves at dlopen.
+                # -exported_symbol ADDS patterns to the export set: the whole pulp::
+                # surface (mangled Itanium prefix _ZN4pulp..., leading '_' on Mach-O)
+                # so the dlopened logic resolves BOTH its editor (pulp::view
+                # View/Label/widgets) AND its Processor base (pulp::format virtuals
+                # like create_ara_document_controller) + any state/canvas/midi it uses.
+                "-Wl,-exported_symbol,__ZN4pulp*"
+                "-Wl,-exported_symbol,__ZNK4pulp*"
+                "-Wl,-exported_symbol,__ZTVN4pulp*"    # vtables
+                "-Wl,-exported_symbol,__ZTIN4pulp*"    # typeinfo
+                "-Wl,-exported_symbol,__ZTSN4pulp*")   # typeinfo name
+        elseif(NOT WIN32)
+            target_link_options(${target} PRIVATE
+                "-Wl,--whole-archive" "$<TARGET_FILE:pulp-view-reload-exports>"
+                "-Wl,--no-whole-archive")
+        endif()
+    endif()
+endfunction()
+
 # ── Internal: VST3 target ────────────────────────────────────────────────
 
 # Per-format / AUv3 / app target helpers

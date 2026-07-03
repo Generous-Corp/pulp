@@ -42,6 +42,16 @@ else()
     endif()
 endif()
 
+# ── pulp-view-reload-exports (live-swap M2b) ─────────────────────────────────
+# A tiny static lib whose single keep-alive TU references the editor ABI surface
+# (View/Label/widgets) a hot-reload logic's create_view() resolves FROM THE HOST
+# at dlopen. A host force-loads THIS (via pulp_reload_host_ui) so those symbols
+# survive dead-strip + are exported — without dragging in the window/SDL-host TUs
+# a whole-archive force-load of view-core would. Self-contained: links view-core.
+add_library(pulp-view-reload-exports STATIC src/reload_exports.cpp)
+add_library(pulp::view-reload-exports ALIAS pulp-view-reload-exports)
+target_link_libraries(pulp-view-reload-exports PUBLIC pulp-view-core)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
 # ── Embed JS preludes as C++ string constants ────────────────────────────────
