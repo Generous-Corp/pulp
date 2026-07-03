@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05620"></a>
+## [0.562.0] - 2026-07-03
+
+- feat(view): add a FrameClock activity channel + pump_view_frame seam ([#5487](https://github.com/danielraffel/pulp/pull/5487))
+
 <a id="v05610"></a>
 ## [0.561.0] - 2026-07-03
 
@@ -5824,6 +5829,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.562.0]: https://github.com/danielraffel/pulp/releases/tag/v0.562.0
 [0.561.0]: https://github.com/danielraffel/pulp/releases/tag/v0.561.0
 [0.560.0]: https://github.com/danielraffel/pulp/releases/tag/v0.560.0
 [0.559.0]: https://github.com/danielraffel/pulp/releases/tag/v0.559.0
