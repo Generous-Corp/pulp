@@ -158,6 +158,7 @@ TEST_CASE("DesignIR round-trips faithful_svg render mode and interactive element
     knob.svg_patch_d = "M120 208L120 200";
     knob.default_value = 0.33f;
     knob.source_node_id = "3:225";
+    knob.param_key = "filter.cutoff";   // host-param binding key (geometry-detected control)
     ir.root.interactive_elements.push_back(knob);
 
     IRInteractiveElement knob2;          // a second, minimal overlay (no source id)
@@ -184,11 +185,13 @@ TEST_CASE("DesignIR round-trips faithful_svg render mode and interactive element
     REQUIRE(k0.svg_patch_d == "M120 208L120 200");
     REQUIRE(k0.default_value == 0.33f);
     REQUIRE(k0.source_node_id == "3:225");
+    REQUIRE(k0.param_key == "filter.cutoff");   // binding key survives round-trip
 
     const auto& k1 = parsed.root.interactive_elements[1];
     REQUIRE(k1.svg_patch_d.empty());
     REQUIRE_FALSE(k1.source_node_id.has_value());
     REQUIRE(k1.default_value == 0.5f);
+    REQUIRE(k1.param_key.empty());              // absent key stays empty (omitted from JSON)
 }
 
 TEST_CASE("DesignIR defaults to normal render mode and omits faithful_svg keys",

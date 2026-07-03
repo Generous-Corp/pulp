@@ -405,6 +405,16 @@ struct IRInteractiveElement {
     /// PulpEmbedParamInfo.name); unit/range are not carried here yet.
     std::string label;
 
+    /// Host-parameter binding key for this control, e.g. "filter.cutoff". Empty
+    /// when the importer found no binding hint (a geometry-detected knob with a
+    /// bare layer name) — the control still renders and drags, but drives nothing
+    /// until a key is supplied. Maps 1:1 to DesignFrameElement::param_key, which
+    /// DesignFrameView resolves against the framework-agnostic HostParamSurface
+    /// (JUCE APVTS / iPlug2 / StateStore) when route_changes_to_host_params is on.
+    /// This is the binding channel for geometry-detected interactive elements —
+    /// the recognized-widget path lowers its binding through IRNode instead.
+    std::string param_key;
+
     // ── Import report (resolution provenance) ────────────────────────────
     // Carried from the importer (where all three signals — geometry/affordance,
     // name/token, component identity — exist) THROUGH to the host materialize
@@ -434,7 +444,9 @@ struct IRInteractiveElement {
     /// Maps 1:1 to DesignFrameElement::custom_props.
     std::string custom_props;
 
-    std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
+    /// Figma node id — provenance for the inspector's Wiring lens (maps a live
+    /// control back to its source node). NOT the host-param key; that is param_key.
+    std::optional<std::string> source_node_id;
 };
 
 struct IRNode {

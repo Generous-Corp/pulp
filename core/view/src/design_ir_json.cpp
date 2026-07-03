@@ -943,6 +943,10 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             }
             if (e.hasObjectMember("source_node_id") && e["source_node_id"].isString())
                 el.source_node_id = get_string(e, "source_node_id");
+            // Host-param binding key for a geometry-detected control (e.g.
+            // "filter.cutoff"); DesignFrameView routes gestures on it to the
+            // framework-agnostic HostParamSurface. Absent for unbound knobs.
+            el.param_key = get_string(e, "param_key");
             node.interactive_elements.push_back(std::move(el));
         }
         if (!node.interactive_elements.empty()) break;
@@ -1926,6 +1930,8 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                 out << ']';
             }
             write_string_member(out, ef, "source_node_id", el.source_node_id);
+            if (!el.param_key.empty())
+                write_string_member(out, ef, "param_key", el.param_key);
             out << '}';
         }
         out << ']';

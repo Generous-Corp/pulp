@@ -168,6 +168,26 @@ for swap, value patterns for value_label) land with P2's unified resolver. An
 reports it unrecognized and the parser emits a `log_warn` (the full ordered
 resolution ladder + import report is the P7 work).
 
+**Binding an interactive element to a host parameter (`param_key`).** A
+faithful_svg interactive element carries an optional `param_key` (e.g.
+`"filter.cutoff"`) that flows schema → `interactive_element.param_key` → IR
+`IRInteractiveElement::param_key` → `to_frame_elements()` →
+`DesignFrameElement::param_key`. This is the binding channel for
+**geometry-detected** controls — the Triaz case, where a knob is a custom design
+component (not a recognized Pulp-Library widget), so the recognized-widget path
+that lowers its binding through `IRNode` never fires. When ANY element in a frame
+carries a non-empty `param_key`, `make_faithful_svg_frame` auto-enables
+`route_changes_to_host_params(true)`, so a user gesture drives the
+framework-agnostic `HostParamSurface` (JUCE APVTS / iPlug2 / StateStore) directly
+via `element_for_param_key` / `sync_from_host_params`. It is inert until a
+producer emits a key: an all-unbound frame keeps routing OFF and behaves exactly
+as before (the public `on_element_changed` / `on_gesture_*` callbacks fire
+regardless of routing, so an existing consumer never changes). The producers do
+NOT emit `param_key` from a layer-name sigil yet — that lockstep
+(`faithful-vector.ts` + `figma_rest_export.py`, mirroring the recognized-widget
+`figma_binding_from_layer_name` sigil convention) is the follow-up that plugs
+into this ready runtime; until then, an annotated manifest supplies `param_key`.
+
 **Custom controls (P7 Tier-3) — the `name→View` factory registry.** A genuinely
 novel control resolves to `kind=custom`, which carries a `factory_id` (+ opaque
 `custom_props`, typically JSON Pulp doesn't parse). The runtime
