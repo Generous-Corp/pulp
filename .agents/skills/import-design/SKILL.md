@@ -7,6 +7,33 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## LOCAL-FIRST — never start with the REST script when Figma desktop is open (read this first)
+
+The headless REST exporter (`figma_rest_export.py`, used in the steps below) is
+the **CI / true-headless fallback**. On a dense real file it **WILL be
+rate-limited** (HTTP 429): Figma's `/images` render endpoint is a strict Tier-1
+budget keyed to the *file's* plan, so a big frame can 429 for many minutes. When
+Figma desktop is running on this machine (the common case), **do not reach for
+REST first** — the local paths have **no REST rate limit**. Order of preference:
+
+1. **Inspect / verify a design** (structure, screenshot, code context) → the
+   **Figma desktop MCP server**: `get_metadata` (node tree: ids, names, types,
+   positions), `get_screenshot` (returns a short-lived PNG URL — cheap), and
+   `get_design_context` (reference code + assets). This is how you look at a
+   real file, confirm layer names/structure, and grab a reference render for
+   validation — all rate-limit-free.
+2. **Export a scene for import** → the **Pulp Figma desktop plugin**
+   (`tools/figma-plugin`) exports the `figma-plugin-export-v1` envelope directly
+   from the open file, no REST.
+3. **Only in true headless / CI** (no desktop, no MCP) → `figma_rest_export.py`.
+   If it 429s, it now prints a loud one-time advisory and its terminal error
+   points back here — **switch to (1)/(2), don't wait out the backoff.**
+
+Everything below documents lane (3)'s mechanics because it's the scriptable one,
+but the ordering above governs *which lane to start in*. `figma_rest_export.py`
+mirrors the desktop plugin field-for-field, so a scene from lane (2) or (3) is
+interchangeable downstream.
+
 ## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
 
 When the goal is a **visually faithful (1:1)** import of a component that lives in
@@ -416,6 +443,23 @@ mind when touching this:
 - **Recognized-widget gate.** Synthesis only fires when `audio_widget != none`.
   A generic/visual frame that happens to carry a `binding` attribute gets NO
   synthesized binding — it stays a generic node. Don't loosen this gate.
+- **Opt-in LAYER-NAME binding (`figma_binding_from_layer_name`).** A recognized
+  widget can declare its binding WITHOUT the explicit `binding` component
+  property, via a sigil-prefixed layer name — `param:`, `bind:`, or `meter:`
+  followed by `"<module>.<param>"` (e.g. a knob layer named
+  `param:filter.cutoff_hz`). `normalize_figma_plugin_binding` resolves the binding
+  from the `binding` attribute FIRST, then falls back to the layer-name sigil;
+  the rest of the lowering (module/param split, param-vs-meter routing by
+  `audio_widget`, `pulp*` synthesis) is identical either way. The **sigil is
+  load-bearing**: a bare/ordinary layer name is NEVER treated as a binding (no
+  false positives from names like "Big Cutoff Knob") — only a control the designer
+  explicitly tagged binds by name. An explicit `binding` attribute always wins
+  over the name. Case-insensitive on the sigil. This is the recognized-widget
+  path; binding a *geometry-detected* faithful-vector overlay (a knob the importer
+  found by geometry, not a Pulp Library component) by layer name is a separate
+  `param_key`-on-`IRInteractiveElement` path — keep the sigil convention identical
+  across both when you wire it. Pin any change with a
+  `[layer-name-binding]` case in `test_design_import_sources.cpp`.
 - **Name→kind resolution matches whole WORD TOKENS, not substrings — in ALL
   THREE lanes.** The C++ `detect_audio_widget`, the TS
   `audioWidgetKindFromName` (`extract-pure.ts`), and the Python

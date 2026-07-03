@@ -3,6 +3,19 @@
 `figma-plugin-export-v1` envelope that `pulp import-design --from figma-plugin`
 consumes — no Figma desktop, no plugin click, no manual export.
 
+LOCAL-FIRST — READ THIS. This REST lane is the HEADLESS / CI fallback and it
+WILL be rate-limited (HTTP 429) on dense real files: `/images` is a strict
+Tier-1 endpoint budgeted by the *file's* plan, so a big frame can 429 for many
+minutes. When Figma desktop is open on this machine, DO NOT start here — the
+local paths have no REST rate limit:
+  1. INSPECT / verify a design (structure, screenshot, code context): the Figma
+     desktop MCP server — `get_metadata`, `get_screenshot`, `get_design_context`.
+  2. EXPORT a scene for import: the Pulp Figma desktop plugin (`tools/figma-plugin`)
+     exports the `figma-plugin-export-v1` envelope directly from the open file.
+  3. Only when neither is available (true headless / CI), use THIS script — and
+     if it 429s, switch to (1)/(2) rather than waiting out the backoff.
+The `.agents/skills/import-design` skill documents the ordering; keep it in sync.
+
 This is a faithful PORT of the Pulp Figma plugin's extractor, not an
 approximation: every field mapping mirrors
 `pulp-figma-plugin/tools/figma-plugin/src/extract.ts` + `serialize.ts`
@@ -37,9 +50,33 @@ import argparse, json, os, re, sys, time, urllib.error, urllib.parse, urllib.req
 # the documented diagnostic headers (rate-limit type, plan tier, upgrade link).
 FIGMA_MAX_RETRIES = 6
 
+# Shown ONCE, loudly, the first time a 429 forces a wait — so an interactive user
+# switches to a local path instead of silently waiting out minutes of backoff.
+_RATE_LIMIT_ADVICE = (
+    "\n"
+    "  ⚠  Figma REST is rate-limited (HTTP 429). This lane is the headless/CI\n"
+    "     FALLBACK. If Figma desktop is open, STOP waiting and use a LOCAL path\n"
+    "     (no REST rate limit):\n"
+    "       • inspect: Figma desktop MCP — get_metadata / get_screenshot /\n"
+    "         get_design_context\n"
+    "       • export a scene: the Pulp Figma desktop plugin (tools/figma-plugin)\n"
+    "     See the import-design skill's 'Local-first' section.\n"
+)
+_rate_limit_advice_shown = False
+
+def _advise_rate_limit_once():
+    global _rate_limit_advice_shown
+    if not _rate_limit_advice_shown:
+        _rate_limit_advice_shown = True
+        print(_RATE_LIMIT_ADVICE, file=sys.stderr)
+
 def figma_get(url, token=None, timeout=120, what="request", max_retries=FIGMA_MAX_RETRIES):
     """GET `url`, returning the response body as bytes. Honors Retry-After on 429
-    and retries transient failures up to `max_retries` times before raising."""
+    and retries transient failures up to `max_retries` times before raising.
+
+    On the FIRST 429 it prints a one-time local-first advisory (prefer the Figma
+    desktop MCP / plugin over this rate-limited REST lane) so an interactive run
+    doesn't sit silently through minutes of backoff."""
     RETRY_AFTER_CAP = 300  # never honor an absurd Retry-After (e.g. a misconfigured proxy)
     headers = {"X-Figma-Token": token} if token else {}
     attempt = 0
@@ -52,16 +89,20 @@ def figma_get(url, token=None, timeout=120, what="request", max_retries=FIGMA_MA
             transient = e.code == 429 or 500 <= e.code < 600
             if not transient or attempt >= max_retries:
                 if e.code == 429:
+                    _advise_rate_limit_once()
                     h = e.headers or {}
                     raise RuntimeError(
                         f"Figma {what}: rate-limited (HTTP 429) after {attempt} "
                         f"retr{'y' if attempt == 1 else 'ies'}. "
                         f"rate-limit-type={h.get('X-Figma-Rate-Limit-Type', '?')} "
                         f"plan-tier={h.get('X-Figma-Plan-Tier', '?')} "
-                        f"upgrade={h.get('X-Figma-Upgrade-Link', '')}".rstrip()) from e
+                        f"upgrade={h.get('X-Figma-Upgrade-Link', '')}".rstrip()
+                        + " — prefer the local Figma desktop MCP / plugin "
+                          "(see the import-design skill's Local-first section).") from e
                 raise
             wait = None
             if e.code == 429:
+                _advise_rate_limit_once()
                 try:
                     wait = int((e.headers or {}).get("Retry-After", ""))
                 except (TypeError, ValueError):
