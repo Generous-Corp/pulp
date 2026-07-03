@@ -16,7 +16,12 @@
 
 namespace {
 // ── EDIT ME LIVE ────────────────────────────────────────────────────────────
-constexpr pulp::examples::Osc kOsc = pulp::examples::Osc::Sine;
+// Flip this (or build the -DSYNTH_SAW variant) and rebuild to hot-swap the tone.
+#if defined(SYNTH_SAW)
+constexpr pulp::examples::Osc kOsc = pulp::examples::Osc::Saw;   // bright/buzzy
+#else
+constexpr pulp::examples::Osc kOsc = pulp::examples::Osc::Sine;  // pure/soft
+#endif
 // ─────────────────────────────────────────────────────────────────────────────
 }  // namespace
 
