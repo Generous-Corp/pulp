@@ -268,6 +268,26 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   escape), and the parity-registration check requires the test source to appear on
   a real `SOURCES`/`add_executable`/`target_sources`/`pulp_add_test_suite` line —
   a bare mention in a dead variable no longer counts.
+- **Conflict-marker guard (`conflict_marker_check.py`).** Whole-tree guard (not
+  diff-scoped): no tracked file may carry a git conflict marker. Born from the
+  incident where a squash-merge's stale side collided with an already-advanced
+  `project() VERSION` line and wrote `<<<<<<< / ======= / >>>>>>>` straight into
+  `CMakeLists.txt` (fixed in #5477), breaking every build until a human noticed.
+  Keyed on the start/base/end markers (`<<<<<<<` / `|||||||` / `>>>>>>>` at
+  column 0, followed by whitespace/EOL) — verified zero-false-positive across the
+  whole tracked tree, `external/` included; the `=======` separator is reported
+  only inside a real conflict block, so Markdown headings and ASCII banners stay
+  clean. Runs in three layers: `gates.sh` + the pre-push hook (local), the
+  `Versioning & Skill-Sync` workflow's **Conflict-marker guard** step (which scans
+  the pull_request MERGE ref, so a marker born from the merge itself is caught,
+  not only one on the PR head), and `conflict-marker-guard.yml` — a `push:main`
+  backstop that reddens the branch and opens a tracking issue if a marker reaches
+  main by any path (the squash case, where GitHub had no clean mergeable ref for
+  the PR job to inspect). Carries a `--selftest` in the fixture-test step. A
+  vendored fixture that legitimately ships markers is a reviewable `ALLOWLIST`
+  edit in the script. If the `push:main` guard reddens main, run
+  `python3 tools/scripts/conflict_marker_check.py` for the file:line list, resolve,
+  and push — the tracker auto-closes on the next clean push.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a
