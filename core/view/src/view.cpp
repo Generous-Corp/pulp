@@ -890,6 +890,12 @@ void View::add_child(std::unique_ptr<View> child) {
     child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
     children_.back()->on_attached();
+    // If this parent can already reach a FrameClock, tell the newly-grafted
+    // subtree so a self-subscribing descendant (a live Meter built offline)
+    // attaches to the already-present clock instead of silently missing it.
+    if (frame_clock()) {
+        children_.back()->notify_frame_clock_changed();
+    }
 }
 
 std::unique_ptr<View> View::remove_child(View* child) {
@@ -903,6 +909,11 @@ std::unique_ptr<View> View::remove_child(View* child) {
     child->set_host_params(nullptr);
     child->set_host_actions(nullptr);
     child->parent_ = nullptr;
+    // The removed subtree can no longer reach this parent's clock. Notify it so
+    // self-subscribing descendants (a live Meter that never got its own
+    // on_detached — remove_child only fires that on the removed root) drop their
+    // subscription now instead of lingering until the next tick.
+    child->notify_frame_clock_changed();
     auto owned = std::move(*it);
     children_.erase(it);
     return owned;
@@ -1270,6 +1281,22 @@ FrameClock* View::frame_clock() const {
     if (frame_clock_) return frame_clock_;
     if (parent_) return parent_->frame_clock();
     return nullptr;
+}
+
+void View::set_frame_clock(FrameClock* clock) {
+    frame_clock_ = clock;
+    // Hosts build the tree first and install the clock afterward, so any
+    // descendant that self-subscribes on a reachable clock must be told the
+    // clock is now available — otherwise a Meter built before hosting would
+    // silently never subscribe.
+    notify_frame_clock_changed();
+}
+
+void View::notify_frame_clock_changed() {
+    on_frame_clock_changed();
+    for (auto& child : children_) {
+        if (child) child->notify_frame_clock_changed();
+    }
 }
 
 void View::request_repaint() {

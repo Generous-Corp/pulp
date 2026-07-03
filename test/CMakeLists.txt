@@ -4046,6 +4046,9 @@ pulp_add_test_suite(pulp-test-animation LIBRARIES pulp::view)
 # FrameClock tests
 pulp_add_test_suite(pulp-test-frame-clock LIBRARIES pulp::view)
 
+# Meter/scalar host->view source + subscription lifecycle
+pulp_add_test_suite(pulp-test-meter-source LIBRARIES pulp::view)
+
 # Motion bedrock tests.
 pulp_add_test_suite(pulp-test-motion LIBRARIES pulp::view)
 
