@@ -196,6 +196,39 @@ TEST_CASE("Resampler integer-ratio fast path preserves in-band amplitude",
     }
 }
 
+TEST_CASE("Resampler output is invariant to input block chunking",
+          "[signal][resampler]") {
+    // The streaming phase accumulator + delay line must make the resampled stream
+    // independent of how the input is chunked across process_block calls. Feeding
+    // the same signal in one shot vs in odd 37-sample chunks exercises the delay
+    // line at every write position — including the dual-write mirror that keeps the
+    // tap window contiguous — so a ring-index off-by-one surfaces here as a
+    // one-shot-vs-chunked mismatch. The two runs must be bit-identical.
+    struct Case { double in; double out; };
+    for (const Case c : {Case{44100.0, 48000.0}, Case{48000.0, 44100.0}, Case{48000.0, 96000.0}}) {
+        const auto in = sine(1234.0, c.in, 6000);
+
+        Resampler one;
+        one.prepare(c.in, c.out, 1, in.size());
+        const auto ref = resample_mono(one, in, one.max_output_for(in.size()));
+
+        Resampler chunked;
+        chunked.prepare(c.in, c.out, 1, 4096);
+        std::vector<float> got;
+        for (std::size_t off = 0; off < in.size();) {
+            const std::size_t chunk = std::min<std::size_t>(37u, in.size() - off);
+            std::vector<float> obuf(chunked.max_output_for(chunk) + 4u, 0.0f);
+            const std::size_t produced =
+                chunked.process_block_mono(in.data() + off, chunk, obuf.data(), obuf.size());
+            got.insert(got.end(), obuf.begin(), obuf.begin() + static_cast<std::ptrdiff_t>(produced));
+            off += chunk;
+        }
+        INFO("ratio " << c.in << "->" << c.out << " one=" << ref.size() << " chunked=" << got.size());
+        REQUIRE(got.size() == ref.size());
+        for (std::size_t i = 0; i < ref.size(); ++i) REQUIRE(got[i] == ref[i]);
+    }
+}
+
 TEST_CASE("Resampler 1 kHz round-trip 44.1→48→44.1 reconstructs the sine",
           "[signal][resampler]") {
     // Acceptance check uses sample-by-sample RMS-error against a
