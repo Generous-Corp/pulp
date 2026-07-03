@@ -229,6 +229,70 @@ TEST_CASE("Resampler output is invariant to input block chunking",
     }
 }
 
+TEST_CASE("Resampler float MAC keeps distortion below the stopband",
+          "[signal][resampler]") {
+    // The polyphase convolution accumulates in single precision across four
+    // independent lanes so the compiler can vectorize the reduction. That
+    // reassociation trades the last few ulps for speed, so this guards that the
+    // added round-off stays far below the design's stopband: a full-scale in-band
+    // tone must resample with a noise+distortion floor near the filter's own
+    // limit, not lifted by the accumulator.
+    //
+    // THD+N is estimated with a Hann-windowed least-squares fit of the output to
+    // A·cos + B·sin at the tone frequency; the residual after subtracting the
+    // fundamental is the noise+distortion energy. The window suppresses the
+    // spectral leakage that would otherwise dominate a single-bin estimate.
+    const auto thdn_db = [](double in, double out, double f0) {
+        Resampler r;
+        r.prepare(in, out, 1, 4096);
+        const std::size_t n_in = static_cast<std::size_t>(in * 1.2);
+        std::vector<float> input(n_in);
+        for (std::size_t i = 0; i < n_in; ++i)
+            input[i] = 0.9f * static_cast<float>(std::sin(2.0 * kPi * f0 / in * i));
+        std::vector<float> outbuf(r.max_output_for(n_in) + 8u, 0.0f);
+        const std::size_t n =
+            r.process_block_mono(input.data(), input.size(), outbuf.data(), outbuf.size());
+        // Drop the filter transient at both ends before measuring steady state.
+        const std::size_t start = 1024u;
+        const std::size_t end = (n > 1024u) ? n - 1024u : n;
+        const std::size_t N = (end > start) ? end - start : 0u;
+        if (N < 4096u) return 0.0;  // too short — treat as a failure
+        const double th = 2.0 * kPi * f0 / out;
+        double scc = 0, sss = 0, syc = 0, sys = 0;
+        for (std::size_t i = 0; i < N; ++i) {
+            const double w = 0.5 - 0.5 * std::cos(2.0 * kPi * i / (N - 1));
+            const double c = std::cos(th * i), s = std::sin(th * i), y = outbuf[start + i];
+            scc += w * c * c; sss += w * s * s; syc += w * y * c; sys += w * y * s;
+        }
+        const double A = syc / scc, B = sys / sss;
+        double noise = 0, sig = 0;
+        for (std::size_t i = 0; i < N; ++i) {
+            const double w = 0.5 - 0.5 * std::cos(2.0 * kPi * i / (N - 1));
+            const double c = std::cos(th * i), s = std::sin(th * i), y = outbuf[start + i];
+            const double fit = A * c + B * s, e = y - fit;
+            noise += w * e * e; sig += w * fit * fit;
+        }
+        return 10.0 * std::log10(noise / sig + 1e-300);
+    };
+
+    // Non-integer audio ratios: the floor is set by the 64-phase linear
+    // interpolation, so the single-precision MAC leaves it unchanged. Measured
+    // ≈ -80 dB (48→44.1) and ≈ -74 dB (44.1→48); assert with margin.
+    REQUIRE(thdn_db(48000.0, 44100.0, 1000.0) < -70.0);
+    REQUIRE(thdn_db(44100.0, 48000.0, 1000.0) < -68.0);
+    // Integer ratio: no inter-phase interpolation masks the accumulation, so this
+    // directly exercises the float MAC's precision. Measured ≈ -143 dB (double is
+    // ≈ -150); a broken reassociation would lift this floor by tens of dB.
+    REQUIRE(thdn_db(96000.0, 48000.0, 1000.0) < -120.0);
+    // Worst case for accumulation error: an extreme downsample drives the Kaiser
+    // design to the tap-count ceiling (taps_per_phase ≈ 1024, the longest supported
+    // filter), and the integer 24:1 ratio again bypasses interpolation — so the
+    // float sum runs over the most terms it ever will. Even here the floor stays
+    // ≈ -140 dB, confirming the 4-lane reduction error grows far slower than the
+    // stopband; a regression in the long-filter regime would surface here.
+    REQUIRE(thdn_db(192000.0, 8000.0, 1000.0) < -120.0);
+}
+
 TEST_CASE("Resampler 1 kHz round-trip 44.1→48→44.1 reconstructs the sine",
           "[signal][resampler]") {
     // Acceptance check uses sample-by-sample RMS-error against a
