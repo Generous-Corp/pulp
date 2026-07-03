@@ -307,6 +307,11 @@ private:
             runtime::log_warn("[reload-shell] initial logic rejected ({}) — passthrough; "
                               "a logic with parameters needs a full plugin reload to take effect",
                               rejected->detail);
+            // Surface the structured per-field diff (fingerprint/contract) so a
+            // rejection says WHAT differs (e.g. cpp_standard host vs logic), not
+            // just "mismatch" — the difference between a 5-minute fix and an hour.
+            for (const auto& issue : rejected->issues)
+                runtime::log_warn("[reload-shell]   diff: {}", issue);
             return;
         }
         GatedImage& image = std::get<GatedImage>(gated);
