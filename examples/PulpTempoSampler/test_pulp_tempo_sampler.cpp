@@ -868,6 +868,38 @@ TEST_CASE("tempo override persists across serialize/deserialize",
     CHECK_FALSE(g.proc->tempo_linked());                 // still manual
 }
 
+// Full "save the session, reopen it" restore: the mode + Direction/Loop settings
+// (StateStore params) AND the loaded sample (plugin state) all come back — the
+// StateStore blob + plugin-state blob are exactly what a host persists together.
+TEST_CASE("mode + settings + sample all restore across save/reopen",
+          "[tempo-sampler][persist]") {
+    std::vector<std::uint8_t> store_blob, plugin_blob;
+    {
+        Fixture a;
+        a.store.set_value(kPlaybackMode, 1.0f);   // One-Shot (non-default)
+        a.store.set_value(kDirection, 1.0f);      // Reverse
+        a.store.set_value(kTempoLoop, 1.0f);
+        a.store.set_value(kLoopMode, 2.0f);       // Ping-Pong
+        auto loop = percussive_loop(48000, 4);
+        const float* ch[1] = {loop.data()};
+        REQUIRE(a.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return a.proc->has_sample(); }));
+        store_blob = a.store.serialize();
+        plugin_blob = a.proc->serialize_plugin_state();
+        REQUIRE(!plugin_blob.empty());
+    }
+    Fixture b;                                    // fresh instance (close + reopen)
+    REQUIRE_FALSE(b.proc->has_sample());
+    REQUIRE(b.store.deserialize(std::span<const std::uint8_t>(store_blob.data(), store_blob.size())));
+    REQUIRE(b.proc->deserialize_plugin_state(
+        std::span<const std::uint8_t>(plugin_blob.data(), plugin_blob.size())));
+    REQUIRE(wait_for([&] { return b.proc->has_sample(); }));
+    CHECK(b.store.get_value(kPlaybackMode) == 1.0f);   // mode restored
+    CHECK(b.store.get_value(kDirection) == 1.0f);      // Direction restored
+    CHECK(b.store.get_value(kTempoLoop) == 1.0f);      // Loop on
+    CHECK(b.store.get_value(kLoopMode) == 2.0f);       // Ping-Pong restored
+}
+
 // TEMPO LINK: default linked (follows host); a manual value unlinks; re-link
 // follows the host again. Mirrors the editor's LINK toggle + drag-to-unlink.
 TEST_CASE("tempo LINK: default-linked follows host, manual unlinks, relink re-follows",
