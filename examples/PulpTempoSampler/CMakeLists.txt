@@ -12,7 +12,7 @@ pulp_add_plugin(PulpTempoSampler
     PLUGIN_NAME       "PulpTempoSampler"
     BUNDLE_ID         "com.pulp.tempo-sampler"
     MANUFACTURER      "Pulp"
-    VERSION           "1.6.1"
+    VERSION           "1.7.0"
     CATEGORY          Instrument
     PLUGIN_CODE       "PTsm"
     MANUFACTURER_CODE "Pulp"
