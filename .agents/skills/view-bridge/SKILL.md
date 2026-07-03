@@ -461,6 +461,26 @@ fresh lib instead of segfaulting at first paint.
    `drawRect:` and GPU `paint_scene`) call `View::paint_overlays`
    INSIDE the save/translate/scale block, matching the standalone
    `MacGpuWindowHost::paint_scene` overlay-inside-transform rule.
+9. **A GPU display-link idle pump can outlive its `ViewBridge` — guard on
+   `ViewBridge::alive_token()`, not the host's own `alive_`.** The GPU
+   scripted-idle pump (`gpu_host_select.hpp::make_scripted_idle_pump`) is
+   dispatched to the main queue by `CVDisplayLink` and captures the bridge by
+   raw pointer. Two ways it runs after the bridge is gone: (a) a host reloading
+   the embedded view REPLACES the bridge (`_bridge = make_unique<…>`) while the
+   host + its idle callback survive, and (b) `CVDisplayLinkStop` does NOT join
+   an in-flight callback during teardown. The host's `alive_` token guards the
+   HOST, not the bridge, so it does not cover case (a). Fix: `ViewBridge` owns
+   its own `std::shared_ptr<std::atomic<bool>> alive_` (`alive_token()`), flipped
+   false FIRST in `~ViewBridge` before `close()`; the pump captures a COPY of
+   that token and no-ops when it reads false. This crashed the PulpTempoSampler
+   AU embedded in Ableton Live 12 (EXC_BAD_ACCESS in `store()`/`scripted_ui()`
+   on a freed bridge, v1.6.1). The token makes the no-op DECISION safe — it does
+   NOT make a cross-thread deref of the raw bridge pointer safe, so teardown must
+   stay on the main thread. General rule: any display-link/cross-thread callback
+   capturing a raw pointer to a REPLACEABLE owned object needs a liveness token
+   on THAT object, not just its host. Test: `[idle-pump][crash]` in
+   `test_view_bridge.cpp` builds the pump, destroys the bridge, calls the pump →
+   no-op instead of use-after-free.
 
 ## Tests
 
@@ -473,9 +493,11 @@ fresh lib instead of segfaulting at first paint.
 - `"ViewBridge destructor closes view"`
 - `"ViewBridge cross-format lifecycle invariants"` (VST3 / CLAP / AU v2 /
   AU v3 / Standalone / failed-attach replay)
+- `"scripted idle pump no-ops after the ViewBridge is destroyed"`
+  (`[idle-pump][crash]`) — the GPU display-link pump liveness-token guard
+  (pitfall 9); build the pump, `reset()` the bridge, call the pump → no UAF.
 
-7 cases, 67 assertions. Run with
-`ctest --test-dir build -R ViewBridge --output-on-failure`.
+Run with `ctest --test-dir build -R ViewBridge --output-on-failure`.
 
 ## Remote views
 
