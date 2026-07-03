@@ -168,6 +168,17 @@ jobs:
           python3 tools/scripts/processing_model_terms_lint.py
           python3 tools/scripts/single_backend_guard.py
 
+      - name: Conflict-marker guard
+        # Whole-tree invariant: no tracked file may carry a git conflict marker.
+        # actions/checkout resolves a pull_request to the MERGE ref, so this
+        # scans the merged result — catching a marker born from the merge itself
+        # (the CMakeLists.txt VERSION-line incident), not only one committed on
+        # the PR head. Hard-fail, no bypass. A dedicated push:main workflow
+        # (conflict-marker-guard.yml) backstops the case where a squash lands a
+        # marker without a clean mergeable ref for this job to inspect.
+        run: |
+          python3 tools/scripts/conflict_marker_check.py
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
@@ -180,3 +191,4 @@ jobs:
           python3 tools/scripts/test_check_cli_mcp_parity.py
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
+          python3 tools/scripts/conflict_marker_check.py --selftest

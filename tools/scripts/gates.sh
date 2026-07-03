@@ -69,6 +69,7 @@ CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
 CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
+CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -247,6 +248,20 @@ if [ -f "$FORK_GUARD" ]; then
     echo "" >&2
     echo "▸ scheduled-workflow fork-guard check" >&2
     if ! "$PYTHON" "$FORK_GUARD"; then
+        fail=1
+    fi
+fi
+
+# ── 12. conflict-marker guard ──────────────────────────────────────────────
+# Global invariant (not diff-scoped): no tracked file may carry a git conflict
+# marker. A squash-merge whose stale side collided with an advanced line can
+# write markers straight onto main (it happened to CMakeLists.txt's VERSION
+# line). Sub-second whole-tree scan; zero-false-positive on the start/base/end
+# markers.
+if [ -f "$CONFLICT_MARKER_GUARD" ]; then
+    echo "" >&2
+    echo "▸ conflict-marker guard (no committed <<<<<<< / ======= / >>>>>>>)" >&2
+    if ! "$PYTHON" "$CONFLICT_MARKER_GUARD"; then
         fail=1
     fi
 fi
