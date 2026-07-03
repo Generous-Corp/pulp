@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc":     6275,
+      "max_loc":     6279,
       "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
@@ -87,8 +87,8 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2790,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised from 2775: added scrollWheel routing to an open ComboBox popup (so a wheel over an overflowing menu inside a ScrollView scrolls it instead of closing it); the mouseDown + scrollWheel popup handling was deduplicated into the shared routeToOpenComboPopup helper, so the net growth is the new feature, not copy-paste."
+      "max_loc": 2752,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Lowered from 2790: the duplicated view_needs_continuous_frames predicate was promoted to the shared pulp::view::needs_continuous_frames (continuous_frames.hpp) and removed from this host."
     },
     {
       "path": "core/view/src/design_import.cpp",
