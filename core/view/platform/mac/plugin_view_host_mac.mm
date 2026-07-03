@@ -14,6 +14,7 @@
 #include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
 #import <Cocoa/Cocoa.h>
 // CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
@@ -936,38 +937,10 @@ static void detach_child_view_from_host(NSView* container, void* child_view_hand
 
 namespace pulp::view {
 
-// Shared frame-pump helpers used by BOTH the CPU and GPU plugin hosts so the
-// continuous-repaint + widget-animation behaviour is identical on either path.
-// Pure functions over the view tree (no host state).
-static bool view_needs_continuous_frames(View* view) {
-    if (!view) return false;
-    if (view->wants_continuous_repaint()) return true;
-    if (auto* k = dynamic_cast<Knob*>(view)) {
-        if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-            return true;
-    }
-    if (auto* t = dynamic_cast<Toggle*>(view)) {
-        if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-            return true;
-    }
-    if (auto* f = dynamic_cast<Fader*>(view)) {
-        if (f->hover_scale() > 1.01f || f->shader_uses_time())
-            return true;
-    }
-    if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-        if (sv->scroll_animating()) return true;
-    }
-    if (view->animation_play_state() != "paused") {
-        for (const auto& a : view->active_animations()) {
-            if (a.active) return true;
-        }
-    }
-    for (size_t i = 0; i < view->child_count(); ++i) {
-        if (view_needs_continuous_frames(view->child_at(i))) return true;
-    }
-    return false;
-}
-
+// Shared frame-pump helper used by BOTH the CPU and GPU plugin hosts so the
+// widget-animation behaviour is identical on either path. Pure function over
+// the view tree (no host state). The companion continuous-frame predicate is
+// the shared pulp::view::needs_continuous_frames() (continuous_frames.hpp).
 static void advance_widget_animations(View* view, float dt) {
     if (!view) return;
     if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
@@ -1127,7 +1100,7 @@ public:
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
                 advance_widget_animations(&self->root_, 1.0f / 60.0f);
-                if (self->view_ && view_needs_continuous_frames(&self->root_))
+                if (self->view_ && pulp::view::needs_continuous_frames(&self->root_))
                     [self->view_ setNeedsDisplay:YES];
                 state->queued.store(false, std::memory_order_release);
             }
@@ -1856,7 +1829,7 @@ private:
         paint_scene(*canvas);
 
         continuous_frames_.store(
-            view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path
@@ -1984,7 +1957,7 @@ private:
                     // FIRST so any request_repaint they trigger is seen below.
                     if (self->idle_callback_) self->idle_callback_();
 
-                    bool animate = view_needs_continuous_frames(&self->root_);
+                    bool animate = pulp::view::needs_continuous_frames(&self->root_);
                     bool tick_subscribers = self->frame_clock_.has_active_subscribers();
                     if (!self->needs_repaint_.load(std::memory_order_relaxed) &&
                         !animate && !tick_subscribers) {
@@ -2066,35 +2039,8 @@ private:
     }
 
     // ── Continuous-frame / animation drivers (parity with MacGpuWindowHost) ──
-    static bool view_needs_continuous_frames(View* view) {
-        if (!view) return false;
-        if (view->wants_continuous_repaint()) return true;
-        if (auto* k = dynamic_cast<Knob*>(view)) {
-            if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-                return true;
-        }
-        if (auto* t = dynamic_cast<Toggle*>(view)) {
-            if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-                return true;
-        }
-        if (auto* f = dynamic_cast<Fader*>(view)) {
-            if (f->hover_scale() > 1.01f || f->shader_uses_time())
-                return true;
-        }
-        if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-            if (sv->scroll_animating()) return true;
-        }
-        if (view->animation_play_state() != "paused") {
-            for (const auto& a : view->active_animations()) {
-                if (a.active) return true;
-            }
-        }
-        for (size_t i = 0; i < view->child_count(); ++i) {
-            if (view_needs_continuous_frames(view->child_at(i))) return true;
-        }
-        return false;
-    }
-
+    // The continuous-frame predicate is the shared
+    // pulp::view::needs_continuous_frames() (continuous_frames.hpp).
     static void advance_widget_animations(View* view, float dt) {
         if (!view) return;
         if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);

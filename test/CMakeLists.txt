@@ -1476,6 +1476,10 @@ pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
 # fixed-design content into the current window.
 pulp_add_test_suite(pulp-test-view-design-viewport LIBRARIES pulp::view)
 
+# Shared continuous-frame predicate (needs_continuous_frames) the window /
+# plugin-view hosts and a foreign-host embed tick gate repaint on.
+pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
+
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the
 # PluginViewHost virtuals + CPU-host inverse mouse mapping (GPU section

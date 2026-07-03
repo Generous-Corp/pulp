@@ -367,6 +367,7 @@ target_sources(pulp-view-core PRIVATE
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
     src/view.cpp
+    src/continuous_frames.cpp
     src/host_param_surface.cpp
     src/yoga_layout.cpp
     src/layout_snapshot.cpp
