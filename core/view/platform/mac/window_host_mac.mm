@@ -5,6 +5,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/continuous_frames.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
@@ -2440,45 +2441,8 @@ private:
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
 
-    static bool view_needs_continuous_frames(View* view) {
-        if (!view) return false;
-        if (view->wants_continuous_repaint()) return true;
-
-        if (auto* k = dynamic_cast<Knob*>(view)) {
-            if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-                return true;
-        }
-        if (auto* t = dynamic_cast<Toggle*>(view)) {
-            if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-                return true;
-        }
-        if (auto* f = dynamic_cast<Fader*>(view)) {
-            if (f->hover_scale() > 1.01f || f->shader_uses_time())
-                return true;
-        }
-        if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-            if (sv->scroll_animating()) return true;
-        }
-
-        // CSS animations on a generic View must keep the CVDisplayLink loop
-        // alive. tick_animations()
-        // is called every frame in advance_widget_animations, but
-        // without a continuous-frame request the loop stalls after
-        // needs_repaint_ clears once. Check for any unpaused active
-        // CSS animation; matches the gate inside tick_animations()
-        // (early-out when animation_play_state_ == "paused").
-        if (view->animation_play_state() != "paused") {
-            for (const auto& a : view->active_animations()) {
-                if (a.active) return true;
-            }
-        }
-
-        for (size_t i = 0; i < view->child_count(); ++i) {
-            if (view_needs_continuous_frames(view->child_at(i))) return true;
-        }
-        return false;
-    }
-
+    // The continuous-frame predicate is the shared
+    // pulp::view::needs_continuous_frames() (continuous_frames.hpp).
     static void advance_widget_animations(View* view, float dt) {
         if (!view) return;
         if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
@@ -2659,7 +2623,7 @@ private:
         paint_scene(*canvas);
 
         continuous_frames_.store(
-            view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
         skia_surface_->end_frame();   // submit Graphite recording
@@ -2718,7 +2682,7 @@ private:
                             return;
                     }
 
-                    bool animate = view_needs_continuous_frames(&self->root_);
+                    bool animate = pulp::view::needs_continuous_frames(&self->root_);
                     bool tick_subscribers = self->frame_clock_.has_active_subscribers();
                     if (!self->needs_repaint_.load(std::memory_order_relaxed) && !animate && !tick_subscribers) {
                         self->continuous_frames_.store(false, std::memory_order_relaxed);
