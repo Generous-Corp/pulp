@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc":     6279,
+      "max_loc":     6282,
       "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
@@ -117,8 +117,8 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1658,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions)"
+      "max_loc": 1674,
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook — on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed — powering paint-safe meter sources)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",
