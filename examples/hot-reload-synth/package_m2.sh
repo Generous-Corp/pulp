@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Build the signed M2 installer: the hot-reload SYNTH (instrument) — AU/VST3/CLAP/
-# standalone — plus its sine/saw logic variants + a swap.sh, seeding the sine
-# variant to the watched path on install. Reproducible replacement for the M1
-# ad-hoc pkg build. Requires the built artifacts + signing creds.
+# Build the signed M2 installer: TWO hot-reload demos, both AU/VST3/CLAP/standalone,
+# each with its logic variants + a swap script, seeding the initial variant on
+# install. Reproducible replacement for the M1 ad-hoc pkg build.
+#   SYNTH  (instrument, aumu) — swap.sh  sine|saw    (hear the oscillator morph)
+#   MORPH  (effect, aufx)     — morph.sh warm|harsh  (SEE editor blue/red + HEAR sine/square)
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -15,48 +16,71 @@ security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$PULP_SIGN_KEYCHAIN" 2>/de
 APP="$PULP_SIGN_IDENTITY_HASH"; INST="$PULP_SIGN_INSTALLER_HASH"; KC="$PULP_SIGN_KEYCHAIN"
 sign() { codesign --force --timestamp --options runtime --sign "$APP" --keychain "$KC" "$1"; }
 
-AU="$build/AU/Pulp Hot-Reload Synth.component"
-VST3="$build/VST3/Pulp Hot-Reload Synth.vst3"
-CLAP="$build/CLAP/Pulp Hot-Reload Synth.clap"
-APPB="$build/examples/hot-reload-synth/Pulp Hot-Reload Synth.app"
-SINE="$build/examples/hot-reload-synth/logic.dylib"
-SAW="$build/examples/hot-reload-synth/logic-saw.dylib"
-for f in "$AU" "$VST3" "$CLAP" "$APPB" "$SINE" "$SAW"; do [ -e "$f" ] || { echo "MISSING: $f"; exit 1; }; done
+# synth artifacts
+S_AU="$build/AU/Pulp Hot-Reload Synth.component"
+S_VST3="$build/VST3/Pulp Hot-Reload Synth.vst3"
+S_CLAP="$build/CLAP/Pulp Hot-Reload Synth.clap"
+S_APP="$build/examples/hot-reload-synth/Pulp Hot-Reload Synth.app"
+S_SINE="$build/examples/hot-reload-synth/logic.dylib"
+S_SAW="$build/examples/hot-reload-synth/logic-saw.dylib"
+# morph artifacts
+M_AU="$build/AU/Pulp Hot-Reload Morph.component"
+M_VST3="$build/VST3/Pulp Hot-Reload Morph.vst3"
+M_CLAP="$build/CLAP/Pulp Hot-Reload Morph.clap"
+M_APP="$build/examples/hot-reload-morph/Pulp Hot-Reload Morph.app"
+M_WARM="$build/examples/hot-reload-morph/logic.dylib"
+M_HARSH="$build/examples/hot-reload-morph/logic-harsh.dylib"
+for f in "$S_AU" "$S_VST3" "$S_CLAP" "$S_APP" "$S_SINE" "$S_SAW" \
+         "$M_AU" "$M_VST3" "$M_CLAP" "$M_APP" "$M_WARM" "$M_HARSH"; do
+    [ -e "$f" ] || { echo "MISSING: $f"; exit 1; }
+done
 
 echo "== sign artifacts =="
-sign "$SINE"; sign "$SAW"
-sign "$AU"; sign "$VST3"; sign "$CLAP"; sign "$APPB"
+for f in "$S_SINE" "$S_SAW" "$M_WARM" "$M_HARSH" \
+         "$S_AU" "$S_VST3" "$S_CLAP" "$S_APP" "$M_AU" "$M_VST3" "$M_CLAP" "$M_APP"; do
+    sign "$f"
+done
 
 echo "== assemble pkgroot =="
-rm -rf "$out"; pkgroot="$out/root"; scripts="$out/scripts"
+rm -rf "$out"; pkgroot="$out/root"; scripts="$out/scripts"; sup="$pkgroot/Library/Application Support/PulpHotReloadM2"
 mkdir -p "$pkgroot/Library/Audio/Plug-Ins/Components" \
          "$pkgroot/Library/Audio/Plug-Ins/VST3" \
          "$pkgroot/Library/Audio/Plug-Ins/CLAP" \
-         "$pkgroot/Applications" \
-         "$pkgroot/Library/Application Support/PulpHotReloadM2" "$scripts"
-cp -R "$AU"  "$pkgroot/Library/Audio/Plug-Ins/Components/"
-cp -R "$VST3" "$pkgroot/Library/Audio/Plug-Ins/VST3/"
-cp -R "$CLAP" "$pkgroot/Library/Audio/Plug-Ins/CLAP/"
-cp -R "$APPB" "$pkgroot/Applications/"
-cp "$SINE" "$pkgroot/Library/Application Support/PulpHotReloadM2/logic-sine.dylib"
-cp "$SAW"  "$pkgroot/Library/Application Support/PulpHotReloadM2/logic-saw.dylib"
-cat > "$pkgroot/Library/Application Support/PulpHotReloadM2/swap.sh" <<'SW'
+         "$pkgroot/Applications" "$sup" "$scripts"
+cp -R "$S_AU" "$M_AU"     "$pkgroot/Library/Audio/Plug-Ins/Components/"
+cp -R "$S_VST3" "$M_VST3" "$pkgroot/Library/Audio/Plug-Ins/VST3/"
+cp -R "$S_CLAP" "$M_CLAP" "$pkgroot/Library/Audio/Plug-Ins/CLAP/"
+cp -R "$S_APP" "$M_APP"   "$pkgroot/Applications/"
+cp "$S_SINE" "$sup/synth-sine.dylib"; cp "$S_SAW" "$sup/synth-saw.dylib"
+cp "$M_WARM" "$sup/morph-warm.dylib"; cp "$M_HARSH" "$sup/morph-harsh.dylib"
+
+cat > "$sup/swap.sh" <<'SW'
 #!/bin/bash
-# Hot-swap the running synth's oscillator with no reopen: ./swap.sh sine|saw
+# Hot-swap the running SYNTH oscillator (no reopen): ./swap.sh sine|saw
 v="${1:-}"; case "$v" in sine|saw);; *) echo "usage: $0 sine|saw"; exit 2;; esac
 dest="$HOME/.pulp/hot-reload-synth/logic.dylib"; mkdir -p "$(dirname "$dest")"
-cp "/Library/Application Support/PulpHotReloadM2/logic-$v.dylib" "$dest" && touch "$dest"
-echo "swapped -> $v (hold a chord in the synth and you'll hear the timbre morph)"
+cp "/Library/Application Support/PulpHotReloadM2/synth-$v.dylib" "$dest" && touch "$dest"
+echo "synth -> $v (hold a chord; the timbre morphs live)"
 SW
-chmod +x "$pkgroot/Library/Application Support/PulpHotReloadM2/swap.sh"
+cat > "$sup/morph.sh" <<'MW'
+#!/bin/bash
+# Hot-swap the running MORPH DSP+editor (no reopen): ./morph.sh warm|harsh
+v="${1:-}"; case "$v" in warm|harsh);; *) echo "usage: $0 warm|harsh"; exit 2;; esac
+dest="$HOME/.pulp/hot-reload-morph/logic.dylib"; mkdir -p "$(dirname "$dest")"
+cp "/Library/Application Support/PulpHotReloadM2/morph-$v.dylib" "$dest" && touch "$dest"
+echo "morph -> $v (the editor flips blue WARM/red HARSH + the tremolo sine/square)"
+MW
+chmod +x "$sup/swap.sh" "$sup/morph.sh"
 
 cat > "$scripts/postinstall" <<'PI'
 #!/bin/bash
-# Seed the sine variant to the console user's watched path so the synth sounds
-# on first load (the AU watches $HOME/.pulp/hot-reload-synth/logic.dylib).
+# Seed each demo's initial variant to the console user's watched path so the
+# plugins sound + look right on first load.
 u=$(stat -f%Su /dev/console); h=$(dscl . -read "/Users/$u" NFSHomeDirectory | awk '{print $2}')
-d="$h/.pulp/hot-reload-synth"; mkdir -p "$d"
-cp "/Library/Application Support/PulpHotReloadM2/logic-sine.dylib" "$d/logic.dylib"
+sup="/Library/Application Support/PulpHotReloadM2"
+mkdir -p "$h/.pulp/hot-reload-synth" "$h/.pulp/hot-reload-morph"
+cp "$sup/synth-sine.dylib" "$h/.pulp/hot-reload-synth/logic.dylib"
+cp "$sup/morph-warm.dylib" "$h/.pulp/hot-reload-morph/logic.dylib"
 chown -R "$u" "$h/.pulp"
 exit 0
 PI
@@ -65,7 +89,7 @@ chmod +x "$scripts/postinstall"
 echo "== pkgbuild + productbuild (signed) =="
 mkdir -p "$out"
 pkgbuild --root "$pkgroot" --scripts "$scripts" \
-    --identifier com.pulp.hot-reload-synth.m2 --version 1.0.0 \
+    --identifier com.pulp.hot-reload.m2 --version 1.0.0 \
     --install-location / "$out/component.pkg"
 productbuild --package "$out/component.pkg" --sign "$INST" --keychain "$KC" \
     "$out/Pulp-Hot-Reload-M2.pkg"
