@@ -7,6 +7,33 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## LOCAL-FIRST — never start with the REST script when Figma desktop is open (read this first)
+
+The headless REST exporter (`figma_rest_export.py`, used in the steps below) is
+the **CI / true-headless fallback**. On a dense real file it **WILL be
+rate-limited** (HTTP 429): Figma's `/images` render endpoint is a strict Tier-1
+budget keyed to the *file's* plan, so a big frame can 429 for many minutes. When
+Figma desktop is running on this machine (the common case), **do not reach for
+REST first** — the local paths have **no REST rate limit**. Order of preference:
+
+1. **Inspect / verify a design** (structure, screenshot, code context) → the
+   **Figma desktop MCP server**: `get_metadata` (node tree: ids, names, types,
+   positions), `get_screenshot` (returns a short-lived PNG URL — cheap), and
+   `get_design_context` (reference code + assets). This is how you look at a
+   real file, confirm layer names/structure, and grab a reference render for
+   validation — all rate-limit-free.
+2. **Export a scene for import** → the **Pulp Figma desktop plugin**
+   (`tools/figma-plugin`) exports the `figma-plugin-export-v1` envelope directly
+   from the open file, no REST.
+3. **Only in true headless / CI** (no desktop, no MCP) → `figma_rest_export.py`.
+   If it 429s, it now prints a loud one-time advisory and its terminal error
+   points back here — **switch to (1)/(2), don't wait out the backoff.**
+
+Everything below documents lane (3)'s mechanics because it's the scriptable one,
+but the ordering above governs *which lane to start in*. `figma_rest_export.py`
+mirrors the desktop plugin field-for-field, so a scene from lane (2) or (3) is
+interchangeable downstream.
+
 ## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
 
 When the goal is a **visually faithful (1:1)** import of a component that lives in

@@ -725,5 +725,47 @@ class WidgetKindFromNameTest(unittest.TestCase):
         self.assertEqual(frx._tokenize_name("Dialog"), ["dialog"])
 
 
+class RateLimitAdviceTest(unittest.TestCase):
+    """A terminal 429 must fail LOUDLY toward the local-first path (Figma desktop
+    MCP / plugin), not silently — this is the codified fix for reaching for the
+    rate-limited REST lane when the local paths are available."""
+
+    def setUp(self):
+        frx._rate_limit_advice_shown = False  # reset the one-time latch
+
+    def _raise_429(self, *a, **k):
+        raise frx.urllib.error.HTTPError(
+            "https://api.figma.com/v1/images/x", 429, "Too Many Requests",
+            {"Retry-After": "300", "X-Figma-Rate-Limit-Type": "image-render"}, None)
+
+    def test_terminal_429_advises_local_first_and_prints_once(self):
+        import contextlib, io
+        orig = frx.urllib.request.urlopen
+        frx.urllib.request.urlopen = self._raise_429
+        try:
+            err = io.StringIO()
+            # max_retries=0 → the first 429 is terminal (no backoff sleep in the test).
+            with contextlib.redirect_stderr(err):
+                with self.assertRaises(RuntimeError) as cm:
+                    frx.figma_get("https://api.figma.com/v1/images/x",
+                                  token="t", what="frame SVG render", max_retries=0)
+            # The raised error points at the local-first path…
+            self.assertIn("Local-first", str(cm.exception))
+            # …and the loud one-time advisory named the local MCP + plugin.
+            adv = err.getvalue()
+            self.assertIn("get_screenshot", adv)
+            self.assertIn("Pulp Figma desktop plugin", adv)
+        finally:
+            frx.urllib.request.urlopen = orig
+
+    def test_advice_latch_prints_only_once(self):
+        frx._advise_rate_limit_once()
+        import contextlib, io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            frx._advise_rate_limit_once()  # already shown → silent
+        self.assertEqual(err.getvalue(), "")
+
+
 if __name__ == "__main__":
     unittest.main()
