@@ -1037,12 +1037,21 @@ log is NOT in the GHA store (`run view --job <id> --log` returns 0 lines), so
 read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
 `extract_keyboard_shortcuts does not catastrophically backtrack on large
 embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
-load). Recovery, once confirmed flaky: arm `gh pr merge <pr> --squash --auto`,
-then `ghapp run cancel <run>` (advisory legs are expendable), wait ~20–60s for
-`status: completed`, and `ghapp run rerun <run> --failed` — the flaky required
-leg reruns on the idle Studios, goes green, and the armed auto-merge fires. (Or
-`ghapp workflow run build.yml --ref <branch>` for a fresh run whose newer
-`macos` context supersedes the stale failure — do one or the other, not both.)
+load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
+`gh pr merge <pr> --squash --auto`, then **`shipyard rescue <pr> --rerun-failed`**.
+`rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
+failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
+the provider so the rerun lands local-first on the idle Studios; the armed
+auto-merge then fires when it goes green. Do NOT hand-crank the cancel+rerun
+unless `rescue` is unavailable. `shipyard ship` now also *detects* this exact
+wedge (validated green + a red required check that maps to a validated-green
+target) and prints the `shipyard rescue … --rerun-failed` line for you in its
+hand-back, so on a fresh block you usually just copy it. Manual fallback only if
+`rescue` is missing/older: `ghapp run cancel <run>` (advisory legs are
+expendable), wait ~20–60s for `status: completed`, then `ghapp run rerun <run>
+--failed`; the per-run rerun lock is why the cancel must come first. (Or `ghapp
+workflow run build.yml --ref <branch>` for a fresh run whose newer `macos`
+context supersedes the stale failure — do one or the other, not both.)
 
 **Prevention: retry transient flakes on the required leg.** `build.yml`'s
 non-Windows and Windows `ctest` steps run `--repeat until-pass:2` (mirroring
