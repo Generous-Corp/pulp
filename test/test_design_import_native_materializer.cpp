@@ -682,6 +682,65 @@ TEST_CASE("baked native materializer renders a faithful_svg node as a DesignFram
     CHECK(frame->panel_width() == 80.0f);   // the 80x80 panel, not the 100x100 frame
     CHECK(frame->panel_height() == 80.0f);
     CHECK(frame->element_value(0) == 0.5f);
+    // No param_key on the knob → the frame stays inert w.r.t. host params: the
+    // element carries no binding key and gestures do NOT self-route to the
+    // HostParamSurface (they fall back to on_value_changed).
+    CHECK(frame->element_param_key(0).empty());
+    CHECK_FALSE(frame->routes_changes_to_host_params());
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+}
+
+TEST_CASE("faithful_svg knob with a param_key self-wires to the host-param surface",
+          "[view][import][native-materializer][faithful-svg][host-params]") {
+    // A geometry-detected knob that carries a host-param binding key materializes
+    // with that key on its DesignFrameElement, and the frame enables host-param
+    // routing so a user gesture drives the framework-agnostic HostParamSurface
+    // directly (element_for_param_key resolves it). This is the binding channel
+    // for interactive elements that are NOT recognized Pulp-Library widgets.
+    const std::string encoded_payload =
+        "%3Csvg%20width%3D%22100%22%20height%3D%22100%22%20"
+        "xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E"
+        "%3Crect%20x%3D%2210%22%20y%3D%2210%22%20width%3D%2280%22%20height%3D%2280%22%20"
+        "rx%3D%224%22%20fill%3D%22%23cccccc%22%2F%3E"
+        "%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2220%22%20fill%3D%22%238a97a6%22%2F%3E"
+        "%3Cpath%20d%3D%22M50%2038L50%2030%22%20stroke%3D%22white%22%20stroke-width%3D%223%22%2F%3E"
+        "%3C%2Fsvg%3E";
+
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    ir.root.name = "ELYSIUM";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-frame-svg";
+
+    IRInteractiveElement knob;
+    knob.kind = InteractiveElementKind::knob;
+    knob.cx = 50.0f;
+    knob.cy = 50.0f;
+    knob.hit_radius = 22.0f;
+    knob.svg_patch_d = "M50 38L50 30";
+    knob.default_value = 0.5f;
+    knob.param_key = "filter.cutoff";
+    ir.root.interactive_elements.push_back(knob);
+
+    IRAssetRef asset;
+    asset.asset_id = "asset-frame-svg";
+    asset.original_uri = "data:image/svg+xml," + encoded_payload;
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);
+    // The binding key rode the IR → DesignFrameElement mapping.
+    CHECK(frame->element_param_key(0) == "filter.cutoff");
+    CHECK(frame->element_for_param_key("filter.cutoff") == 0);
+    // Presence of a key auto-enables host-param routing for the frame.
+    CHECK(frame->routes_changes_to_host_params());
     REQUIRE_FALSE(diagnostics_contain(diagnostics,
                                       "native-materialize-faithful-svg-unresolved"));
 }

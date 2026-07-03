@@ -1040,6 +1040,10 @@ std::vector<DesignFrameElement> to_frame_elements(
         // Carry the design-source node id to the live element so the inspector's
         // Wiring lens can map a control back to its Figma node.
         if (e.source_node_id) el.source_node_id = *e.source_node_id;
+        // Host-param binding key: lets DesignFrameView resolve this control
+        // against the framework-agnostic HostParamSurface (element_for_param_key
+        // / sync_from_host_params) when host-param routing is enabled.
+        el.param_key = e.param_key;
         out.push_back(std::move(el));
     }
     return out;
@@ -1089,6 +1093,14 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
     }
     auto frame = std::make_unique<DesignFrameView>(std::move(svg),
                                                    to_frame_elements(node.interactive_elements));
+    // If any control carries a host-param binding key, self-wire gestures to the
+    // framework-agnostic HostParamSurface so an imported design with bound
+    // controls drives host parameters directly. Controls with an empty key still
+    // fall back to on_value_changed, so an all-unbound frame stays inert here.
+    const bool any_bound = std::any_of(
+        node.interactive_elements.begin(), node.interactive_elements.end(),
+        [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    if (any_bound) frame->route_changes_to_host_params(true);
     return frame;
 }
 
