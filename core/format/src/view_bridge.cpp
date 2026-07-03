@@ -19,6 +19,14 @@ ViewBridge::ViewBridge(Processor& processor, state::StateStore& store, Options o
 }
 
 ViewBridge::~ViewBridge() {
+    // Flip liveness FIRST so a display-link idle pump that races this teardown
+    // (or a stale pump left on a host after a bridge replacement) reads false and
+    // no-ops before we tear down the store / scripted session in close(). Guard
+    // against a moved-from bridge (alive_ would be null). NOTE: the pump's
+    // check-then-use is only safe because both the pump and this teardown run on
+    // the host main thread — the token makes the no-op DECISION safe, not a
+    // cross-thread deref of bridge_ptr.
+    if (alive_) alive_->store(false, std::memory_order_release);
     close();
 }
 
