@@ -287,7 +287,16 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   vendored fixture that legitimately ships markers is a reviewable `ALLOWLIST`
   edit in the script. If the `push:main` guard reddens main, run
   `python3 tools/scripts/conflict_marker_check.py` for the file:line list, resolve,
-  and push — the tracker auto-closes on the next clean push.
+  and push — the tracker auto-closes on the next clean push. Exit codes are
+  meaningful: `0` clean, `1` markers found (the backstop opens the tracker), `2+`
+  internal error (the backstop fails the run *without* opening a wrong "markers
+  committed" issue) — the selftest locks this contract. Documented scope
+  limitations (deliberate, to keep zero false positives): only default
+  seven-char markers (a non-default `.gitattributes` `conflict-marker-size` is
+  missed), submodule *contents* are out of scope (the superproject sees a
+  gitlink), and NUL-bearing/UTF-16 text is skipped as binary. The upstream fix
+  for the whole class — the merge tool refusing to commit a conflicted result —
+  is tracked in Shipyard #372; this guard is the consumer-side backstop.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a
