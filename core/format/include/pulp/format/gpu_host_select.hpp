@@ -109,6 +109,13 @@ inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
         // adapter writes the store from the audio thread, this propagates it
         // to the editor. Cheap when the queue is empty.
         bridge_ptr->store().pump_listeners();
+        // Live editor reload (1.9): when the processor's logic hot-swaps
+        // (ReloadableShell), rebuild the OPEN editor in place and request a
+        // repaint, so the DAW shows the new UI live without re-instantiating the
+        // plugin. No-op (cheap generation compare) for non-reloadable processors.
+        if (bridge_ptr->poll_editor_reload()) {
+            if (auto* v = bridge_ptr->view()) v->request_repaint();
+        }
         if (auto* session = bridge_ptr->scripted_ui()) {
             session->poll();
         }
