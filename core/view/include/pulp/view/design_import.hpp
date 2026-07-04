@@ -25,7 +25,10 @@
 #include <pulp/view/design_codegen.hpp>
 
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
@@ -275,5 +278,31 @@ void hoist_captured_art_knobs(DesignIR& ir);
 /// fields only (width/height, corner radii, and optional pointCount/innerRadius
 /// attributes) — never a layer name or source quirk.
 void synthesize_primitive_paths(IRNode& root);
+
+/// Bind geometry-detected controls to host parameters from an out-of-band
+/// manifest that maps a Figma node id (`IRInteractiveElement::source_node_id`,
+/// stamped by the producer) to a host-param key. For each interactive element
+/// whose `source_node_id` is present in `node_id_to_param_key` with a non-empty
+/// value AND whose `param_key` is still empty, sets `param_key` from the manifest.
+/// Recurses into children. Returns the number of controls bound.
+///
+/// This is the binding path for DESCRIPTIVELY-named controls — the common Figma
+/// case (a knob named "Cutoff", not `param:filter.cutoff`), where the producer
+/// stamps provenance but no key. An explicit producer binding (a layer-name
+/// sigil) always WINS: the manifest never overwrites a non-empty `param_key`, so
+/// a sigil and a manifest entry for the same node resolve to the sigil. A node id
+/// absent from the manifest, or mapped to an empty string, is left untouched.
+int apply_param_binding_manifest(
+    IRNode& root,
+    const std::unordered_map<std::string, std::string>& node_id_to_param_key);
+
+/// Parse a `--param-binding-manifest` document — a flat JSON object mapping a
+/// Figma node id to a host-param key, e.g. `{"10:42": "filter.cutoff"}` — into a
+/// map suitable for apply_param_binding_manifest. Entries with an empty key, a
+/// non-string value, or an empty value are skipped (lenient, like the IR parser).
+/// Returns std::nullopt only on malformed JSON or a non-object root, setting
+/// `*error` (when non-null).
+std::optional<std::unordered_map<std::string, std::string>>
+parse_param_binding_manifest_json(const std::string& json, std::string* error);
 
 } // namespace pulp::view

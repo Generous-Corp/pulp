@@ -1193,3 +1193,100 @@ TEST_CASE("DesignIR diagnostic kinds parse and serialize every normalized bucket
     REQUIRE(json.find("\"kind\":\"unknown\"") != std::string::npos);
     REQUIRE(json.find("\"severity\":\"error\"") != std::string::npos);
 }
+
+TEST_CASE("apply_param_binding_manifest binds descriptive knobs by node id, sigil wins",
+          "[view][import][param-binding]") {
+    using namespace pulp::view;
+    IRNode root;
+
+    // A descriptively-named knob: has provenance, no key yet → manifest binds it.
+    IRInteractiveElement descriptive;
+    descriptive.kind = InteractiveElementKind::knob;
+    descriptive.source_node_id = "10:1";
+    root.interactive_elements.push_back(descriptive);
+
+    // A sigil-bound knob: already has a key → manifest must NOT overwrite it.
+    IRInteractiveElement sigiled;
+    sigiled.kind = InteractiveElementKind::knob;
+    sigiled.source_node_id = "10:2";
+    sigiled.param_key = "explicit.sigil";
+    root.interactive_elements.push_back(sigiled);
+
+    // A knob whose node id is absent from the manifest → untouched.
+    IRInteractiveElement unmapped;
+    unmapped.kind = InteractiveElementKind::knob;
+    unmapped.source_node_id = "10:3";
+    root.interactive_elements.push_back(unmapped);
+
+    // A knob with no provenance at all → nothing to key on.
+    IRInteractiveElement anon;
+    anon.kind = InteractiveElementKind::knob;
+    root.interactive_elements.push_back(anon);
+
+    // A knob nested in a child node → recursion must reach it.
+    IRNode child;
+    IRInteractiveElement nested;
+    nested.kind = InteractiveElementKind::knob;
+    nested.source_node_id = "10:4";
+    child.interactive_elements.push_back(nested);
+    root.children.push_back(child);
+
+    std::unordered_map<std::string, std::string> manifest{
+        {"10:1", "filter.cutoff"},
+        {"10:2", "should.be.ignored"},   // sigil wins
+        {"10:4", "lfo.rate"},
+        {"10:9", "no.such.node"},        // no matching element
+    };
+
+    const int bound = apply_param_binding_manifest(root, manifest);
+    REQUIRE(bound == 2);  // descriptive (10:1) + nested (10:4); sigil untouched
+
+    REQUIRE(root.interactive_elements[0].param_key == "filter.cutoff");
+    REQUIRE(root.interactive_elements[1].param_key == "explicit.sigil");  // NOT overwritten
+    REQUIRE(root.interactive_elements[2].param_key.empty());              // unmapped
+    REQUIRE(root.interactive_elements[3].param_key.empty());              // no provenance
+    REQUIRE(root.children[0].interactive_elements[0].param_key == "lfo.rate");
+}
+
+TEST_CASE("apply_param_binding_manifest skips empty manifest values and empty map",
+          "[view][import][param-binding]") {
+    using namespace pulp::view;
+    IRNode root;
+    IRInteractiveElement knob;
+    knob.kind = InteractiveElementKind::knob;
+    knob.source_node_id = "10:1";
+    root.interactive_elements.push_back(knob);
+
+    REQUIRE(apply_param_binding_manifest(root, {}) == 0);
+    REQUIRE(root.interactive_elements[0].param_key.empty());
+
+    // An empty-string value is a no-op (never binds a control to "").
+    REQUIRE(apply_param_binding_manifest(root, {{"10:1", ""}}) == 0);
+    REQUIRE(root.interactive_elements[0].param_key.empty());
+}
+
+TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
+          "[view][import][param-binding]") {
+    using namespace pulp::view;
+    std::string err;
+
+    auto ok = parse_param_binding_manifest_json(
+        R"({"10:1": "filter.cutoff", "10:2": "lfo.rate", "blank": "", "10:3": 5})",
+        &err);
+    REQUIRE(ok.has_value());
+    REQUIRE(ok->size() == 2);              // blank value + non-string dropped leniently
+    REQUIRE((*ok)["10:1"] == "filter.cutoff");
+    REQUIRE((*ok)["10:2"] == "lfo.rate");
+    REQUIRE(ok->count("blank") == 0);
+    REQUIRE(ok->count("10:3") == 0);
+
+    // Malformed JSON → nullopt with an error message.
+    err.clear();
+    auto bad = parse_param_binding_manifest_json("{not json", &err);
+    REQUIRE_FALSE(bad.has_value());
+    REQUIRE_FALSE(err.empty());
+
+    // A non-object root (array) → nullopt.
+    auto arr = parse_param_binding_manifest_json(R"(["10:1"])", &err);
+    REQUIRE_FALSE(arr.has_value());
+}

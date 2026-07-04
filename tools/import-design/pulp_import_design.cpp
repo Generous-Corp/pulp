@@ -943,6 +943,12 @@ static void print_usage() {
     std::cout << "                    your OWN Figma component-set keys / name prefixes to Pulp control\n";
     std::cout << "                    kinds; merged OVER the built-in Pulp Figma Library so the importer\n";
     std::cout << "                    wires controls on third-party designs. figma / figma-plugin only.\n";
+    std::cout << "  --param-binding-manifest <path>\n";
+    std::cout << "                    JSON object mapping a Figma node id to a host-param key\n";
+    std::cout << "                    (e.g. {\"10:42\": \"filter.cutoff\"}). Binds DESCRIPTIVELY-named\n";
+    std::cout << "                    geometry controls (a knob layer named \"Cutoff\", not a\n";
+    std::cout << "                    param: sigil) by their stamped source_node_id. A layer-name\n";
+    std::cout << "                    sigil still wins; the manifest never overwrites one.\n";
     std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
@@ -1740,6 +1746,9 @@ int main(int argc, char* argv[]) {
     std::unordered_map<std::string, std::string> expected_asset_hashes;
     // User recognition mappings are merged over the built-in Figma library.
     std::string recognition_manifest_path;
+    // Out-of-band host-param bindings: figma node id → param_key, applied to the
+    // parsed IR's geometry-detected controls (a layer-name sigil still wins).
+    std::string param_binding_manifest_path;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -1783,6 +1792,8 @@ int main(int argc, char* argv[]) {
             import_report_path = argv[++i];
         } else if (std::strcmp(argv[i], "--recognition-manifest") == 0 && i + 1 < argc) {
             recognition_manifest_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--param-binding-manifest") == 0 && i + 1 < argc) {
+            param_binding_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
             fail_on_unresolved = true;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
@@ -2525,6 +2536,33 @@ int main(int argc, char* argv[]) {
                       << "design but mapped by no recognition manifest; add it "
                       << "to --recognition-manifest to wire it as a control\n";
         }
+    }
+
+    // Out-of-band host-param binding: apply a --param-binding-manifest (figma
+    // node id → param_key) to the parsed IR. This binds DESCRIPTIVELY-named
+    // geometry controls (the common Figma case — a knob layer named "Cutoff")
+    // that carry provenance but no layer-name sigil; an explicit sigil still wins.
+    // Applied BEFORE the import report so its provenance reflects the bound state.
+    if (!param_binding_manifest_path.empty()) {
+        const std::string manifest_json = read_file(param_binding_manifest_path);
+        if (manifest_json.empty()) {
+            std::cerr << "Error: could not read --param-binding-manifest "
+                      << param_binding_manifest_path << "\n";
+            return 2;
+        }
+        std::string parse_err;
+        auto bindings = pulp::view::parse_param_binding_manifest_json(
+            manifest_json, &parse_err);
+        if (!bindings) {
+            std::cerr << "Error: invalid --param-binding-manifest "
+                      << param_binding_manifest_path << ": " << parse_err << "\n";
+            return 2;
+        }
+        const int bound =
+            pulp::view::apply_param_binding_manifest(ir.root, *bindings);
+        std::cerr << "param-binding: bound " << bound << " control"
+                  << (bound == 1 ? "" : "s") << " from "
+                  << param_binding_manifest_path << "\n";
     }
 
     // P7 import report — surface every interactive control's resolution provenance
