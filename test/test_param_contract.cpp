@@ -77,17 +77,22 @@ TEST_CASE("an added parameter breaks the contract", "[reload][contract]") {
 }
 
 TEST_CASE("a removed parameter breaks the contract", "[reload][contract]") {
+    // Remove a NON-bypass param (kFreq). A removed bypass is adapter-owned and
+    // does NOT break the contract (see the dedicated bypass test below); a removed
+    // real parameter still does, since automation/sessions are keyed to it.
     state::StateStore live; fill_store(live);
     state::StateStore candidate;
     candidate.add_parameter({.id = kGain, .name = "Gain", .unit = "",
                              .range = {0.0f, 1.0f, 0.5f, 0.0f}});
-    candidate.add_parameter({.id = kFreq, .name = "Freq", .unit = "Hz",
-                             .range = {20.0f, 20000.0f, 440.0f, 0.0f}});
-    // kBypass omitted.
+    state::ParamInfo bypass{.id = kBypass, .name = "Bypass", .unit = "",
+                            .range = {0.0f, 1.0f, 0.0f, 1.0f}};
+    candidate.add_parameter(bypass);
+    // kFreq omitted.
     REQUIRE_FALSE(param_contracts_match(live, candidate));
     const auto diff = param_contract_diff(live, candidate);
     REQUIRE(diff.size() == 1);
     REQUIRE(diff[0].find("removed in candidate") != std::string::npos);
+    REQUIRE(diff[0].find("Freq") != std::string::npos);
 }
 
 TEST_CASE("a relabelled parameter still matches (name is cosmetic)", "[reload][contract]") {
@@ -166,12 +171,16 @@ TEST_CASE("superset gate: removing or re-ranging a live parameter is NOT a super
           "[reload][contract][2.4]") {
     using pulp::format::reload::param_contract_superset;
     SECTION("removed") {
+        // A removed NON-bypass param is not a superset (breaks automation). A
+        // removed bypass is adapter-owned and would still be a superset — covered
+        // by the dedicated bypass test — so remove kFreq here.
         state::StateStore live; fill_store(live);            // kGain,kFreq,kBypass
-        state::StateStore candidate;                          // missing kBypass
+        state::StateStore candidate;                          // missing kFreq
         candidate.add_parameter({.id = kGain, .name = "Gain", .unit = "",
                                  .range = {0.0f, 1.0f, 0.5f, 0.0f}});
-        candidate.add_parameter({.id = kFreq, .name = "Freq", .unit = "Hz",
-                                 .range = {20.0f, 20000.0f, 440.0f, 0.0f}});
+        state::ParamInfo bypass{.id = kBypass, .name = "Bypass", .unit = "",
+                                .range = {0.0f, 1.0f, 0.0f, 1.0f}};
+        candidate.add_parameter(bypass);
         auto r = param_contract_superset(live, candidate);
         REQUIRE_FALSE(r.is_superset);
     }
@@ -183,4 +192,39 @@ TEST_CASE("superset gate: removing or re-ranging a live parameter is NOT a super
         auto r = param_contract_superset(live, candidate);
         REQUIRE_FALSE(r.is_superset);   // a changed shared contract disqualifies it
     }
+}
+
+TEST_CASE("adapter-synthesized bypass is excluded from the reload contract",
+          "[reload][contract][issue-1_9]") {
+    // In a real DAW the adapter SYNTHESIZES a bypass into the live store
+    // (HostQuirks::synthesize_bypass_parameter). The reloaded logic's candidate
+    // declares only its own params (no bypass). The reload must still be accepted
+    // — the bypass is adapter-owned, not the logic's swappable contract.
+    // Regression: in-DAW reload was rejected "parameter contract differs" because
+    // live carried the synthesized bypass the candidate never declares.
+    state::StateStore live;
+    live.add_parameter({.id = kGain, .name = "Gain", .unit = "",
+                        .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    live.add_parameter({.id = kFreq, .name = "Freq", .unit = "Hz",
+                        .range = {20.0f, 20000.0f, 440.0f, 0.0f}});
+    state::ParamInfo bypass{.id = kBypass, .name = "Bypass", .unit = "",
+                            .range = {0.0f, 1.0f, 0.0f, 1.0f}};
+    bypass.designation = state::ParamDesignation::Bypass;
+    live.add_parameter(bypass);
+
+    state::StateStore candidate;  // reloaded logic: only its own params, no bypass
+    candidate.add_parameter({.id = kGain, .name = "Gain", .unit = "",
+                             .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    candidate.add_parameter({.id = kFreq, .name = "Freq", .unit = "Hz",
+                             .range = {20.0f, 20000.0f, 440.0f, 0.0f}});
+
+    REQUIRE(param_contracts_match(live, candidate));
+    REQUIRE(param_contract_diff(live, candidate).empty());
+    // Symmetric: whichever side carries the adapter bypass, the swap is accepted.
+    REQUIRE(param_contracts_match(candidate, live));
+
+    // A REAL contract change (a non-bypass param added) must still be rejected.
+    candidate.add_parameter({.id = 4, .name = "Extra", .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    REQUIRE_FALSE(param_contracts_match(live, candidate));
 }

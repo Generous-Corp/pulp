@@ -414,6 +414,11 @@ private:
         } else {
             runtime::log_warn("[reload-shell] reload rejected after {:.2f} ms: {}",
                               outcome.metrics.total_ms, outcome.detail);
+            // Surface the structured per-field diff so a rejection says WHAT
+            // differs (e.g. which parameter's contract changed), not just the
+            // category — the difference between a 5-minute fix and an hour.
+            for (const auto& issue : outcome.issues)
+                runtime::log_warn("[reload-shell]   reject-diff: {}", issue);
         }
     }
 
