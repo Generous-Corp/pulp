@@ -10,27 +10,47 @@ silently. That is exactly what happened when a stale ``chore: bump versions``
 side of a squash collided with an already-advanced ``project() VERSION`` line
 and the merge wrote markers straight into ``CMakeLists.txt``.
 
-This guard turns "no committed conflict markers, ever" into an enforced,
-whole-tree invariant. It is deliberately zero-configuration and
-zero-false-positive: the start/base/end markers it keys on
-(``<<<<<<<`` / ``|||||||`` / ``>>>>>>>`` followed by whitespace or end-of-line)
-never appear in legitimate source, docs, or vendored code — verified across the
-entire tracked tree, ``external/`` included. The ``=======`` separator IS common
-in real content (Markdown setext headings, ASCII banners), so it is reported
-only when the same file also carries a start or end marker — i.e. only inside an
-actual conflict block — keeping the banner case clean.
+This guard makes "no committed conflict markers" an enforced, whole-tree
+invariant. It keys on the start/base/end markers
+(``<<<<<<<`` / ``|||||||`` / ``>>>>>>>`` followed by whitespace or end-of-line):
+those line starts do not appear anywhere in the current tracked tree
+(``external/`` included, verified), so in practice they are a clean signal. They
+are not *guaranteed* impossible in legitimate content, though — a VCS tutorial or
+a vendored test fixture could carry one — so a real exception is a deliberate,
+reviewable ``ALLOWLIST`` edit. The ``=======`` separator IS common in real
+content (Markdown setext headings, ASCII banners), so it is reported only when
+the same file also carries a start or end marker — i.e. only inside an actual
+conflict block — keeping the banner case clean.
 
 Scope: every file reported by ``git ls-files`` (tracked content only — never a
-build directory or an untracked artifact). Binary files are skipped. A vendored
-test fixture that legitimately ships conflict markers would be a deliberate
-``ALLOWLIST`` edit, visible in the diff and reviewable.
+build directory or an untracked artifact). Known limitations, deliberately
+traded for zero-configuration and zero false positives on this repo:
+
+  * **Marker size.** Only the default seven-character markers are matched. Git's
+    ``.gitattributes`` ``conflict-marker-size=N`` produces N-character markers; a
+    non-default size would be missed. Not set anywhere in this repo; widening the
+    regex would forfeit the zero-false-positive property, so this stays strict.
+  * **Submodule contents.** A submodule appears to the superproject as a single
+    gitlink, so markers *inside* a submodule's own files are out of scope here —
+    they are the submodule's own history to guard.
+  * **NUL-bearing text.** UTF-16 (or any file with a NUL in the first 8 KB) is
+    skipped as binary, so a conflict in such a file would pass. This repo tracks
+    only UTF-8 text.
+  * **Separator-only leftovers.** A file hand-resolved down to a bare
+    ``=======`` (both arrow markers deleted) is intentionally not flagged, to
+    keep Markdown headings and banners clean.
+
+The upstream fix for the whole class is the merge tool refusing to commit a
+conflicted result at all (tracked in Shipyard #372); this guard is the
+consumer-side backstop.
 
 Usage:
     python3 tools/scripts/conflict_marker_check.py [--root DIR]
     python3 tools/scripts/conflict_marker_check.py --selftest
 
 Exits 0 when no markers are found, 1 on any marker (or a failing self-test),
-2 when it cannot enumerate the tree (not a git working tree).
+2 when it cannot enumerate the tree (not a git working tree — an internal error,
+distinct from a marker finding).
 """
 
 from __future__ import annotations
@@ -45,9 +65,10 @@ from pathlib import Path
 # ── Marker signatures ──────────────────────────────────────────────────────
 # A git conflict block is bounded by a start and an end marker and (in diff3
 # mode) a base marker: exactly seven of the character, at column 0, followed by
-# whitespace or end-of-line. Eight-or-more runs (arrow art like a long "<<<<<<<<"
-# rule) do not match — the eighth character is not whitespace. These three are
-# never legitimate line starts, so they are the definitive signal.
+# whitespace or end-of-line. Matching *exactly* seven (not seven-or-more) is a
+# deliberate choice: it excludes decorative rules (a long "<<<<<<<<" divider) so
+# the guard stays zero-false-positive, at the cost of missing a non-default
+# `conflict-marker-size` (see the module docstring's limitations).
 START_END_RE = re.compile(r"^(?:<{7}|>{7}|\|{7})(?:\s|$)")
 
 # The separator is only decisive inside a conflict block — plain runs of "=" are
@@ -221,6 +242,17 @@ def selftest() -> int:
         {"blob.bin": f"\0\0\0{_LT} HEAD\n"},
         False,
     )
+
+    # main() must return 2 (not 1) when handed a non-git directory. The
+    # push:main workflow relies on this distinction: exit 1 means "markers
+    # committed" (open the tracker), exit 2+ means "internal error" (fail the
+    # run WITHOUT opening a factually-wrong marker issue).
+    with tempfile.TemporaryDirectory() as td:
+        rc = main(["prog", "--root", td])
+        ok = rc == 2
+        if not ok:
+            failures += 1
+        print(f"[{'ok' if ok else 'FAIL'}] non-git dir -> exit 2 (not 1); got rc={rc}")
 
     if failures:
         print(f"\nselftest: {failures} case(s) failed")
