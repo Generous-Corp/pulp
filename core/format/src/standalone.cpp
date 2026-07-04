@@ -748,6 +748,22 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     window->set_idle_callback(pre_screenshot_idle);
 #endif
 
+    // Live editor reload (1.9): when the hosted processor's logic hot-swaps
+    // (ReloadableShell), rebuild the OPEN editor in place and request a repaint —
+    // the same path the plugin editor pump uses (make_scripted_idle_pump), so the
+    // standalone dev window shows the swapped UI live too. Composed over whatever
+    // idle work the build wired above; cheap no-op for non-reloadable processors.
+    {
+        auto prev_idle = pre_screenshot_idle;
+        pre_screenshot_idle = [prev_idle, bridge_raw] {
+            if (prev_idle) prev_idle();
+            if (bridge_raw && bridge_raw->poll_editor_reload()) {
+                if (auto* v = bridge_raw->view()) v->request_repaint();
+            }
+        };
+        window->set_idle_callback(pre_screenshot_idle);
+    }
+
 #if PULP_ENABLE_AUDIO_PROBES
     // Refresh the Audio Inspector from `output_probe_` every UI tick. Compose
     // with whatever idle work is already wired (inspector overlay / scripted_ui
