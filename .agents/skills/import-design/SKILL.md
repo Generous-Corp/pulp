@@ -36,7 +36,12 @@ cannot clear it**. So be maximally frugal. Order of preference, smartest first:
 3. **Only in true headless / CI** (no desktop, no MCP) → `figma_rest_export.py`.
    Its `figma_get` honors `429 Retry-After` with backoff; if it 429s it prints a
    loud one-time advisory pointing back here — **switch to (0)/(1), don't wait out
-   6×300s of backoff.**
+   6×300s of backoff.** Pass **`--cache-dir DIR`** to memoize the two REST-heavy
+   payloads (the `/nodes` geometry JSON + the frame SVG) per `(file_key, node_id)`:
+   the first run populates the cache, every re-run reads it with **ZERO REST calls**
+   and needs **no token** — so iterating on the importer against a real Triaz frame
+   costs one fetch, not one per test. `--refresh-cache` busts it. This is the
+   transparent form of the manual `--node-json` / `--frame-svg` inputs.
 
 Everything below documents lane (3)'s mechanics because it's the scriptable one,
 but the ordering above governs *which lane to start in*. `figma_rest_export.py`

@@ -689,6 +689,63 @@ def fetch_nodes(file_key, node_id, token):
         f"https://api.figma.com/v1/files/{file_key}/nodes?ids={node_id}&geometry=paths",
         token=token, what="file nodes")
 
+# --- transparent (file_key, node_id) export cache ------------------------------
+# The Figma MCP server allows only ~6 calls/MONTH on a View/Collab seat, so
+# re-testing the same frame must not re-fetch. --cache-dir memoizes the two
+# REST-heavy payloads (the /nodes geometry JSON and the frame SVG) on disk; a hit
+# returns the stored payload with ZERO REST calls, so a populated cache lets the
+# importer re-run fully offline (no token needed).
+_CACHE_NODES_SUFFIX = ".nodes.json"
+_CACHE_SVG_SUFFIX = ".frame.svg"
+
+def _export_cache_key(file_key, node_id):
+    """Filesystem-safe cache basename for a (file_key, node_id) export. Figma node
+    ids embed ':' — normalize every non-portable char to '_' so the key is valid
+    on every platform."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", f"{file_key}__{node_id}")
+
+def _cache_path(cache_dir, file_key, node_id, suffix):
+    if not cache_dir:
+        return None
+    return os.path.join(cache_dir, _export_cache_key(file_key, node_id) + suffix)
+
+def fetch_nodes_cached(file_key, node_id, token, cache_dir=None, refresh=False):
+    """fetch_nodes() with the transparent on-disk cache. A cache hit returns the
+    stored /nodes JSON without touching the network; --refresh-cache forces a
+    re-fetch + rewrite."""
+    path = _cache_path(cache_dir, file_key, node_id, _CACHE_NODES_SUFFIX)
+    if path and not refresh and os.path.exists(path):
+        print(f"  cache hit (nodes): {path} — no REST call")
+        with open(path) as f:
+            return json.load(f)
+    doc = fetch_nodes(file_key, node_id, token)
+    if path:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(doc, f)
+        print(f"  cached nodes -> {path}")
+    return doc
+
+def fetch_frame_svg_cached(file_key, node_id, token, cache_dir=None, refresh=False):
+    """fetch_frame_svg() with the same transparent cache. Only a non-empty SVG is
+    cached — a None render (no image URL) must not be memoized as a permanent miss.
+    With no token and a cache miss there is nothing to fetch, so returns None."""
+    path = _cache_path(cache_dir, file_key, node_id, _CACHE_SVG_SUFFIX)
+    if path and not refresh and os.path.exists(path):
+        print(f"  cache hit (frame SVG): {path} — no REST call")
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    if not token:
+        return None
+    print("fetching frame SVG via /images?format=svg ...")
+    svg = fetch_frame_svg(file_key, node_id, token)
+    if path and svg:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(svg)
+        print(f"  cached frame SVG -> {path}")
+    return svg
+
 def resolve_image_fills(file_key, refs, token, out_dir):
     """Resolve IMAGE-fill imageRefs into real assets. The image fill on a node
     references a file image by `imageRef`; the file-images
@@ -1273,6 +1330,12 @@ def build_argparser():
     ap.add_argument("--knob-name", action="append", default=[],
                     help="name-override (repeatable): also treat any node whose name contains this "
                          "substring as a knob, supplementing geometry auto-detect (with --faithful-vector)")
+    ap.add_argument("--cache-dir",
+                    help="cache the /nodes JSON + frame SVG per (file-key,node) here; re-runs read the "
+                         "cache with ZERO REST calls (the Figma MCP allows ~6/month on a View seat). "
+                         "Populate once with a token, then re-test the same frame offline.")
+    ap.add_argument("--refresh-cache", action="store_true",
+                    help="ignore any cached payloads and re-fetch (rewrites the cache)")
     return ap
 
 
@@ -1288,11 +1351,16 @@ def main():
         ap.error("need --file-key + --node (or --url)")
 
     token = resolve_token(args.token)
-    if not token and not args.node_json:
+    # A populated cache is a valid token-free source: a cached /nodes payload lets
+    # the whole run proceed offline.
+    cached_nodes = _cache_path(args.cache_dir, file_key, node_id, _CACHE_NODES_SUFFIX)
+    have_cached_nodes = bool(cached_nodes) and not args.refresh_cache and os.path.exists(cached_nodes)
+    if not token and not args.node_json and not have_cached_nodes:
         ap.error("no Figma token (pass --token, set $FIGMA_TOKEN, or create ~/.config/pulp/figma-token). "
                  "Generate at figma.com -> Settings -> Security -> Personal access tokens (scope file_content:read).")
 
-    doc = json.load(open(args.node_json)) if args.node_json else fetch_nodes(file_key, node_id, token)
+    doc = (json.load(open(args.node_json)) if args.node_json
+           else fetch_nodes_cached(file_key, node_id, token, args.cache_dir, args.refresh_cache))
     root = doc["nodes"][node_id]["document"]
     root_node, ctx = node_tree_to_ir(root)
 
@@ -1318,9 +1386,9 @@ def main():
         svg = None
         if args.frame_svg:
             svg = open(args.frame_svg).read()
-        elif token:
-            print("fetching frame SVG via /images?format=svg ...")
-            svg = fetch_frame_svg(file_key, node_id, token)
+        elif token or args.cache_dir:
+            svg = fetch_frame_svg_cached(file_key, node_id, token,
+                                         args.cache_dir, args.refresh_cache)
         if svg:
             entry = apply_faithful_vector(root_node, root, svg, file_key, node_id,
                                           out_dir, args.knob_name)

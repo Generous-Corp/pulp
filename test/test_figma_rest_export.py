@@ -889,5 +889,101 @@ class RateLimitAdviceTest(unittest.TestCase):
         self.assertEqual(err.getvalue(), "")
 
 
+class ExportCacheTest(unittest.TestCase):
+    """--cache-dir memoizes the two REST-heavy payloads per (file_key, node_id) so
+    re-testing the same frame does ZERO REST calls (the Figma MCP allows ~6/month
+    on a View seat). A hit must not touch the network; a miss fetches then writes."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.mkdtemp()
+        self._orig_nodes = frx.fetch_nodes
+        self._orig_svg = frx.fetch_frame_svg
+
+    def tearDown(self):
+        import shutil
+        frx.fetch_nodes = self._orig_nodes
+        frx.fetch_frame_svg = self._orig_svg
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_cache_key_normalizes_node_colon(self):
+        # Figma node ids embed ':' — the key must be a portable filename.
+        key = frx._export_cache_key("FILEKEY", "10578:288008")
+        self.assertNotIn(":", key)
+        self.assertEqual(key, "FILEKEY__10578_288008")
+
+    def test_nodes_miss_fetches_and_writes_then_hit_is_offline(self):
+        calls = {"n": 0}
+        doc = {"nodes": {"1:2": {"document": {"id": "1:2"}}}}
+        def fake_fetch(fk, nid, tok):
+            calls["n"] += 1
+            return doc
+        frx.fetch_nodes = fake_fetch
+        # Miss → fetches once and writes the cache file.
+        got = frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp)
+        self.assertEqual(got, doc)
+        self.assertEqual(calls["n"], 1)
+        import os
+        path = frx._cache_path(self._tmp, "FK", "1:2", frx._CACHE_NODES_SUFFIX)
+        self.assertTrue(os.path.exists(path))
+        # Hit → NO further fetch, even with a token that would otherwise be used.
+        def boom(*a, **k):
+            raise AssertionError("cache hit must not call fetch_nodes")
+        frx.fetch_nodes = boom
+        again = frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp)
+        self.assertEqual(again, doc)
+
+    def test_refresh_cache_forces_refetch(self):
+        calls = {"n": 0}
+        def fake_fetch(fk, nid, tok):
+            calls["n"] += 1
+            return {"v": calls["n"]}
+        frx.fetch_nodes = fake_fetch
+        frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp)
+        # refresh=True ignores the written cache and re-fetches (rewrites it).
+        again = frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp, refresh=True)
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(again, {"v": 2})
+
+    def test_no_cache_dir_is_passthrough(self):
+        calls = {"n": 0}
+        def fake_fetch(fk, nid, tok):
+            calls["n"] += 1
+            return {"ok": True}
+        frx.fetch_nodes = fake_fetch
+        frx.fetch_nodes_cached("FK", "1:2", "tok")  # no cache_dir → always fetch
+        frx.fetch_nodes_cached("FK", "1:2", "tok")
+        self.assertEqual(calls["n"], 2)
+
+    def test_svg_none_not_cached_but_text_is(self):
+        import os
+        # A None render must NOT be memoized as a permanent miss.
+        frx.fetch_frame_svg = lambda fk, nid, tok: None
+        self.assertIsNone(
+            frx.fetch_frame_svg_cached("FK", "1:2", "tok", cache_dir=self._tmp))
+        self.assertFalse(os.path.exists(
+            frx._cache_path(self._tmp, "FK", "1:2", frx._CACHE_SVG_SUFFIX)))
+        # A real SVG is cached, and the hit is offline (no token).
+        frx.fetch_frame_svg = lambda fk, nid, tok: "<svg/>"
+        self.assertEqual(
+            frx.fetch_frame_svg_cached("FK", "1:2", "tok", cache_dir=self._tmp), "<svg/>")
+        def boom(*a, **k):
+            raise AssertionError("cache hit must not call fetch_frame_svg")
+        frx.fetch_frame_svg = boom
+        self.assertEqual(
+            frx.fetch_frame_svg_cached("FK", "1:2", None, cache_dir=self._tmp), "<svg/>")
+
+    def test_svg_no_token_and_miss_returns_none(self):
+        # No token + cache miss → nothing to fetch, returns None (no crash).
+        called = {"n": 0}
+        def boom(*a, **k):
+            called["n"] += 1
+            raise AssertionError("must not fetch without a token")
+        frx.fetch_frame_svg = boom
+        self.assertIsNone(
+            frx.fetch_frame_svg_cached("FK", "1:2", None, cache_dir=self._tmp))
+        self.assertEqual(called["n"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
