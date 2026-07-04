@@ -15,9 +15,9 @@
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.1</string>
+    <string>1.0.2</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>1.0.2</string>
     <key>AudioComponents</key>
     <array>
         <dict>
@@ -32,7 +32,7 @@
             <key>subtype</key>
             <string>SpLb</string>
             <key>version</key>
-            <integer>65536</integer>
+            <integer>65538</integer>
             <key>factoryFunction</key>
             <string>SpectralLabAUFactory</string>
             <key>sandboxSafe</key>
