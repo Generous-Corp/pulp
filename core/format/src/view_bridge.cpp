@@ -51,6 +51,47 @@ bool ViewBridge::open(std::string* error) {
     height_ = size_hints_.preferred_height;
     attached_ = false;
     released_ = false;
+    last_reload_generation_ = processor_.editor_reload_generation();
+    return true;
+}
+
+bool ViewBridge::poll_editor_reload() {
+    if (!view_raw_ || !processor_.supports_editor_reload()) return false;
+    const uint64_t gen = processor_.editor_reload_generation();
+    if (gen == last_reload_generation_) return false;
+    last_reload_generation_ = gen;
+    return rebuild_primary_view();
+}
+
+bool ViewBridge::rebuild_primary_view() {
+    if (!view_raw_) return false;
+    // Re-run create_view() on the (hot-swapped) processor to get the new editor.
+    auto fresh = processor_.create_view();
+    if (!fresh) return false;
+
+    // Transplant the fresh content into the SAME root View object the host holds
+    // by reference — so the open editor updates in place (no re-attach, works for
+    // both the CoreGraphics and GPU hosts). Move children over and mirror the
+    // root's background; a P0.2 "hold last frame" is implicit — the host keeps
+    // painting the stable root, which now carries the new content.
+    while (view_raw_->child_count() > 0) {
+        view_raw_->remove_child(view_raw_->child_at(view_raw_->child_count() - 1));
+    }
+    std::vector<view::View*> order;
+    order.reserve(fresh->child_count());
+    for (size_t i = 0; i < fresh->child_count(); ++i) order.push_back(fresh->child_at(i));
+    for (view::View* child : order) {
+        if (auto owned = fresh->remove_child(child)) view_raw_->add_child(std::move(owned));
+    }
+    if (fresh->has_background_color()) {
+        view_raw_->set_background_color(fresh->background_color());
+    } else {
+        view_raw_->clear_background_color();
+    }
+    view_raw_->invalidate_layout();
+
+    // Refresh size hints (the new editor may prefer a different size).
+    size_hints_ = processor_.view_size();
     return true;
 }
 

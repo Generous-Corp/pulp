@@ -935,6 +935,24 @@ public:
         sidechain_ = previous_sidechain;
     }
 
+    /// Editor live-reload support (live-swap 1.9). A processor whose editor
+    /// should rebuild IN PLACE while it is open — e.g. a `ReloadableShell` whose
+    /// logic hot-swaps its `create_view()` — returns true here. The `ViewBridge`
+    /// then hosts the editor under a STABLE root container so its content can be
+    /// replaced live (the host keeps referencing the same root `View`) without
+    /// the DAW re-instantiating the plugin. Default false: normal plugins are
+    /// unaffected — no wrapper, no polling cost. Appended to preserve
+    /// additive-only vtable ordering.
+    virtual bool supports_editor_reload() const { return false; }
+
+    /// Monotonic counter that increments each time this processor's editor
+    /// content should be rebuilt (after a successful logic hot-swap). The editor
+    /// idle tick polls this; when it changes, the `ViewBridge` rebuilds the
+    /// primary view from `create_view()`. Only meaningful when
+    /// `supports_editor_reload()` is true. Must be safe to call from the UI
+    /// thread. Appended to preserve additive-only vtable ordering.
+    virtual std::uint64_t editor_reload_generation() const { return 0; }
+
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
     state::StateStore& state() { return *state_store_; }

@@ -108,6 +108,28 @@ public:
     /// `on_view_resized` and stores the new size.
     void resize(uint32_t width, uint32_t height);
 
+    /// Live editor reload (live-swap 1.9). When the processor supports editor
+    /// reload (`Processor::supports_editor_reload()`), the editor idle tick calls
+    /// this each frame; it compares `Processor::editor_reload_generation()` to the
+    /// last seen value and, on a change, rebuilds the OPEN editor in place by
+    /// re-calling `create_view()` on the (now hot-swapped) processor and
+    /// transplanting its content into the SAME root `View` the host references —
+    /// so a DAW sees the editor update live without re-instantiating the plugin.
+    /// Returns true if a rebuild happened (the caller should then relayout +
+    /// repaint the host). No-op (returns false) for processors that don't support
+    /// editor reload, when not open, or when the generation is unchanged.
+    bool poll_editor_reload();
+
+    /// Force a rebuild of the open primary view from `create_view()` now,
+    /// transplanting the fresh content (children + background) into the stable
+    /// root `View`. Returns false if not open or `create_view()` yields nothing.
+    /// Normally driven by `poll_editor_reload()`; exposed for tests. NOTE: the
+    /// root `View` OBJECT is preserved (the host holds it by reference); a logic
+    /// whose `create_view()` returns a CUSTOM `View` subclass with root-level
+    /// paint/behavior gets its children + background refreshed but not the root
+    /// subclass identity — sufficient for container-root editors (the common case).
+    bool rebuild_primary_view();
+
     bool is_open() const { return view_raw_ != nullptr; }
     ViewRole role() const { return options_.role; }
     view::View* view() { return view_raw_; }
@@ -179,6 +201,7 @@ private:
     bool uses_script_ui_ = false;
     bool attached_ = false;  ///< true between notify_attached() and close()
     bool released_ = false;  ///< true after release_view() transfers ownership
+    uint64_t last_reload_generation_ = 0;  ///< editor-reload generation last applied (1.9)
 
     struct Secondary {
         std::unique_ptr<view::View> view;

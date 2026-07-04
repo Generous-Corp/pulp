@@ -116,6 +116,16 @@ public:
         return slot_.with_active([](Processor& p) { return p.create_view(); });
     }
 
+    // Live-swap 1.9: this shell's editor rebuilds IN PLACE on each hot-swap. The
+    // ViewBridge hosts create_view() under a stable root container and rebuilds
+    // its content whenever editor_reload_generation() changes — polled on the
+    // editor idle tick, so the reload notification never crosses threads unsafely
+    // (the counter is bumped on the control/watcher thread, read on the UI thread).
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override {
+        return reload_generation_.load(std::memory_order_acquire);
+    }
+
     /// Register a callback fired (on the CONTROL/watcher thread) after each
     /// successful hot-swap — e.g. a standalone host rebuilds its window's editor
     /// from create_view(). The callback must marshal any UI work to the UI thread.
@@ -208,7 +218,10 @@ public:
             if (!controller_) return {ReloadOutcome::Status::RejectedLoadFailed, "not prepared"};
             outcome = controller_->reload_now();
             record(outcome);
-            if (outcome.ok()) on_reloaded = on_reloaded_snapshot();
+            if (outcome.ok()) {
+                reload_generation_.fetch_add(1, std::memory_order_release);  // editor rebuild (1.9)
+                on_reloaded = on_reloaded_snapshot();
+            }
         }
         if (on_reloaded) on_reloaded();   // fire AFTER releasing the lock (re-entrant-safe)
         return outcome;
@@ -367,7 +380,10 @@ private:
                 if (controller_) {
                     if (auto outcome = controller_->poll()) {
                         record(*outcome);
-                        if (outcome->ok()) on_reloaded = on_reloaded_snapshot();
+                        if (outcome->ok()) {
+                            reload_generation_.fetch_add(1, std::memory_order_release);  // editor rebuild (1.9)
+                            on_reloaded = on_reloaded_snapshot();
+                        }
                     }
                 }
             }
@@ -424,6 +440,7 @@ private:
     std::atomic<std::uint64_t> successful_reloads_{0};
     std::atomic<double> last_reload_ms_{0.0};     // wall-clock of the last swap (item 1.2)
     std::atomic<ReloadOutcome::Status> last_status_{ReloadOutcome::Status::RejectedLoadFailed};
+    std::atomic<std::uint64_t> reload_generation_{0};  // editor rebuild counter (1.9; UI-thread read)
     std::function<void()> on_reloaded_;           // host editor-rebuild hook (control thread)
 };
 
