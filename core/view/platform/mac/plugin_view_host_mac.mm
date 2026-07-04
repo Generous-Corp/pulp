@@ -1873,9 +1873,16 @@ private:
             dispatch_async(dispatch_get_main_queue(), ^{
                 @autoreleasepool {
                     if (!alive->load(std::memory_order_acquire)) return;
-                    // Pump idle (scripted poll: async results, timers, rAF)
-                    // FIRST so any request_repaint they trigger is seen below.
-                    if (self->idle_callback_) self->idle_callback_();
+                    // Copy the idle callback locally so running it can't free the
+                    // std::function out from under its own call; pump idle
+                    // (scripted poll: async results, timers, rAF) FIRST so any
+                    // request_repaint it triggers is seen below.
+                    std::function<void()> idle = self->idle_callback_;
+                    if (idle) idle();
+                    // Idle work can reentrantly close the editor → ~host flips
+                    // alive=false and frees `self`. Re-check before touching ANY
+                    // self member (parity with the CPU host's render_link_callback).
+                    if (!alive->load(std::memory_order_acquire)) return;
 
                     bool animate = view_needs_continuous_frames(&self->root_);
                     bool tick_subscribers = self->frame_clock_.has_active_subscribers();
