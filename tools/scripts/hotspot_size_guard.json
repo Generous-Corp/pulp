@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc":     6282,
+      "max_loc": 6282,
       "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
@@ -47,7 +47,7 @@
     },
     {
       "path": "test/test_design_import_ir.cpp",
-      "max_loc": 1195,
+      "max_loc": 1292,
       "note": "design-import IR test split; +3 for the interactive-element param_key round-trip assertions"
     },
     {
@@ -82,7 +82,7 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3439,
+      "max_loc": 3477,
       "note": "import-design CLI orchestration hotspot; grew with the recognition-resolver + installed-package custom-control wiring, plus the --validate faithful_svg honesty caveat"
     },
     {
@@ -92,7 +92,7 @@
     },
     {
       "path": "core/view/src/design_import.cpp",
-      "max_loc": 2471,
+      "max_loc": 2520,
       "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup"
     },
     {
@@ -118,7 +118,7 @@
     {
       "path": "core/view/include/pulp/view/view.hpp",
       "max_loc": 1674,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook — on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed — powering paint-safe meter sources)"
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",

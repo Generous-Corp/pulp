@@ -89,8 +89,10 @@ Raw MCP responses are acquisition data, not a separate CLI source. Translate or 
 > or dense imports, prefer the **plugin export** (`--from figma-plugin`), which
 > uses no MCP quota at all. When you do call the MCP, use a single
 > `get_design_context` (code + screenshot + metadata together) over separate
-> calls. Seat/plan limits and the full guidance:
-> [The Figma plugin — avoiding Figma's limits](figma-plugin.md#two-ways-to-get-a-design-into-pulp--and-which-one-avoids-figmas-limits).
+> calls. Full seat/plan limits:
+> [The Figma plugin — avoiding Figma's limits](figma-plugin.md#two-ways-to-get-a-design-into-pulp--and-which-one-avoids-figmas-limits);
+> the authoritative numbers are in
+> [Figma's MCP rate-limit docs](https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/).
 
 The raw Figma and Figma Make adapter lanes are tracked in the compatibility
 import reference, which records the current parser status instead of relying on

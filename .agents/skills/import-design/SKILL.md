@@ -215,6 +215,21 @@ root frame is excluded so a panel name ("sound / main panel") never mis-binds a
 centered knob. Tests: `[layer-name-binding]`/knob cases in
 `faithful-vector.test.ts` + `ParamKeyBindingTest` in `test_figma_rest_export.py`.
 
+**Annotated-manifest binding (`--param-binding-manifest`) — the descriptive-name
+lane.** Real designs (Triaz) name knobs descriptively ("Cutoff"), not with a
+sigil, so the producer stamps `source_node_id` but no `param_key`. Supply a JSON
+object mapping that Figma node id to a host-param key —
+`{"10:42": "filter.cutoff"}` — via `pulp import-design … --param-binding-manifest
+bindings.json`. `apply_param_binding_manifest` (design_import.cpp) walks the parsed
+IR and sets `param_key` on each interactive element whose `source_node_id` is in
+the manifest AND whose key is still empty — so **an explicit layer-name sigil
+always wins**; the manifest never overwrites one. Applied once in the C++ import
+CLI after IR parse (before the import report), so all downstream lanes
+(materialize / codegen / DesignIR) see the binding. Get the node ids from the
+importer's provenance or the Figma MCP `get_metadata`. Tests: `[param-binding]`
+cases in `test_design_import_ir.cpp` (library) + `test_import_design_tool.cpp`
+(CLI wiring + error paths).
+
 **Custom controls (P7 Tier-3) — the `name→View` factory registry.** A genuinely
 novel control resolves to `kind=custom`, which carries a `factory_id` (+ opaque
 `custom_props`, typically JSON Pulp doesn't parse). The runtime
