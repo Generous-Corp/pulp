@@ -17,6 +17,7 @@ import {
   parseFrameKnobs,
   parsePanelBounds,
   detectOverlayControls,
+  labelAndBindKnobs,
   decodeSvgBytes,
 } from "./faithful-vector";
 import { assessResolution } from "./resolve-control";
@@ -719,6 +720,12 @@ async function applyFaithfulVector(
       [panel[0], panel[1]],
     );
     const all = knobs.concat(overlays);
+    // Resolve each control against the frame's node tree: stamp a human `label`,
+    // provenance `source_node_id` (for the manifest binding lane), and an opt-in
+    // host-param `param_key` from a layer-name sigil. Node centers are compared in
+    // the SVG space parseFrameKnobs uses, so pass the same `panel` origin the
+    // overlay detector got. Lockstep with the REST lane's _label_elements.
+    labelAndBindKnobs(all, node, [panel[0], panel[1]]);
     if (all.length > 0) node.interactive_elements = all;
   }
 }

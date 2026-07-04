@@ -11,6 +11,9 @@ import {
   parseFrameKnobs,
   parsePanelBounds,
   detectOverlayControls,
+  labelAndBindKnobs,
+  paramKeyFromLayerName,
+  nodeLabel,
   decodeSvgBytes,
 } from "../src/faithful-vector";
 import { serializeExport, type SerializeContext } from "../src/serialize";
@@ -38,6 +41,131 @@ test("parseFrameKnobs: geometry auto-detect finds the knob with the exact needle
   assert.equal(k.hit_radius, 20);
   assert.equal(k.svg_patch_d, "M50 38L50 30"); // exact d so the needle can rotate
   assert.equal(k.default_value, 0.5);
+});
+
+// ── Layer-name binding + provenance (lockstep with test_figma_rest_export.py) ──
+
+test("paramKeyFromLayerName: sigil strips to the binding key, else empty", () => {
+  assert.equal(paramKeyFromLayerName("param:filter.cutoff"), "filter.cutoff");
+  assert.equal(paramKeyFromLayerName("bind:gain"), "gain");
+  assert.equal(paramKeyFromLayerName("meter:out_l"), "out_l");
+  assert.equal(paramKeyFromLayerName("PARAM:Cutoff"), "Cutoff");       // sigil case-insensitive
+  assert.equal(paramKeyFromLayerName("  param:cutoff "), "cutoff");    // leading ws + trim
+  assert.equal(paramKeyFromLayerName("param: a.b "), "a.b");           // inner value trimmed
+  // Not a binding: bare/descriptive names, empty/punctuation-only values.
+  assert.equal(paramKeyFromLayerName("Cutoff"), "");
+  assert.equal(paramKeyFromLayerName("param:"), "");                   // nothing after sigil
+  assert.equal(paramKeyFromLayerName("param: "), "");
+  assert.equal(paramKeyFromLayerName("param:."), "");                  // punctuation only
+  assert.equal(paramKeyFromLayerName("xparam:y"), "");                 // sigil not a prefix
+  assert.equal(paramKeyFromLayerName(""), "");
+});
+
+test("nodeLabel: meaningful names only; default/kind names yield empty", () => {
+  assert.equal(nodeLabel("Cutoff"), "Cutoff");
+  assert.equal(nodeLabel("  Depth  "), "Depth");
+  assert.equal(nodeLabel("Ellipse 12"), "");   // auto-generated
+  assert.equal(nodeLabel("Frame 41"), "");
+  assert.equal(nodeLabel("Knob"), "");         // structural/kind word
+  assert.equal(nodeLabel("value"), "");
+  assert.equal(nodeLabel(""), "");
+});
+
+test("labelAndBindKnobs: a sigil-named knob node binds param_key + provenance, no label", () => {
+  // Frame at origin with a knob-instance node named with a binding sigil,
+  // centered on the geometry knob the SVG dome/needle produced (cx=50,cy=50,r=20).
+  const frame = baseNode({
+    absolute_bounds: { x: 0, y: 0, w: 100, h: 100 },
+    children: [
+      baseNode({ figma_type: "INSTANCE", name: "param:filter.cutoff",
+                 figma_node_id: "9:1", absolute_bounds: { x: 40, y: 40, w: 20, h: 20 } }),
+      // A default-named inner leaf must NOT steal ownership.
+      baseNode({ figma_type: "ELLIPSE", name: "Ellipse 7",
+                 figma_node_id: "9:2", absolute_bounds: { x: 45, y: 45, w: 10, h: 10 } }),
+    ],
+  });
+  const els = parseFrameKnobs(SVG);
+  labelAndBindKnobs(els, frame, [0, 0]);
+  assert.equal(els.length, 1);
+  assert.equal(els[0].param_key, "filter.cutoff");
+  assert.equal(els[0].source_node_id, "9:1");  // the sigil instance, not the leaf
+  assert.equal(els[0].label, undefined);       // a sigil is a binding, not a human label
+});
+
+test("labelAndBindKnobs: a descriptively-named knob gets a label + provenance, no param_key", () => {
+  const frame = baseNode({
+    absolute_bounds: { x: 0, y: 0, w: 100, h: 100 },
+    children: [
+      baseNode({ figma_type: "INSTANCE", name: "Cutoff", figma_node_id: "9:3",
+                 absolute_bounds: { x: 40, y: 40, w: 20, h: 20 } }),
+    ],
+  });
+  const els = parseFrameKnobs(SVG);
+  labelAndBindKnobs(els, frame, [0, 0]);
+  assert.equal(els[0].label, "Cutoff");
+  assert.equal(els[0].source_node_id, "9:3");
+  assert.equal(els[0].param_key, undefined);   // descriptive name → manifest lane, not a sigil
+});
+
+test("labelAndBindKnobs: an unnamed knob stays inert (no label, no binding, no provenance)", () => {
+  const frame = baseNode({
+    absolute_bounds: { x: 0, y: 0, w: 100, h: 100 },
+    children: [
+      baseNode({ figma_type: "ELLIPSE", name: "Ellipse 12", figma_node_id: "9:4",
+                 absolute_bounds: { x: 40, y: 40, w: 20, h: 20 } }),
+    ],
+  });
+  const els = parseFrameKnobs(SVG);
+  labelAndBindKnobs(els, frame, [0, 0]);
+  assert.equal(els[0].param_key, undefined);
+  assert.equal(els[0].label, undefined);
+  assert.equal(els[0].source_node_id, undefined);
+});
+
+test("labelAndBindKnobs: a Triaz-shaped panel of descriptive knobs gets provenance, no binding", () => {
+  // Modeled on the real Triaz synth panel ("sound / main panel", 988x300): a
+  // descriptively-named container with descriptively-named knob instances, no
+  // sigils. Each knob gets a label + source_node_id (for the manifest lane); the
+  // panel's own name must not be mis-bound to a centered knob.
+  const frame = baseNode({
+    name: "sound / main panel",
+    absolute_bounds: { x: 8, y: 68, w: 988, h: 300 },
+    children: [
+      baseNode({ figma_type: "INSTANCE", name: "Cutoff", figma_node_id: "k:cut",
+                 absolute_bounds: { x: 100, y: 150, w: 56, h: 56 } }),
+      baseNode({ figma_type: "INSTANCE", name: "Resonance", figma_node_id: "k:res",
+                 absolute_bounds: { x: 300, y: 150, w: 56, h: 56 } }),
+    ],
+  });
+  const els = [
+    { kind: "knob" as const, cx: 120, cy: 110, hit_radius: 28 },
+    { kind: "knob" as const, cx: 320, cy: 110, hit_radius: 28 },
+  ];
+  labelAndBindKnobs(els, frame, [0, 0]);
+  assert.deepEqual(els.map((e) => e.label), ["Cutoff", "Resonance"]);
+  assert.deepEqual(els.map((e) => e.source_node_id), ["k:cut", "k:res"]);
+  assert.equal(els[0].param_key, undefined);  // descriptive names never auto-bind
+  assert.equal(els[1].param_key, undefined);
+});
+
+test("labelAndBindKnobs: a drop-shadow panel margin (panel origin != 0) still binds", () => {
+  // Regression: parseFrameKnobs reports SVG coords `(node_abs - root_abs) +
+  // panelOrigin`. A frame with a shadow margin has panel origin (73,50), so a
+  // sigil knob node at abs (140,240,40,40) under root (100,200) has SVG center
+  // (133,110). Without the panelOrigin term the matcher looked at (60,60) — 88px
+  // off, outside the hit radius — and the knob silently stayed unbound.
+  const frame = baseNode({
+    name: "panel",
+    absolute_bounds: { x: 100, y: 200, w: 500, h: 400 },
+    children: [
+      baseNode({ figma_type: "INSTANCE", name: "param:filter.cutoff", figma_node_id: "s:1",
+                 absolute_bounds: { x: 140, y: 240, w: 40, h: 40 } }),
+    ],
+  });
+  const els = [{ kind: "knob" as const, cx: 133, cy: 110, hit_radius: 30 }];
+  labelAndBindKnobs(els, frame, [73, 50]);
+  assert.equal(els[0].param_key, "filter.cutoff");
+  assert.equal(els[0].source_node_id, "s:1");
 });
 
 test("parseFrameKnobs: ignores non-knob shapes", () => {

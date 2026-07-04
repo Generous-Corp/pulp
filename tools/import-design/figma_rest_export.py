@@ -792,6 +792,30 @@ def _node_label(name):
         return ""
     return s
 
+# Opt-in host-param binding sigil. A layer named `param:` / `bind:` / `meter:` +
+# "<module>.<param>" (e.g. `param:filter.cutoff`) declares its binding key in the
+# layer name. Mirrors the C++ figma_binding_from_layer_name (design_ir_json.cpp)
+# and the TS lane (paramKeyFromLayerName) EXACTLY.
+_BINDING_SIGILS = ("param:", "bind:", "meter:")
+
+def _param_key_from_layer_name(name):
+    """The host-param binding key from a layer-name sigil, or '' when the name is
+    not a binding declaration. Leading-whitespace tolerant, case-insensitive on
+    the sigil, value trimmed, and must carry at least one alphanumeric char. The
+    sigil is load-bearing: a bare or DESCRIPTIVE name ("Cutoff") is NEVER a
+    binding, so there are no false positives — a descriptive design binds via the
+    annotated manifest instead."""
+    s = (name or "").lstrip(" \t")
+    low = s.lower()
+    for sig in _BINDING_SIGILS:
+        if len(s) > len(sig) and low.startswith(sig):
+            key = s[len(sig):].strip(" \t")
+            # ASCII-only alnum to match C++ std::isalnum and the TS /[a-z0-9]/i
+            # (Python str.isalnum() is Unicode-aware and would diverge on a
+            # purely non-ASCII key).
+            return key if re.search(r"[A-Za-z0-9]", key) else ""
+    return ""
+
 def _solid_fill_hex(n):
     """The node's first visible SOLID fill as '#RRGGBB', or '' if none."""
     for f in (n.get("fills") or []):
@@ -1128,56 +1152,85 @@ def apply_faithful_vector(root_node, figma_root, svg, file_key, node_id, out_dir
     elements += _name_override_knobs(figma_root, knob_names, elements)
     elements += detect_overlay_controls(figma_root, root_abs, (px, py))
 
-    _label_elements(elements, figma_root, root_abs)
+    _label_elements(elements, figma_root, root_abs, (px, py))
 
     root_node["render_mode"] = "faithful_svg"
     root_node["svg_asset_id"] = asset_id
     root_node["interactive_elements"] = elements
     return entry
 
-def _label_elements(elements, figma_root, root_abs):
-    """Attach a human-readable `label` (the generated-parameter name) to each
-    interactive element from its source Figma layer name, when meaningful (see
-    _node_label). Overlay controls already carry source_node_id → look the node up
+def _label_elements(elements, figma_root, root_abs, panel_origin):
+    """Resolve each interactive element against the frame's Figma node tree to
+    stamp a human `label`, provenance `source_node_id`, and an opt-in host-param
+    `param_key`. Overlay controls already carry source_node_id → look the node up
     directly; geometry-detected knobs have no node link, so match the named node
-    whose frame-local center lands within the knob's hit radius (same coordinate
-    convention as _name_override_knobs). Sets `label` only when non-empty, so an
-    unnamed control keeps falling back to its binding key — no regression."""
+    whose SVG-space center lands within the knob's hit radius. Node centers are
+    mapped into the SAME SVG space `parse_frame_knobs` reports — `(node_abs -
+    root_abs) + panel_origin` — so a frame with a drop-shadow margin (panel not at
+    0,0) still matches (the exact convention `detect_overlay_controls` uses). A
+    sigil name (param:/bind:/meter:) yields a param_key binding (and no label — the
+    sigil is not a human name); a plain meaningful name yields a label. An unnamed
+    control keeps falling back to its synthetic key — no regression."""
     ox, oy = root_abs
-    # id -> node, and a flat list of (cx_local, cy_local, label) for named leaves.
+    pox, poy = panel_origin
+    # id -> node, and a flat list of (cx_svg, cy_svg, node) for the nodes eligible
+    # to own a knob: those with a meaningful label OR a binding sigil. Default-named
+    # leaves are excluded, so a bare inner ellipse never steals ownership from its
+    # named knob instance.
     id2node = {}
-    named_pts = []  # (cx, cy, label)
-    def walk(n):
+    named_pts = []  # (cx, cy, area, node)
+    def walk(n, is_root):
         nid = n.get("id")
         if nid:
             id2node[nid] = n
         bb = n.get("absoluteBoundingBox")
-        lbl = _node_label(n.get("name", ""))
-        if bb and lbl:
-            cx = bb.get("x", 0.0) - ox + bb.get("width", 0.0) / 2.0
-            cy = bb.get("y", 0.0) - oy + bb.get("height", 0.0) / 2.0
-            named_pts.append((cx, cy, lbl))
+        name = n.get("name", "")
+        # The root frame is excluded — it is the container, and its name (the
+        # design's own name) would otherwise be mis-bound to a knob near its center.
+        if not is_root and bb and (_node_label(name) or _param_key_from_layer_name(name)):
+            w, h = bb.get("width", 0.0), bb.get("height", 0.0)
+            cx = bb.get("x", 0.0) - ox + pox + w / 2.0
+            cy = bb.get("y", 0.0) - oy + poy + h / 2.0
+            named_pts.append((cx, cy, w * h, n))
         for c in n.get("children", []) or []:
-            walk(c)
-    walk(figma_root)
+            walk(c, False)
+    walk(figma_root, True)
+
+    def _apply(el, node):
+        name = node.get("name", "")
+        pk = _param_key_from_layer_name(name)
+        if pk:
+            el["param_key"] = pk  # binding sigil → host-param key (no human label)
+        else:
+            lbl = _node_label(name)
+            if lbl:
+                el["label"] = lbl
 
     for el in elements:
         sid = el.get("source_node_id")
         if sid and sid in id2node:
-            lbl = _node_label(id2node[sid].get("name", ""))
-            if lbl:
-                el["label"] = lbl
+            _apply(el, id2node[sid])
             continue
-        # Geometry knob: nearest named node whose center is within the hit radius.
+        # Geometry knob: the best candidate whose center is within the hit radius.
+        # Priority: a binding-sigil node beats a plain-named one; within a rank,
+        # nearest center wins, then smallest area (the tightest owner over an
+        # enclosing group at the same center).
         if el.get("kind") == "knob":
             kx, ky, r = el.get("cx", 0.0), el.get("cy", 0.0), el.get("hit_radius", 0.0)
-            best, bd = None, 1e18
-            for cx, cy, lbl in named_pts:
+            best, best_rank, bd, ba = None, -1, 1e18, 1e18
+            for cx, cy, area, node in named_pts:
                 d2 = (cx - kx) ** 2 + (cy - ky) ** 2
-                if d2 <= r * r and d2 < bd:
-                    bd, best = d2, lbl
-            if best:
-                el["label"] = best
+                if d2 > r * r:
+                    continue
+                rank = 1 if _param_key_from_layer_name(node.get("name", "")) else 0
+                better = rank > best_rank or (
+                    rank == best_rank and
+                    (d2 < bd - 1e-6 or (d2 <= bd + 1e-6 and area < ba)))
+                if better:
+                    best, best_rank, bd, ba = node, rank, d2, area
+            if best is not None:
+                el["source_node_id"] = best.get("id", "")  # provenance for the manifest lane
+                _apply(el, best)
 
 def _rewrite_image_fills(node, ref_to_rel):
     """Replace style.background_image 'pending:<ref>' with the resolved relative
