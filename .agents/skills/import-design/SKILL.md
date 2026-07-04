@@ -12,22 +12,31 @@ Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, 
 The headless REST exporter (`figma_rest_export.py`, used in the steps below) is
 the **CI / true-headless fallback**. On a dense real file it **WILL be
 rate-limited** (HTTP 429): Figma's `/images` render endpoint is a strict Tier-1
-budget keyed to the *file's* plan, so a big frame can 429 for many minutes. When
-Figma desktop is running on this machine (the common case), **do not reach for
-REST first** — the local paths have **no REST rate limit**. Order of preference:
+budget keyed to the *file's* plan, so a big frame can 429 for many minutes.
 
-1. **Inspect / verify a design** (structure, screenshot, code context) → the
-   **Figma desktop MCP server**: `get_metadata` (node tree: ids, names, types,
-   positions), `get_screenshot` (returns a short-lived PNG URL — cheap), and
-   `get_design_context` (reference code + assets). This is how you look at a
-   real file, confirm layer names/structure, and grab a reference render for
-   validation — all rate-limit-free.
-2. **Export a scene for import** → the **Pulp Figma desktop plugin**
-   (`tools/figma-plugin`) exports the `figma-plugin-export-v1` envelope directly
-   from the open file, no REST.
+**But the Figma MCP is ALSO quota-limited — do not treat it as free.** On a
+**View/Collab seat the MCP is 6 tool calls per MONTH** (any plan); Dev/Full seats
+get 200–600/day + a per-minute cap. Every *read* tool counts (`get_metadata`,
+`get_screenshot`, `get_design_context`); write tools (`whoami`,
+`generate_figma_design`) are exempt. This is a hard MONTHLY quota — **backoff
+cannot clear it**. So be maximally frugal. Order of preference, smartest first:
+
+0. **Reuse a CACHED artifact.** Prior sessions cache Figma PNGs/scenes under the
+   session scratchpad. `find … -iname '<file>*'` BEFORE spending a call — a cached
+   source screenshot suffices for source-vs-implementation checks with zero calls.
+1. **Export a scene for import** → the **Pulp Figma desktop plugin**
+   (`tools/figma-plugin`) exports the `figma-plugin-export-v1` envelope (SVG +
+   node tree) directly from the open file — **no MCP tool call, no REST budget**.
+   This is the truly-unlimited local path; once you hold the envelope, all
+   importer/render work is offline forever. Prefer this to spend ZERO quota.
+2. **Inspect / verify a design** → the **Figma desktop MCP**, but BUDGET the
+   6/month. When you must call, use ONE `get_design_context` (reference code +
+   screenshot + metadata together) instead of separate `get_metadata` +
+   `get_screenshot`, and never re-fetch what you cached.
 3. **Only in true headless / CI** (no desktop, no MCP) → `figma_rest_export.py`.
-   If it 429s, it now prints a loud one-time advisory and its terminal error
-   points back here — **switch to (1)/(2), don't wait out the backoff.**
+   Its `figma_get` honors `429 Retry-After` with backoff; if it 429s it prints a
+   loud one-time advisory pointing back here — **switch to (0)/(1), don't wait out
+   6×300s of backoff.**
 
 Everything below documents lane (3)'s mechanics because it's the scriptable one,
 but the ordering above governs *which lane to start in*. `figma_rest_export.py`
@@ -187,11 +196,24 @@ framework-agnostic `HostParamSurface` (JUCE APVTS / iPlug2 / StateStore) directl
 via `element_for_param_key` / `sync_from_host_params`. It is inert until a
 producer emits a key: an all-unbound frame keeps routing OFF and behaves exactly
 as before (the public `on_element_changed` / `on_gesture_*` callbacks fire
-regardless of routing, so an existing consumer never changes). The producers do
-NOT emit `param_key` from a layer-name sigil yet — that lockstep
-(`faithful-vector.ts` + `figma_rest_export.py`, mirroring the recognized-widget
-`figma_binding_from_layer_name` sigil convention) is the follow-up that plugs
-into this ready runtime; until then, an annotated manifest supplies `param_key`.
+regardless of routing, so an existing consumer never changes).
+
+**Producer emission (both lanes).** `faithful-vector.ts` (`labelAndBindKnobs`) and
+`figma_rest_export.py` (`_label_elements`) resolve each geometry knob against the
+frame's Figma node tree by position and stamp three things from the matched node:
+a human `label`, provenance `source_node_id`, and — when the layer name carries an
+opt-in `param:`/`bind:`/`meter:` sigil — a `param_key`. `paramKeyFromLayerName` /
+`_param_key_from_layer_name` mirror the C++ `figma_binding_from_layer_name`
+EXACTLY (leading-ws tolerant, case-insensitive sigil, trimmed value, ≥1 alnum), so
+a sigil-named knob binds identically to a recognized widget. The **sigil is
+load-bearing**: a bare/DESCRIPTIVE name (the real Triaz case — "Cutoff", "Res")
+is NEVER auto-bound (verified: all Triaz panel captions classify as `label` with
+zero false bindings in both lanes) — it gets a `label` + `source_node_id` so the
+**annotated-manifest** lane can bind it by node id. Match tie-breaks: a sigil node
+beats a plain-named one; within a rank, nearest center then smallest area; the
+root frame is excluded so a panel name ("sound / main panel") never mis-binds a
+centered knob. Tests: `[layer-name-binding]`/knob cases in
+`faithful-vector.test.ts` + `ParamKeyBindingTest` in `test_figma_rest_export.py`.
 
 **Custom controls (P7 Tier-3) — the `name→View` factory registry.** A genuinely
 novel control resolves to `kind=custom`, which carries a `factory_id` (+ opaque
