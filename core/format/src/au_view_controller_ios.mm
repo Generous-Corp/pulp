@@ -273,7 +273,21 @@
     // Calling `_bridge->close()` HERE explicitly (before [super dealloc])
     // reverses that order — the View dies first, then ~PluginViewHost
     // dereferences a dangling `root_`. Don't reintroduce the explicit close.
+    //
+    // The GPU host owns the CVDisplayLink idle pump, dispatched to the MAIN
+    // queue, which dereferences the bridge. An AU v3 controller can be released
+    // off the main thread (setAudioUnit / rebuild arrive on the XPC queue), so
+    // destroying the host off-main would race a queued main-queue idle block →
+    // use-after-free (same class as the AU v2 fix). Reset the host on the main
+    // thread FIRST (flips its liveness token + stops the display link) so
+    // teardown and the idle block are mutually exclusive on one queue; its later
+    // reverse-order ivar destruction is then a no-op and the contract above holds.
 #if !__has_feature(objc_arc)
+    if ([NSThread isMainThread]) {
+        _viewHost.reset();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{ _viewHost.reset(); });
+    }
     [_audioUnit release];
     [super dealloc];
 #endif

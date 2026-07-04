@@ -619,6 +619,21 @@ assigns to `self.audioUnit`, bypassing your thread check. The hard
 guard inside `rebuildEditorIfReady` is the only safe place. Same
 gotcha on iOS — `au_view_controller_ios.mm` has the same guard.
 
+**`dealloc` is on the XPC queue too — reset the host on main.** The
+same off-main hazard bites teardown: a GPU-backed `PluginViewHost`'s
+`CVDisplayLink` idle pump is dispatched to the main queue and
+dereferences the `ViewBridge`, so if the last controller release lands
+on the XPC queue, freeing host + bridge off-main races a queued
+main-queue idle block → SIGSEGV in `display_link_callback` (Ableton
+Live "add plugin then delete" repro). Both `au_view_controller_mac.mm`
+and `au_view_controller_ios.mm` `dealloc` now reset `_viewHost` via
+`[NSThread isMainThread] ? reset : dispatch_sync(main, reset)` before
+the reverse-order ivar destruction (flips the host liveness token +
+stops the link first). Do NOT instead clear `idle_callback_` from the
+off-main `dealloc` — that just swaps in a data race on the
+`std::function`. See the `view-bridge` skill, "AU v3 teardown must ALSO
+run on the main thread," for the full lifecycle.
+
 ### Logic's per-plugin failed-state cache
 
 Logic Pro remembers AU v3 plugins that previously failed to validate
