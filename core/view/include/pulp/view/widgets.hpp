@@ -7,6 +7,7 @@
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/sprite_strip.hpp>
+#include <pulp/view/value_source.hpp>
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
 #include <string>
@@ -1164,6 +1165,31 @@ public:
     float display_peak() const { return ballistics_.display_peak; }
     float held_peak() const { return ballistics_.held_peak; }
 
+    // ── Live host→view source ────────────────────────────────────────────────
+    // Bind a lock-free MeterSource whose `channel` this meter reads once per
+    // frame (through the ballistic `update()` path) while attached to a
+    // FrameClock. The host publishes on the audio/host thread; the meter reads
+    // paint-safe. A bound-and-attached meter is a FrameClock subscriber, so it
+    // also keeps an editor's frames alive (see needs_continuous_frames) while a
+    // source is present. Pass nullptr to unbind. Safe to call before or after
+    // the view is hosted — the subscription attaches whenever a clock becomes
+    // reachable. UI thread.
+    //
+    // Lifetime: the bound FrameClock must outlive the meter, OR the host must
+    // clear it (`root->set_frame_clock(nullptr)`) / detach the meter before
+    // destroying the clock — both drop the subscription first. Pulp's GPU hosts
+    // clear the root clock during teardown, so this holds for them; a custom
+    // host that owns a clock must observe the same order.
+    void set_source(std::shared_ptr<MeterSource> source, int channel = 0);
+    bool has_source() const { return static_cast<bool>(source_); }
+    int source_channel() const { return source_channel_; }
+
+    ~Meter() override { stop_source_subscription(); }
+
+    void on_attached() override { try_source_subscription(); }
+    void on_detached() override { stop_source_subscription(); }
+    void on_frame_clock_changed() override { try_source_subscription(); }
+
     void paint(canvas::Canvas& canvas) override;
 
     // ── Skin overrides ────────────────────────────────────────────────────
@@ -1210,6 +1236,19 @@ public:
     canvas::Color gradient_color_at(float t) const;
 
 private:
+    // (Re)subscribe to the reachable FrameClock if a source is bound and we
+    // aren't already subscribed. Idempotent; a no-op when no clock is reachable
+    // yet (a preview, or a tree built before hosting — the subscription attaches
+    // later via on_attached / on_frame_clock_changed).
+    void try_source_subscription();
+    // Unsubscribe from the cached clock, if subscribed. Safe to call repeatedly.
+    void stop_source_subscription();
+    // FrameClock callback: pull the latest frame and drive the ballistic path.
+    // Returns false (auto-unsubscribing) once the source is gone or the reachable
+    // clock no longer matches the one we subscribed to — the robust teardown for
+    // a detach that does not fire on_detached on every descendant.
+    bool on_source_frame(float dt);
+
     Orientation orientation_ = Orientation::vertical;
     MeterBallistics ballistics_;
     float current_rms_ = 0;
@@ -1219,6 +1258,11 @@ private:
     canvas::Color background_color_{};
     bool has_skin_background_ = false;
     float bar_fill_ratio_ = 1.0f;
+
+    std::shared_ptr<MeterSource> source_;
+    int source_channel_ = 0;
+    int source_sub_id_ = -1;               // FrameClock subscription id, -1 = none
+    FrameClock* subscribed_clock_ = nullptr; // cached for unsubscribe + detach detection
 };
 
 // ── XYPad ────────────────────────────────────────────────────────────────────
@@ -1228,8 +1272,8 @@ class XYPad : public View {
 public:
     XYPad() = default;
 
-    void set_x(float v) { x_ = std::clamp(v, 0.0f, 1.0f); }
-    void set_y(float v) { y_ = std::clamp(v, 0.0f, 1.0f); }
+    void set_x(float v) { x_ = std::clamp(v, 0.0f, 1.0f); request_repaint(); }
+    void set_y(float v) { y_ = std::clamp(v, 0.0f, 1.0f); request_repaint(); }
     float x_value() const { return x_; }
     float y_value() const { return y_; }
 

@@ -185,6 +185,12 @@ public:
     virtual void on_resized() {}
     virtual void on_attached() {}
     virtual void on_detached() {}
+    /// The FrameClock reachable from this view (via `frame_clock()`) may have
+    /// changed — a clock was installed on an ancestor, or this subtree was
+    /// re-parented. A view that self-subscribes to the clock (e.g. a Meter with
+    /// a live source) overrides this to (re)evaluate its subscription. Default
+    /// no-op. Fired by `set_frame_clock()` across the whole subtree.
+    virtual void on_frame_clock_changed() {}
 
     // ── Input events (rich, with modifiers and pointer ID) ──────────────
 
@@ -253,7 +259,12 @@ public:
     // ── Frame clock ─────────────────────────────────────────────────────
 
     /// Set the frame clock on the root view. Children access via frame_clock().
-    void set_frame_clock(FrameClock* clock) { frame_clock_ = clock; }
+    /// Hosts typically build the view tree *before* installing the clock, so
+    /// this propagates an `on_frame_clock_changed()` notification down the whole
+    /// subtree — a descendant that self-subscribes on a reachable clock (a live
+    /// Meter, say) gets a chance to (re)subscribe now rather than silently
+    /// missing the clock it was built before.
+    void set_frame_clock(FrameClock* clock);
 
     /// Get the frame clock (walks up parent chain to find it).
     FrameClock* frame_clock() const;
@@ -1442,6 +1453,11 @@ public:
     UserSelect user_select() const { return user_select_; }
 
 private:
+    /// Recursively fire `on_frame_clock_changed()` on this view and every
+    /// descendant. Used by `set_frame_clock()` so a clock installed on a root
+    /// after the subtree was built reaches self-subscribing descendants.
+    void notify_frame_clock_changed();
+
     /// Seed corner_radii_ from the uniform corner_radius_ on the first
     /// transition into per-corner mode. Idempotent: subsequent calls (when
     /// has_corner_radii_ is already true) are no-ops.

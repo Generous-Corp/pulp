@@ -1701,7 +1701,7 @@ commands:
       - name: validate assert
         summary: Re-check a stored assertions.json (or an audio-run dir containing one); exits nonzero on any failing assertion
       - name: compare
-        summary: "Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge). Delegates to the opt-in Audio Quality Lab tool (never links DSP into the CLI); level-matches, runs one --profile axis (tonal-balance | added-hf), and prints a typed evidence envelope + verdict (regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Exits nonzero ONLY when it could not measure (invalid), never for a judgment. Distinct from `validate compare`, which is the deterministic pass/fail gate. Prints an install hint + exit 1 if the tool is absent."
+        summary: "Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge). Delegates to the opt-in Audio Quality Lab tool (never links DSP into the CLI); level-matches, runs one --profile axis (tonal-balance | added-hf | noise-roughness | graininess | stereo-width), and prints a typed evidence envelope + verdict (regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Exits nonzero ONLY when it could not measure (invalid), never for a judgment. Distinct from `validate compare`, which is the deterministic pass/fail gate. Prints an install hint + exit 1 if the tool is absent."
         args:
           - name: --profile
             kind: option

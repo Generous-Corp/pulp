@@ -8,6 +8,76 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05630"></a>
+## [0.563.0] - 2026-07-04
+
+- feat(design-import): emit param_key + provenance for geometry knobs (producer side) ([#5495](https://github.com/danielraffel/pulp/pull/5495))
+- ci: harden the conflict-marker guard per adversarial review ([#5493](https://github.com/danielraffel/pulp/pull/5493))
+
+<a id="v05620"></a>
+## [0.562.0] - 2026-07-03
+
+- feat(view): add a FrameClock activity channel + pump_view_frame seam ([#5487](https://github.com/danielraffel/pulp/pull/5487))
+
+<a id="v05610"></a>
+## [0.561.0] - 2026-07-03
+
+- feat(import-design): label faithful_svg fidelity honestly in --validate ([#5483](https://github.com/danielraffel/pulp/pull/5483))
+
+<a id="v05600"></a>
+## [0.560.0] - 2026-07-03
+
+- feat(view): bind geometry-detected faithful-vector controls to host params ([#5481](https://github.com/danielraffel/pulp/pull/5481))
+- ci: guard against committed git conflict markers on every layer ([#5480](https://github.com/danielraffel/pulp/pull/5480))
+
+<a id="v05590"></a>
+## [0.559.0] - 2026-07-03
+
+- chore: raise hotspot ceilings for the layer-name binding slice ([#5479](https://github.com/danielraffel/pulp/pull/5479))
+- fix(build): resolve committed merge-conflict markers in CMakeLists version ([#5477](https://github.com/danielraffel/pulp/pull/5477))
+- fix(sampler): mode-gate the footer chrome + slice bands; fit the toolbar buttons ([#5466](https://github.com/danielraffel/pulp/pull/5466))
+
+<a id="v05580"></a>
+## [0.558.0] - 2026-07-03
+
+- feat(view): paint-safe meter/scalar host→view source with FrameClock self-update ([#5472](https://github.com/danielraffel/pulp/pull/5472))
+
+<a id="v05570"></a>
+## [0.557.0] - 2026-07-03
+
+- feat(view): make DesignFrameView emit_* a supported protected extension point ([#5471](https://github.com/danielraffel/pulp/pull/5471))
+- docs(ci): lead flaky-required-wedge recovery with the shipyard rescue one-liner ([#5469](https://github.com/danielraffel/pulp/pull/5469))
+- ci: retry transient flakes on the required test legs ([#5467](https://github.com/danielraffel/pulp/pull/5467))
+
+<a id="v05560"></a>
+## [0.556.0] - 2026-07-03
+
+- feat(view): promote needs_continuous_frames to a public predicate ([#5465](https://github.com/danielraffel/pulp/pull/5465))
+
+<a id="v05540"></a>
+## [0.554.0] - 2026-07-02
+
+- feat(quality-lab): stereo-width compare axis (compare -> 5-of-7, closes the stereo gap) ([#5457](https://github.com/danielraffel/pulp/pull/5457))
+- feat(quality-lab): golden-render regression net (the daily-driver verify loop) ([#5452](https://github.com/danielraffel/pulp/pull/5452))
+
+<a id="v05530"></a>
+## [0.553.0] - 2026-07-02
+
+- feat(quality-lab): wire noise-roughness + graininess axes (compare -> 4-of-7) ([#5448](https://github.com/danielraffel/pulp/pull/5448))
+- chore(lint): scan source comments and test tags for transient breadcrumbs ([#5430](https://github.com/danielraffel/pulp/pull/5430))
+
+<a id="v05520"></a>
+## [0.552.0] - 2026-07-02
+
+- feat(view): complete widget↔parameter automation + ComboBox polish ([#5419](https://github.com/danielraffel/pulp/pull/5419))
+- feat(quality-lab): promote corroboration disagreement into the headline ([#5447](https://github.com/danielraffel/pulp/pull/5447))
+- fix(quality-lab): make added-hf band-relative (dB), fix the bass-heavy blind spot ([#5443](https://github.com/danielraffel/pulp/pull/5443))
+- docs(skills): add code-comments skill for durable comments ([#5421](https://github.com/danielraffel/pulp/pull/5421))
+- fix(quality-lab): disclose downmix, guard added-hf band, surface DC offset ([#5439](https://github.com/danielraffel/pulp/pull/5439))
+- docs/planning audio measurement brief ([#5432](https://github.com/danielraffel/pulp/pull/5432))
+- docs(guides): clarify the template's siblings mode needs both adapter checkouts ([#5426](https://github.com/danielraffel/pulp/pull/5426))
+- docs(guides): add "Putting a Pulp UI in a JUCE plugin" guide ([#5424](https://github.com/danielraffel/pulp/pull/5424))
+
 <a id="v05510"></a>
 ## [0.551.0] - 2026-07-02
 
@@ -5765,6 +5835,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.563.0]: https://github.com/danielraffel/pulp/releases/tag/v0.563.0
+[0.562.0]: https://github.com/danielraffel/pulp/releases/tag/v0.562.0
+[0.561.0]: https://github.com/danielraffel/pulp/releases/tag/v0.561.0
+[0.560.0]: https://github.com/danielraffel/pulp/releases/tag/v0.560.0
+[0.559.0]: https://github.com/danielraffel/pulp/releases/tag/v0.559.0
+[0.558.0]: https://github.com/danielraffel/pulp/releases/tag/v0.558.0
+[0.557.0]: https://github.com/danielraffel/pulp/releases/tag/v0.557.0
+[0.556.0]: https://github.com/danielraffel/pulp/releases/tag/v0.556.0
+[0.554.0]: https://github.com/danielraffel/pulp/releases/tag/v0.554.0
+[0.553.0]: https://github.com/danielraffel/pulp/releases/tag/v0.553.0
+[0.552.0]: https://github.com/danielraffel/pulp/releases/tag/v0.552.0
 [0.551.0]: https://github.com/danielraffel/pulp/releases/tag/v0.551.0
 [0.550.0]: https://github.com/danielraffel/pulp/releases/tag/v0.550.0
 [0.549.3]: https://github.com/danielraffel/pulp/releases/tag/v0.549.3

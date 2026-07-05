@@ -669,6 +669,172 @@ TEST_CASE("figma-plugin knob with explicit pulp* binding is not overwritten",
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Opt-in LAYER-NAME binding convention.
+//
+// A control normally declares its binding via an explicit `binding` component
+// property. These pin the additive fallback: a recognized widget with NO
+// `binding` attribute but a sigil-prefixed layer name (`param:`/`bind:`/`meter:`
+// + "<module>.<param>") synthesizes the SAME canonical pulp* binding — while a
+// bare/ordinary layer name stays unbound (no false positives), and an explicit
+// `binding` attribute always wins over the name.
+
+TEST_CASE("figma-plugin knob binds by param: layer name when no binding attribute",
+          "[view][import][figma-plugin][binding-wireup][layer-name-binding]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "param:filter.cutoff_hz",
+            "audio_widget": "knob",
+            "label": "Cutoff",
+            "min": 20, "max": 20000, "default": 880,
+            "style": { "width": 56, "height": 56 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::knob);
+    // No explicit `binding` attribute — the binding came from the layer name.
+    REQUIRE(ir.root.attributes.count("binding") == 0);
+    // …and lowers to the identical canonical pulp* contract as an explicit one.
+    REQUIRE(ir.root.attributes.at("pulpParamKey") == "filter.cutoff_hz");
+    REQUIRE(ir.root.attributes.at("pulpBindingModule") == "filter");
+    REQUIRE(ir.root.attributes.at("pulpBindingParam") == "cutoff_hz");
+    REQUIRE(ir.root.attributes.at("pulpRouteId") == "figma-plugin:filter.cutoff_hz");
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.binding_manifest.find("\"param_key\": \"filter.cutoff_hz\"") != std::string::npos);
+    REQUIRE(result.source.find("ctx.bind_knob(") != std::string::npos);
+}
+
+TEST_CASE("figma-plugin bare layer name synthesizes no binding (no false positive)",
+          "[view][import][figma-plugin][binding-wireup][layer-name-binding]") {
+    // An ordinary layer name (no sigil) must NEVER be treated as a binding — the
+    // importer does not guess semantics from arbitrary names.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "Big Cutoff Knob",
+            "audio_widget": "knob",
+            "min": 20, "max": 20000, "default": 880,
+            "style": { "width": 56, "height": 56 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::knob);
+    REQUIRE(ir.root.attributes.count("pulpParamKey") == 0);
+    REQUIRE(ir.root.attributes.count("pulpRouteId") == 0);
+    REQUIRE(ir.root.attributes.count("binding") == 0);
+}
+
+TEST_CASE("figma-plugin explicit binding attribute wins over the layer name",
+          "[view][import][figma-plugin][binding-wireup][layer-name-binding]") {
+    // Precedence: an explicit `binding` attribute is authoritative even when the
+    // layer name also carries a sigil — the attribute is the deliberate override.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "param:osc.detune",
+            "audio_widget": "knob",
+            "attributes": { "binding": "filter.cutoff_hz" },
+            "style": { "width": 56, "height": 56 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.attributes.at("pulpParamKey") == "filter.cutoff_hz");
+    REQUIRE(ir.root.attributes.at("pulpBindingParam") == "cutoff_hz");
+}
+
+TEST_CASE("figma-plugin meter binds by meter: layer name",
+          "[view][import][figma-plugin][binding-wireup][layer-name-binding]") {
+    // The audio_widget type still routes param-vs-meter; the sigil only supplies
+    // the binding string. A meter named `meter:meter.out_l` lowers to a source/
+    // channel, matching the explicit-attribute meter path.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": {
+            "type": "frame",
+            "name": "meter:meter.out_l",
+            "audio_widget": "meter",
+            "style": { "width": 12, "height": 64 },
+            "children": []
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.audio_widget == AudioWidgetType::meter);
+    REQUIRE(ir.root.attributes.at("pulpMeterSource") == "meter");
+    REQUIRE(ir.root.attributes.at("pulpMeterChannel") == "out_l");
+    REQUIRE(ir.root.attributes.count("pulpParamKey") == 0);
+}
+
+TEST_CASE("figma-plugin layer-name binding tolerates leading whitespace",
+          "[view][import][figma-plugin][binding-wireup][layer-name-binding]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1", "parser_version": "0.1.0", "compat_schema_version": "v1",
+        "root": {
+            "type": "frame", "name": "  param:filter.cutoff_hz",
+            "audio_widget": "knob", "min": 20, "max": 20000, "default": 880,
+            "style": { "width": 56, "height": 56 }, "children": []
+        }
+    })JSON";
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.attributes.at("pulpParamKey") == "filter.cutoff_hz");
+}
+
+TEST_CASE("figma-plugin sigil with pure-punctuation binds nothing (no false positive)",
+          "[view][import][figma-plugin][binding-wireup][layer-name-binding]") {
+    // A sigil followed by only punctuation ("param:.") has no real param token —
+    // it must not synthesize a binding.
+    const std::string envelope = R"JSON({
+        "format_version": "v1", "parser_version": "0.1.0", "compat_schema_version": "v1",
+        "root": {
+            "type": "frame", "name": "param:.",
+            "audio_widget": "knob", "min": 0, "max": 1, "default": 0.5,
+            "style": { "width": 32, "height": 32 }, "children": []
+        }
+    })JSON";
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.attributes.count("pulpParamKey") == 0);
+    REQUIRE(ir.root.attributes.count("pulpRouteId") == 0);
+}
+
+TEST_CASE("figma-plugin layer-name binding leaves an already-lowered node untouched",
+          "[view][import][figma-plugin][binding-wireup][layer-name-binding]") {
+    // Gate 3: a node already carrying a canonical pulp* binding attribute (here
+    // pulpRouteId, without pulpParamKey) is left exactly as-is — the sigil name
+    // must not layer a second, hybrid binding on top of it.
+    const std::string envelope = R"JSON({
+        "format_version": "v1", "parser_version": "0.1.0", "compat_schema_version": "v1",
+        "root": {
+            "type": "frame", "name": "param:filter.cutoff_hz",
+            "audio_widget": "knob",
+            "attributes": { "pulpRouteId": "authored:preexisting", "pulpRouteType": "native_cpp" },
+            "style": { "width": 56, "height": 56 }, "children": []
+        }
+    })JSON";
+    auto ir = parse_figma_plugin_json(envelope);
+    // No param key synthesized over the existing route metadata.
+    REQUIRE(ir.root.attributes.count("pulpParamKey") == 0);
+    REQUIRE(ir.root.attributes.at("pulpRouteId") == "authored:preexisting");
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pulp / Fader + Pulp / Meter recognition.
 //
 // Mirrors the knob contract for library widgets added in Pulp Library v0.2.0:

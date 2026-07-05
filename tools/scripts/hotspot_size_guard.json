@@ -27,18 +27,18 @@
     },
     {
       "path": "tools/local-ci/local_ci.py",
-      "max_loc": 8710,
-      "note": "local CI runner orchestration hotspot"
+      "max_loc": 81,
+      "note": "legacy local CI runner (superseded by Shipyard, #120); ratcheted down after the file was gutted to a thin stub"
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc":     6275,
+      "max_loc": 6285,
       "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
-      "max_loc": 2094,
-      "note": "design-import codegen test split"
+      "max_loc": 2101,
+      "note": "design-import codegen test split; +7 for the interactive-element param_key + host-param routing codegen assertions"
     },
     {
       "path": "test/test_design_import_fidelity.cpp",
@@ -47,13 +47,13 @@
     },
     {
       "path": "test/test_design_import_ir.cpp",
-      "max_loc": 1192,
-      "note": "design-import IR test split"
+      "max_loc": 1292,
+      "note": "design-import IR test split; +3 for the interactive-element param_key round-trip assertions"
     },
     {
       "path": "test/test_design_import_sources.cpp",
-      "max_loc": 1199,
-      "note": "design-import source parser test split; lowered after comment-hygiene cleanup"
+      "max_loc": 1370,
+      "note": "design-import source parser test split; +166 for the layer-name binding cases ([layer-name-binding])"
     },
     {
       "path": "test/test_renderer3d_shared.hpp",
@@ -82,33 +82,33 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3414,
-      "note": "import-design CLI orchestration hotspot; grew with the recognition-resolver + installed-package custom-control wiring"
+      "max_loc": 3477,
+      "note": "import-design CLI orchestration hotspot; grew with the recognition-resolver + installed-package custom-control wiring, plus the --validate faithful_svg honesty caveat"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2775,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing)"
+      "max_loc": 2752,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Lowered from 2790: the duplicated view_needs_continuous_frames predicate was promoted to the shared pulp::view::needs_continuous_frames (continuous_frames.hpp) and removed from this host."
     },
     {
       "path": "core/view/src/design_import.cpp",
-      "max_loc": 2471,
+      "max_loc": 2520,
       "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2200,
-      "note": "DesignIR serialization contract hotspot; net after extracting the analysis passes to design_ir_analysis.cpp (-) and parse_ir_node preserving component_key for the recognition resolver (+21)"
+      "max_loc": 2265,
+      "note": "DesignIR serialization contract hotspot; layer-name binding helper + Gate-2/3 resolve in normalize_figma_plugin_binding, plus interactive-element param_key parse/serialize"
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 2185,
-      "note": "DesignIR C++ codegen contract hotspot"
+      "max_loc": 2197,
+      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame)"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2067,
-      "note": "native materialization/import boundary hotspot"
+      "max_loc": 2079,
+      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable"
     },
     {
       "path": "core/view/src/design_codegen.cpp",
@@ -117,8 +117,8 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1658,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions)"
+      "max_loc": 1674,
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",

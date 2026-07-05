@@ -1324,6 +1324,10 @@ bool emit_faithful_frame(std::ostringstream& out,
         if (!e.custom_props.empty())
             emit_line(out, depth + 1, ctx.opts.indent_spaces,
                       "el.custom_props = " + cpp_string_literal(e.custom_props) + ";");
+        // Host-param binding key for a geometry-detected control.
+        if (!e.param_key.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.param_key = " + cpp_string_literal(e.param_key) + ";");
         emit_line(out, depth + 1, ctx.opts.indent_spaces,
                   var + "_els.push_back(std::move(el));");
         emit_line(out, depth, ctx.opts.indent_spaces, "}");
@@ -1332,6 +1336,14 @@ bool emit_faithful_frame(std::ostringstream& out,
     emit_line(out, depth, ctx.opts.indent_spaces,
               "auto " + var + " = std::make_unique<pulp::view::DesignFrameView>(std::move(" +
               var + "_svg), std::move(" + var + "_els));");
+    // If any control carries a binding key, self-wire gestures to the host-param
+    // surface — parity with the runtime materialize path (make_faithful_svg_frame).
+    const bool any_bound = std::any_of(
+        node.interactive_elements.begin(), node.interactive_elements.end(),
+        [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    if (any_bound)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  var + "->route_changes_to_host_params(true);");
     return true;
 }
 

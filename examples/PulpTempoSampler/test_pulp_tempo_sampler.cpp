@@ -170,7 +170,8 @@ TEST_CASE("PulpTempoSampler descriptor + params", "[tempo-sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.output_buses.size() == 1);
     state::StateStore s; p.define_parameters(s);
-    REQUIRE(s.param_count() == 16);
+    REQUIRE(s.param_count() == 17);
+    REQUIRE(s.get_value(kPlaybackMode) == 0.0f);  // default mode = Classic
     REQUIRE(s.get_value(kDirection) == 0.0f);  // default direction = Forward
     REQUIRE(s.get_value(kLoopMode) == 0.0f);   // default loop shape = Forward
     REQUIRE(s.get_value(kTempoLoop) == 0.0f);  // default LOOP = None (play once)
@@ -375,6 +376,7 @@ TEST_CASE("pitch-bend and mod-wheel reach the rendered audio",
 TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)",
           "[tempo-sampler]") {
     Fixture f;
+    f.store.set_value(kPlaybackMode, 2.0f);  // Slice: no whole-sample fallback
     auto loop = percussive_loop(48000, 4);
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
@@ -407,6 +409,7 @@ TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)"
 // keyboard mapping follows the slider.
 TEST_CASE("sensitivity change reaches the keyboard trigger mapping", "[tempo-sampler]") {
     Fixture f;
+    f.store.set_value(kPlaybackMode, 2.0f);  // Slice: per-key slice mapping
     auto loop = percussive_loop(48000, 8);  // ~8 onsets available
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
@@ -751,6 +754,7 @@ TEST_CASE("CC120 All Sound Off hard-stops ringing voices and clears the held set
 TEST_CASE("all slices play back at the same (native) rate — none faster/slower",
           "[tempo-sampler][issue-slice-rate]") {
     Fixture f;
+    f.store.set_value(kPlaybackMode, 2.0f);  // Slice: each key is its own slice at native rate
     auto loop = percussive_loop(48000, 6);            // 48k loop into 48k host -> R=1 at matched tempo
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
@@ -864,6 +868,38 @@ TEST_CASE("tempo override persists across serialize/deserialize",
     CHECK_FALSE(g.proc->tempo_linked());                 // still manual
 }
 
+// Full "save the session, reopen it" restore: the mode + Direction/Loop settings
+// (StateStore params) AND the loaded sample (plugin state) all come back — the
+// StateStore blob + plugin-state blob are exactly what a host persists together.
+TEST_CASE("mode + settings + sample all restore across save/reopen",
+          "[tempo-sampler][persist]") {
+    std::vector<std::uint8_t> store_blob, plugin_blob;
+    {
+        Fixture a;
+        a.store.set_value(kPlaybackMode, 1.0f);   // One-Shot (non-default)
+        a.store.set_value(kDirection, 1.0f);      // Reverse
+        a.store.set_value(kTempoLoop, 1.0f);
+        a.store.set_value(kLoopMode, 2.0f);       // Ping-Pong
+        auto loop = percussive_loop(48000, 4);
+        const float* ch[1] = {loop.data()};
+        REQUIRE(a.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return a.proc->has_sample(); }));
+        store_blob = a.store.serialize();
+        plugin_blob = a.proc->serialize_plugin_state();
+        REQUIRE(!plugin_blob.empty());
+    }
+    Fixture b;                                    // fresh instance (close + reopen)
+    REQUIRE_FALSE(b.proc->has_sample());
+    REQUIRE(b.store.deserialize(std::span<const std::uint8_t>(store_blob.data(), store_blob.size())));
+    REQUIRE(b.proc->deserialize_plugin_state(
+        std::span<const std::uint8_t>(plugin_blob.data(), plugin_blob.size())));
+    REQUIRE(wait_for([&] { return b.proc->has_sample(); }));
+    CHECK(b.store.get_value(kPlaybackMode) == 1.0f);   // mode restored
+    CHECK(b.store.get_value(kDirection) == 1.0f);      // Direction restored
+    CHECK(b.store.get_value(kTempoLoop) == 1.0f);      // Loop on
+    CHECK(b.store.get_value(kLoopMode) == 2.0f);       // Ping-Pong restored
+}
+
 // TEMPO LINK: default linked (follows host); a manual value unlinks; re-link
 // follows the host again. Mirrors the editor's LINK toggle + drag-to-unlink.
 TEST_CASE("tempo LINK: default-linked follows host, manual unlinks, relink re-follows",
@@ -954,22 +990,29 @@ TEST_CASE("a fresh drop while unlinked adopts the new sample's detected tempo",
         CHECK(std::abs(f.proc->effective_bpm() - det) < 0.01);  // override adopted it
 }
 
-// Product default: a freshly dropped loop is ONE slice (the whole loop), so
-// holding the root + LOOP tiles the entire loop — not a chop.
-TEST_CASE("default loads the whole loop as a single region (SENS 0)",
+// Product default is CLASSIC: every key plays the WHOLE tempo-matched loop
+// (region [0, N)), so holding a key with LOOP=Forward tiles the entire loop — not
+// a chop. The Slice DEFAULT, by contrast, chops the loop into several slices
+// (never 1), so switching to Slice is immediately playable per-key.
+TEST_CASE("default is Classic (whole loop); Slice chops into >1",
           "[tempo-sampler][issue-loop-tile]") {
     state::StateStore store;
     auto proc = std::make_unique<PulpTempoSamplerProcessor>();
     proc->set_state_store(&store);
-    proc->define_parameters(store);   // installs the DEFAULT SENS
+    proc->define_parameters(store);   // installs DEFAULT mode (Classic) + SENS
     format::PrepareContext ctx; ctx.sample_rate = 48000; ctx.max_buffer_size = 512;
     ctx.input_channels = 0; ctx.output_channels = 2; proc->prepare(ctx);
-    CHECK(store.get_value(kOnsetSens) == 0.0f);   // whole-loop default
+    CHECK(store.get_value(kPlaybackMode) == 0.0f);   // default mode = Classic
     auto loop = percussive_loop(48000, 8);
     const float* ch[1] = {loop.data()};
     REQUIRE(proc->load_loop(ch, 1, 48000, 48000.0));
     REQUIRE(wait_for([&] { return proc->has_sample(); }));
-    CHECK(proc->num_slices() == 1);               // one region = the whole loop
+    CHECK(proc->num_slices() > 1);                    // Slice default chops (never 1)
+    // Classic: the root's region is the WHOLE published loop, [0, N).
+    const long whole = proc->published_frames();
+    const auto r = proc->region_range_for_note_test(48, /*mode=*/0);  // 0 = Classic
+    CHECK(r.first == 0);
+    CHECK(static_cast<long>(r.second) == whole);
 }
 
 // AUDIO-LEVEL tiling proof (the "loops perfectly" claim): a click-per-beat loop,
@@ -1750,8 +1793,9 @@ TEST_CASE("Reverse mode plays the loop backwards", "[tempo-sampler][loop-mode]")
         REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
         REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
         f.proc->set_loop_bpm_for_test(bpm);
-        f.store.set_value(kTempoLoop, 1.0f);                     // loop on
-        f.store.set_value(kLoopMode, static_cast<float>(dir));   // loop shape: 0 Forward, 1 Reverse
+        // Direction (first-pass entry) is what plays the region backward. Loop=None
+        // so it plays ONCE in the Direction — the FIRST peak proves the entry dir.
+        f.store.set_value(kDirection, static_cast<float>(dir));  // 0 Forward, 1 Reverse
         std::vector<float> l(512), r(512);
         { midi::MidiBuffer m; process_midi(*f.proc, bpm, m, l, r); }
         REQUIRE(wait_for([&] { return std::abs(f.proc->published_frames() - frames) <= 8; }));
@@ -1775,6 +1819,114 @@ TEST_CASE("Reverse mode plays the loop backwards", "[tempo-sampler][loop-mode]")
     CHECK(fwd_first > 0.7f);
     CHECK(rev_first < 0.7f);
     CHECK(rev_first > 0.2f);                 // it IS the weak impulse, not silence
+}
+
+// Classic mode pitches the WHOLE sample across the keyboard: the root plays at
+// rate 1.0, +12 semitones plays an octave up (rate 2x) so it finishes in ~half
+// the frames. Proves the per-voice base_rate reaches the renderer (it used to be
+// clobbered by the expression rate).
+TEST_CASE("Classic mode repitches across the keyboard", "[tempo-sampler][classic]") {
+    auto play_frames = [](int note) -> long {
+        Fixture f;
+        f.store.set_value(kPlaybackMode, 0.0f);   // Classic
+        f.store.set_value(kOnsetSens, 0.0f);      // whole sample (1 region)
+        f.store.set_value(kGate, 0.0f);           // play through (ignore note-off)
+        auto buf = sine(220.0, 48000.0, 48000);   // 1 s source
+        const float* ch[1] = {buf.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        f.proc->set_loop_bpm_for_test(120.0);
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, note, 110));
+          process_midi(*f.proc, 120.0, m, l, r); }
+        long frames = 0;
+        for (int blk = 0; blk < 600; ++blk) {
+            midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            double e = 0.0; for (float s : l) e += static_cast<double>(s) * s;
+            if (e < 1e-9 && frames > 2000) break;
+            frames += 512;
+        }
+        return frames;
+    };
+    const long root_frames = play_frames(kRoot);
+    const long oct_frames  = play_frames(kRoot + 12);
+    INFO("root plays " << root_frames << " frames, +12 plays " << oct_frames);
+    REQUIRE(root_frames > 4000);
+    CHECK(oct_frames < root_frames * 3 / 4);   // an octave up plays notably shorter
+}
+
+// A One-Shot LOOP must STOP on note-off (One-Shot ignores note-off only for a
+// finite Loop=None one-shot; a loop needs a release path or it drones forever).
+TEST_CASE("One-Shot + LOOP releases on note-off (no stuck drone)",
+          "[tempo-sampler][one-shot]") {
+    auto tail_energy = [](bool note_off) -> double {
+        Fixture f;
+        f.store.set_value(kPlaybackMode, 1.0f);   // One-Shot
+        f.store.set_value(kTempoLoop, 1.0f);      // Loop on (Forward)
+        f.store.set_value(kLoopMode, 0.0f);
+        f.store.set_value(kOnsetSens, 0.0f);      // whole loop
+        f.store.set_value(kTempoRelease, 10.0f);  // 10 ms release → decays fast
+        auto buf = sine(220.0, 48000.0, 24000);
+        const float* ch[1] = {buf.data()};
+        REQUIRE(f.proc->load_loop(ch, 1, 24000, 48000.0));
+        REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+        f.proc->set_loop_bpm_for_test(120.0);
+        std::vector<float> l(512), r(512);
+        { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+        { midi::MidiBuffer m; m.add(midi::MidiEvent::note_on(0, kRoot, 110));
+          process_midi(*f.proc, 120.0, m, l, r); }
+        for (int b = 0; b < 20; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        if (note_off) { midi::MidiBuffer m; m.add(midi::MidiEvent::note_off(0, kRoot));
+                        process_midi(*f.proc, 120.0, m, l, r); }
+        for (int b = 0; b < 60; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r); }
+        double e = 0.0;
+        for (int b = 0; b < 8; ++b) { midi::MidiBuffer m; process_midi(*f.proc, 120.0, m, l, r);
+            for (float s : l) e += static_cast<double>(s) * s; }
+        return e;
+    };
+    const double held = tail_energy(false);      // no note-off: still looping (audible)
+    const double released = tail_energy(true);   // note-off: released (silent)
+    INFO("held energy=" << held << "  released energy=" << released);
+    CHECK(held > 1e-3);                 // the loop keeps going while held
+    CHECK(released < held * 0.05);      // note-off stopped it — not a stuck drone
+}
+
+// The mode toggle gates the footer chrome: Classic/One-Shot play the whole sample
+// (no slices, no tempo slider — just LINK + Direction/Loop); Slice shows the
+// slicing chrome (SENS, SLICES, TEMPO) and hides Direction/Loop. The waveform
+// slice bands follow the same rule.
+TEST_CASE("mode toggle gates the slice chrome and Direction/Loop",
+          "[tempo-sampler][mode-ui]") {
+    Fixture f;
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->sens_fader_ != nullptr);
+    REQUIRE(root->slices_label_ != nullptr);
+    REQUIRE(root->tempo_fader != nullptr);
+    REQUIRE(root->dir_combo_ != nullptr);
+    REQUIRE(root->loop_combo_ != nullptr);
+
+    root->apply_mode_ui(0);  // Classic: slicing chrome hidden, Direction+Loop shown
+    CHECK_FALSE(root->sens_fader_->visible());
+    CHECK_FALSE(root->slices_label_->visible());
+    CHECK_FALSE(root->tempo_fader->visible());
+    CHECK(root->dir_combo_->visible());
+    CHECK(root->loop_combo_->visible());
+
+    root->apply_mode_ui(1);  // One-Shot: same gating as Classic
+    CHECK_FALSE(root->slices_label_->visible());
+    CHECK(root->dir_combo_->visible());
+
+    root->apply_mode_ui(2);  // Slice: slicing chrome shown, Direction+Loop hidden
+    CHECK(root->sens_fader_->visible());
+    CHECK(root->slices_label_->visible());
+    CHECK(root->tempo_fader->visible());
+    CHECK_FALSE(root->dir_combo_->visible());
+    CHECK_FALSE(root->loop_combo_->visible());
 }
 
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {

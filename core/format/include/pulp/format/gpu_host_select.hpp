@@ -102,7 +102,16 @@ inline GpuHostDecision decide_gpu_host(const ViewBridge& bridge) {
 /// host before `bridge.close()`.
 inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
     auto* bridge_ptr = &bridge;
-    return [bridge_ptr]() {
+    // Copy the bridge's liveness token. This pump is dispatched to the main
+    // queue by the GPU display link and can outlive the bridge (host view
+    // reload replaces the bridge; teardown races where CVDisplayLinkStop does
+    // not join an in-flight callback). Guarding on the token makes the pump a
+    // no-op once the bridge is gone instead of dereferencing freed memory —
+    // the crash seen embedding the AU in Ableton Live. Belt-and-suspenders on
+    // top of the adapter contract that the host drops this callback first.
+    auto alive = bridge.alive_token();
+    return [bridge_ptr, alive]() {
+        if (!alive->load(std::memory_order_acquire)) return;  // bridge gone
         // Drain queued host-automation parameter changes to Main-thread
         // listeners on the UI thread, so parameter-bound widgets
         // (bind_parameter) follow automation playback / host edits: the

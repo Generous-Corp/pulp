@@ -31,6 +31,7 @@ add_subdirectory(pulp-compressor)
 
 # Bendr: pitch/time/freeze effect composed from public pulp::signal primitives
 add_subdirectory(bendr)
+add_subdirectory(live-swap-probe-latency)  # Phase 0 P0.5 probe (not for main)
 
 # Hot-Reload Demo: a reloadable shell plugin whose DSP lives in a separate
 # .dylib that hot-swaps live in a DAW (the Phase 1b DAW-integration example).

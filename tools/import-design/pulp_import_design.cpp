@@ -943,6 +943,12 @@ static void print_usage() {
     std::cout << "                    your OWN Figma component-set keys / name prefixes to Pulp control\n";
     std::cout << "                    kinds; merged OVER the built-in Pulp Figma Library so the importer\n";
     std::cout << "                    wires controls on third-party designs. figma / figma-plugin only.\n";
+    std::cout << "  --param-binding-manifest <path>\n";
+    std::cout << "                    JSON object mapping a Figma node id to a host-param key\n";
+    std::cout << "                    (e.g. {\"10:42\": \"filter.cutoff\"}). Binds DESCRIPTIVELY-named\n";
+    std::cout << "                    geometry controls (a knob layer named \"Cutoff\", not a\n";
+    std::cout << "                    param: sigil) by their stamped source_node_id. A layer-name\n";
+    std::cout << "                    sigil still wins; the manifest never overwrites one.\n";
     std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
@@ -1740,6 +1746,9 @@ int main(int argc, char* argv[]) {
     std::unordered_map<std::string, std::string> expected_asset_hashes;
     // User recognition mappings are merged over the built-in Figma library.
     std::string recognition_manifest_path;
+    // Out-of-band host-param bindings: figma node id → param_key, applied to the
+    // parsed IR's geometry-detected controls (a layer-name sigil still wins).
+    std::string param_binding_manifest_path;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -1783,6 +1792,8 @@ int main(int argc, char* argv[]) {
             import_report_path = argv[++i];
         } else if (std::strcmp(argv[i], "--recognition-manifest") == 0 && i + 1 < argc) {
             recognition_manifest_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--param-binding-manifest") == 0 && i + 1 < argc) {
+            param_binding_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
             fail_on_unresolved = true;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
@@ -2527,6 +2538,33 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Out-of-band host-param binding: apply a --param-binding-manifest (figma
+    // node id → param_key) to the parsed IR. This binds DESCRIPTIVELY-named
+    // geometry controls (the common Figma case — a knob layer named "Cutoff")
+    // that carry provenance but no layer-name sigil; an explicit sigil still wins.
+    // Applied BEFORE the import report so its provenance reflects the bound state.
+    if (!param_binding_manifest_path.empty()) {
+        const std::string manifest_json = read_file(param_binding_manifest_path);
+        if (manifest_json.empty()) {
+            std::cerr << "Error: could not read --param-binding-manifest "
+                      << param_binding_manifest_path << "\n";
+            return 2;
+        }
+        std::string parse_err;
+        auto bindings = pulp::view::parse_param_binding_manifest_json(
+            manifest_json, &parse_err);
+        if (!bindings) {
+            std::cerr << "Error: invalid --param-binding-manifest "
+                      << param_binding_manifest_path << ": " << parse_err << "\n";
+            return 2;
+        }
+        const int bound =
+            pulp::view::apply_param_binding_manifest(ir.root, *bindings);
+        std::cerr << "param-binding: bound " << bound << " control"
+                  << (bound == 1 ? "" : "s") << " from "
+                  << param_binding_manifest_path << "\n";
+    }
+
     // P7 import report — surface every interactive control's resolution provenance
     // (rung / confidence / conflicts / verification) for EVERY output mode (codegen
     // and DesignIR-v1 alike), so a low-confidence or conflicted control is SEEN at
@@ -3259,6 +3297,31 @@ int main(int argc, char* argv[]) {
     // ── Validation: render generated JS and compare with reference ──────
     if (validate) {
         std::cout << "Validating render...\n";
+
+        // Honesty guard: --validate renders the generated JS (the native-
+        // materialized widget tree), NOT the embedded faithful SVG. For a
+        // faithful_svg scene the two are different renders — the widget tree can
+        // diverge badly (missing custom controls, placeholder art) while the 1:1
+        // faithful SVG is pixel-perfect. Reporting the native-materialize
+        // similarity without saying so has read as a failed import when the
+        // faithful render was fine. Detect faithful nodes and label the number.
+        std::function<bool(const pulp::view::IRNode&)> scene_has_faithful =
+            [&](const pulp::view::IRNode& node) -> bool {
+            if (node.render_mode == pulp::view::NodeRenderMode::faithful_svg)
+                return true;
+            for (const auto& child : node.children)
+                if (scene_has_faithful(child)) return true;
+            return false;
+        };
+        const bool faithful_scene = scene_has_faithful(ir.root);
+        if (faithful_scene) {
+            std::cout <<
+                "  NOTE: this scene uses faithful_svg render mode. --validate renders the\n"
+                "  native-materialized widget tree, NOT the 1:1 faithful SVG. The similarity\n"
+                "  below is native-materialize fidelity and will UNDERSTATE the true faithful\n"
+                "  render. Verify the faithful render with pulp-svg-probe on the embedded SVG\n"
+                "  (extract the data:image/svg+xml payload from the scene JSON first).\n";
+        }
 
         // Render the generated JS headlessly
         View render_root;

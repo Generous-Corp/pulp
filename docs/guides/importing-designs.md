@@ -84,6 +84,16 @@ Agent workflows may use Figma MCP tools to acquire source context or reference s
 
 Raw MCP responses are acquisition data, not a separate CLI source. Translate or export them into one of the supported file shapes before importing.
 
+> **Mind the Figma MCP quota.** The MCP read tools above are metered — as low as
+> **6 calls per _month_** on a View/Collab seat or any Starter plan. For repeated
+> or dense imports, prefer the **plugin export** (`--from figma-plugin`), which
+> uses no MCP quota at all. When you do call the MCP, use a single
+> `get_design_context` (code + screenshot + metadata together) over separate
+> calls. Full seat/plan limits:
+> [The Figma plugin — avoiding Figma's limits](figma-plugin.md#two-ways-to-get-a-design-into-pulp--and-which-one-avoids-figmas-limits);
+> the authoritative numbers are in
+> [Figma's MCP rate-limit docs](https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/).
+
 The raw Figma and Figma Make adapter lanes are tracked in the compatibility
 import reference, which records the current parser status instead of relying on
 a one-off issue link.

@@ -361,13 +361,45 @@ harness or `ctest`.
   agent-facing **measure → compare → judge** surface. Level-matches, runs one curated **axis**
   (`--profile`), and emits a typed evidence envelope + an action-oriented verdict
   (`regression_suspected` / `material_change_detected` / `no_material_change_detected` /
-  `inconclusive` / `invalid`). Two axes today, both global/alignment-free — a new axis is one
+  `inconclusive` / `invalid`). Five axes today, all global/alignment-free — a new axis is one
   `_AXES` registry entry in `compare.py`, the shared `_measure`/`_verdict` machinery does the rest:
 
   | `--profile` | axis | measures | bad direction (`bad_sign`) |
   |-------------|------|----------|----------------------------|
   | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift | duller (−1) |
-  | `added-hf` | `added_hf` | ≥8 kHz energy fraction | added fizz (+1) |
+  | `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | added fizz (+1) |
+  | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | rougher/noisier (−1) |
+  | `graininess` | `graininess` | relative spectral-flux increase | grainier (+1) |
+  | `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | narrower/collapsed (−1) |
+
+  `noise-roughness` (HNR, pitch range 40–1000 Hz so bass fundamentals count) and `graininess`
+  (relative `mean_spectral_flux` increase) are meaningful on tonal/sustained material — a
+  caller-declared contract (the caller picks the profile), carried as a standing summary caveat +
+  both per-signal scalars in the payload, NOT an automatic tonal/percussive classifier in the
+  honesty path (which would just be a tunable threshold on the same statistic). Only mathematically
+  degenerate inputs go `not_applicable` (a flux reference below an epsilon floor — the div-by-zero
+  edge). **`stereo-width`** is the one axis fed the ORIGINAL 2-channel signal (via
+  `audio_io.load_wav_multichannel`, the `_Axis.needs_stereo` flag, and the `_measure_stereo` path)
+  rather than the mono downmix; mono input on either side is `not_applicable`, its metric is
+  level-invariant (no level-match), and a candidate whose correlation goes negative is flagged out
+  of phase (mono-incompatible) in the summary. That takes compare to **5 of the lab's 7 detectors**
+  reachable from the agent-facing surface (up from 2). `compare.MONO_PROFILES` /
+  `compare.STEREO_PROFILES` split which axes need 2-channel input — the regression net defaults to
+  the mono set so a mono comparison doesn't emit a spurious not_applicable stereo-width row.
+
+  The `added-hf` axis measures the **ratio of the ≥8 kHz energy fraction** (`10·log10(frac_cand /
+  frac_ref)`, default ±3 dB), NOT the absolute fraction *delta* — the absolute delta is
+  signal-dependent and effectively blind on a bass-heavy source (an amp render's HF fraction is
+  ~1e-4, so even a clearly harsh addition barely moves it; only the null-residual corroboration
+  caught it before). The ratio is invariant to a broadband gain / the level-match, so it flags a
+  real harshness change on a dark source that the absolute delta missed. Both band fractions are
+  floor-clamped, so a zero-HF reference (fizz on a dark source) or candidate (brickwall low-pass)
+  gives a large *finite* dB delta, never `inf` → a false `invalid`. It flags HF *loss* as material
+  too (a negative dB delta) — only *added* fizz is the bad direction. A large EQ move outside the
+  band (e.g. a big LF shelf) still leaves some residual sensitivity — far less than the absolute
+  metric, not zero. The threshold is a dB magnitude with its own per-axis range, so the shipped
+  CLI / MCP pass any positive threshold through to the Python registry (the single source of truth
+  for the valid range) rather than a hardcoded fraction bound.
 
   **Intent-safe:** `regression_suspected` needs `--reference-role golden` AND a change in the
   axis's bad direction (a duller candidate can't trip the `added-hf` axis; added fizz can't trip
@@ -389,7 +421,16 @@ harness or `ctest`.
   signal is disagreement: `not_corroborated` with `axis_exceeds:false, raw_material:true` means a
   real sample-domain difference this axis can't see (e.g. a pure delay — try another profile);
   `axis_exceeds:true, raw_material:false` means a marginal/phase-only change to treat with more
-  caution. Length is handled honestly: the candidate is level-matched over the **common region**
+  caution. **That disagreement is now PROMOTED to the headline** (it used to sit buried in the
+  advisory): a top-level `report["headline_flags"]` (always present, empty when there's nothing to
+  flag) carries a structured `{flag, detail, expected_for}` — `uncaptured_material_difference` or
+  `axis_change_without_residual` — and a matching sentence is appended to `summary`. The flag is
+  STRUCTURED, not prose, precisely so the known false-alarm class is machine-suppressible: every
+  time/pitch-variant A/B (chorus, phaser, bendr, any modulated effect) legitimately reads
+  `not_corroborated` forever because the phase-sensitive residual always disagrees with a tonal
+  axis, so `uncaptured_material_difference` carries `expected_for:["time_variant_processing"]` — a
+  caller doing time-variant work filters on that rather than treating the flag as noise. It still
+  NEVER moves the verdict. Length is handled honestly: the candidate is level-matched over the **common region**
   and the shorter signal **zero-padded** to the longer length, so a dropped/added tail *with
   content* raises the residual on its own (reads material) while trailing *silence* contributes
   ~0 (stays immaterial) — a truncated render can never masquerade as a near-identity match, and
@@ -399,6 +440,22 @@ harness or `ctest`.
   AGPL Essentia feature-extractor menu — feature extractors are never verdicts, and an env-path
   license fence is disproportionate surface for the value; the pure-numpy residual carries the
   corroboration story license-free.
+
+  **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
+  mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is
+  invisible. When a file was multichannel the report says so on the mono axes:
+  `provenance.ref_channels`/`cand_channels`, a `downmix` note on the measurement envelope, and a
+  one-line summary clause — a stereo-widener whose mid is unchanged reads `no_material_change` on
+  `tonal-balance` but the report never hides that imaging was discarded, and pointing the same pair
+  at `--profile stereo-width` catches the change directly (the downmix note is correctly suppressed
+  there, since that axis DID read the stereo image). The **`added-hf`** axis reports
+  `not_applicable` (→ `inconclusive`) at low sample rates where the ≥8 kHz band collapses to a
+  degenerate handful of LTAS bins (e.g. sr = 16 kHz is the single Nyquist bin) instead of a
+  confident "no change" over nothing. A **DC offset** concentrates energy in LTAS bin 0 and drags
+  the centroid down — reading as false tonal "dulling" — so the advisory carries a `dc_offset`
+  raw comparator (per-signal means + `present` flag) and, when present, a summary sentence telling
+  you to high-pass before comparing rather than chase phantom dullness. All three are
+  presentation/advisory only — like corroboration, they never move the verdict.
 - **Shipped surfaces (same measurement, three entry points):** the Python `quality-lab compare`
   is the dev-loop surface; **`pulp audio compare <ref> <cand> [--profile …] [--reference-role …]
   [--json …]`** is the shipped CLI verb (thin delegator — `tools/cli/cmd_audio_compare.cpp` locates
@@ -406,6 +463,23 @@ harness or `ctest`.
   the MCP tool mirroring it (returns the report JSON). All three run the identical axis logic. The
   `/audio-compare` slash command wraps the CLI. Install the tool once: `pulp tool install
   audio-quality-lab`.
+- **Golden-render regression net (`quality_lab.regression_net`, `quality-lab regression-net
+  --manifest net.json`).** The daily-driver loop: keep a golden render per plugin/preset, `pulp
+  audio render --plugin …` the candidate, and `compare` across every wired axis, emitting a table
+  (plugin | profile | verdict | corroboration | flags). **Fail policy is the contract: the fail
+  signal keys off axis verdicts only — exit 1 iff an axis reports `regression_suspected`; a pair
+  that couldn't be measured (missing/corrupt render → `invalid`, or a bad manifest) is a separate
+  ERROR (exit 2), never greenlit as clean; exit 0 = all measured, none regressed. The corroboration
+  column is informational and never affects the exit code** — the modulated family
+  (chorus/phaser/flanger/tremolo/ring-mod) is time-variant
+  so it reads `not_corroborated` forever (the `expected_for:["time_variant_processing"]` flag). This
+  is advisory reporting attached to a change; gating proper stays `pulp audio validate compare`. The
+  module is the reusable REFERENCE — a plugin suite (pulp-classic-effects, bendr, GPU NAM) wires its
+  own renders into `run_net` and commits a portable manifest (paths resolve relative to it). Read
+  the change class, not the backend: timbral + modulated changes are valid through the net; bendr
+  *fixed-ratio* A/Bs are valid, but bendr ratio changes / tempo-sampler offsets are time-misaligned
+  (the residual false-alarms) → use the reference-free engine path instead. See the guide's
+  "Golden-render regression net" section.
 - **Live plugin before/after (measure a real plugin, then judge the change).** `compare` needs two
   WAVs; capture them from a live/hosted plugin with the existing steady-state tap, then judge:
   ```bash

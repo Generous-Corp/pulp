@@ -190,6 +190,10 @@ def build_report(
 # axis-agnostic: the caller supplies `alignment`/`region`, so no tonal-balance assumption
 # leaks into the schema.
 COMPARE_SCHEMA = "quality_lab.compare.v1"
+# Evolution policy for this envelope: keys may be ADDED within `v1` (readers must ignore unknown
+# keys; the MCP round-trips the JSON with no key whitelist, the C++ CLI byte-passes it, and no
+# consumer asserts an exact key set). A REMOVAL or RENAME of an existing key is a breaking change
+# and bumps the schema version. `headline_flags` (below) is such an additive extension.
 
 # Action-oriented verdicts an agent can act on — advisory, never a gate.
 COMPARE_VERDICT_REGRESSION = "regression_suspected"
@@ -243,6 +247,20 @@ def compare_measurement(
     return env
 
 
+def compare_downmix_note(ref_channels: int, cand_channels: int) -> dict[str, Any]:
+    """Disclosure that multichannel input(s) were mean-downmixed to mono before measuring.
+
+    Attached to the measurement envelope whenever either input had more than one channel, so a
+    reader knows stereo/spatial changes were NOT compared (honesty-per-measurement: the report
+    states what it could not see, rather than silently returning 'no change'). Shape only."""
+    return {
+        "applied": True,
+        "ref_channels": int(ref_channels),
+        "cand_channels": int(cand_channels),
+        "note": "stereo/spatial image not compared — multichannel input(s) were downmixed to mono",
+    }
+
+
 def compare_raw_comparator(
     name: str,
     tool: str,
@@ -279,6 +297,25 @@ def compare_raw_comparator(
     return rc
 
 
+# Headline flags — machine-readable top-level pointers that PROMOTE an advisory corroboration
+# DISAGREEMENT into the headline without moving the verdict. Structured (not a bare prose line) so
+# the known false-alarm class is machine-SUPPRESSIBLE: a caller doing time/pitch-variant processing
+# (where the phase-sensitive residual always disagrees with a tonal axis) knows
+# `uncaptured_material_difference` is expected and filters it by `expected_for`. NEVER read by the
+# verdict — the advisory/verdict boundary is a hard contract.
+COMPARE_FLAG_UNCAPTURED_DIFF = "uncaptured_material_difference"
+COMPARE_FLAG_AXIS_ONLY = "axis_change_without_residual"
+
+
+def compare_headline_flag(
+    flag: str, detail: str, *, expected_for: list[str] | None = None
+) -> dict[str, Any]:
+    """One structured headline flag. `flag` is a stable machine token (COMPARE_FLAG_*); `detail`
+    is a human line; `expected_for` names processing classes for which this flag is a known,
+    suppressible false alarm (e.g. `time_variant_processing`). Shape only."""
+    return {"flag": flag, "detail": detail, "expected_for": list(expected_for or [])}
+
+
 def compare_corroboration(status: str, note: str, *, basis: dict[str, Any] | None = None) -> dict[str, Any]:
     """A materiality cross-check result. `status` is one of COMPARE_CORROBORATED /
     COMPARE_NOT_CORROBORATED / COMPARE_CORROBORATION_NA. `note` MUST state that this is a
@@ -308,11 +345,14 @@ def compare_report(
     measurements: list[dict[str, Any]],
     provenance: dict[str, Any] | None = None,
     advisory: dict[str, Any] | None = None,
+    headline_flags: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Assemble the agent-facing compare report envelope. `provenance` is attached whenever
     available — including on `invalid` reports — so an agent can always trace what it read.
     `advisory` (raw comparators + corroboration) is attached when present; it is off-gate and
-    never consulted by the verdict."""
+    never consulted by the verdict. `headline_flags` is ALWAYS present (empty when there is no
+    corroboration disagreement to promote) so a machine reader has one stable place to look; it too
+    never moves the verdict."""
     report: dict[str, Any] = {
         "schema": COMPARE_SCHEMA,
         "profile": profile,
@@ -320,6 +360,7 @@ def compare_report(
         "verdict": verdict,
         "summary": summary,
         "measurements": measurements,
+        "headline_flags": headline_flags or [],
     }
     if advisory is not None:
         report["advisory"] = advisory

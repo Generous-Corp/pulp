@@ -14,6 +14,7 @@
 #include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
 #import <Cocoa/Cocoa.h>
 // CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
@@ -143,10 +144,46 @@ static pulp::view::View* pulp_focus_under_root(pulp::view::View* root);
 // AppKit ObjC frame that delivered the event → undefined behavior / host crash.
 // Wrap each dispatch in try/catch, exactly as the standalone PulpView mouse
 // handlers do (window_host_mac.mm), so a throwing handler is contained.
+// Route an event at window-point `pt` to an open ComboBox popup when the point
+// falls inside its (flip/scroll/clamp-aware) menu rect. The dropdown paints as an
+// overlay OVER sibling views, so a plain hit_test lands on the sibling
+// underneath — this mirrors the standalone host's active_popup_ bypass so
+// dropdown selection + wheel-scroll work in an EMBEDDED plugin editor (Logic/AU
+// etc.), not just the standalone window. `configure` fills the event-specific
+// fields. Returns the routed combo, or nullptr when nothing was handled.
+pulp::view::ComboBox* pulp_plugin_route_to_open_popup(
+    pulp::view::View* root, pulp::view::Point pt,
+    const std::function<void(pulp::view::MouseEvent&)>& configure) {
+    auto* combo = pulp::view::ComboBox::active_popup_;
+    if (!combo || !root) return nullptr;
+    float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    pulp::view::MouseEvent me;
+    me.position = pulp::view::mac_geometry::to_local(pt, combo, root);
+    me.window_position = pt;
+    configure(me);
+    combo->on_mouse_event(me);
+    return combo;
+}
+
 void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
                             pulp::view::Point pt, pulp::view::View** drag_target) {
   try {
     if (!root) return;
+    // Route a click inside an open dropdown to the combo BEFORE hit_test (which
+    // would otherwise land on the sibling view the menu overlays).
+    if (auto* combo = pulp_plugin_route_to_open_popup(
+            root, pt, [&](pulp::view::MouseEvent& me) {
+                me.button = pulp::view::MouseButton::left;
+                me.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(
+                    event.modifierFlags);
+                me.is_down = true;
+                me.click_count = static_cast<int>(event.clickCount);
+            })) {
+        *drag_target = combo;
+        return;
+    }
     *drag_target = root->hit_test(pt);
     pulp::view::ComboBox::notify_global_click(*drag_target);
     if (!*drag_target) return;
@@ -257,6 +294,14 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
 void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* event) {
   try {
     if (!root) return;
+    // An open dropdown consumes the wheel to scroll its (clamped) item list,
+    // ahead of any enclosing ScrollView (whose scroll would close it).
+    if (pulp_plugin_route_to_open_popup(
+            root, pt, [&](pulp::view::MouseEvent& me) {
+                me.is_wheel = true;
+                me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+                me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+            })) return;
     auto* target = root->hit_test(pt);
     if (!target) return;
     pulp::view::MouseEvent me;
@@ -471,6 +516,15 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
 void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point local) {
   try {
     if (!root) return;
+    // Route hover over an OPEN dropdown to the combo so every row highlights —
+    // the menu overlays sibling views, so a plain hit_test/simulate_hover would
+    // land on the sibling under the lower rows and they'd never highlight.
+    if (auto* combo = pulp_plugin_route_to_open_popup(
+            root, local, [&](pulp::view::MouseEvent&) {})) {
+        (void)combo;
+        [[NSCursor arrowCursor] set];
+        return;
+    }
     root->simulate_hover(local);
     auto* target = root->hit_test(local);
     if (!target) { [[NSCursor arrowCursor] set]; return; }
@@ -883,38 +937,10 @@ static void detach_child_view_from_host(NSView* container, void* child_view_hand
 
 namespace pulp::view {
 
-// Shared frame-pump helpers used by BOTH the CPU and GPU plugin hosts so the
-// continuous-repaint + widget-animation behaviour is identical on either path.
-// Pure functions over the view tree (no host state).
-static bool view_needs_continuous_frames(View* view) {
-    if (!view) return false;
-    if (view->wants_continuous_repaint()) return true;
-    if (auto* k = dynamic_cast<Knob*>(view)) {
-        if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-            return true;
-    }
-    if (auto* t = dynamic_cast<Toggle*>(view)) {
-        if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-            return true;
-    }
-    if (auto* f = dynamic_cast<Fader*>(view)) {
-        if (f->hover_scale() > 1.01f || f->shader_uses_time())
-            return true;
-    }
-    if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-        if (sv->scroll_animating()) return true;
-    }
-    if (view->animation_play_state() != "paused") {
-        for (const auto& a : view->active_animations()) {
-            if (a.active) return true;
-        }
-    }
-    for (size_t i = 0; i < view->child_count(); ++i) {
-        if (view_needs_continuous_frames(view->child_at(i))) return true;
-    }
-    return false;
-}
-
+// Shared frame-pump helper used by BOTH the CPU and GPU plugin hosts so the
+// widget-animation behaviour is identical on either path. Pure function over
+// the view tree (no host state). The companion continuous-frame predicate is
+// the shared pulp::view::needs_continuous_frames() (continuous_frames.hpp).
 static void advance_widget_animations(View* view, float dt) {
     if (!view) return;
     if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
@@ -1074,7 +1100,7 @@ public:
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
                 advance_widget_animations(&self->root_, 1.0f / 60.0f);
-                if (self->view_ && view_needs_continuous_frames(&self->root_))
+                if (self->view_ && pulp::view::needs_continuous_frames(&self->root_))
                     [self->view_ setNeedsDisplay:YES];
                 state->queued.store(false, std::memory_order_release);
             }
@@ -1803,7 +1829,7 @@ private:
         paint_scene(*canvas);
 
         continuous_frames_.store(
-            view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path
@@ -1931,7 +1957,7 @@ private:
                     // FIRST so any request_repaint they trigger is seen below.
                     if (self->idle_callback_) self->idle_callback_();
 
-                    bool animate = view_needs_continuous_frames(&self->root_);
+                    bool animate = pulp::view::needs_continuous_frames(&self->root_);
                     bool tick_subscribers = self->frame_clock_.has_active_subscribers();
                     if (!self->needs_repaint_.load(std::memory_order_relaxed) &&
                         !animate && !tick_subscribers) {
@@ -2013,35 +2039,8 @@ private:
     }
 
     // ── Continuous-frame / animation drivers (parity with MacGpuWindowHost) ──
-    static bool view_needs_continuous_frames(View* view) {
-        if (!view) return false;
-        if (view->wants_continuous_repaint()) return true;
-        if (auto* k = dynamic_cast<Knob*>(view)) {
-            if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-                return true;
-        }
-        if (auto* t = dynamic_cast<Toggle*>(view)) {
-            if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-                return true;
-        }
-        if (auto* f = dynamic_cast<Fader*>(view)) {
-            if (f->hover_scale() > 1.01f || f->shader_uses_time())
-                return true;
-        }
-        if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-            if (sv->scroll_animating()) return true;
-        }
-        if (view->animation_play_state() != "paused") {
-            for (const auto& a : view->active_animations()) {
-                if (a.active) return true;
-            }
-        }
-        for (size_t i = 0; i < view->child_count(); ++i) {
-            if (view_needs_continuous_frames(view->child_at(i))) return true;
-        }
-        return false;
-    }
-
+    // The continuous-frame predicate is the shared
+    // pulp::view::needs_continuous_frames() (continuous_frames.hpp).
     static void advance_widget_animations(View* view, float dt) {
         if (!view) return;
         if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);

@@ -29,7 +29,17 @@ from typing import Any, Callable
 import numpy as np
 
 from . import audio_io, schema
-from .dsp import hf_fraction_delta, null_residual_db, relative_centroid_shift
+from .dsp import (
+    dc_offset_metrics,
+    harmonic_to_noise_ratio_db,
+    hf_band_bin_count,
+    hf_fraction_ratio_db,
+    interchannel_correlation,
+    mean_spectral_flux,
+    null_residual_db,
+    relative_centroid_shift,
+    stereo_width_ratio,
+)
 
 # Re-export the schema's compare vocabulary so the agent-facing API is one import.
 SCHEMA = schema.COMPARE_SCHEMA
@@ -44,9 +54,40 @@ STATUS_INVALID = schema.COMPARE_STATUS_INVALID
 CORROBORATED = schema.COMPARE_CORROBORATED
 NOT_CORROBORATED = schema.COMPARE_NOT_CORROBORATED
 CORROBORATION_NA = schema.COMPARE_CORROBORATION_NA
+FLAG_UNCAPTURED_DIFF = schema.COMPARE_FLAG_UNCAPTURED_DIFF
+FLAG_AXIS_ONLY = schema.COMPARE_FLAG_AXIS_ONLY
 
 _LTAS_N_FFT = 2048  # a valid LTAS needs at least this many samples
 _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
+
+# added-hf band. Below `_HF_MIN_BINS` LTAS bins at/above the cutoff, the >=cutoff band is too
+# narrow for an energy *fraction* to mean anything (e.g. sr=16 kHz → the >=8 kHz band is the
+# single Nyquist bin), so the axis reports `not_applicable` instead of a confident fraction. 8
+# bins cleanly separates degenerate rates (<=~16 kHz) from every normal one (>=22.05 kHz has
+# hundreds of bins), keeping the guard honest without excluding a real working rate.
+_HF_CUTOFF_HZ = 8000.0
+_HF_MIN_BINS = 8
+# HNR (noise-roughness) pitch range: 40 Hz covers bass fundamentals (low E ~41 Hz) — the default
+# 70 Hz would miss them, precisely the material the compare axis is asked about. flux (graininess)
+# needs a non-degenerate reference; below this floor the reference has no sustained content to
+# measure churn against, so the axis is not_applicable (the div-by-~zero edge, cf. Slice 2).
+_HNR_FMIN, _HNR_FMAX = 40.0, 1000.0
+_FLUX_REF_FLOOR = 1e-9
+# noise-roughness and graininess are only meaningful on tonal/sustained material — a caller-declared
+# contract (the caller picks the profile), surfaced as a standing summary caveat rather than an
+# unvalidated tonal/percussive CLASSIFIER inside the honesty path (which would just be a tunable
+# threshold on the same statistic). Both axes still carry per-signal scalars in the payload so a
+# reader can judge, and only mathematically degenerate inputs go not_applicable.
+_MATERIAL_CAVEAT = " (meaningful on tonal/sustained material)"
+# Floor for the band-relative HF fraction-ratio: a fraction at/below this (~-60 dB, far under any
+# real HF fraction) clamps so a zero-HF reference or candidate yields a large FINITE dB delta, not
+# -inf → an `invalid` report (which would violate "nonzero exit only when we could not measure").
+_HF_FRACTION_FLOOR = 1e-6
+# Stereo width is RMS(side)/RMS(mid); its delta between renders. A collapse toward mono is the
+# regression direction (bad_sign=-1). Interchannel correlation rides in the payload + a summary note:
+# a candidate whose correlation goes negative is out of phase (mono-incompatible) — a defect the
+# width delta alone (which a phase flip pushes *up*) does not name.
+_STEREO_WIDTH_THRESHOLD = 0.1
 
 # Above this level-matched, reference-relative residual, an algorithm-agnostic sample-domain
 # difference is present (the two renders are not effectively identical). Heuristic floor: -60 dB
@@ -56,6 +97,7 @@ _ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
 # own (and trailing silence does not), keeping the identity claim honest for any render length.
 _RESIDUAL_MATERIAL_DB = -60.0
 _RAW_NULL_TOOL = "quality-lab:null_residual"
+_RAW_DC_TOOL = "quality-lab:dc_offset"
 
 
 # ── Axis registry ───────────────────────────────────────────────────────────────────────
@@ -77,6 +119,10 @@ class _Axis:
     # dimensionless fractions in (0, 1); a future dB-unit axis declares its own range here
     # so the guard travels with the axis instead of being baked into `compare_arrays`.
     threshold_range: tuple[float, float] = (0.0, 1.0)
+    # When True the kernel is fed the ORIGINAL 2-channel signals (candidate, reference), not the mono
+    # downmix — the stereo-image axes measure L/R relationships the mono path throws away. `compare`
+    # supplies the stereo pair; mono input makes such an axis not_applicable.
+    needs_stereo: bool = False
 
 
 def _generic_head(verdict: str, env: dict[str, Any]) -> str | None:
@@ -114,12 +160,17 @@ def _tonal_summary(verdict: str, env: dict[str, Any]) -> str:
 
 
 def _added_hf_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
-    delta, hf_ref, hf_cand = hf_fraction_delta(reference, matched, sr)
-    direction = "added HF" if delta > 0 else "reduced HF"
-    return {"applicable": True, "delta": delta, "unit": "hf_energy_frac_delta",
-            "tolerance_class": "hf_fizz.v1",
-            "payload": {"kind": "scalar", "ref_hf_frac": round(hf_ref, 4),
-                        "cand_hf_frac": round(hf_cand, 4), "hf_frac_delta": round(delta, 4),
+    n_hf = hf_band_bin_count(sr, _HF_CUTOFF_HZ, _LTAS_N_FFT)
+    if n_hf < _HF_MIN_BINS:
+        return {"applicable": False,
+                "reason": (f"high-frequency band too narrow at {sr} Hz: only {n_hf} LTAS "
+                           f"bin(s) >= {_HF_CUTOFF_HZ:.0f} Hz (need >= {_HF_MIN_BINS})")}
+    ratio_db, hf_ref, hf_cand = hf_fraction_ratio_db(reference, matched, sr, _HF_CUTOFF_HZ, _HF_FRACTION_FLOOR)
+    direction = "added HF" if ratio_db > 0 else "reduced HF"
+    return {"applicable": True, "delta": ratio_db, "unit": "hf_fraction_ratio_db",
+            "tolerance_class": "hf_fizz.v2",
+            "payload": {"kind": "scalar", "ref_hf_frac": round(hf_ref, 6),
+                        "cand_hf_frac": round(hf_cand, 6), "hf_ratio_db": round(ratio_db, 2),
                         "direction": direction}}
 
 
@@ -128,13 +179,96 @@ def _added_hf_summary(verdict: str, env: dict[str, Any]) -> str:
     if head:
         return head
     p = env["payload"]
-    frac = (f"HF(>=8kHz) fraction {p['ref_hf_frac']:.3f}->{p['cand_hf_frac']:.3f} "
-            f"(delta {p['hf_frac_delta']:+.3f})")
+    band = (f"HF(>=8kHz) fraction {p['ref_hf_frac']:.4g}->{p['cand_hf_frac']:.4g} "
+            f"(band-relative {p['hf_ratio_db']:+.1f} dB)")
     if verdict == VERDICT_NO_CHANGE:
-        return f"No material high-frequency change ({frac})."
+        return f"No material high-frequency balance change ({band})."
     if verdict == VERDICT_REGRESSION:
-        return f"Regression suspected: candidate added metallic high-frequency fizz vs the golden reference ({frac})."
-    return f"Material high-frequency change: candidate {p['direction']} ({frac})."
+        return f"Regression suspected: candidate added metallic high-frequency fizz vs the golden reference ({band})."
+    return f"Material high-frequency balance change: candidate {p['direction']} ({band})."
+
+
+def _noise_roughness_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
+    hnr_ref = harmonic_to_noise_ratio_db(reference, sr, fmin=_HNR_FMIN, fmax=_HNR_FMAX)
+    hnr_cand = harmonic_to_noise_ratio_db(matched, sr, fmin=_HNR_FMIN, fmax=_HNR_FMAX)
+    delta = hnr_cand - hnr_ref              # dB; a DROP (negative) = added noise/roughness = bad
+    direction = "rougher/noisier" if delta < 0 else "cleaner"
+    return {"applicable": True, "delta": delta, "unit": "hnr_delta_db",
+            "tolerance_class": "hnr.v1",
+            "payload": {"kind": "scalar", "ref_hnr_db": round(hnr_ref, 2),
+                        "cand_hnr_db": round(hnr_cand, 2), "hnr_delta_db": round(delta, 2),
+                        "direction": direction}}
+
+
+def _noise_roughness_summary(verdict: str, env: dict[str, Any]) -> str:
+    head = _generic_head(verdict, env)
+    if head:
+        return head
+    p = env["payload"]
+    m = f"HNR {p['ref_hnr_db']:.1f}->{p['cand_hnr_db']:.1f} dB (delta {p['hnr_delta_db']:+.1f} dB)"
+    if verdict == VERDICT_NO_CHANGE:
+        return f"No material roughness change ({m}){_MATERIAL_CAVEAT}."
+    if verdict == VERDICT_REGRESSION:
+        return f"Regression suspected: candidate is rougher/noisier than the golden reference ({m}){_MATERIAL_CAVEAT}."
+    return f"Material roughness change: candidate is {p['direction']} ({m}){_MATERIAL_CAVEAT}."
+
+
+def _graininess_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
+    flux_ref = mean_spectral_flux(reference, sr)
+    if flux_ref <= _FLUX_REF_FLOOR:
+        return {"applicable": False,
+                "reason": "reference has negligible spectral flux (no sustained content to measure graininess against)"}
+    flux_cand = mean_spectral_flux(matched, sr)
+    rel = (flux_cand - flux_ref) / flux_ref   # relative flux increase; a RISE (positive) = grainier = bad
+    direction = "grainier" if rel > 0 else "smoother"
+    return {"applicable": True, "delta": rel, "unit": "rel_flux_increase",
+            "tolerance_class": "spectral_flux.v1",
+            "payload": {"kind": "scalar", "ref_flux": round(flux_ref, 5),
+                        "cand_flux": round(flux_cand, 5), "rel_flux_increase": round(rel, 3),
+                        "direction": direction}}
+
+
+def _graininess_summary(verdict: str, env: dict[str, Any]) -> str:
+    head = _generic_head(verdict, env)
+    if head:
+        return head
+    p = env["payload"]
+    m = f"spectral flux {p['ref_flux']:.4g}->{p['cand_flux']:.4g} (rel {p['rel_flux_increase']:+.0%})"
+    if verdict == VERDICT_NO_CHANGE:
+        return f"No material graininess change ({m}){_MATERIAL_CAVEAT}."
+    if verdict == VERDICT_REGRESSION:
+        return f"Regression suspected: candidate is grainier than the golden reference ({m}){_MATERIAL_CAVEAT}."
+    return f"Material graininess change: candidate is {p['direction']} ({m}){_MATERIAL_CAVEAT}."
+
+
+def _stereo_width_kernel(cand_stereo: np.ndarray, ref_stereo: np.ndarray, sr: int) -> dict[str, Any]:
+    w_ref, w_cand = stereo_width_ratio(ref_stereo), stereo_width_ratio(cand_stereo)
+    c_ref, c_cand = interchannel_correlation(ref_stereo), interchannel_correlation(cand_stereo)
+    delta = w_cand - w_ref                     # RMS(side)/RMS(mid) change; a drop = narrowing/collapse
+    direction = "wider" if delta > 0 else "narrower"
+    return {"applicable": True, "delta": delta, "unit": "stereo_width_delta",
+            "tolerance_class": "stereo_width.v1",
+            "payload": {"kind": "scalar", "ref_width": round(w_ref, 4), "cand_width": round(w_cand, 4),
+                        "width_delta": round(delta, 4), "ref_corr": round(c_ref, 3),
+                        "cand_corr": round(c_cand, 3), "direction": direction}}
+
+
+def _stereo_width_summary(verdict: str, env: dict[str, Any]) -> str:
+    head = _generic_head(verdict, env)
+    if head:
+        return head
+    p = env["payload"]
+    m = (f"width(side/mid) {p['ref_width']:.3f}->{p['cand_width']:.3f} (delta {p['width_delta']:+.3f}), "
+         f"interchannel corr {p['ref_corr']:+.2f}->{p['cand_corr']:+.2f}")
+    # A candidate correlation gone negative is out of phase (mono-incompatible) — a defect the width
+    # delta does not name (a phase flip pushes width UP). Surface it whenever it newly appears.
+    phase = (" Candidate is out of phase (interchannel correlation is negative) — a mono-compatibility defect."
+             if p["cand_corr"] < 0 <= p["ref_corr"] else "")
+    if verdict == VERDICT_NO_CHANGE:
+        return f"No material stereo-width change ({m}).{phase}"
+    if verdict == VERDICT_REGRESSION:
+        return f"Regression suspected: stereo image narrowed/collapsed vs the golden reference ({m}).{phase}"
+    return f"Material stereo-width change: image is {p['direction']} ({m}).{phase}"
 
 
 _TONAL_BALANCE = _Axis(
@@ -143,12 +277,36 @@ _TONAL_BALANCE = _Axis(
 )
 _ADDED_HF = _Axis(
     profile="added-hf", axis="added_hf", tool="quality-lab:hf_fizz",
-    default_threshold=0.02, bad_sign=+1, kernel=_added_hf_kernel, summarize=_added_hf_summary,
+    default_threshold=3.0, bad_sign=+1, kernel=_added_hf_kernel, summarize=_added_hf_summary,
+    threshold_range=(0.0, 60.0),  # dB magnitude — its own unit, so the shared guard travels with it
 )
-_AXES: dict[str, _Axis] = {a.profile: a for a in (_TONAL_BALANCE, _ADDED_HF)}
+_NOISE_ROUGHNESS = _Axis(
+    profile="noise-roughness", axis="noise_roughness", tool="quality-lab:hnr",
+    default_threshold=1.5, bad_sign=-1, kernel=_noise_roughness_kernel, summarize=_noise_roughness_summary,
+    threshold_range=(0.0, 60.0),  # dB magnitude (HNR delta)
+)
+_GRAININESS = _Axis(
+    profile="graininess", axis="graininess", tool="quality-lab:spectral_flux",
+    default_threshold=0.5, bad_sign=+1, kernel=_graininess_kernel, summarize=_graininess_summary,
+    threshold_range=(0.0, 100.0),  # relative flux increase — can exceed 1.0 (e.g. +500%)
+)
+_STEREO_WIDTH = _Axis(
+    profile="stereo-width", axis="stereo_width", tool="quality-lab:stereo_width",
+    default_threshold=_STEREO_WIDTH_THRESHOLD, bad_sign=-1,
+    kernel=_stereo_width_kernel, summarize=_stereo_width_summary,
+    threshold_range=(0.0, 10.0),   # RMS(side)/RMS(mid) delta — a phase flip can push it well past 1
+    needs_stereo=True,
+)
+_AXES: dict[str, _Axis] = {a.profile: a for a in
+                           (_TONAL_BALANCE, _ADDED_HF, _NOISE_ROUGHNESS, _GRAININESS, _STEREO_WIDTH)}
 
 PROFILES = tuple(sorted(_AXES))
 DEFAULT_THRESHOLD = _TONAL_BALANCE.default_threshold  # back-compat alias
+# Profiles that require 2-channel input (stereo-width). A mono-defaulting caller (the regression
+# net) excludes these so it doesn't emit a spurious not_applicable row on every mono comparison; a
+# stereo suite opts in explicitly.
+STEREO_PROFILES = tuple(sorted(p for p, a in _AXES.items() if a.needs_stereo))
+MONO_PROFILES = tuple(p for p in PROFILES if p not in set(STEREO_PROFILES))
 
 
 # ── Shared measurement + verdict machinery ──────────────────────────────────────────────
@@ -168,10 +326,35 @@ def _level_match_evidence(ref_rms: float, cand_rms_pre: float) -> dict[str, Any]
     }
 
 
-def _measure(axis: _Axis, reference: np.ndarray, candidate: np.ndarray, sr: int, threshold: float) -> dict[str, Any]:
-    """Shared flow for every global axis: length + silence applicability, level-match, run the
-    axis kernel, assemble the evidence envelope. `status`/`applicable`/`materiality` carry the
-    honesty — a reader never has to guess whether the number is trustworthy."""
+def _measured(axis: _Axis, k: dict[str, Any], threshold: float, level_match: dict[str, Any]) -> dict[str, Any]:
+    """Assemble the MEASURED envelope from a kernel result. `exceeds` and `direction_sign` are BOTH
+    derived from the RAW (unrounded) delta so neither can disagree with the presentation-rounded
+    `delta` at a boundary. `direction_sign` exists because `delta` rounds to 4 places: with a
+    threshold finer than that (e.g. 1e-8), a raw delta that exceeds still rounds to 0.0, whose sign
+    would flip the regression direction. Shared by the mono and stereo measurement paths."""
+    delta = k["delta"]
+    if not np.isfinite(delta):
+        # Finite audio through a well-behaved kernel yields a finite delta; guard anyway so a
+        # future kernel can't smuggle a NaN past the threshold check into a false verdict.
+        return _measurement(axis, STATUS_INVALID, applicable=False,
+                            reason=f"{axis.axis} kernel produced a non-finite delta")
+    return _measurement(
+        axis, STATUS_MEASURED, applicable=True, level_match=level_match,
+        materiality={"delta": round(delta, 4), "unit": k["unit"], "tolerance_class": k["tolerance_class"],
+                     "threshold": threshold, "exceeds": bool(abs(delta) >= threshold),
+                     "direction_sign": (1 if delta > 0 else -1 if delta < 0 else 0)},
+        payload=k["payload"],
+    )
+
+
+def _measure(axis: _Axis, reference: np.ndarray, candidate: np.ndarray, sr: int, threshold: float,
+             stereo: tuple[np.ndarray, np.ndarray] | None = None) -> dict[str, Any]:
+    """Shared flow for every axis: length + silence applicability, level-match, run the axis kernel,
+    assemble the evidence envelope. A `needs_stereo` axis routes to the stereo path (fed the original
+    2-channel signals); every other axis uses the mono downmix. `status`/`applicable`/`materiality`
+    carry the honesty — a reader never has to guess whether the number is trustworthy."""
+    if axis.needs_stereo:
+        return _measure_stereo(axis, stereo, sr, threshold)
     ref_rms = audio_io.rms(reference)
     if reference.size < _LTAS_N_FFT or candidate.size < _LTAS_N_FFT:
         return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False, reason="material shorter than one LTAS frame")
@@ -183,20 +366,34 @@ def _measure(axis: _Axis, reference: np.ndarray, candidate: np.ndarray, sr: int,
     k = axis.kernel(matched, reference, sr)
     if not k.get("applicable"):
         return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False, reason=k.get("reason", "not applicable"))
+    return _measured(axis, k, threshold, _level_match_evidence(ref_rms, cand_rms_pre))
 
-    delta = k["delta"]
-    if not np.isfinite(delta):
-        # Finite audio through a well-behaved kernel yields a finite delta; guard anyway so a
-        # future kernel can't smuggle a NaN past the threshold check into a false verdict.
-        return _measurement(axis, STATUS_INVALID, applicable=False,
-                            reason=f"{axis.axis} kernel produced a non-finite delta")
-    return _measurement(
-        axis, STATUS_MEASURED, applicable=True,
-        level_match=_level_match_evidence(ref_rms, cand_rms_pre),
-        materiality={"delta": round(delta, 4), "unit": k["unit"], "tolerance_class": k["tolerance_class"],
-                     "threshold": threshold, "exceeds": bool(abs(delta) >= threshold)},
-        payload=k["payload"],
-    )
+
+def _measure_stereo(axis: _Axis, stereo: tuple[np.ndarray, np.ndarray] | None, sr: int,
+                    threshold: float) -> dict[str, Any]:
+    """Measurement path for a `needs_stereo` axis. The kernel is fed the ORIGINAL (candidate,
+    reference) 2-channel signals — the metric (side/mid ratio, interchannel correlation) is
+    level-invariant, so no level-match is applied. Mono input on either side (no stereo pair) is
+    `not_applicable`; silence gates on the STEREO signal's energy (a pure anti-phase render has a
+    silent mono downmix but real stereo content, so a mono-downmix gate would wrongly reject it)."""
+    if stereo is None:
+        return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False,
+                            reason="stereo-width requires exactly 2-channel (stereo) input on both sides")
+    ref_st, cand_st = stereo
+    # Harden a direct caller (compare_files only ever passes exact-2-channel arrays): a malformed
+    # (N,1)/(N,3) tuple becomes not_applicable, not a raw ValueError out of the dsp primitive.
+    if not (ref_st.ndim == 2 and ref_st.shape[1] == 2 and cand_st.ndim == 2 and cand_st.shape[1] == 2):
+        return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False,
+                            reason="stereo-width requires exactly 2-channel (stereo) input on both sides")
+    if ref_st.shape[0] < _LTAS_N_FFT or cand_st.shape[0] < _LTAS_N_FFT:
+        return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False, reason="material shorter than one LTAS frame")
+    if float(np.sqrt(np.mean(ref_st ** 2))) <= 1e-9:
+        return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False, reason="reference is silent")
+    k = axis.kernel(cand_st, ref_st, sr)
+    if not k.get("applicable"):
+        return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False, reason=k.get("reason", "not applicable"))
+    return _measured(axis, k, threshold,
+                     {"applied": False, "reason": "stereo width/correlation are level-invariant"})
 
 
 def _verdict(axis: _Axis, env: dict[str, Any], reference_role: str) -> str:
@@ -207,13 +404,12 @@ def _verdict(axis: _Axis, env: dict[str, Any], reference_role: str) -> str:
     if not env.get("applicable") or env.get("coverage", 0.0) < 1.0:
         return VERDICT_INCONCLUSIVE
     mat = env["materiality"]
-    # `exceeds` is the ONE materiality decision, computed from the raw (unrounded) delta in
-    # `_measure`. Keying the verdict off it means presentation-rounding of `delta` can never
-    # disagree with the envelope's own `exceeds` flag at the threshold boundary.
+    # `exceeds` and `direction_sign` are BOTH computed from the raw (unrounded) delta in `_measure`,
+    # so presentation-rounding of `delta` can never disagree with the verdict at the boundary —
+    # neither the materiality decision nor the regression DIRECTION reads the rounded `delta`.
     if not mat["exceeds"]:
         return VERDICT_NO_CHANGE
-    # `exceeds` implies |raw delta| >= threshold (> 0), so the rounded delta preserves the sign.
-    if reference_role == "golden" and (1 if mat["delta"] > 0 else -1) == axis.bad_sign:
+    if reference_role == "golden" and mat["direction_sign"] == axis.bad_sign:
         return VERDICT_REGRESSION
     return VERDICT_MATERIAL
 
@@ -255,6 +451,8 @@ def _corroboration(primary_exceeds: bool, residual_db: float, length: dict[str, 
         status, note,
         basis={"raw_comparator": _RAW_NULL_TOOL, "residual_db": round(residual_db, 2),
                "residual_material_floor_db": _RESIDUAL_MATERIAL_DB,
+               # bool() is load-bearing: `_headline_flags` uses `is True`/`is False` identity checks
+               # on these, which a numpy.bool_ would silently fail. Keep the wraps.
                "axis_exceeds": bool(primary_exceeds), "raw_material": bool(raw_material),
                "ref_samples": length["ref_samples"], "cand_samples": length["cand_samples"]},
     )
@@ -285,8 +483,23 @@ def _advisory_block(reference: np.ndarray, candidate: np.ndarray, primary_env: d
         detail={"ref_samples": length["ref_samples"], "cand_samples": length["cand_samples"],
                 "level_match_applied": nr.level_matched},
     )
+    # DC-offset diagnostic (appended AFTER null_residual so the residual stays at index 0 for the
+    # corroboration cross-check and its tests). A DC offset drags the LTAS centroid down and can
+    # masquerade as tonal 'dulling' — surface it, off-gate, so the headline stops misdirecting.
+    dc = dc_offset_metrics(reference, candidate)
+    dc_raw = schema.compare_raw_comparator(
+        "dc_offset", _RAW_DC_TOOL, "mean_amplitude",
+        ("Per-signal DC offset (mean sample value) and its magnitude relative to RMS. A DC "
+         "component concentrates energy in LTAS bin 0, pulling the spectral centroid DOWN — a "
+         "nonzero offset can read as tonal 'dulling' when nothing timbral changed. Informational "
+         "only; never a verdict. `present` marks an offset large enough to bias the measurement."),
+        ref_value=round(dc.ref_mean, 6), cand_value=round(dc.cand_mean, 6),
+        delta=round(dc.cand_mean - dc.ref_mean, 6),
+        detail={"ref_frac_of_rms": round(dc.ref_frac, 4),
+                "cand_frac_of_rms": round(dc.cand_frac, 4), "present": bool(dc.present)},
+    )
     exceeds = bool(primary_env["materiality"]["exceeds"])
-    return schema.compare_advisory([raw], _corroboration(exceeds, nr.residual_db, length))
+    return schema.compare_advisory([raw, dc_raw], _corroboration(exceeds, nr.residual_db, length))
 
 
 def _resolve(profile: str) -> _Axis:
@@ -294,6 +507,66 @@ def _resolve(profile: str) -> _Axis:
     if axis is None:
         raise ValueError(f"unknown profile {profile!r} (available: {', '.join(PROFILES)})")
     return axis
+
+
+def _headline_flags(advisory: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Promote a corroboration DISAGREEMENT to a machine-readable top-level flag (never a verdict).
+    Two mirrored directions off the corroboration basis:
+    - axis blind, residual material  → `uncaptured_material_difference` — the single most actionable
+      line for a DSP dev (a real change the chosen axis can't see). It is ALSO the known false-alarm
+      for time/pitch-variant processing (the phase-sensitive residual always disagrees there), so it
+      carries `expected_for=["time_variant_processing"]` for machine suppression.
+    - axis flags, residual immaterial → `axis_change_without_residual` — a marginal or phase-only
+      change to weigh before acting on the axis verdict."""
+    if not advisory:
+        return []
+    basis = (advisory.get("corroboration") or {}).get("basis") or {}
+    # Identity checks (not truthiness) are deliberate: they distinguish a real False from an absent
+    # key (None). They rely on the basis storing genuine Python bools — `_corroboration` wraps both
+    # with bool(); do NOT drop those wraps or a numpy.bool_ would fail `is True`/`is False` and
+    # silently swallow a flag.
+    axis_exceeds, raw_material = basis.get("axis_exceeds"), basis.get("raw_material")
+    if axis_exceeds is False and raw_material is True:
+        return [schema.compare_headline_flag(
+            schema.COMPARE_FLAG_UNCAPTURED_DIFF,
+            "an independent sample-domain residual registers a material difference this axis does not measure",
+            expected_for=["time_variant_processing"])]
+    if axis_exceeds is True and raw_material is False:
+        return [schema.compare_headline_flag(
+            schema.COMPARE_FLAG_AXIS_ONLY,
+            "the axis flags a change the sample-domain residual does not register (marginal or phase-only)")]
+    return []
+
+
+def _summary_with_disclosures(
+    axis: _Axis, verdict: str, env: dict[str, Any], advisory: dict[str, Any] | None,
+    headline_flags: list[dict[str, Any]],
+) -> str:
+    """The axis's own summary plus any honesty disclosures (mono downmix, DC offset, corroboration
+    disagreement). These are PRESENTATION ONLY — appended after the verdict is decided, reading only
+    off-gate facts (the envelope's `downmix` note, the advisory's `dc_offset` comparator, and the
+    `headline_flags` derived from corroboration); they never change the verdict. This stops the
+    headline from actively misdirecting or from burying the most actionable corroboration signal."""
+    summary = axis.summarize(verdict, env)
+    # The structured `downmix` field always discloses the fold (machine-readable); the prose clause
+    # is suppressed on `invalid`, where "we downmixed to mono" reads oddly on a report that never
+    # actually compared anything.
+    if env.get("downmix") and verdict != VERDICT_INVALID:
+        summary += " Stereo/spatial image not compared — input(s) were downmixed to mono."
+    if advisory:
+        dc = next((r for r in advisory.get("raw_comparators", []) if r.get("name") == "dc_offset"), None)
+        if dc and dc.get("detail", {}).get("present"):
+            summary += (" A DC offset is present in the input(s); it biases the LTAS toward bin 0 "
+                        "and can be mistaken for a tonal change — high-pass the inputs before comparing.")
+    for f in headline_flags:
+        if f["flag"] == schema.COMPARE_FLAG_UNCAPTURED_DIFF:
+            summary += (" An independent sample-domain residual registers a material difference this "
+                        "axis does not measure (expected for time/pitch-variant processing; otherwise "
+                        "try another profile).")
+        elif f["flag"] == schema.COMPARE_FLAG_AXIS_ONLY:
+            summary += (" The sample-domain residual does not register a material difference — the "
+                        "flagged change may be marginal or phase-only; weigh the axis verdict accordingly.")
+    return summary
 
 
 def compare_arrays(
@@ -304,11 +577,18 @@ def compare_arrays(
     profile: str = "tonal-balance",
     reference_role: str = "peer",
     threshold: float | None = None,
+    input_channels: tuple[int, int] | None = None,
+    stereo: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """Compare two in-memory signals and return the full report (envelope + verdict). Pure —
     no file I/O. Raises ValueError on a caller-contract error (unknown profile/role, out-of-range
     threshold, non-positive sr); returns an `invalid` report for *data* problems (non-finite
-    samples). `threshold` defaults to the selected axis's default."""
+    samples). `threshold` defaults to the selected axis's default. `input_channels` is the
+    ORIGINAL (ref, cand) channel counts when the signals came from multichannel files — supplied
+    by `compare_files` so the report can disclose that a stereo/spatial input was folded to mono.
+    `reference`/`candidate` are always mono here; `stereo` optionally carries the ORIGINAL
+    (ref, cand) 2-channel arrays that a `needs_stereo` axis (stereo-width) measures — None (mono
+    input) makes such an axis not_applicable."""
     axis = _resolve(profile)
     if reference_role not in ("peer", "golden"):
         raise ValueError(f"unknown reference_role {reference_role!r} (expected 'peer' or 'golden')")
@@ -326,13 +606,25 @@ def compare_arrays(
         env = _measurement(axis, STATUS_INVALID, applicable=False, reason="non-finite samples (NaN/Inf)")
         advisory = None
     else:
-        env = _measure(axis, reference, candidate, sr, threshold)
-        advisory = _advisory_block(reference, candidate, env)
+        env = _measure(axis, reference, candidate, sr, threshold, stereo=stereo)
+        # A needs_stereo axis measures the stereo image; the null-residual + corroboration run on the
+        # MONO downmix, a different domain that cannot cross-check it — a pure widener (mid unchanged)
+        # makes the mono residual read "identity" and would wrongly flag the real stereo change as
+        # phase-only. Suppress the mono advisory rather than emit a misleading cross-check (a
+        # stereo-domain residual is future work).
+        advisory = None if axis.needs_stereo else _advisory_block(reference, candidate, env)
+
+    # Disclose the mono fold — UNLESS this axis actually measured the stereo image (stereo-width),
+    # where "stereo not compared" would be false.
+    if (input_channels is not None and (input_channels[0] > 1 or input_channels[1] > 1)
+            and not axis.needs_stereo):
+        env["downmix"] = schema.compare_downmix_note(input_channels[0], input_channels[1])
 
     verdict = _verdict(axis, env, reference_role)
-    return schema.compare_report(
-        profile, reference_role, verdict, axis.summarize(verdict, env), [env], advisory=advisory
-    )
+    headline_flags = _headline_flags(advisory)
+    summary = _summary_with_disclosures(axis, verdict, env, advisory, headline_flags)
+    return schema.compare_report(profile, reference_role, verdict, summary, [env],
+                                 advisory=advisory, headline_flags=headline_flags)
 
 
 def _sha256(path: str) -> str:
@@ -360,8 +652,8 @@ def compare_files(
     if reference_role not in ("peer", "golden"):
         raise ValueError(f"unknown reference_role {reference_role!r} (expected 'peer' or 'golden')")
     try:
-        ref, sr_ref = audio_io.load_wav(reference_wav)
-        cand, sr_cand = audio_io.load_wav(candidate_wav)
+        ref_raw, sr_ref, ref_ch = audio_io.load_wav_multichannel(reference_wav)
+        cand_raw, sr_cand, cand_ch = audio_io.load_wav_multichannel(candidate_wav)
     except Exception as exc:  # decode/open failure → structured invalid, not a crash
         return _invalid_report(profile, reference_role, f"could not read inputs: {exc}",
                                provenance={"reference": reference_wav, "candidate": candidate_wav,
@@ -373,8 +665,16 @@ def compare_files(
                         "error": "sample_rate_mismatch", "ref_sample_rate": sr_ref,
                         "cand_sample_rate": sr_cand})
 
+    # Mono downmix (mean, matching load_wav_info) is what every axis but stereo-width measures, plus
+    # the advisory + length/silence gates. The original 2-channel arrays feed the stereo-width axis,
+    # but only when BOTH inputs are exactly stereo — otherwise that axis is not_applicable.
+    ref = ref_raw if ref_raw.ndim == 1 else ref_raw.mean(axis=1)
+    cand = cand_raw if cand_raw.ndim == 1 else cand_raw.mean(axis=1)
+    stereo = (ref_raw, cand_raw) if (ref_ch == 2 and cand_ch == 2) else None
+
     report = compare_arrays(
-        ref, cand, sr_ref, profile=profile, reference_role=reference_role, threshold=threshold
+        ref, cand, sr_ref, profile=profile, reference_role=reference_role, threshold=threshold,
+        input_channels=(ref_ch, cand_ch), stereo=stereo,
     )
     report["provenance"] = {
         "reference": reference_wav,
@@ -382,9 +682,21 @@ def compare_files(
         "ref_sha256": _sha256(reference_wav),
         "cand_sha256": _sha256(candidate_wav),
         "sample_rate": sr_ref,
+        "ref_channels": ref_ch,
+        "cand_channels": cand_ch,
         "profile": profile,
     }
     return report
+
+
+def invalid_report(
+    profile: str, reference_role: str, reason: str, *, provenance: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Public builder for a caller-contract `invalid` report (e.g. an out-of-range `--threshold`
+    caught at a CLI/MCP surface). Emitting a structured report — instead of letting the ValueError
+    escape as a traceback — lets a delegating caller (the MCP tool, which reads the report JSON)
+    see a clean `invalid` verdict rather than misread an empty file as 'tool not installed'."""
+    return _invalid_report(profile, reference_role, reason, provenance=provenance)
 
 
 def _invalid_report(

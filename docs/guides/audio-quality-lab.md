@@ -52,13 +52,23 @@ python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --
 `compare` is the agent-facing **measure → compare → judge** surface: it level-matches, runs one
 curated **axis** (selected by `--profile`), and returns a typed evidence envelope plus an
 action-oriented verdict (`regression_suspected` / `material_change_detected` /
-`no_material_change_detected` / `inconclusive` / `invalid`). Two axes today, both global and
+`no_material_change_detected` / `inconclusive` / `invalid`). Five axes today, all global and
 alignment-free:
 
 | `--profile` | axis | measures | bad direction (regression vs a golden reference) |
 |-------------|------|----------|--------------------------------------------------|
 | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift (brighter/duller) | **duller** |
-| `added-hf` | `added_hf` | high-frequency (≥8 kHz) energy fraction | **added HF fizz** |
+| `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | **added HF fizz** |
+| `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | **rougher / noisier** |
+| `graininess` | `graininess` | relative spectral-flux increase | **grainier** |
+| `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | **narrower / collapsed** |
+
+`noise-roughness` and `graininess` are meaningful on tonal/sustained material — that is a
+caller-declared contract (you pick the profile), surfaced as a standing caveat in the summary
+rather than an automatic tonal/percussive classifier. `stereo-width` is the one axis that reads the
+**original 2-channel** signal (every other axis mean-downmixes to mono); mono input on either side
+is `not_applicable`, and a candidate whose interchannel correlation goes negative is flagged as out
+of phase (mono-incompatible) in the summary.
 
 Each axis carries its own materiality default (`--threshold` overrides). Adding an axis is one
 registry entry (`_AXES` in `compare.py`) — the shared machinery does the level-matching,
@@ -66,6 +76,59 @@ applicability, materiality, and intent-safe verdict. `compare` is **intent-safe*
 `regression_suspected` needs `--reference-role golden` AND a change in the axis's bad direction —
 and **advisory**: it exits non-zero only when it couldn't measure, never for a judgment. So an
 agent tuning DSP can weigh in on a change with cited evidence instead of a bare pass/fail.
+
+### Golden-render regression net (the daily-driver loop)
+
+Once you have `compare`, the highest-value thing to stand up is a **golden-render regression net**:
+keep a known-good ("golden") render per plugin/preset, render the candidate after a DSP change, and
+`compare` across every wired axis — attaching a cited, multi-axis verdict to the change.
+
+```bash
+# 1. render the candidate from the changed plugin (shipped CLI; any format/backend)
+pulp audio render --plugin build/MyEffect.vst3 --preset plate --in dry.wav --out cand/plate.wav
+
+# 2. run the net over a manifest of before/after pairs
+python -m quality_lab.cli regression-net --manifest net.json --json results.json
+```
+
+`net.json` lists the pairs (paths resolve relative to the manifest, so a suite commits a portable
+net):
+
+```json
+{
+  "reference_role": "golden",
+  "profiles": ["tonal-balance", "added-hf", "noise-roughness", "graininess"],
+  "pairs": [
+    {"name": "plate-reverb", "golden": "golden/plate.wav", "candidate": "cand/plate.wav"},
+    {"name": "saturator",    "golden": "golden/sat.wav",   "candidate": "cand/sat.wav"}
+  ]
+}
+```
+
+**Fail policy (the contract):** the *fail* signal keys off axis verdicts only — the net returns
+**exit 1** when (and only when) an axis reports `regression_suspected`. A pair that could not be
+measured (a missing/corrupt render → `invalid`, or a malformed manifest) is a broken pipeline, not
+a judgment, and returns a **distinct exit 2** so a missing render is never greenlit as clean;
+**exit 0** means every pair was measured and nothing regressed. The corroboration column is
+**informational and never affects the exit code** —
+because the modulated family (chorus / phaser / flanger / vibrato / tremolo / ring-mod) is
+time-variant, so its phase-sensitive sample-domain residual reads `not_corroborated` forever (a
+known, machine-suppressible false alarm — the `uncaptured_material_difference` headline flag carries
+`expected_for: ["time_variant_processing"]`). Gating **proper** stays `pulp audio validate compare`;
+this net is advisory reporting attached to a change, not a gate by accretion. The runner script for a
+specific plugin suite (e.g. `pulp-classic-effects`) lives with the plugins; `quality_lab.regression_net`
+is the reusable reference the suite wires its renders into.
+
+**Per-plugin applicability** — read the change class, not the backend (`compare` measures any render
+identically, CPU or GPU):
+
+| Change under test | Through the net? | Notes |
+|-------------------|------------------|-------|
+| Timbral (EQ / filter / saturation / amp-NAM / reverb tone / comp tone) | ✅ directly valid | the validated sweet spot — all four axes apply |
+| Modulated (chorus / phaser / flanger / tremolo / ring-mod) | ✅ valid; corroboration will read `not_corroborated` (expected, informational) | time-variant; the axis verdict is what matters |
+| bendr time-stretch — **fixed-ratio** A/B ("did my stretch *algorithm* get worse?") | ✅ valid | same ratio, so the renders are time-aligned |
+| bendr ratio changes / tempo-sampler **offsets** | ⚠ engine path, not this net | the candidate is time-misaligned; the null-residual flags the shift as a false alarm for "did the *tone* change?" — use the lab's reference-free engine path (or the deferred alignment axis) |
+| Stereo width / imaging (widener / panner / M-S / collapse) | ✅ via `stereo-width` (opt-in) | add `"stereo-width"` to the manifest's `profiles`; it reads the 2-channel signal and flags a collapse or an out-of-phase candidate. The mono default profiles skip it |
 
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build

@@ -1512,6 +1512,10 @@ pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
 # fixed-design content into the current window.
 pulp_add_test_suite(pulp-test-view-design-viewport LIBRARIES pulp::view)
 
+# Shared continuous-frame predicate (needs_continuous_frames) the window /
+# plugin-view hosts and a foreign-host embed tick gate repaint on.
+pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
+
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the
 # PluginViewHost virtuals + CPU-host inverse mouse mapping (GPU section
@@ -2267,6 +2271,9 @@ pulp_add_test_suite(pulp-test-state
 
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
+
+# Structured non-param state channel (sequencer/mod-matrix transport)
+pulp_add_test_suite(pulp-test-sequencer-state-channel LIBRARIES pulp::state)
 
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
@@ -4081,6 +4088,9 @@ pulp_add_test_suite(pulp-test-animation LIBRARIES pulp::view)
 
 # FrameClock tests
 pulp_add_test_suite(pulp-test-frame-clock LIBRARIES pulp::view)
+
+# Meter/scalar host->view source + subscription lifecycle
+pulp_add_test_suite(pulp-test-meter-source LIBRARIES pulp::view)
 
 # Motion bedrock tests.
 pulp_add_test_suite(pulp-test-motion LIBRARIES pulp::view)

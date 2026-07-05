@@ -268,6 +268,35 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   escape), and the parity-registration check requires the test source to appear on
   a real `SOURCES`/`add_executable`/`target_sources`/`pulp_add_test_suite` line —
   a bare mention in a dead variable no longer counts.
+- **Conflict-marker guard (`conflict_marker_check.py`).** Whole-tree guard (not
+  diff-scoped): no tracked file may carry a git conflict marker. Born from the
+  incident where a squash-merge's stale side collided with an already-advanced
+  `project() VERSION` line and wrote `<<<<<<< / ======= / >>>>>>>` straight into
+  `CMakeLists.txt` (fixed in #5477), breaking every build until a human noticed.
+  Keyed on the start/base/end markers (`<<<<<<<` / `|||||||` / `>>>>>>>` at
+  column 0, followed by whitespace/EOL) — verified zero-false-positive across the
+  whole tracked tree, `external/` included; the `=======` separator is reported
+  only inside a real conflict block, so Markdown headings and ASCII banners stay
+  clean. Runs in three layers: `gates.sh` + the pre-push hook (local), the
+  `Versioning & Skill-Sync` workflow's **Conflict-marker guard** step (which scans
+  the pull_request MERGE ref, so a marker born from the merge itself is caught,
+  not only one on the PR head), and `conflict-marker-guard.yml` — a `push:main`
+  backstop that reddens the branch and opens a tracking issue if a marker reaches
+  main by any path (the squash case, where GitHub had no clean mergeable ref for
+  the PR job to inspect). Carries a `--selftest` in the fixture-test step. A
+  vendored fixture that legitimately ships markers is a reviewable `ALLOWLIST`
+  edit in the script. If the `push:main` guard reddens main, run
+  `python3 tools/scripts/conflict_marker_check.py` for the file:line list, resolve,
+  and push — the tracker auto-closes on the next clean push. Exit codes are
+  meaningful: `0` clean, `1` markers found (the backstop opens the tracker), `2+`
+  internal error (the backstop fails the run *without* opening a wrong "markers
+  committed" issue) — the selftest locks this contract. Documented scope
+  limitations (deliberate, to keep zero false positives): only default
+  seven-char markers (a non-default `.gitattributes` `conflict-marker-size` is
+  missed), submodule *contents* are out of scope (the superproject sees a
+  gitlink), and NUL-bearing/UTF-16 text is skipped as binary. The upstream fix
+  for the whole class — the merge tool refusing to commit a conflicted result —
+  is tracked in Shipyard #372; this guard is the consumer-side backstop.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a
@@ -1025,6 +1054,44 @@ matrix. It should depend only on cheap setup/classification jobs and poll the
 macOS matrix leg by name, then exit as soon as that leg reports. Otherwise
 advisory Linux/Windows jobs can keep a green macOS leg from satisfying branch
 protection.
+
+**Flaky required-leg wedge + the rerun lock (recovery).** Even when the `macos`
+alias reports its failure promptly, a *flaky* failure on the required leg wedges
+auto-merge: the PR sits `mergeStateStatus: BLOCKED`, and `ghapp run rerun <run>
+--failed` refuses with **"cannot be rerun; This workflow is already running"**
+for as long as an advisory leg (Windows x64 / Coverage) keeps the run
+`in_progress`. So a slow advisory leg blocks the re-run of the flaky required
+leg. First confirm it's a flake, not the branch: the required `[local]` leg's
+log is NOT in the GHA store (`run view --job <id> --log` returns 0 lines), so
+read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
+`extract_keyboard_shortcuts does not catastrophically backtrack on large
+embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
+load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
+`gh pr merge <pr> --squash --auto`, then **`shipyard rescue <pr> --rerun-failed`**.
+`rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
+failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
+the provider so the rerun lands local-first on the idle Studios; the armed
+auto-merge then fires when it goes green. Do NOT hand-crank the cancel+rerun
+unless `rescue` is unavailable. `shipyard ship` now also *detects* this exact
+wedge (validated green + a red required check that maps to a validated-green
+target) and prints the `shipyard rescue … --rerun-failed` line for you in its
+hand-back, so on a fresh block you usually just copy it. Manual fallback only if
+`rescue` is missing/older: `ghapp run cancel <run>` (advisory legs are
+expendable), wait ~20–60s for `status: completed`, then `ghapp run rerun <run>
+--failed`; the per-run rerun lock is why the cancel must come first. (Or `ghapp
+workflow run build.yml --ref <branch>` for a fresh run whose newer `macos`
+context supersedes the stale failure — do one or the other, not both.)
+
+**Prevention: retry transient flakes on the required leg.** `build.yml`'s
+non-Windows and Windows `ctest` steps run `--repeat until-pass:2` (mirroring
+`sanitizers.yml`), so a single timing-flake retries once and self-heals instead
+of reddening the required `macos` gate. This is the right tool for *transient*
+flakes; reserve the `--exclude-regex` quarantine (above) for tests that fail
+*consistently* on `main`, and the `PROCESSORS` reservation for RT-teardown
+starvation hangs. Each retry attempt is still bounded by `--timeout 120`. The
+deeper structural fix for the rerun lock — splitting the required macOS leg into
+its own workflow so advisory legs can never hold its run open — is a tracked
+follow-up.
 
 ### Gotcha: the macOS overflow busy-probe must count only *running* M1 legs (#2467)
 
@@ -2507,6 +2574,7 @@ HEAD reporting.
 Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+- `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
 - `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
 **Bypass-priority cheat sheet** — reach for the surgical knob first; the nuclear one masks fast checks too:

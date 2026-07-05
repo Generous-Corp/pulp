@@ -159,12 +159,28 @@ def _cmd_loop(args: argparse.Namespace) -> int:
 def _cmd_compare(args: argparse.Namespace) -> int:
     import json
     from . import compare
-    report = compare.compare_files(
-        args.reference, args.candidate,
-        profile=args.profile, reference_role=args.reference_role,
-        threshold=args.threshold,
-    )
+    try:
+        report = compare.compare_files(
+            args.reference, args.candidate,
+            profile=args.profile, reference_role=args.reference_role,
+            threshold=args.threshold,
+        )
+    except ValueError as exc:
+        # A caller-contract error — in practice an out-of-range --threshold for this axis (profile
+        # and reference_role are argparse-constrained). Emit a structured `invalid` report so a
+        # delegating caller (the MCP tool) reads a clean verdict instead of a raw traceback that
+        # its "empty report" heuristic would misread as "the tool isn't installed".
+        report = compare.invalid_report(args.profile, args.reference_role, str(exc))
     print(f"[quality-lab compare] {report['verdict']}: {report['summary']}")
+    # Corroboration status + any promoted headline flags, printed under the verdict on every run
+    # (advisory — a cross-check about materiality, never a gate; see the compare report contract).
+    corr = (report.get("advisory") or {}).get("corroboration")
+    if corr:
+        print(f"  corroboration: {corr['status']}")
+    for f in report.get("headline_flags", []):
+        exp = f.get("expected_for") or []
+        suffix = f" (expected for: {', '.join(exp)})" if exp else ""
+        print(f"  flag: {f['flag']}{suffix}")
     if args.json:
         with open(args.json, "w") as fh:
             json.dump(report, fh, indent=2)
@@ -172,6 +188,37 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     # Advisory: exit nonzero ONLY when we could not measure (invalid input/tool failure),
     # never for a judgment — a regression_suspected verdict is advice, not a gate failure.
     return 2 if report["verdict"] == compare.VERDICT_INVALID else 0
+
+
+def _cmd_regression_net(args: argparse.Namespace) -> int:
+    from . import compare, regression_net
+    try:
+        rows, failed = regression_net.run_manifest(args.manifest)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        # A broken manifest (missing/malformed/incomplete) is a broken pipeline, not a clean run —
+        # surface it and exit 2 (could-not-run), never a silent exit 0.
+        print(f"[quality-lab regression-net] ERROR — could not run net: {exc}")
+        return 2
+    print(regression_net.format_table(rows))
+    st = regression_net.status(rows)
+    errored = regression_net.net_errored(rows)
+    n_reg = sum(r.is_regression for r in rows)
+    n_inv = sum(r.is_invalid for r in rows)
+    print(f"\n[quality-lab regression-net] {st} — {n_reg} regression axis-verdict(s), "
+          f"{n_inv} unmeasured (invalid) across {len(rows)} checks "
+          f"(corroboration is informational; the net fails only on an axis regression)")
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump({"rows": [r.to_dict() for r in rows], "status": st,
+                       "failed": failed, "errored": errored}, fh, indent=2)
+        print(f"  wrote results -> {args.json}")
+    # Distinct exit codes so a delegating caller can tell the three states apart: 1 = an axis
+    # regression, 2 = a pair could not be measured (broken/missing render), 0 = genuinely clean.
+    if failed:
+        return 1
+    if errored:
+        return 2
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -238,9 +285,17 @@ def main(argv: list[str] | None = None) -> int:
         help="advisory before/after judgment over two WAVs (agent-facing; not a gate)")
     cmp_.add_argument("reference", help="reference (before) WAV")
     cmp_.add_argument("candidate", help="candidate (after) WAV")
-    cmp_.add_argument("--profile", choices=list(compare.PROFILES), default="tonal-balance",
-                      help="measurement axis: tonal-balance (LTAS centroid shift) or "
-                           "added-hf (high-frequency fizz fraction)")
+    # NOTE: intentionally NO argparse `choices` — an unknown profile must reach `compare_files`,
+    # whose ValueError `_cmd_compare` catches into a clean structured `invalid` report. argparse
+    # `choices` would instead exit 2 before that, and a DELEGATING caller (the MCP tool) would read
+    # the empty report as "tool not installed". The Python `_AXES` registry stays the source of
+    # truth for the valid set; the help lists it for humans.
+    cmp_.add_argument("--profile", default="tonal-balance", metavar="AXIS",
+                      help="measurement axis (default: tonal-balance): tonal-balance (LTAS "
+                           "centroid), added-hf (band-relative >=8kHz dB), noise-roughness (HNR "
+                           "drop), graininess (spectral-flux rise), stereo-width (side/mid ratio + "
+                           "phase). roughness/graininess need tonal/sustained material; stereo-width "
+                           "needs 2-channel input")
     cmp_.add_argument("--reference-role", choices=["peer", "golden"], default="peer",
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "
@@ -249,6 +304,16 @@ def main(argv: list[str] | None = None) -> int:
                       help="materiality threshold override (defaults to the axis's own default)")
     cmp_.add_argument("--json", default="", help="write the full report JSON to this path")
     cmp_.set_defaults(func=_cmd_compare)
+
+    rnet = sub.add_parser(
+        "regression-net",
+        help="golden-render regression net over a manifest of before/after pairs "
+             "(advisory; fails ONLY on an axis regression, corroboration is informational)")
+    rnet.add_argument("--manifest", required=True,
+                      help='JSON: {"reference_role"?, "profiles"?, "pairs":[{name,golden,candidate}]} '
+                           "— golden/candidate paths are resolved relative to the manifest")
+    rnet.add_argument("--json", default="", help="write structured results JSON to this path")
+    rnet.set_defaults(func=_cmd_regression_net)
 
     args = p.parse_args(argv)
     return args.func(args)

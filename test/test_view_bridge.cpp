@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/message_channel.hpp>
@@ -8,6 +9,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
+#include <memory>
 
 using namespace pulp;
 
@@ -562,4 +564,23 @@ TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bri
     // A non-reloadable processor never rebuilds — poll is always false, no wrapper.
     REQUIRE_FALSE(bridge.poll_editor_reload());
     REQUIRE_FALSE(bridge.poll_editor_reload());
+}
+
+// Regression: the GPU display-link scripted-idle pump is dispatched to the main
+// queue and can run AFTER its ViewBridge is destroyed — a host reloading the
+// embedded view replaces the bridge while the host still holds the pump, and
+// CVDisplayLinkStop does not join an in-flight callback. Before the bridge
+// liveness token, the pump dereferenced the freed bridge (store()/scripted_ui())
+// → EXC_BAD_ACCESS crash embedding the AU in Ableton Live. The pump must now
+// read the token and no-op once the bridge is gone.
+TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
+          "[view_bridge][idle-pump][crash]") {
+    StubProcessor p;
+    state::StateStore store;
+    auto bridge = std::make_unique<format::ViewBridge>(p, store);
+    auto pump = format::make_scripted_idle_pump(*bridge);
+    pump();                 // bridge alive: safe
+    bridge.reset();         // destroy the bridge out from under the pump
+    pump();                 // must NOT touch the freed bridge — token is false
+    SUCCEED("idle pump no-oped after the bridge was destroyed");
 }

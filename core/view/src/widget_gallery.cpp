@@ -2,6 +2,8 @@
 
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/midi_keyboard.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -139,8 +141,87 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
     }
     y += 244.0f;
 
+    // ── Inputs ──
+    header("Inputs");
+    {
+        auto in = std::make_unique<TextEditor>();
+        in->placeholder = "Search presets…";
+        in->set_text("Velvet Plate");
+        add(std::move(in), M, y, 260.0f, 32.0f);
+
+        auto combo = std::make_unique<ComboBox>();
+        combo->set_items({"Sine", "Saw", "Square", "Triangle"});
+        combo->set_selected_silent(1);
+        add(std::move(combo), M + 280.0f, y, 160.0f, 32.0f);
+
+        auto cb = std::make_unique<Checkbox>(); cb->set_checked(true);
+        add(std::move(cb), M + 470.0f, y + 4.0f, 22.0f, 22.0f);
+        auto cbl = std::make_unique<Label>("Sync"); cbl->set_font_size(12.0f);
+        add(std::move(cbl), M + 498.0f, y + 6.0f, 60.0f, 18.0f);
+
+        auto sw = std::make_unique<Toggle>(); sw->set_on(true, false); sw->set_label("Mono");
+        add(std::move(sw), M + 580.0f, y, 100.0f, 32.0f);
+    }
+    y += 44.0f;
+    {
+        auto memo = std::make_unique<TextEditor>();
+        memo->multi_line = true;
+        memo->set_text("Multi-line text input.\nBinds to plugin state.");
+        add(std::move(memo), M, y, 440.0f, 64.0f);
+    }
+    y += 84.0f;
+
+    // ── XY pad & segmented ──
+    header("XY pad & segmented");
+    {
+        auto xy = std::make_unique<XYPad>();
+        xy->set_x(0.62f); xy->set_y(0.40f);
+        xy->set_x_label("Cutoff"); xy->set_y_label("Reso");
+        add(std::move(xy), M, y, 150.0f, 150.0f);
+
+        auto seg = std::make_unique<SegmentedControl>();
+        seg->set_segments({"LP", "BP", "HP"}); seg->set_selected_silent(1);
+        add(std::move(seg), M + 180.0f, y + 8.0f, 220.0f, 32.0f);
+
+        auto seg2 = std::make_unique<SegmentedControl>();
+        seg2->set_segments({"1x", "2x", "4x", "8x"}); seg2->set_selected_silent(2);
+        add(std::move(seg2), M + 180.0f, y + 52.0f, 220.0f, 32.0f);
+    }
+    y += 168.0f;
+
+    // ── Meters & keyboard ──
+    header("Meters & keyboard");
+    {
+        auto m1 = std::make_unique<Meter>();
+        m1->set_orientation(Meter::Orientation::vertical); m1->set_level(0.55f, 0.82f);
+        add(std::move(m1), M, y, 22.0f, 130.0f);
+        auto m2 = std::make_unique<Meter>();
+        m2->set_orientation(Meter::Orientation::vertical); m2->set_level(0.38f, 0.64f);
+        add(std::move(m2), M + 32.0f, y, 22.0f, 130.0f);
+
+        auto kb = std::make_unique<MidiKeyboard>();
+        kb->set_range(48, 72);
+        add(std::move(kb), M + 84.0f, y + 46.0f, 700.0f, 84.0f);
+    }
+    y += 150.0f;
+
     root->set_bounds({0, 0, W, y});
     return root;
+}
+
+std::unique_ptr<View> build_scrolling_widget_gallery(const Theme& theme,
+                                                     float viewport_w,
+                                                     float viewport_h) {
+    auto board = build_widget_gallery(theme);
+    const auto content = board->bounds();
+
+    auto scroll = std::make_unique<ScrollView>();
+    scroll->set_theme(theme);
+    scroll->set_direction(ScrollView::Direction::both);
+    scroll->set_content_size({content.width, content.height});
+    scroll->set_bounds({0, 0, viewport_w, viewport_h});
+    scroll->add_child(std::move(board));
+    return scroll;
 }
 
 }  // namespace pulp::view

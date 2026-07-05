@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
-"""Lint long-lived docs and skills for transient workflow breadcrumbs.
+"""Lint long-lived docs, skills, and source comments for transient breadcrumbs.
 
-This is intentionally small, line-oriented, and zero-dependency. It guards the
-surfaces that are expected to stay evergreen: public reference docs and shared
-agent skills. The lint skips fenced code blocks, inline backtick spans, known
+This is intentionally small, line-oriented, and zero-dependency. It guards two
+surfaces:
+
+1. Evergreen docs and shared agent skills (public reference docs, SKILL.md).
+   The full markdown scope is scannable (changed lines by default, or --all).
+2. Source-tree comments and test tags under core/, examples/, tools/, test/,
+   apple/, inspect/, and ship/. Source is scanned ONLY on changed/added lines
+   (or explicit paths) — never in --all — so the huge historical backlog never
+   blocks a push, but a NEW phase/milestone/agent/PR breadcrumb in a comment or
+   a stale Catch2 selector tag fails fast. Source scanning is comment-aware: for
+   C-family files only // and /* */ comment text is checked (plus string
+   literals for `[tag]`-style Catch2 selectors), and for #-comment files only
+   the comment text — so code, identifiers, and URLs in strings are not flagged.
+
+Both surfaces skip fenced code blocks (markdown), inline backtick spans, known
 external/spec references, and explicit per-line skip markers.
 
 Modes:
@@ -11,9 +23,9 @@ Modes:
     --mode=report  exits 1 on findings
 
 By default, git checkouts scan added/modified lines in changed/untracked files
-within the default scope so the guard is forward-looking and does not block on
-historical debt. Outside a git checkout, or with --all, the same default scope
-is scanned across the working tree.
+so the guard is forward-looking and does not block on historical debt. Outside a
+git checkout, or with --all, the markdown default scope is scanned across the
+working tree (source scope stays diff-scoped only).
 
 Exit codes:
     0  clean, or hint-mode findings
@@ -38,6 +50,30 @@ DEFAULT_SCAN_GLOBS = (
     "docs/reference/**/*.yaml",
     ".agents/skills/**/SKILL.md",
 )
+
+# Source-tree scope. Comments and test tags under these roots are checked, but
+# ONLY on changed/added lines (or explicit paths) — never in --all — so the
+# historical backlog never blocks a push while new breadcrumbs fail fast.
+SOURCE_SCAN_DIRS = (
+    "core/",
+    "examples/",
+    "tools/",
+    "test/",
+    "apple/",
+    "inspect/",
+    "ship/",
+)
+# C-family: // line + /* */ block comments, and "..."/'...' string literals
+# (string literals carry Catch2 `[tag]` selectors).
+SOURCE_C_EXTS = frozenset(
+    {
+        ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".hxx",
+        ".m", ".mm", ".swift", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    }
+)
+# Hash-comment: only `#` comment text (no Catch2 tags live here).
+SOURCE_HASH_EXTS = frozenset({".py", ".sh", ".bash", ".cmake"})
+SOURCE_HASH_NAMES = frozenset({"CMakeLists.txt"})
 
 # File-level allowlist. Most entries are outside the v1 default scan but are
 # listed here so explicit-path runs and future scope expansions keep the same
@@ -77,6 +113,9 @@ EXTERNAL_REF_PATTERNS = tuple(
 SKIP_MARKER_RE = re.compile(
     r"<!--\s*docs-noise-lint:\s*skip\s+—\s+\S.*?-->"
 )
+# Comment-delimiter-agnostic skip for source files: any comment that contains
+# `docs-noise-lint: skip <reason>` exempts that line (reason required).
+SOURCE_SKIP_MARKER_RE = re.compile(r"docs-noise-lint:\s*skip\b\s*\S")
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 
@@ -145,6 +184,87 @@ RULES = (
         "workflow-artifact-phrase",
         re.compile(r"\b(?:planning artifact|markdown artifact|compat pass)\b"),
         "workflow artifact phrases belong in planning/reports, not reference docs",
+    ),
+)
+
+
+# Rules for source COMMENT text (C-family // and /* */, or # comments). Kept
+# separate from the markdown RULES: source comments carry a different breadcrumb
+# vocabulary (phase/tier/milestone labels, agent-review notes, reference-lineage
+# provenance) and must not match code, only comment prose.
+SOURCE_COMMENT_RULES = (
+    Rule(
+        "source-phase-label",
+        re.compile(r"\bPhase\s*\d+[a-z]?\b"),
+        "phase labels are transient — state the current behavior instead "
+        '(e.g. "feedback needs a previous-block slot", not "Phase 4d adds feedback")',
+    ),
+    Rule(
+        "source-milestone-label",
+        re.compile(
+            r"\b(?:Tier\s+[A-Z]\s+Slice\s+\d+|plan item\s+\d+|item\s+\d+\.\d+\s+follow-up)\b"
+        ),
+        "milestone/plan-item labels belong in planning, not source comments",
+    ),
+    Rule(
+        "source-slice-label",
+        re.compile(r"\b[Ss]lice\s+\d+(?:\.\d+)?[a-z]?\b"),
+        "slice labels should be rewritten as current behavior",
+    ),
+    Rule(
+        "source-wave-label",
+        re.compile(r"\bWave\s+\d+\b"),
+        "planning wave labels are transient workflow state",
+    ),
+    Rule(
+        "source-agent-review-label",
+        re.compile(r"\b[Cc]odex\s+(?:P[012]\b|review\b)|\bsub-?PR\b|\bslice \d+ of\b"),
+        "agent/review breadcrumbs belong in the commit message, not source",
+    ),
+    Rule(
+        "source-cleanroom-note",
+        re.compile(r"\bclean[\s-]?room\b", re.IGNORECASE),
+        "clean-room provenance lives in the Reference-Lineage commit trailer, "
+        "not a source comment — describe the behavior instead",
+    ),
+    Rule(
+        "source-future-version",
+        re.compile(r"\bFuture\s+v\d+\b"),
+        "speculative future/roadmap notes belong in planning, not source comments",
+    ),
+    Rule(
+        "source-wip-marker",
+        re.compile(r"\bWIP\b"),
+        "WIP/temporary notes: either describe the behavior or track it in planning",
+    ),
+    Rule(
+        "source-issue-cite-phrase",
+        re.compile(
+            r"\b(?:see|See|added in|Added in|fixed in|Fixed in|via|Via|pulp|Pulp|PR|issue|Issue)\s+#\d{2,}\b"
+        ),
+        "issue/PR cite phrases should be rewritten as stable rationale",
+    ),
+    Rule(
+        "source-issue-parenthetical",
+        re.compile(r"\([^)]*#\d{2,}[^)]*\)"),
+        "bare issue/PR parentheticals should be removed or justified inline",
+    ),
+    Rule(
+        "source-issue-only-todo",
+        re.compile(r"\bTODO\b.*#\d{2,}"),
+        "issue-only TODOs should state the actual missing behavior",
+    ),
+)
+
+# Rules for Catch2-style selector tags. These live in string literals (the
+# second arg of TEST_CASE/SECTION), so they are matched against extracted string
+# text, not comments — `arr[coverage]` indexing in code is never flagged.
+SOURCE_TAG_RULES = (
+    Rule(
+        "source-workflow-tag",
+        re.compile(r"\[(?:phase\d+[a-z0-9-]*|codecov|coverage|requested|codex[a-z0-9-]*)\]"),
+        "stale Catch2 selector tags: use behavioral tags ([rt-safety], [parity]) "
+        "or a durable [issue-NNN] anchor",
     ),
 )
 
@@ -336,6 +456,137 @@ def _is_yaml_description_line(line: str) -> bool:
     return bool(value.strip())
 
 
+def _source_style(rel: str) -> Optional[str]:
+    """Return 'c', 'hash', or None for a source file's comment style."""
+    name = rel.rsplit("/", 1)[-1]
+    if name in SOURCE_HASH_NAMES:
+        style = "hash"
+    else:
+        dot = name.rfind(".")
+        ext = name[dot:] if dot >= 0 else ""
+        if ext in SOURCE_C_EXTS:
+            style = "c"
+        elif ext in SOURCE_HASH_EXTS:
+            style = "hash"
+        else:
+            return None
+    return style
+
+
+def _path_is_source(rel: str) -> bool:
+    if _is_allowlisted_path(rel) or rel.startswith("external/"):
+        return False
+    if not any(rel.startswith(prefix) for prefix in SOURCE_SCAN_DIRS):
+        return False
+    return _source_style(rel) is not None
+
+
+def _split_c_line(line: str, in_block: bool) -> tuple[str, str, bool]:
+    """Split a C-family line into (comment_text, string_text, still_in_block).
+
+    Walks the line so `//` and `#123` inside a string literal (e.g. a URL) are
+    not treated as comments, and `[tag]` selectors inside string literals are
+    captured separately for the Catch2-tag rules.
+    """
+    comments: list[str] = []
+    strings: list[str] = []
+    i, n = 0, len(line)
+    if in_block:
+        end = line.find("*/")
+        if end == -1:
+            return line, "", True
+        comments.append(line[:end])
+        i = end + 2
+    while i < n:
+        ch = line[i]
+        if ch in ('"', "'"):
+            quote = ch
+            i += 1
+            buf: list[str] = []
+            while i < n:
+                if line[i] == "\\":
+                    i += 2
+                    continue
+                if line[i] == quote:
+                    break
+                buf.append(line[i])
+                i += 1
+            strings.append("".join(buf))
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n and line[i + 1] == "/":
+            comments.append(line[i + 2:])
+            break
+        if ch == "/" and i + 1 < n and line[i + 1] == "*":
+            end = line.find("*/", i + 2)
+            if end == -1:
+                comments.append(line[i + 2:])
+                return " ".join(comments), " ".join(strings), True
+            comments.append(line[i + 2:end])
+            i = end + 2
+            continue
+        i += 1
+    return " ".join(comments), " ".join(strings), False
+
+
+def _split_hash_line(line: str) -> str:
+    """Return the `#` comment text of a line, ignoring `#` inside a string."""
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if ch in ('"', "'"):
+            quote = ch
+            i += 1
+            while i < n and line[i] != quote:
+                i += 2 if line[i] == "\\" else 1
+            i += 1
+            continue
+        if ch == "#":
+            return line[i + 1:]
+        i += 1
+    return ""
+
+
+def _scan_source_file(
+    path: Path,
+    root: Path,
+    style: str,
+    allowed_lines: Optional[set[int]] = None,
+) -> list[Finding]:
+    """Diff-scoped comment/tag scan for a source file."""
+    rel = _norm_path(path, root)
+    findings: list[Finding] = []
+    in_block = False
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        raise RuntimeError(f"could not read {rel}: {exc}") from exc
+
+    for idx, original in enumerate(lines, start=1):
+        if style == "c":
+            comment, strings, in_block = _split_c_line(original, in_block)
+        else:
+            comment, strings = _split_hash_line(original), ""
+        if allowed_lines is not None and idx not in allowed_lines:
+            continue
+        if SOURCE_SKIP_MARKER_RE.search(original):
+            continue
+        matched = False
+        if comment.strip() and not _has_external_ref(comment):
+            for rule in SOURCE_COMMENT_RULES:
+                if rule.pattern.search(comment):
+                    findings.append(Finding(rel, idx, rule, original.strip()))
+                    matched = True
+                    break
+        if matched or not strings:
+            continue
+        for rule in SOURCE_TAG_RULES:
+            if rule.pattern.search(strings):
+                findings.append(Finding(rel, idx, rule, original.strip()))
+                break
+    return findings
+
+
 def scan_file(
     path: Path,
     root: Path,
@@ -392,9 +643,11 @@ def scan(
         else:
             files = []
             for rel in sorted(line_map):
-                if not _path_in_default_scope(rel):
-                    continue
                 if _is_allowlisted_path(rel):
+                    continue
+                # Source is diff-scoped only; markdown default scope is also
+                # scanned here on its changed lines.
+                if not (_path_in_default_scope(rel) or _path_is_source(rel)):
                     continue
                 path = root / rel
                 if path.is_file():
@@ -403,7 +656,13 @@ def scan(
     for path in files:
         rel = _norm_path(path, root)
         allowed_lines = None if line_map is None else line_map.get(rel)
-        findings.extend(scan_file(path, root, allowed_lines=allowed_lines))
+        style = _source_style(rel) if _path_is_source(rel) else None
+        if style is not None:
+            findings.extend(
+                _scan_source_file(path, root, style, allowed_lines=allowed_lines)
+            )
+        else:
+            findings.extend(scan_file(path, root, allowed_lines=allowed_lines))
     return findings
 
 

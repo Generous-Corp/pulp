@@ -48,6 +48,15 @@ struct LoopRegion {
     LoopCrossfadeCurve crossfade_curve = LoopCrossfadeCurve::Linear;
     LoopInterpolationMode interpolation = LoopInterpolationMode::Linear;
     LoopSnapPolicy snap_policy = LoopSnapPolicy::ValueDirection;
+    // Two-phase playback (PlunderTube / Logic model): reverse_entry sets the
+    // FIRST-pass direction (where playback enters and which way it travels),
+    // while playback_mode sets the STEADY-STATE loop behavior that takes over
+    // after the first pass reaches the far edge — its direction OVERRIDES the
+    // entry. So a Reverse loop with reverse_entry=false plays forward once, then
+    // loops backward; a Forward loop with reverse_entry=true plays backward once,
+    // then loops forward. Default false = enter forward (unchanged for Forward/
+    // OneShot/PingPong). ReverseOnce implies a reverse entry regardless.
+    bool reverse_entry = false;
 };
 
 struct LoopValidationResult {

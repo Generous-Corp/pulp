@@ -140,6 +140,48 @@ computer.
 
 ---
 
+## Two ways to get a design into Pulp — and which one avoids Figma's limits
+
+There are two ways to pull a Figma design into Pulp, and they hit **very
+different** rate limits. Pick the one that matches your Figma seat.
+
+| Path | What it is | Figma rate limit |
+|------|-----------|------------------|
+| **Plugin export** (this guide) | The "Design for Pulp" plugin exports a `*.pulp.json` / `*.pulp.zip` from inside Figma. | **None.** Runs inside Figma desktop; no Figma API/MCP quota, no REST `/images` budget. **Unlimited.** |
+| **Figma MCP** (`get_metadata` / `get_screenshot` / `get_design_context`) | An AI agent reads the file directly to inspect structure or grab a reference render. | **Metered.** See the seat table below — as low as **6 calls per _month_**. |
+| **Headless REST** (`figma_rest_export.py`) | CI / no-desktop fallback that renders frames via Figma's REST `/images`. | Strict per-file **Tier-1 budget**; a dense frame `429`s for many minutes. Honors `Retry-After` with backoff, but slow. |
+
+**Recommendation: export with the plugin.** It is the only unlimited path and it
+produces the exact envelope the importer consumes — so it works on **any seat or
+plan**, including Starter and View/Collab, with zero quota concerns.
+
+### If you (or your agent) will use the Figma MCP, your seat matters
+
+The Figma MCP's read tools are metered, and the free/viewer tiers are **too low
+for iterative work** ([Figma's rate-limit
+docs](https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/)):
+
+| Seat | Starter | Professional | Organization | Enterprise |
+|------|---------|--------------|--------------|------------|
+| **View / Collab** | 6 / month | 6 / month | 6 / month | 6 / month |
+| **Dev / Full** | 6 / month | 200 / day · 10/min | 200 / day · 15/min | 600 / day · 20/min |
+
+- **View/Collab seat, or any Starter plan → 6 MCP calls per _month_.** This is a
+  hard monthly quota (not a transient limit — backoff cannot clear it). At this
+  tier, **do not rely on the MCP**; use the **plugin export** above, which needs
+  none. Reserve MCP calls for a one-off inspection, and prefer a single
+  `get_design_context` (it returns code + screenshot + metadata together) over
+  separate `get_metadata` + `get_screenshot`.
+- **To use the MCP for real design-to-code work, you need a Dev or Full seat on
+  Professional or higher** (200–600 calls/day). If an agent keeps hitting the
+  monthly cap, that is the upgrade to make — or switch that workflow to the
+  plugin export.
+
+Only *read* tools are metered; write tools (`whoami`, `generate_figma_design`)
+are exempt. Figma may change these numbers — the linked doc is authoritative.
+
+---
+
 ## Publishing the plugin to the Figma Community (maintainers)
 
 Publishing is a **manual action in Figma desktop**. There is no CI step for it.
