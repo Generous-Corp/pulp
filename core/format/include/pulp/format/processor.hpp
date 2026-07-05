@@ -667,8 +667,11 @@ public:
     ///     (no audio reader is inside the old processor), so both calls run
     ///     off the audio thread; keep the blob bounded (it is copied while the
     ///     lock is held, which briefly stalls the audio thread into passthrough).
-    virtual std::vector<std::byte> serialize_dsp_state() const { return {}; }
-    virtual bool restore_dsp_state(const std::vector<std::byte>& /*blob*/) { return false; }
+    ///
+    /// NOTE: the two virtuals are DECLARED at the end of this class (after
+    /// process(ProcessBuffers&)) — not here — to keep the Processor vtable
+    /// additive-only (node_abi_gate): new virtuals must be appended after every
+    /// pre-existing one. See the appended block below.
 
     /// Proposed bus layout passed to is_bus_layout_supported().
     ///
@@ -934,6 +937,16 @@ public:
         process(*output, input ? *input : empty_input, midi_in, midi_out, context);
         sidechain_ = previous_sidechain;
     }
+
+    /// Opt-in DSP-state carry across a hot-reload (reload lane, item 1.6).
+    /// Documented in full next to `latency_samples()` above; DECLARED here (at the
+    /// end of the vtable) so the Processor virtual order stays additive-only
+    /// (node_abi_gate) after `is_bus_layout_supported`/`process` were frozen on
+    /// main. serialize returns the OLD processor's opaque DSP-state blob (empty =
+    /// nothing to carry); restore loads it into the NEW processor (false = cold
+    /// start, always safe). Appended to preserve additive-only vtable ordering.
+    virtual std::vector<std::byte> serialize_dsp_state() const { return {}; }
+    virtual bool restore_dsp_state(const std::vector<std::byte>& /*blob*/) { return false; }
 
     /// Editor live-reload support (live-swap 1.9). A processor whose editor
     /// should rebuild IN PLACE while it is open — e.g. a `ReloadableShell` whose
