@@ -266,7 +266,7 @@
     "pr-review-sweep": {
       "paths": [],
       "_doc": {
-        "empty-ok": "Process skill (sweep a PR's review comments and act on them) — not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+        "empty-ok": "Process skill (sweep a PR's review comments and act on them) \u2014 not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
       }
     },
     "prototype-loop": {
@@ -418,6 +418,13 @@
         "tools/local-ci/remotion-proof/**",
         "tools/local-ci/scripts/compose-video-proof.mjs",
         "tools/local-ci/scripts/smoke-video-proof.mjs"
+      ]
+    },
+    "daw-smoke": {
+      "paths": [
+        ".agents/skills/daw-smoke/**",
+        "tools/testing/daw-smoke/**",
+        "docs/guides/daw-smoke.md"
       ]
     }
   }
