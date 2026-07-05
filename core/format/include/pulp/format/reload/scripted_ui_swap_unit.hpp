@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file scripted_ui_swap_unit.hpp
-/// UX SwapUnit adapter over ScriptedUiSession (live-swap plan item 1.8b/2.5b).
+/// UX SwapUnit adapter over ScriptedUiSession.
 ///
 /// Adapts a scripted-UI reload to the SwapUnit contract so a content pack's UI
 /// swap composes with a DSP swap (DspReloadSwapUnit) under apply_live_swap. Lives

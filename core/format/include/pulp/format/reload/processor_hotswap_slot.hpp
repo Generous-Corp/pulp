@@ -54,7 +54,7 @@
 namespace pulp::format::reload {
 
 /// The crossfade amplitude law is the shared `signal::TransitionMixer` primitive
-/// (live-swap plan item 2.1) — extracted so the hot-swap slot, the convolver IR
+/// — extracted so the hot-swap slot, the convolver IR
 /// swapper, and the Phase-2 SwapUnit transitions all fade identically and are
 /// covered by one click-free fixture. `Smoothstep` = equal-gain (default),
 /// `EqualPower` = constant power; both click-free (evaluated over the smoothstep

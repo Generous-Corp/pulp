@@ -1,4 +1,4 @@
-// Unified UX+DSP live-swap transaction (live-swap plan item 1.8). Verifies the
+// Unified UX+DSP live-swap transaction. Verifies the
 // all-or-nothing coordination with fake stages: a failure in a later stage rolls
 // back the earlier applied stages in reverse, and an earlier failure never
 // applies the later stages — so a content pack can't land a new UI on old DSP.

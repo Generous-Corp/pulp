@@ -1,4 +1,4 @@
-// Swap-pack manifest schema + per-file integrity (live-swap plan item 3.1a).
+// Swap-pack manifest schema + per-file integrity.
 // A tampered/truncated/missing file must fail closed at the hash layer before
 // anything is installed. Signing (3.1b) + install (3.1c) are separate slices.
 #include <catch2/catch_test_macros.hpp>

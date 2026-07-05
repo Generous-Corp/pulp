@@ -128,8 +128,8 @@ inline bool param_contracts_match(const state::StateStore& live,
            param_contract_diff(live, candidate).empty();
 }
 
-/// Result of the SUPERSET contract check (live-swap plan item 2.4 — "add params
-/// and stay live"). A candidate is a valid superset when every LIVE parameter is
+/// Result of the SUPERSET contract check ("add params and stay live"): a
+/// candidate is a valid superset when every LIVE parameter is
 /// present in the candidate with an identical contract (existing automation /
 /// saved sessions stay valid), and the candidate may ALSO declare new parameters.
 struct ParamSupersetResult {

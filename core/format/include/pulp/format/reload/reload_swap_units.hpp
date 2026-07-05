@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file reload_swap_units.hpp
-/// Real SwapUnit adapters over the reload sessions (live-swap plan item 1.8b/2.5b).
+/// Real SwapUnit adapters over the reload sessions.
 ///
 /// The `SwapUnit` contract (live_swap_transaction.hpp) lets heterogeneous
 /// subsystems join one atomic live-swap transaction. This header adapts the DSP

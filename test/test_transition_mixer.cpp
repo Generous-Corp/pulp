@@ -1,6 +1,6 @@
-// Shared click-free crossfade fixture for signal::TransitionMixer (live-swap
-// plan item 2.1) — the one primitive the hot-swap slot, convolver IR swapper,
-// and Phase-2 SwapUnit transitions all fade through.
+// Shared click-free crossfade fixture for signal::TransitionMixer — the one
+// primitive the hot-swap slot, convolver IR swapper, and SwapUnit transitions
+// all fade through.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>

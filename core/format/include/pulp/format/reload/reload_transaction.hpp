@@ -45,7 +45,7 @@ namespace pulp::format::reload {
 /// DSP-axis reload timings (control-thread, off the audio path). Populated by
 /// reload_processor_from_library() on every attempt — partial on early
 /// rejection (later phases stay 0). Milliseconds. Feeds the `swapped in NNN ms`
-/// dev diagnostic and p50/p95 baselines (plan item 1.2).
+/// dev diagnostic and p50/p95 baselines.
 struct ReloadMetrics {
     double load_gate_ms = 0.0;  ///< dlopen + ABI/fingerprint gates + resolve create.
     double construct_ms = 0.0;  ///< create() + define_parameters + contract gate.

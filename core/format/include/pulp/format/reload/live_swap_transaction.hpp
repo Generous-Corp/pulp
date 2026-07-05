@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file live_swap_transaction.hpp
-/// One reload session = one atomic unit across UX + DSP (live-swap plan item 1.8).
+/// One reload session = one atomic unit across UX + DSP.
 ///
 /// A content pack can carry BOTH a new scripted UI and new DSP. Applied
 /// independently, a failure in one half leaves a mismatched plugin — a new UI
@@ -86,7 +86,7 @@ inline LiveSwapResult apply_live_swap(const std::vector<SwapStage>& stages) {
 }
 
 /// The contract a swappable subsystem implements to join a live-swap transaction
-/// (live-swap plan item 2.5). A `SwapUnit` is anything that can be swapped as one
+///. A `SwapUnit` is anything that can be swapped as one
 /// half of a unified reload — DSP (a `ReloadSession`), scripted UI (a
 /// `ScriptedUiSession`), or a future GPU-resource unit. It produces a `SwapStage`
 /// that captures its current state for rollback at the moment `to_stage()` is

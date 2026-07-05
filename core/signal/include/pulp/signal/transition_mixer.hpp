@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file transition_mixer.hpp
-/// Shared click-free crossfade primitive (live-swap plan item 2.1).
+/// Shared click-free crossfade primitive.
 ///
 /// The one place the live-swap machinery computes old→new blend gains, so the
 /// DSP hot-swap slot, the convolver IR swapper, and the Phase-2 SwapUnit

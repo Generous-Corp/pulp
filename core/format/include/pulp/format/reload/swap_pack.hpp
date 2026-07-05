@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file swap_pack.hpp
-/// Sealed swap-pack manifest + per-file integrity (live-swap plan item 3.1a).
+/// Sealed swap-pack manifest + per-file integrity.
 ///
 /// A swap-pack is downloadable content that hot-swaps a shipped plugin's UI/DSP:
 /// a manifest plus files (scripted-UI JS + theme + assets, `.pulpgraph` DSP

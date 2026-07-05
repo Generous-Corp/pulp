@@ -54,7 +54,7 @@ public:
     void set_repaint_callback(std::function<void()> cb);
     WidgetBridge* bridge() const { return bridge_.get(); }
 
-    /// JS-axis reload timings, ms (plan item 1.2). Populated on every
+    /// JS-axis reload timings, ms. Populated on every
     /// rebuild_from_code() — full on success, partial (later phases 0) on an
     /// early failure. The DSP-axis counterpart lives in reload_transaction.hpp's
     /// ReloadMetrics; together they feed the `reloaded in NNN ms` diagnostic and
