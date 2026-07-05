@@ -59,8 +59,14 @@ bool ViewBridge::poll_editor_reload() {
     if (!view_raw_ || !processor_.supports_editor_reload()) return false;
     const uint64_t gen = processor_.editor_reload_generation();
     if (gen == last_reload_generation_) return false;
-    last_reload_generation_ = gen;
-    return rebuild_primary_view();
+    // Consume the generation only on a SUCCESSFUL rebuild. If create_view()
+    // returns null transiently, leave last_reload_generation_ so the next tick
+    // retries instead of stranding the stale UI until another swap.
+    if (rebuild_primary_view()) {
+        last_reload_generation_ = gen;
+        return true;
+    }
+    return false;
 }
 
 bool ViewBridge::rebuild_primary_view() {
@@ -88,10 +94,22 @@ bool ViewBridge::rebuild_primary_view() {
     } else {
         view_raw_->clear_background_color();
     }
+    // Carry the new editor's ROOT layout too (not just children + background) — a
+    // reloaded editor may change root flex / layout-mode (review 3.1). NOTE: a
+    // root-level event handler set on the root inside create_view() is NOT carried
+    // (std::function handlers can't be generically transplanted) — attach handlers
+    // to child views, or re-instantiate the plugin, if the root must own one.
+    view_raw_->flex() = fresh->flex();
+    view_raw_->set_layout_mode(fresh->layout_mode());
     view_raw_->invalidate_layout();
 
-    // Refresh size hints (the new editor may prefer a different size).
+    // Refresh size hints (the new editor may prefer a different size). NOTE: the
+    // host owns the window; a preferred-size CHANGE across reload is not renotified
+    // to the host here (review 3.2, LOW) — the editor lays out to the host's current
+    // size, and a size change needs a re-instantiate for now.
     size_hints_ = processor_.view_size();
+    width_ = size_hints_.preferred_width;
+    height_ = size_hints_.preferred_height;
     return true;
 }
 

@@ -72,6 +72,14 @@ inline std::vector<std::string> param_contract_diff(const state::StateStore& liv
     // "contract differs" (the reload the standalone/capture host accepts) even
     // though the logic's automatable surface is unchanged. The adapter owns the
     // bypass independently of the logic, so it is not part of the swap contract.
+    // RESIDUAL (low, inherent): the synthesized bypass is created with default
+    // designation (None) + a boolean "Bypass" name/range (quirk_apply.hpp), so it
+    // is only detectable via the is_bypass_param HEURISTIC. A plugin author's OWN
+    // genuinely-automatable boolean param literally named "Bypass" with range
+    // [0,1] is therefore indistinguishable and also excluded — its re-ID/removal
+    // across a reload is not caught. Requires that exact name+range collision on
+    // one param; the fix if it ever bites is to key exclusion on a dedicated
+    // "adapter-synthesized" flag instead of the heuristic.
     for (const auto& l : live.all_params()) {
         const state::ParamInfo* c = candidate.info(l.id);
         if (!c) {
