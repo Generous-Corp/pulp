@@ -4,14 +4,19 @@
 #include "design_binding.hpp"
 
 #include <pulp/design/design_adherence.hpp>
+#include <pulp/design/design_gallery.hpp>
 #include <pulp/design/design_ledger.hpp>
 #include <pulp/design/design_manifest.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_tokens.hpp>
 
+#include <cctype>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
+#include <system_error>
 
 namespace {
 
@@ -500,6 +505,205 @@ int run_record(const std::vector<std::string>& rest) {
               << "] -> " << ledger_path.string() << "\n";
     return 0;
 }
+void print_gallery_usage() {
+    std::cout <<
+        "Usage: pulp design gallery [--root <dir>] [--out <dir>] [options]\n"
+        "\n"
+        "  Render every @dsCard-tagged source file under <root> into one review\n"
+        "  artifact: a grouped HTML grid (gallery.html) + a JSON manifest\n"
+        "  (gallery.json). Tag a file with a leading magic comment, e.g.:\n"
+        "      // @dsCard group=knobs viewport=120x140\n"
+        "      // @startingPoint\n"
+        "\n"
+        "  --root <dir>        Tree to scan for tagged *.js files (default: cwd).\n"
+        "  --out <dir>         Where to write the artifact (default: <root>/.pulp-gallery).\n"
+        "  --backend <name>    Screenshot backend: skia (default) | auto | coregraphics.\n"
+        "  --screenshot <bin>  Path to the pulp-screenshot binary (default: auto-locate).\n"
+        "  --no-render         Inventory only: emit the manifest/HTML with no PNGs.\n"
+        "  --force             Re-render every card, ignoring the content-hash cache.\n"
+        "  --json              Print the manifest to stdout and skip rendering.\n";
+}
+
+// Read a bounded prefix of a file — enough to hold the leading magic-comment
+// block without slurping a large source body just to check for a tag.
+std::string read_file_head(const fs::path& p, size_t max_bytes = 1024) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f.is_open()) return {};
+    std::string head(max_bytes, '\0');
+    f.read(head.data(), static_cast<std::streamsize>(max_bytes));
+    head.resize(static_cast<size_t>(f.gcount()));
+    return head;
+}
+
+// A filesystem-safe, collision-resistant PNG name for one card: its path with
+// non-alphanumerics folded to '_', then the viewport and content hash. Because
+// the hash is in the name, unchanged content at an unchanged viewport maps to an
+// already-existing file — that is the content-hash render cache.
+std::string card_png_name(const pulp::design::GalleryCard& c) {
+    std::string slug;
+    for (char ch : c.file) slug += std::isalnum(static_cast<unsigned char>(ch)) ? ch : '_';
+    return slug + "_" + std::to_string(c.width) + "x" + std::to_string(c.height) + "_" +
+           c.content_hash + ".png";
+}
+
+// Directories that never hold hand-authored cards and are expensive to walk.
+bool is_skippable_dir(const std::string& name) {
+    return name == ".git" || name == "build" || name == "node_modules" ||
+           name == "external" || name == "planning" || name.rfind("build-", 0) == 0 ||
+           name == ".pulp-gallery";
+}
+
+int run_gallery(const std::vector<std::string>& rest) {
+    fs::path root, out_dir, screenshot_bin;
+    std::string backend = "skia";
+    bool no_render = false, json_only = false, force = false;
+
+    for (size_t i = 0; i < rest.size(); ++i) {
+        const std::string& a = rest[i];
+        auto next = [&](const char* flag) -> std::string {
+            if (i + 1 >= rest.size()) {
+                std::cerr << "pulp design gallery: " << flag << " requires a value\n";
+                return {};
+            }
+            return rest[++i];
+        };
+        if (a == "--help" || a == "-h") { print_gallery_usage(); return 0; }
+        else if (a == "--root") root = next("--root");
+        else if (a == "--out") out_dir = next("--out");
+        else if (a == "--backend") backend = next("--backend");
+        else if (a == "--screenshot") screenshot_bin = next("--screenshot");
+        else if (a == "--no-render") no_render = true;
+        else if (a == "--json") json_only = true;
+        else if (a == "--force") force = true;
+        else { std::cerr << "pulp design gallery: unknown option '" << a << "'\n"; return 2; }
+    }
+
+    std::error_code ec;
+    if (root.empty()) root = fs::current_path();
+    if (!fs::is_directory(root, ec)) {
+        std::cerr << "Error: --root " << root << " is not a directory\n";
+        return 1;
+    }
+    if (out_dir.empty()) out_dir = root / ".pulp-gallery";
+
+    // Discover tagged cards. Walk the tree, skip noise dirs, parse each *.js head.
+    // Status queries use the error_code overloads so a broken symlink or a status
+    // race skips the entry instead of aborting the CLI.
+    std::vector<pulp::design::GalleryCard> cards;
+    auto it = fs::recursive_directory_iterator(
+        root, fs::directory_options::skip_permission_denied, ec);
+    const fs::recursive_directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        std::error_code sec;
+        if (it->is_directory(sec) && is_skippable_dir(it->path().filename().string())) {
+            it.disable_recursion_pending();
+            continue;
+        }
+        if (sec || !it->is_regular_file(sec) || sec || it->path().extension() != ".js") continue;
+        auto card = pulp::design::parse_gallery_card(read_file_head(it->path()),
+                                                     fs::relative(it->path(), root).generic_string());
+        if (!card) continue;
+        card->content_hash = pulp::design::gallery_content_hash(read_text_file(it->path()));
+        cards.push_back(std::move(*card));
+    }
+    if (ec) {
+        // A traversal error mid-walk would otherwise emit a silently-partial
+        // gallery as success. Fail loudly instead.
+        std::cerr << "Error: scanning " << root << " failed: " << ec.message() << "\n";
+        return 1;
+    }
+    pulp::design::sort_cards(cards);
+
+    // Records the rendered (or cached) PNG path for each card, relative to out_dir.
+    std::map<std::string, std::string> png_by_file;
+    auto png_rel = [&](const pulp::design::GalleryCard& c) -> std::string {
+        auto found = png_by_file.find(c.file);
+        return found == png_by_file.end() ? std::string{} : found->second;
+    };
+
+    if (json_only) {
+        // Fast inventory: manifest to stdout, no render, no files written.
+        std::cout << pulp::design::gallery_manifest_json(cards, png_rel) << "\n";
+        return 0;
+    }
+
+    fs::create_directories(out_dir, ec);
+    fs::path cards_dir = out_dir / "cards";
+
+    int rendered = 0, cached = 0, failed = 0;
+    if (!no_render && !cards.empty()) {
+        fs::create_directories(cards_dir, ec);
+        // Locate pulp-screenshot next to this binary, then under <root>/build.
+        if (screenshot_bin.empty()) {
+            fs::path self_dir = current_executable_path().parent_path();
+            for (const fs::path& cand : {platform_executable(self_dir / "pulp-screenshot"),
+                                         platform_executable(root / "build" / "tools" /
+                                                             "screenshot" / "pulp-screenshot")}) {
+                if (fs::exists(cand)) { screenshot_bin = cand; break; }
+            }
+        }
+        if (screenshot_bin.empty() || !fs::exists(screenshot_bin)) {
+            std::cerr << "Error: pulp-screenshot not found; pass --screenshot <bin> or use "
+                         "--no-render.\n";
+            return 1;
+        }
+        // A PNG counts as a valid render (and a cache hit) only if it exists and
+        // is non-empty — an interrupted or crashed render can leave a zero-byte
+        // file, which must not be trusted forever.
+        auto is_valid_png = [](const fs::path& p) {
+            std::error_code fec;
+            return fs::exists(p, fec) && fs::file_size(p, fec) > 0 && !fec;
+        };
+        for (const auto& c : cards) {
+            fs::path png = cards_dir / card_png_name(c);
+            std::string rel = (fs::path("cards") / card_png_name(c)).generic_string();
+            // Cache key is the card's OWN bytes at its viewport (hash embedded in
+            // the filename). It does NOT cover imported modules, assets, or theme
+            // tokens the card pulls in — pass --force to re-render when those
+            // change.
+            if (!force && is_valid_png(png)) {
+                png_by_file[c.file] = rel;
+                ++cached;
+                continue;
+            }
+            // Spawn the renderer with an argv array (no shell): the command
+            // begins with a quoted path and carries quoted args, exactly the
+            // shape std::system's `cmd /c` mis-parses on Windows.
+            std::vector<std::string> args = {
+                "--script",  (root / c.file).string(),
+                "--output",  png.string(),
+                "--width",   std::to_string(c.width),
+                "--height",  std::to_string(c.height),
+                "--backend", backend};
+            auto result = pulp::platform::exec(screenshot_bin.string(), args, /*timeout_ms=*/120000);
+            if (result.exit_code == 0 && is_valid_png(png)) {
+                png_by_file[c.file] = rel;
+                ++rendered;
+            } else {
+                std::cerr << "Warning: render failed for " << c.file;
+                if (result.timed_out) std::cerr << " (timed out)";
+                else std::cerr << " (exit " << result.exit_code << ")";
+                std::cerr << "\n";
+                fs::remove(png, ec);  // drop any partial/empty output so it is not cached
+                ++failed;
+            }
+        }
+    }
+
+    if (!write_text_file(out_dir / "gallery.json",
+                         pulp::design::gallery_manifest_json(cards, png_rel)) ||
+        !write_text_file(out_dir / "gallery.html",
+                         pulp::design::gallery_html(cards, png_rel))) {
+        std::cerr << "Error: cannot write gallery artifact under " << out_dir << "\n";
+        return 1;
+    }
+
+    std::cout << "Gallery: " << cards.size() << " card(s)";
+    if (!no_render) std::cout << " (" << rendered << " rendered, " << cached << " cached, "
+                              << failed << " failed)";
+    std::cout << " -> " << (out_dir / "gallery.html").string() << "\n";
+    return failed > 0 ? 1 : 0;
+}
 
 } // namespace
 
@@ -522,6 +726,9 @@ int cmd_design(const std::vector<std::string>& args) {
         }
         if (args[0] == "record") {
             return run_record(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "gallery") {
+            return run_gallery(std::vector<std::string>(args.begin() + 1, args.end()));
         }
     }
 

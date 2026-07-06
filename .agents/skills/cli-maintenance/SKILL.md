@@ -571,6 +571,31 @@ command begins with a quoted path, wrap the ENTIRE command in one extra pair of
 double quotes (`command = "\"" + command + "\"";`) so `cmd` strips exactly that
 pair and runs the remainder verbatim.
 
+### A CLI subcommand that renders shells out to `pulp-screenshot`
+
+`pulp design gallery` renders each tagged card by spawning the sibling
+`pulp-screenshot` binary rather than linking Skia/Dawn into the CLI process —
+the CLI stays GPU-free and testable, and the render tool owns the backend. Two
+conventions apply to any subcommand that does this:
+
+- **Locate the sibling next to the CLI first**, then under `<root>/build/tools/
+  screenshot`, and let the user override with an explicit `--screenshot <bin>`
+  (mirrors `delegate_to_build_binary`'s cwd-independent search). If it is not
+  found, fail with an actionable message or offer a `--no-render` inventory
+  mode — never silently emit an artifact full of broken images.
+- **Spawn with `pulp::platform::exec(bin, args_vector)`, not a shell string.**
+  The command begins with a quoted path and carries quoted `--output`/`--script`
+  args — the exact shape `std::system`'s `cmd /c` mis-parses on Windows (see the
+  quoted-path note above). The argv array sidesteps the shell entirely and gives
+  a `timed_out` flag for the render wall-clock cap.
+
+The render output is content-hash cached: the PNG filename embeds
+`gallery_content_hash(bytes)`, so an unchanged card at an unchanged viewport maps
+to a file that already exists and is skipped. Keep the pure card model
+(`core/view/src/design_gallery.cpp`) free of filesystem/render concerns — the CLI
+owns the walk, the cache, and the shell-out; the core only parses tags and
+serializes the manifest/HTML.
+
 ### Numeric CLI flags
 
 For count-like flags such as `pulp run --frames`, parsers should accept only

@@ -548,6 +548,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_codegen.cpp
         src/design_fidelity.cpp
         src/design_fidelity_ledger.cpp
+        src/design_gallery.cpp
         src/lock_to_source.cpp
         src/jsx_lock.cpp
         src/design_import_shortcuts.cpp
