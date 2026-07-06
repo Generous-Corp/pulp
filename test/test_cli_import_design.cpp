@@ -741,3 +741,112 @@ TEST_CASE("pulp import-design default (silver) knob keeps the native vector body
     REQUIRE(js.find("setKnobSpriteStrip('GainKnob") == std::string::npos);
     REQUIRE(js.find("setKnobSpriteCore('GainKnob") == std::string::npos);
 }
+
+// ── `pulp design compile` — the design contract CLI ─────────────────────────
+
+TEST_CASE("pulp design compile --stdout --json emits the manifest", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--stdout", "--json"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("\"manifest_version\"") != std::string::npos);
+    REQUIRE(r.stdout_output.find("ink-signal") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"tokens\"") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"components\"") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"reskin_tokens\"") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile --stdout --prompt emits the binding contract", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--stdout", "--prompt"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("# Design binding contract") != std::string::npos);
+    REQUIRE(r.stdout_output.find("## Allowed tokens") != std::string::npos);
+    REQUIRE(r.stdout_output.find("## Allowed components") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile writes both artifacts to --out-dir", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto tmp = unique_temp_dir("pulp-design-compile");
+    auto r = run_pulp({"design", "compile", "-o", tmp.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    auto manifest = tmp / "design-manifest.json";
+    auto prompt = tmp / "design-binding-prompt.md";
+    REQUIRE(fs::exists(manifest));
+    REQUIRE(fs::exists(prompt));
+    const auto json = read_text(manifest);
+    REQUIRE(json.find("2026.07-design-manifest-v1") != std::string::npos);
+    REQUIRE(read_text(prompt).find("# Design binding contract") != std::string::npos);
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("pulp design compile rejects mutually exclusive sources", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--design-md", "a.md", "--theme", "b.json"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("mutually exclusive") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile rejects --json with --prompt", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--json", "--prompt", "--stdout"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("mutually exclusive") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile rejects an unknown flag", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--nope"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("pulp design compile --help prints usage", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--help"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp design compile") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile --design-md compiles a project's tokens", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto md = repo_root() / "test" / "fixtures" / "imports" / "designmd" / "alpha" / "DESIGN.md";
+    if (!fs::exists(md)) { SUCCEED("skipped: DESIGN.md fixture absent"); return; }
+    auto r = run_pulp({"design", "compile", "--design-md", md.string(), "--stdout", "--json"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    // Provenance records the source file, and its tokens are compiled in.
+    REQUIRE(r.stdout_output.find("DESIGN.md") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"kind\": \"color\"") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile --theme on an unreadable file fails cleanly", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto missing = unique_temp_dir("pulp-design-theme") / "nope.json";
+    auto r = run_pulp({"design", "compile", "--theme", missing.string(), "--stdout"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_output.find("no tokens read") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile --out-dir requires a value", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--out-dir"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("requires a value") != std::string::npos);
+}
+
+TEST_CASE("pulp design compile --stdout with no filter prints both artifacts", "[cli][design-compile][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "compile", "--stdout"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("\"manifest_version\"") != std::string::npos);  // json
+    REQUIRE(r.stdout_output.find("# Design binding contract") != std::string::npos);  // prompt
+}

@@ -737,6 +737,31 @@ commands:
         kind: option
         required: false
         description: Override the build directory used to configure/build and launch the tool
+    subcommands:
+      - name: compile
+        summary: Compile the design contract (token allowlist + per-component reskin contracts) into design-manifest.json and an LLM binding prompt. Defaults to the built-in Ink & Signal system.
+        args:
+          - name: --design-md
+            kind: option
+            description: Compile a project's DESIGN.md tokens instead of the built-in system.
+          - name: --theme
+            kind: option
+            description: Compile a saved Theme JSON instead of the built-in system.
+          - name: --dark
+            kind: flag
+            description: Resolve the dark appearance (default is light).
+          - name: --out-dir
+            kind: option
+            description: Directory to write design-manifest.json and design-binding-prompt.md (default is the current directory).
+          - name: --json
+            kind: flag
+            description: Emit only the manifest JSON.
+          - name: --prompt
+            kind: flag
+            description: Emit only the binding prompt Markdown.
+          - name: --stdout
+            kind: flag
+            description: Print to stdout instead of writing files.
     docs: reference/cli.md#design
 
   - name: design-debug

@@ -106,6 +106,40 @@ silently dropped. External-library instances and cross-file variables that a
 local file can't resolve surface the same way — treat them as data, not failures,
 and fill in the critical ones by hand.
 
+### Design contract (`pulp design compile`) — the token/widget allowlist
+
+Before generating or hand-writing a UI, compile the **design contract**: the
+closed set of tokens and components the UI is allowed to bind to. It is compiled
+from the buildable sources of truth — a `Theme` (the token allowlist) and the
+`pulp::design::catalog()` component set (each widget's native class plus the exact
+theme tokens it paints through) — so it never drifts from the code.
+
+```bash
+# Built-in Ink & Signal system (default). Writes design-manifest.json +
+# design-binding-prompt.md into --out-dir (default: cwd).
+pulp design compile --out-dir build/design
+
+# A project's own tokens instead of the built-in system:
+pulp design compile --design-md DESIGN.md --out-dir build/design
+pulp design compile --theme my-theme.json --dark --stdout --json
+```
+
+Two artifacts, one source of truth:
+- **`design-manifest.json`** — deterministic (all lists sorted): every token
+  (name, kind, value) and every component contract (native class, category,
+  `reskin_tokens` allowlist). This is the machine-readable allowlist an adherence
+  check validates generated JS against.
+- **`design-binding-prompt.md`** — an LLM-ready Markdown fragment listing the
+  allowed tokens and components with an explicit "do not invent token names"
+  directive. Embed it in an importer/codegen prompt so the model binds only to
+  real tokens and widgets. A value or widget outside the contract is a fidelity
+  break, not a silent drift.
+
+The module is `core/view/src/design_manifest.cpp`
+(`pulp::design::compile_design_manifest` / `manifest_to_json` /
+`emit_binding_prompt`), gated behind `PULP_ENABLE_DESIGN_IMPORT` alongside the
+rest of the authoring cluster.
+
 **THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
 cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
 SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
