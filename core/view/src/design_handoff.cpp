@@ -1,6 +1,7 @@
 // design_handoff.cpp — parse a Claude Design project handoff into a contract.
 
 #include <pulp/design/design_handoff.hpp>
+#include <pulp/design/design_text_util.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -11,18 +12,8 @@ namespace pulp::design {
 
 namespace {
 
-std::string to_lower(std::string_view s) {
-    std::string out(s);
-    for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return out;
-}
-
-std::string_view trim(std::string_view s) {
-    auto issp = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
-    while (!s.empty() && issp(s.front())) s.remove_prefix(1);
-    while (!s.empty() && issp(s.back())) s.remove_suffix(1);
-    return s;
-}
+using text::to_lower;
+using text::trim;
 
 // Strip surrounding Markdown emphasis markers (**bold**, *italic*, `code`) and
 // list-bullet/hash prefixes so a value compares cleanly.
