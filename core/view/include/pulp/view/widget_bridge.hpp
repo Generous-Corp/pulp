@@ -41,6 +41,8 @@ struct PerfCounters;
 
 namespace pulp::view {
 
+class QueryService;
+
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
     std::unordered_map<std::string, float> scalar_values;
@@ -313,6 +315,24 @@ private:
     std::shared_ptr<std::mutex> async_exec_mutex_ = std::make_shared<std::mutex>();
     std::shared_ptr<std::vector<AsyncExecResult>> async_exec_results_ =
         std::make_shared<std::vector<AsyncExecResult>>();
+
+    // Returns a thread-safe sink that a background worker calls with
+    // (callback_id, payload) to queue a result for delivery to JS via
+    // poll_async_results() → __dispatch__. Captures the async_exec_results_
+    // plumbing by shared_ptr (not `this`), so a worker that outlives the bridge
+    // safely no-ops via the callback_alive_ flag. Shared by execAsync and the
+    // query service.
+    std::function<void(const std::string& callback_id, std::string payload)>
+    make_async_result_sink();
+
+    // Off-UI-thread index/search service (R7). Lazily created on first use by
+    // register_query_service_api(); its worker delivers results through the same
+    // async_exec_results_ queue that poll_async_results() drains, so no extra
+    // per-frame pump is needed. Held by shared_ptr (not unique_ptr) so its
+    // type-erased deleter lets widget_bridge.cpp destroy it with only a forward
+    // declaration — avoiding a query_service.hpp include in that hotspot file.
+    std::shared_ptr<QueryService> query_service_;
+
     std::vector<int> pending_frame_ids_;
     bool frame_preamble_loaded_ = false;
     // Identity of the most-recently loaded script (via
@@ -461,6 +481,11 @@ private:
     void register_metadata_computed_api();
     void register_platform_services_ai_api();
     void register_platform_services_exec_api();
+    void register_query_service_api();
+    // Lazily creates the off-UI-thread query service (spawns its worker thread
+    // only on first use) with a deliver hook that funnels results into the
+    // async_exec_results_ queue drained by poll_async_results().
+    QueryService& ensure_query_service();
     void register_platform_services_dialog_api();
     void register_platform_services_clipboard_api();
     void register_state_binding_api();

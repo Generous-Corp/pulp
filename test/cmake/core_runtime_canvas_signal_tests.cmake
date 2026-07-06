@@ -307,3 +307,6 @@ pulp_add_test_suite(pulp-test-audio-thumbnail LIBRARIES pulp::audio pulp::view)
 
 # Memory-mapped reader: true ranged (seek-based) decode, no whole-file decode.
 pulp_add_test_suite(pulp-test-mmap-reader-ranged LIBRARIES pulp::audio)
+
+# SearchIndex — pure ranking/matching core of the off-UI-thread query service (R7).
+pulp_add_test_suite(pulp-test-search-index LIBRARIES pulp::runtime)
