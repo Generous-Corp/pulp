@@ -51,6 +51,7 @@ Advisory only — never blocks. Full contract + override knobs live in the
 | `appcast` | All | Generate Sparkle-compatible XML update feed |
 | `check` | All | Verify signing status of built artifacts |
 | `doctor` | macOS | Make signing+notarization non-interactive: self-heal the dedicated signing keychain and validate the `.p8` notary key. No build dir required. |
+| `swap-pack` | All (keychain macOS-only) | Sign a hot-reload UX bundle into a swap pack. **No build dir required.** Capabilities are inferred from the bundle's JS (`--autocaps`, no hand-maintained list); the Ed25519 signing key is reused from the macOS keychain (`pulp.reload.signing.<plugin_id>`, created + stored + screamed on first use, **never silently regenerated**, corrupt entry refused) or a `--sign-key <file>`. `--backup-github [--repo owner/name]` publishes the key as a GitHub secret in the **plugin** repo (refuses core Pulp). The key blob is piped to `security`/`gh` via a 0600 temp, never on argv. Thin assembly over the header-only reload building blocks (`pack_build`/`pack_signing_ui`/`swap_pack` serialize/`key_store`); the signing key is a distinct concern from the Developer-ID/notary identity the other subcommands use. See [`docs/guides/reload-trust.md`](../../../docs/guides/reload-trust.md). |
 
 ## Non-interactive signing (no keychain / 1Password prompt)
 
