@@ -311,7 +311,27 @@ jobs:
           for tc in "$HOME"/.rustup/toolchains/*/bin; do
             if runs "$tc"; then use "$tc"; exit 0; fi
           done
-          echo "::error::No working cargo found (broken rustup? run 'rustup default stable' on this runner). release-cli needs Rust to build the user-facing build/pulp CLI — refusing to ship a CLI-less tarball." >&2
+          # Last resort: no usable toolchain on this runner. This is the normal
+          # state of a fresh Tart VM golden provisioned only for the C++
+          # Build-and-Test lane (cmake/ninja, no cargo) — release-cli is the
+          # first VM workload that builds the Rust build/pulp CLI. Bootstrap
+          # rustup so the release lane is self-sufficient on ANY runner (VM or
+          # bare-metal) instead of depending on operator-baked Rust. The
+          # toolchain is pinned (experimental/pulp-rs/rust-toolchain.toml =
+          # stable), so this resolves the same compiler the bare-metal runners
+          # already use — no reproducibility drift from installing it here.
+          echo "rust: no usable cargo on this runner — bootstrapping rustup (pinned stable)"
+          # --no-modify-path: never touch the runner's shell profiles (this
+          # fallback can fire on a persistent home, not just a disposable VM).
+          if curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+               | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path >/dev/null 2>&1; then
+            # rust-toolchain.toml also declares rustfmt+clippy; front-load them
+            # here (best-effort) so any component fetch happens in this step
+            # instead of stalling the CMake-driven cargo build later.
+            "$HOME/.cargo/bin/rustup" component add rustfmt clippy >/dev/null 2>&1 || true
+            if runs "$HOME/.cargo/bin"; then use "$HOME/.cargo/bin"; exit 0; fi
+          fi
+          echo "::error::No working cargo and the rustup bootstrap failed. release-cli needs Rust to build the user-facing build/pulp CLI — refusing to ship a CLI-less tarball." >&2
           exit 1
         shell: bash
 
