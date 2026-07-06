@@ -290,6 +290,40 @@ TEST_CASE("pulp import-design --dry-run --strict-fidelity exits 0 on a clean imp
     CHECK_FALSE(fs::exists(js_out));
 }
 
+TEST_CASE("pulp import-design --fidelity-report writes a valid ledger",
+          "[cli][import-design][fidelity][shellout]") {
+    // --fidelity-report persists the run's findings as a machine-readable
+    // ledger regardless of --strict-fidelity. A clean import has zero findings,
+    // so this asserts the header + taxonomy + zeroed summary — the durable,
+    // diffable contract shape. (The by-kind counting logic is unit-covered in
+    // test_design_fidelity_ledger.cpp.)
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-import-design-fidelity-report");
+    auto html_in = fixture_dir() / "example.html";
+    auto js_out = tmp / "ui.js";
+    auto ledger_out = tmp / "fidelity.json";
+
+    auto r = run_pulp({"import-design",
+                       "--from", "claude",
+                       "--file", html_in.string(),
+                       "--output", js_out.string(),
+                       "--no-bridge-scaffold",
+                       "--fidelity-report", ledger_out.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(ledger_out));
+
+    auto v = choc::json::parse(read_text(ledger_out));
+    REQUIRE(v.isObject());
+    CHECK(v["format_version"].getString().empty() == false);
+    CHECK(v.hasObjectMember("summary"));
+    CHECK(v["summary"].hasObjectMember("total"));
+    CHECK(v.hasObjectMember("findings"));
+    // The taxonomy is embedded so a consumer can render any kind.
+    CHECK(v["taxonomy"].size() > 0);
+}
+
 TEST_CASE("pulp import-design --from claude --no-emit-classnames suppresses the artifact",
           "[cli][import-design][issue-1035][shellout]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
