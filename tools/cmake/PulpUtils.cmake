@@ -962,6 +962,15 @@ function(pulp_add_reload_logic target)
         endif()
         # Linux: a MODULE may keep undefined symbols, resolved from the host at
         # dlopen — no extra flag needed.
+        #
+        # The thin logic MUST compile at the SAME C++ standard as the SDK/host or
+        # the build-fingerprint's cpp_standard field mismatches and the reload is
+        # rejected. A static logic links pulp::format (PUBLIC cxx_std_23) and so
+        # inherits C++23; a THIN logic links no archives, so it would fall back to
+        # the root CMAKE_CXX_STANDARD (20) → host=202302 vs logic=202002 mismatch.
+        # Match pulp-format, which sets CXX_STANDARD 23 authoritatively
+        # (core/format/CMakeLists.txt). Keep in lockstep if the SDK bumps standard.
+        set_target_properties(${target} PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
     else()
         if(RL_RESOLVE_FROM_HOST AND WIN32)
             message(WARNING "pulp_add_reload_logic(${target}): RESOLVE_FROM_HOST is "
@@ -1001,6 +1010,44 @@ function(pulp_reload_host target)
         target_link_options(${target} PRIVATE -Wl,-export_dynamic)
     else()  # Linux / other ELF
         target_link_options(${target} PRIVATE -rdynamic)
+    endif()
+endfunction()
+
+# Like pulp_reload_host, but ALSO force-retains + exports the editor ABI surface
+# (View/Label/widgets) so a UI-carrying hot-reload logic (its create_view()
+# resolves pulp::view from the host at dlopen) can render its editor inside this
+# host. Use this instead of pulp_reload_host for a host that loads a logic which
+# builds its own UI. (Live-swap M2b — see planning/2026-07-03-m2b-...) The plain
+# host would dead-strip the editor symbols (nothing in the host references them);
+# force-loading pulp-view-reload-exports keeps them, and export_dynamic below
+# makes them resolvable by the dlopened logic. Force-loads ONLY the tiny
+# curated-surface lib, NOT all of view-core (which drags in the mac-incompatible
+# SDL-host TU).
+function(pulp_reload_host_ui target)
+    pulp_reload_host(${target})
+    if(TARGET pulp-view-reload-exports)
+        target_link_libraries(${target} PRIVATE pulp-view-reload-exports)
+        if(APPLE)
+            target_link_options(${target} PRIVATE
+                "-Wl,-force_load,$<TARGET_FILE:pulp-view-reload-exports>"
+                # The plugin's -exported_symbols_list exports only the entry point
+                # and localizes everything else, defeating -export_dynamic for the
+                # SDK symbols a THIN (RESOLVE_FROM_HOST) logic resolves at dlopen.
+                # -exported_symbol ADDS patterns to the export set: the whole pulp::
+                # surface (mangled Itanium prefix _ZN4pulp..., leading '_' on Mach-O)
+                # so the dlopened logic resolves BOTH its editor (pulp::view
+                # View/Label/widgets) AND its Processor base (pulp::format virtuals
+                # like create_ara_document_controller) + any state/canvas/midi it uses.
+                "-Wl,-exported_symbol,__ZN4pulp*"
+                "-Wl,-exported_symbol,__ZNK4pulp*"
+                "-Wl,-exported_symbol,__ZTVN4pulp*"    # vtables
+                "-Wl,-exported_symbol,__ZTIN4pulp*"    # typeinfo
+                "-Wl,-exported_symbol,__ZTSN4pulp*")   # typeinfo name
+        elseif(NOT WIN32)
+            target_link_options(${target} PRIVATE
+                "-Wl,--whole-archive" "$<TARGET_FILE:pulp-view-reload-exports>"
+                "-Wl,--no-whole-archive")
+        endif()
     endif()
 endfunction()
 

@@ -1186,6 +1186,18 @@ pulp_add_test_suite(pulp-test-hotswap-slot LIBRARIES pulp::format)
 
 # DSP hot reload — parameter-contract equivalence checker (Phase 0)
 pulp_add_test_suite(pulp-test-param-contract LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-reload-capabilities LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-reload-pack-build LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-reload-key-store LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-reload-remote-update LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-reload-trust-policy LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-reload-autocaps LIBRARIES pulp::view)
+
+# Signed Revocation List (SRL) + namespaced monotonic epoch floor.
+pulp_add_test_suite(pulp-test-reload-revocation LIBRARIES pulp::format
+    DISCOVERY_ARGS TEST_PREFIX "revocation.")
+pulp_add_test_suite(pulp-test-pack-install LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-pack-signing-ui LIBRARIES pulp::format)
 
 # DSP hot reload — dynamic-library handle + leak policy (Phase 0). Builds a tiny
 # MODULE fixture and dlopens it by absolute path (RELOAD_PROBE_PATH).
@@ -1207,19 +1219,27 @@ endif()
 add_library(pulp-reload-logic-compat MODULE fixtures/reload_logic_compatible.cpp)
 add_library(pulp-reload-logic-incompat MODULE fixtures/reload_logic_incompatible.cpp)
 add_library(pulp-reload-logic-throwing MODULE fixtures/reload_logic_throwing.cpp)
+add_library(pulp-reload-logic-nan MODULE fixtures/reload_logic_nan.cpp)
+# Verify-before-load: a fixture whose static constructor writes a marker file at
+# load time, so the test can prove a rejected pack is NEVER dlopen'd.
+add_library(pulp-reload-logic-ctor-marker MODULE fixtures/reload_logic_ctor_marker.cpp)
 foreach(_pulp_reload_logic pulp-reload-logic-compat pulp-reload-logic-incompat
-                           pulp-reload-logic-throwing)
+                           pulp-reload-logic-throwing pulp-reload-logic-nan
+                           pulp-reload-logic-ctor-marker)
     set_target_properties(${_pulp_reload_logic} PROPERTIES
         PREFIX "" POSITION_INDEPENDENT_CODE ON)
     target_link_libraries(${_pulp_reload_logic} PRIVATE pulp::format)
 endforeach()
 pulp_add_test_suite(pulp-test-reload-transaction LIBRARIES pulp::format)
 add_dependencies(pulp-test-reload-transaction
-    pulp-reload-logic-compat pulp-reload-logic-incompat pulp-reload-logic-throwing)
+    pulp-reload-logic-compat pulp-reload-logic-incompat pulp-reload-logic-throwing
+    pulp-reload-logic-nan pulp-reload-logic-ctor-marker)
 target_compile_definitions(pulp-test-reload-transaction PRIVATE
     RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
     RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
-    RELOAD_LOGIC_THROWING="$<TARGET_FILE:pulp-reload-logic-throwing>")
+    RELOAD_LOGIC_THROWING="$<TARGET_FILE:pulp-reload-logic-throwing>"
+    RELOAD_LOGIC_NAN="$<TARGET_FILE:pulp-reload-logic-nan>"
+    RELOAD_LOGIC_CTOR_MARKER="$<TARGET_FILE:pulp-reload-logic-ctor-marker>")
 if(NOT WIN32)
     target_link_libraries(pulp-test-reload-transaction PRIVATE ${CMAKE_DL_LIBS})
 endif()
@@ -1248,6 +1268,18 @@ add_library(pulp-reload-logic-unity MODULE fixtures/reload_logic_unity.cpp)
 set_target_properties(pulp-reload-logic-unity PROPERTIES
     PREFIX "" POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(pulp-reload-logic-unity PRIVATE pulp::format)
+# Unified UX+DSP live-swap transaction (item 1.8) — pure coordinator, no RT.
+pulp_add_test_suite(pulp-test-live-swap-transaction LIBRARIES pulp::format)
+# Sealed swap-pack manifest + per-file integrity (item 3.1a) — reuses crypto.
+pulp_add_test_suite(pulp-test-swap-pack LIBRARIES pulp::format pulp::runtime)
+# Hot-reload SYNTH demo DSP (examples/hot-reload-synth) — instrument makes sound.
+pulp_add_test_suite(pulp-test-hot-reload-synth LIBRARIES pulp::format)
+target_include_directories(pulp-test-hot-reload-synth PRIVATE
+    ${CMAKE_SOURCE_DIR}/examples/hot-reload-synth)
+# Hot-reload MORPH demo (examples/hot-reload-morph) — one reload swaps UI + DSP.
+pulp_add_test_suite(pulp-test-hot-reload-morph LIBRARIES pulp::format pulp::view)
+target_include_directories(pulp-test-hot-reload-morph PRIVATE
+    ${CMAKE_SOURCE_DIR}/examples/hot-reload-morph)
 pulp_add_test_suite(pulp-test-reloadable-shell LIBRARIES pulp::format)
 add_dependencies(pulp-test-reloadable-shell
     pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
@@ -1261,6 +1293,27 @@ if(NOT WIN32)
 endif()
 find_package(Threads REQUIRED)
 target_link_libraries(pulp-test-reloadable-shell PRIVATE Threads::Threads)
+
+# Ship-safety symbol-absence test (live-swap item 1.12 / D5): the dev filesystem
+# watcher must be compiled OUT of a shipping build. Two fixture binaries — a dev
+# build (watcher gated ON + force-emit mark) and a ship build
+# (PULP_RELOAD_DEV_WATCHER=0) — then an nm check asserts the watcher symbol is
+# present in dev and absent in ship. UNIX-only (uses nm).
+if(UNIX)
+    add_executable(pulp-reload-ship-fixture-dev fixtures/reload_ship_fixture.cpp)
+    target_link_libraries(pulp-reload-ship-fixture-dev PRIVATE pulp::format Threads::Threads ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-reload-ship-fixture-dev PRIVATE PULP_RELOAD_SHIP_FIXTURE_MARK=1)
+
+    add_executable(pulp-reload-ship-fixture-ship fixtures/reload_ship_fixture.cpp)
+    target_link_libraries(pulp-reload-ship-fixture-ship PRIVATE pulp::format Threads::Threads ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-reload-ship-fixture-ship PRIVATE PULP_RELOAD_DEV_WATCHER=0)
+
+    add_test(NAME pulp-reload-ship-symbol-absence
+        COMMAND ${CMAKE_COMMAND}
+            -DDEV_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-dev>
+            -DSHIP_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-ship>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/reload_ship_symbol_check.cmake)
+endif()
 
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
@@ -2023,6 +2076,8 @@ pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
+# Shared crossfade primitive (live-swap item 2.1) — the one click-free fixture.
+pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests (P5 test-split — extracted from test_signal.cpp).
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
@@ -2062,7 +2117,9 @@ pulp_add_test_suite(pulp-test-convolver LIBRARIES pulp::signal)
 # Background-IR-swap tests for PartitionedConvolver. Lock-free
 # pointer-shuttle hand-off from worker thread → audio thread, including
 # a concurrent stage/swap hammer test.
-pulp_add_test_suite(pulp-test-convolver-bg-swap LIBRARIES pulp::signal pulp::runtime)
+pulp_add_test_suite(pulp-test-convolver-bg-swap
+    SOURCES test_convolver_bg_swap.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::runtime)
 
 # Non-uniform partitioned convolver tests. Two-stage Gardner-style
 # head (small block) + tail (K× larger block) with zero-latency mixing.
@@ -4258,7 +4315,7 @@ pulp_add_test_suite(pulp-test-script SOURCES test_script_engine.cpp LIBRARIES pu
 
 # Scripted UI hot reload/theme reload tests
 add_executable(pulp-test-scripted-ui test_scripted_ui.cpp)
-target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::view Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::view pulp::format Catch2::Catch2WithMain)
 if(TARGET pulp-render)
     target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::render)
 endif()
@@ -4839,6 +4896,7 @@ if(TARGET pulp-render)
     list(APPEND _pulp_widget_bridge_test_libs pulp::render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test_libs})
+pulp_add_test_suite(pulp-test-widget-bridge-capabilities LIBRARIES ${_pulp_widget_bridge_test_libs})
 
 # Widget bridge — source-level API contract. Keeps JS-native registrations
 # unique and matched to the reviewed bridge API manifest so future registrar

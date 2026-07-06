@@ -888,6 +888,7 @@ pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship check
+pulp ship swap-pack --bundle ui/ --plugin-id com.you.synth   # sign a hot-reload UX bundle (caps inferred; key from keychain)
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
 pulp ship notarize --path MyApp-1.0.dmg --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
 pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
@@ -1440,7 +1441,7 @@ pulp audio validate summarize <file.wav> [--json]
 pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamental <hz>]
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
 pulp audio validate assert <audio-run-dir-or-assertions.json>
-pulp audio compare <reference.wav> <candidate.wav> [--profile tonal-balance|added-hf|noise-roughness|graininess|stereo-width] [--reference-role peer|golden] [--align none|latency] [--threshold <t>] [--json report.json]
+pulp audio compare <reference.wav> <candidate.wav> [--profile tonal-balance|added-hf|noise-roughness|graininess|stereo-width|transient-integrity] [--reference-role peer|golden] [--align none|latency] [--threshold <t>] [--json report.json]
 pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]
 ```
 
@@ -1458,7 +1459,7 @@ pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --dura
 | `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
 | `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
-| `compare` | Advisory, agent-facing before/after judgment between two WAVs (measure → compare → judge). Delegates to the opt-in [Audio Quality Lab](../guides/audio-quality-lab.md) tool (no DSP links into the CLI); level-matches, runs one `--profile` axis (`tonal-balance` \| `added-hf` \| `noise-roughness` \| `graininess` \| `stereo-width`), prints a typed evidence envelope + verdict. Exits nonzero **only** when it could not measure (invalid), never for a judgment — distinct from the pass/fail `validate compare` gate. Prints an install hint + exit 1 when the tool is absent |
+| `compare` | Advisory, agent-facing before/after judgment between two WAVs (measure → compare → judge). Delegates to the opt-in [Audio Quality Lab](../guides/audio-quality-lab.md) tool (no DSP links into the CLI); level-matches, runs one `--profile` axis (`tonal-balance` \| `added-hf` \| `noise-roughness` \| `graininess` \| `stereo-width` \| `transient-integrity`), prints a typed evidence envelope + verdict. Exits nonzero **only** when it could not measure (invalid), never for a judgment — distinct from the pass/fail `validate compare` gate. Prints an install hint + exit 1 when the tool is absent |
 | `render` | Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load `--plugin`, drive it from declarative flags, write a WAV, and emit metrics JSON matching `validate summarize --json` |
 
 Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. Inputs are WAV files or directories of WAV files today; unsupported files are reported as skipped. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
@@ -1514,6 +1515,7 @@ pulp dev --test                               # Watch, rebuild, run tests
 pulp dev --test --test-filter=Knob            # Watch, rebuild, run tests matching Knob
 pulp dev --test --validate                    # Watch, rebuild, test, and validate built plugins
 pulp dev --run pulp-gain-standalone           # Watch, rebuild, relaunch app on each rebuild
+pulp dev --hot-dsp --run my-reloadable-standalone  # Watch, rebuild, live DSP hot-swap (no relaunch)
 pulp dev --design ui.js                       # Watch, rebuild pulp-design-tool, relaunch with ui.js
 pulp dev --target pulp-format                 # Pass --target to cmake --build
 pulp dev --run my-app -- --arg1 --arg2        # Arguments after `--` go to the launched binary
@@ -1528,6 +1530,7 @@ Flags:
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
 | `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
 | `--run TARGET` | Launch TARGET from the build dir; delegated watch mode relaunches on rebuild, Rust fallback launches once |
+| `--hot-dsp` | With `--run`: keep the launched app alive across rebuilds so its `ReloadableShell` watcher hot-swaps the rebuilt DSP logic library in place instead of a process relaunch (live DSP dev loop — edit → audible without losing audio/UI state). Requires `--run`. |
 | `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
 | `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |

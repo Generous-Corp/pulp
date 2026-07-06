@@ -86,6 +86,36 @@ commands:
     status: usable
     summary: Sign, notarize, package, and generate update feeds for all platforms.
     subcommands:
+      - name: swap-pack
+        summary: "Sign a hot-reload UX bundle into a swap pack. Capabilities are inferred from the bundle's JS; the Ed25519 signing key is reused from the macOS keychain (created + stored on first use, with a loud backup notice) or a --sign-key file. No build dir required."
+        args:
+          - name: --bundle
+            required: true
+            description: Directory of the UX bundle to sign
+          - name: --plugin-id
+            required: true
+            description: The plugin this pack targets
+          - name: --pack-version
+            required: false
+            description: Monotonic pack version (downgrade protection)
+          - name: --channel
+            required: false
+            description: Update channel (also namespaces revocation)
+          - name: --sign-key
+            required: false
+            description: Path to a signing-key file; created if absent (alternative to the macOS keychain)
+          - name: --out
+            required: false
+            description: Output manifest path (default <bundle>/swap-pack.manifest.json)
+          - name: --yes
+            required: false
+            description: Skip the interactive signing confirmation (for CI)
+          - name: --backup-github
+            required: false
+            description: Publish the signing key as a GitHub Actions secret in the plugin repo (refuses the core Pulp repo)
+          - name: --repo
+            required: false
+            description: owner/name for --backup-github (defaults to the bundle's git origin)
       - name: sign
         summary: Code-sign plugin bundles (macOS/Windows) or Android APK/AAB
         args:
@@ -1799,7 +1829,7 @@ commands:
       - name: validate assert
         summary: Re-check a stored assertions.json (or an audio-run dir containing one); exits nonzero on any failing assertion
       - name: compare
-        summary: "Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge). Delegates to the opt-in Audio Quality Lab tool (never links DSP into the CLI); level-matches, runs one --profile axis (tonal-balance | added-hf | noise-roughness | graininess | stereo-width), and prints a typed evidence envelope + verdict (regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Optional --align latency trims a constant delay/offset before measuring (refuses if the difference is not a reliable pure delay). Exits nonzero ONLY when it could not measure (invalid), never for a judgment. Distinct from `validate compare`, which is the deterministic pass/fail gate. Prints an install hint + exit 1 if the tool is absent."
+        summary: "Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge). Delegates to the opt-in Audio Quality Lab tool (never links DSP into the CLI); level-matches, runs one --profile axis (tonal-balance | added-hf | noise-roughness | graininess | stereo-width | transient-integrity), and prints a typed evidence envelope + verdict (regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Optional --align latency trims a constant delay/offset before measuring (refuses if the difference is not a reliable pure delay). Exits nonzero ONLY when it could not measure (invalid), never for a judgment. Distinct from `validate compare`, which is the deterministic pass/fail gate. Prints an install hint + exit 1 if the tool is absent."
         args:
           - name: --profile
             kind: option
@@ -1898,6 +1928,9 @@ commands:
       - name: --run
         kind: option
         description: Launch a build-dir binary and relaunch it on rebuild in delegated watch mode; Rust fallback launches once
+      - name: --hot-dsp
+        kind: flag
+        description: With `--run`, keep the launched app alive across rebuilds so its ReloadableShell watcher hot-swaps the rebuilt DSP logic library in place instead of relaunching the process (live DSP dev loop); requires --run
       - name: --design
         kind: option
         description: Build pulp-design-tool and launch it with the given JS script; delegated watch mode relaunches on rebuild, Rust fallback launches once

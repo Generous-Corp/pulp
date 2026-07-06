@@ -371,8 +371,10 @@ std::unordered_set<WidgetBridge*>& all_bridges_set() {
 }  // namespace
 
 WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& store,
-                           render::GpuSurface* gpu_surface)
-    : engine_(engine), root_(root), store_(store), gpu_surface_(gpu_surface) {
+                           render::GpuSurface* gpu_surface,
+                           CapabilitySet granted_capabilities)
+    : engine_(engine), root_(root), store_(store),
+      granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface) {
     {
         std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
         all_bridges_set().insert(this);
@@ -807,7 +809,19 @@ void WidgetBridge::snapshot_values(WidgetReloadSnapshot& out) const {
         else if (auto* t = dynamic_cast<Toggle*>(view)) out.scalar_values[id] = t->is_on() ? 1.0f : 0.0f;
         else if (auto* cb = dynamic_cast<Checkbox*>(view)) out.scalar_values[id] = cb->is_checked() ? 1.0f : 0.0f;
         else if (auto* tb = dynamic_cast<ToggleButton*>(view)) out.scalar_values[id] = tb->is_on() ? 1.0f : 0.0f;
+        // Selection controls: their selected INDEX is reload state too — without
+        // this a dev reload silently resets the user's dropdown / segment choice
+        // (item 1.4 coverage gap). Stored as the index-as-float in scalar_values;
+        // restore keys by id so the type is unambiguous.
+        else if (auto* combo = dynamic_cast<ComboBox*>(view)) out.scalar_values[id] = static_cast<float>(combo->selected());
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(view)) out.scalar_values[id] = static_cast<float>(seg->selected());
         else if (auto* xy = dynamic_cast<XYPad*>(view)) out.xy_values[id] = {.x = xy->x_value(), .y = xy->y_value()};
+        // Custom widget-declared state (item 1.4b): independent of the built-in
+        // type match above — a custom widget opts in via save_reload_state.
+        // Built-in widgets return false (View default), so this stays empty for
+        // them and adds no per-widget cost beyond one virtual call.
+        std::string blob;
+        if (view->save_reload_state(blob)) out.custom_state[id] = std::move(blob);
     }
 }
 
@@ -821,11 +835,24 @@ void WidgetBridge::restore_values(const WidgetReloadSnapshot& snapshot) {
         else if (auto* t = dynamic_cast<Toggle*>(it->second)) t->set_on(val > 0.5f);
         else if (auto* cb = dynamic_cast<Checkbox*>(it->second)) cb->set_checked(val > 0.5f);
         else if (auto* tb = dynamic_cast<ToggleButton*>(it->second)) tb->set_on(val > 0.5f);
+        // Selection controls — restore the index SILENTLY so re-applying it during
+        // a reload doesn't fire the widget's on_change as if the user clicked.
+        else if (auto* combo = dynamic_cast<ComboBox*>(it->second)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
     }
     for (auto& [id, val] : snapshot.xy_values) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
         if (auto* xy = dynamic_cast<XYPad*>(it->second)) { xy->set_x(val.x); xy->set_y(val.y); }
+    }
+    // Custom widget-declared state (item 1.4b): hand each saved blob back to the
+    // widget that still lives under the same script id. A widget whose id/type
+    // changed across the reload simply won't match (find fails or the virtual
+    // ignores an unfamiliar blob) — fail-safe, no throw.
+    for (auto& [id, blob] : snapshot.custom_state) {
+        auto it = widgets_.find(id);
+        if (it == widgets_.end()) continue;
+        (void)it->second->restore_reload_state(blob);
     }
 }
 
@@ -866,9 +893,19 @@ void WidgetBridge::service_frame_callbacks() {
     }
 }
 
+#ifndef PULP_BRIDGE_EXEC_ENABLED
+// Shell exec/execAsync is a development-only affordance. Compiled out of shipping
+// builds via -DPULP_BRIDGE_EXEC_ENABLED=0, and even when compiled in it is ALSO
+// gated behind the `exec` capability, so a UI with no granted capabilities never
+// receives it. Two independent locks, because shelling out is the sharpest edge.
+#define PULP_BRIDGE_EXEC_ENABLED 1
+#endif
+
 void WidgetBridge::register_api() {
     register_widget_factory_controls_api();
-    register_widget_assets_api();
+    // Reads arbitrary file paths (image/sprite assets) → gated by Filesystem.
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_widget_assets_api();
 
     register_widget_factory_form_api();
 
@@ -1123,28 +1160,42 @@ void WidgetBridge::register_api() {
 
     register_shader_widget_api();
 
-    register_widget_schema_api();
+    // Persists style presets to temp files → gated by Storage.
+    if (granted_capabilities_.has(ReloadCapability::Storage))
+        register_widget_schema_api();
 
 
     register_theme_api();
 
-    register_platform_services_ai_api();
+    if (granted_capabilities_.has(ReloadCapability::Ai))
+        register_platform_services_ai_api();
 
     register_metadata_computed_api();
 
-    register_platform_services_exec_api();
+    // Shell exec — dev-only (compiled out of ship) AND gated by the exec cap.
+#if PULP_BRIDGE_EXEC_ENABLED
+    if (granted_capabilities_.has(ReloadCapability::Exec))
+        register_platform_services_exec_api();
+#endif
 
     register_context_menu_event_api();
 
-    register_platform_services_dialog_api();
+    // Native file dialogs read/choose arbitrary paths → gated by Filesystem.
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_platform_services_dialog_api();
 
     register_runtime_api();
 
-    register_platform_services_clipboard_api();
+    if (granted_capabilities_.has(ReloadCapability::Clipboard))
+        register_platform_services_clipboard_api();
 
 
-    register_storage_key_value_api();
-    register_asset_loading_api();
+    // Key/value persistence → Storage; asset loading reads file:// paths →
+    // Filesystem (granted independently).
+    if (granted_capabilities_.has(ReloadCapability::Storage))
+        register_storage_key_value_api();
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_asset_loading_api();
 
 
     register_drop_event_api();

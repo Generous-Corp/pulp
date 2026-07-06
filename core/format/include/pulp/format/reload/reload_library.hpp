@@ -2,7 +2,7 @@
 
 /// @file reload_library.hpp
 /// Dynamic-library handle for the DSP hot-reload path, with an explicit and
-/// deliberately conservative leak policy (v2 plan §4.4 / Phase 0).
+/// deliberately conservative leak policy.
 ///
 /// THE LEAK POLICY — why the default is to NOT unload:
 ///   Once a freshly-built logic library has been `dlopen`ed and a `Processor`
@@ -45,6 +45,52 @@
 #endif
 
 namespace pulp::format::reload {
+
+#if !defined(_WIN32)
+/// Promote the HOST image's symbols to global loader scope, once per process
+///.
+///
+/// A DAW loads a plugin bundle (.vst3/.component/.clap) with `RTLD_LOCAL`, so
+/// the bundle's `pulp::*` SDK symbols are NOT in the global scope that thin
+/// (`RESOLVE_FROM_HOST`) reload logic binds against at `dlopen` — the thin image
+/// then fails to load with "symbol not found in flat namespace". Re-opening the
+/// host image (the bundle that contains THIS code, located via `dladdr`) with
+/// `RTLD_GLOBAL | RTLD_NOLOAD` promotes its already-loaded symbols into global
+/// scope WITHOUT reloading it, so subsequently-`dlopen`ed thin logic resolves
+/// `pulp::*` via flat-namespace lookup. Verified by the P0.1 spike: the baseline
+/// `RTLD_LOCAL` load fails; after this promotion the thin image binds.
+///
+/// Harmless for the static-link reload model (that logic image has no undefined
+/// `pulp::*` symbols to resolve) and for ordinary two-level-namespace plugins
+/// (only images doing flat-namespace lookup — i.e. thin reload logic — consult
+/// the promoted symbols). No-op on Windows (the static model is used there).
+///
+/// DEV-ONLY: the thin-logic dlopen path is compiled out of shipping builds
+///. Multi-instance caveat (dev-time only): two DIFFERENT Pulp
+/// plugins reloading thin logic in the SAME host would share one global set of
+/// `pulp::*` symbols; that is a niche dev scenario and the shared symbols are the
+/// same SDK build, so stateless SDK calls are unaffected (only process-global
+/// SDK singletons could cross-talk). Documented as a dev-loop limitation.
+inline void promote_host_symbols_once() {
+    static const bool promoted = [] {
+        ::Dl_info info{};
+        if (::dladdr(reinterpret_cast<const void*>(&promote_host_symbols_once), &info) &&
+            info.dli_fname) {
+            // RTLD_NOLOAD: do not map a new copy — just look up the already-loaded
+            // host image and (via RTLD_GLOBAL) promote its symbols' scope.
+            if (void* self = ::dlopen(info.dli_fname, RTLD_GLOBAL | RTLD_NOLOAD)) {
+                // Intentionally leak this handle: we only wanted the scope change;
+                // the image is the running host and is never unloaded regardless.
+                (void)self;
+            }
+        }
+        return true;
+    }();
+    (void)promoted;
+}
+#else
+inline void promote_host_symbols_once() {}
+#endif
 
 /// What the handle does with the loaded image when it is destroyed.
 enum class LeakPolicy {
@@ -127,6 +173,11 @@ private:
         if (changed) ::SetThreadErrorMode(old_mode, nullptr);
         if (!handle_) error_ = "LoadLibraryA failed for '" + path + "'";
 #else
+        // Ensure the host bundle's pulp::* SDK symbols are globally visible
+        // BEFORE loading (possibly thin) logic that resolves them at dlopen via
+        // flat-namespace lookup — the in-DAW RTLD_LOCAL fix. Once per
+        // process; a no-op after the first load and for the static-link model.
+        promote_host_symbols_once();
         handle_ = ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle_) {
             const char* e = ::dlerror();

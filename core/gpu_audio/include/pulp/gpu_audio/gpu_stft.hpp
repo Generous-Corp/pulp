@@ -9,7 +9,7 @@
 
 namespace pulp::gpu_audio {
 
-/// GPU short-time Fourier transform primitive (Phase 4 spectral toolkit).
+/// GPU short-time Fourier transform primitive (spectral toolkit).
 ///
 /// analyze(): apply the analysis window to one frame, then a GPU forward FFT →
 /// an interleaved-complex spectral frame. synthesize(): GPU inverse FFT → the

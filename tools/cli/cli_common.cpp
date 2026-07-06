@@ -1081,8 +1081,14 @@ int watch_loop(const WatchOptions& opts) {
             }
         }
 
-        // Relaunch target
-        if (!opts.launch_target.empty()) {
+        // Relaunch target — UNLESS hot-dsp: there the app stays running and its
+        // ReloadableShell watcher hot-swaps the rebuilt logic library live
+        // (relaunching would kill the plugin and lose its audio/UI state).
+        if (!opts.launch_target.empty() && opts.hot_dsp) {
+            std::cout << color::cyan()
+                      << "hot-dsp: rebuilt — running plugin will hot-swap (not relaunching)"
+                      << color::reset() << "\n";
+        } else if (!opts.launch_target.empty()) {
             kill_child();
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             launch_child();

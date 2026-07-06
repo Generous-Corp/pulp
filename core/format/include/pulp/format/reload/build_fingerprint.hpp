@@ -2,7 +2,7 @@
 
 /// @file build_fingerprint.hpp
 /// Strict build-compatibility fingerprint — the PRIMARY safety gate for DSP
-/// hot reload (v2 plan §4.6). The shell and the hot-loaded logic dylib must be
+/// hot reload. The shell and the hot-loaded logic dylib must be
 /// built with a byte-identical toolchain + ABI configuration, because the seam
 /// carries full C++ traffic (vtable dispatch, std:: containers, exceptions,
 /// RTTI). A `sizeof`/layout probe cannot prove that; this fingerprint does, by

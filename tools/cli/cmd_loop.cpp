@@ -53,7 +53,7 @@ void print_help() {
         "  --off                             Restore cross-platform mode (clear focus)\n"
         "  --status                          Print the current focus state and exit\n"
         "  --watch-issues N1,N2,...          Recognized; prints a not-implemented diagnostic\n"
-        "  --ar-swap-from <ref>              Recognized; prints a not-implemented diagnostic\n"
+        "  --ar-swap-from <ref>              Superseded; points you to `pulp dev --hot-dsp`\n"
         "  --test, -t                        Run tests after each successful build\n"
         "  --test-filter=PATTERN             Run only tests matching PATTERN (implies --test)\n"
         "  --validate                        Run quick plugin dlopen validation after build\n"
@@ -263,8 +263,11 @@ int cmd_loop(const std::vector<std::string>& args) {
     }
     if (!ar_swap_from.empty()) {
         std::cout << "\npulp loop: --ar-swap-from=" << ar_swap_from
-                  << " is recognized but not implemented.\n"
-                     "  Build and validate the alternate SDK manually before swapping artifacts.\n";
+                  << " is superseded by the live reload lane.\n"
+                     "  For live DSP hot-swap during development use:\n"
+                     "    pulp dev --hot-dsp --run <reloadable-shell target>\n"
+                     "  which rebuilds the logic library and lets the running plugin's\n"
+                     "  ReloadableShell watcher swap it in place (no artifact swapping).\n";
     }
 
     // If --no-watch was passed (or there's no project to watch), exit

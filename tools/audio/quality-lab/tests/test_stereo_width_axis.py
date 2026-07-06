@@ -28,9 +28,9 @@ def _write(tmp_path, name, y, sr):
     return p
 
 
-def test_registry_exposes_five_profiles():
+def test_registry_exposes_all_profiles():
     assert set(compare.PROFILES) == {"tonal-balance", "added-hf", "noise-roughness",
-                                     "graininess", "stereo-width"}
+                                     "graininess", "stereo-width", "transient-integrity"}
 
 
 def test_stereo_collapse_is_regression_when_golden(tmp_path):

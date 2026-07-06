@@ -7,8 +7,12 @@
 #define PULP_TEST_HAS_GPU_SURFACE 0
 #endif
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/format/reload/scripted_ui_swap_unit.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
+#include <algorithm>
 #include <chrono>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -574,4 +578,198 @@ TEST_CASE("ScriptedUiSession explicit reload() rebuilds without a watcher, prese
     REQUIRE(session.bridge()->widget("only-here") != nullptr);
 
     fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession records JS-axis reload metrics (item 1.2)",
+          "[view][scripted-ui][metrics]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-metrics");
+    const auto script_path = temp_dir / "main.js";
+    write_text(script_path, "createKnob('gain', 10, 10, 48, 48);\n");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+
+    // A reload (preserve_state) exercises probe → snapshot → rebuild → restore.
+    write_text(script_path,
+               "createKnob('gain', 10, 10, 48, 48);\ncreateLabel('added', 'v2', '');\n");
+    REQUIRE(session.reload(&error));
+
+    const auto& m = session.last_reload_metrics();
+    CHECK(m.probe_ms >= 0.0);
+    CHECK(m.snapshot_ms >= 0.0);
+    CHECK(m.rebuild_ms >= 0.0);
+    CHECK(m.restore_ms >= 0.0);
+    CHECK(m.total_ms >= m.probe_ms);
+    CHECK(m.total_ms >= m.rebuild_ms);
+    CHECK(session.last_reload_ms() == m.total_ms);
+    const double sum = m.probe_ms + m.snapshot_ms + m.rebuild_ms + m.restore_ms;
+    CHECK(m.total_ms + 1.0 >= sum);   // total ≈ sum of contiguous phases
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession reload rolls back cleanly on a bad theme (no post-commit failure)",
+          "[view][scripted-ui][reload][rollback]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-rollback");
+    const auto script_path = temp_dir / "main.js";
+    const auto theme_path = temp_dir / "theme.json";
+    write_text(script_path, "createLabel('before', 'v1', '');\n");
+    write_text(theme_path, R"({ "colors": { "bg.primary": "#112233" } })");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {
+        .script_path = script_path,
+        .enable_hot_reload = false,
+        .enable_theme_reload = true,
+    });
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(session.bridge()->widget("before") != nullptr);
+
+    // New code (would add 'after') + a MALFORMED theme file. The theme is
+    // pre-resolved before the commit, so the reload must FAIL with the OLD UI
+    // fully intact — NOT commit the new bridge and then error (item 1.5).
+    write_text(script_path, "createLabel('after', 'v2', '');\n");
+    write_text(theme_path, "{ this is not valid json ]]]");
+
+    std::string reload_error;
+    REQUIRE_FALSE(session.reload(&reload_error));      // reload failed…
+    REQUIRE_FALSE(reload_error.empty());
+    REQUIRE(session.bridge()->widget("before") != nullptr);  // …old UI still live
+    REQUIRE(session.bridge()->widget("after") == nullptr);   // …new NOT committed
+
+    // A subsequent good reload (fix the theme) still works — no wedged state.
+    write_text(theme_path, R"({ "colors": { "bg.primary": "#445566" } })");
+    REQUIRE(session.reload(&error));
+    REQUIRE(session.bridge()->widget("after") != nullptr);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession preserves ComboBox selection across reload (item 1.4)",
+          "[view][scripted-ui][hotreload]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-combo");
+    const auto script_path = temp_dir / "main.js";
+    // Combo with 3 items; the script does NOT set a selection, so a fresh build
+    // defaults to index 0. Preservation must come from the reload snapshot.
+    const char* script_v1 =
+        "createCombo('mode', '');\nsetItems('mode', ['a','b','c']);\n";
+    write_text(script_path, script_v1);
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+
+    auto* combo = dynamic_cast<ComboBox*>(session.bridge()->widget("mode"));
+    REQUIRE(combo != nullptr);
+    REQUIRE(combo->selected() == 0);          // default
+    combo->set_selected(2);                    // user picks the third item
+
+    // Reload (same combo + items, plus a new widget to force a real rebuild).
+    write_text(script_path, std::string(script_v1) + "createLabel('added', 'v2', '');\n");
+    REQUIRE(session.reload(&error));
+
+    auto* combo2 = dynamic_cast<ComboBox*>(session.bridge()->widget("mode"));
+    REQUIRE(combo2 != nullptr);
+    REQUIRE(combo2->selected() == 2);          // selection preserved across reload
+    REQUIRE(session.bridge()->widget("added") != nullptr);  // reload really happened
+
+    fs::remove_all(temp_dir);
+}
+
+// item 1.2 baseline: publish scripted-UI (JS-axis) reload p50/p95 for a realistic
+// panel so regressions in the dev-loop latency are visible. Hidden [.benchmark].
+TEST_CASE("ScriptedUiSession reload latency baseline", "[view][scripted-ui][.benchmark]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-baseline");
+    const auto script_path = temp_dir / "panel.js";
+    std::string base;
+    for (int i = 0; i < 24; ++i)
+        base += "createKnob('k" + std::to_string(i) + "', " +
+                std::to_string(10 + (i % 6) * 52) + ", " +
+                std::to_string(10 + (i / 6) * 60) + ", 48, 48);\n";
+    write_text(script_path, base);
+
+    View root;
+    root.set_bounds({0, 0, 640, 480});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path,
+                                            .enable_hot_reload = false,
+                                            .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+
+    constexpr int kIters = 200;
+    std::vector<double> totals;
+    totals.reserve(kIters);
+    for (int i = 0; i < kIters; ++i) {
+        write_text(script_path, base + "createLabel('rev', 'v" + std::to_string(i) + "', '');\n");
+        REQUIRE(session.reload(&error));
+        totals.push_back(session.last_reload_ms());
+    }
+    std::sort(totals.begin(), totals.end());
+    const double p50 = totals[totals.size() / 2];
+    const double p95 = totals[static_cast<size_t>(totals.size() * 0.95)];
+    WARN("item 1.2 baseline — scripted-UI reload (24-knob panel): p50=" << p50
+         << "ms p95=" << p95 << "ms worst=" << totals.back() << "ms (60fps frame=16.7ms)");
+    CHECK(p50 >= 0.0);
+    fs::remove_all(temp_dir);
+}
+
+// ── UX SwapUnit adapter (live-swap item 1.8b/2.5b) ────────────────────────────
+TEST_CASE("ScriptedUiSwapUnit applies + rolls back a UI swap via apply_live_swap",
+          "[view][scripted-ui][swap-unit][1.8]") {
+    const auto dir = make_temp_dir("pulp-ux-swapunit");
+    const auto ui_a = dir / "a.js";
+    const auto ui_b = dir / "b.js";
+    write_text(ui_a, "createLabel('v', 'A', '');");
+    write_text(ui_b, "createLabel('v', 'B', '');");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = ui_a});
+    std::string err;
+    REQUIRE(session.load(&err));
+    REQUIRE(session.script_path() == ui_a);
+
+    using pulp::format::reload::apply_live_swap;
+    using pulp::format::reload::ScriptedUiSwapUnit;
+    using pulp::format::reload::SwapStage;
+    using pulp::format::reload::SwapUnit;
+
+    SECTION("UX-only transaction commits the swap") {
+        ScriptedUiSwapUnit ux(session, ui_b);
+        std::vector<SwapUnit*> units{&ux};
+        REQUIRE(apply_live_swap(units).ok);
+        REQUIRE(session.script_path() == ui_b);
+    }
+
+    SECTION("a later stage failing rolls the UX back to the previous script") {
+        ScriptedUiSwapUnit ux(session, ui_b);
+        // UX first, then a stand-in DSP stage that rejects → UX must roll back.
+        std::vector<SwapStage> stages{ux.to_stage(),
+                                      SwapStage{"dsp", [] { return false; }, [] {}}};
+        auto r = apply_live_swap(stages);
+        REQUIRE_FALSE(r.ok);
+        REQUIRE(r.failed_stage == "dsp");
+        REQUIRE(session.script_path() == ui_a);   // rolled back to the pre-swap UI
+    }
 }

@@ -3,6 +3,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/view/view.hpp>
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,6 +12,23 @@ namespace pulp::runtime { class MessageChannel; }
 namespace pulp::view { class ScriptedUiSession; }
 
 namespace pulp::format {
+
+/// Whether a DAW-hosted editor should enable scripted-UI + theme hot reload
+/// (item 1.3). OFF by default — a shipping plugin must not watch and reload from
+/// disk inside a host — but a developer opts in for the edit→see-it loop by
+/// exporting `PULP_DEV_HOT_RELOAD=1` in the DAW's environment. (The standalone
+/// app always enables it; it IS the dev tool.) Polling already runs on every
+/// editor tick, so this only decides whether the watcher acts. Kept header-inline
+/// so the platform view controllers (`au_view_controller_*.mm`,
+/// `au_v2_cocoa_view.mm`) share one definition.
+inline bool dev_editor_hot_reload_enabled() {
+    const char* v = std::getenv("PULP_DEV_HOT_RELOAD");
+    if (!v) return false;
+    switch (v[0]) {
+        case '1': case 't': case 'T': case 'y': case 'Y': return true;
+        default: return false;
+    }
+}
 
 /// Role of a view attached to a ViewBridge. The primary editor is
 /// `Editor`; auxiliary panels (component inspector, remote preview)
@@ -91,6 +109,28 @@ public:
     /// `on_view_resized` and stores the new size.
     void resize(uint32_t width, uint32_t height);
 
+    /// Live editor reload (live-swap 1.9). When the processor supports editor
+    /// reload (`Processor::supports_editor_reload()`), the editor idle tick calls
+    /// this each frame; it compares `Processor::editor_reload_generation()` to the
+    /// last seen value and, on a change, rebuilds the OPEN editor in place by
+    /// re-calling `create_view()` on the (now hot-swapped) processor and
+    /// transplanting its content into the SAME root `View` the host references —
+    /// so a DAW sees the editor update live without re-instantiating the plugin.
+    /// Returns true if a rebuild happened (the caller should then relayout +
+    /// repaint the host). No-op (returns false) for processors that don't support
+    /// editor reload, when not open, or when the generation is unchanged.
+    bool poll_editor_reload();
+
+    /// Force a rebuild of the open primary view from `create_view()` now,
+    /// transplanting the fresh content (children + background) into the stable
+    /// root `View`. Returns false if not open or `create_view()` yields nothing.
+    /// Normally driven by `poll_editor_reload()`; exposed for tests. NOTE: the
+    /// root `View` OBJECT is preserved (the host holds it by reference); a logic
+    /// whose `create_view()` returns a CUSTOM `View` subclass with root-level
+    /// paint/behavior gets its children + background refreshed but not the root
+    /// subclass identity — sufficient for container-root editors (the common case).
+    bool rebuild_primary_view();
+
     bool is_open() const { return view_raw_ != nullptr; }
     ViewRole role() const { return options_.role; }
     view::View* view() { return view_raw_; }
@@ -170,6 +210,7 @@ private:
     bool uses_script_ui_ = false;
     bool attached_ = false;  ///< true between notify_attached() and close()
     bool released_ = false;  ///< true after release_view() transfers ownership
+    uint64_t last_reload_generation_ = 0;  ///< editor-reload generation last applied (1.9)
     /// Cross-thread liveness (see alive_token()). Flipped false in ~ViewBridge.
     std::shared_ptr<std::atomic<bool>> alive_ =
         std::make_shared<std::atomic<bool>>(true);

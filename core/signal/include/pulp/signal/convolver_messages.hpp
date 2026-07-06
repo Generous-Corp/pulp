@@ -228,6 +228,14 @@ public:
         return retired_queue_.size_approx() < kRetireRingCapacity;
     }
 
+    /// Room to park at least @p n IRs — for a caller that must retire more than
+    /// one in a single audio-thread step (e.g. a completed crossfade fade-out
+    /// PLUS the just-displaced IR). Reserve before committing so no retire ever
+    /// fails inline and strands an IR on the audio thread.
+    bool has_retire_capacity(std::size_t n) const {
+        return retired_queue_.size_approx() + n <= kRetireRingCapacity;
+    }
+
     /// UI / worker thread: reclaim ALL retired IRs the audio thread
     /// has parked. Returns the count freed; the actual deallocation
     /// runs through `unique_ptr` destructors in this scope (off-RT).

@@ -142,10 +142,13 @@ does level-matching, applicability, materiality, and the intent-safe verdict):
 | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | rougher / noisier |
 | `graininess` | `graininess` | relative spectral-flux increase | grainier |
 | `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | narrower / collapsed |
+| `transient-integrity` | `transient_integrity` | per-onset attack-smear deficit (onset-aligned) | softer / smeared attacks |
 
 Each axis carries its own materiality default; `--threshold` overrides. `noise-roughness` and
 `graininess` are meaningful on tonal/sustained material; `stereo-width` reads the original 2-channel
-signal (mono input → `not_applicable`) and flags an out-of-phase candidate.
+signal (mono input → `not_applicable`) and flags an out-of-phase candidate; `transient-integrity`
+needs onset-bearing (percussive) material (too few onsets → `not_applicable`) and is one-directional
+(a softening is the regression; a sharper candidate reads no change).
 
 - **Time-alignment (`--align latency`).** By default the axes are alignment-free, so a constant
   delay/offset false-alarms the sample residual (`not_corroborated`). `--align latency` estimates a

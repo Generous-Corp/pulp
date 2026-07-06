@@ -29,10 +29,11 @@ from typing import Any
 
 from . import compare
 
-# Default to the mono-safe axes so a mono comparison doesn't emit a spurious not_applicable row for
-# the stereo-width axis on every pair. A stereo suite adds "stereo-width" to its manifest's
-# `profiles` explicitly. A plugin picks whatever subset fits its change class.
-DEFAULT_PROFILES: tuple[str, ...] = compare.MONO_PROFILES
+# Default to the broadly-applicable axes so a comparison doesn't emit a spurious not_applicable row
+# for a capability-specific axis (stereo-width needs 2 channels; transient-integrity needs percussive
+# material) on the wrong material. A suite adds those to its manifest's `profiles` explicitly. A
+# plugin picks whatever subset fits its change class.
+DEFAULT_PROFILES: tuple[str, ...] = compare.NET_DEFAULT_PROFILES
 
 VALID_REFERENCE_ROLES = ("peer", "golden")
 

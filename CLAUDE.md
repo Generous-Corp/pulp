@@ -824,6 +824,27 @@ Build → Validate → Install
 
 A plugin that crashes a DAW during scan is worse than no plugin at all. Validation is the gate. The `--skip-validation` flag exists for debugging but defaults OFF.
 
+### Real-DAW Functional Smoke (REAPER) — opt-in, scoped
+
+`auval` / `pluginval` / `clap-validator` prove a plugin **scans + loads**. They do
+NOT prove a **functional** behavior happens in a host. Some bugs only appear in a
+real DAW because the format adapter injects state no headless / standalone /
+render-to-png path has — e.g. a synthesized Bypass param that made the reload
+param-contract gate reject every in-DAW reload (2026-07-04; fixed `4a6e048f4`, caught
+only by driving the plugin in REAPER).
+
+So for **reload / editor / format-adapter** changes, run the real-DAW smoke
+(`tools/testing/daw-smoke/reaper_smoke.py`) when you want functional proof beyond the
+validators — **especially before asking a human to test**. It is **opt-in (default
+OFF)**, enabled per-machine in `~/.config/pulp/daw-smoke.toml`, and runs only when the
+diff touches the reload/editor/adapter allowlist AND the moment warrants it (initial
+development of a behavior, or a risky change) — **NOT every build**. It is a ship gate
+**only at certain times** (`enabled` + `gate` + path-hit); it degrades to a loud SKIP
+when REAPER is absent (unless `strict`), and a SKIP is never a PASS. Bypass a single
+commit with a `DAW-Smoke: skip reason="..."` trailer. It is zero-pollution (temp scan
+path, always cleans up) and headless-safe (log-scrape, never `screencapture`). Full
+rules + how-to: [docs/guides/daw-smoke.md](docs/guides/daw-smoke.md).
+
 ### Test in Every Worktree
 
 Tests must pass in the worktree before creating a PR. CI runs the full matrix on PR. No merging with red tests.
@@ -1068,6 +1089,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
 | `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/clean-room-breadcrumb rule with concrete rewrite examples |
 | `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
+| `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |

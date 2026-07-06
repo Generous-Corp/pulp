@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file param_contract.hpp
-/// Parameter-contract equivalence check for DSP hot reload (v2 plan §4.5 / Phase 0).
+/// Parameter-contract equivalence check for DSP hot reload.
 ///
 /// A reload builds the candidate logic's parameters into a *scratch* StateStore,
 /// separate from the live one. Before swapping, the candidate's parameter
@@ -64,23 +64,55 @@ inline bool has_unique_param_ids(const state::StateStore& store) {
 inline std::vector<std::string> param_contract_diff(const state::StateStore& live,
                                                     const state::StateStore& candidate) {
     std::vector<std::string> out;
+    // Bypass parameters are excluded from the contract: an adapter SYNTHESIZES a
+    // bypass into the live store to satisfy a host bypass convention (VST3/AU/CLAP
+    // via HostQuirks::synthesize_bypass_parameter, quirk_apply.hpp), so the live
+    // store carries a bypass the reloaded logic's define_parameters() never
+    // declares. Comparing it would make EVERY in-DAW reload of such a plugin fail
+    // "contract differs" (the reload the standalone/capture host accepts) even
+    // though the logic's automatable surface is unchanged. The adapter owns the
+    // bypass independently of the logic, so it is not part of the swap contract.
+    // RESIDUAL (low, inherent): the synthesized bypass is created with default
+    // designation (None) + a boolean "Bypass" name/range (quirk_apply.hpp), so it
+    // is only detectable via the is_bypass_param HEURISTIC. A plugin author's OWN
+    // genuinely-automatable boolean param literally named "Bypass" with range
+    // [0,1] is therefore indistinguishable and also excluded — its re-ID/removal
+    // across a reload is not caught. Requires that exact name+range collision on
+    // one param; the fix if it ever bites is to key exclusion on a dedicated
+    // "adapter-synthesized" flag instead of the heuristic.
     for (const auto& l : live.all_params()) {
         const state::ParamInfo* c = candidate.info(l.id);
         if (!c) {
+            // A bypass present in live but not the candidate is adapter-owned
+            // (synthesized) — its absence in the logic's contract is not a
+            // violation. A non-bypass removal still breaks automation.
+            if (state::is_bypass_param(l)) continue;
             out.push_back("parameter " + std::to_string(l.id) + " ('" + l.name +
                           "') removed in candidate");
         } else if (!param_contract_equal(l, *c)) {
+            // Present on BOTH sides → still compared (a real bypass whose range/
+            // flags changed is a genuine contract change).
             out.push_back("parameter " + std::to_string(l.id) + " ('" + l.name +
                           "') range/flags changed");
         }
     }
     for (const auto& c : candidate.all_params()) {
         if (!live.info(c.id)) {
+            if (state::is_bypass_param(c)) continue;  // candidate-only bypass is adapter-ownable
             out.push_back("parameter " + std::to_string(c.id) + " ('" + c.name +
                           "') added in candidate");
         }
     }
     return out;
+}
+
+/// Count parameters that are part of the swap contract (i.e. excluding
+/// adapter-synthesized bypass params — see param_contract_diff).
+inline std::size_t contract_param_count(const state::StateStore& store) {
+    std::size_t n = 0;
+    for (const auto& p : store.all_params())
+        if (!state::is_bypass_param(p)) ++n;
+    return n;
 }
 
 /// The gate: the candidate's parameter contract is equivalent to the live one
@@ -92,8 +124,48 @@ inline bool param_contracts_match(const state::StateStore& live,
     // checks below can't distinguish multisets (e.g. {1,1,2} vs {1,2,2}), so a
     // duplicate-ID store (a plugin bug) must force a full reload, not hot-swap.
     return has_unique_param_ids(live) && has_unique_param_ids(candidate) &&
-           live.all_params().size() == candidate.all_params().size() &&
+           contract_param_count(live) == contract_param_count(candidate) &&
            param_contract_diff(live, candidate).empty();
+}
+
+/// Result of the SUPERSET contract check ("add params and stay live"): a
+/// candidate is a valid superset when every LIVE parameter is
+/// present in the candidate with an identical contract (existing automation /
+/// saved sessions stay valid), and the candidate may ALSO declare new parameters.
+struct ParamSupersetResult {
+    bool is_superset = false;                ///< candidate ⊇ live, shared contracts identical
+    std::vector<state::ParamID> added_ids;   ///< IDs new in candidate (candidate order)
+};
+
+/// Superset gate: relaxes `param_contracts_match` from "identical" to "candidate
+/// is a superset of live". A strict match is the special case `is_superset==true
+/// && added_ids.empty()`. When `is_superset` is true with non-empty `added_ids`,
+/// the reload can hot-swap AND the host must then rescan the parameter list to
+/// pick up the additions (the live-store registration + per-adapter host-notify
+/// the check is pure and mutates nothing). Fails closed on
+/// duplicate IDs, exactly like the strict gate.
+inline ParamSupersetResult param_contract_superset(const state::StateStore& live,
+                                                    const state::StateStore& candidate) {
+    ParamSupersetResult result;
+    if (!has_unique_param_ids(live) || !has_unique_param_ids(candidate))
+        return result;  // is_superset stays false
+    // Every live parameter must survive unchanged in the candidate — a removed or
+    // re-ranged/re-flagged parameter would break automation, so it is NOT a
+    // superset (that case still requires a full reload).
+    for (const auto& l : live.all_params()) {
+        if (state::is_bypass_param(l)) continue;  // adapter-owned; see param_contract_diff
+        const state::ParamInfo* c = candidate.info(l.id);
+        if (!c || !param_contract_equal(l, *c))
+            return result;
+    }
+    // Collect the parameters the candidate adds (present in candidate, not live).
+    for (const auto& c : candidate.all_params()) {
+        if (state::is_bypass_param(c)) continue;
+        if (!live.info(c.id))
+            result.added_ids.push_back(c.id);
+    }
+    result.is_superset = true;
+    return result;
 }
 
 /// Copy each live parameter value into @p candidate for IDs the candidate also

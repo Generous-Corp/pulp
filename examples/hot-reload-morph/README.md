@@ -64,3 +64,21 @@ Then `morph.sh harsh` (or edit `logic_morph.cpp` + rebuild) to hear *and* see it
 flip — the DSP and the editor swap together.
 
 See [the DSP hot-reload guide](../../docs/guides/dsp-hot-reload.md) for the engine.
+
+## The three trust lanes
+
+The same reload works at three trust levels — you don't change the plugin, only how
+you build/ship it (full model: [reload-trust.md](../../docs/guides/reload-trust.md)):
+
+```bash
+# 1. Local dev — unsigned, instant. Edit + rebuild; the watcher swaps it. No keys.
+
+# 2. Signed — sign the UX bundle so a consumer verifies it before loading:
+pulp ship swap-pack --bundle ui/ --plugin-id com.you.morph   # caps inferred; key in keychain
+
+# 3. Consumer — the signed pack loads only if signature + revocation + version +
+#    capabilities all pass; otherwise the running UI/DSP is kept (fail-closed).
+```
+
+Opt-out is first-class: ship with reload off, `--allow-unsigned`, or capabilities
+wide open — the protection is default-on, never forced.

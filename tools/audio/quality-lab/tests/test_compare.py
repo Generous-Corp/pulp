@@ -275,7 +275,7 @@ def test_added_hf_uses_its_own_default_threshold():
 
 def test_registry_exposes_all_profiles():
     assert set(compare.PROFILES) == {"tonal-balance", "added-hf", "noise-roughness",
-                                     "graininess", "stereo-width"}
+                                     "graininess", "stereo-width", "transient-integrity"}
     assert compare.STEREO_PROFILES == ("stereo-width",)
     assert "stereo-width" not in compare.MONO_PROFILES
 

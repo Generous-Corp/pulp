@@ -23,6 +23,7 @@ int cmd_dev(const std::vector<std::string>& args) {
     std::vector<std::string> launch_args;
     std::vector<std::string> build_args;
     bool allow_unsupported_sdk = false;
+    bool hot_dsp = false;
     bool after_separator = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -36,6 +37,8 @@ int cmd_dev(const std::vector<std::string>& args) {
             std::cout << "  --test-filter=PATTERN  Run only tests matching PATTERN\n";
             std::cout << "  --validate             Run quick plugin validation (dlopen) after build\n";
             std::cout << "  --run TARGET           Launch TARGET from build dir, relaunch on rebuild\n";
+            std::cout << "  --hot-dsp              With --run: keep the app alive across rebuilds so its\n";
+            std::cout << "                         ReloadableShell hot-swaps the rebuilt logic live (no relaunch)\n";
             std::cout << "  --design SCRIPT        Launch design tool with SCRIPT, relaunch on rebuild\n";
             std::cout << "  --target T             Pass --target T to cmake --build\n";
             std::cout << "  --allow-unsupported-sdk  Bypass the CLI-vs-project SDK guard (unsupported)\n";
@@ -45,6 +48,7 @@ int cmd_dev(const std::vector<std::string>& args) {
             std::cout << "  pulp dev --test                   # Watch, rebuild, test\n";
             std::cout << "  pulp dev --test --validate        # Watch, rebuild, test, validate\n";
             std::cout << "  pulp dev --run pulp-gain-standalone  # Watch, rebuild, relaunch app\n";
+            std::cout << "  pulp dev --hot-dsp --run pulp-hot-reload-demo-standalone  # Watch, rebuild, live DSP hot-swap\n";
             std::cout << "  pulp dev --design ui.js           # Watch, rebuild design tool, relaunch\n";
             std::cout << "  pulp dev --test-filter=Knob       # Watch, rebuild, run Knob tests only\n";
             return 0;
@@ -67,6 +71,8 @@ int cmd_dev(const std::vector<std::string>& args) {
             run_tests = true;
         } else if (args[i] == "--allow-unsupported-sdk") {
             allow_unsupported_sdk = true;
+        } else if (args[i] == "--hot-dsp") {
+            hot_dsp = true;
         } else if (args[i] == "--validate") {
             run_validate = true;
         } else if (args[i] == "--run") {
@@ -146,5 +152,10 @@ int cmd_dev(const std::vector<std::string>& args) {
     opts.run_validate = run_validate;
     opts.launch_target = launch_target;
     opts.launch_args = launch_args;
+    opts.hot_dsp = hot_dsp;
+    if (hot_dsp && launch_target.empty()) {
+        std::cerr << "pulp dev: --hot-dsp requires --run <reloadable-shell target>\n";
+        return 2;
+    }
     return watch_loop(opts);
 }

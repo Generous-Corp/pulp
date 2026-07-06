@@ -294,8 +294,9 @@ def main(argv: list[str] | None = None) -> int:
                       help="measurement axis (default: tonal-balance): tonal-balance (LTAS "
                            "centroid), added-hf (band-relative >=8kHz dB), noise-roughness (HNR "
                            "drop), graininess (spectral-flux rise), stereo-width (side/mid ratio + "
-                           "phase). roughness/graininess need tonal/sustained material; stereo-width "
-                           "needs 2-channel input")
+                           "phase), transient-integrity (per-onset attack smear). roughness/graininess "
+                           "need tonal material; stereo-width needs 2-channel; transient-integrity needs "
+                           "onset-bearing (percussive) material")
     cmp_.add_argument("--reference-role", choices=["peer", "golden"], default="peer",
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "

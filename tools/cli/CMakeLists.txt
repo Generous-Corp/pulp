@@ -185,6 +185,17 @@ if(PULP_BUILD_TESTS)
     target_link_libraries(pulp-test-cli-au-info-plist PRIVATE Catch2::Catch2WithMain)
     add_test(NAME pulp-test-cli-au-info-plist COMMAND pulp-test-cli-au-info-plist)
 
+    # End-to-end swap-pack signing: shell out to the built CLI, verify the manifest.
+    add_executable(pulp-test-cli-swap-pack ${CMAKE_SOURCE_DIR}/test/test_cli_swap_pack.cpp)
+    target_include_directories(pulp-test-cli-swap-pack PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(pulp-test-cli-swap-pack PRIVATE
+        PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>"
+        PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(pulp-test-cli-swap-pack PRIVATE
+        pulp::format pulp::view pulp::runtime Catch2::Catch2WithMain)
+    add_dependencies(pulp-test-cli-swap-pack pulp-cli)
+    add_test(NAME pulp-test-cli-swap-pack COMMAND pulp-test-cli-swap-pack)
+
     set(_pulp_cli_doctor_ctest_env
         "PULP_UPDATE_CHECK_DISABLED=1"
         "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-doctor")
