@@ -86,6 +86,30 @@ commands:
     status: usable
     summary: Sign, notarize, package, and generate update feeds for all platforms.
     subcommands:
+      - name: swap-pack
+        summary: "Sign a hot-reload UX bundle into a swap pack. Capabilities are inferred from the bundle's JS; the Ed25519 signing key is reused from the macOS keychain (created + stored on first use, with a loud backup notice) or a --sign-key file. No build dir required."
+        args:
+          - name: --bundle
+            required: true
+            description: Directory of the UX bundle to sign
+          - name: --plugin-id
+            required: true
+            description: The plugin this pack targets
+          - name: --pack-version
+            required: false
+            description: Monotonic pack version (downgrade protection)
+          - name: --channel
+            required: false
+            description: Update channel (also namespaces revocation)
+          - name: --sign-key
+            required: false
+            description: Path to a signing-key file; created if absent (alternative to the macOS keychain)
+          - name: --out
+            required: false
+            description: Output manifest path (default <bundle>/swap-pack.manifest.json)
+          - name: --yes
+            required: false
+            description: Skip the interactive signing confirmation (for CI)
       - name: sign
         summary: Code-sign plugin bundles (macOS/Windows) or Android APK/AAB
         args:

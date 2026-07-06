@@ -888,6 +888,7 @@ pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship check
+pulp ship swap-pack --bundle ui/ --plugin-id com.you.synth   # sign a hot-reload UX bundle (caps inferred; key from keychain)
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
 pulp ship notarize --path MyApp-1.0.dmg --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
 pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
