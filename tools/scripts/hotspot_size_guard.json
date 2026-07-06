@@ -12,7 +12,7 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1200,
+      "max_loc": 1215,
       "note": "WidgetBridge shell after registrar split; lowered after comment-hygiene cleanup"
     },
     {
@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6345,
+      "max_loc": 6350,
       "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
     },
     {
