@@ -1185,6 +1185,7 @@ pulp_add_test_suite(pulp-test-reload-capabilities LIBRARIES pulp::view)
 # Signed Revocation List (SRL) + namespaced monotonic epoch floor.
 pulp_add_test_suite(pulp-test-reload-revocation LIBRARIES pulp::format
     DISCOVERY_ARGS TEST_PREFIX "revocation.")
+pulp_add_test_suite(pulp-test-pack-install LIBRARIES pulp::format)
 
 # DSP hot reload — dynamic-library handle + leak policy (Phase 0). Builds a tiny
 # MODULE fixture and dlopens it by absolute path (RELOAD_PROBE_PATH).
