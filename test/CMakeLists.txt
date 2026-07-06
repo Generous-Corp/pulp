@@ -2271,6 +2271,7 @@ pulp_add_test_suite(pulp-test-state
 
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
+pulp_add_test_suite(pulp-test-external-binding LIBRARIES pulp::state)
 
 # Structured non-param state channel (sequencer/mod-matrix transport)
 pulp_add_test_suite(pulp-test-sequencer-state-channel LIBRARIES pulp::state)
