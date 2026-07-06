@@ -4,6 +4,14 @@ add_library(pulp::gpu-audio ALIAS pulp-gpu-audio)
 target_include_directories(pulp-gpu-audio
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        # The public GPU-node headers (gpu_convolver.hpp, gpu_stft.hpp, …) name
+        # render::GpuCompute, so they #include <pulp/render/gpu_compute.hpp>. Those
+        # render headers are Dawn-free (opaque void* device/queue handles), so
+        # exposing render's include dir keeps the gpu_audio public headers
+        # self-contained even in a GPU-off configure where pulp::render isn't
+        # linked (the transport is still built there). $<INSTALL_INTERFACE:include>
+        # already covers render's headers in the installed SDK.
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/core/render/include>
         $<INSTALL_INTERFACE:include>
 )
 
