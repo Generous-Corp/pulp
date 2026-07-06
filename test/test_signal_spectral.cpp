@@ -296,6 +296,43 @@ TEST_CASE("FFT magnitude helpers tolerate empty ranges and preserve destination 
     REQUIRE_THAT(db[1], WithinAbs(10.0f, 1e-6f));
 }
 
+TEST_CASE("FFT64 runs a double-precision round trip and real transform",
+          "[signal][fft][f64]") {
+    constexpr int N = 16;
+    Fft64 fft(N);
+
+    std::vector<std::complex<double>> data(N);
+    for (int i = 0; i < N; ++i) {
+        data[static_cast<size_t>(i)] = {
+            std::sin(2.0 * 3.14159265358979323846 * 3.0 * i / N), 0.0};
+    }
+    const auto original = data;
+
+    fft.forward(data.data());
+    fft.inverse(data.data());
+
+    for (int i = 0; i < N; ++i) {
+        REQUIRE_THAT(data[static_cast<size_t>(i)].real(),
+                     WithinAbs(original[static_cast<size_t>(i)].real(), 1e-12));
+        REQUIRE_THAT(data[static_cast<size_t>(i)].imag(), WithinAbs(0.0, 1e-12));
+    }
+
+    std::vector<double> real_input(N, 0.0);
+    real_input[0] = 1.0;
+    std::vector<std::complex<double>> bins(N);
+    std::vector<double> magnitude(N, 0.0);
+    fft.forward_real(real_input.data(), bins.data());
+    fft.magnitude(bins.data(), magnitude.data(), N);
+
+    for (double mag : magnitude)
+        REQUIRE_THAT(mag, WithinAbs(1.0, 1e-12));
+
+    bins[0] = {0.01, 0.0};
+    std::vector<double> db(1, 0.0);
+    fft.magnitude_db(bins.data(), db.data(), 1);
+    REQUIRE_THAT(db[0], WithinAbs(-40.0, 1e-12));
+}
+
 // ── Convolver ────────────────────────────────────────────────────────────────
 
 TEST_CASE("Convolver with identity IR", "[signal][convolver]") {
@@ -436,4 +473,20 @@ TEST_CASE("Convolver default block size and reload reset the buffered stream",
     for (int i = 0; i < 7; ++i)
         REQUIRE_THAT(conv.process(0.0f), WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(conv.process(0.0f), WithinAbs(1.0f, 1e-4f));
+}
+
+TEST_CASE("Convolver64 identity IR preserves double buffers",
+          "[signal][convolver][f64]") {
+    Convolver64 conv;
+    const double identity[] = {1.0};
+    conv.load_ir(identity, 1, 8);
+
+    std::vector<double> input(16, 0.0);
+    std::vector<double> output(16, 0.0);
+    input[0] = 0.25;
+    input[1] = -0.5;
+    conv.process(input.data(), output.data(), static_cast<int>(input.size()));
+
+    REQUIRE_THAT(output[8], WithinAbs(0.25, 1e-12));
+    REQUIRE_THAT(output[9], WithinAbs(-0.5, 1e-12));
 }

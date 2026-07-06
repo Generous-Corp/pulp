@@ -51,6 +51,31 @@ TEST_CASE("FreezeLoopSampler loops captured audio click-free", "[signal][freeze-
     REQUIRE(max_step(out) < 0.2f);
 }
 
+TEST_CASE("FreezeLoopSampler64 snapshots and restores double loops",
+          "[signal][freeze-loop][f64]") {
+    FreezeLoopSampler64 a;
+    a.prepare(1, 2048, 64);
+    std::vector<double> in(1024);
+    for (int i = 0; i < 1024; ++i)
+        in[static_cast<size_t>(i)] = std::sin(2.0 * kPi * 0.017 * i);
+    const double* ip[1] = {in.data()};
+    a.write(ip, static_cast<int>(in.size()));
+    a.freeze(512);
+
+    const auto blob = a.snapshot();
+    FreezeLoopSampler64 b;
+    b.prepare(1, 2048, 64);
+    REQUIRE(b.restore(blob));
+
+    std::vector<double> ao(700), bo(700);
+    double* ap[1] = {ao.data()};
+    double* bp[1] = {bo.data()};
+    a.read(ap, static_cast<int>(ao.size()));
+    b.read(bp, static_cast<int>(bo.size()));
+    for (std::size_t i = 0; i < ao.size(); ++i)
+        REQUIRE_THAT(bo[i], WithinAbs(ao[i], 1e-12));
+}
+
 TEST_CASE("FreezeLoopSampler crossfade beats a hard loop at the boundary",
           "[signal][freeze-loop]") {
     auto boundary_step = [](int crossfade) {

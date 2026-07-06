@@ -34,6 +34,27 @@ TEST_CASE("Convolver: identity IR passes audio through", "[signal][convolver]") 
     REQUIRE(error < 0.01f);
 }
 
+TEST_CASE("Convolver64: identity IR passes double audio through",
+          "[signal][convolver][f64]") {
+    constexpr size_t block_size = 16;
+    const std::vector<double> ir = {1.0};
+
+    PartitionedConvolver64 conv;
+    conv.load_ir(ir.data(), ir.size(), block_size);
+    REQUIRE(conv.is_loaded());
+
+    std::vector<double> input(block_size);
+    std::vector<double> output(block_size, 0.0);
+    for (size_t i = 0; i < block_size; ++i)
+        input[i] = std::sin(2.0 * 3.14159265358979323846 *
+                            static_cast<double>(i) / block_size);
+
+    conv.process(input.data(), output.data(), block_size);
+
+    for (size_t i = 0; i < block_size; ++i)
+        REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-12));
+}
+
 TEST_CASE("Convolver: reset clears state", "[signal][convolver]") {
     constexpr size_t block_size = 32;
     std::vector<float> ir = {1.0f, 0.5f, 0.25f};

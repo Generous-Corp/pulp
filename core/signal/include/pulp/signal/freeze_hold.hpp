@@ -34,7 +34,8 @@
 
 namespace pulp::signal {
 
-class FreezeHold {
+template <typename SampleType = float>
+class FreezeHoldT {
 public:
     struct Config {
         int fft_size = 2048;
@@ -61,22 +62,22 @@ public:
         const auto bins = static_cast<size_t>(num_bins_);
         const auto channels = static_cast<size_t>(config.channels);
         const auto depth = static_cast<size_t>(config.capture_frames);
-        capture_mag_.assign(channels * depth * bins, 0.0f);
+        capture_mag_.assign(channels * depth * bins, SampleType{0});
         capture_ref_phase_.assign(depth * bins, 0.0);
-        held_mag_.assign(channels * bins, 0.0f);
+        held_mag_.assign(channels * bins, SampleType{0});
         held_phase_.assign(channels * bins, 0.0);
         inst_freq_.assign(bins, 0.0);
         reset();
     }
 
     void reset() {
-        std::fill(capture_mag_.begin(), capture_mag_.end(), 0.0f);
+        std::fill(capture_mag_.begin(), capture_mag_.end(), SampleType{0});
         std::fill(capture_ref_phase_.begin(), capture_ref_phase_.end(), 0.0);
         captured_ = 0;
         capture_pos_ = 0;
         engaged_ = false;
         latched_ = false;
-        fade_ = 0.0f;
+        fade_ = SampleType{0};
         rng_ = 0x9e3779b97f4a7c15ull;
     }
 
@@ -89,7 +90,7 @@ public:
     /// Run at the head of the vocoder chain for every analysis frame
     /// group. Captures live frames; when engaged and latched, replaces
     /// `frames` with hold content (crossfaded at the edges).
-    void process_group(std::complex<float>* const* frames, int channels, int num_bins) {
+    void process_group(std::complex<SampleType>* const* frames, int channels, int num_bins) {
         assert(num_bins == num_bins_);
         assert(channels == config_.channels);
 
@@ -99,7 +100,7 @@ public:
         if (engaged_ && !latched_ && captured_ >= config_.capture_frames)
             latch();
 
-        if (!engaged_ && latched_ && fade_ <= 0.0f)
+        if (!engaged_ && latched_ && fade_ <= SampleType{0})
             latched_ = false; // release completed last frame
 
         if (!latched_)
@@ -116,21 +117,21 @@ public:
         // live are decorrelated: there a linear fade dips ~3–5 dB mid-fade
         // (measured -5.1 dB on a steady tone — an audible "ding"), and the
         // power-flat equal-power law is correct.
-        const float step = 1.0f / static_cast<float>(config_.crossfade_frames);
-        fade_ = std::clamp(fade_ + (engaged_ ? step : -step), 0.0f, 1.0f);
-        float hold_gain, live_gain;
+        const SampleType step = SampleType{1} / static_cast<SampleType>(config_.crossfade_frames);
+        fade_ = std::clamp(fade_ + (engaged_ ? step : -step), SampleType{0}, SampleType{1});
+        SampleType hold_gain, live_gain;
         if (engaged_) {
             hold_gain = fade_;
-            live_gain = 1.0f - fade_;
+            live_gain = SampleType{1} - fade_;
         } else {
-            const float t = fade_ * 1.57079632679489662f;  // fade_ * pi/2
+            const SampleType t = fade_ * static_cast<SampleType>(1.57079632679489662); // fade_ * pi/2
             hold_gain = std::sin(t);
             live_gain = std::cos(t);
         }
 
         for (int ch = 0; ch < channels; ++ch) {
-            const float* mags = held_mag_.data()
-                                + static_cast<size_t>(ch) * num_bins_;
+            const SampleType* mags = held_mag_.data()
+                                     + static_cast<size_t>(ch) * num_bins_;
             const double* phases = held_phase_.data()
                                    + static_cast<size_t>(ch) * num_bins_;
             // Per-channel frame energies for the transition normalization
@@ -145,14 +146,14 @@ public:
             for (int k = 0; k < num_bins_; ++k) {
                 const auto live = frames[ch][k];
                 const auto held = std::polar(mags[k] * hold_gain,
-                                             static_cast<float>(phases[k]));
+                                             static_cast<SampleType>(phases[k]));
                 e_live += static_cast<double>(std::norm(live));
                 e_hold += static_cast<double>(mags[k]) * mags[k];
                 const auto mixed = live * live_gain + held;
                 e_mix += static_cast<double>(std::norm(mixed));
                 frames[ch][k] = mixed;
             }
-            if (live_gain > 0.0f) {  // mid-fade only; steady hold is exact
+            if (live_gain > SampleType{0}) { // mid-fade only; steady hold is exact
                 // Target: endpoint energies interpolated by fade POSITION,
                 // not by the gains — gain-derived targets are wrong for one
                 // correlation case or the other (a g²-weighted target undid
@@ -161,7 +162,7 @@ public:
                     (1.0 - static_cast<double>(fade_)) * e_live
                     + static_cast<double>(fade_) * e_hold;
                 const double scale_sq = target / std::max(e_mix, 1e-12);
-                const float scale = static_cast<float>(std::sqrt(
+                const SampleType scale = static_cast<SampleType>(std::sqrt(
                     std::clamp(scale_sq, 0.0625, 16.0)));
                 for (int k = 0; k < num_bins_; ++k) frames[ch][k] *= scale;
             }
@@ -174,13 +175,13 @@ public:
     }
 
 private:
-    void capture(std::complex<float>* const* frames, int channels) {
+    void capture(std::complex<SampleType>* const* frames, int channels) {
         const auto bins = static_cast<size_t>(num_bins_);
         const auto depth = static_cast<size_t>(config_.capture_frames);
         for (int ch = 0; ch < channels; ++ch) {
-            float* slot = capture_mag_.data()
-                          + (static_cast<size_t>(ch) * depth
-                             + static_cast<size_t>(capture_pos_)) * bins;
+            SampleType* slot = capture_mag_.data()
+                               + (static_cast<size_t>(ch) * depth
+                                  + static_cast<size_t>(capture_pos_)) * bins;
             for (int k = 0; k < num_bins_; ++k)
                 slot[k] = std::abs(frames[ch][k]);
         }
@@ -189,7 +190,7 @@ private:
         double* ref = capture_ref_phase_.data()
                       + static_cast<size_t>(capture_pos_) * bins;
         for (int k = 0; k < num_bins_; ++k) {
-            std::complex<float> sum(0.0f, 0.0f);
+            std::complex<SampleType> sum(SampleType{0}, SampleType{0});
             for (int ch = 0; ch < channels; ++ch) sum += frames[ch][k];
             ref[k] = static_cast<double>(std::arg(sum));
         }
@@ -204,14 +205,14 @@ private:
 
         // Hold magnitudes: average over the captured window.
         for (int ch = 0; ch < config_.channels; ++ch) {
-            float* held = held_mag_.data() + static_cast<size_t>(ch) * bins;
-            std::fill(held, held + bins, 0.0f);
+            SampleType* held = held_mag_.data() + static_cast<size_t>(ch) * bins;
+            std::fill(held, held + bins, SampleType{0});
             for (size_t f = 0; f < depth; ++f) {
-                const float* slot = capture_mag_.data()
-                                    + (static_cast<size_t>(ch) * depth + f) * bins;
+                const SampleType* slot = capture_mag_.data()
+                                         + (static_cast<size_t>(ch) * depth + f) * bins;
                 for (int k = 0; k < num_bins_; ++k) held[k] += slot[k];
             }
-            const float inv = 1.0f / static_cast<float>(depth);
+            const SampleType inv = SampleType{1} / static_cast<SampleType>(depth);
             for (int k = 0; k < num_bins_; ++k) held[k] *= inv;
         }
 
@@ -237,7 +238,7 @@ private:
                     phases[k] = static_cast<double>(std::arg(last_frames_[ch][k]));
             }
         }
-        fade_ = 0.0f;
+        fade_ = SampleType{0};
         latched_ = true;
     }
 
@@ -271,19 +272,22 @@ private:
     Config config_;
     int num_bins_ = 0;
 
-    std::vector<float> capture_mag_;       // channels * depth * bins
+    std::vector<SampleType> capture_mag_; // channels * depth * bins
     std::vector<double> capture_ref_phase_; // depth * bins
-    std::vector<float> held_mag_;          // channels * bins
+    std::vector<SampleType> held_mag_;    // channels * bins
     std::vector<double> held_phase_;       // channels * bins
     std::vector<double> inst_freq_;        // bins
 
-    std::complex<float>* const* last_frames_ = nullptr;
+    std::complex<SampleType>* const* last_frames_ = nullptr;
     int captured_ = 0;
     int capture_pos_ = 0;
     bool engaged_ = false;
     bool latched_ = false;
-    float fade_ = 0.0f;
+    SampleType fade_ = SampleType{0};
     std::uint64_t rng_ = 0;
 };
+
+using FreezeHold = FreezeHoldT<float>;
+using FreezeHold64 = FreezeHoldT<double>;
 
 } // namespace pulp::signal

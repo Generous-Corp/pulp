@@ -30,7 +30,8 @@
 
 namespace pulp::signal {
 
-class TransientPhasePolicy {
+template <typename SampleType = float>
+class TransientPhasePolicyT {
 public:
     struct Config {
         int fft_size = 2048;
@@ -57,12 +58,12 @@ public:
         assert(config.fft_size >= 256 && (config.fft_size & (config.fft_size - 1)) == 0);
         config_ = config;
         num_bins_ = config.fft_size / 2 + 1;
-        prev_mag_.assign(static_cast<size_t>(num_bins_), 0.0f);
+        prev_mag_.assign(static_cast<size_t>(num_bins_), SampleType{0});
         reset();
     }
 
     void reset() {
-        std::fill(prev_mag_.begin(), prev_mag_.end(), 0.0f);
+        std::fill(prev_mag_.begin(), prev_mag_.end(), SampleType{0});
         std::memset(flux_history_, 0, sizeof(flux_history_));
         history_count_ = 0;
         history_pos_ = 0;
@@ -72,28 +73,28 @@ public:
     /// Analyze one frame group (all channels of the same time index) and
     /// return the phase-reset confidence: `strength` when a transient is
     /// detected, 0 otherwise.
-    float analyze(const std::complex<float>* const* frames, int channels, int num_bins) {
+    SampleType analyze(const std::complex<SampleType>* const* frames, int channels, int num_bins) {
         assert(num_bins == num_bins_);
         double flux = 0.0;
         double total = 0.0;
         for (int k = 0; k < num_bins_; ++k) {
-            std::complex<float> sum(0.0f, 0.0f);
+            std::complex<SampleType> sum(SampleType{0}, SampleType{0});
             for (int ch = 0; ch < channels; ++ch) sum += frames[ch][k];
-            const float mag = std::abs(sum);
-            const float d = mag - prev_mag_[static_cast<size_t>(k)];
-            if (d > 0.0f) flux += static_cast<double>(d);
+            const SampleType mag = std::abs(sum);
+            const SampleType d = mag - prev_mag_[static_cast<size_t>(k)];
+            if (d > SampleType{0}) flux += static_cast<double>(d);
             total += static_cast<double>(mag);
             prev_mag_[static_cast<size_t>(k)] = mag;
         }
 
-        flux_history_[history_pos_] = static_cast<float>(flux);
+        flux_history_[history_pos_] = static_cast<SampleType>(flux);
         history_pos_ = (history_pos_ + 1) % kHistory;
         if (history_count_ < kHistory) ++history_count_;
 
         if (history_count_ < 9 || total < 1e-9)
-            return 0.0f;
+            return SampleType{0};
 
-        float sorted[kHistory];
+        SampleType sorted[kHistory];
         std::copy(flux_history_, flux_history_ + history_count_, sorted);
         std::nth_element(sorted, sorted + history_count_ / 2, sorted + history_count_);
         const double median = static_cast<double>(sorted[history_count_ / 2]);
@@ -110,9 +111,9 @@ public:
         if (refractory_remaining_ > 0) --refractory_remaining_;
         if (transient && refractory_remaining_ == 0) {
             refractory_remaining_ = config_.refractory_frames;
-            return config_.strength;
+            return static_cast<SampleType>(config_.strength);
         }
-        return 0.0f;
+        return SampleType{0};
     }
 
 private:
@@ -120,11 +121,14 @@ private:
 
     Config config_;
     int num_bins_ = 0;
-    std::vector<float> prev_mag_;
-    float flux_history_[kHistory] = {};
+    std::vector<SampleType> prev_mag_;
+    SampleType flux_history_[kHistory] = {};
     int history_count_ = 0;
     int history_pos_ = 0;
     int refractory_remaining_ = 0;  // frames left in the post-reset suppression window
 };
+
+using TransientPhasePolicy = TransientPhasePolicyT<float>;
+using TransientPhasePolicy64 = TransientPhasePolicyT<double>;
 
 } // namespace pulp::signal

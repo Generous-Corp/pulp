@@ -71,6 +71,10 @@ PYBIND11_MODULE(pulp, m) {
         .def_readonly("manufacturer", &format::PluginDescriptor::manufacturer)
         .def_readonly("version", &format::PluginDescriptor::version)
         .def_readonly("bundle_id", &format::PluginDescriptor::bundle_id)
+        .def_property_readonly("supports_f64_audio",
+            [](const format::PluginDescriptor& d) {
+                return d.effective_capabilities().supports_f64_audio;
+            })
         .def_property_readonly("is_instrument", [](const format::PluginDescriptor& d) {
             return d.category == format::PluginCategory::Instrument;
         });
@@ -144,6 +148,34 @@ PYBIND11_MODULE(pulp, m) {
         }, py::arg("input"),
         "Process audio using NumPy arrays. Input shape: (channels, frames). Returns output array.")
 
+        // NumPy-friendly double-precision process method
+        .def("process_numpy_f64", [](format::HeadlessHost& host,
+                                      py::array_t<double> input) {
+            auto buf = input.request();
+            if (buf.ndim != 2) throw std::runtime_error("Input must be 2D (channels x frames)");
+
+            int channels = static_cast<int>(buf.shape[0]);
+            int frames = static_cast<int>(buf.shape[1]);
+
+            std::vector<const double*> in_ptrs(static_cast<size_t>(channels));
+            for (int ch = 0; ch < channels; ++ch) {
+                in_ptrs[static_cast<size_t>(ch)] = static_cast<double*>(buf.ptr) + ch * frames;
+            }
+            audio::BufferView<const double> in_view(in_ptrs.data(), channels, frames);
+
+            py::array_t<double> output({channels, frames});
+            auto out_buf = output.request();
+            std::vector<double*> out_ptrs(static_cast<size_t>(channels));
+            for (int ch = 0; ch < channels; ++ch) {
+                out_ptrs[static_cast<size_t>(ch)] = static_cast<double*>(out_buf.ptr) + ch * frames;
+            }
+            audio::BufferView<double> out_view(out_ptrs.data(), channels, frames);
+
+            host.process_f64(out_view, in_view);
+            return output;
+        }, py::arg("input"),
+        "Process double-precision audio using NumPy arrays. Input shape: (channels, frames). Returns float64 output array.")
+
         // Process with MIDI
         .def("process_numpy_midi", [](format::HeadlessHost& host,
                                        py::array_t<float> input,
@@ -173,5 +205,36 @@ PYBIND11_MODULE(pulp, m) {
 
             return py::make_tuple(output, midi_out);
         }, py::arg("input"), py::arg("midi_in"),
-        "Process audio with MIDI. Returns (output_array, midi_out).");
+        "Process audio with MIDI. Returns (output_array, midi_out).")
+
+        // Process double-precision audio with MIDI
+        .def("process_numpy_midi_f64", [](format::HeadlessHost& host,
+                                           py::array_t<double> input,
+                                           midi::MidiBuffer& midi_in) {
+            auto buf = input.request();
+            if (buf.ndim != 2) throw std::runtime_error("Input must be 2D (channels x frames)");
+
+            int channels = static_cast<int>(buf.shape[0]);
+            int frames = static_cast<int>(buf.shape[1]);
+
+            std::vector<const double*> in_ptrs(static_cast<size_t>(channels));
+            for (int ch = 0; ch < channels; ++ch) {
+                in_ptrs[static_cast<size_t>(ch)] = static_cast<double*>(buf.ptr) + ch * frames;
+            }
+            audio::BufferView<const double> in_view(in_ptrs.data(), channels, frames);
+
+            py::array_t<double> output({channels, frames});
+            auto out_buf = output.request();
+            std::vector<double*> out_ptrs(static_cast<size_t>(channels));
+            for (int ch = 0; ch < channels; ++ch) {
+                out_ptrs[static_cast<size_t>(ch)] = static_cast<double*>(out_buf.ptr) + ch * frames;
+            }
+            audio::BufferView<double> out_view(out_ptrs.data(), channels, frames);
+
+            midi::MidiBuffer midi_out;
+            host.process_f64(out_view, in_view, midi_in, midi_out);
+
+            return py::make_tuple(output, midi_out);
+        }, py::arg("input"), py::arg("midi_in"),
+        "Process double-precision audio with MIDI. Returns (float64_output_array, midi_out).");
 }

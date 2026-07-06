@@ -17,6 +17,10 @@ TEST_CASE("simd_float_lanes returns positive value", "[simd]") {
     REQUIRE(simd_float_lanes() >= 1);
 }
 
+TEST_CASE("simd_double_lanes returns positive value", "[simd][f64]") {
+    REQUIRE(simd_double_lanes() >= 1);
+}
+
 TEST_CASE("simd_add matches scalar add", "[simd]") {
     const size_t N = 1023;  // non-power-of-two to test tail handling
     std::vector<float> a(N), b(N), dst(N), expected(N);
@@ -224,6 +228,59 @@ TEST_CASE("simd operations handle count=1", "[simd]") {
     float a = 3.0f, b = 4.0f, dst = 0.0f;
     simd_add(&a, &b, &dst, 1);
     REQUIRE_THAT(dst, WithinAbs(7.0f, 1e-6));
+}
+
+TEST_CASE("simd double operations match scalar references", "[simd][f64]") {
+    constexpr size_t N = 1023;
+    std::vector<double> a(N), b(N), c(N), dst(N), expected(N);
+
+    for (size_t i = 0; i < N; ++i) {
+        const auto n = static_cast<double>(i);
+        a[i] = std::sin(n * 0.017) * 0.5;
+        b[i] = std::cos(n * 0.013) * 0.25;
+        c[i] = (static_cast<int>(i % 17) - 8) * 0.03125;
+    }
+
+    simd_add(a.data(), b.data(), dst.data(), N);
+    for (size_t i = 0; i < N; ++i)
+        REQUIRE_THAT(dst[i], WithinAbs(a[i] + b[i], 1e-14));
+
+    simd_mul(a.data(), b.data(), dst.data(), N);
+    for (size_t i = 0; i < N; ++i)
+        REQUIRE_THAT(dst[i], WithinAbs(a[i] * b[i], 1e-14));
+
+    simd_fma(a.data(), b.data(), c.data(), dst.data(), N);
+    for (size_t i = 0; i < N; ++i)
+        REQUIRE_THAT(dst[i], WithinAbs(a[i] * b[i] + c[i], 1e-14));
+
+    simd_scale(a.data(), -0.5, dst.data(), N);
+    for (size_t i = 0; i < N; ++i)
+        REQUIRE_THAT(dst[i], WithinAbs(a[i] * -0.5, 1e-14));
+
+    dst = c;
+    simd_add_scaled(a.data(), 0.25, dst.data(), N);
+    for (size_t i = 0; i < N; ++i)
+        REQUIRE_THAT(dst[i], WithinAbs(c[i] + a[i] * 0.25, 1e-14));
+
+    simd_abs(a.data(), dst.data(), N);
+    for (size_t i = 0; i < N; ++i)
+        REQUIRE_THAT(dst[i], WithinAbs(std::abs(a[i]), 1e-14));
+
+    simd_clamp(a.data(), -0.125, 0.125, dst.data(), N);
+    for (size_t i = 0; i < N; ++i)
+        REQUIRE_THAT(dst[i], WithinAbs(std::clamp(a[i], -0.125, 0.125), 1e-14));
+
+    simd_set(0.375, dst.data(), N);
+    for (double sample : dst)
+        REQUIRE_THAT(sample, WithinAbs(0.375, 1e-15));
+
+    const double sum = simd_reduce_add(a.data(), N);
+    const double expected_sum = std::accumulate(a.begin(), a.end(), 0.0);
+    REQUIRE_THAT(sum, WithinAbs(expected_sum, 1e-12));
+    REQUIRE_THAT(simd_reduce_min(a.data(), N),
+                 WithinAbs(*std::min_element(a.begin(), a.end()), 1e-15));
+    REQUIRE_THAT(simd_reduce_max(a.data(), N),
+                 WithinAbs(*std::max_element(a.begin(), a.end()), 1e-15));
 }
 
 // ── AlignedBuffer ───────────────────────────────────────────────────────

@@ -13,7 +13,7 @@
 ///
 /// These are offline operations (they allocate and process a whole buffer), so
 /// configure()/time_stretch()/pitch_shift() are control-thread work, not
-/// real-time-audio-safe. Input/output are mono float buffers. Header-only to
+/// real-time-audio-safe. Input/output are mono sample buffers. Header-only to
 /// match the header-only pulp::signal umbrella.
 
 #include <algorithm>
@@ -32,10 +32,11 @@ struct PhaseVocoderConfig {
     WindowFunction::Type window = WindowFunction::Type::hann;
 };
 
-class PhaseVocoder {
+template <typename SampleType = float>
+class PhaseVocoderT {
 public:
-    PhaseVocoder() { configure({}); }
-    explicit PhaseVocoder(const PhaseVocoderConfig& config) { configure(config); }
+    PhaseVocoderT() { configure({}); }
+    explicit PhaseVocoderT(const PhaseVocoderConfig& config) { configure(config); }
 
     void configure(const PhaseVocoderConfig& config) {
         config_ = config;
@@ -46,7 +47,8 @@ public:
         synthesis_hop_ =
             config.synthesis_hop > 0 ? config.synthesis_hop : fft_size_ / 4;
         if (synthesis_hop_ < 1) synthesis_hop_ = 1;
-        window_ = WindowFunction::generate(fft_size_, config.window, 0.0f);
+        window_ = WindowFunction::generate<SampleType>(
+            fft_size_, config.window, SampleType{0});
     }
 
     const PhaseVocoderConfig& config() const noexcept { return config_; }
@@ -55,8 +57,8 @@ public:
     /// round(input.size() * factor) frames long and keeps the same pitch.
     /// factor == 1 is ~identity. @p factor is clamped to a sane maximum
     /// (kMaxStretch) so an absurd value can't request a multi-gigabyte buffer.
-    std::vector<float> time_stretch(const std::vector<float>& input,
-                                    double factor) const {
+    std::vector<SampleType> time_stretch(const std::vector<SampleType>& input,
+                                         double factor) const {
         const int N = fft_size_;
         if (input.empty() || factor <= 0.0 || N <= 1) return input;
         // Guard against an absurd factor allocating gigabytes — a 100x stretch is
@@ -85,11 +87,11 @@ public:
         const std::size_t out_len =
             static_cast<std::size_t>(num_frames - 1) * Hs + N;
 
-        std::vector<float> out(out_len, 0.0f);
-        std::vector<float> norm(out_len, 0.0f);
+        std::vector<SampleType> out(out_len, SampleType{0});
+        std::vector<SampleType> norm(out_len, SampleType{0});
 
-        Fft fft(N);
-        std::vector<std::complex<float>> buf(N);
+        FftT<SampleType> fft(N);
+        std::vector<std::complex<SampleType>> buf(N);
         std::vector<double> prev_phase(N, 0.0);
         std::vector<double> sum_phase(N, 0.0);
 
@@ -98,7 +100,8 @@ public:
             const std::size_t out_pos = static_cast<std::size_t>(frame) * Hs;
 
             for (int k = 0; k < N; ++k)
-                buf[k] = std::complex<float>(input[in_pos + k] * window_[k], 0.0f);
+                buf[k] = std::complex<SampleType>(input[in_pos + k] * window_[k],
+                                                  SampleType{0});
 
             fft.forward(buf.data());
 
@@ -116,8 +119,8 @@ public:
                     sum_phase[k] += static_cast<double>(Hs) * true_freq;
                 }
                 prev_phase[k] = phase;
-                buf[k] = std::polar(static_cast<float>(mag),
-                                    static_cast<float>(sum_phase[k]));
+                buf[k] = std::polar(static_cast<SampleType>(mag),
+                                    static_cast<SampleType>(sum_phase[k]));
             }
 
             fft.inverse(buf.data());
@@ -129,13 +132,13 @@ public:
         }
 
         for (std::size_t i = 0; i < out_len; ++i)
-            if (norm[i] > 1e-8f) out[i] /= norm[i];
+            if (norm[i] > static_cast<SampleType>(1e-8)) out[i] /= norm[i];
 
         // Deliver exactly round(n_in * factor) frames: trim the overlap-add
         // tail, or zero-pad when the framed output falls a hop short (so callers
         // can size a destination buffer off round(n_in * factor)). resize(0) is
         // well-defined and yields the correct empty buffer for a tiny factor.
-        out.resize(target, 0.0f);
+        out.resize(target, SampleType{0});
         return out;
     }
 
@@ -143,13 +146,13 @@ public:
     /// duration. Returns a new buffer the same length as @p input. Inputs
     /// shorter than fft_size are returned unshifted (one analysis frame is the
     /// minimum the phase vocoder can process).
-    std::vector<float> pitch_shift(const std::vector<float>& input,
-                                   double semitones) const {
+    std::vector<SampleType> pitch_shift(const std::vector<SampleType>& input,
+                                        double semitones) const {
         if (input.empty() || semitones == 0.0) return input;
         const double ratio = std::pow(2.0, semitones / 12.0);
         // Stretch by ratio (same pitch, longer), then resample back to the
         // original length (speeds up by ratio), shifting pitch by ratio.
-        const std::vector<float> stretched = time_stretch(input, ratio);
+        const std::vector<SampleType> stretched = time_stretch(input, ratio);
         return resample_linear(stretched, input.size());
     }
 
@@ -173,9 +176,9 @@ private:
         return phase - kTwoPi() * std::round(phase / kTwoPi());
     }
 
-    static std::vector<float> resample_linear(const std::vector<float>& in,
-                                              std::size_t out_len) {
-        std::vector<float> out(out_len, 0.0f);
+    static std::vector<SampleType> resample_linear(const std::vector<SampleType>& in,
+                                                   std::size_t out_len) {
+        std::vector<SampleType> out(out_len, SampleType{0});
         if (in.empty() || out_len == 0) return out;
         if (in.size() == 1) {
             std::fill(out.begin(), out.end(), in[0]);
@@ -187,8 +190,8 @@ private:
             const double pos = static_cast<double>(i) * step;
             const std::size_t i0 = static_cast<std::size_t>(pos);
             const std::size_t i1 = std::min(i0 + 1, in.size() - 1);
-            const float frac = static_cast<float>(pos - static_cast<double>(i0));
-            out[i] = in[i0] * (1.0f - frac) + in[i1] * frac;
+            const SampleType frac = static_cast<SampleType>(pos - static_cast<double>(i0));
+            out[i] = in[i0] * (SampleType{1} - frac) + in[i1] * frac;
         }
         return out;
     }
@@ -196,7 +199,10 @@ private:
     PhaseVocoderConfig config_{};
     int fft_size_ = 2048;
     int synthesis_hop_ = 512;
-    std::vector<float> window_;
+    std::vector<SampleType> window_;
 };
+
+using PhaseVocoder = PhaseVocoderT<float>;
+using PhaseVocoder64 = PhaseVocoderT<double>;
 
 }  // namespace pulp::signal

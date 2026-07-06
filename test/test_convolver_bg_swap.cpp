@@ -68,6 +68,20 @@ TEST_CASE("ConvolverIrSwapper builds a non-null state for a valid IR",
     REQUIRE_FALSE(swapper.has_pending());
 }
 
+TEST_CASE("ConvolverIrSwapper64 builds double-precision IR state",
+          "[signal][convolver][bg-swap][f64]") {
+    ConvolverIrSwapper64 swapper;
+    const std::vector<double> ir = {1.0, 0.5, 0.25};
+
+    REQUIRE(swapper.stage_ir(ir.data(), ir.size(), 4));
+    auto state = swapper.try_consume();
+
+    REQUIRE(state != nullptr);
+    REQUIRE(state->block_size == 4);
+    REQUIRE(state->fft_size == 8);
+    REQUIRE(state->num_partitions == 1);
+}
+
 TEST_CASE("ConvolverIrSwapper rejects null/empty input",
           "[signal][convolver][bg-swap]") {
     ConvolverIrSwapper swapper;

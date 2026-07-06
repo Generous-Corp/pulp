@@ -14,6 +14,12 @@ genuinely good vs. still cooking. Headers:
 `core/signal/include/pulp/signal/{offline_stretch,stretch_preset}.hpp`. Dev CLI:
 `examples/offline-stretch/stretchcli`. Eval toolkit: `examples/offline-stretch/eval/`.
 
+Most DSP helpers now expose `*64` aliases when the underlying class is templated,
+including `OfflineStretch64` and `RealtimePitchTimeProcessor64`. The offline
+stretch public config remains control-plane double regardless of sample type;
+only the sample buffers and internal DSP storage widen for the f64 aliases.
+Keep quality comparisons explicit about which sample type is under test.
+
 ## Build + run
 
 ```bash

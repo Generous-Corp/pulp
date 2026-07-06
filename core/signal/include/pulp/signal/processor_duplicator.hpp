@@ -20,13 +20,13 @@ namespace pulp::signal {
 /// RT contract: `prepare()` resizes channel storage and is not audio-callback
 /// safe. `process()`, `process_channel()`, `for_each()`, and `reset()` allocate
 /// no memory after prepare when `P` follows the same contract.
-template<typename P>
-class ProcessorDuplicator {
+template<typename P, typename SampleType = float>
+class ProcessorDuplicatorT {
 public:
-    ProcessorDuplicator() = default;
+    ProcessorDuplicatorT() = default;
 
     /// Prepare for processing with the given number of channels
-    void prepare(int num_channels, float sample_rate) {
+    void prepare(int num_channels, SampleType sample_rate) {
         processors_.resize(static_cast<std::size_t>(std::max(0, num_channels)));
         for (auto& p : processors_) {
             p.set_sample_rate(sample_rate);
@@ -37,7 +37,7 @@ public:
     /// channels: array of channel pointers
     /// num_channels: number of channels
     /// num_samples: samples per channel
-    void process(float* const* channels, int num_channels, int num_samples) {
+    void process(SampleType* const* channels, int num_channels, int num_samples) {
         if (channels == nullptr || num_channels <= 0 || num_samples <= 0)
             return;
 
@@ -53,7 +53,7 @@ public:
     }
 
     /// Process a single channel
-    void process_channel(float* buffer, int channel, int num_samples) {
+    void process_channel(SampleType* buffer, int channel, int num_samples) {
         if (buffer == nullptr || num_samples <= 0 ||
             channel < 0 || channel >= static_cast<int>(processors_.size())) return;
 
@@ -84,5 +84,11 @@ public:
 private:
     std::vector<P> processors_;
 };
+
+template<typename P>
+using ProcessorDuplicator = ProcessorDuplicatorT<P, float>;
+
+template<typename P>
+using ProcessorDuplicator64 = ProcessorDuplicatorT<P, double>;
 
 }  // namespace pulp::signal

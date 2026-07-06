@@ -3,9 +3,11 @@
 // Convenience header — includes all pulp-signal DSP utilities
 #include <pulp/signal/smoothed_value.hpp>
 #include <pulp/signal/adsr.hpp>
+#include <pulp/signal/bias.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/svf.hpp>
@@ -21,10 +23,16 @@
 #include <pulp/signal/windowing.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/fir_filter.hpp>
+#include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/ballistics_filter.hpp>
 #include <pulp/signal/log_ramped_value.hpp>
+#include <pulp/signal/matrix.hpp>
 #include <pulp/signal/processor_chain.hpp>
+#include <pulp/signal/processor_duplicator.hpp>
 #include <pulp/signal/lookup_table.hpp>
+#include <pulp/signal/simd_buffer.hpp>
+#include <pulp/signal/soft_bypass.hpp>
+#include <pulp/signal/transition_mixer.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/filter_design.hpp>
@@ -40,6 +48,8 @@
 #include <pulp/signal/transient_phase_policy.hpp>
 #include <pulp/signal/freeze_hold.hpp>
 #include <pulp/signal/pitched_feedback_delay.hpp>
+#include <pulp/signal/resampler.hpp>
+#include <pulp/signal/sinc_resampler.hpp>
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
 #include <pulp/signal/convolver.hpp>

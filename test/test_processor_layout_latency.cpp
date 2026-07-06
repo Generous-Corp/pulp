@@ -16,6 +16,7 @@
 #include <pulp/midi/buffer.hpp>
 
 #include <atomic>
+#include <algorithm>
 #include <array>
 #include <thread>
 #include <type_traits>
@@ -41,6 +42,37 @@ public:
                  pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
                  const ProcessContext&) override {}
+};
+
+class CopyEffect : public StereoEffect {
+public:
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        const auto channels = std::min(output.num_channels(), input.num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            auto dst = output.channel(ch);
+            const auto src = input.channel(ch);
+            const auto frames = std::min(dst.size(), src.size());
+            for (std::size_t i = 0; i < frames; ++i) dst[i] = src[i];
+        }
+    }
+};
+
+class FrameCountingCopyEffect : public CopyEffect {
+public:
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const ProcessContext& context) override {
+        observed_frames = output.num_samples();
+        CopyEffect::process(output, input, midi_in, midi_out, context);
+    }
+
+    std::size_t observed_frames = 0;
 };
 
 // Effect with a sidechain bus: main + sidechain in, main out.
@@ -162,18 +194,8 @@ TEST_CASE("Processor::is_bus_layout_supported override can enforce a "
 
 // ── processBlock precision contract ───────────────────────────────────────
 
-TEST_CASE("Processor::process is declared with float-precision BufferView. "
-          "All four adapters today route only float buffers; double-"
-          "precision support requires a deliberate Processor overload.",
+TEST_CASE("Processor keeps the f32 process signature and exposes an additive f64 fallback",
           "[processor][precision]") {
-    // The single virtual `process()` on pulp::format::Processor is
-    // `BufferView<float>` only — there is
-    // no `BufferView<double>` overload. Adapters wire float input ↔
-    // output buffers in every format (VST3 channelBuffers32, AU
-    // float32 render block, CLAP audio_buffer_t.data32, AAX float
-    // pages). A regression that adds a second virtual or that
-    // changes the element type to a wider scalar would silently
-    // un-implement every adapter; this static_assert pins that contract.
     using ProcessSig = void (Processor::*)(
         pulp::audio::BufferView<float>&,
         const pulp::audio::BufferView<const float>&,
@@ -182,13 +204,26 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
         const ProcessContext&);
     static_assert(std::is_same_v<decltype(static_cast<ProcessSig>(&Processor::process)),
                                  ProcessSig>,
-                  "Processor::process() must remain a float-precision "
-                  "virtual unless a double overload is added deliberately; "
-                  "do not silently change the element type.");
+                  "Processor::process() must remain the f32 adapter-facing virtual.");
+    using ProcessF64Sig = void (Processor::*)(
+        pulp::audio::BufferView<double>&,
+        const pulp::audio::BufferView<const double>&,
+        pulp::midi::MidiBuffer&,
+        pulp::midi::MidiBuffer&,
+        const ProcessContext&);
+    static_assert(std::is_same_v<decltype(static_cast<ProcessF64Sig>(&Processor::process_f64)),
+                                 ProcessF64Sig>,
+                  "Processor::process_f64() must stay an additive f64 overload.");
+    using RichProcessF64Sig = void (Processor::*)(
+        ProcessBuffers64&,
+        pulp::midi::MidiBuffer&,
+        pulp::midi::MidiBuffer&,
+        const ProcessContext&);
+    static_assert(std::is_same_v<decltype(static_cast<RichProcessF64Sig>(&Processor::process_f64)),
+                                 RichProcessF64Sig>,
+                  "Processor::process_f64(ProcessBuffers64&) must stay additive.");
 
-    // Runtime smoke: invoke process() with a float buffer to prove
-    // the adapter-facing path is callable (not a compile-only check).
-    StereoEffect p;
+    CopyEffect p;
     float buf_in[2][8] = {};
     float buf_out[2][8] = {};
     const float* in_ptrs[2]  = {buf_in[0],  buf_in[1]};
@@ -198,7 +233,61 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     pulp::midi::MidiBuffer mi, mo;
     ProcessContext ctx; ctx.sample_rate = 48000.0; ctx.num_samples = 8;
     p.process(out_view, in_view, mi, mo, ctx);
-    SUCCEED("process() ran with float buffers");
+
+    PrepareContext prepare;
+    prepare.sample_rate = 48000.0;
+    prepare.max_buffer_size = 8;
+    prepare.input_channels = 2;
+    prepare.output_channels = 2;
+    p.prepare_f64_fallback_scratch(prepare);
+
+    double buf64_in[2][8] = {
+        {0.125, -0.25, 0.5, -0.75, 1.0, -1.25, 1.5, -1.75},
+        {2.0, -2.25, 2.5, -2.75, 3.0, -3.25, 3.5, -3.75},
+    };
+    double buf64_out[2][8] = {};
+    const double* in64_ptrs[2] = {buf64_in[0], buf64_in[1]};
+    double* out64_ptrs[2] = {buf64_out[0], buf64_out[1]};
+    pulp::audio::BufferView<const double> in64_view(in64_ptrs, 2, 8);
+    pulp::audio::BufferView<double> out64_view(out64_ptrs, 2, 8);
+    p.process_f64(out64_view, in64_view, mi, mo, ctx);
+
+    for (std::size_t ch = 0; ch < 2; ++ch) {
+        for (std::size_t i = 0; i < 8; ++i) {
+            REQUIRE(buf64_out[ch][i] ==
+                    static_cast<double>(static_cast<float>(buf64_in[ch][i])));
+        }
+    }
+}
+
+TEST_CASE("Processor f64 fallback slices prepared scratch to the active block",
+          "[processor][precision]") {
+    FrameCountingCopyEffect p;
+
+    PrepareContext prepare;
+    prepare.sample_rate = 48000.0;
+    prepare.max_buffer_size = 8;
+    prepare.input_channels = 2;
+    prepare.output_channels = 2;
+    p.prepare_f64_fallback_scratch(prepare);
+
+    double in_l[4] = {1.0, 2.0, 3.0, 4.0};
+    double in_r[4] = {};
+    double out_l[4] = {};
+    double out_r[4] = {};
+    const double* in_ptrs[2] = {in_l, in_r};
+    double* out_ptrs[2] = {out_l, out_r};
+    pulp::audio::BufferView<const double> in_view(in_ptrs, 2, 4);
+    pulp::audio::BufferView<double> out_view(out_ptrs, 2, 4);
+
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+    ctx.num_samples = 4;
+    p.process_f64(out_view, in_view, midi_in, midi_out, ctx);
+
+    REQUIRE(p.observed_frames == 4);
+    REQUIRE(out_l[0] == 1.0);
+    REQUIRE(out_l[3] == 4.0);
 }
 
 // ── Additive multi-bus process surface ───────────────────────────────────
@@ -400,6 +489,117 @@ TEST_CASE("Processor multi-bus overload projects to the legacy process callback"
     REQUIRE(processor.saw_sidechain);
     REQUIRE(out_l[0] == 3.0f);
     REQUIRE(processor.sidechain_input() == nullptr);
+}
+
+TEST_CASE("Processor rich f64 fallback preserves sidechain projection",
+          "[processor][precision][process-buffers]") {
+    ProjectingProcessor processor;
+
+    PrepareContext prepare;
+    prepare.sample_rate = 48000.0;
+    prepare.max_buffer_size = 8;
+    prepare.input_channels = 2;
+    prepare.output_channels = 2;
+    processor.prepare_f64_fallback_scratch(prepare);
+
+    double in_l[4] = {2.0, 0.0, 0.0, 0.0};
+    double in_r[4] = {};
+    double side_l[4] = {7.0, 0.0, 0.0, 0.0};
+    double side_r[4] = {};
+    double out_l[4] = {};
+    double out_r[4] = {};
+    const double* in_ptrs[2] = {in_l, in_r};
+    const double* side_ptrs[2] = {side_l, side_r};
+    double* out_ptrs[2] = {out_l, out_r};
+
+    std::array<ProcessBusBufferView<const double>, 2> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const double>(in_ptrs, 2, 4),
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, 2, true, true},
+            .buffer = pulp::audio::BufferView<const double>(side_ptrs, 2, 4),
+        },
+    }};
+    std::array<ProcessBusBufferView<double>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<double>(out_ptrs, 2, 4),
+        },
+    }};
+
+    ProcessBuffers64 buffers{
+        .inputs = ProcessBusBufferSet<const double>(inputs),
+        .outputs = ProcessBusBufferSet<double>(outputs),
+    };
+
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+    ctx.num_samples = 4;
+    static_cast<Processor&>(processor).process_f64(buffers, midi_in, midi_out, ctx);
+
+    REQUIRE(processor.simple_process_calls == 1);
+    REQUIRE(processor.observed_input_channels == 2);
+    REQUIRE(processor.observed_output_channels == 2);
+    REQUIRE(processor.saw_sidechain);
+    REQUIRE(out_l[0] == 3.0);
+    REQUIRE(processor.sidechain_input() == nullptr);
+}
+
+TEST_CASE("Processor rich f64 fallback silences every active output when scratch is too small",
+          "[processor][precision][process-buffers]") {
+    ProjectingProcessor processor;
+
+    PrepareContext prepare;
+    prepare.sample_rate = 48000.0;
+    prepare.max_buffer_size = 4;
+    prepare.input_channels = 2;
+    prepare.output_channels = 2;
+    processor.prepare_f64_fallback_scratch(prepare);
+
+    double in_l[4] = {};
+    double in_r[4] = {};
+    double main_l[4] = {1.0, 1.0, 1.0, 1.0};
+    double main_r[4] = {1.0, 1.0, 1.0, 1.0};
+    double aux_l[4] = {2.0, 2.0, 2.0, 2.0};
+    double aux_r[4] = {2.0, 2.0, 2.0, 2.0};
+    const double* in_ptrs[2] = {in_l, in_r};
+    double* main_ptrs[2] = {main_l, main_r};
+    double* aux_ptrs[2] = {aux_l, aux_r};
+
+    std::array<ProcessBusBufferView<const double>, 1> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const double>(in_ptrs, 2, 4),
+        },
+    }};
+    std::array<ProcessBusBufferView<double>, 2> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<double>(main_ptrs, 2, 4),
+        },
+        {
+            .info = {"Aux Out", 1, BusDirection::Output, BusRole::Aux, 2, true, true},
+            .buffer = pulp::audio::BufferView<double>(aux_ptrs, 2, 4),
+        },
+    }};
+
+    ProcessBuffers64 buffers{
+        .inputs = ProcessBusBufferSet<const double>(inputs),
+        .outputs = ProcessBusBufferSet<double>(outputs),
+    };
+
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+    ctx.num_samples = 4;
+    static_cast<Processor&>(processor).process_f64(buffers, midi_in, midi_out, ctx);
+
+    REQUIRE(processor.simple_process_calls == 0);
+    for (double sample : main_l) REQUIRE(sample == 0.0);
+    for (double sample : main_r) REQUIRE(sample == 0.0);
+    for (double sample : aux_l) REQUIRE(sample == 0.0);
+    for (double sample : aux_r) REQUIRE(sample == 0.0);
 }
 
 TEST_CASE("Processor multi-bus overload no-ops when no active main output exists",

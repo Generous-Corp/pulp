@@ -85,6 +85,14 @@ struct. It owns:
   skipping the synthesis when MIDI2 is present silently drops the
   note half from the UMP buffer. See Gotchas. `clap_activate()` reserves
   and capacity-limits this sidecar.
+- `native_f64_enabled` plus the `data64` scratch/pointer arrays — CLAP hosts
+  may provide double-precision audio buffers. If
+  `PluginDescriptor::effective_capabilities().supports_f64_audio` is false,
+  the adapter converts host `data64` to the normal f32 `process(...)` path and
+  converts f32 outputs back to `data64`. If the plugin opts in, every active
+  routed bus for the block must be f64 before the adapter calls
+  `Processor::process_f64(ProcessBuffers64&, ...)`; mixed f32/f64 blocks stay
+  on the compatibility path.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
 - `bridge` + `editor_host` + `editor_visible` — gated on

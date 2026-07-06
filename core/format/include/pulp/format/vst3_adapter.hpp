@@ -39,6 +39,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include <pluginterfaces/gui/iplugview.h>
 
@@ -123,6 +124,9 @@ public:
         Steinberg::Vst::SpeakerArrangement* inputs, Steinberg::int32 numIns,
         Steinberg::Vst::SpeakerArrangement* outputs, Steinberg::int32 numOuts) override;
 
+    Steinberg::tresult PLUGIN_API canProcessSampleSize(
+        Steinberg::int32 symbolicSampleSize) override;
+
     Steinberg::tresult PLUGIN_API setupProcessing(
         Steinberg::Vst::ProcessSetup& setup) override;
 
@@ -169,10 +173,16 @@ private:
     // Working buffers
     std::vector<float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
+    std::vector<const double*> input64_ptrs_;
+    std::vector<double*> output64_ptrs_;
+    std::vector<std::vector<float>> f64_input_scratch_;
+    std::vector<std::vector<float>> f64_output_scratch_;
     // Second input bus routed to Processor::set_sidechain(). Only input
     // bus 1 is consumed; additional buses are ignored because the
     // Processor API exposes a single sidechain slot.
     std::vector<float*> sidechain_ptrs_;
+    std::vector<const double*> sidechain64_ptrs_;
+    std::vector<std::vector<float>> f64_sidechain_scratch_;
     // Per-bus channel-pointer storage for secondary (aux) output buses,
     // indexed [aux_bus][channel]. aux_output_ptrs_[i] backs the BufferView for
     // the host output bus at index i+1, routed to the Processor's richer
@@ -183,11 +193,13 @@ private:
     // allocates nothing on the audio thread, and never silently drops a channel
     // the host negotiated.
     std::vector<std::vector<float*>> aux_output_ptrs_;
+    std::vector<std::vector<double*>> aux_output64_ptrs_;
     // Descriptor-declared channel count per secondary output bus (index i = host
     // output bus i+1), captured in setupProcessing(). Reported as the aux
     // ProcessBusBufferView's declared_channels so matches_declared_layout()
     // compares the routed count against the declared layout rather than itself.
     std::vector<int> declared_aux_channels_;
+    std::vector<std::vector<std::vector<float>>> f64_aux_output_scratch_;
 
     // Per-block MIDI buffers, reused across process() calls. Reserved +
     // realtime-capacity-limited in setupProcessing() so add()/add_sysex_copy()
@@ -295,6 +307,8 @@ private:
     int native_in_ = 0;
     int native_out_ = 0;
     bool silence_unsupported_active_ = false;
+    bool native_f64_enabled_ = false;
+    Steinberg::int32 selected_sample_size_ = Steinberg::Vst::kSample32;
 
     // Block size the processor's scratch buffers were prepared for in
     // setupProcessing() (setup.maxSamplesPerBlock). process() clamps an

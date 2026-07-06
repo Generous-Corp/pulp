@@ -327,3 +327,21 @@ TEST_CASE("Wavetable explicit band construction sorts by ascending ceiling",
     wt.set_frequency(8000.0f); // covered by 10-kHz band
     REQUIRE(wt.current_band() == 2);
 }
+
+TEST_CASE("Wavetable64 and WavetableBank64 play double samples",
+          "[signal][wavetable][f64]") {
+    auto wt = Wavetable64::make_sine(/*table_length=*/64, 48000.0);
+    wt.set_sample_rate(48000.0);
+    wt.set_frequency(440.0);
+    const double sample = wt.next();
+    REQUIRE(std::isfinite(sample));
+
+    std::vector<Wavetable64> tables;
+    tables.push_back(Wavetable64::make_sine(64, 48000.0));
+    tables.push_back(Wavetable64::make_triangle(2, 64, 48000.0));
+    WavetableBank64 bank(std::move(tables));
+    bank.set_sample_rate(48000.0);
+    bank.set_frequency(440.0);
+    bank.set_position(0.5);
+    REQUIRE(std::isfinite(bank.next()));
+}
