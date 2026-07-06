@@ -498,6 +498,31 @@ triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
 vanished-`-object` existence-filter + mass-drop guard in `run_coverage.sh` were
 real); only the runtime/timeout is accepted as best-effort.
 
+### `release-cli.yml` needs Rust; the VM golden does not have it
+
+The macOS build gate and `release-cli.yml`'s darwin leg can share the Tart VM
+golden (`pulp-build-runner`), but that golden is provisioned **only for the C++
+"Build and Test" lane** — Xcode, homebrew cmake/ninja/node, baked Skia, and
+**no Rust toolchain** (`manifests/pulp.macos.toml [brew]` has no rust/rustup).
+`build.yml` stays green on it because it never builds the Rust `build/pulp` CLI
+(`experimental/pulp-rs`, pulled into the CMake graph only when `PULP_ENABLE_GPU
+&& top-level` — which `release-cli`'s GPU-enabled configure trips). So
+**`release-cli` is the first VM workload that needs `cargo`**, and on a fresh
+golden its "Ensure a working Rust toolchain on PATH" step exhausts every probe
+(PATH `cargo`, `~/.cargo/bin`, `~/.rustup/toolchains/*`) and fails the darwin
+release leg — while the bare-metal studios stay green because they have rustup
+from operator setup. That step now **bootstraps rustup as a last resort**
+(`curl … | sh -s -- -y --profile minimal --default-toolchain stable
+--no-modify-path`, then front-loads `rustfmt`+`clippy` per
+`rust-toolchain.toml`), so the lane is self-sufficient on any runner; the pin is
+`stable`, so no reproducibility drift vs the studios. Before flipping
+`PULP_RELEASE_MACOS_RUNS_ON_JSON` to a VM label, either that fallback must be in
+place **or** the golden must bake rustup — otherwise the darwin publish leg
+fails and the whole release never publishes (the `release` job `needs` the full
+`build-cli` matrix). Steady-state fix is to bake rustup into the golden (tartci
+`manifests/pulp.macos.toml`); the workflow fallback stays as the portability
+belt for any un-baked runner.
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory
