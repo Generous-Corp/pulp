@@ -324,8 +324,19 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 
 - **`PluginViewHost` now mirrors `WindowHost` for native child views** —
   `plugin_view_host_ios.mm` supports `attach_native_child_view(...)`,
-  `set_native_child_view_bounds(...)`, and `detach_native_child_view(...)`
-  for `UIView` children embedded inside AUv3/plugin editors.
+  `set_native_child_view_bounds(...)`, `set_native_child_view_clip(...)`, and
+  `detach_native_child_view(...)` for `UIView` children embedded inside
+  AUv3/plugin editors.
+- **Native-child clipping uses a `CALayer` mask, and UIKit layers are already
+  top-left** — `set_native_child_view_clip(...)` (used by the `NativeViewHost`
+  widget so an embedded WebView/text-field/video layer clips to its scroll
+  ancestor) sets `child.layer.mask` to a `CALayer` sized to the visible sub-rect
+  expressed in the child's own `[0,0,w,h]` box. Unlike AppKit (where a
+  non-flipped `NSView` layer is bottom-left and the helper flips the Y), a
+  `UIView`'s layer is top-left origin, so the local clip maps **directly** with
+  no Y-flip — do not copy the mac flip math into the iOS helper. `has_clip=false`
+  removes the mask. Masking clips WITHOUT resizing the child, so a `WKWebView`
+  does not reflow when it scrolls past a viewport edge.
 - **Subview trees inherit `plugin_view_host()` recursively before
   `Processor::on_view_opened(...)` fires** — if a `View` creates a
   `WebViewPanel` or other native-backed child in a plugin editor, wire it

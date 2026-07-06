@@ -597,6 +597,7 @@ export interface IntrinsicElementMap {
     Col: ColProps;
     Panel: PanelProps;
     ScrollView: ScrollViewProps;
+    NativeView: ViewProps;
     Modal: ModalProps;
     Label: LabelProps;
     Button: ButtonProps;

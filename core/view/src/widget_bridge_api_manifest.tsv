@@ -80,6 +80,7 @@ createSpectrum	widget_factory	function	core/view/src/widget_bridge/factory_api.c
 createCombo	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createProgress	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createScrollView	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
+createNativeView	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createListBox	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 setListItems	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
 setListSelected	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
