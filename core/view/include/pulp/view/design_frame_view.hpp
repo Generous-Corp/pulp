@@ -163,13 +163,52 @@ struct DesignControlContext {
     std::string factory_id;
     std::string props;            ///< opaque (typically JSON); Pulp does not parse it
     std::string source_node_id;
-    float default_value = 0.5f;
+    float default_value = 0.5f;   ///< opening value. A DesignControl also receives
+                                  ///< this via set_control_value() right after build
+                                  ///< (that seed is authoritative), so a factory that
+                                  ///< reads default_value in its ctor need not — it
+                                  ///< will be seeded regardless.
 };
 
 // Builds a native overlay View for a Kind::custom element. Returns the View
 // (ownership moves to the DesignFrameView) or nullptr to render inert.
 using DesignControlFactory =
     std::function<std::unique_ptr<View>(const DesignControlContext&)>;
+
+// Opt-in value conduit for a custom-control overlay. A factory-built View MAY
+// also inherit DesignControl to join DesignFrameView's normalized-value channel
+// — exactly as the built-in kinds do, so a custom knob behaves like a knob to
+// the host: set_element_value() pushes host->view, element_value() reads back,
+// and user edits route through on_element_changed + host-param binding. A View
+// that does NOT inherit DesignControl is still built and rendered; it simply has
+// no value channel (element_value() stays -1, set_element_value() is a no-op),
+// which is the pre-conduit behavior. Retrieved via dynamic_cast, mirroring the
+// DropReceiver mixin idiom used elsewhere in core/view.
+class DesignControl {
+public:
+    virtual ~DesignControl() = default;
+    // Host -> view: adopt the normalized value (0..1). SILENT — implementations
+    // MUST NOT re-emit through on_control_changed (this is the host pushing a
+    // value in, not the user editing), matching the silent host->view push the
+    // other kinds do in DesignFrameView::set_element_value.
+    virtual void set_control_value(float value) = 0;
+    // View -> host: the control's current normalized value (0..1).
+    virtual float control_value() const = 0;
+    // Installed by DesignFrameView when the overlay is built. Implementations
+    // call it on a USER-driven value change so the edit funnels through the
+    // frame's single change path (on_element_changed, param_key host routing).
+    // Never call it from set_control_value.
+    std::function<void(float)> on_control_changed;
+    // Optional undo / touch-automation bracketing for a CONTINUOUS control (a
+    // knob/fader): call on_gesture_begin at the start of a drag and on_gesture_end
+    // at its end so the host groups one undo step and latches automation write —
+    // exactly what the built-in knob does. A momentary/discrete control may leave
+    // these unset. DesignFrameView wires them to its own gesture callbacks
+    // (→ host begin_gesture / end_gesture). Both are installed AFTER the initial
+    // seed, so they never fire during construction.
+    std::function<void()> on_gesture_begin;
+    std::function<void()> on_gesture_end;
+};
 
 // Register / query a custom-control factory by id. UI-THREAD-ONLY: registration
 // happens at host startup and lookup at overlay build, both on the UI thread, so
