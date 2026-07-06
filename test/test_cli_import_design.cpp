@@ -1207,3 +1207,57 @@ TEST_CASE("pulp design gallery --help prints usage", "[cli][design-gallery][shel
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design gallery") != std::string::npos);
 }
+
+// ── `pulp design handoff` — project handoff-contract parser CLI ───────────────
+
+TEST_CASE("pulp design handoff parses a project folder to JSON", "[cli][design-handoff][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-handoff");
+    // A project with a handoff README and two _ds/<slug>/ systems.
+    fs::create_directories(dir / "_ds" / "ink-signal");
+    fs::create_directories(dir / "_ds" / "aurora");
+    std::ofstream(dir / "HANDOFF.md")
+        << "# App Handoff\n\n**Fidelity:** hi-fi\nBound to: ink-signal\n\n"
+        << "## Screens\n\n### Home (screens/home.html)\n- Background: #101216\n\n"
+        << "## Tokens\n\n| Token | Value |\n|-------|-------|\n| color.bg | #101216 |\n";
+
+    auto r = run_pulp({"design", "handoff", dir.string(), "--json"});
+    REQUIRE(r.exit_code == 0);
+    auto v = choc::json::parse(r.stdout_output);
+    CHECK(v["fidelity"].getString() == "hifi");
+    // README declares ink-signal; the _ds/ folder adds aurora -> merged, sorted.
+    REQUIRE(v["design_systems"].size() == 2);
+    CHECK(v["design_systems"][0].getString() == "aurora");
+    CHECK(v["design_systems"][1].getString() == "ink-signal");
+    REQUIRE(v["screens"].size() == 1);
+    CHECK(v["screens"][0]["path"].getString() == "screens/home.html");
+    CHECK(v["tokens"].size() == 1);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design handoff summary flags an undeclared fidelity", "[cli][design-handoff][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-handoff-bare");
+    std::ofstream(dir / "README.md") << "# Bare\n\nNo fidelity here.\n";
+    auto r = run_pulp({"design", "handoff", dir.string()});
+    REQUIRE(r.exit_code == 0);
+    CHECK(r.stdout_output.find("fidelity: unspecified") != std::string::npos);
+    CHECK(r.stdout_output.find("confirm hi-fi vs lo-fi") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design handoff errors on a folder with no README", "[cli][design-handoff][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-handoff-empty");
+    auto r = run_pulp({"design", "handoff", dir.string()});
+    REQUIRE(r.exit_code == 1);
+    CHECK(r.stderr_output.find("no handoff README") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design handoff --help prints usage", "[cli][design-handoff][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "handoff", "--help"});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp design handoff") != std::string::npos);
+}

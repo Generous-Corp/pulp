@@ -5,6 +5,7 @@
 
 #include <pulp/design/design_adherence.hpp>
 #include <pulp/design/design_gallery.hpp>
+#include <pulp/design/design_handoff.hpp>
 #include <pulp/design/design_ledger.hpp>
 #include <pulp/design/design_manifest.hpp>
 #include <pulp/platform/child_process.hpp>
@@ -13,6 +14,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -447,7 +449,11 @@ int run_record(const std::vector<std::string>& rest) {
             try {
                 auto probe = choc::json::parse(raw);
                 valid = probe.isObject();
-            } catch (const std::exception&) {
+            } catch (...) {
+                // Catch-all, not catch(std::exception&): this CLI co-links Yoga
+                // (-fno-rtti), which shadows std::exception's typeinfo so choc's
+                // ParseError slips a typed catch. A bare catch keeps the corrupt-
+                // ledger guard total instead of letting a parse throw escape.
                 valid = false;
             }
             if (!valid) {
@@ -759,6 +765,103 @@ int run_gallery(const std::vector<std::string>& rest) {
     return failed > 0 ? 1 : 0;
 }
 
+void print_handoff_usage() {
+    std::cout <<
+        "Usage: pulp design handoff <project-dir|README.md> [--json]\n"
+        "\n"
+        "  Parse a design-tool project's handoff contract into machine-stated\n"
+        "  intent: the explicit hi-fi vs lo-fi fidelity declaration, bound design\n"
+        "  systems, per-screen exact-value specs, the token table, and interaction\n"
+        "  notes. Given a directory, reads its handoff README and folds in the\n"
+        "  `_ds/<slug>/` design-system directories.\n"
+        "\n"
+        "  --json              Print the contract JSON instead of a summary.\n";
+}
+
+// The handoff README at a project root, trying the common names in order.
+fs::path find_handoff_readme(const fs::path& dir) {
+    for (const char* name : {"HANDOFF.md", "handoff.md", "README.md", "readme.md"}) {
+        std::error_code ec;
+        fs::path p = dir / name;
+        if (fs::is_regular_file(p, ec)) return p;
+    }
+    return {};
+}
+
+// The `_ds/<slug>/` design-system directory names under a project root.
+std::vector<std::string> design_system_slugs(const fs::path& dir) {
+    std::vector<std::string> slugs;
+    std::error_code ec;
+    fs::path ds = dir / "_ds";
+    if (!fs::is_directory(ds, ec)) return slugs;
+    for (auto it = fs::directory_iterator(ds, ec); !ec && it != fs::directory_iterator();
+         it.increment(ec)) {
+        std::error_code sec;
+        if (it->is_directory(sec) && !sec)  // per-entry error skips that entry, not the walk
+            slugs.push_back(it->path().filename().string());
+    }
+    std::sort(slugs.begin(), slugs.end());
+    return slugs;
+}
+
+int run_handoff(const std::vector<std::string>& rest) {
+    fs::path input;
+    bool json_out = false;
+    for (const auto& a : rest) {
+        if (a == "--help" || a == "-h") { print_handoff_usage(); return 0; }
+        else if (a == "--json") json_out = true;
+        else if (!a.empty() && a[0] == '-') {
+            std::cerr << "pulp design handoff: unknown option '" << a << "'\n";
+            return 2;
+        } else if (input.empty()) {
+            input = a;
+        } else {
+            std::cerr << "pulp design handoff: unexpected extra argument '" << a << "'\n";
+            return 2;
+        }
+    }
+    if (input.empty()) { print_handoff_usage(); return 2; }
+
+    std::error_code ec;
+    fs::path readme = input;
+    std::vector<std::string> slugs;
+    if (fs::is_directory(input, ec)) {
+        readme = find_handoff_readme(input);
+        if (readme.empty()) {
+            std::cerr << "Error: no handoff README (HANDOFF.md / README.md) in " << input << "\n";
+            return 1;
+        }
+        slugs = design_system_slugs(input);
+    } else if (!fs::is_regular_file(input, ec)) {
+        std::cerr << "Error: " << input << " is not a file or directory\n";
+        return 1;
+    }
+
+    auto text = read_text_file(readme);
+    if (text.empty()) { std::cerr << "Error: cannot read " << readme << "\n"; return 1; }
+
+    auto contract = pulp::design::parse_handoff_readme(text, readme.generic_string());
+    pulp::design::merge_design_systems(contract, slugs);
+
+    if (json_out) {
+        std::cout << pulp::design::handoff_contract_json(contract) << "\n";
+        return 0;
+    }
+
+    std::cout << "Handoff: " << readme.filename().string() << "\n";
+    std::cout << "  fidelity: " << pulp::design::fidelity_intent_name(contract.fidelity) << "\n";
+    std::cout << "  design systems: ";
+    if (contract.design_systems.empty()) std::cout << "(none declared)";
+    for (size_t i = 0; i < contract.design_systems.size(); ++i)
+        std::cout << (i ? ", " : "") << contract.design_systems[i];
+    std::cout << "\n  screens: " << contract.screens.size()
+              << ", tokens: " << contract.tokens.size()
+              << ", interactions: " << contract.interactions.size() << "\n";
+    if (contract.fidelity == pulp::design::FidelityIntent::unspecified)
+        std::cout << "  note: no fidelity declared — confirm hi-fi vs lo-fi before importing.\n";
+    return 0;
+}
+
 } // namespace
 
 int cmd_design(const std::vector<std::string>& args) {
@@ -783,6 +886,9 @@ int cmd_design(const std::vector<std::string>& args) {
         }
         if (args[0] == "gallery") {
             return run_gallery(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "handoff") {
+            return run_handoff(std::vector<std::string>(args.begin() + 1, args.end()));
         }
     }
 

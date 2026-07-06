@@ -880,6 +880,16 @@ commands:
           - name: --json
             kind: flag
             description: Print the manifest JSON to stdout and skip rendering.
+      - name: handoff
+        summary: Parse a design-tool project's handoff contract into machine-stated intent — the explicit hi-fi vs lo-fi fidelity declaration, bound design systems, per-screen exact-value specs, the token table, and interaction notes. Given a directory, reads its handoff README and folds in the _ds/<slug>/ design-system directories.
+        args:
+          - name: path
+            kind: positional
+            required: true
+            description: A project directory or a handoff README (Markdown) file.
+          - name: --json
+            kind: flag
+            description: Print the parsed contract JSON instead of a human summary.
     docs: reference/cli.md#design
 
   - name: design-debug
