@@ -30,6 +30,7 @@
 #include <pulp/format/reload/reload_abi.hpp>
 #include <pulp/format/reload/reload_library.hpp>
 #include <pulp/format/reload/swap_pack.hpp>
+#include <pulp/format/reload/revocation.hpp>
 #include <pulp/state/store.hpp>
 
 #include <chrono>
@@ -107,6 +108,12 @@ struct SwapPackTrust {
     std::filesystem::path pack_root;               ///< dir the manifest paths are relative to.
     SwapPackManifest manifest;                     ///< parsed manifest (incl. signer + signature).
     std::vector<std::uint8_t> trusted_public_key;  ///< the pinned Ed25519 key the signer must be.
+    /// The revocation list to enforce, already authenticated by the host against
+    /// the trusted revocation key (the host owns loading it, the monotonic epoch
+    /// floor, and offline-last-known). nullptr = no revocation info this load:
+    /// signature + integrity still gate, a not-yet-known revocation simply cannot
+    /// block yet — never fail-open on authenticity, only on revocation freshness.
+    const SignedRevocationList* srl = nullptr;
 };
 
 /// Verify @p trust on the RAW bytes on disk and confirm @p library_path is a
@@ -133,22 +140,28 @@ verify_pack_before_load(const SwapPackTrust& trust, const std::string& library_p
                 v.detail};
     }
 
-    // Hook for the signed-revocation-list check: once the pack is authenticated,
-    // reject a signer or artifact that has since been revoked (a leaked signing
-    // key must be killable without re-shipping every consumer). The revocation
-    // list reader (reload/revocation.hpp) is not present yet, so this is a
-    // deliberate not-revoked stub structured so wiring it is a one-liner here:
-    //        if (auto rev = revocation::check_revoked(trust.manifest, srl); rev.revoked)
-    //            return ReloadOutcome{ReloadOutcome::Status::RejectedRevoked, rev.detail};
-    // The stub is fail-OPEN on revocation ONLY: the signature and integrity gates
-    // above are already fail-closed, so a not-revoked default can never admit an
-    // unsigned or tampered pack — it only defers killing an already-trusted one.
-    // Signed policy fields (pack version, allowed kind) will be checked at this
-    // same point once they are bound inside the signed manifest.
-    const bool revoked = false;  // stub: revocation list reader not present yet.
-    if (revoked) {
-        return ReloadOutcome{ReloadOutcome::Status::RejectedRevoked,
-                             "swap-pack signer/artifact is revoked"};
+    // Once the pack is authenticated, reject a signer or artifact that has since
+    // been revoked (a leaked signing key must be killable without re-shipping every
+    // consumer). The host authenticates the revocation list against the trusted
+    // revocation key and enforces its monotonic epoch floor before handing it in;
+    // here we only query it. Fail-OPEN on revocation ONLY: with no list this load
+    // still passes the fail-closed signature + integrity gates above, so a
+    // not-yet-known revocation defers killing an already-trusted pack — it can
+    // never admit an unsigned or tampered one. The signer fingerprint is the
+    // lowercase-hex Ed25519 public key; the artifact is any signed file's hash (an
+    // empty query dimension is skipped by is_revoked).
+    if (trust.srl != nullptr) {
+        const std::string signer_fpr = srl_hex_encode(trust.manifest.signer_public_key);
+        if (is_revoked(*trust.srl, signer_fpr, /*artifact_hash=*/"")) {
+            return ReloadOutcome{ReloadOutcome::Status::RejectedRevoked,
+                                 "swap-pack signer key is revoked"};
+        }
+        for (const auto& f : trust.manifest.files) {
+            if (is_revoked(*trust.srl, /*signer_key_fpr=*/"", f.sha256_hex)) {
+                return ReloadOutcome{ReloadOutcome::Status::RejectedRevoked,
+                                     "swap-pack artifact is revoked"};
+            }
+        }
     }
 
     // 3. Bind verification to the load: the exact file we are about to dlopen must

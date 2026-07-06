@@ -385,7 +385,7 @@ StagedPack stage_pack(const std::string& tag, const runtime::Ed25519KeyPair& sig
 }  // namespace
 
 TEST_CASE("verify-before-load: a trusted signed pack loads (ctor runs) and gates normally",
-          "[reload][transaction][trust][c1]") {
+          "[reload][transaction][trust]") {
     auto kp = runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
     auto pack = stage_pack("trusted", *kp, kp->public_key, /*tamper_hash=*/false);
@@ -410,7 +410,7 @@ TEST_CASE("verify-before-load: a trusted signed pack loads (ctor runs) and gates
 }
 
 TEST_CASE("verify-before-load: an ill-signed pack is rejected BEFORE any load (ctor never runs)",
-          "[reload][transaction][trust][c1]") {
+          "[reload][transaction][trust]") {
     auto kp = runtime::ed25519_keypair_generate();
     auto attacker = runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
@@ -436,7 +436,7 @@ TEST_CASE("verify-before-load: an ill-signed pack is rejected BEFORE any load (c
 }
 
 TEST_CASE("verify-before-load: a tampered pack file is rejected BEFORE any load (ctor never runs)",
-          "[reload][transaction][trust][c1]") {
+          "[reload][transaction][trust]") {
     auto kp = runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
     // Validly signed manifest, but the declared file hash does not match the bytes.
@@ -458,7 +458,7 @@ TEST_CASE("verify-before-load: a tampered pack file is rejected BEFORE any load 
 }
 
 TEST_CASE("verify-before-load: loading a file outside the verified pack is rejected (not a member)",
-          "[reload][transaction][trust][c1]") {
+          "[reload][transaction][trust]") {
     auto kp = runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
     auto pack = stage_pack("member", *kp, kp->public_key, /*tamper_hash=*/false);
@@ -476,7 +476,7 @@ TEST_CASE("verify-before-load: loading a file outside the verified pack is rejec
 }
 
 TEST_CASE("verify-before-load: opting into trust with an unsigned pack fails closed",
-          "[reload][transaction][trust][c1]") {
+          "[reload][transaction][trust]") {
     // A pack with no signer/signature must NOT be accepted just because trust was
     // requested — verification is fail-closed on the signature axis.
     namespace fs = std::filesystem;
@@ -509,6 +509,86 @@ TEST_CASE("verify-before-load: opting into trust with an unsigned pack fails clo
     REQUIRE_FALSE(fs::exists(marker));  // never loaded
 
     fs::remove_all(root);
+}
+
+TEST_CASE("verify-before-load: a revoked signer key is rejected before load (ctor never runs)",
+          "[reload][transaction][trust][revocation]") {
+    auto kp = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    auto pack = stage_pack("revoked-signer", *kp, kp->public_key, /*tamper_hash=*/false);
+
+    // The host would authenticate this list against the trusted revocation key and
+    // enforce its epoch floor; here we only need it to name the pack's signer.
+    SignedRevocationList srl;
+    srl.epoch = 1;
+    srl.revoked_signer_key_fprs = {srl_hex_encode(kp->public_key)};
+    pack.trust.srl = &srl;
+
+    const auto marker = std::filesystem::temp_directory_path() /
+                        ("pulp-marker-revoked-" + unique_suffix());
+    std::filesystem::remove(marker);
+    set_env("PULP_RELOAD_CTOR_MARKER", marker.string());
+
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(pack.lib.string(), host, &pack.trust);
+
+    REQUIRE(std::holds_alternative<ReloadOutcome>(gated));
+    REQUIRE(std::get<ReloadOutcome>(gated).status == ReloadOutcome::Status::RejectedRevoked);
+    REQUIRE_FALSE(std::filesystem::exists(marker));  // signature was valid, but revoked → never loaded
+    std::filesystem::remove_all(pack.root);
+}
+
+TEST_CASE("verify-before-load: a revoked artifact hash is rejected before load",
+          "[reload][transaction][trust][revocation]") {
+    auto kp = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    auto pack = stage_pack("revoked-artifact", *kp, kp->public_key, /*tamper_hash=*/false);
+
+    SignedRevocationList srl;
+    srl.epoch = 1;
+    srl.revoked_artifact_hashes = {pack.trust.manifest.files.front().sha256_hex};
+    pack.trust.srl = &srl;
+
+    const auto marker = std::filesystem::temp_directory_path() /
+                        ("pulp-marker-revoked-art-" + unique_suffix());
+    std::filesystem::remove(marker);
+    set_env("PULP_RELOAD_CTOR_MARKER", marker.string());
+
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(pack.lib.string(), host, &pack.trust);
+
+    REQUIRE(std::holds_alternative<ReloadOutcome>(gated));
+    REQUIRE(std::get<ReloadOutcome>(gated).status == ReloadOutcome::Status::RejectedRevoked);
+    REQUIRE_FALSE(std::filesystem::exists(marker));
+    std::filesystem::remove_all(pack.root);
+}
+
+TEST_CASE("verify-before-load: a revocation list that does not name this pack lets it load",
+          "[reload][transaction][trust][revocation]") {
+    auto kp = runtime::ed25519_keypair_generate();
+    auto other = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    REQUIRE(other.has_value());
+    auto pack = stage_pack("revoked-other", *kp, kp->public_key, /*tamper_hash=*/false);
+
+    SignedRevocationList srl;
+    srl.epoch = 1;
+    srl.revoked_signer_key_fprs = {srl_hex_encode(other->public_key)};  // a different signer
+    srl.revoked_artifact_hashes = {runtime::sha256_hex(std::string_view("some-other-build"))};
+    pack.trust.srl = &srl;
+
+    const auto marker = std::filesystem::temp_directory_path() /
+                        ("pulp-marker-revoked-none-" + unique_suffix());
+    std::filesystem::remove(marker);
+    set_env("PULP_RELOAD_CTOR_MARKER", marker.string());
+
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(pack.lib.string(), host, &pack.trust);
+
+    REQUIRE(std::holds_alternative<GatedImage>(gated));   // not named → loads
+    REQUIRE(std::filesystem::exists(marker));
+    std::filesystem::remove(marker);
+    std::filesystem::remove_all(pack.root);
 }
 #endif  // RELOAD_LOGIC_CTOR_MARKER
 
