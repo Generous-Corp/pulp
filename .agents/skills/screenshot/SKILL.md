@@ -188,3 +188,35 @@ session only).
   content. The design-import screenshot-parity test asserts
   `REQUIRE_FALSE(passes_content_floor())` on a stable flat capture to prove the
   oracle actually rejects empties.
+
+## Vision probe: prove image input works before reading a screenshot into context
+
+A screenshot is only useful for review if the model can actually SEE it. Some
+models/harnesses silently drop image input — the render succeeds, the bytes are
+handed over, and the model then hallucinates a description of a picture it never
+received. Before you read ANY capture into context for a visual judgment, run a
+one-shot **vision probe**: hand the model a tiny, known committed PNG (e.g. one of
+the small rendered fixtures under `test/fixtures/import-fidelity/assets/`, whose
+content you have confirmed) and ask it to return exactly `VISION_OK` or
+`VISION_UNSUPPORTED` based on a describable feature of that image — not "did an
+image arrive" but "what does the shape look like".
+
+- On `VISION_OK`: proceed to read real captures for visual review.
+- On `VISION_UNSUPPORTED` (or any answer that does not match the known image):
+  do NOT read screenshots into context and do NOT describe them. Save the
+  captures to disk, report only their PATHS, and disclose explicitly: "visual
+  review skipped — image input unavailable in this model/harness." Non-visual
+  checks (logs, `passes_content_floor` on the raw bytes, `pulp design
+  lint-adherence`) still run and still gate.
+
+This degrades honestly across models instead of emitting confident fiction about
+an unseen image.
+
+## Verdict contract: one review artifact per pass, `done` or `needs_work`
+
+When a verification pass reviews a render (see the read-only verifier in the
+`import-design` skill), its final output is a verdict, never prose: exactly
+`done`, or `needs_work: <root cause>` naming the constraint/token/log defect —
+not the pixel symptom. A "looks good" with no verdict is a failure mode; so is a
+reviewer that edits while reviewing. Keep review read-only and let the main agent
+apply fixes, then re-run the verifier.
