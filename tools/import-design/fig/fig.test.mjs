@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 
 import { ByteReader, readSchema, makeDecoder } from './kiwi.mjs';
 import { unpackFig, isZip } from './container.mjs';
-import { buildScene, outline, findFrame, materializeFrame, countFramesByName } from './scene.mjs';
+import { buildScene, outline, findFrame, materializeFrame, countFramesByName, framesByName, nodesByName } from './scene.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(here, '../../../test/fixtures/imports/fig/synthetic.fig');
@@ -73,6 +73,87 @@ test('findFrame resolves by name and by guid', () => {
   assert.equal(findFrame(scene, '0:2').name, 'Plugin UI');
   assert.equal(findFrame(scene, 'plugin ui').name, 'Plugin UI', 'case-insensitive');
   assert.equal(findFrame(scene, 'nope'), null);
+});
+
+// A scene with the same top-level frame name on two pages — the exact shape that
+// makes a bare --frame <name> ambiguous in a large community file.
+function twoPageDuplicateScene() {
+  const frame = (local, name, parentLocal) => ({
+    guid: { sessionID: 0, localID: local }, type: 'FRAME', name,
+    parentIndex: { guid: { sessionID: 0, localID: parentLocal }, position: 'a' },
+    size: { x: 10, y: 10 },
+  });
+  return buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page One' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'CANVAS', name: 'Page Two' },
+    frame(3, 'Panel', 1),   // Page One / Panel
+    frame(4, 'Panel', 2),   // Page Two / Panel  (same name, different page)
+    frame(5, 'Solo', 1),    // Page One / Solo   (unique)
+  ]});
+}
+
+test('framesByName reports every match with its page and guid', () => {
+  const scene = twoPageDuplicateScene();
+  const matches = framesByName(scene, 'Panel');
+  assert.equal(matches.length, 2);
+  assert.deepEqual(matches.map((m) => m.page).sort(), ['Page One', 'Page Two']);
+  assert.equal(countFramesByName(scene, 'Panel'), 2);        // delegates to framesByName
+  assert.equal(countFramesByName(scene, 'Solo'), 1);
+  // A page restriction narrows the match set.
+  const onPageTwo = framesByName(scene, 'Panel', 'Page Two');
+  assert.equal(onPageTwo.length, 1);
+  assert.equal(onPageTwo[0].page, 'Page Two');
+});
+
+test('findFrame restricts a name lookup to the requested page', () => {
+  const scene = twoPageDuplicateScene();
+  const onPageOne = findFrame(scene, 'Panel', 'Page One');
+  const onPageTwo = findFrame(scene, 'Panel', 'Page Two');
+  assert.ok(onPageOne && onPageTwo);
+  // Distinct frames on distinct pages — page scoping actually selects.
+  assert.equal(onPageOne.guid.localID, 3);
+  assert.equal(onPageTwo.guid.localID, 4);
+  // A name absent from the requested page is not found, even if it exists elsewhere.
+  assert.equal(findFrame(scene, 'Solo', 'Page Two'), null);
+  // A guid is global; a page hint does not suppress it.
+  assert.equal(findFrame(scene, '0:4', 'Page One').guid.localID, 4);
+});
+
+test('a colon in a frame name is not mistaken for a guid', () => {
+  // Two top-level frames literally named "16:9" — a name a substring `:` test
+  // would wrongly treat as a guid, skipping the ambiguity guard. No node has the
+  // guid "16:9", so guid-by-membership correctly classifies it as a name.
+  const frame = (local, name, parentLocal) => ({
+    guid: { sessionID: 0, localID: local }, type: 'FRAME', name,
+    parentIndex: { guid: { sessionID: 0, localID: parentLocal }, position: 'a' },
+    size: { x: 10, y: 10 },
+  });
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page One' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'CANVAS', name: 'Page Two' },
+    frame(3, '16:9', 1),
+    frame(4, '16:9', 2),
+  ]});
+  assert.equal(scene.byGuid.has('16:9'), false, 'the name is not a guid key');
+  assert.equal(framesByName(scene, '16:9').length, 2, 'both same-named frames are seen');
+});
+
+test('nodesByName finds same-named nested nodes for the fallback guard', () => {
+  // Two nodes named "Button" nested under different top-level frames, with no
+  // top-level "Button" — the case where findFrame falls back to a nested match.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Card A',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 10, y: 10 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Card B',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'b' }, size: { x: 10, y: 10 } },
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Button',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 5, y: 5 } },
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Button',
+      parentIndex: { guid: { sessionID: 0, localID: 3 }, position: 'a' }, size: { x: 5, y: 5 } },
+  ]});
+  assert.equal(framesByName(scene, 'Button').length, 0, 'no top-level Button');
+  assert.equal(nodesByName(scene, 'Button').length, 2, 'two nested Buttons caught');
 });
 
 test('materializeFrame builds a valid figma-plugin envelope', () => {

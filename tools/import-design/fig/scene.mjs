@@ -58,15 +58,29 @@ function countDescendants(scene, node, seen) {
 
 /** Count top-level frames (across all pages) whose name matches, for ambiguity. */
 export function countFramesByName(scene, name) {
-  if (!name) return 0;
+  return framesByName(scene, name).length;
+}
+
+/**
+ * Every top-level frame whose name matches (case-insensitive), each tagged with
+ * its page name and guid. Optionally restricted to a single page. This is what
+ * lets the caller list candidates when a name is ambiguous, and the basis for
+ * page-scoped lookup.
+ */
+export function framesByName(scene, name, pageName) {
+  if (!name) return [];
   const wanted = name.toLowerCase();
-  let n = 0;
+  const wantedPage = pageName ? pageName.toLowerCase() : null;
+  const out = [];
   for (const page of scene.pages) {
+    if (wantedPage !== null && (page.name || '').toLowerCase() !== wantedPage) continue;
     for (const f of scene.childrenOf.get(guidKey(page.guid)) || []) {
-      if ((f.name || '').toLowerCase() === wanted) n += 1;
+      if ((f.name || '').toLowerCase() === wanted) {
+        out.push({ frame: f, page: page.name || '', guid: guidKey(f.guid) });
+      }
     }
   }
-  return n;
+  return out;
 }
 
 /**
@@ -99,20 +113,45 @@ export function outline(scene, meta) {
   };
 }
 
-/** Locate a frame by exact guid, else exact (case-insensitive) name. */
-export function findFrame(scene, selector) {
+/**
+ * Every node at any depth whose name matches (case-insensitive), each tagged
+ * with its guid. This backs the ambiguity guard for the `findFrame` fallback,
+ * which resolves a name to a nested node when no top-level frame matches — so a
+ * name shared by several nested nodes is caught rather than silently resolved.
+ */
+export function nodesByName(scene, name) {
+  if (!name) return [];
+  const wanted = name.toLowerCase();
+  const out = [];
+  for (const node of scene.byGuid.values()) {
+    if ((node.name || '').toLowerCase() === wanted) out.push({ node, guid: guidKey(node.guid) });
+  }
+  return out;
+}
+
+/**
+ * Locate a frame by exact guid, else exact (case-insensitive) name. When
+ * `pageName` is given, a name lookup is restricted to that page (a guid is
+ * global — it is already unambiguous). Returns null if nothing matches.
+ */
+export function findFrame(scene, selector, pageName) {
   if (!selector) return null;
   if (scene.byGuid.has(selector)) return scene.byGuid.get(selector);
   const wanted = selector.toLowerCase();
+  const wantedPage = pageName ? pageName.toLowerCase() : null;
   for (const page of scene.pages) {
+    if (wantedPage !== null && (page.name || '').toLowerCase() !== wantedPage) continue;
     const frames = scene.childrenOf.get(guidKey(page.guid)) || [];
     for (const f of frames) {
       if ((f.name || '').toLowerCase() === wanted) return f;
     }
   }
-  // Fall back to any node with a matching name (nested frames included).
-  for (const node of scene.byGuid.values()) {
-    if ((node.name || '').toLowerCase() === wanted) return node;
+  // Fall back to any node with a matching name (nested frames included). Only
+  // when unscoped — a page restriction means "a top-level frame on this page".
+  if (wantedPage === null) {
+    for (const node of scene.byGuid.values()) {
+      if ((node.name || '').toLowerCase() === wanted) return node;
+    }
   }
   return null;
 }
