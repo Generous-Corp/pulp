@@ -4,6 +4,7 @@
 #include "design_binding.hpp"
 
 #include <pulp/design/design_adherence.hpp>
+#include <pulp/design/design_variants.hpp>
 #include <pulp/design/design_gallery.hpp>
 #include <pulp/design/design_handoff.hpp>
 #include <pulp/design/design_ledger.hpp>
@@ -862,6 +863,101 @@ int run_handoff(const std::vector<std::string>& rest) {
     return 0;
 }
 
+void print_variants_usage() {
+    std::cout <<
+        "Usage: pulp design variants --component <name> <variants-file> [--json]\n"
+        "\n"
+        "  Collapse a component set's `Prop=Value` variant names into one typed\n"
+        "  component contract: each property with its value enum and a chosen\n"
+        "  default. Feeds the design manifest (pulp design compile) and the\n"
+        "  adherence lint. <variants-file> is one variant name per line; blank\n"
+        "  lines and lines starting with '#' are ignored.\n"
+        "\n"
+        "  --component <name>  Component-set name (required).\n"
+        "  --json              Print the contract JSON instead of a summary.\n";
+}
+
+int run_variants(const std::vector<std::string>& rest) {
+    std::string component;
+    fs::path variants_file;
+    bool json_out = false;
+    for (size_t i = 0; i < rest.size(); ++i) {
+        const std::string& a = rest[i];
+        auto next = [&](const char* flag) -> std::string {
+            if (i + 1 >= rest.size()) {
+                std::cerr << "pulp design variants: " << flag << " requires a value\n";
+                return {};
+            }
+            return rest[++i];
+        };
+        if (a == "--help" || a == "-h") { print_variants_usage(); return 0; }
+        else if (a == "--component") component = next("--component");
+        else if (a == "--json") json_out = true;
+        else if (!a.empty() && a[0] == '-') {
+            std::cerr << "pulp design variants: unknown option '" << a << "'\n";
+            return 2;
+        } else if (variants_file.empty()) {
+            variants_file = a;
+        } else {
+            std::cerr << "pulp design variants: unexpected extra argument '" << a << "'\n";
+            return 2;
+        }
+    }
+    if (component.empty()) {
+        std::cerr << "pulp design variants: --component <name> is required\n";
+        return 2;
+    }
+    if (variants_file.empty()) { print_variants_usage(); return 2; }
+    std::error_code ec;
+    if (!fs::is_regular_file(variants_file, ec)) {
+        std::cerr << "Error: cannot read variants file " << variants_file << "\n";
+        return 1;
+    }
+
+    std::vector<std::string> names;
+    {
+        std::ifstream f(variants_file);
+        if (!f) {
+            std::cerr << "Error: cannot open variants file " << variants_file << "\n";
+            return 1;
+        }
+        std::string line;
+        while (std::getline(f, line)) {
+            // Trim trailing CR (CRLF files) and skip blanks / comments.
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+                line.pop_back();
+            size_t b = line.find_first_not_of(" \t");
+            if (b == std::string::npos || line[b] == '#') continue;
+            names.push_back(line.substr(b));
+        }
+    }
+    if (names.empty()) {
+        std::cerr << "Error: no variant names in " << variants_file << "\n";
+        return 1;
+    }
+
+    auto contract = pulp::design::build_component_contract(component, names);
+    if (json_out) {
+        std::cout << pulp::design::component_contract_json(contract) << "\n";
+        return 0;
+    }
+    std::cout << "Component: " << contract.component << " (" << contract.variant_count
+              << " variants)\n";
+    for (const auto& p : contract.props) {
+        std::cout << "  " << p.name << " = { ";
+        for (size_t i = 0; i < p.values.size(); ++i)
+            std::cout << (i ? ", " : "") << p.values[i]
+                      << (p.values[i] == p.default_value ? "*" : "");
+        std::cout << " }\n";
+    }
+    if (!contract.issues.empty()) {
+        std::cout << "  issues:\n";
+        for (const auto& is : contract.issues)
+            std::cout << "    [" << is.kind << "] " << is.detail << "\n";
+    }
+    return 0;
+}
+
 } // namespace
 
 int cmd_design(const std::vector<std::string>& args) {
@@ -889,6 +985,9 @@ int cmd_design(const std::vector<std::string>& args) {
         }
         if (args[0] == "handoff") {
             return run_handoff(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "variants") {
+            return run_variants(std::vector<std::string>(args.begin() + 1, args.end()));
         }
     }
 

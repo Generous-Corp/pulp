@@ -1261,3 +1261,44 @@ TEST_CASE("pulp design handoff --help prints usage", "[cli][design-handoff][shel
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design handoff") != std::string::npos);
 }
+
+// ── `pulp design variants` — typed component-contract CLI ────────────────────
+
+TEST_CASE("pulp design variants collapses a variant set to a contract", "[cli][design-variants][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-variants");
+    auto vf = dir / "variants.txt";
+    std::ofstream(vf) << "# Button variants\n"
+                      << "Size=Small, State=Default\n"
+                      << "Size=Large, State=Hover\n"
+                      << "Size=Small, State=Hover\n";
+    auto r = run_pulp({"design", "variants", "--component", "Button", vf.string(), "--json"});
+    REQUIRE(r.exit_code == 0);
+    auto v = choc::json::parse(r.stdout_output);
+    CHECK(v["component"].getString() == "Button");
+    CHECK(v["variant_count"].getWithDefault<int>(0) == 3);
+    REQUIRE(v["props"].size() == 2);
+    CHECK(v["props"][0]["name"].getString() == "Size");
+    CHECK(v["props"][1]["name"].getString() == "State");
+    CHECK(v["props"][1]["default"].getString() == "Default");  // explicit Default
+    CHECK(v["issues"].size() == 0);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design variants requires --component", "[cli][design-variants][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-variants-nc");
+    auto vf = dir / "v.txt";
+    std::ofstream(vf) << "Size=S\n";
+    auto r = run_pulp({"design", "variants", vf.string()});
+    REQUIRE(r.exit_code == 2);
+    CHECK(r.stderr_output.find("--component") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design variants --help prints usage", "[cli][design-variants][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "variants", "--help"});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp design variants") != std::string::npos);
+}
