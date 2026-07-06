@@ -130,6 +130,7 @@ ignore:
   # tools/scripts/test_codecov_config_sync.py - keep them in sync.
   - "**/cmd_loop.cpp"
   - "**/pulp_import_design.cpp"
+  - "**/fig_lane.cpp"
   - "**/cg_canvas.mm"
   - "**/window_host_mac.mm"
   - "**/window_host_ios.mm"

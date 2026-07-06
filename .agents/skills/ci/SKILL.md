@@ -297,6 +297,22 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   gitlink), and NUL-bearing/UTF-16 text is skipped as binary. The upstream fix
   for the whole class — the merge tool refusing to commit a conflicted result —
   is tracked in Shipyard #372; this guard is the consumer-side backstop.
+- **Thread-safe-assertions guard (`thread_assert_check.py`).** Catch2 3.7.1's
+  assertion macros are NOT thread-safe (thread-safe assertions are opt-in only
+  from Catch2 3.9.0), so a `REQUIRE`/`CHECK`/`FAIL`/`SUCCEED` inside a
+  `std::thread` / `std::jthread` / `std::async` lambda in `test/` is undefined
+  behavior: it corrupts Catch's per-run assertion counters + section state. Bare
+  metal tolerated it, but the move of the required macOS gate onto Tart VMs made
+  the different scheduler timing trip it — a HotSwapSlot hammer test "failed" in
+  0.00s though the code under test was race-free by design. The correct pattern:
+  record the violation into an `atomic`/guarded value in the worker, `join()`,
+  then assert on the test thread (`REQUIRE_FALSE(bad.load())`). The lint is a
+  lexical scan (best-effort: it does not follow calls into helpers) with a
+  same-length string/comment-blanking pass that also skips C++ digit separators
+  (`10'000`); suppress a verified-safe line with a trailing
+  `// thread-assert:allow`. Runs as the `thread-safe-assertions` ctest case and
+  in `gates.sh`. When graduating any required lane to VMs, expect this class of
+  latent UB to surface — fix at the source, don't suppress.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

@@ -8,6 +8,22 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05680"></a>
+## [0.568.0] - 2026-07-06
+
+- feat/design adherence lint ([#5512](https://github.com/danielraffel/pulp/pull/5512))
+
+<a id="v05670"></a>
+## [0.567.0] - 2026-07-06
+
+- feat(design): compile a design contract (token + component allowlist) via `pulp design compile` ([#5510](https://github.com/danielraffel/pulp/pull/5510))
+
+<a id="v05660"></a>
+## [0.566.0] - 2026-07-06
+
+- feat/offline fig import ([#5509](https://github.com/danielraffel/pulp/pull/5509))
+- test: make cross-thread Catch2 assertions thread-safe + add lint guard ([#5507](https://github.com/danielraffel/pulp/pull/5507))
+
 <a id="v05630"></a>
 ## [0.563.0] - 2026-07-04
 
@@ -5835,6 +5851,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.568.0]: https://github.com/danielraffel/pulp/releases/tag/v0.568.0
+[0.567.0]: https://github.com/danielraffel/pulp/releases/tag/v0.567.0
+[0.566.0]: https://github.com/danielraffel/pulp/releases/tag/v0.566.0
 [0.563.0]: https://github.com/danielraffel/pulp/releases/tag/v0.563.0
 [0.562.0]: https://github.com/danielraffel/pulp/releases/tag/v0.562.0
 [0.561.0]: https://github.com/danielraffel/pulp/releases/tag/v0.561.0

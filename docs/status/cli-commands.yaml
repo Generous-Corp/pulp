@@ -737,6 +737,53 @@ commands:
         kind: option
         required: false
         description: Override the build directory used to configure/build and launch the tool
+    subcommands:
+      - name: compile
+        summary: Compile the design contract (token allowlist + per-component reskin contracts) into design-manifest.json and an LLM binding prompt. Defaults to the built-in Ink & Signal system.
+        args:
+          - name: --design-md
+            kind: option
+            description: Compile a project's DESIGN.md tokens instead of the built-in system.
+          - name: --theme
+            kind: option
+            description: Compile a saved Theme JSON instead of the built-in system.
+          - name: --dark
+            kind: flag
+            description: Resolve the dark appearance (default is light).
+          - name: --out-dir
+            kind: option
+            description: Directory to write design-manifest.json and design-binding-prompt.md (default is the current directory).
+          - name: --json
+            kind: flag
+            description: Emit only the manifest JSON.
+          - name: --prompt
+            kind: flag
+            description: Emit only the binding prompt Markdown.
+          - name: --stdout
+            kind: flag
+            description: Print to stdout instead of writing files.
+      - name: lint-adherence
+        summary: Lint UI JS against the design contract — flags raw hex colors, unknown var(--token) references, and px literals that match a design token. Exit 1 on any error-severity finding.
+        args:
+          - name: js
+            kind: positional
+            required: true
+            description: The UI JS file to lint.
+          - name: --manifest
+            kind: option
+            description: Lint against a compiled design-manifest.json.
+          - name: --design-md
+            kind: option
+            description: Build the contract from a DESIGN.md instead.
+          - name: --theme
+            kind: option
+            description: Build the contract from a saved Theme JSON instead.
+          - name: --dark
+            kind: flag
+            description: Resolve the dark appearance (default is light).
+          - name: --strict
+            kind: flag
+            description: Exit non-zero on any finding, not just error-severity ones.
     docs: reference/cli.md#design
 
   - name: design-debug
@@ -933,15 +980,21 @@ commands:
   - name: import-design
     status: partial
     summary: >
-      Import designs from Figma/Figma plugin, Stitch, v0, Pencil,
-      Claude Design, React JSX, or Google DESIGN.md into Pulp JS, DesignIR,
-      or baked C++ artifacts. The designmd source is tokens-only (no ui.js);
-      other sources can emit a full ui.js + tokens.json.
+      Import designs from Figma/Figma plugin, a local Figma .fig file, Stitch,
+      v0, Pencil, Claude Design, React JSX, or Google DESIGN.md into Pulp JS,
+      DesignIR, or baked C++ artifacts. The designmd source is tokens-only (no
+      ui.js); other sources can emit a full ui.js + tokens.json.
     args:
       - name: --from
         kind: option
         required: true
-        description: "Design source: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx"
+        description: "Design source: figma, figma-plugin, fig, stitch, v0, pencil, claude, designmd, jsx"
+      - name: --outline
+        kind: flag
+        description: "With --from fig: print a read-only inventory of the .fig file's pages and top-level frames (name, guid, size, node count) and exit. Use it to pick a frame before importing a large file. Add --json for machine-readable output."
+      - name: --page
+        kind: option
+        description: "With --from fig: restrict frame lookup to a named page"
       - name: --file
         kind: option
         description: Input file path (required if --url not given)

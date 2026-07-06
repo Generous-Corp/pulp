@@ -18,6 +18,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME token-key-correctness COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_key_check.py")
 
+    # Thread-safe assertions: fail on a Catch2 assertion macro invoked inside a
+    # worker-thread lambda. Catch2 3.7.1's macros aren't thread-safe; off-main
+    # assertions are UB that bare metal tolerates but VM scheduler timing trips.
+    add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest
@@ -5146,7 +5152,7 @@ catch_discover_tests(pulp-test-design-export
 
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
-    SOURCES test_design_import_ir.cpp test_design_import_codegen.cpp test_design_import_sources.cpp test_design_import_fidelity.cpp test_recognition_resolver.cpp
+    SOURCES test_design_import_ir.cpp test_design_import_codegen.cpp test_design_import_sources.cpp test_design_import_fidelity.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]"
@@ -5714,13 +5720,19 @@ add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz.c
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tdef.c
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tinfl.c
-    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c)
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c
+    # Compile the fig lane in-process so its logic is exercised (and covered)
+    # directly, not only through the CLI subprocess.
+    ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp)
 target_include_directories(pulp-test-import-design-tool PRIVATE
-    ${CMAKE_SOURCE_DIR}/external/miniz)
+    ${CMAKE_SOURCE_DIR}/external/miniz
+    ${CMAKE_SOURCE_DIR}/tools/import-design)
 target_link_libraries(pulp-test-import-design-tool
     PRIVATE pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
-    PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>")
+    PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>"
+    PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
+    PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs")
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
@@ -5740,6 +5752,18 @@ else()
         PROPERTIES
             LABELS "parser-import"
             RESOURCE_LOCK "design-import-network")
+endif()
+
+# Offline .fig decoder unit tests (Node). Cover kiwi decode, container
+# unpacking, outline, and envelope materialization against a committed
+# synthetic fixture. Skipped when Node is unavailable.
+if(_PULP_NODE_FOR_TESTS)
+    add_test(NAME pulp-fig-decode-unit
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+                     ${CMAKE_SOURCE_DIR}/tools/import-design/fig/fig.test.mjs)
+    set_tests_properties(pulp-fig-decode-unit PROPERTIES
+        TIMEOUT 60
+        LABELS "parser-import;node")
 endif()
 
 # `--execute-bundle` harness end-to-end. Boots the
