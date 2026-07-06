@@ -300,6 +300,8 @@ struct WatchOptions {
     bool hot_dsp = false;             // keep the launched app alive across rebuilds;
                                       // its ReloadableShell watcher hot-swaps the
                                       // rebuilt logic instead of a process restart
+    int build_jobs = 0;                // optional host-governed build/test cap
+    std::string build_qos;             // optional host role QoS hint
 };
 
 // Watch source files and rebuild on changes. Optionally runs tests,
