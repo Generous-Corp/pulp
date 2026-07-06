@@ -78,6 +78,97 @@ build-gpu/tools/import-design/pulp-import-design \
   --reference <figma-node-render.png> --diff diff.png --render-size 1356x781
 ```
 
+### Offline `.fig` lane (`--from fig`) — no account, no network
+
+When you have a **local Figma save file** (`File → Save local copy…`, a `.fig`),
+`--from fig` decodes it offline — no Figma account, PAT, MCP, or network. It
+produces the same `figma-plugin` envelope as `figma_rest_export.py`, then runs
+the standard figma-plugin lane, so everything above (audio-widget/library
+matching, faithful-vector render, `--validate`) applies unchanged. Requires
+Node ≥ 22 on PATH (native zstd); the decoder is `tools/import-design/fig_decode.mjs`.
+
+A `.fig` can carry hundreds of frames across many pages, so **outline first,
+then pick a frame** — importing the whole file is never right:
+```bash
+# 1) Inventory the file (read-only): pages → frames with guid, size, node count.
+pulp import-design --from fig --file design.fig --outline          # or --outline --json
+
+# 2) Import ONE frame, by name or guid (from the outline). --page scopes the lookup.
+pulp import-design --from fig --file design.fig --frame '102:1624' --output ui.js
+```
+Frame selection accepts a guid (`102:1624`, unambiguous) or an exact
+case-insensitive name. The decoder is purely structural — geometry, style, text,
+and bundled raster assets; **widget recognition stays the importer's job** (a
+node's name flows through untouched for the resolver to classify). Fidelity
+losses are reported as named warnings in the emitted envelope's `diagnostics`
+(`vector-simplified`, `gradient-approximated`, `asset-missing`) rather than
+silently dropped. External-library instances and cross-file variables that a
+local file can't resolve surface the same way — treat them as data, not failures,
+and fill in the critical ones by hand.
+
+### Design contract (`pulp design compile`) — the token/widget allowlist
+
+Before generating or hand-writing a UI, compile the **design contract**: the
+closed set of tokens and components the UI is allowed to bind to. It is compiled
+from the buildable sources of truth — a `Theme` (the token allowlist) and the
+`pulp::design::catalog()` component set (each widget's native class plus the exact
+theme tokens it paints through) — so it never drifts from the code.
+
+```bash
+# Built-in Ink & Signal system (default). Writes design-manifest.json +
+# design-binding-prompt.md into --out-dir (default: cwd).
+pulp design compile --out-dir build/design
+
+# A project's own tokens instead of the built-in system:
+pulp design compile --design-md DESIGN.md --out-dir build/design
+pulp design compile --theme my-theme.json --dark --stdout --json
+```
+
+Two artifacts, one source of truth:
+- **`design-manifest.json`** — deterministic (all lists sorted): every token
+  (name, kind, value) and every component contract (native class, category,
+  `reskin_tokens` allowlist). This is the machine-readable allowlist an adherence
+  check validates generated JS against.
+- **`design-binding-prompt.md`** — an LLM-ready Markdown fragment listing the
+  allowed tokens and components with an explicit "do not invent token names"
+  directive. Embed it in an importer/codegen prompt so the model binds only to
+  real tokens and widgets. A value or widget outside the contract is a fidelity
+  break, not a silent drift.
+
+The module is `core/view/src/design_manifest.cpp`
+(`pulp::design::compile_design_manifest` / `manifest_to_json` /
+`emit_binding_prompt`), gated behind `PULP_ENABLE_DESIGN_IMPORT` alongside the
+rest of the authoring cluster.
+
+### Adherence lint (`pulp design lint-adherence`) — the mechanical backstop
+
+The binding prompt tells the model what's allowed; the adherence lint proves the
+generated JS actually stayed inside the contract. It flags three high-signal
+drifts and is the CI-gateable counterpart to the prompt:
+
+```bash
+# Lint an imported/generated UI against the built-in system (or a manifest):
+pulp design lint-adherence ui.js
+pulp design lint-adherence ui.js --manifest build/design/design-manifest.json
+pulp design lint-adherence ui.js --design-md DESIGN.md --strict
+```
+
+- **raw-color** (error): a hex literal (`#rrggbb`/`#rgb`/`#rrggbbaa`) where a
+  bound theme should be referenced via `var(--token)`. When the value is one the
+  system defines, the finding names the token to bind instead.
+- **unknown-token** (error): a `var(--name)` reference whose token is not in the
+  manifest — a hallucinated or renamed token that silently falls back at runtime
+  (`resolve_color` returns the default). This is the exact failure the binding
+  prompt exists to prevent, caught mechanically.
+- **raw-dimension** (info): an `<n>px` literal whose value matches a dimension
+  token — prefer the token.
+
+Exit 0 when clean, 1 on any error-severity finding (`--strict` fails on info too).
+The scan is purely lexical (`core/view/src/design_adherence.cpp`,
+`pulp::design::lint_adherence`): line/block comments are ignored, string literals
+are scanned, and token→`var(--x)` mapping mirrors `export_css_variables`
+(`.`→`-`). Pair it with `compile` — the prompt and the lint share one manifest.
+
 **THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
 cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
 SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →

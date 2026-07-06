@@ -476,13 +476,21 @@ TEST_CASE("HotSwapSlot swap-while-processing is race-free (hammer)",
     ProcessorHotSwapSlot slot(std::make_unique<ScaleProc>(1.0f, &live));
     std::atomic<bool> stop{false};
     std::atomic<std::uint64_t> blocks{0};
+    // Catch2 assertion macros are not thread-safe, so the audio thread records
+    // any invariant violation into atomics and the test thread asserts after
+    // join() (see thread_assert_check.py).
+    std::atomic<bool> saw_bad_sample{false};
+    std::atomic<float> first_bad{0.0f};
 
     std::thread audio([&] {
         while (!stop.load(std::memory_order_relaxed)) {
             const float v = render_one(slot, 32);
             // Active scale is always >= 1.0 here; passthrough is exactly 1.0.
-            // A destroyed-instance call would yield -999 → assert sanity.
-            REQUIRE(v >= 1.0f);
+            // A destroyed-instance call would yield -999 → record the violation.
+            if (v < 1.0f) {
+                first_bad.store(v, std::memory_order_relaxed);
+                saw_bad_sample.store(true, std::memory_order_relaxed);
+            }
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
@@ -495,6 +503,8 @@ TEST_CASE("HotSwapSlot swap-while-processing is race-free (hammer)",
     stop.store(true, std::memory_order_relaxed);
     audio.join();
 
+    INFO("first bad sample: " << first_bad.load(std::memory_order_relaxed));
+    REQUIRE_FALSE(saw_bad_sample.load(std::memory_order_relaxed));
     REQUIRE(blocks.load() > 0);
     REQUIRE(live.load() == 1);  // only the final installed instance remains
 }

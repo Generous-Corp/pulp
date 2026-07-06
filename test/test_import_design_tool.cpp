@@ -1,11 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <miniz.h>
+#include "fig_lane.hpp"
+
+#include <iostream>
 
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -2421,4 +2425,208 @@ TEST_CASE("pulp-import-design --emit swiftui gives each view a distinct theme (n
     // Distinct theme enum names → no duplicate-symbol clash in one Swift target.
     REQUIRE(read_text(tmp.path / "FooViewTheme.swift").find("enum FooViewTheme") != std::string::npos);
     REQUIRE(read_text(tmp.path / "BarViewTheme.swift").find("enum BarViewTheme") != std::string::npos);
+}
+
+// ── offline .fig lane (--from fig) ──────────────────────────────────────────
+//
+// These drive the built CLI against a committed synthetic .fig fixture. The
+// decode itself runs in a Node subtool, so the cases skip cleanly when Node is
+// unavailable rather than failing a host without it.
+#ifndef PULP_FIG_FIXTURE
+#define PULP_FIG_FIXTURE ""
+#endif
+#ifndef PULP_FIG_DECODE_SCRIPT
+#define PULP_FIG_DECODE_SCRIPT ""
+#endif
+
+namespace {
+
+bool node_available() {
+    return pulp::platform::find_on_path("node").has_value();
+}
+
+// Point the CLI at the in-tree decoder regardless of the runner's cwd.
+struct FigDecodeEnv {
+    FigDecodeEnv() {
+        if (std::strlen(PULP_FIG_DECODE_SCRIPT) > 0) {
+#if defined(_WIN32)
+            _putenv_s("PULP_FIG_DECODE", PULP_FIG_DECODE_SCRIPT);
+#else
+            ::setenv("PULP_FIG_DECODE", PULP_FIG_DECODE_SCRIPT, 1);
+#endif
+        }
+    }
+};
+
+}  // namespace
+
+TEST_CASE("pulp-import-design --from fig decodes a local .fig offline",
+          "[cli][import-design][tool][fig]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+    if (!node_available()) { SUCCEED("skipped: node not on PATH"); return; }
+    static FigDecodeEnv fig_env;
+    const std::string fixture = PULP_FIG_FIXTURE;
+    REQUIRE_FALSE(fixture.empty());
+
+    SECTION("--outline lists pages and frames") {
+        auto r = run_import_design({"--from", "fig", "--file", fixture, "--outline"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(r.stdout_output.find("Page One") != std::string::npos);
+        REQUIRE(r.stdout_output.find("Plugin UI") != std::string::npos);
+        REQUIRE(r.stdout_output.find("Empty Page") != std::string::npos);
+    }
+
+    SECTION("--outline --json is machine-readable") {
+        auto r = run_import_design({"--from", "fig", "--file", fixture, "--outline", "--json"});
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(r.stdout_output.find("\"pageCount\"") != std::string::npos);
+        REQUIRE(r.stdout_output.find("\"frames\"") != std::string::npos);
+    }
+
+    SECTION("a chosen frame decodes to ui.js through the figma-plugin path") {
+        TempDir tmp("fig-emit");
+        const auto out = tmp.path / "ui.js";
+        auto r = run_import_design(
+            {"--from", "fig", "--file", fixture, "--frame", "Plugin UI",
+             "--output", out.string()});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(fs::exists(out));
+        const auto js = read_text(out);
+        REQUIRE(js.find("figma-plugin:Plugin UI") != std::string::npos);
+        REQUIRE(js.find("setBackground('root', '#14171c')") != std::string::npos);
+    }
+
+    SECTION("a frame can be selected by guid") {
+        TempDir tmp("fig-emit-guid");
+        const auto out = tmp.path / "ui.js";
+        auto r = run_import_design(
+            {"--from", "fig", "--file", fixture, "--frame", "0:2",
+             "--output", out.string()});
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(fs::exists(out));
+    }
+
+    SECTION("missing frame is an error (exit 2)") {
+        auto r = run_import_design({"--from", "fig", "--file", fixture, "--frame", "Nope"});
+        REQUIRE(r.exit_code == 2);
+    }
+
+    SECTION("no frame without --outline is a usage error") {
+        auto r = run_import_design({"--from", "fig", "--file", fixture});
+        REQUIRE(r.exit_code == 1);
+        REQUIRE(r.stderr_output.find("--frame") != std::string::npos);
+    }
+
+    SECTION("--outline is rejected for non-fig sources") {
+        auto r = run_import_design({"--from", "figma-plugin", "--file", fixture, "--outline"});
+        REQUIRE(r.exit_code == 1);
+        REQUIRE(r.stderr_output.find("only supported with --from fig") != std::string::npos);
+    }
+}
+
+// In-process coverage of the fig lane orchestration (fig_lane.cpp). The CLI
+// subprocess cases above prove end-to-end behavior; these exercise handle()
+// directly so its control flow is instrumented rather than run out-of-process.
+TEST_CASE("fig::handle drives the offline lane in-process",
+          "[cli][import-design][tool][fig]") {
+    if (!node_available()) { SUCCEED("skipped: node not on PATH"); return; }
+    static FigDecodeEnv fig_env;
+    const std::string fixture = PULP_FIG_FIXTURE;
+    REQUIRE_FALSE(fixture.empty());
+
+    using pulp::import_design::fig::LaneArgs;
+    using pulp::import_design::fig::handle;
+
+    SECTION("outline prints an inventory and returns 0") {
+        std::string src = "fig";
+        std::string file = fixture;
+        LaneArgs args{src, file};
+        args.outline_mode = true;
+        std::ostringstream captured;
+        auto* prev = std::cout.rdbuf(captured.rdbuf());
+        auto code = handle(args);
+        std::cout.rdbuf(prev);
+        REQUIRE(code.has_value());
+        REQUIRE(*code == 0);
+        REQUIRE(captured.str().find("Plugin UI") != std::string::npos);
+    }
+
+    SECTION("outline --json returns machine-readable output") {
+        std::string src = "fig";
+        std::string file = fixture;
+        LaneArgs args{src, file};
+        args.outline_mode = true;
+        args.outline_json = true;
+        std::ostringstream captured;
+        auto* prev = std::cout.rdbuf(captured.rdbuf());
+        auto code = handle(args);
+        std::cout.rdbuf(prev);
+        REQUIRE(code.has_value());
+        REQUIRE(*code == 0);
+        REQUIRE(captured.str().find("\"pageCount\"") != std::string::npos);
+    }
+
+    SECTION("emit rewrites the source to figma-plugin and drops a scene") {
+        std::string src = "fig";
+        std::string file = fixture;
+        std::string scratch;
+        LaneArgs args{src, file};
+        args.frame_name = "Plugin UI";
+        args.created_tmp_dir = &scratch;
+        auto code = handle(args);
+        REQUIRE_FALSE(code.has_value());  // caller continues
+        REQUIRE(src == "figma-plugin");
+        REQUIRE(file.find("scene.pulp.json") != std::string::npos);
+        REQUIRE(fs::exists(file));
+        REQUIRE_FALSE(scratch.empty());
+        std::error_code ec;
+        fs::remove_all(scratch, ec);
+    }
+
+    SECTION("a missing frame returns exit 2") {
+        std::string src = "fig";
+        std::string file = fixture;
+        LaneArgs args{src, file};
+        args.frame_name = "Definitely Not Here";
+        auto code = handle(args);
+        REQUIRE(code.has_value());
+        REQUIRE(*code == 2);
+    }
+
+    SECTION("no frame and no outline is a usage error (1)") {
+        std::string src = "fig";
+        std::string file = fixture;
+        LaneArgs args{src, file};
+        auto code = handle(args);
+        REQUIRE(code == 1);
+    }
+
+    SECTION("missing --file for fig is a usage error (1)") {
+        std::string src = "fig";
+        std::string file;
+        LaneArgs args{src, file};
+        args.outline_mode = true;
+        auto code = handle(args);
+        REQUIRE(code == 1);
+    }
+
+    SECTION("--outline on a non-fig source is rejected (1)") {
+        std::string src = "figma-plugin";
+        std::string file = fixture;
+        LaneArgs args{src, file};
+        args.outline_mode = true;
+        auto code = handle(args);
+        REQUIRE(code == 1);
+    }
+
+    SECTION("a non-fig source without --outline continues untouched") {
+        std::string src = "figma-plugin";
+        std::string file = fixture;
+        LaneArgs args{src, file};
+        auto code = handle(args);
+        REQUIRE_FALSE(code.has_value());
+        REQUIRE(src == "figma-plugin");
+    }
 }
