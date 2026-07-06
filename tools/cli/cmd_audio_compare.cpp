@@ -25,7 +25,7 @@ constexpr const char* kToolId = "audio-quality-lab";
 // positionals for a friendly local arity error; all args are forwarded verbatim.
 bool takes_value(const std::string& opt) {
     return opt == "--profile" || opt == "--reference-role"
-        || opt == "--threshold" || opt == "--json";
+        || opt == "--threshold" || opt == "--json" || opt == "--align";
 }
 
 void print_compare_usage() {
@@ -36,6 +36,8 @@ void print_compare_usage() {
         "Options:\n"
         "  --profile <tonal-balance|added-hf|noise-roughness|graininess|stereo-width>   measurement axis (default: tonal-balance)\n"
         "  --reference-role <peer|golden>       golden enables regression_suspected (default: peer)\n"
+        "  --align <none|latency>               time-align first: latency trims a constant delay/offset\n"
+        "                                       (refuses if it isn't a reliable pure delay) (default: none)\n"
         "  --threshold <t>                      materiality override (axis default otherwise)\n"
         "  --json <path>                        write the full quality_lab.compare.v1 report JSON\n\n"
         "Delegates to the opt-in Audio Quality Lab tool. Advisory: exits non-zero ONLY when it\n"

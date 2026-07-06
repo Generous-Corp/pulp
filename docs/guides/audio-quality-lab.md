@@ -127,8 +127,32 @@ identically, CPU or GPU):
 | Timbral (EQ / filter / saturation / amp-NAM / reverb tone / comp tone) | ✅ directly valid | the validated sweet spot — all four axes apply |
 | Modulated (chorus / phaser / flanger / tremolo / ring-mod) | ✅ valid; corroboration will read `not_corroborated` (expected, informational) | time-variant; the axis verdict is what matters |
 | bendr time-stretch — **fixed-ratio** A/B ("did my stretch *algorithm* get worse?") | ✅ valid | same ratio, so the renders are time-aligned |
-| bendr ratio changes / tempo-sampler **offsets** | ⚠ engine path, not this net | the candidate is time-misaligned; the null-residual flags the shift as a false alarm for "did the *tone* change?" — use the lab's reference-free engine path (or the deferred alignment axis) |
+| tempo-sampler / delay **constant offsets** | ✅ with `--align latency` | trims the constant lag first so the residual doesn't false-alarm on the shift (see below); refuses if it isn't a reliable pure delay |
+| bendr ratio changes (time-STRETCH, non-constant lag) | ⚠ engine path, not this net | a stretch is a time-warp, not a constant offset — needs the deferred warp alignment (Tier 3); use the reference-free engine path for now |
 | Stereo width / imaging (widener / panner / M-S / collapse) | ✅ via `stereo-width` (opt-in) | add `"stereo-width"` to the manifest's `profiles`; it reads the 2-channel signal and flags a collapse or an out-of-phase candidate. The mono default profiles skip it |
+
+### Time-alignment before measuring (`--align latency`)
+
+Every axis is global and alignment-free, so a **constant delay/offset** (a delay plugin, a
+tempo-sampler that starts a few ms late) doesn't change the tonal verdict — but the phase-sensitive
+null-residual *does* see the shift, so it false-alarms `not_corroborated` ("a real difference this
+axis can't see") even though nothing tonal changed. `--align latency` fixes that:
+
+```bash
+pulp audio compare before.wav delayed_after.wav --reference-role golden --align latency
+```
+
+It estimates a single constant lag (normalized cross-correlation of the attack envelopes), trims
+both signals to a common time base, and measures the aligned pair — so a pure delay reads
+`no_material_change` **and corroborated**, and a real change *hidden behind* a delay (say a dulling)
+is measured cleanly. The alignment is disclosed on the measurement envelope
+(`alignment: {policy: "fixed-latency-trim", lag_samples, confidence, applied}`) and in the summary.
+
+**It refuses rather than guess:** below a confidence floor the difference isn't a reliable pure
+delay (it's a real timbral/structural change, or a time-*stretch*), so it records
+`alignment: {policy: "not_aligned", …}` and measures unaligned — a wrong alignment is worse than
+none. Default is `--align none` (no behavior change). Time-**stretch** (a non-constant warp) is the
+deferred Tier 3 work, not this mode.
 
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build

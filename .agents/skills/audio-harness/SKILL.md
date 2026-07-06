@@ -441,6 +441,20 @@ harness or `ctest`.
   license fence is disproportionate surface for the value; the pure-numpy residual carries the
   corroboration story license-free.
 
+  **Time-alignment (`--align latency`).** The axes are alignment-free, so a constant delay/offset
+  (delay plugin, tempo-sampler start offset) doesn't move the tonal verdict but makes the
+  phase-sensitive null-residual false-alarm `not_corroborated`. `--align latency` estimates one
+  constant lag (`dsp.estimate_global_lag` — normalized cross-correlation of the attack envelopes),
+  trims to a common time base (`dsp.apply_lag_trim`), and measures the aligned pair: a pure delay
+  then reads `no_material_change` + corroborated, and a real change *behind* a delay is measured
+  cleanly. The outcome is disclosed on the envelope (`alignment: {policy: "fixed-latency-trim",
+  lag_samples, confidence, applied}`) and the summary. It **refuses** below a confidence floor
+  (records `policy: "not_aligned"`, measures unaligned) — a wrong alignment is worse than none.
+  Default `--align none` = zero behavior change. `--align` threads through `compare_files` → CLI →
+  MCP (`pulp_audio_compare`'s `align` param) → the `/audio-compare` slash command. Time-**stretch**
+  (a non-constant warp) is deferred to Tier 3 (a caller-declared warp class, not sample-level
+  warping — see the alignment plan).
+
   **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
   mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is
   invisible. When a file was multichannel the report says so on the mono axes:
