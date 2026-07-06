@@ -209,6 +209,37 @@ The scan is purely lexical (`core/view/src/design_adherence.cpp`,
 are scanned, and token→`var(--x)` mapping mirrors `export_css_variables`
 (`.`→`-`). Pair it with `compile` — the prompt and the lint share one manifest.
 
+### Project design ledger (`pulp design record`) — resumability + review status
+
+Import/design sessions span days and multiple agents; "which of these five `ui.js`
+revisions did the human approve" is a signal that otherwise lives only in chat.
+The **design ledger** (`.pulp-design-meta.json`) makes it a durable, CLI-owned
+record: each emitted artifact as a named, versioned asset with its source
+provenance, viewport, bound design system(s), and a review status.
+
+```bash
+# Record an emitted artifact (auto-assigns v1, v2, … per name):
+pulp design record --name main-panel --asset ui.js \
+  --source fig --viewport 340x280 --system ink-signal
+
+# Approve a revision (an approved version must never be silently regenerated):
+pulp design record --name main-panel --version v2 --asset ui.js --status approved
+
+# Read on resume; drop a stale entry; reconcile hand-deleted files:
+pulp design record --list            # or --list --json
+pulp design record --remove main-panel@v1
+pulp design record --reconcile       # drop entries whose file is gone
+```
+
+**Discipline: only the CLI writes the ledger; skills/agents READ it.** On resume,
+read it (`--list --json`) to recover the bound design system (⇒ load its binding
+prompt from `compile` without re-asking) and to see which revisions are
+`approved` vs `needs-review` vs `changes-requested`. Never hand-edit the file and
+never regenerate an `approved` asset without an explicit request. The ledger
+operations are pure (`core/view/src/design_ledger.cpp`,
+`pulp::design::parse_ledger` / `ledger_to_json` / `upsert_asset` / `remove_asset`
+/ `reconcile`); all file IO lives in the `pulp design record` CLI.
+
 **THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
 cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
 SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
