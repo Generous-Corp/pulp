@@ -78,7 +78,10 @@ DecodeResult run_decode(const std::vector<std::string>& args, std::string* stdou
         return {124, false};
     }
     if (stdout_capture) *stdout_capture = result.stdout_output;
-    if (result.exit_code != 0 && !result.stderr_output.empty()) {
+    // Forward the decoder's stderr whenever it has any — not only on failure.
+    // It is a diagnostic channel (ambiguous-frame candidates, asset warnings),
+    // and swallowing it on a zero exit hid, e.g., an ambiguous-name pick.
+    if (!result.stderr_output.empty()) {
         std::cerr << result.stderr_output;
     }
     const bool truncated = stdout_capture && result.stdout_output.size() >= kMaxDecodeStdout;

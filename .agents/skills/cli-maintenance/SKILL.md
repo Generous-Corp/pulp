@@ -596,6 +596,20 @@ to a file that already exists and is skipped. Keep the pure card model
 owns the walk, the cache, and the shell-out; the core only parses tags and
 serializes the manifest/HTML.
 
+### `pulp design` splits offline verbs from the live-tool launcher
+
+`cmd_design.cpp` is only the verb dispatcher plus the live GPU design-tool
+launcher (project discovery, build, watch loop, spawn). The nine pure-data
+offline handlers — `lint`, `diff`, `compile`, `lint-adherence`, `record`,
+`gallery`, `handoff`, `variants`, `tweak` — live in `cmd_design_subcommands.cpp`
+behind the `pulp::cli::design` namespace, declared in
+`cmd_design_subcommands.hpp`. To add a new offline `pulp design <verb>`: add the
+`run_<verb>` handler (and its private helpers) to `cmd_design_subcommands.cpp`,
+declare `run_<verb>` in the header, and wire one `args[0] == "<verb>"` branch in
+the `cmd_design` dispatcher. Handlers must not open a window; they read/write
+files and call the design cores in `core/view`. Keep helpers namespace-local so
+they stay implementation-private.
+
 ### Numeric CLI flags
 
 For count-like flags such as `pulp run --frames`, parsers should accept only
