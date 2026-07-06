@@ -979,3 +979,54 @@ TEST_CASE("pulp design lint-adherence --help prints usage", "[cli][design-adhere
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design lint-adherence") != std::string::npos);
 }
+
+// ── `pulp design gallery` — the review-artifact CLI ──────────────────────────
+// Exercised with --no-render / --json so the CLI wiring is covered without a
+// GPU/Skia dependency; the render path shells out to pulp-screenshot, tested
+// with the screenshot tool itself.
+
+TEST_CASE("pulp design gallery --json lists tagged cards, ignores untagged", "[cli][design-gallery][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-gallery-json");
+    write_js(dir, "knob.js", "// @dsCard group=knobs viewport=120x140\n// @startingPoint\nk=1;\n");
+    write_js(dir, "plain.js", "const x = 1;\n");  // untagged -> not a card
+
+    auto r = run_pulp({"design", "gallery", "--root", dir.string(), "--json"});
+    REQUIRE(r.exit_code == 0);
+    auto v = choc::json::parse(r.stdout_output);
+    REQUIRE(v["total"].getWithDefault<int>(-1) == 1);
+    auto groups = v["groups"];
+    REQUIRE(groups.size() == 1);
+    REQUIRE(groups[0]["name"].getString() == "knobs");
+    auto card = groups[0]["cards"][0];
+    REQUIRE(card["viewport"].getString() == "120x140");
+    REQUIRE(card["starting_point"].getWithDefault<bool>(false) == true);
+    REQUIRE_FALSE(card["content_hash"].getString().empty());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design gallery --no-render writes html + json artifact", "[cli][design-gallery][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-gallery-out");
+    write_js(dir, "fader.js", "// @dsCard group=faders viewport=40x200\nf=1;\n");
+    auto out = dir / "artifact";
+
+    auto r = run_pulp({"design", "gallery", "--root", dir.string(),
+                       "--out", out.string(), "--no-render"});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(out / "gallery.json"));
+    REQUIRE(fs::exists(out / "gallery.html"));
+    // No render requested -> no PNGs, and the HTML shows the placeholder.
+    std::ifstream html(out / "gallery.html");
+    std::stringstream ss; ss << html.rdbuf();
+    REQUIRE(ss.str().find("not rendered") != std::string::npos);
+    REQUIRE(ss.str().find("faders") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design gallery --help prints usage", "[cli][design-gallery][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "gallery", "--help"});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp design gallery") != std::string::npos);
+}

@@ -814,6 +814,30 @@ commands:
           - name: --strict
             kind: flag
             description: Exit non-zero on any finding, not just error-severity ones.
+      - name: gallery
+        summary: Render every @dsCard-tagged source file under a root into one review artifact — a grouped HTML grid plus a JSON manifest. Content-hash cached so unchanged cards are not re-rendered.
+        args:
+          - name: --root
+            kind: option
+            description: Tree to scan for @dsCard-tagged *.js files (default is the current directory).
+          - name: --out
+            kind: option
+            description: Directory to write gallery.html + gallery.json (default is <root>/.pulp-gallery).
+          - name: --backend
+            kind: option
+            description: Screenshot backend used for rendering — skia (default), auto, or coregraphics.
+          - name: --screenshot
+            kind: option
+            description: Explicit path to the pulp-screenshot binary (default is auto-located next to the CLI or under <root>/build).
+          - name: --no-render
+            kind: flag
+            description: Emit the manifest and HTML with no PNGs (inventory only).
+          - name: --force
+            kind: flag
+            description: Re-render every card, ignoring the content-hash cache (use when a card's imported modules, assets, or theme tokens changed).
+          - name: --json
+            kind: flag
+            description: Print the manifest JSON to stdout and skip rendering.
     docs: reference/cli.md#design
 
   - name: design-debug
