@@ -53,6 +53,7 @@ add_executable(pulp-cli
     cmd_ci_host.cpp
     cmd_overflow.cpp
     cmd_design.cpp
+    cmd_design_subcommands.cpp
     cmd_doctor.cpp
     cmd_docs.cpp
     cmd_misc.cpp
