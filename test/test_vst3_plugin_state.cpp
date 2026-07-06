@@ -874,10 +874,15 @@ TEST_CASE("VST3 restartComponent is marshaled off the audio thread",
     SECTION("process() flags a restart without calling the host callback") {
         // Run process() on a DEDICATED thread so its identity is provably
         // distinct from the main thread. The host callback must not fire here.
+        // Catch2 assertions are not thread-safe: record the render result and
+        // assert on the test thread after join() (see thread_assert_check.py).
+        std::atomic<bool> process_ok{false};
         std::thread audio_thread([&] {
-            REQUIRE(processor.process(data) == Steinberg::kResultOk);
+            process_ok.store(processor.process(data) == Steinberg::kResultOk,
+                             std::memory_order_relaxed);
         });
         audio_thread.join();
+        REQUIRE(process_ok.load());
 
         // No restartComponent during the audio render — only the atomic flag.
         REQUIRE(handler.restart_calls == 0);
@@ -901,11 +906,15 @@ TEST_CASE("VST3 restartComponent is marshaled off the audio thread",
         // The test processor flags only on its first block, but flag the
         // processor again directly to simulate a multi-block burst before any
         // drain. Both edges must collapse to ONE restartComponent call.
+        std::atomic<bool> process_ok{true};
         std::thread audio_thread([&] {
-            REQUIRE(processor.process(data) == Steinberg::kResultOk);  // flags
-            REQUIRE(processor.process(data) == Steinberg::kResultOk);  // no flag
+            if (processor.process(data) != Steinberg::kResultOk)  // flags
+                process_ok.store(false, std::memory_order_relaxed);
+            if (processor.process(data) != Steinberg::kResultOk)  // no flag
+                process_ok.store(false, std::memory_order_relaxed);
         });
         audio_thread.join();
+        REQUIRE(process_ok.load());
         REQUIRE(handler.restart_calls == 0);
 
         processor.poll_pending_restart_for_test();
@@ -915,10 +924,13 @@ TEST_CASE("VST3 restartComponent is marshaled off the audio thread",
     SECTION("a main-thread host entrypoint drains the pending restart") {
         // getLatencySamples() runs on the main thread; a host re-queries it
         // after a latency change. It must flush the pending restartComponent.
+        std::atomic<bool> process_ok{false};
         std::thread audio_thread([&] {
-            REQUIRE(processor.process(data) == Steinberg::kResultOk);
+            process_ok.store(processor.process(data) == Steinberg::kResultOk,
+                             std::memory_order_relaxed);
         });
         audio_thread.join();
+        REQUIRE(process_ok.load());
         REQUIRE(handler.restart_calls == 0);
 
         (void)processor.getLatencySamples();
@@ -1008,10 +1020,13 @@ TEST_CASE("VST3 paced main-thread poll delivers a restart without a host query",
     data.inputs = ab_in;
     data.outputs = ab_out;
 
+    std::atomic<bool> process_ok{false};
     std::thread audio_thread([&] {
-        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        process_ok.store(processor.process(data) == Steinberg::kResultOk,
+                         std::memory_order_relaxed);
     });
     audio_thread.join();
+    REQUIRE(process_ok.load());
 
     // No host query was made — the restart is only delivered by the poll tick.
     REQUIRE(handler.restart_calls == 0);

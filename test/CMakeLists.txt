@@ -18,6 +18,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME token-key-correctness COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_key_check.py")
 
+    # Thread-safe assertions: fail on a Catch2 assertion macro invoked inside a
+    # worker-thread lambda. Catch2 3.7.1's macros aren't thread-safe; off-main
+    # assertions are UB that bare metal tolerates but VM scheduler timing trips.
+    add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest

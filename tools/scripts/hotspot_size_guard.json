@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6306,
-      "note": "shared test registration hotspot (+14 registering the fig decoder unit + CLI tests); exact ceiling tracks current registered CMake test manifest"
+      "max_loc": 6312,
+      "note": "shared test registration hotspot (registers the fig decoder unit + CLI tests); exact ceiling tracks current registered CMake test manifest"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
