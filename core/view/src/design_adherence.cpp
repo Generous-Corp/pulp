@@ -4,6 +4,8 @@
 
 #include <pulp/view/design_tokens.hpp>  // token_css_var — single owner of token → var(--x)
 
+#include <choc/text/choc_StringUtilities.h>
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -59,12 +61,6 @@ std::string scrub_comments(const std::string& src) {
     return out;
 }
 
-std::string to_lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
 // Expand a 3-digit hex ("#abc") to 6 ("#aabbcc"); pass 6/8 through. Input is the
 // hex body without '#', already lowercased.
 std::string expand_hex(const std::string& body) {
@@ -98,7 +94,7 @@ std::vector<AdherenceFinding> lint_adherence(const std::string& js_source,
     std::unordered_map<std::string, std::string> dim_value_to_token;    // "8" → name
     for (const auto& t : manifest.tokens) {
         valid_css_vars.insert(pulp::view::token_css_var(t.name));
-        if (t.kind == "color") color_value_to_token.emplace(to_lower(t.value), t.name);
+        if (t.kind == "color") color_value_to_token.emplace(choc::text::toLowerCase(t.value), t.name);
         else if (t.kind == "dimension") dim_value_to_token.emplace(t.value, t.name);
     }
 
@@ -122,7 +118,7 @@ std::vector<AdherenceFinding> lint_adherence(const std::string& js_source,
             const std::string body = it->str(1);
             if (body.size() != 3 && body.size() != 6 && body.size() != 8) continue;  // not a color
             const int col = static_cast<int>(it->position(0)) + 1;
-            const std::string value = "#" + expand_hex(to_lower(body));
+            const std::string value = "#" + expand_hex(choc::text::toLowerCase(body));
             std::string msg = "raw color " + it->str(0) + " — bind to the theme via var(--token)";
             auto known = color_value_to_token.find(value);
             if (known != color_value_to_token.end())

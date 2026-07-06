@@ -44,7 +44,16 @@ concurrency:
 
 jobs:
   resolve-provider:
-    runs-on: ubuntu-latest
+    # Runner for the required-gate routing preamble. Defaults to ubuntu-latest
+    # (no behaviour change). Set the PULP_PREAMBLE_RUNS_ON_JSON repo var to a
+    # self-hosted Linux selector — e.g. ["self-hosted","Linux","ARM64",
+    # "pulp-build-linux"] — to decouple the required macOS gate from
+    # GitHub-hosted queue saturation: when the shared ubuntu pool is jammed this
+    # preamble can't get a slot and the idle self-hosted Studios sit unused
+    # behind it. Only flip once the self-hosted pool is confirmed always-on (not
+    # on-demand), or the required gate just starves on a different pool. See
+    # planning/2026-07-06-ci-queue-saturation-watchdog.md.
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       provider: ${{ steps.resolve.outputs.provider }}
       matrix_json: ${{ steps.resolve.outputs.matrix_json }}
@@ -484,7 +493,9 @@ jobs:
   # treats any uncertainty as "native build required". See that script's
   # module docstring + tools/scripts/test_classify_changes.py.
   classify:
-    runs-on: ubuntu-latest
+    # Same PULP_PREAMBLE_RUNS_ON_JSON toggle as resolve-provider: keep the
+    # required-gate preamble off the saturated GitHub-hosted pool when opted in.
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       native_build_required: ${{ steps.classify.outputs.native_build_required }}
     steps:
@@ -1169,7 +1180,10 @@ jobs:
   # than letting a PR merge on an unverified classification.
   macos:
     needs: [resolve-provider, classify]
-    runs-on: ubuntu-latest
+    # The required `macos` check is itself this alias job, so it must ride the
+    # same PULP_PREAMBLE_RUNS_ON_JSON toggle — otherwise the gate still queues on
+    # ubuntu-latest to *report* the result even after the preamble is relocated.
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: always()
     steps:
       - name: macOS leg outcome (required)

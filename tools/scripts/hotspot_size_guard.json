@@ -92,7 +92,7 @@
     },
     {
       "path": "core/view/src/design_import.cpp",
-      "max_loc": 2520,
+      "max_loc": 2506,
       "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup"
     },
     {
