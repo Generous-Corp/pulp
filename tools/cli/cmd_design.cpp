@@ -11,6 +11,8 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_tokens.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -28,11 +30,32 @@ std::string read_text_file(const fs::path& p) {
     return ss.str();
 }
 
+// Atomic write: a full write to a sibling temp file, verified, then a rename
+// over the destination — so a crash or full disk mid-write leaves the previous
+// file intact rather than truncated. Matters most for the ledger sidecar, whose
+// recorded history must survive an interrupted record.
 bool write_text_file(const fs::path& p, const std::string& content) {
-    std::ofstream f(p, std::ios::binary);
-    if (!f.is_open()) return false;
-    f << content;
-    return f.good();
+    fs::path tmp = p;
+    tmp += ".pulp-tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f.is_open()) return false;
+        f << content;
+        f.flush();
+        if (!f.good()) {
+            f.close();
+            std::error_code ec;
+            fs::remove(tmp, ec);
+            return false;
+        }
+    }
+    std::error_code ec;
+    fs::rename(tmp, p, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    return true;
 }
 
 // Build the design manifest from the standard source options: an explicit
@@ -411,9 +434,31 @@ int run_record(const std::vector<std::string>& rest) {
         return 2;
     }
 
-    // Load the current ledger (absent = empty; tolerant parse).
-    pulp::design::DesignLedger ledger =
-        pulp::design::parse_ledger(fs::exists(ledger_path) ? read_text_file(ledger_path) : std::string{});
+    // Load the current ledger. Absent or blank = empty (a first record
+    // bootstraps cleanly). But a present-but-unparseable ledger is corrupt:
+    // refuse to touch it rather than silently treat it as empty and overwrite
+    // the recorded history on the next write.
+    pulp::design::DesignLedger ledger;
+    if (fs::exists(ledger_path)) {
+        const std::string raw = read_text_file(ledger_path);
+        const bool blank = raw.find_first_not_of(" \t\r\n") == std::string::npos;
+        if (!blank) {
+            bool valid = false;
+            try {
+                auto probe = choc::json::parse(raw);
+                valid = probe.isObject();
+            } catch (const std::exception&) {
+                valid = false;
+            }
+            if (!valid) {
+                std::cerr << "Error: ledger " << ledger_path.string()
+                          << " is not valid JSON; refusing to touch it. "
+                             "Fix or delete it first.\n";
+                return 1;
+            }
+        }
+        ledger = pulp::design::parse_ledger(raw);
+    }
 
     if (do_list) {
         if (as_json) {
@@ -433,8 +478,17 @@ int run_record(const std::vector<std::string>& rest) {
     }
 
     if (do_reconcile) {
-        auto removed = pulp::design::reconcile(
-            ledger, [](const std::string& p) { return fs::exists(p); });
+        // Asset paths are recorded relative to the project (the ledger's
+        // directory), not the process cwd — resolve them against the ledger dir
+        // so `--reconcile` from any cwd does not wrongly delete valid entries.
+        const fs::path ledger_dir = ledger_path.has_parent_path() ? ledger_path.parent_path()
+                                                                  : fs::path(".");
+        auto removed = pulp::design::reconcile(ledger, [&](const std::string& p) {
+            fs::path fp(p);
+            if (fp.is_relative()) fp = ledger_dir / fp;
+            std::error_code ec;
+            return fs::exists(fp, ec);
+        });
         if (!write_text_file(ledger_path, pulp::design::ledger_to_json(ledger))) {
             std::cerr << "Error: cannot write " << ledger_path.string() << "\n";
             return 1;

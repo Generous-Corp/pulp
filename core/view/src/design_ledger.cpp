@@ -29,9 +29,8 @@ void sort_dedupe(std::vector<std::string>& v) {
 
 std::string slug_of(const LedgerAsset& a) { return a.name + "@" + a.version; }
 
-// Next "v<N>" for a name: one past the highest existing v-number, so removing a
-// middle revision never reuses a slug already seen in review history.
-std::string next_version(const DesignLedger& ledger, const std::string& name) {
+// The highest existing v-number for a name, or 0 if none.
+int highest_vnum(const DesignLedger& ledger, const std::string& name) {
     int highest = 0;
     for (const auto& a : ledger.assets) {
         if (a.name != name) continue;
@@ -41,7 +40,32 @@ std::string next_version(const DesignLedger& ledger, const std::string& name) {
         const char* last = a.version.data() + a.version.size();
         if (std::from_chars(first, last, n).ec == std::errc{} && n > highest) highest = n;
     }
-    return "v" + std::to_string(highest + 1);
+    return highest;
+}
+
+// Next "v<N>" for a name: one past the highest existing v-number, so removing a
+// middle revision never reuses a slug already seen in review history.
+std::string next_version(const DesignLedger& ledger, const std::string& name) {
+    return "v" + std::to_string(highest_vnum(ledger, name) + 1);
+}
+
+// The current latest version string of a name ("v3"), or "" if none exists.
+std::string latest_version(const DesignLedger& ledger, const std::string& name) {
+    int h = highest_vnum(ledger, name);
+    return h > 0 ? "v" + std::to_string(h) : std::string{};
+}
+
+// After a removal, a child may point at a parent version that no longer exists.
+// Clear those dangling links so the chain never references a missing revision.
+void clear_dangling_inherits(DesignLedger& ledger) {
+    for (auto& a : ledger.assets) {
+        if (a.inherit_from.empty()) continue;
+        const bool parent_exists =
+            std::any_of(ledger.assets.begin(), ledger.assets.end(), [&](const LedgerAsset& p) {
+                return p.name == a.name && p.version == a.inherit_from;
+            });
+        if (!parent_exists) a.inherit_from.clear();
+    }
 }
 
 std::string string_member(const choc::value::ValueView& obj, const char* key) {
@@ -143,7 +167,14 @@ std::string ledger_to_json(const DesignLedger& ledger) {
 LedgerAsset& upsert_asset(DesignLedger& ledger, const LedgerAsset& incoming) {
     LedgerAsset entry = incoming;
     sort_dedupe(entry.design_systems);
-    if (entry.version.empty()) entry.version = next_version(ledger, entry.name);
+    if (entry.version.empty()) {
+        // Auto-versioning links the new revision to the current latest version
+        // of this name (unless the caller set an explicit parent), so the chain
+        // is connected by default instead of orphaned at every fresh record.
+        const std::string prev = latest_version(ledger, entry.name);
+        entry.version = next_version(ledger, entry.name);
+        if (entry.inherit_from.empty() && !prev.empty()) entry.inherit_from = prev;
+    }
     const std::string key_name = entry.name;
     const std::string key_version = entry.version;
 
@@ -178,6 +209,7 @@ std::vector<std::string> remove_asset(DesignLedger& ledger, const std::string& s
         return match;
     });
     ledger.assets.erase(it, ledger.assets.end());
+    clear_dangling_inherits(ledger);
     std::sort(removed.begin(), removed.end());
     return removed;
 }
@@ -191,6 +223,7 @@ std::vector<std::string> reconcile(DesignLedger& ledger,
         return gone;
     });
     ledger.assets.erase(it, ledger.assets.end());
+    clear_dangling_inherits(ledger);
     std::sort(removed.begin(), removed.end());
     return removed;
 }

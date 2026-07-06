@@ -141,6 +141,50 @@ TEST_CASE("remove_asset drops a whole name or a single revision", "[design-ledge
     REQUIRE(remove_asset(ledger, "ghost").empty());
 }
 
+TEST_CASE("auto-versioning links the new revision to the prior version", "[design-ledger]") {
+    DesignLedger ledger;
+    auto& v1 = upsert_asset(ledger, asset("panel", "ui-v1.js"));
+    REQUIRE(v1.version == "v1");
+    REQUIRE(v1.inherit_from.empty());  // first revision is a root
+    auto& v2 = upsert_asset(ledger, asset("panel", "ui-v2.js"));
+    REQUIRE(v2.version == "v2");
+    REQUIRE(v2.inherit_from == "v1");  // chain is connected by default
+    auto& v3 = upsert_asset(ledger, asset("panel", "ui-v3.js"));
+    REQUIRE(v3.inherit_from == "v2");
+}
+
+TEST_CASE("an explicit inherit_from is not overwritten by auto-linking", "[design-ledger]") {
+    DesignLedger ledger;
+    upsert_asset(ledger, asset("panel", "a.js"));         // v1
+    upsert_asset(ledger, asset("panel", "b.js"));         // v2 -> v1
+    LedgerAsset forked = asset("panel", "c.js");
+    forked.inherit_from = "v1";                            // deliberately fork off v1
+    auto& v3 = upsert_asset(ledger, forked);
+    REQUIRE(v3.version == "v3");
+    REQUIRE(v3.inherit_from == "v1");  // caller's explicit parent wins
+}
+
+TEST_CASE("removing a parent clears the child's dangling inherit_from", "[design-ledger]") {
+    DesignLedger ledger;
+    upsert_asset(ledger, asset("panel", "a.js"));  // v1
+    upsert_asset(ledger, asset("panel", "b.js"));  // v2 -> v1
+    remove_asset(ledger, "panel@v1");
+    REQUIRE(ledger.assets.size() == 1);
+    REQUIRE(ledger.assets[0].version == "v2");
+    REQUIRE(ledger.assets[0].inherit_from.empty());  // no longer points at a missing v1
+}
+
+TEST_CASE("reconcile clears a child's link to a reconciled-away parent", "[design-ledger]") {
+    DesignLedger ledger;
+    upsert_asset(ledger, asset("panel", "v1.js"));  // v1
+    upsert_asset(ledger, asset("panel", "v2.js"));  // v2 -> v1
+    std::set<std::string> on_disk = {"v2.js"};  // v1.js was hand-deleted
+    reconcile(ledger, [&](const std::string& p) { return on_disk.count(p) > 0; });
+    REQUIRE(ledger.assets.size() == 1);
+    REQUIRE(ledger.assets[0].version == "v2");
+    REQUIRE(ledger.assets[0].inherit_from.empty());
+}
+
 TEST_CASE("reconcile drops entries whose file is gone", "[design-ledger]") {
     DesignLedger ledger;
     upsert_asset(ledger, asset("panel", "present.js"));

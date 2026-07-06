@@ -1054,12 +1054,14 @@ TEST_CASE("pulp design record --remove and --reconcile drop entries",
     auto rc = run_pulp({"design", "record", "--ledger", ledger.string(), "--reconcile"});
     REQUIRE(rc.exit_code == 0);
     REQUIRE(rc.stdout_output.find("footer@v1") != std::string::npos);
-    REQUIRE(choc::json::parse(read_text(ledger))["assets"].size() == 1);
+    auto after_rc = choc::json::parse(read_text(ledger));  // owning Value; bind before indexing
+    REQUIRE(after_rc["assets"].size() == 1);
 
     // Explicit --remove of the survivor empties the ledger.
     auto rm = run_pulp({"design", "record", "--ledger", ledger.string(), "--remove", "panel"});
     REQUIRE(rm.exit_code == 0);
-    REQUIRE(choc::json::parse(read_text(ledger))["assets"].size() == 0);
+    auto after_rm = choc::json::parse(read_text(ledger));
+    REQUIRE(after_rm["assets"].size() == 0);
     fs::remove_all(tmp);
 }
 
@@ -1096,6 +1098,63 @@ TEST_CASE("pulp design record --help prints usage", "[cli][design-record][shello
     auto r = run_pulp({"design", "record", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design record") != std::string::npos);
+}
+
+TEST_CASE("pulp design record refuses a corrupt ledger instead of overwriting it",
+          "[cli][design-record][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto tmp = unique_temp_dir("pulp-record-corrupt");
+    auto ledger = tmp / ".pulp-design-meta.json";
+    const std::string corrupt = "{\"assets\":[{\"name\":\"panel\",\"version\":\"v1\"}";  // truncated
+    { std::ofstream f(ledger); f << corrupt; }
+    auto r = run_pulp({"design", "record", "--ledger", ledger.string(),
+                       "--name", "footer", "--asset", "footer.js"});
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_output.find("not valid JSON") != std::string::npos);
+    // The corrupt file is left exactly as it was — no data loss.
+    REQUIRE(read_text(ledger) == corrupt);
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("pulp design record --reconcile resolves paths against the ledger dir",
+          "[cli][design-record][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto proj = unique_temp_dir("pulp-record-rel") / "project";
+    fs::create_directories(proj);
+    auto ledger = proj / ".pulp-design-meta.json";
+    // Record an asset by its project-relative path; the file lives next to the
+    // ledger, not in the test's cwd.
+    { std::ofstream f(proj / "ui.js"); f << "x=1;\n"; }
+    auto rec = run_pulp({"design", "record", "--ledger", ledger.string(),
+                         "--name", "panel", "--asset", "ui.js"});
+    REQUIRE(rec.exit_code == 0);
+    // Reconcile: the relative path resolves against the ledger dir, so the
+    // present file is NOT dropped even though cwd is elsewhere.
+    auto rc = run_pulp({"design", "record", "--ledger", ledger.string(), "--reconcile"});
+    REQUIRE(rc.exit_code == 0);
+    REQUIRE(rc.stdout_output.find("dropped 0") != std::string::npos);
+    auto v = choc::json::parse(read_text(ledger));
+    REQUIRE(v["assets"].size() == 1);
+    fs::remove_all(proj.parent_path());
+}
+
+TEST_CASE("pulp design record auto-links a new version to the prior one",
+          "[cli][design-record][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto tmp = unique_temp_dir("pulp-record-chain");
+    auto ledger = tmp / ".pulp-design-meta.json";
+    run_pulp({"design", "record", "--ledger", ledger.string(), "--name", "panel", "--asset", "v1.js"});
+    run_pulp({"design", "record", "--ledger", ledger.string(), "--name", "panel", "--asset", "v2.js"});
+    auto v = choc::json::parse(read_text(ledger));
+    // v2 links back to v1 rather than being an orphan.
+    bool linked = false;
+    for (uint32_t i = 0; i < v["assets"].size(); ++i) {
+        auto a = v["assets"][i];
+        if (std::string(a["version"].getString()) == "v2")
+            linked = std::string(a["inherit_from"].getString()) == "v1";
+    }
+    REQUIRE(linked);
+    fs::remove_all(tmp);
 }
 
 // ── `pulp design gallery` — the review-artifact CLI ──────────────────────────
