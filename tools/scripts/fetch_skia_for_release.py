@@ -297,6 +297,14 @@ def main(argv: list[str]) -> int:
 
     dest = Path(dest_root)
     dest.mkdir(parents=True, exist_ok=True)
+    # Self-heal a corrupted warm cache: a dangling `build` symlink (its target
+    # gone) makes mkdir see the path as both present (the link exists) and
+    # unusable (a child cannot be created because the target is missing), which
+    # aborts unpacking. Remove ONLY a broken link — a healthy cache is left
+    # intact, so this costs nothing on a good runner.
+    build_entry = dest / "build"
+    if build_entry.is_symlink() and not build_entry.exists():
+        build_entry.unlink()
     print(f"Unpacking → {dest}")
     # Idempotent extract. A prior cache restore may already have populated the
     # destination tree; zipfile.extractall raises FileExistsError on a directory

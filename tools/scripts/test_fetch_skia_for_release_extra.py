@@ -279,6 +279,42 @@ class BakedSkiaShortCircuit(unittest.TestCase):
             # Overwritten with the fresh bytes; no exception on the existing dir.
             self.assertEqual(skia.expected_library_path("darwin-arm64").read_bytes(), b"fresh")
 
+    def test_main_self_heals_a_dangling_build_symlink(self) -> None:
+        # A warm runner can leave external/skia-build/build as a dangling symlink
+        # (its target gone). Unpacking must remove the broken link and succeed,
+        # not abort with the FileNotFound/FileExists pair the link produces.
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            data = make_zip_bytes(pathlib.Path("build/mac-gpu/lib/Release/libskia.a"), b"ok")
+            digest = hashlib.sha256(data).hexdigest()
+            manifest = pathlib.Path("tools/deps/manifest.json")
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(
+                json.dumps({
+                    "dependencies": [{
+                        "name": "skia",
+                        "determinism": {
+                            "release_assets": {
+                                "mac-arm64": {"url": "https://example.invalid/skia.zip", "sha256": digest}
+                            }
+                        },
+                    }]
+                }),
+                encoding="utf-8",
+            )
+            # external/skia-build/build → a target that does not exist (dangling).
+            pathlib.Path("external/skia-build").mkdir(parents=True)
+            pathlib.Path("external/skia-build/build").symlink_to("nonexistent-target")
+            self.assertTrue(pathlib.Path("external/skia-build/build").is_symlink())
+            self.assertFalse(pathlib.Path("external/skia-build/build").exists())  # dangling
+
+            with mock.patch.object(skia.urllib.request, "urlopen", return_value=_FakeResponse(data)), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 0)
+
+            # The broken link is gone, replaced by a real tree with the fetched lib.
+            self.assertFalse(pathlib.Path("external/skia-build/build").is_symlink())
+            self.assertEqual(skia.expected_library_path("darwin-arm64").read_bytes(), b"ok")
+
 
 if __name__ == "__main__":
     unittest.main()
