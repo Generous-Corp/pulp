@@ -378,14 +378,13 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             bus.optional ? 0 : Steinberg::Vst::BusInfo::kDefaultActive);
     }
 
-    // Add event buses for MIDI. The event input bus carries all 16 MIDI
-    // channels (the second argument is the channel count, default 16), so
-    // per-channel controller mapping below has a channel to bind to.
+    // Add event buses for MIDI. The second argument is the advertised MIDI
+    // channel count; hosts query controller mappings and outputs per channel.
     if (desc.accepts_midi) {
         addEventInput(STR16("MIDI In"), 16);
     }
     if (desc.produces_midi) {
-        addEventOutput(STR16("MIDI Out"), 1);
+        addEventOutput(STR16("MIDI Out"), 16);
     }
 
     // Register Pulp parameters with the VST3 parameter system

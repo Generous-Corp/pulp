@@ -178,6 +178,13 @@ bool StandaloneApp::start() {
     prep.output_channels = config_.output_channels;
     processor_->prepare(prep);
 
+    while (hardware_midi_queue_.try_pop()) {}
+    hardware_midi_queue_.reset_overflow_count();
+    midi_in_.reserve(detail::kStandaloneMidiBufferEventCapacity);
+    midi_out_.reserve(detail::kStandaloneMidiBufferEventCapacity);
+    midi_in_.set_realtime_capacity_limit(true);
+    midi_out_.set_realtime_capacity_limit(true);
+
     // Pre-allocate test signal buffer and pointer arrays (no audio-thread allocation)
     test_signal_.set_sample_rate(config_.sample_rate);
     int test_ch = std::max(config_.input_channels, config_.output_channels);
@@ -267,8 +274,7 @@ bool StandaloneApp::start() {
             auto midi_port_id = config_.midi_input_id.empty()
                 ? inputs[0].id : config_.midi_input_id;
             midi_input_->open(midi_port_id, [this](const midi::MidiEvent& event) {
-                std::lock_guard lock(midi_mutex_);
-                pending_midi_.add(event);
+                (void)hardware_midi_queue_.try_push(event);
             });
             if (midi_input_->is_open()) {
                 runtime::log_info("Standalone: MIDI input connected");
@@ -313,17 +319,17 @@ bool StandaloneApp::start() {
             return;
         }
 
-        // Collect pending MIDI from the hardware input thread (mutex-guarded
-        // accumulator). UI / virtual-keyboard / scripting MIDI is delivered
-        // separately via `ui_midi_collector_` (pulp::midi::
-        // MidiMessageCollector), which is lock-free and sample-accurate within
-        // the current block.
-        midi::MidiBuffer midi_in, midi_out;
-        {
-            std::lock_guard lock(midi_mutex_);
-            midi_in = std::move(pending_midi_);
-            pending_midi_.clear();
-        }
+        // Collect hardware MIDI through the lock-free input queue. UI /
+        // virtual-keyboard / scripting MIDI is delivered separately via
+        // `ui_midi_collector_`, which is also lock-free and sample-accurate
+        // within the current block.
+        midi::MidiBuffer& midi_in = midi_in_;
+        midi::MidiBuffer& midi_out = midi_out_;
+        midi_in.clear();
+        midi_in.clear_sysex();
+        midi_out.clear();
+        midi_out.clear_sysex();
+        detail::drain_standalone_midi_input(hardware_midi_queue_, midi_in);
 
         // Drain UI-thread MIDI into this block at the correct sample offsets.
         // The standalone host treats its own audio clock as the master
@@ -337,6 +343,7 @@ bool StandaloneApp::start() {
                 : 0.0;
         ui_midi_collector_.drain_into(midi_in, block_start_seconds,
                                       ctx.buffer_size, ctx.sample_rate);
+        midi_in.sort();
 
 #if PULP_ENABLE_AUDIO_PROBES
         auto analyze_output_probe = [&]() noexcept {

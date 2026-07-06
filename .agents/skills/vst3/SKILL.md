@@ -300,9 +300,12 @@ Load-bearing constraints:
   declared — existing param-count / state-format contracts are unaffected.
   (Controllers never enter `store_`, so saved state never contains a
   controller ID — verified by `[vst3][midimapping][state]`.)
-- **The event input bus must declare 16 channels** (`addEventInput(name, 16)`),
-  not 1 — the host queries `getMidiControllerAssignment` per channel up to the
-  bus's `channelCount`, so a 1-channel bus only ever maps channel 0.
+- **The event input/output buses must declare 16 channels**
+  (`addEventInput(name, 16)` / `addEventOutput(name, 16)`), not 1. Hosts query
+  `getMidiControllerAssignment` per input channel up to the input bus's
+  `channelCount`, and MIDI-output-aware hosts use the output bus count for
+  multi-channel routing. A 1-channel event bus silently collapses routing to
+  channel 0.
 - Controllers are decoded in the parameter-change loop (before the note/SysEx
   loop), so `midi_in_` is cleared at the **top** of `process()`, not just
   before the event loop, and `midi_in_.sort()` runs after both sources append

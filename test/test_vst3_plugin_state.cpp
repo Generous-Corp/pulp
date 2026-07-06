@@ -2828,6 +2828,36 @@ struct MidiControllerSetup {
 
 }  // namespace
 
+TEST_CASE("VST3 MIDI event buses advertise all 16 channels",
+          "[vst3][midi][bus]") {
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    config.descriptor.produces_midi = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::BusInfo input_info{};
+    REQUIRE(processor.getBusInfo(Steinberg::Vst::kEvent,
+                                 Steinberg::Vst::kInput,
+                                 0,
+                                 input_info) == Steinberg::kResultOk);
+    REQUIRE(input_info.channelCount ==
+            pulp::format::detail::kVst3MidiChannels);
+
+    Steinberg::Vst::BusInfo output_info{};
+    REQUIRE(processor.getBusInfo(Steinberg::Vst::kEvent,
+                                 Steinberg::Vst::kOutput,
+                                 0,
+                                 output_info) == Steinberg::kResultOk);
+    REQUIRE(output_info.channelCount ==
+            pulp::format::detail::kVst3MidiChannels);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 IMidiMapping assigns stable, non-colliding controller ParamIDs",
           "[vst3][midi][midimapping]") {
     namespace VstCtrl = Steinberg::Vst;
