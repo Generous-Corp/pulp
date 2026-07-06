@@ -141,7 +141,12 @@ identically, CPU or GPU):
 | Stereo width / imaging (widener / panner / M-S / collapse) | ✅ via `stereo-width` (opt-in) | add `"stereo-width"` to the manifest's `profiles`; it reads the 2-channel signal and flags a collapse or an out-of-phase candidate. The mono default profiles skip it |
 | Attack smear / transient softening (dynamics, phase-vocoder, transient designer) | ✅ via `transient-integrity` (opt-in) | add `"transient-integrity"`; onset-aligned per-attack. Percussive/onset material only — skipped by the mono default (it would be `not_applicable` on sustained material) |
 
-### Time-alignment before measuring (`--align latency`)
+### Time-alignment before measuring (`--align`)
+
+The `--align` flag brings the pair to a common time base before measuring. `none` (the default) is
+the alignment-free path; the other modes are opt-in and each is disclosed on the envelope + summary.
+
+#### Constant delay/offset (`--align latency`)
 
 Every axis is global and alignment-free, so a **constant delay/offset** (a delay plugin, a
 tempo-sampler that starts a few ms late) doesn't change the tonal verdict — but the phase-sensitive
@@ -161,8 +166,27 @@ is measured cleanly. The alignment is disclosed on the measurement envelope
 **It refuses rather than guess:** below a confidence floor the difference isn't a reliable pure
 delay (it's a real timbral/structural change, or a time-*stretch*), so it records
 `alignment: {policy: "not_aligned", …}` and measures unaligned — a wrong alignment is worse than
-none. Default is `--align none` (no behavior change). Time-**stretch** (a non-constant warp) is the
-deferred Tier 3 work, not this mode.
+none. Default is `--align none` (no behavior change).
+
+#### Declared tape-speed change (`--align varispeed:R`)
+
+A **varispeed** (tape-style) speed change couples pitch and time — the candidate is the reference
+resampled by a ratio `R`. Because a resample is *exact* for this class (not an approximation of it),
+`--align varispeed:R` undoes it by resampling the candidate back to the reference's time base, and
+then the **entire** alignment-free pipeline — including the phase-sensitive sample residual — measures
+the pair unchanged (a clean varispeed reads `no_material_change` **and corroborated**).
+
+```bash
+pulp audio compare before.wav varispeed_after.wav --reference-role golden --align varispeed:1.5
+```
+
+You **declare** the ratio; the tool **verifies** it against the observed duration ratio and **refuses**
+(`policy: "not_aligned"`) if the audio doesn't support the declaration — it never resamples to a wrong
+length. A defect *hidden behind* a varispeed (added fizz, roughness) still flags after the resample-back
+(anti-masking). The one honest limit is physics: a speed-*up* (`R < 1`) bandlimits to a lower Nyquist,
+so a source with substantial near-Nyquist energy legitimately reads slightly duller — that is correct
+varispeed behavior, not a resampler artifact. Pitch-preserving time-**stretch** and pitch-shift (the
+other declared-warp classes) are later Tier 3 slices.
 
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build

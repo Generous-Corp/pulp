@@ -461,9 +461,27 @@ harness or `ctest`.
   lag_samples, confidence, applied}`) and the summary. It **refuses** below a confidence floor
   (records `policy: "not_aligned"`, measures unaligned) — a wrong alignment is worse than none.
   Default `--align none` = zero behavior change. `--align` threads through `compare_files` → CLI →
-  MCP (`pulp_audio_compare`'s `align` param) → the `/audio-compare` slash command. Time-**stretch**
-  (a non-constant warp) is deferred to Tier 3 (a caller-declared warp class, not sample-level
-  warping — see the alignment plan).
+  MCP (`pulp_audio_compare`'s `align` param) → the `/audio-compare` slash command.
+
+  The `--align` grammar + per-mode dispatch live in **`alignment.py`** (extracted from compare.py in
+  Tier 3 / T3.1): `alignment.parse("mode[:param]") → AlignSpec` and `alignment.apply(spec, ref, cand,
+  sr, *, needs_stereo, needs_onsets) → (ref, cand, record)`, dispatched through a `_HANDLERS` dict so
+  a new warp class is one entry. `alignment.py` imports `schema` + `dsp` (never `compare` — capability
+  facts arrive as booleans; no import cycle); the record shape stays in `schema.py`; the prose lives in
+  `alignment.describe(record)`. Not to be confused with `align.py` (onset primitives) which the
+  onset-anchored warp handlers consume.
+
+  **`--align varispeed:R`** (Tier 3 / T3.1) — a caller-**declared** tape-style speed change (candidate
+  = reference resampled by R, pitch+time coupled). A resample is EXACT for this class, so the handler
+  resamples the candidate back to the reference length (`dsp.resample_to_length` — a pure-numpy
+  Kaiser-windowed-sinc resampler, no scipy) and the WHOLE alignment-free pipeline including the sample
+  residual applies (clean varispeed → `no_material_change` + corroborated). It **verifies** the
+  declared ratio against the observed duration ratio (±2%) and **refuses** (`not_aligned`) otherwise —
+  never resampling to a wrong length. Anti-masking holds (a defect behind the varispeed still flags).
+  Honest physical limit: a speed-up (R<1) bandlimits to a lower Nyquist, so near-Nyquist energy is
+  legitimately lost (correct varispeed behavior, matches an ideal brickwall to ~1% — not a resampler
+  artifact). Pitch-preserving **stretch** + **pitch**-shift + `ratio:auto` are later Tier 3 slices; a
+  non-constant warp / DTW stays on the engine path, not compare.
 
   **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
   mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is
