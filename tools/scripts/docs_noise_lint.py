@@ -201,8 +201,10 @@ SOURCE_COMMENT_RULES = (
     ),
     Rule(
         "source-milestone-label",
+        # Capital-F "Feature N" is a plan milestone label; lowercase "feature 3"
+        # prose is left alone by the case-sensitive match.
         re.compile(
-            r"\b(?:Tier\s+[A-Z]\s+Slice\s+\d+|plan item\s+\d+|item\s+\d+\.\d+\s+follow-up)\b"
+            r"\b(?:Tier\s+[A-Z]\s+Slice\s+\d+|Feature\s+\d+|plan item\s+\d+|item\s+\d+\.\d+\s+follow-up)\b"
         ),
         "milestone/plan-item labels belong in planning, not source comments",
     ),
