@@ -1184,6 +1184,7 @@ pulp_add_test_suite(pulp-test-reload-capabilities LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-reload-pack-build LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-reload-key-store LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-reload-remote-update LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-reload-trust-policy LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-reload-autocaps LIBRARIES pulp::view)
 
 # Signed Revocation List (SRL) + namespaced monotonic epoch floor.
