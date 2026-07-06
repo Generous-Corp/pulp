@@ -38,20 +38,23 @@ def copy_required_repo_bits(source_root, target_root):
             shutil.copy2(src, dst)
 
 
-def run_verifier(verifier, repo_root, ctest_file, doc_file):
+def run_verifier(verifier, repo_root, ctest_files, doc_file):
+    cmd = [
+        sys.executable,
+        str(verifier),
+        "--repo-root",
+        str(repo_root),
+    ]
+    for ctest_file in ctest_files:
+        cmd.extend(["--ctest-file", str(ctest_file)])
+    cmd.extend([
+        "--doc-file",
+        str(doc_file),
+        "--plan-file",
+        str(repo_root / "planning/threejs-webgpu-gltf-bake-plan.md"),
+    ])
     return subprocess.run(
-        [
-            sys.executable,
-            str(verifier),
-            "--repo-root",
-            str(repo_root),
-            "--ctest-file",
-            str(ctest_file),
-            "--doc-file",
-            str(doc_file),
-            "--plan-file",
-            str(repo_root / "planning/threejs-webgpu-gltf-bake-plan.md"),
-        ],
+        cmd,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -69,6 +72,11 @@ def remove_ctest(ctest_file, test_name):
     if needle not in text:
         raise ValueError(f"missing CTest token {needle}")
     write_text(ctest_file, text.replace(needle, f"add_test(NAME drift-{test_name}", 1))
+
+
+def combine_ctest_files(source_files, ctest_file):
+    text = "\n".join(read_text(path) for path in source_files)
+    write_text(ctest_file, text)
 
 
 def remove_doc_token(doc_file, token):
@@ -99,17 +107,20 @@ def main():
         description="Verify native slice handoff drift is rejected.")
     parser.add_argument("--handoff-verifier", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--ctest-file", type=Path, required=True)
+    parser.add_argument("--ctest-file", type=Path, action="append", required=True)
     parser.add_argument("--doc-file", type=Path, required=True)
     args = parser.parse_args()
 
     for label, path in (
             ("handoff_verifier", args.handoff_verifier),
             ("repo_root", args.repo_root),
-            ("ctest_file", args.ctest_file),
             ("doc_file", args.doc_file)):
         if not path.exists():
             print(f"{label}_exists=false path={path}")
+            return 2
+    for path in args.ctest_file:
+        if not path.exists():
+            print(f"ctest_file_exists=false path={path}")
             return 2
 
     errors = []
@@ -150,7 +161,7 @@ def main():
             doc_file = case_root / "docs/analysis/threejs-gltf-bake-native-slice.md"
             ctest_file.parent.mkdir(parents=True, exist_ok=True)
             doc_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(args.ctest_file, ctest_file)
+            combine_ctest_files(args.ctest_file, ctest_file)
             shutil.copy2(args.doc_file, doc_file)
 
             if drift == "artifact":
@@ -192,7 +203,7 @@ def main():
 
             expect_case(
                 name,
-                run_verifier(args.handoff_verifier, case_root, ctest_file, doc_file),
+                run_verifier(args.handoff_verifier, case_root, [ctest_file], doc_file),
                 expected_code,
                 expected_text,
                 errors,

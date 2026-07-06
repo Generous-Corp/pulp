@@ -211,16 +211,22 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   near-simultaneous merges bump the version line one at a time. The
   `chore: bump versions` commit it pushes triggers `auto-release.yml` exactly
   like a PR-side bump.
-- **`test/CMakeLists.txt` is a frozen hotspot — bump its ceiling when you add a
-  test.** `hotspot_size_guard.json` freezes its LOC, but it is a *test
-  registration manifest* that legitimately grows whenever a new
-  `add_test` / `pulp_add_test_suite` lands. Adding a test fails the
-  `hotspot_size_guard` gate until you raise `max_loc` for `test/CMakeLists.txt`
-  in the same change (compress the registration first, then bump by the small
-  remaining delta). Set `max_loc` to the exact current `wc -l test/CMakeLists.txt`
-  so the ceiling stays honest rather than accumulating headroom. This is
-  expected, not a smell — unlike source hotspots, the fix is to raise the
-  ceiling, not to split the file.
+- **`test/CMakeLists.txt` is now an include hub, not a registration
+  manifest.** Add new `add_test`, `add_executable`, and
+  `pulp_add_test_suite` blocks to the matching `test/cmake/*_tests.cmake`
+  manifest instead of rebuilding the old monolith. If no existing manifest
+  owns the subsystem, create a focused new `test/cmake/<area>_tests.cmake`
+  file and include it from `test/CMakeLists.txt` in dependency order. Focused
+  owner hubs may include smaller manifests for their own subsystem, but do not
+  hide sibling manifests inside an unrelated owner just to keep the top-level
+  file short. Keep the top-level `hotspot_size_guard.json` ceiling at the exact
+  tiny hub LOC; raising it for ordinary test additions is a regression. Before
+  burning a PR CI job on a manifest-only cleanup, run the local preflight:
+  `python3 tools/scripts/docs_noise_lint.py --mode=report --base origin/main`,
+  `python3 tools/scripts/hotspot_size_guard.py --base origin/main --config
+  tools/scripts/hotspot_size_guard.json --mode=report
+  --require-ceiling-reduction`, and a clean CMake configure/target-list compare
+  against `origin/main`.
 - **Source hotspots (e.g. `core/view/src/design_cpp_codegen.cpp`) are frozen
   too — bump the ceiling for a *coherent* feature, split when it's accretion.**
   `hotspot_size_guard.json` also freezes large source files. When a single,
