@@ -57,6 +57,37 @@ inline std::string reload_github_secret_name(KeyRole role, std::string_view plug
            to_secret_token(plugin_id) + "_GEN" + std::to_string(generation);
 }
 
+/// A signing key may be published as a GitHub Actions secret ONLY into a plugin's
+/// own repository — never the core Pulp repo, and never an empty/malformed target.
+/// Returns false (refuse) for the core repo (with or without a trailing `.git` or a
+/// host prefix), a value with no `owner/name` shape, or an empty string. Fail
+/// closed: when unsure, refuse rather than risk leaking a key into the wrong repo.
+inline bool github_backup_repo_allowed(std::string_view repo) {
+    if (repo.empty()) return false;
+    std::string r;
+    for (char c : repo) r.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    // Strip a trailing ".git" and any host/URL prefix down to owner/name.
+    if (r.size() > 4 && r.substr(r.size() - 4) == ".git") r.resize(r.size() - 4);
+    if (auto at = r.find('@'); at != std::string::npos) r = r.substr(at + 1);      // scp-style
+    for (const char* scheme : {"https://", "http://", "ssh://", "git://"}) {
+        const std::size_t n = std::string_view(scheme).size();
+        if (r.rfind(scheme, 0) == 0) { r = r.substr(n); break; }
+    }
+    if (auto host = r.find("github.com"); host != std::string::npos) {
+        // Host/path separator is '/' for URLs and ':' for scp-style remotes.
+        const std::size_t sep = r.find_first_of(":/", host);
+        if (sep != std::string::npos) r = r.substr(sep + 1);
+    }
+    while (!r.empty() && (r.front() == '/' || r.front() == ':')) r.erase(r.begin());
+    // Must be owner/name (a single slash, non-empty halves).
+    const std::size_t slash = r.find('/');
+    if (slash == std::string::npos || slash == 0 || slash + 1 >= r.size()) return false;
+    if (r.find('/', slash + 1) != std::string::npos) return false;  // extra path segments
+    // Never the core Pulp repo.
+    if (r == "danielraffel/pulp") return false;
+    return true;
+}
+
 /// A readable summary of everything the signature will cover, so the signer can
 /// confirm exactly what they are vouching for before a key touches it.
 inline std::string swap_pack_signing_summary(const SwapPackManifest& m) {

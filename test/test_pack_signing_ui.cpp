@@ -54,6 +54,27 @@ TEST_CASE("signing summary says pure-UI when no capabilities are declared",
     REQUIRE_THAT(swap_pack_signing_summary(m), ContainsSubstring("none — pure UI"));
 }
 
+TEST_CASE("github backup refuses the core repo + malformed targets, allows a plugin repo",
+          "[reload][signing]") {
+    // Allowed: a developer's own plugin repo (various URL forms all normalize).
+    REQUIRE(github_backup_repo_allowed("me/my-synth"));
+    REQUIRE(github_backup_repo_allowed("git@github.com:me/my-synth.git"));
+    REQUIRE(github_backup_repo_allowed("https://github.com/me/my-synth"));
+
+    // Refused: the core Pulp repo, in every form.
+    REQUIRE_FALSE(github_backup_repo_allowed("danielraffel/pulp"));
+    REQUIRE_FALSE(github_backup_repo_allowed("DanielRaffel/Pulp"));
+    REQUIRE_FALSE(github_backup_repo_allowed("git@github.com:danielraffel/pulp.git"));
+    REQUIRE_FALSE(github_backup_repo_allowed("https://github.com/danielraffel/pulp"));
+
+    // Refused: malformed / ambiguous targets (fail closed).
+    REQUIRE_FALSE(github_backup_repo_allowed(""));
+    REQUIRE_FALSE(github_backup_repo_allowed("just-a-name"));
+    REQUIRE_FALSE(github_backup_repo_allowed("owner/"));
+    REQUIRE_FALSE(github_backup_repo_allowed("/name"));
+    REQUIRE_FALSE(github_backup_repo_allowed("a/b/c"));
+}
+
 TEST_CASE("key-generation banner names the key, its location, and the consequences",
           "[reload][signing]") {
     const auto svc = reload_keychain_service(KeyRole::Signing, "com.pulp.demo");
