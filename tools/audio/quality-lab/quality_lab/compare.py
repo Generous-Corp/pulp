@@ -42,6 +42,8 @@ from .dsp import (
     mean_spectral_flux,
     null_residual_db,
     onset_attack_deficit,
+    pitch_compensated_centroid_shift,
+    pitch_ratio_from_semitones,
     relative_centroid_shift,
     stereo_width_ratio,
 )
@@ -150,9 +152,10 @@ class _Axis:
     # downmix — the stereo-image axes measure L/R relationships the mono path throws away. `compare`
     # supplies the stereo pair; mono input makes such an axis not_applicable.
     needs_stereo: bool = False
-    # When True the kernel accepts a `flux_hop_scale` kwarg (the declared stretch ratio) so it can
-    # warp-normalize under `--align stretch:R` — graininess, whose per-frame flux would otherwise read
-    # a false "smoother" on a pitch-preserving stretch. Ignored for every other axis.
+    # When True the kernel accepts the accepted warp `spec` (an AlignSpec) so it can warp-normalize for
+    # its declared class: graininess hop-scales its flux under `--align stretch:R` (else a clean stretch
+    # reads a false "smoother"); tonal-balance compensates its centroid under `--align pitch:S`. The
+    # kernel ignores classes that aren't its own; every non-warp-aware axis takes no spec.
     warp_aware: bool = False
 
 
@@ -164,16 +167,25 @@ def _generic_head(verdict: str, env: dict[str, Any]) -> str | None:
     return None
 
 
-def _centroid_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
-    rel, c_ref, c_cand = relative_centroid_shift(reference, matched, sr)
+def _centroid_kernel(matched: np.ndarray, reference: np.ndarray, sr: int,
+                     spec: Any = None) -> dict[str, Any]:
+    # Under a declared pitch:S the LTAS centroid moves by the pitch ratio by construction; measure the
+    # deviation from that EXPECTED move (the shifter's added dulling/damage), not the shift itself.
+    pitched = spec is not None and spec.mode == "pitch"
+    if pitched:
+        ratio = pitch_ratio_from_semitones(spec.param)
+        rel, c_ref, c_cand = pitch_compensated_centroid_shift(reference, matched, sr, ratio)
+    else:
+        rel, c_ref, c_cand = relative_centroid_shift(reference, matched, sr)
     if c_ref <= 1e-9:
         return {"applicable": False, "reason": "reference centroid undefined (no spectral energy)"}
     direction = "duller" if rel < 0 else "brighter"
     return {"applicable": True, "delta": rel, "unit": "rel_centroid_shift",
-            "tolerance_class": "spectral_centroid.v1",
+            "tolerance_class": "spectral_centroid.v2-pitch" if pitched else "spectral_centroid.v1",
             "payload": {"kind": "scalar", "ref_centroid_hz": round(c_ref, 1),
                         "cand_centroid_hz": round(c_cand, 1), "rel_shift": round(rel, 4),
-                        "direction": direction}}
+                        "direction": direction,
+                        **({"pitch_ratio": round(ratio, 4)} if pitched else {})}}
 
 
 def _tonal_summary(verdict: str, env: dict[str, Any]) -> str:
@@ -245,13 +257,14 @@ def _noise_roughness_summary(verdict: str, env: dict[str, Any]) -> str:
 
 
 def _graininess_kernel(matched: np.ndarray, reference: np.ndarray, sr: int,
-                       flux_hop_scale: float = 1.0) -> dict[str, Any]:
+                       spec: Any = None) -> dict[str, Any]:
     flux_ref = mean_spectral_flux(reference, sr)
     if flux_ref <= _FLUX_REF_FLOOR:
         return {"applicable": False,
                 "reason": "reference has negligible spectral flux (no sustained content to measure graininess against)"}
     # Under a declared stretch:R the candidate evolves R× slower, so its per-frame flux reads a false
     # "smoother"; measuring it at hop·R steps both series through the same source-content interval.
+    flux_hop_scale = float(spec.param) if (spec is not None and spec.mode == "stretch" and spec.param) else 1.0
     warped = flux_hop_scale != 1.0
     flux_cand = mean_spectral_flux(matched, sr, hop_scale=flux_hop_scale)
     rel = (flux_cand - flux_ref) / flux_ref   # relative flux increase; a RISE (positive) = grainier = bad
@@ -375,6 +388,7 @@ def _transient_integrity_summary(verdict: str, env: dict[str, Any]) -> str:
 _TONAL_BALANCE = _Axis(
     profile="tonal-balance", axis="tonal_balance", tool="quality-lab:spectral_centroid",
     default_threshold=0.05, bad_sign=-1, kernel=_centroid_kernel, summarize=_tonal_summary,
+    warp_aware=True,               # pitch-compensates the centroid under --align pitch:S
 )
 _ADDED_HF = _Axis(
     profile="added-hf", axis="added_hf", tool="quality-lab:hf_fizz",
@@ -390,7 +404,7 @@ _GRAININESS = _Axis(
     profile="graininess", axis="graininess", tool="quality-lab:spectral_flux",
     default_threshold=0.5, bad_sign=+1, kernel=_graininess_kernel, summarize=_graininess_summary,
     threshold_range=(0.0, 100.0),  # relative flux increase — can exceed 1.0 (e.g. +500%)
-    warp_aware=True,               # accepts flux_hop_scale to warp-normalize under --align stretch:R
+    warp_aware=True,               # hop-scales its flux from the accepted spec under --align stretch:R
 )
 _STEREO_WIDTH = _Axis(
     profile="stereo-width", axis="stereo_width", tool="quality-lab:stereo_width",
@@ -468,11 +482,12 @@ def _measured(axis: _Axis, k: dict[str, Any], threshold: float, level_match: dic
 
 def _measure(axis: _Axis, reference: np.ndarray, candidate: np.ndarray, sr: int, threshold: float,
              stereo: tuple[np.ndarray, np.ndarray] | None = None,
-             flux_hop_scale: float = 1.0) -> dict[str, Any]:
+             spec: Any = None) -> dict[str, Any]:
     """Shared flow for every axis: length + silence applicability, level-match, run the axis kernel,
     assemble the evidence envelope. A `needs_stereo` axis routes to the stereo path (fed the original
-    2-channel signals); every other axis uses the mono downmix. A `warp_aware` axis (graininess) also
-    receives `flux_hop_scale` (the declared stretch ratio) so it can warp-normalize. `status`/
+    2-channel signals); every other axis uses the mono downmix. A `warp_aware` axis also receives the
+    accepted warp `spec` (an AlignSpec) so it can warp-normalize per its declared class — graininess
+    hop-scales under `stretch:R`, tonal-balance pitch-compensates under `pitch:S`. `status`/
     `applicable`/`materiality` carry the honesty — a reader never has to guess whether the number is
     trustworthy."""
     if axis.needs_stereo:
@@ -485,7 +500,7 @@ def _measure(axis: _Axis, reference: np.ndarray, candidate: np.ndarray, sr: int,
 
     matched = audio_io.level_match(candidate, reference)
     cand_rms_pre = audio_io.rms(candidate)
-    k = (axis.kernel(matched, reference, sr, flux_hop_scale=flux_hop_scale)
+    k = (axis.kernel(matched, reference, sr, spec=spec)
          if axis.warp_aware else axis.kernel(matched, reference, sr))
     if not k.get("applicable"):
         return _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False, reason=k.get("reason", "not applicable"))
@@ -583,7 +598,7 @@ def _corroboration(primary_exceeds: bool, residual_db: float, length: dict[str, 
 
 def _corroboration_warp(primary_exceeds: bool, ltas_db: float, length: dict[str, Any]) -> dict[str, Any]:
     """Warp-compatible materiality cross-check for `stretch:R` (later `pitch:S`): the phase-blind LTAS
-    log-spectral distance — NOT the sample residual, which is invalid across a time-stretch — is the
+    log-spectral distance — NOT the sample residual, which is invalid across a declared warp — is the
     independent measure. Same agreement logic as `_corroboration`, but it corroborates a
     SPECTRAL-ENVELOPE change only; a pure phase defect is invisible to it (the inverse blindness of
     the sample residual). Advisory, never a verdict input."""
@@ -601,7 +616,7 @@ def _corroboration_warp(primary_exceeds: bool, ltas_db: float, length: dict[str,
         detail = ("a material LTAS spectral difference exists that this axis does not capture — "
                   "try another profile")
     note = (f"Materiality cross-check across a declared warp via the phase-blind LTAS log-spectral "
-            f"distance (the sample residual is invalid across a time-stretch), NOT a trust score: "
+            f"distance (the sample residual is invalid across a declared warp), NOT a trust score: "
             f"{detail}. It sees only the spectral ENVELOPE — a pure phase defect is invisible to it.")
     return schema.compare_corroboration(
         status, note,
@@ -613,15 +628,18 @@ def _corroboration_warp(primary_exceeds: bool, ltas_db: float, length: dict[str,
 
 
 def _advisory_block(reference: np.ndarray, candidate: np.ndarray, sr: int, primary_env: dict[str, Any],
-                    warp_corroborator: bool = False) -> dict[str, Any] | None:
+                    warp_spec: Any = None) -> dict[str, Any] | None:
     """Build the report's off-gate `advisory` namespace: the deterministic null-residual raw
     comparator plus a materiality corroboration against the primary axis. Only meaningful when
     the primary measurement succeeded (it reuses the same level-match contract). Returns None
     otherwise, so a not_applicable/invalid report carries no misleading advisory.
 
-    When `warp_corroborator` (a `stretch:R` pair measured unwarped), the sample residual is still
-    EMITTED (true information) but the corroboration binds instead to a phase-blind, warp-compatible
-    LTAS log-spectral distance (§5.4) — the sample residual would false-disagree across a time-stretch."""
+    When `warp_spec` is an accepted stretch/pitch, the sample residual is still EMITTED (true
+    information) but the corroboration binds instead to a phase-blind, warp-compatible LTAS log-spectral
+    distance (§5.4) — the sample residual would false-disagree across a warp. For a pitch shift the
+    reference LTAS is shifted to its expected position first, so the distance measures added damage,
+    not the pitch move."""
+    warp_corroborator = warp_spec is not None
     if primary_env.get("status") != STATUS_MEASURED:
         return None
     # null_residual_db does its own length-robust (common-region) level match — do NOT pre-match
@@ -638,7 +656,7 @@ def _advisory_block(reference: np.ndarray, candidate: np.ndarray, sr: int, prima
         "gain (the residual is then raw). Phase/delay-sensitive and alignment-free by contract: a "
         "measure of materiality, not audibility.")
     if warp_corroborator:
-        null_desc += (" NOTE: across the declared time-stretch this residual is not a valid "
+        null_desc += (" NOTE: across the declared warp this residual is not a valid "
                       "corroborator (it is phase/time-sensitive); the corroboration binds to the "
                       "LTAS spectral distance below.")
     raw = schema.compare_raw_comparator(
@@ -652,7 +670,8 @@ def _advisory_block(reference: np.ndarray, candidate: np.ndarray, sr: int, prima
     ltas_db = None
     warp_raws: list[dict[str, Any]] = []
     if warp_corroborator:
-        ltas_db = ltas_log_spectral_distance_db(reference, candidate, sr)
+        ref_shift = (pitch_ratio_from_semitones(warp_spec.param) if warp_spec.mode == "pitch" else None)
+        ltas_db = ltas_log_spectral_distance_db(reference, candidate, sr, ref_shift_ratio=ref_shift)
         warp_raws.append(schema.compare_raw_comparator(
             "ltas_residual", _RAW_LTAS_TOOL, "db_ltas_distance",
             ("Mean absolute dB difference over the two signals' long-term-average-spectrum bins — a "
@@ -795,8 +814,15 @@ def compare_arrays(
     reference = np.asarray(reference, dtype=np.float64)
     candidate = np.asarray(candidate, dtype=np.float64)
 
+    unsupported = alignment.unsupported_axis(align_spec, profile)
     if not (bool(np.all(np.isfinite(reference))) and bool(np.all(np.isfinite(candidate)))):
         env = _measurement(axis, STATUS_INVALID, applicable=False, reason="non-finite samples (NaN/Inf)")
+        advisory = None
+    elif unsupported:
+        # This axis is not valid under the declared warp (only tonal-balance is compensated under a
+        # pitch shift) — decline it honestly instead of confidently mis-measuring a clean transform.
+        env = _measurement(axis, STATUS_NOT_APPLICABLE, applicable=False, reason=unsupported)
+        env["alignment"] = schema.compare_alignment_not_required(reason=unsupported, requested=align_spec.raw)
         advisory = None
     else:
         # Optionally align to a common time base FIRST, then measure the aligned pair. The alignment
@@ -804,12 +830,14 @@ def compare_arrays(
         aref, acand, align_rec = alignment.apply(
             align_spec, reference, candidate, sr,
             needs_stereo=axis.needs_stereo, needs_onsets=axis.needs_onsets)
-        # Under a declared stretch the pair is measured UNWARPED: graininess flux is hop-scaled by the
-        # ratio, and the corroboration binds to the phase-blind LTAS distance (the sample residual is
-        # invalid across a stretch). Only applies when the declaration was accepted (applied).
-        measures_unwarped = alignment.measures_unwarped(align_spec) and align_rec.get("applied")
-        flux_hop_scale = alignment.flux_hop_scale(align_spec) if measures_unwarped else 1.0
-        env = _measure(axis, aref, acand, sr, threshold, stereo=stereo, flux_hop_scale=flux_hop_scale)
+        # Under a declared stretch/pitch the pair is measured UNWARPED: the warp-aware axes normalize
+        # for the declared class (graininess hop-scales under stretch, tonal-balance pitch-compensates
+        # under pitch) and the corroboration binds to the phase-blind LTAS distance (the sample residual
+        # is invalid across a warp). Only when the declaration was accepted (applied); else the axes see
+        # the raw pair and the spec is withheld so no half-trusted normalization is applied.
+        measures_unwarped = bool(alignment.measures_unwarped(align_spec) and align_rec.get("applied"))
+        warp_spec = align_spec if measures_unwarped else None
+        env = _measure(axis, aref, acand, sr, threshold, stereo=stereo, spec=warp_spec)
         env["alignment"] = align_rec
         # A needs_stereo axis measures the stereo image; the null-residual + corroboration run on the
         # MONO downmix, a different domain that cannot cross-check it — a pure widener (mid unchanged)
@@ -820,7 +848,7 @@ def compare_arrays(
         # mono null-residual can cross-check: the stereo image, or per-onset attacks (the onset axis
         # self-aligns, so the un-onset-aligned residual would false-disagree).
         advisory = (None if (axis.needs_stereo or axis.needs_onsets)
-                    else _advisory_block(aref, acand, sr, env, warp_corroborator=bool(measures_unwarped)))
+                    else _advisory_block(aref, acand, sr, env, warp_spec=warp_spec))
 
     # Disclose the mono fold — UNLESS this axis actually measured the stereo image (stereo-width),
     # where "stereo not compared" would be false.

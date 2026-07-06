@@ -161,8 +161,9 @@ needs onset-bearing (percussive) material (too few onsets → `not_applicable`) 
   graininess is measured at `hop·R` (else a clean stretch reads a false "smoother"), and corroboration
   binds to a phase-blind LTAS distance (the sample residual is invalid across a stretch). All **verify**
   their request (duration + that a single uniform ratio fits) and **refuse** (`alignment: not_aligned`)
-  when the audio doesn't support it; default `none` is unchanged. Pitch-shift + `ratio:auto` are later
-  Tier 3 classes.
+  when the audio doesn't support it. `--align pitch:S` declares a **duration-preserving pitch shift**
+  (S semitones): tonal-balance compensates for the expected centroid move so it measures the shifter's
+  added damage, not the shift itself. Default `none` is unchanged.
 - **Verdicts:** `regression_suspected` · `material_change_detected` · `no_material_change_detected`
   · `inconclusive` · `invalid` (a per-measurement `not_applicable` rolls up to `inconclusive`).
 - **Intent-safe:** `regression_suspected` is only emitted with `--reference-role golden` (reference

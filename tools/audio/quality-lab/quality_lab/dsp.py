@@ -136,6 +136,49 @@ def relative_centroid_shift(
     return rel, c_ref, c_cand
 
 
+def pitch_ratio_from_semitones(semitones: float) -> float:
+    """Frequency ratio of a semitone interval: ``2 ** (semitones / 12)``. Guards non-finite input."""
+    s = float(semitones)
+    if not np.isfinite(s):
+        raise ValueError(f"semitones must be finite, got {semitones!r}")
+    return 2.0 ** (s / 12.0)
+
+
+def ltas_logfreq_shift(mag: np.ndarray, freqs: np.ndarray, ratio: float) -> np.ndarray:
+    """The EXPECTED shifted reference LTAS for a declared pitch shift: every bin's energy moves to
+    ``freq·ratio``, computed as ``shifted(g) = source(g / ratio)`` via one ``np.interp`` over the LTAS
+    bins. Below-Nyquist support only — output bins whose source maps beyond Nyquist go to 0. Lets the
+    tonal axes measure deviation-FROM-EXPECTED (the algorithm's added damage) rather than the pitch
+    move itself. Cheap, numpy-only."""
+    mag = np.asarray(mag, dtype=np.float64)
+    freqs = np.asarray(freqs, dtype=np.float64)
+    if not np.isfinite(ratio) or ratio <= 0.0:
+        raise ValueError(f"ratio must be finite and > 0, got {ratio!r}")
+    if mag.size == 0:
+        return mag.copy()
+    return np.interp(freqs / ratio, freqs, mag, left=float(mag[0]), right=0.0)
+
+
+def pitch_compensated_centroid_shift(
+    reference: np.ndarray, candidate: np.ndarray, sr: int, ratio: float
+) -> tuple[float, float, float]:
+    """The pitch-aware analog of :func:`relative_centroid_shift`: a perfect declared pitch shift moves
+    the LTAS centroid by exactly ``ratio``, so the delta is the candidate centroid's deviation from
+    the EXPECTED shifted centroid — ``(c_cand / (ratio·c_ref)) − 1`` — which reads ~0 for a clean
+    shift and negative when the shifter dulled beyond the expected move. Uses the closed-form expected
+    centroid (``ratio·c_ref``), so it carries none of :func:`ltas_logfreq_shift`'s bin-interpolation
+    error. Returns (delta, c_ref, c_cand)."""
+    if not np.isfinite(ratio) or ratio <= 0.0:
+        raise ValueError(f"ratio must be finite and > 0, got {ratio!r}")
+    f, m_ref = ltas(reference, sr)
+    _, m_cand = ltas(candidate, sr)
+    c_ref = spectral_centroid_hz(f, m_ref)
+    c_cand = spectral_centroid_hz(f, m_cand)
+    expected = ratio * c_ref
+    delta = (c_cand / expected) - 1.0 if expected > 1e-9 else 0.0
+    return delta, c_ref, c_cand
+
+
 def hf_band_bin_count(sr: int, cutoff_hz: float = 8000.0, n_fft: int = 2048) -> int:
     """Number of LTAS bins at/above ``cutoff_hz`` for this sample rate + FFT size.
 
@@ -300,6 +343,7 @@ def ltas_log_spectral_distance_db(
     n_fft: int = 2048,
     hop: int = 512,
     floor_db: float = -100.0,
+    ref_shift_ratio: float | None = None,
 ) -> float:
     """Long-term-average-spectrum log-spectral distance: the mean absolute dB difference between the
     two signals' LTAS bins.
@@ -332,8 +376,13 @@ def ltas_log_spectral_distance_db(
         ref = ref / ref_rms
     if cand_rms > 1e-12:
         cand = cand / cand_rms
-    _, m_ref = ltas(ref, sr, n_fft, hop)
+    f_ref, m_ref = ltas(ref, sr, n_fft, hop)
     _, m_cand = ltas(cand, sr, n_fft, hop)
+    if ref_shift_ratio is not None:
+        # Pitch corroboration (§5.4): shift the REFERENCE LTAS by the declared pitch ratio to its
+        # expected position, so the distance measures the shifter's added spectral damage — not the
+        # pitch move itself, which a raw LTAS distance would read as a large (expected) difference.
+        m_ref = ltas_logfreq_shift(m_ref, f_ref, ref_shift_ratio)
     n = min(m_ref.size, m_cand.size)  # identical for equal n_fft/sr; min() is a length-safety guard
     if n == 0:
         return 0.0
