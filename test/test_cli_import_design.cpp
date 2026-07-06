@@ -1096,6 +1096,8 @@ TEST_CASE("pulp design record --help prints usage", "[cli][design-record][shello
     auto r = run_pulp({"design", "record", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design record") != std::string::npos);
+}
+
 // ── `pulp design gallery` — the review-artifact CLI ──────────────────────────
 // Exercised with --no-render / --json so the CLI wiring is covered without a
 // GPU/Skia dependency; the render path shells out to pulp-screenshot, tested
