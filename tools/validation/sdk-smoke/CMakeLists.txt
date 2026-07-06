@@ -105,3 +105,79 @@ pulp_add_plugin(PulpSDKSmokeProbe
     AAX_PRODUCT_CODE "SdSm"
     AAX_NATIVE_CODE "SdkS"
 )
+
+# GPU-audio transport export probe.
+#
+# find_package(Pulp) must expose Pulp::gpu-audio and its public headers so a
+# downstream GPU plugin can drive a GpuAudioTransport. A STATIC probe would only
+# prove the header compiles; an EXECUTABLE forces the linker to resolve a symbol
+# defined in the archive (GpuAudioTransport::stats(), which lives in
+# gpu_audio_transport.cpp, not the header), so a missing target export OR a
+# missing header install fails this smoke at configure/build time instead of
+# surfacing later as a broken downstream GPU plugin. Guarded because a non-GPU
+# or minimally-configured SDK need not carry the transport.
+if(TARGET Pulp::gpu-audio)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp"
+"#include <pulp/gpu_audio/gpu_audio_transport.hpp>\n"
+"\n"
+"// Reference a header type and an archive-defined symbol (stats()) so the\n"
+"// probe fails to link when Pulp::gpu-audio or its headers are absent from\n"
+"// the installed SDK.\n"
+"int main() {\n"
+"    pulp::gpu_audio::GpuAudioTransport transport;\n"
+"    const auto stats = transport.stats();\n"
+"    return transport.is_prepared() ? 1 : (stats.miss_blocks == 0 ? 0 : 2);\n"
+"}\n")
+    add_executable(PulpSDKSmokeGpuAudioProbe
+        "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeGpuAudioProbe PRIVATE Pulp::gpu-audio)
+endif()
+
+# Bundle-relocatability helper reachability.
+#
+# A GPU plugin built against the installed SDK calls pulp_make_bundle_relocatable
+# + pulp_validate_bundle_relocatable — the @loader_path fix that stops the
+# libwgpu_native.dylib "false pass on the build machine, crash on any other Mac"
+# footgun. Those helpers live in PulpBundleRelocatable.cmake, which the SDK must
+# both INSTALL (to lib/cmake/Pulp, with its check script under scripts/) and
+# INCLUDE from PulpConfig. Assert both commands are defined by find_package(Pulp)
+# so a regression that drops the module from the installed SDK fails here rather
+# than in a downstream GPU plugin's configure with "Unknown CMake command".
+# (Deterministic — holds even in the GPU-off smoke, since the functions are
+# always defined and self-guard on APPLE internally.) Driving a real GPU bundle
+# through make/validate end-to-end is a separate GPU-build-gated check.
+if(NOT COMMAND pulp_make_bundle_relocatable
+   OR NOT COMMAND pulp_validate_bundle_relocatable)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: pulp_make_bundle_relocatable / "
+        "pulp_validate_bundle_relocatable are not defined by find_package(Pulp). "
+        "PulpBundleRelocatable.cmake must be installed to lib/cmake/Pulp and "
+        "included by PulpConfig.cmake for downstream GPU plugins to ship "
+        "self-contained bundles.")
+endif()
+
+# End-to-end relocatable GPU bundle check (GPU SDK only).
+#
+# pulp_add_plugin already places libwgpu_native.dylib next to each format binary
+# and bakes the @loader_path rpath (its internal target_copy_webgpu_binaries),
+# for find_package(Pulp) consumers just as for a source build. What is NOT
+# automatic is the *validation* — so add pulp_validate_bundle_relocatable on the
+# probe's real bundles. A regression in that installed-SDK copy/rpath path then
+# fails the smoke here instead of shipping a GPU plugin that passes every check
+# on the build machine and crashes ("Library not loaded") on a customer's Mac.
+#
+# Allow-list of self-contained single-bundle formats only. AUv3 is deliberately
+# excluded: its .appex is intentionally NOT relocatable in isolation — the wgpu
+# dylib and the AUv3 framework live in the *container app's* Contents/Frameworks,
+# and the appex references the framework by @rpath resolved only inside that
+# container, so scanning the standalone appex would be a false failure (and the
+# container app that IS the relocatability unit isn't a probe target here).
+# Gated on the `webgpu` IMPORTED target so the GPU-off smoke skips it.
+if(TARGET webgpu)
+    foreach(_fmt Standalone CLAP VST3 AU)
+        set(_pulp_gpu_bundle "PulpSDKSmokeProbe_${_fmt}")
+        if(TARGET ${_pulp_gpu_bundle})
+            pulp_validate_bundle_relocatable(${_pulp_gpu_bundle})
+        endif()
+    endforeach()
+endif()

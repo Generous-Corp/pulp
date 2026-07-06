@@ -30,7 +30,9 @@ import numpy as np
 
 from . import audio_io, schema
 from .dsp import (
+    apply_lag_trim,
     dc_offset_metrics,
+    estimate_global_lag,
     harmonic_to_noise_ratio_db,
     hf_band_bin_count,
     hf_fraction_ratio_db,
@@ -58,7 +60,16 @@ FLAG_UNCAPTURED_DIFF = schema.COMPARE_FLAG_UNCAPTURED_DIFF
 FLAG_AXIS_ONLY = schema.COMPARE_FLAG_AXIS_ONLY
 
 _LTAS_N_FFT = 2048  # a valid LTAS needs at least this many samples
-_ALIGNMENT = {"policy": "not_required", "reason": "global_ltas_metric"}
+
+# Alignment modes for `--align` (opt-in; default "none" preserves every existing contract). "latency"
+# estimates a single constant lag and trims to a common time base so a pure delay/offset reads as the
+# tone change it is, not a false "material" from the shift. Below this confidence floor the difference
+# is NOT a pure delay, so we REFUSE to trim (a wrong alignment is worse than none) and record
+# `not_aligned`. Floor 0.7 sits above spurious partial/out-of-range matches (~0.68) yet well below
+# real delays (~0.9-1.0); ambiguous (periodic) and boundary peaks are already forced to confidence 0
+# in the estimator. Future modes (onset/ratio/dtw) plug in here behind the same alignment record.
+_ALIGN_MODES = ("none", "latency")
+_ALIGN_CONFIDENCE_FLOOR = 0.7
 
 # added-hf band. Below `_HF_MIN_BINS` LTAS bins at/above the cutoff, the >=cutoff band is too
 # narrow for an energy *fraction* to mean anything (e.g. sr=16 kHz → the >=8 kHz band is the
@@ -313,7 +324,8 @@ MONO_PROFILES = tuple(p for p in PROFILES if p not in set(STEREO_PROFILES))
 
 def _measurement(axis: _Axis, status: str, *, applicable: bool, reason: str | None = None, **evidence: Any) -> dict[str, Any]:
     return schema.compare_measurement(
-        axis.axis, axis.tool, status, applicable=applicable, alignment=_ALIGNMENT, reason=reason, **evidence
+        axis.axis, axis.tool, status, applicable=applicable,
+        alignment=schema.compare_alignment_not_required(), reason=reason, **evidence
     )
 
 
@@ -548,6 +560,14 @@ def _summary_with_disclosures(
     `headline_flags` derived from corroboration); they never change the verdict. This stops the
     headline from actively misdirecting or from burying the most actionable corroboration signal."""
     summary = axis.summarize(verdict, env)
+    # Alignment disclosure (only when latency alignment was requested — the default not_required
+    # policy stays silent). It changed WHAT was measured, so surface it plainly.
+    al = env.get("alignment", {})
+    if al.get("policy") == schema.COMPARE_ALIGN_FIXED_LATENCY and al.get("applied"):
+        summary += (f" Aligned: trimmed a {al['lag_samples']}-sample constant lag before measuring "
+                    f"(confidence {al['confidence']}).")
+    elif al.get("policy") == schema.COMPARE_ALIGN_NOT_ALIGNED:
+        summary += f" Alignment refused ({al.get('reason', 'low confidence')}) — measured unaligned."
     # The structured `downmix` field always discloses the fold (machine-readable); the prose clause
     # is suppressed on `invalid`, where "we downmixed to mono" reads oddly on a report that never
     # actually compared anything.
@@ -569,6 +589,36 @@ def _summary_with_disclosures(
     return summary
 
 
+def _apply_alignment(
+    align: str, reference: np.ndarray, candidate: np.ndarray, sr: int, axis: _Axis
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Optionally trim `reference`/`candidate` to a common time base BEFORE measuring, so a constant
+    delay/offset is judged as content, not as the shift. Returns (ref, cand, alignment_record); the
+    record replaces the envelope's `alignment` field so a reader sees whether — and how — the pair
+    was aligned. On low confidence it REFUSES (records `not_aligned`) and returns the signals
+    untouched: a wrong alignment is worse than none, and the residual will still flag the offset
+    (correct, since we couldn't align)."""
+    if align == "none":
+        return reference, candidate, schema.compare_alignment_not_required()
+    if axis.needs_stereo:
+        # stereo width/correlation are global over the whole render → invariant to a constant delay,
+        # and the mono ref/cand only feed a suppressed advisory for the stereo axis. Disclose that
+        # latency was requested and deliberately skipped, rather than a stale "not requested".
+        return reference, candidate, schema.compare_alignment_not_required(
+            reason="stereo-width is invariant to a constant delay", requested=align)
+    est = estimate_global_lag(reference, candidate, sr)   # align == "latency"
+    if est.confidence < _ALIGN_CONFIDENCE_FLOOR:
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested="latency", applied=False,
+            confidence=round(est.confidence, 3),
+            reason=(f"no reliable constant lag (confidence {est.confidence:.2f} < "
+                    f"{_ALIGN_CONFIDENCE_FLOOR}) — the difference is not a pure delay"))
+    ref_a, cand_a = apply_lag_trim(reference, candidate, est.lag_samples)
+    return ref_a, cand_a, schema.compare_alignment(
+        schema.COMPARE_ALIGN_FIXED_LATENCY, applied=True,
+        lag_samples=int(est.lag_samples), confidence=round(est.confidence, 3))
+
+
 def compare_arrays(
     reference: np.ndarray,
     candidate: np.ndarray,
@@ -579,6 +629,7 @@ def compare_arrays(
     threshold: float | None = None,
     input_channels: tuple[int, int] | None = None,
     stereo: tuple[np.ndarray, np.ndarray] | None = None,
+    align: str = "none",
 ) -> dict[str, Any]:
     """Compare two in-memory signals and return the full report (envelope + verdict). Pure —
     no file I/O. Raises ValueError on a caller-contract error (unknown profile/role, out-of-range
@@ -592,6 +643,8 @@ def compare_arrays(
     axis = _resolve(profile)
     if reference_role not in ("peer", "golden"):
         raise ValueError(f"unknown reference_role {reference_role!r} (expected 'peer' or 'golden')")
+    if align not in _ALIGN_MODES:
+        raise ValueError(f"unknown align {align!r} (expected one of {_ALIGN_MODES})")
     if threshold is None:
         threshold = axis.default_threshold
     lo, hi = axis.threshold_range
@@ -606,13 +659,17 @@ def compare_arrays(
         env = _measurement(axis, STATUS_INVALID, applicable=False, reason="non-finite samples (NaN/Inf)")
         advisory = None
     else:
-        env = _measure(axis, reference, candidate, sr, threshold, stereo=stereo)
+        # Optionally align to a common time base FIRST, then measure the aligned pair. The alignment
+        # record is disclosed on the envelope; on `none` it is the default not_required policy.
+        aref, acand, alignment = _apply_alignment(align, reference, candidate, sr, axis)
+        env = _measure(axis, aref, acand, sr, threshold, stereo=stereo)
+        env["alignment"] = alignment
         # A needs_stereo axis measures the stereo image; the null-residual + corroboration run on the
         # MONO downmix, a different domain that cannot cross-check it — a pure widener (mid unchanged)
         # makes the mono residual read "identity" and would wrongly flag the real stereo change as
         # phase-only. Suppress the mono advisory rather than emit a misleading cross-check (a
         # stereo-domain residual is future work).
-        advisory = None if axis.needs_stereo else _advisory_block(reference, candidate, env)
+        advisory = None if axis.needs_stereo else _advisory_block(aref, acand, env)
 
     # Disclose the mono fold — UNLESS this axis actually measured the stereo image (stereo-width),
     # where "stereo not compared" would be false.
@@ -642,6 +699,7 @@ def compare_files(
     profile: str = "tonal-balance",
     reference_role: str = "peer",
     threshold: float | None = None,
+    align: str = "none",
 ) -> dict[str, Any]:
     """Load two WAVs and compare them. Adds provenance (hashes, sample rate). Caller-contract
     errors (unknown profile / reference_role) raise ValueError up front — same as
@@ -651,6 +709,8 @@ def compare_files(
     _resolve(profile)  # unknown profile → ValueError (not a silent tonal-balance fallback)
     if reference_role not in ("peer", "golden"):
         raise ValueError(f"unknown reference_role {reference_role!r} (expected 'peer' or 'golden')")
+    if align not in _ALIGN_MODES:
+        raise ValueError(f"unknown align {align!r} (expected one of {_ALIGN_MODES})")
     try:
         ref_raw, sr_ref, ref_ch = audio_io.load_wav_multichannel(reference_wav)
         cand_raw, sr_cand, cand_ch = audio_io.load_wav_multichannel(candidate_wav)
@@ -674,7 +734,7 @@ def compare_files(
 
     report = compare_arrays(
         ref, cand, sr_ref, profile=profile, reference_role=reference_role, threshold=threshold,
-        input_channels=(ref_ch, cand_ch), stereo=stereo,
+        input_channels=(ref_ch, cand_ch), stereo=stereo, align=align,
     )
     report["provenance"] = {
         "reference": reference_wav,

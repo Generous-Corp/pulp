@@ -563,18 +563,40 @@ Run `security find-identity -v -p codesigning` (macOS) to find your identity, th
 pulp config set signing.apple.identity "Developer ID Application: ..."
 ```
 
-### `codesign` fails with `errSecInternalComponent`
+### `codesign` fails with `errSecInternalComponent` (or pops a GUI password dialog)
 
-The identity is present and the keychain is unlocked, but `codesign` cannot use
-the private key non-interactively until the partition list is authorized once.
-The user runs (it needs the login password):
+In a fresh agent / SSH / CI session this almost always means the **dedicated
+signing keychain is locked and not on the search list**, so `codesign -s <hash>`
+falls through to the (locked) login-keychain copy of the same Developer ID cert.
+The GUI dialog that appears is asking for the **dedicated keychain's** password (a
+stored secret, `PULP_SIGN_KEYCHAIN_PW`), **not** the user's login password — so a
+user typing their login password is correctly rejected. The non-interactive fix is
+to unlock the dedicated keychain from the secret and restrict the search list to
+ONLY it (so codesign can't reach the login keychain), then restore:
+```bash
+set -a; source ~/.config/pulp/secrets/keychain.env; set +a   # PULP_SIGN_KEYCHAIN, PULP_SIGN_KEYCHAIN_PW, …
+security list-keychains -d user -s "$PULP_SIGN_KEYCHAIN"      # ONLY the dedicated keychain
+security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$PULP_SIGN_KEYCHAIN"
+# … sign / package …
+security list-keychains -d user -s "$HOME/Library/Keychains/login.keychain-db" "$PULP_SIGN_KEYCHAIN"  # restore
+```
+`tools/scripts/build_combined_installer.sh` runs `ensure_signing_ready.sh` (the
+same `pulp ship doctor` preflight, single source of truth) before signing, so
+`pulp ship package` / a plugin's `package.sh` sign prompt-free out of the box —
+no manual `pulp ship doctor` needed first, and the fresh-machine case (keychain
+or `.p12` not yet imported) is covered too.
+`pulp ship doctor` separately authorizes the key for codesign via
+`set-key-partition-list` (login-keychain variant below, run once, needs the login
+password):
 ```bash
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
   -k "<login-password>" ~/Library/Keychains/login.keychain-db
 ```
-Full local sign+notarize recipe (inner-out dylib signing, the `*.cstemp`
-leftover, `pkgbuild`, notarytool, stapler) in *macOS manual sign + notarize from
-a worktree* above.
+(zsh trap: `${PIPESTATUS[0]}` is empty in zsh — it's `pipestatus`, 1-indexed — so a
+codesign exit reads blank when it actually succeeded; verify with `codesign
+--verify --strict` or run the check under `bash -c`.) Full local sign+notarize
+recipe (inner-out dylib signing, the `*.cstemp` leftover, `pkgbuild`, notarytool,
+stapler) in *macOS manual sign + notarize from a worktree* above.
 
 ### "Android SDK not found"
 
@@ -982,3 +1004,54 @@ DRAFT and `release-publish.yml` publishes it once BOTH succeed. So a release onl
 appears once the macOS sign/notarize leg is green too; a red sign-and-release leg
 leaves the release a draft. See the `ci` skill's coordinator note for the full
 mechanism and debugging steps.
+
+## One installer for a plugin: standalone + plugins + diagnostics (don't ship them separately)
+
+A user wants ONE installer, not a per-format `.pkg` plus a per-app `.dmg`. Do
+NOT reach for `pulp ship package` (emits a separate `.pkg` per format) and
+`pulp ship share` (a separate `.dmg` per app) piecemeal — that was the early
+SuperConvolver mistake. Use the canonical recipe:
+
+```
+tools/scripts/build_combined_installer.sh \
+  --name MyPlugin --version X.Y.Z \
+  --sign-identity <Developer ID Application hash> \
+  --installer-identity <Developer ID Installer hash> \
+  --out DIR \
+  --plugin au   build/AU/MyPlugin.component \
+  --plugin vst3 build/VST3/MyPlugin.vst3 \
+  --plugin clap build/CLAP/MyPlugin.clap \
+  --app "Standalone app" build/examples/myplugin/MyPlugin.app \
+  --app "Diagnostics helper" "/path/MyPlugin Diagnostics.app" /path/Kit.entitlements \
+  --content "Sample models" "Example .nam captures" \
+           "/Library/Application Support/MyPlugin/models" build/models
+```
+
+It produces ONE component-selectable, notarized installer (Customize pane picks
+AU/VST3/CLAP/Standalone/Diagnostics). It deep-signs every bundle (inner dylibs
+first → `@loader_path`) and runs `check_bundle_relocatable.py --strict` on each,
+so a build that only works on the build machine never ships. Identities are the
+`security find-identity` hashes from the dedicated `pulp-signing` keychain (NOT
+the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
+copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
+
+**`--content "Title" "Desc" DEST SRCDIR`** (repeatable) adds a selectable
+component that installs the *contents* of `SRCDIR` to an absolute `DEST` (e.g.
+sample models / IRs into `/Library/Application Support/<Plugin>/...`), rather than
+a plugin bundle or `/Applications` app. Use it to ship bundled demo content that a
+plugin loads at runtime. Titles/descriptions are XML-escaped before they go into
+the distribution XML, so `&`/`<`/`>`/quotes in a human-readable title no longer
+corrupt the installer; the staging tree is removed via an `EXIT` trap on any exit
+(success, error, or signal).
+
+**Notarize works without `pulp-cpp` (standalone / submodule consumers).** The
+script prefers the in-tree `pulp-cpp ship notarize` when it exists, but a
+plugin repo that vendors Pulp as a *submodule* never builds `pulp-cpp` (the CLI
+is gated to top-level Pulp builds). In that case the notarize step falls back to
+`xcrun notarytool submit --wait` + `stapler staple` using the file-based
+`.p8` key from `~/.config/pulp/secrets/notary.env` (`PULP_NOTARY_KEY_ID` /
+`PULP_NOTARY_ISSUER_ID` / `PULP_NOTARY_KEY_PATH` — the same trio `pulp ship
+doctor` provisions). If neither `pulp-cpp` nor a notary key is available the step
+**fails loudly** (never ships a signed-but-unnotarized `.pkg`); pass
+`--no-notarize` to opt out deliberately. Always `stapler validate` +
+`spctl --assess --type install` the finished `.pkg` regardless of path.

@@ -147,6 +147,12 @@ Each axis carries its own materiality default; `--threshold` overrides. `noise-r
 `graininess` are meaningful on tonal/sustained material; `stereo-width` reads the original 2-channel
 signal (mono input → `not_applicable`) and flags an out-of-phase candidate.
 
+- **Time-alignment (`--align latency`).** By default the axes are alignment-free, so a constant
+  delay/offset false-alarms the sample residual (`not_corroborated`). `--align latency` estimates a
+  single constant lag, trims to a common time base, and measures the aligned pair — a pure delay then
+  reads `no_material_change` + corroborated, and a change hidden behind a delay is measured cleanly.
+  It **refuses** (records `alignment: not_aligned`) when the difference isn't a reliable pure delay;
+  default `none` is unchanged. Time-*stretch* (a non-constant warp) is deferred.
 - **Verdicts:** `regression_suspected` · `material_change_detected` · `no_material_change_detected`
   · `inconclusive` · `invalid` (a per-measurement `not_applicable` rolls up to `inconclusive`).
 - **Intent-safe:** `regression_suspected` is only emitted with `--reference-role golden` (reference

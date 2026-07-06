@@ -4,7 +4,7 @@ add_library(pulp::host ALIAS pulp-host)
 target_include_directories(pulp-host
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/core/format/include>
+        $<BUILD_INTERFACE:${PULP_ROOT_DIR}/core/format/include>
         $<INSTALL_INTERFACE:include>
 )
 

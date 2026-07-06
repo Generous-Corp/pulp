@@ -467,13 +467,27 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     if ([self.view isKindOfClass:[PulpAUMacRootView class]]) {
         ((PulpAUMacRootView *)self.view).onResize = nil;
     }
-    // Same destruction-order contract as au_view_controller_ios.mm:
-    // ivars destroy in reverse declaration order after [super dealloc].
-    // 1. ~PluginViewHost runs first, clears back-pointer on root_ View.
+    // The GPU host owns the CVDisplayLink idle pump, dispatched to the MAIN
+    // queue, which dereferences the bridge. An AU v3 controller can be released
+    // on the XPC connection queue (createAudioUnitWithComponentDescription and
+    // the rebuild bounce arrive off-main), so destroying the host off-main would
+    // race a queued main-queue idle block already past its liveness check →
+    // use-after-free in display_link_callback (same class as the AU v2 fix).
+    // Reset the host on the main thread FIRST — that flips its liveness token and
+    // stops the display link — making teardown and the idle block mutually
+    // exclusive on one queue. This preserves the destruction order below:
+    // ivars destroy in reverse declaration order after [super dealloc]:
+    // 1. ~PluginViewHost runs first, clears back-pointer on root_ View —
+    //    already done here (the reset), so its later ivar destruction is a no-op.
     // 2. ~unique_ptr<View> (_fallbackView) — no-op on success path.
     // 3. ~ViewBridge — close() fires on_view_closed, releases scripted UI.
     // Explicitly closing the bridge HERE would reverse that order and
     // dereference a dangling root_ from ~PluginViewHost. Don't.
+    if ([NSThread isMainThread]) {
+        _viewHost.reset();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{ _viewHost.reset(); });
+    }
     [_audioUnit release];
     [super dealloc];
 }

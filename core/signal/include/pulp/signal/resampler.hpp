@@ -227,6 +227,15 @@ public:
         const double beta = kaiser_beta_for_stopband(quality_.stopband_db);
         std::size_t n_taps = kaiser_length_for_transition(quality_.stopband_db, df_norm);
 
+        // Hard-cap the prototype length. The tap count grows with the rate ratio, so
+        // an extreme input:output ratio (e.g. a hostile IR header) would otherwise
+        // demand a multi-GB prototype and minutes of design work. A real audio
+        // resample needs only a few hundred taps; this ceiling is orders of
+        // magnitude above that, so it only ever clamps a pathological ratio —
+        // trading a slightly wider transition band for a bounded allocation.
+        constexpr std::size_t kMaxProtoTaps = 1u << 16;   // 65536
+        if (n_taps > kMaxProtoTaps) n_taps = kMaxProtoTaps;
+
         // Force n_taps to be `L * taps_per_phase` so the polyphase
         // decomposition is rectangular.
         const std::size_t L = quality_.phases;
@@ -239,17 +248,27 @@ public:
         for (auto& v : prototype_) v *= static_cast<double>(L);
 
         // Slice into L phases of `taps_per_phase` each. Phase p contains
-        // prototype_[p, p+L, p+2L, ...].
+        // prototype_[p, p+L, p+2L, ...]. Each phase is stored with its taps
+        // REVERSED (index k holds tap `taps-1-k`): the convolution reads the
+        // most-recent-`taps` window newest-last, so reversing the phase table
+        // here lets the hot loop walk the window and the coefficients in the
+        // same ascending direction — straight vector loads, no reverse shuffle.
         phases_.assign(L, std::vector<float>(taps_per_phase, 0.0f));
         for (std::size_t p = 0; p < L; ++p) {
             for (std::size_t k = 0; k < taps_per_phase; ++k) {
-                phases_[p][k] = static_cast<float>(prototype_[k * L + p]);
+                phases_[p][k] =
+                    static_cast<float>(prototype_[(taps_per_phase - 1u - k) * L + p]);
             }
         }
         taps_per_phase_ = taps_per_phase;
 
-        // Pre-size delay lines so we never allocate in the hot path.
-        delays_.assign(channels_, std::vector<float>(taps_per_phase, 0.0f));
+        // Pre-size delay lines so we never allocate in the hot path. Each line is
+        // DOUBLE the tap count: every input sample is written at both `write_pos`
+        // and `write_pos + taps` (a mirror), so the most-recent-`taps` window is
+        // always a contiguous physical span. The convolution then reads it with a
+        // plain pointer walk instead of a per-tap wrap branch — same taps in the
+        // same order (bit-identical), but branch-free and vectorizable.
+        delays_.assign(channels_, std::vector<float>(taps_per_phase * 2u, 0.0f));
         write_pos_.assign(channels_, 0u);
 
         // Output scratch — worst-case output count for a max-size input block.
@@ -311,8 +330,14 @@ public:
                 }
                 for (std::size_t c = 0; c < channels_; ++c) {
                     auto& d = delays_[c];
-                    d[write_pos_[c]] = input[c][input_consumed];
-                    write_pos_[c] = (write_pos_[c] + 1u) % taps_per_phase_;
+                    const float xs = input[c][input_consumed];
+                    // Mirror-write at `wp` and `wp + taps` so the read window stays
+                    // contiguous (see the convolution below).
+                    d[write_pos_[c]] = xs;
+                    d[write_pos_[c] + taps_per_phase_] = xs;
+                    // write_pos_ stays in [0, taps), so a compare-and-reset is the
+                    // same result as the modulo without the per-input-sample divide.
+                    if (++write_pos_[c] >= taps_per_phase_) write_pos_[c] = 0u;
                 }
                 ++input_consumed;
                 phase_acc_ -= 1.0;
@@ -334,17 +359,49 @@ public:
                 const auto& ph0 = phases_[p0];
                 const auto& ph1 = phases_[p1];
 
-                // Convolve: y = sum_k h[k] * x[wp - 1 - k] (most recent first).
-                double acc0 = 0.0, acc1 = 0.0;
-                std::size_t idx = (wp == 0 ? taps_per_phase_ - 1u : wp - 1u);
-                for (std::size_t k = 0; k < taps_per_phase_; ++k) {
-                    const float xs = d[idx];
-                    acc0 += static_cast<double>(xs) * static_cast<double>(ph0[k]);
-                    acc1 += static_cast<double>(xs) * static_cast<double>(ph1[k]);
-                    idx = (idx == 0 ? taps_per_phase_ - 1u : idx - 1u);
+                // Convolve the contiguous window against the (reversed) phase
+                // coefficients: y = sum_k win[k] * ph[k]. The mirror write makes
+                // `win[0 .. taps-1]` the physical most-recent-`taps` span oldest→
+                // newest, and the phase table is stored reversed to match, so both
+                // walk ascending with straight vector loads.
+                //
+                // Four independent single-precision lane accumulators let the
+                // compiler fold the reduction into SIMD FMAs. This reassociates the
+                // sum (and drops the double accumulator), so the result differs from
+                // a strict left-to-right double sum in the last few ulps — but the
+                // error sits ~69 dB below the filter's stopband floor (the
+                // "float reassociation stays below the stopband" test asserts it),
+                // far under any audible or spec-relevant level.
+                const float* win = &d[wp];   // window = win[0 .. taps-1], oldest→newest
+                const std::size_t T = taps_per_phase_;
+                float a0 = 0.f, a1 = 0.f, a2 = 0.f, a3 = 0.f;
+                std::size_t k = 0;
+                if (frac != 0.0) {
+                    float b0 = 0.f, b1 = 0.f, b2 = 0.f, b3 = 0.f;
+                    for (; k + 4u <= T; k += 4u) {
+                        a0 += win[k]      * ph0[k];      b0 += win[k]      * ph1[k];
+                        a1 += win[k + 1u] * ph0[k + 1u]; b1 += win[k + 1u] * ph1[k + 1u];
+                        a2 += win[k + 2u] * ph0[k + 2u]; b2 += win[k + 2u] * ph1[k + 2u];
+                        a3 += win[k + 3u] * ph0[k + 3u]; b3 += win[k + 3u] * ph1[k + 3u];
+                    }
+                    float acc0 = (a0 + a1) + (a2 + a3);
+                    float acc1 = (b0 + b1) + (b2 + b3);
+                    for (; k < T; ++k) { acc0 += win[k] * ph0[k]; acc1 += win[k] * ph1[k]; }
+                    output[c][out_n] = acc0 + static_cast<float>(frac) * (acc1 - acc0);
+                } else {
+                    // Integer phase position (e.g. integer resample ratios): the
+                    // second phase is weighted by frac == 0, so it never reaches the
+                    // output — skip the redundant second MAC. y == acc0 exactly.
+                    for (; k + 4u <= T; k += 4u) {
+                        a0 += win[k]      * ph0[k];
+                        a1 += win[k + 1u] * ph0[k + 1u];
+                        a2 += win[k + 2u] * ph0[k + 2u];
+                        a3 += win[k + 3u] * ph0[k + 3u];
+                    }
+                    float acc0 = (a0 + a1) + (a2 + a3);
+                    for (; k < T; ++k) acc0 += win[k] * ph0[k];
+                    output[c][out_n] = acc0;
                 }
-                const double y = acc0 + frac * (acc1 - acc0);
-                output[c][out_n] = static_cast<float>(y);
             }
 
             ++out_n;

@@ -78,6 +78,53 @@ build_convolver_ir_state(const float* ir, std::size_t ir_length, std::size_t blo
     return state;
 }
 
+/// Carry the input frequency-domain delay line (and the time-domain overlap
+/// buffer) from a displaced IR state into a freshly-built one during a live swap.
+///
+/// The input FDL is a ring of the FFTs of recent input blocks — it depends only
+/// on the audio, not the IR — so replacing the whole state at swap would zero it
+/// and force the first blocks after the swap to convolve against silent history,
+/// an audible dip / tail truncation. This moves the most recent min(prev, next)
+/// partitions of history into `next` (age-aligned) and carries the overlap
+/// buffer, so a swap is genuinely continuous.
+///
+/// `prev` is the displaced state, which the caller retires immediately after, so
+/// this SWAPS the buffers out of it rather than copying: O(num_partitions) pointer
+/// swaps, no per-sample copy and no allocation, keeping the audio-thread swap
+/// cheap even for a long (many-partition) IR. `prev` is left holding `next`'s old
+/// zero buffers — harmless, it is about to be freed off-thread. Requires matching
+/// block/FFT sizes.
+///
+/// `old_write_pos` is the convolver's ring cursor at the swap — the slot the NEXT
+/// input block would occupy — so the most-recent written block is at old-1.
+/// Returns the new ring cursor to use after the swap (always 0: the carried
+/// history is laid out so the next write lands at 0).
+inline std::size_t carry_input_history(ConvolverIrState& prev,
+                                       ConvolverIrState& next,
+                                       std::size_t old_write_pos) {
+    if (prev.fft_size != next.fft_size || prev.block_size != next.block_size)
+        return 0;  // incompatible geometry — leave `next` fresh (still no crash)
+    const std::size_t P = prev.num_partitions;
+    const std::size_t Q = next.num_partitions;
+    if (P == 0 || Q == 0) return 0;
+    const std::size_t K = std::min(P, Q);
+    // Age 0 = most recently written block. With the next write landing at cursor 0,
+    // an age-a block belongs at ring position (Q - 1 - a); older-than-available
+    // ages stay at the freshly-zeroed value. This keeps process()'s readback
+    // `(cursor + Q - p) % Q` reading the same audio for every partition that exists.
+    // Each `a` maps to a distinct (oldi, newi) in two distinct states, so swapping
+    // never aliases a slot a later iteration reads.
+    for (std::size_t a = 0; a < K; ++a) {
+        const std::size_t oldi = (old_write_pos + P - 1 - a) % P;
+        const std::size_t newi = (Q - 1 - a) % Q;
+        next.input_spectra[newi].swap(prev.input_spectra[oldi]);
+    }
+    // The overlap buffer's lower half holds the previous block's samples (the
+    // overlap the next block's FFT needs); it is IR-independent, so carry it too.
+    next.input_buffer.swap(prev.input_buffer);
+    return 0;
+}
+
 } // namespace detail
 
 /// Lock-free background-IR shuttle for `PartitionedConvolver`.

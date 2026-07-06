@@ -215,6 +215,26 @@ COMPARE_CORROBORATED = "corroborated"
 COMPARE_NOT_CORROBORATED = "not_corroborated"
 COMPARE_CORROBORATION_NA = "not_applicable"
 
+# Alignment is a measurement PRECONDITION (optionally trim/warp to a common time base before
+# measuring), disclosed on the envelope's `alignment` field — NEVER a verdict input. The policy
+# names live here; later tiers add onset-map / warp policies behind the same record shape.
+COMPARE_ALIGN_NOT_REQUIRED = "not_required"      # alignment-free axis, or not requested
+COMPARE_ALIGN_NOT_ALIGNED = "not_aligned"        # requested but refused (low confidence)
+COMPARE_ALIGN_FIXED_LATENCY = "fixed-latency-trim"  # a single constant lag was trimmed
+
+
+def compare_alignment(policy: str, **fields: Any) -> dict[str, Any]:
+    """One alignment record for a measurement envelope. Returns a FRESH dict every call (never a
+    shared singleton — a consumer mutating one report's alignment must not corrupt others or a
+    module constant). `fields` carry policy-specific keys (e.g. `lag_samples`/`confidence` on a
+    trim, `reason` on a refusal). Shape is owned here so later alignment policies stay consistent."""
+    return {"policy": policy, **fields}
+
+
+def compare_alignment_not_required(reason: str = "global_ltas_metric", **fields: Any) -> dict[str, Any]:
+    """The default alignment record for an alignment-free measurement (or `--align none`)."""
+    return compare_alignment(COMPARE_ALIGN_NOT_REQUIRED, reason=reason, **fields)
+
 
 def compare_measurement(
     axis: str,
