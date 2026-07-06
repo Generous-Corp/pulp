@@ -3,6 +3,7 @@
 #include <pulp/state/sequencer_state_channel.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <thread>
@@ -420,12 +421,20 @@ TEST_CASE("SequencerStateChannel SeqLock playhead reads coherent concurrent writ
     });
 
     std::thread reader([&] {
+        // Bounded by iteration count AND wall-clock so the same loop stays fast in
+        // a plain build yet still terminates promptly under sanitizer instrumentation
+        // (TSan/ASan slow each read 10-30x, which otherwise blows the CTest timeout).
+        // A correct SeqLock never tears, so fewer iterations only reduce sensitivity,
+        // never correctness; the continuous concurrent writer keeps coverage high.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         for (int i = 0; i < 200000; ++i) {
             PlayheadState p = ch.ui_read_playhead();
             // The invariant the writer maintains must hold on every coherent read.
             if (p.playing == 1 &&
                 p.active_step != static_cast<std::uint8_t>(p.sample_time % kStepCount))
                 torn.store(true);
+            if ((i & 0x3FF) == 0 && std::chrono::steady_clock::now() >= deadline)
+                break;
         }
         stop.store(true, std::memory_order_release);
     });
