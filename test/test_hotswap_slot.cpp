@@ -400,6 +400,13 @@ TEST_CASE("HotSwapSlot swap-while-processing is race-free (hammer)",
         }
     });
 
+    // Wait until the audio thread is actually rendering before hammering swaps.
+    // On a slow/loaded host (e.g. a CI VM) thread startup can lag enough that the
+    // control thread finishes all 2000 swaps and sets stop before the audio thread
+    // runs a single block — leaving blocks==0, so the swap-while-processing
+    // invariant goes untested and REQUIRE(blocks > 0) flakes.
+    while (blocks.load(std::memory_order_relaxed) == 0) std::this_thread::yield();
+
     for (int i = 0; i < 2000; ++i) {
         auto old = slot.swap(std::make_unique<ScaleProc>(
             1.0f + static_cast<float>(i % 8), &live));
