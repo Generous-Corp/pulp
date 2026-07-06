@@ -9,22 +9,52 @@ ConsoleCapture::LogCallback ConsoleCapture::callback(LogCallback previous) {
         // Forward to previous callback first (preserve existing behavior)
         if (prev) prev(level, message);
 
-        // Capture the entry
         Entry entry;
         entry.level = std::string(level);
         entry.message = std::string(message);
         entry.time = std::chrono::steady_clock::now();
 
-        std::lock_guard lock(mutex_);
-        entries_.push_back(std::move(entry));
-        if (entries_.size() > kMaxEntries)
-            entries_.erase(entries_.begin());
+        EntrySink sink;
+        Entry pushed;
+        {
+            std::lock_guard lock(mutex_);
+            entry.seq = ++next_seq_;
+            entries_.push_back(entry);
+            if (entries_.size() > kMaxEntries)
+                entries_.erase(entries_.begin());
+            sink = sink_;      // copy under lock; fire outside
+            pushed = entry;
+        }
+        // Fire the live-push sink outside the lock so a broadcasting host can't
+        // deadlock against a concurrent entries()/entries_since() reader.
+        if (sink) sink(pushed);
     };
 }
 
 std::vector<ConsoleCapture::Entry> ConsoleCapture::entries() const {
     std::lock_guard lock(mutex_);
     return entries_;
+}
+
+std::vector<ConsoleCapture::Entry>
+ConsoleCapture::entries_since(uint64_t after_seq, uint64_t& next_seq) const {
+    std::lock_guard lock(mutex_);
+    next_seq = next_seq_;
+    std::vector<Entry> out;
+    for (const auto& e : entries_)
+        if (e.seq > after_seq)
+            out.push_back(e);
+    return out;
+}
+
+uint64_t ConsoleCapture::latest_seq() const {
+    std::lock_guard lock(mutex_);
+    return next_seq_;
+}
+
+void ConsoleCapture::set_entry_sink(EntrySink sink) {
+    std::lock_guard lock(mutex_);
+    sink_ = std::move(sink);
 }
 
 void ConsoleCapture::clear() {

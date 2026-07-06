@@ -29,6 +29,12 @@ catch_discover_tests(pulp-test-scripted-ui PROPERTIES LABELS slow)
 # JS engine abstraction tests (shared across all backends)
 pulp_add_test_suite(pulp-test-js-engine LIBRARIES pulp::view)
 
+# Cooperative-interrupt (runaway-abort) tests for the QuickJS backend
+pulp_add_test_suite(pulp-test-js-engine-interrupt LIBRARIES pulp::view)
+
+# Scripted-UI runtime inspector bridge (off-thread evaluate marshaling)
+pulp_add_test_suite(pulp-test-script-inspector-bridge LIBRARIES pulp::view)
+
 # Theme/design token tests
 pulp_add_test_suite(pulp-test-theme LIBRARIES pulp::view)
 

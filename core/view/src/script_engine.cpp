@@ -67,6 +67,14 @@ void ScriptEngine::pump_message_loop() {
     engine_->pump_message_loop();
 }
 
+bool ScriptEngine::supports_interrupt() const {
+    return engine_ && engine_->supports_interrupt();
+}
+
+void ScriptEngine::request_interrupt() {
+    if (engine_) engine_->request_interrupt();
+}
+
 ScriptEngine::operator bool() const {
     return engine_ && engine_->is_valid();
 }

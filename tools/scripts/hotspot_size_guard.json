@@ -157,8 +157,8 @@
     },
     {
       "path": "inspect/src/domain_handler.cpp",
-      "max_loc": 912,
-      "note": "Inspector protocol dispatch hub; preserve optional-source errors"
+      "max_loc": 879,
+      "note": "Inspector protocol dispatch hub; preserve optional-source errors. Console/Runtime domains extracted to domain_runtime.cpp"
     },
     {
       "path": "inspect/src/tweak_store.cpp",

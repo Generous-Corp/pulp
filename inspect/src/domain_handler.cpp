@@ -733,39 +733,6 @@ InspectorMessage DomainHandler::handle_state(const InspectorMessage& req) {
     return make_error(req.id, "Unknown State method: " + req.method);
 }
 
-// ── Console domain ──────────────────────────────────────────────────────────
-
-InspectorMessage DomainHandler::handle_console(const InspectorMessage& req) {
-    if (req.method == methods::kConsoleEnable) {
-        if (console_) {
-            auto entries = console_->entries();
-            auto arr = choc::value::createEmptyArray();
-            for (auto& e : entries) {
-                auto obj = choc::value::createObject("");
-                obj.addMember("level", choc::value::createString(e.level));
-                obj.addMember("message", choc::value::createString(e.message));
-                arr.addArrayElement(obj);
-            }
-            return make_response(req.id, choc::json::toString(arr, false));
-        }
-        return make_response(req.id, "[]");
-    }
-    return make_error(req.id, "Unknown Console method: " + req.method);
-}
-
-// ── Runtime domain ──────────────────────────────────────────────────────────
-
-InspectorMessage DomainHandler::handle_runtime(const InspectorMessage& req) {
-    if (req.method == methods::kRuntimeEvaluate) {
-        // Would need a ScriptEngine reference — defer to future wiring
-        return make_error(req.id, "Runtime.evaluate not yet wired (needs ScriptEngine reference)");
-    }
-    if (req.method == methods::kRuntimeGetHotReloadStatus) {
-        return make_response(req.id, R"({"available":false})");
-    }
-    return make_error(req.id, "Unknown Runtime method: " + req.method);
-}
-
 // ── Audio domain ────────────────────────────────────────────────────────────
 
 InspectorMessage DomainHandler::handle_audio(const InspectorMessage& req) {

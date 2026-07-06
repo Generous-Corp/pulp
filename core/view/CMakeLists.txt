@@ -477,6 +477,7 @@ target_sources(pulp-view-core PRIVATE
 target_sources(pulp-view-script PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
     src/script_engine.cpp
+    src/script_inspector_bridge.cpp
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
     src/widget_bridge/accessibility_api.cpp

@@ -222,6 +222,17 @@ public:
     bool supports_host_objects() const override { return true; }
     bool supports_promises() const override { return true; }
 
+    // CHOC's QuickJS context installs a host interrupt handler backed by an
+    // atomic `shouldCancel` flag and exposes it as Context::cancel(). Reuse it
+    // rather than installing our own JS_SetInterruptHandler (which would clobber
+    // CHOC's). cancel() is a thread-safe atomic store, so it is the sanctioned
+    // way to abort a runaway evaluation from another thread; the next interrupt
+    // check on the engine thread throws an "interrupted" exception. Returns
+    // whether the engine reports interruption support; we don't gate on it here
+    // because supports_interrupt() already advertises the capability.
+    bool supports_interrupt() const override { return true; }
+    void request_interrupt() override { context_.cancel(); }
+
     // Expose the underlying CHOC context for WidgetBridge backward compatibility
     choc::javascript::Context& choc_context() { return context_; }
 
