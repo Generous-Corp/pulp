@@ -888,6 +888,7 @@ pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship check
+pulp ship swap-pack --bundle ui/ --plugin-id com.you.synth   # sign a hot-reload UX bundle (caps inferred; key from keychain)
 pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
 pulp ship notarize --path MyApp-1.0.dmg --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
 pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
@@ -1514,6 +1515,7 @@ pulp dev --test                               # Watch, rebuild, run tests
 pulp dev --test --test-filter=Knob            # Watch, rebuild, run tests matching Knob
 pulp dev --test --validate                    # Watch, rebuild, test, and validate built plugins
 pulp dev --run pulp-gain-standalone           # Watch, rebuild, relaunch app on each rebuild
+pulp dev --hot-dsp --run my-reloadable-standalone  # Watch, rebuild, live DSP hot-swap (no relaunch)
 pulp dev --design ui.js                       # Watch, rebuild pulp-design-tool, relaunch with ui.js
 pulp dev --target pulp-format                 # Pass --target to cmake --build
 pulp dev --run my-app -- --arg1 --arg2        # Arguments after `--` go to the launched binary
@@ -1528,6 +1530,7 @@ Flags:
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
 | `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
 | `--run TARGET` | Launch TARGET from the build dir; delegated watch mode relaunches on rebuild, Rust fallback launches once |
+| `--hot-dsp` | With `--run`: keep the launched app alive across rebuilds so its `ReloadableShell` watcher hot-swaps the rebuilt DSP logic library in place instead of a process relaunch (live DSP dev loop — edit → audible without losing audio/UI state). Requires `--run`. |
 | `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT; delegated watch mode relaunches on rebuild, Rust fallback launches once |
 | `--target T` | Pass `--target T` to `cmake --build` |
 | `--allow-unsupported-sdk` | Delegated C++ path: bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported) |

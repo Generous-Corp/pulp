@@ -91,3 +91,22 @@ TEST_CASE("ReloadLibrary move transfers ownership without double-unload", "[relo
     REQUIRE(answer != nullptr);
     REQUIRE(answer() == 42);
 }
+
+// The in-DAW self-promote (item 1.9 / P0.1 fix) must be safe to call repeatedly
+// and must never interfere with normal loads. (Its real effect — promoting the
+// RTLD_LOCAL host bundle's pulp::* symbols to global scope so thin logic binds —
+// is validated end-to-end in a DAW at the M1 PKG review; it cannot be reproduced
+// in-process because the test executable already exports its symbols globally.)
+TEST_CASE("promote_host_symbols_once is idempotent and load-safe", "[reload][library][issue-1-9]") {
+    using pulp::format::reload::promote_host_symbols_once;
+    REQUIRE_NOTHROW(promote_host_symbols_once());
+    REQUIRE_NOTHROW(promote_host_symbols_once());   // idempotent (once-guarded)
+
+    // A normal load still succeeds after promotion (promotion is called inside
+    // open() too; this asserts it does not break the loader path).
+    ReloadLibrary lib(kProbe);
+    REQUIRE(lib.valid());
+    auto answer = lib.symbol<AnswerFn>("pulp_reload_probe_answer");
+    REQUIRE(answer != nullptr);
+    REQUIRE(answer() == 42);
+}

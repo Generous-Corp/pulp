@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file reloadable_shell.hpp
-/// A ready-made hot-reloadable plugin shell (v2 plan §4.4 / Phase 1b — DAW
+/// A ready-made hot-reloadable plugin shell (DAW
 /// integration). This is the piece that makes DSP hot-reload work inside a real
 /// host (REAPER, Logic, a DAW): a `Processor` the format adapters (VST3 / AU /
 /// CLAP / Standalone) wrap exactly like any other, except its DSP lives in a
@@ -71,6 +71,19 @@
 #include <unistd.h>    // getpid
 #endif
 
+// Ship-safety gate. The dev filesystem WATCHER — the
+// background thread that polls a source path and dlopen()s whatever compiled
+// artifact appears — is a development affordance, not something a shipped plugin
+// should carry. Define PULP_RELOAD_DEV_WATCHER=0 in a release build and the
+// watcher thread, its poll loop, and the raw-path ReloadController it drives are
+// compiled OUT entirely (no filesystem-watch / auto-dlopen entry point in the
+// binary — asserted by the symbol-absence test). The signed SwapTransaction
+// surface (`session_` / the hot-swap slot) is deliberately NOT gated: that is
+// the path a shipping app-store-style signed content swap would use.
+#if !defined(PULP_RELOAD_DEV_WATCHER)
+#define PULP_RELOAD_DEV_WATCHER 1
+#endif
+
 namespace pulp::format::reload {
 
 class ReloadableShell : public Processor {
@@ -101,6 +114,16 @@ public:
     // view; see ProcessorHotSwapSlot::create_active_view() for the lifetime note.
     std::unique_ptr<view::View> create_view() override {
         return slot_.with_active([](Processor& p) { return p.create_view(); });
+    }
+
+    // Live-swap 1.9: this shell's editor rebuilds IN PLACE on each hot-swap. The
+    // ViewBridge hosts create_view() under a stable root container and rebuilds
+    // its content whenever editor_reload_generation() changes — polled on the
+    // editor idle tick, so the reload notification never crosses threads unsafely
+    // (the counter is bumped on the control/watcher thread, read on the UI thread).
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override {
+        return reload_generation_.load(std::memory_order_acquire);
     }
 
     /// Register a callback fired (on the CONTROL/watcher thread) after each
@@ -158,10 +181,17 @@ public:
         // prepare context, and the running slot.
         {
             std::lock_guard<std::mutex> g(controller_mutex_);
+            // session_ is the signed SwapTransaction surface — always present so
+            // a shipping build can still adopt a signed content swap.
             session_.emplace(slot_, state(), current_build_fingerprint(), prepare_ctx_);
+#if PULP_RELOAD_DEV_WATCHER
+            // The raw-path controller (dev filesystem reload) is compiled out of
+            // a shipping build; without it reload_now() / the watcher have no
+            // path to dlopen an arbitrary on-disk artifact.
             controller_.emplace(*session_, logic_path_);
+#endif
         }
-        start_watcher();
+        start_watcher();  // no-op (compiled out) when the watcher is gated off
     }
 
     void release() override { stop_watcher(); }
@@ -188,7 +218,10 @@ public:
             if (!controller_) return {ReloadOutcome::Status::RejectedLoadFailed, "not prepared"};
             outcome = controller_->reload_now();
             record(outcome);
-            if (outcome.ok()) on_reloaded = on_reloaded_snapshot();
+            if (outcome.ok()) {
+                reload_generation_.fetch_add(1, std::memory_order_release);  // editor rebuild (1.9)
+                on_reloaded = on_reloaded_snapshot();
+            }
         }
         if (on_reloaded) on_reloaded();   // fire AFTER releasing the lock (re-entrant-safe)
         return outcome;
@@ -198,6 +231,8 @@ public:
     std::uint64_t reload_attempts() const { return reload_attempts_.load(std::memory_order_relaxed); }
     std::uint64_t successful_reloads() const { return successful_reloads_.load(std::memory_order_relaxed); }
     ReloadOutcome::Status last_status() const { return last_status_.load(std::memory_order_relaxed); }
+    /// Total wall-clock of the last successful DSP reload, ms.
+    double last_reload_ms() const { return last_reload_ms_.load(std::memory_order_relaxed); }
     std::uint64_t contention_blocks() const { return slot_.contention_blocks(); }
     bool has_active_dsp() const { return slot_.has_active(); }
 
@@ -285,6 +320,11 @@ private:
             runtime::log_warn("[reload-shell] initial logic rejected ({}) — passthrough; "
                               "a logic with parameters needs a full plugin reload to take effect",
                               rejected->detail);
+            // Surface the structured per-field diff (fingerprint/contract) so a
+            // rejection says WHAT differs (e.g. cpp_standard host vs logic), not
+            // just "mismatch" — the difference between a 5-minute fix and an hour.
+            for (const auto& issue : rejected->issues)
+                runtime::log_warn("[reload-shell]   diff: {}", issue);
             return;
         }
         GatedImage& image = std::get<GatedImage>(gated);
@@ -311,15 +351,27 @@ private:
     }
 
     void start_watcher() {
+#if PULP_RELOAD_DEV_WATCHER
         if (running_.exchange(true)) return;  // already running
         watcher_ = std::thread([this] { watcher_loop(); });
+#endif
     }
 
     void stop_watcher() {
+#if PULP_RELOAD_DEV_WATCHER
         if (!running_.exchange(false)) return;
         if (watcher_.joinable()) watcher_.join();
+#endif
     }
 
+#if PULP_RELOAD_DEV_WATCHER
+    // PULP_RELOAD_SHIP_FIXTURE_MARK (test-only) force-emits this symbol so the
+    // ship-safety symbol-absence test has a deterministic marker: present in the
+    // dev fixture, gone from the gate-off ship fixture. Normal builds set nothing
+    // here — the method emits only when ODR-used, as usual.
+#if defined(PULP_RELOAD_SHIP_FIXTURE_MARK)
+    [[gnu::used]]
+#endif
     void watcher_loop() {
         while (running_.load(std::memory_order_relaxed)) {
             std::function<void()> on_reloaded;
@@ -328,7 +380,10 @@ private:
                 if (controller_) {
                     if (auto outcome = controller_->poll()) {
                         record(*outcome);
-                        if (outcome->ok()) on_reloaded = on_reloaded_snapshot();
+                        if (outcome->ok()) {
+                            reload_generation_.fetch_add(1, std::memory_order_release);  // editor rebuild (1.9)
+                            on_reloaded = on_reloaded_snapshot();
+                        }
                     }
                 }
             }
@@ -341,15 +396,29 @@ private:
                 std::this_thread::sleep_for(kPollInterval / 10);
         }
     }
+#endif
 
     void record(const ReloadOutcome& outcome) {
         reload_attempts_.fetch_add(1, std::memory_order_relaxed);
         last_status_.store(outcome.status, std::memory_order_relaxed);
         if (outcome.ok()) {
             successful_reloads_.fetch_add(1, std::memory_order_relaxed);
-            runtime::log_info("[reload-shell] swapped DSP: {}", outcome.detail);
+            last_reload_ms_.store(outcome.metrics.total_ms, std::memory_order_relaxed);
+            // `swapped in NNN ms` dev diagnostic + per-phase breakdown.
+            const auto& m = outcome.metrics;
+            runtime::log_info(
+                "[reload-shell] swapped DSP in {:.2f} ms "
+                "(load+gate {:.2f} / construct {:.2f} / prepare {:.2f} / swap {:.2f}): {}",
+                m.total_ms, m.load_gate_ms, m.construct_ms, m.prepare_ms, m.swap_ms,
+                outcome.detail);
         } else {
-            runtime::log_warn("[reload-shell] reload rejected: {}", outcome.detail);
+            runtime::log_warn("[reload-shell] reload rejected after {:.2f} ms: {}",
+                              outcome.metrics.total_ms, outcome.detail);
+            // Surface the structured per-field diff so a rejection says WHAT
+            // differs (e.g. which parameter's contract changed), not just the
+            // category — the difference between a 5-minute fix and an hour.
+            for (const auto& issue : outcome.issues)
+                runtime::log_warn("[reload-shell]   reject-diff: {}", issue);
         }
     }
 
@@ -374,7 +443,9 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> reload_attempts_{0};
     std::atomic<std::uint64_t> successful_reloads_{0};
+    std::atomic<double> last_reload_ms_{0.0};     // wall-clock of the last swap
     std::atomic<ReloadOutcome::Status> last_status_{ReloadOutcome::Status::RejectedLoadFailed};
+    std::atomic<std::uint64_t> reload_generation_{0};  // editor rebuild counter (1.9; UI-thread read)
     std::function<void()> on_reloaded_;           // host editor-rebuild hook (control thread)
 };
 

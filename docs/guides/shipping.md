@@ -12,6 +12,10 @@ Build → Validate → Sign → Notarize → Package → Distribute
 
 Never install a plugin to system folders without passing validation first.
 
+Shipping a plugin that hot-reloads its DSP/UI to end users? Sign the reload packs
+too — see [reload-trust.md](reload-trust.md) for `pulp ship swap-pack`, the trust
+model, and where signing keys live.
+
 ## Prerequisites
 
 - Apple Developer ID certificate (Developer ID Application)

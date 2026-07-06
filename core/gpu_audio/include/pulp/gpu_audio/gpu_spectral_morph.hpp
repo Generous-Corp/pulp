@@ -8,7 +8,7 @@
 
 namespace pulp::gpu_audio {
 
-/// Spectral morph (Phase 5): capture two spectra (A and B) and render a blend
+/// Spectral morph: capture two spectra (A and B) and render a blend
 /// at position t ∈ [0,1] — the signature "morph between two sounds" effect.
 /// Composed from GpuStft: capture_a/capture_b run GPU STFT analysis; render(t)
 /// linearly interpolates the stored complex spectra and runs a GPU STFT

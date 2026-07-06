@@ -10,6 +10,7 @@
 //     thread (no leak, no audio-thread free),
 //   - convolver still produces identity output after a swap.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -19,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/convolver_messages.hpp>
 
@@ -279,6 +281,65 @@ TEST_CASE("PartitionedConvolver: rapid swaps without drain refuse cleanly (#2881
     // Retry the refused swap — now it succeeds.
     REQUIRE(conv.try_swap_ir(swapper));
     REQUIRE_FALSE(swapper.has_pending());
+}
+
+// Crossfade: an IR swap with a crossfade configured blends old->new via the
+// shared TransitionMixer (parallel render of the retiring IR from its own
+// history) rather than a hard cut, so the change is click-free.
+TEST_CASE("PartitionedConvolver crossfades IR swaps click-free",
+          "[signal][convolver][crossfade]") {
+    constexpr std::size_t block = 64;
+    constexpr std::size_t fade = 256;
+    PartitionedConvolver conv;
+    auto ir_a = make_identity_ir(4);           // passthrough (gain 1.0)
+    conv.load_ir(ir_a.data(), ir_a.size(), block);
+    conv.set_crossfade(fade);                  // opt-in crossfade (off by default)
+
+    ConvolverIrSwapper swapper;
+    auto ir_b = make_attenuation_ir(4, 0.25f); // gain 0.25
+    REQUIRE(swapper.stage_ir(ir_b.data(), ir_b.size(), block));
+
+    using Catch::Matchers::WithinAbs;
+    std::vector<float> in(block, 1.0f), out(block, 0.0f);   // DC input
+    for (int b = 0; b < 4; ++b) conv.process(in.data(), out.data(), block);
+    REQUIRE_THAT(out[block - 1], WithinAbs(1.0f, 0.01f));   // IR-A: ~1.0
+
+    REQUIRE(conv.try_swap_ir(swapper));        // begin the crossfade
+
+    std::vector<float> seq;
+    for (int b = 0; b < static_cast<int>(fade / block) + 6; ++b) {
+        conv.process(in.data(), out.data(), block);
+        for (float v : out) seq.push_back(v);
+    }
+    REQUIRE_THAT(seq.back(), WithinAbs(0.25f, 0.01f));   // settles at IR-B
+    float max_step = 0.0f;
+    for (std::size_t i = 1; i < seq.size(); ++i)
+        max_step = std::max(max_step, std::abs(seq[i] - seq[i - 1]));
+    REQUIRE(max_step < 0.1f);   // click-free (an instant swap would step ~0.75)
+}
+
+// RT audit: a fade-active process() block must not allocate on the audio
+// thread (the crossfade renders into pre-sized scratch; the fade-out retires via
+// the ring, never freed here). Locks in the retire-ring pattern's RT invariant.
+TEST_CASE("PartitionedConvolver crossfade process is allocation-free",
+          "[signal][convolver][rt]") {
+    constexpr std::size_t block = 64, fade = 256;
+    PartitionedConvolver conv;
+    auto ir_a = make_identity_ir(4);
+    conv.load_ir(ir_a.data(), ir_a.size(), block);
+    conv.set_crossfade(fade);
+    ConvolverIrSwapper swapper;
+    auto ir_b = make_attenuation_ir(4, 0.25f);
+    REQUIRE(swapper.stage_ir(ir_b.data(), ir_b.size(), block));
+
+    std::vector<float> in(block, 1.0f), out(block, 0.0f);
+    conv.process(in.data(), out.data(), block);
+    REQUIRE(conv.try_swap_ir(swapper));   // control-thread swap starts the fade
+    {
+        pulp::test::RtAllocationProbe probe;   // audio-thread block, fade active
+        conv.process(in.data(), out.data(), block);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
 }
 
 TEST_CASE("PartitionedConvolver swap preserves input history (no tail dip)",

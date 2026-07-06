@@ -2,7 +2,7 @@
 
 /// @file reload_abi.hpp
 /// The C-ABI contract a hot-reloadable "logic" library exports, and the macro a
-/// plugin uses to export it (v2 plan §4.4 / Phase 1).
+/// plugin uses to export it.
 ///
 /// A reloadable plugin is split into a thin shell (owns the audio thread, the
 /// StateStore, and the ProcessorHotSwapSlot) and a logic library (the DSP, built

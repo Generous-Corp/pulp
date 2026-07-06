@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file processor_hotswap_slot.hpp
-/// RT-safe hot-swap slot for a `Processor` (v2 plan §4.4; adversarial P0-A).
+/// RT-safe hot-swap slot for a `Processor`.
 ///
 /// The lifetime invariant: a `Processor` instance is destroyed only on the
 /// control thread, and only after that thread has *proven* no audio callback is
@@ -41,6 +41,8 @@
 #include <pulp/midi/buffer.hpp>
 
 #include <algorithm>
+#include <pulp/signal/transition_mixer.hpp>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -50,6 +52,14 @@
 #include <vector>
 
 namespace pulp::format::reload {
+
+/// The crossfade amplitude law is the shared `signal::TransitionMixer` primitive
+/// — extracted so the hot-swap slot, the convolver IR
+/// swapper, and the Phase-2 SwapUnit transitions all fade identically and are
+/// covered by one click-free fixture. `Smoothstep` = equal-gain (default),
+/// `EqualPower` = constant power; both click-free (evaluated over the smoothstep
+/// ramp). See transition_mixer.hpp.
+using CrossfadeCurve = signal::TransitionCurve;
 
 class ProcessorHotSwapSlot {
 public:
@@ -91,6 +101,27 @@ public:
         std::unique_ptr<Processor> superseded;  // a collapsed prior fade-out
         {
             std::unique_lock<std::shared_mutex> lock(mutex_);
+            // DSP-state carry: holding the writer lock proves no audio
+            // reader is inside the old processor, so it is safe to serialize its
+            // DSP state (delay tails / filter history / phase) and restore it into
+            // the incoming one — off the audio thread. Opt-in + cold-start-safe:
+            // an empty blob or a false restore leaves `next` freshly prepared and
+            // never fails the swap. Skipped on the first install (no old to carry
+            // from). The blob is copied while the lock is held, so a plugin that
+            // opts in should keep it bounded (a longer copy → a few more audio
+            // passthrough blocks during the swap, which the crossfade masks).
+            if (active_ && next) {
+                // Best-effort: a THROW (not just a false return) must also degrade
+                // to cold-start, per the contract — otherwise a serialize/restore
+                // bug would reject the whole reload (and a throwing serialize on
+                // the already-live OLD processor would block every future reload).
+                try {
+                    const std::vector<std::byte> blob = active_->serialize_dsp_state();
+                    if (!blob.empty()) next->restore_dsp_state(blob);
+                } catch (...) {
+                    // Swallow: state-carry failed → `next` stays freshly prepared.
+                }
+            }
             if (!crossfade_ready()) {
                 displaced = std::move(active_);
                 active_ = std::move(next);
@@ -100,15 +131,26 @@ public:
                 // it out to be freed AFTER unlock (not under the lock — a slow
                 // ~Processor() would lengthen the audio thread's passthrough
                 // contention window, as the instant path already avoids).
-                // NOTE: collapsing an in-progress fade restarts at g=0, so a
-                // re-swap WITHIN the ~12ms fade window can step the output (not
-                // click-free). Hot-reload swaps are human-file-save paced (far
-                // wider than the window), so a single fade slot is sufficient.
+                // MID-FADE RE-SWAP CONTRACT: with a SINGLE fade slot,
+                // a re-swap arriving WITHIN the ~12ms window can only keep one
+                // fade-out — the just-displaced processor — and must drop the
+                // older fade-out's residual contribution, so the output can STEP
+                // at the re-swap instant (bounded, not click-free). This is
+                // deliberate: click-free chaining of overlapping fades needs a
+                // SECOND fade-out slot + buffer (double the RT cost + memory) to
+                // handle an event that is human-file-save paced (far wider than
+                // the window) — not worth it. What IS guaranteed and tested
+                // (test_hotswap_slot "swap during a fade …"): RT-safe (no
+                // alloc/free/leak — the superseded fade-out is reclaimed on the
+                // control thread), output stays finite + bounded across the
+                // re-swap, and the fade always settles to the NEWEST processor.
+                // Restarting the new fade at g=0 (below) is the right single-slot
+                // choice: keeping the ramp position or seeding a partial gain both
+                // measured WORSE late in the fade (the common case). See 1.7b.
                 superseded = std::move(fading_out_);
                 fading_out_ = std::move(active_);   // keep the just-displaced DSP for the fade
                 active_ = std::move(next);
-                fade_total_ = fade_samples_;
-                fade_pos_ = 0;
+                fade_mixer_.configure(fade_samples_, fade_mixer_.curve());
                 // Nothing to fade from on the first install → mark done immediately.
                 fade_done_.store(fading_out_ == nullptr, std::memory_order_release);
             }
@@ -146,6 +188,15 @@ public:
     void set_crossfade_samples(std::size_t samples) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         fade_samples_ = samples;
+    }
+
+    /// Select the crossfade amplitude law (default `Smoothstep` = equal-gain).
+    /// Control thread, before swaps. Takes effect on the next swap; changing it
+    /// mid-fade is allowed (the running fade keeps its ramp position, only the
+    /// gain mapping changes) but not typical.
+    void set_crossfade_curve(CrossfadeCurve curve) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        fade_mixer_.set_curve(curve);   // live: a mid-fade change re-maps gains
     }
 
     /// Allocate the scratch the fade-out processor renders into, sized for the
@@ -230,7 +281,7 @@ private:
                       const ProcessContext& ctx) {
         if (!fading_out_ || fade_done_.load(std::memory_order_relaxed)) return;
         const std::size_t frames = out.num_samples();
-        if (fade_total_ == 0 || frames > scratch_frames_) {
+        if (fade_mixer_.length() == 0 || frames > scratch_frames_) {
             // Safety floor: a block larger than the scratch (the host exceeded
             // its declared max_buffer_size) can't be faded — finish now. This
             // snaps to full-new mid-ramp (a click), but it only triggers on a
@@ -246,19 +297,21 @@ private:
         fade_midi_out_.clear();
         fading_out_->process(sv, in, fade_midi_in_, fade_midi_out_, ctx);
 
-        const float inv_total = 1.0f / static_cast<float>(fade_total_);
+        // Blend gains come from the shared TransitionMixer: old→new
+        // over the mixer's curve, click-free at both ends. Position is shared
+        // across channels (advanced once, after the loop).
+        const std::size_t base = fade_mixer_.position();
         for (std::size_t c = 0; c < ch; ++c) {
             auto o = out.channel(c);
-            auto s = sv.channel(c);
+            auto old_ch = sv.channel(c);                      // fading-out (old) DSP output
             for (std::size_t n = 0; n < frames; ++n) {
-                float t = static_cast<float>(fade_pos_ + n) * inv_total;
-                if (t > 1.0f) t = 1.0f;
-                const float g = t * t * (3.0f - 2.0f * t);   // smoothstep: 0 slope at 0 and 1
-                o[n] = s[n] * (1.0f - g) + o[n] * g;          // old→new, click-free
+                float old_gain, new_gain;
+                fade_mixer_.gains_at(base + n, old_gain, new_gain);
+                o[n] = old_ch[n] * old_gain + o[n] * new_gain;  // old→new, click-free
             }
         }
-        fade_pos_ += frames;
-        if (fade_pos_ >= fade_total_)
+        fade_mixer_.advance(frames);
+        if (fade_mixer_.done())
             fade_done_.store(true, std::memory_order_release);
     }
 
@@ -285,8 +338,7 @@ private:
     // ── Crossfade state ──────────────────────────────────────────────────────
     std::unique_ptr<Processor> fading_out_;       // retained old DSP during a fade
     std::size_t fade_samples_ = 0;                // configured fade length (0 = instant)
-    std::size_t fade_total_ = 0;                  // active fade length
-    std::size_t fade_pos_ = 0;                    // samples elapsed in the active fade
+    signal::TransitionMixer fade_mixer_;          // active fade: length + position + curve
     std::atomic<bool> fade_done_{true};           // audio thread sets; reclaim() reads
     std::vector<float> scratch_storage_;          // [channels * frames], allocated off-RT
     std::vector<float*> scratch_ptrs_;

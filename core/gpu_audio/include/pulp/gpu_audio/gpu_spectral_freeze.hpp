@@ -8,7 +8,7 @@
 
 namespace pulp::gpu_audio {
 
-/// Phase-vocoder spectral freeze (Phase 5): capture one analysis frame and
+/// Phase-vocoder spectral freeze: capture one analysis frame and
 /// sustain it indefinitely with a SEAMLESS, evolving loop — no loop boundary,
 /// no click. capture() stores per-bin magnitude + phase; each render() advances
 /// every bin's phase by its nominal frequency for one synthesis hop (with

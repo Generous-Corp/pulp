@@ -26,8 +26,11 @@ cleanup is removing. The cleanup backlog + classification rules are parked at
 ## Never write these (the "Remove" category)
 
 - **Phase / milestone / slice labels.** No `(Phase 4)`, `Phase N will…`,
-  `4f`-style sub-phase labels, `Tier A Slice 7`, `plan item 7.2`, `item 6.12
-  follow-up`. `[phaseN]` / `[phase3-large]` Catch2 tags are forbidden.
+  `4f`-style sub-phase labels, `Tier A Slice 7`, `Feature 3`, `plan item 7.2`,
+  `item 6.12 follow-up`. `[phaseN]` / `[phase3-large]` Catch2 tags are forbidden.
+  Capital-letter+digit plan tags (`C2`, `D6`, `M1`) are the same kind of
+  breadcrumb — the lint can't safely match them (they collide with MIDI note
+  names and register labels), so it's on you to keep them out of comments.
 - **Agent / review breadcrumbs.** No `Codex P1/P2/P0`, `codex review`,
   `[codex-*]`, "per the reviewer", "sub-PR", "slice N of".
 - **Process/pipeline provenance.** No `[coverage]`, `[codecov]`, `[requested]`

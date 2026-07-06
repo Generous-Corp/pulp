@@ -297,9 +297,32 @@ def main(argv: list[str]) -> int:
 
     dest = Path(dest_root)
     dest.mkdir(parents=True, exist_ok=True)
+    # Self-heal a corrupted warm cache: a dangling `build` symlink (its target
+    # gone) makes mkdir see the path as both present (the link exists) and
+    # unusable (a child cannot be created because the target is missing), which
+    # aborts unpacking. Remove ONLY a broken link — a healthy cache is left
+    # intact, so this costs nothing on a good runner.
+    build_entry = dest / "build"
+    if build_entry.is_symlink() and not build_entry.exists():
+        build_entry.unlink()
     print(f"Unpacking → {dest}")
+    # Idempotent extract. A prior cache restore may already have populated the
+    # destination tree; zipfile.extractall raises FileExistsError on a directory
+    # member whose target already exists. Create directories with exist_ok and
+    # overwrite files so unpacking over a warm/cached checkout succeeds.
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(dest)
+        for member in zf.infolist():
+            target = dest / member.filename
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member) as src, target.open("wb") as out:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
 
     # Free the ~hundreds-of-MiB download once unpacked.
     zip_path.unlink(missing_ok=True)

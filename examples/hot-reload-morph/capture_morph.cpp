@@ -6,6 +6,7 @@
 #include "morph_shell.hpp"
 
 #include <pulp/format/reload/reloadable_shell.hpp>
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -99,6 +100,34 @@ int main(int argc, char** argv) {
     const auto outcome = shell.reload_now();
     if (!outcome.ok()) { runtime::log_error("[morph-capture] reload failed: {}", outcome.detail); return 1; }
     capture(shell, dir, "harsh");                        // version B: red UI + square chop
+
+    // ── In-place open-editor rebuild proof (live-swap 1.9) ───────────────────
+    // The captures above use a FRESH create_view() per variant. This block proves
+    // the real in-host path: the SAME open editor View object, rebuilt via
+    // ViewBridge::poll_editor_reload() after a hot-swap (exactly what the DAW
+    // editor pump calls), renders the new variant — no re-instantiation. Writes
+    // inplace_warm.png (blue) then inplace_harsh.png (red) from ONE view object.
+    {
+        fs::copy_file(MORPH_LOGIC_WARM, watched, fs::copy_options::overwrite_existing);
+        shell.reload_now();  // back to warm
+        format::ViewBridge bridge(shell, store);
+        if (bridge.open()) {
+            view::View* root = bridge.view();  // the stable object a host holds
+            const uint32_t w = 400, h = 300;
+            auto render = [&](const char* tag) {
+                auto png = view::render_to_png(*root, w, h, 2.0f, view::ScreenshotBackend::skia);
+                if (!png.empty()) write_png(dir + "/inplace_" + tag + ".png", png);
+            };
+            render("warm");
+            fs::copy_file(MORPH_LOGIC_HARSH, watched, fs::copy_options::overwrite_existing);
+            const auto ro = shell.reload_now();  // bumps editor_reload_generation
+            const bool rebuilt = bridge.poll_editor_reload();  // in-place rebuild of `root`
+            runtime::log_info("[morph-capture] in-place rebuild reload_ok={} rebuilt={}",
+                              ro.ok(), rebuilt);
+            render("harsh");  // SAME root object, now the harsh editor
+            bridge.close();
+        }
+    }
 
     shell.release();
     runtime::log_info("[morph-capture] done → {}", dir);

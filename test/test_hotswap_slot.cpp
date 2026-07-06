@@ -7,10 +7,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -182,6 +185,49 @@ void render_into(ProcessorHotSwapSlot& slot, std::vector<float>& seq, int frames
     }
 }
 
+// Processor whose output IS its internal DSP state (a held int), so a state
+// carry across a swap is directly observable. Opt-in serialize/restore round-
+// trips the state; `accept_restore_ = false` simulates an incompatible blob so
+// the cold-start fallback can be tested.
+class StatefulProc final : public format::Processor {
+public:
+    explicit StatefulProc(int state, bool accept_restore = true, bool throw_on_restore = false)
+        : state_(state), accept_restore_(accept_restore), throw_on_restore_(throw_on_restore) {}
+    format::PluginDescriptor descriptor() const override {
+        return {.name = "StatefulProc", .manufacturer = "Pulp",
+                .bundle_id = "com.pulp.statefulproc", .version = "1.0.0",
+                .category = format::PluginCategory::Effect,
+                .input_buses = {{"In", 2}}, .output_buses = {{"Out", 2}}};
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>& out,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&,
+                 const format::ProcessContext&) override {
+        const float v = static_cast<float>(state_);
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            auto o = out.channel(c);
+            for (std::size_t n = 0; n < out.num_samples(); ++n) o[n] = v;
+        }
+    }
+    std::vector<std::byte> serialize_dsp_state() const override {
+        std::vector<std::byte> b(sizeof(int));
+        std::memcpy(b.data(), &state_, sizeof(int));
+        return b;
+    }
+    bool restore_dsp_state(const std::vector<std::byte>& b) override {
+        if (throw_on_restore_) throw std::runtime_error("restore boom");
+        if (!accept_restore_ || b.size() != sizeof(int)) return false;
+        std::memcpy(&state_, b.data(), sizeof(int));
+        return true;
+    }
+private:
+    int state_;
+    bool accept_restore_;
+    bool throw_on_restore_;
+};
+
 } // namespace
 
 TEST_CASE("HotSwapSlot forwards to the active processor and swaps behavior",
@@ -258,6 +304,44 @@ TEST_CASE("HotSwapSlot crossfades old->new without a click", "[hot-reload][slot]
     REQUIRE(live.load() == 1);                        // old ×2 processor destroyed
 }
 
+TEST_CASE("HotSwapSlot equal-power crossfade is click-free and constant-power",
+          "[hot-reload][slot][crossfade]") {
+    using pulp::format::reload::CrossfadeCurve;
+    std::atomic<int> live{0};
+    ProcessorHotSwapSlot slot(std::make_unique<ScaleProc>(2.0f, &live));
+    slot.prepare_crossfade(/*max_frames=*/512, /*max_channels=*/2);
+    constexpr int kFade = 256;
+    slot.set_crossfade_samples(kFade);
+    slot.set_crossfade_curve(CrossfadeCurve::EqualPower);
+
+    REQUIRE(render_one(slot) == 2.0f);
+    REQUIRE(slot.swap(std::make_unique<ScaleProc>(4.0f, &live)) == nullptr);
+    REQUIRE(slot.crossfade_active());
+
+    std::vector<float> seq;
+    render_into(slot, seq, kFade + 128);              // block=32 → seq[n] == fade sample n
+    REQUIRE(seq.size() >= static_cast<std::size_t>(kFade + 128));
+
+    // Endpoints unchanged (old ×2 → new ×4); ends stay click-free because the
+    // cos/sin law is evaluated over the zero-slope smoothstep ramp.
+    REQUIRE(seq.front() == Catch::Approx(2.0f).margin(0.05));
+    REQUIRE(seq.back() == Catch::Approx(4.0f).margin(0.01));
+    float max_step = 0.0f;
+    for (std::size_t i = 1; i < seq.size(); ++i)
+        max_step = std::max(max_step, std::abs(seq[i] - seq[i - 1]));
+    REQUIRE(max_step < 0.1f);                          // click-free
+
+    // Constant-power law: at the ramp midpoint the gains are cos(π/4)=sin(π/4)
+    // =0.7071, so the (correlated, same-sign) outputs sum to 6·0.7071 ≈ 4.243 —
+    // the deliberate power "bump" that distinguishes EqualPower from the
+    // equal-gain Smoothstep law (which would give 2·0.5+4·0.5 = 3.0 here).
+    REQUIRE(seq[128] == Catch::Approx(4.2426f).margin(0.05));
+    REQUIRE(seq[128] > 4.0f);                          // unambiguously not equal-gain (3.0)
+
+    slot.reclaim();
+    REQUIRE(live.load() == 1);
+}
+
 TEST_CASE("HotSwapSlot swap during a fade collapses the prior fade-out (no leak)",
           "[hot-reload][slot][crossfade]") {
     std::atomic<int> live{0};
@@ -282,6 +366,17 @@ TEST_CASE("HotSwapSlot swap during a fade collapses the prior fade-out (no leak)
     REQUIRE(seq.back() == Catch::Approx(3.0f).margin(0.01));
     slot.reclaim();
     REQUIRE(live.load() == 1);                        // only ×3 remains
+
+    // item 1.7b contract: a mid-fade re-swap may STEP the output (single fade
+    // slot drops the older fade-out's residual — not click-free), but it must
+    // stay RT-SAFE + BOUNDED: every sample finite and within the processors'
+    // output envelope (inputs are ±1 through ×1..×3 gains → |out| ≤ 3), and it
+    // settles to the newest DSP (asserted above). We deliberately do NOT assert
+    // click-free here, unlike the single-fade tests.
+    for (float v : seq) {
+        REQUIRE(std::isfinite(v));
+        REQUIRE(std::abs(v) <= 3.0f + 1e-3f);
+    }
 }
 
 TEST_CASE("HotSwapSlot crossfades a MIDI-emitting DSP with bounded MIDI", "[hot-reload][slot][crossfade]") {
@@ -419,4 +514,44 @@ TEST_CASE("HotSwapSlot swap-while-processing is race-free (hammer)",
     REQUIRE_FALSE(saw_bad_sample.load(std::memory_order_relaxed));
     REQUIRE(blocks.load() > 0);
     REQUIRE(live.load() == 1);  // only the final installed instance remains
+}
+
+TEST_CASE("HotSwapSlot carries opt-in DSP state across a swap (item 1.6)",
+          "[hot-reload][slot][state-carry]") {
+    // Instant swap path (no crossfade configured): old holds state 7, new starts
+    // at 0. With the carry, the new processor adopts the old's state on swap.
+    ProcessorHotSwapSlot slot(std::make_unique<StatefulProc>(7));
+    REQUIRE(render_one(slot) == 7.0f);                 // old DSP state
+
+    auto displaced = slot.swap(std::make_unique<StatefulProc>(0));  // new inits to 0
+    REQUIRE(displaced != nullptr);                     // instant path returns the old
+    REQUIRE(render_one(slot) == 7.0f);                 // carried: new adopted old's 7, not 0
+}
+
+TEST_CASE("HotSwapSlot state-carry falls back to cold start when restore declines",
+          "[hot-reload][slot][state-carry]") {
+    // The incoming processor rejects the blob (accept_restore = false): the swap
+    // still succeeds and the new processor keeps its own freshly-initialized
+    // state — the carry must NEVER fail the swap.
+    ProcessorHotSwapSlot slot(std::make_unique<StatefulProc>(7));
+    REQUIRE(render_one(slot) == 7.0f);
+
+    auto displaced = slot.swap(std::make_unique<StatefulProc>(3, /*accept_restore=*/false));
+    REQUIRE(displaced != nullptr);
+    REQUIRE(render_one(slot) == 3.0f);                 // cold start: new kept its own 3
+}
+
+TEST_CASE("HotSwapSlot state-carry swallows a throwing restore (cold-start, no failed swap)",
+          "[hot-reload][slot][state-carry]") {
+    // A restore that THROWS must degrade to cold-start exactly like a false
+    // return — the swap must still succeed with the new processor's own state,
+    // never propagate the exception or block the swap.
+    ProcessorHotSwapSlot slot(std::make_unique<StatefulProc>(7));
+    REQUIRE(render_one(slot) == 7.0f);
+
+    std::unique_ptr<format::Processor> displaced;
+    REQUIRE_NOTHROW(displaced = slot.swap(
+        std::make_unique<StatefulProc>(5, /*accept_restore=*/true, /*throw_on_restore=*/true)));
+    REQUIRE(displaced != nullptr);
+    REQUIRE(render_one(slot) == 5.0f);                 // cold start: new kept its own 5
 }

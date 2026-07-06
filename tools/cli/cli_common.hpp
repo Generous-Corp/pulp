@@ -297,6 +297,9 @@ struct WatchOptions {
     bool run_validate = false;        // run quick dlopen validation after build
     std::string launch_target;        // binary to launch/relaunch (empty = none)
     std::vector<std::string> launch_args;  // args for launched binary
+    bool hot_dsp = false;             // keep the launched app alive across rebuilds;
+                                      // its ReloadableShell watcher hot-swaps the
+                                      // rebuilt logic instead of a process restart
 };
 
 // Watch source files and rebuild on changes. Optionally runs tests,

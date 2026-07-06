@@ -94,6 +94,8 @@ TEST_CASE("ReloadableShell hot-swaps DSP through the Processor path", "[reload][
     // mtime change and swapped before reload_now() forced its swap. Either way
     // the DSP is the 2x build; the count just isn't deterministic here.
     REQUIRE(shell.successful_reloads() >= 1);
+    REQUIRE(good.metrics.total_ms >= 0.0);      // item 1.2: DSP-axis metrics populated
+    REQUIRE(shell.last_reload_ms() >= 0.0);     // and surfaced via the shell diagnostic
 
     // A contract-incompatible build (extra param) is rejected; the live DSP is
     // left on the previous good processor — audio keeps playing the 2x build.

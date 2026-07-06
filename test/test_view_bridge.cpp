@@ -6,6 +6,8 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <functional>
 #include <memory>
 
@@ -452,6 +454,116 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
         REQUIRE(p.opened_count == 1);
     }
     REQUIRE(p.closed_count == 1);
+}
+
+// item 1.3: in-DAW editors enable scripted-UI hot reload only when the developer
+// opts in via PULP_DEV_HOT_RELOAD; default (unset) is OFF so a shipping plugin
+// never watches + reloads from disk inside a host.
+TEST_CASE("dev_editor_hot_reload_enabled honors PULP_DEV_HOT_RELOAD", "[format][view-bridge][issue-1-3]") {
+    const char* prev = std::getenv("PULP_DEV_HOT_RELOAD");
+    const std::string saved = prev ? prev : "";
+    const bool had = prev != nullptr;
+
+    ::unsetenv("PULP_DEV_HOT_RELOAD");
+    CHECK_FALSE(format::dev_editor_hot_reload_enabled());     // default OFF
+
+    for (const char* on : {"1", "true", "yes", "T", "Y"}) {
+        ::setenv("PULP_DEV_HOT_RELOAD", on, 1);
+        CHECK(format::dev_editor_hot_reload_enabled());
+    }
+    for (const char* off : {"0", "false", "no", ""}) {
+        ::setenv("PULP_DEV_HOT_RELOAD", off, 1);
+        CHECK_FALSE(format::dev_editor_hot_reload_enabled());
+    }
+
+    // Restore the environment for other tests.
+    if (had) ::setenv("PULP_DEV_HOT_RELOAD", saved.c_str(), 1);
+    else ::unsetenv("PULP_DEV_HOT_RELOAD");
+}
+
+// ── Live editor reload (live-swap 1.9) ───────────────────────────────────────
+// A processor whose editor rebuilds in place when its logic hot-swaps: it
+// reports supports_editor_reload() and bumps editor_reload_generation(), and its
+// create_view() returns different content per "variant". The ViewBridge must
+// rebuild the OPEN editor into the SAME root View object (the host holds it by
+// reference) when poll_editor_reload() sees the generation change.
+namespace {
+class ReloadingStubProcessor : public StubProcessor {
+public:
+    std::uint64_t gen = 0;
+    int variant = 0;  // 0 = A (blue/"A"), 1 = B (red/"B")
+
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return gen; }
+
+    std::unique_ptr<view::View> create_view() override {
+        auto root = std::make_unique<view::View>();
+        if (variant == 0) {
+            root->set_background_color(canvas::Color::rgba8(0, 0, 255, 255));  // blue
+            root->add_child(std::make_unique<view::Label>("A"));
+        } else {
+            root->set_background_color(canvas::Color::rgba8(255, 0, 0, 255));  // red
+            root->add_child(std::make_unique<view::Label>("B"));
+        }
+        return root;
+    }
+
+    // Simulate a hot-swap: new logic content + a bumped generation.
+    void hot_swap_to(int v) { variant = v; ++gen; }
+};
+}  // namespace
+
+TEST_CASE("ViewBridge rebuilds the open editor in place on reload", "[view_bridge][reload][issue-1_9]") {
+    state::StateStore store;
+    ReloadingStubProcessor proc;
+    proc.define_parameters(store);
+
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+
+    view::View* root = bridge.view();  // the stable root the host references
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    REQUIRE(root->has_background_color());
+    const auto bg_a = root->background_color();
+    auto* label_a = dynamic_cast<view::Label*>(root->child_at(0));
+    REQUIRE(label_a != nullptr);
+    REQUIRE(label_a->text() == "A");
+
+    // No reload yet → poll is a no-op and the view is untouched.
+    REQUIRE_FALSE(bridge.poll_editor_reload());
+    REQUIRE(bridge.view() == root);
+    REQUIRE(dynamic_cast<view::Label*>(root->child_at(0))->text() == "A");
+
+    // Hot-swap the logic (new create_view content + bumped generation).
+    proc.hot_swap_to(1);
+    REQUIRE(bridge.poll_editor_reload());  // a rebuild happened
+
+    // SAME root object (the host's View& stays valid) but NEW content.
+    REQUIRE(bridge.view() == root);
+    REQUIRE(root->child_count() == 1);
+    auto* label_b = dynamic_cast<view::Label*>(root->child_at(0));
+    REQUIRE(label_b != nullptr);
+    REQUIRE(label_b->text() == "B");
+    const auto bg_b = root->background_color();
+    REQUIRE((bg_b.r != bg_a.r || bg_b.b != bg_a.b));  // background changed (blue → red)
+
+    // Idempotent: a second poll with no further generation change is a no-op.
+    REQUIRE_FALSE(bridge.poll_editor_reload());
+    REQUIRE(dynamic_cast<view::Label*>(root->child_at(0))->text() == "B");
+}
+
+TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bridge][reload][issue-1_9]") {
+    state::StateStore store;
+    StubProcessor proc;  // supports_editor_reload() == false by default
+    proc.define_parameters(store);
+    proc.custom_view = std::make_unique<view::View>();
+
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    // A non-reloadable processor never rebuilds — poll is always false, no wrapper.
+    REQUIRE_FALSE(bridge.poll_editor_reload());
+    REQUIRE_FALSE(bridge.poll_editor_reload());
 }
 
 // Regression: the GPU display-link scripted-idle pump is dispatched to the main

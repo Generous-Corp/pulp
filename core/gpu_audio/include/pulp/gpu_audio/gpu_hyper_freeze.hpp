@@ -8,7 +8,7 @@
 
 namespace pulp::gpu_audio {
 
-/// Hyper-Freeze (Phase 5, hardcore): a stack of N independently-captured
+/// Hyper-Freeze: a stack of N independently-captured
 /// phase-vocoder spectral freezes summed into one output, with a spectral
 /// "smear" (magnitude blur across frequency) for mangled/blurred textures.
 /// Freeze a chord of moments and sustain them all at once; smear softens each

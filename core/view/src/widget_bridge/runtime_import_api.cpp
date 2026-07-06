@@ -35,6 +35,10 @@ std::string json_string_literal_for_widget_bridge(const std::string& s);
 // JS side reads/clears the err global; this function only writes to it.
 
 void WidgetBridge::install_runtime_import_handlers() {
+    // __pulpRuntimeImport__ evaluates an imported JS bundle (dynamic code load) —
+    // the highest-risk surface after shell exec. Gated by the runtime_import
+    // capability; an ungranted bridge never registers it, so JS cannot reach it.
+    if (!granted_capabilities_.has(ReloadCapability::RuntimeImport)) return;
     // Idempotency guard: register once per bridge. The earlier
     // implementation used a static thread_local set keyed by `this`,
     // which broke under heap reuse (test bridges destroyed and

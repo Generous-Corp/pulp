@@ -14,6 +14,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/reload_capabilities.hpp>
 #include <pulp/state/store.hpp>
 
 namespace pulp::view { struct ClaudeBundle; }
@@ -44,6 +45,9 @@ struct WidgetReloadSnapshot {
     std::unordered_map<std::string, float> scalar_values;
     struct XYValue { float x = 0; float y = 0; };
     std::unordered_map<std::string, XYValue> xy_values;
+    // Custom widget-declared state (item 1.4b): opaque per-widget blobs from
+    // View::save_reload_state, keyed by script id, restored via restore_reload_state.
+    std::unordered_map<std::string, std::string> custom_state;
     // Legacy compat
     std::unordered_map<std::string, float> values;
 };
@@ -53,8 +57,15 @@ struct WidgetReloadSnapshot {
 // layout, style, and interact with widgets.
 class WidgetBridge {
 public:
+    // `granted_capabilities` scopes the EFFECTFUL bridge-API groups (exec,
+    // clipboard, filesystem, storage, ai, runtime_import). Ungranted groups are
+    // never registered — the JS symbol is absent. The default all() leaves every
+    // group present (the full-featured posture for trusted/local UIs); a host that
+    // runs untrusted UI constructs with only the declared set (empty = most
+    // restrictive). Pure-UI groups ignore this. See reload_capabilities.hpp.
     WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& store,
-                 render::GpuSurface* gpu_surface = nullptr);
+                 render::GpuSurface* gpu_surface = nullptr,
+                 CapabilitySet granted_capabilities = CapabilitySet::all());
     ~WidgetBridge();
 
     // Attach (or replace) the GPU surface AFTER construction. Mirrors the
@@ -229,6 +240,8 @@ private:
     ScriptEngine& engine_;
     View& root_;
     state::StateStore& store_;
+    // Effectful-API-group gate. See the constructor doc + reload_capabilities.hpp.
+    CapabilitySet granted_capabilities_;
     render::GpuSurface* gpu_surface_ = nullptr;
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;

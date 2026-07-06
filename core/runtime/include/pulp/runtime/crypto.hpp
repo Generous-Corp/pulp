@@ -12,6 +12,25 @@
 
 namespace pulp::runtime {
 
+// ── Encoding ────────────────────────────────────────────────────────────
+
+/// Lowercase-hex encode raw bytes. Header-only; the one place callers should
+/// reach for bytes→hex (e.g. key/signature fingerprints) instead of re-rolling a
+/// nibble loop.
+inline std::string hex_encode(const uint8_t* data, size_t size) {
+    static const char* d = "0123456789abcdef";
+    std::string out;
+    out.reserve(size * 2);
+    for (size_t i = 0; i < size; ++i) {
+        out.push_back(d[data[i] >> 4]);
+        out.push_back(d[data[i] & 0xF]);
+    }
+    return out;
+}
+inline std::string hex_encode(const std::vector<uint8_t>& bytes) {
+    return hex_encode(bytes.data(), bytes.size());
+}
+
 // ── Hashing ─────────────────────────────────────────────────────────────
 
 /// Compute SHA-256 hash. Returns 32-byte digest.

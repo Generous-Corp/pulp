@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <string_view>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -3526,4 +3528,60 @@ TEST_CASE("WidgetBridge design-system stepper/pan dispatch change events",
     engine.pump_message_loop();
     REQUIRE(engine.evaluate("changes.length").getWithDefault<double>(0) >= 1);
     REQUIRE(engine.evaluate("changes[changes.length-1].ev").getWithDefault<std::string>("") == "change");
+}
+
+// ── Custom widget-declared reload state (live-swap item 1.4b) ─────────────────
+namespace {
+// A custom widget that carries its own state across a scripted-UI reload by
+// opting into the View reload-state hook.
+class CustomStateWidget : public pulp::view::View {
+public:
+    int state = 0;
+    bool save_reload_state(std::string& out) const override {
+        out = "state=" + std::to_string(state);
+        return true;
+    }
+    bool restore_reload_state(std::string_view blob) override {
+        constexpr std::string_view prefix = "state=";
+        if (blob.substr(0, prefix.size()) != prefix) return false;
+        state = std::atoi(std::string(blob.substr(prefix.size())).c_str());
+        return true;
+    }
+};
+}  // namespace
+
+TEST_CASE("View reload-state hook round-trips custom widget state (item 1.4b)",
+          "[view][reload][1.4b]") {
+    CustomStateWidget w;
+    w.state = 42;
+    std::string blob;
+    REQUIRE(w.save_reload_state(blob));
+    REQUIRE(blob == "state=42");
+
+    CustomStateWidget restored;
+    REQUIRE(restored.restore_reload_state(blob));
+    REQUIRE(restored.state == 42);
+
+    // A plain View opts OUT by default — existing widgets are unaffected.
+    pulp::view::View plain;
+    std::string unused;
+    REQUIRE_FALSE(plain.save_reload_state(unused));
+    REQUIRE_FALSE(plain.restore_reload_state("state=1"));
+}
+
+TEST_CASE("WidgetBridge reload snapshot leaves custom_state empty for built-ins (item 1.4b)",
+          "[view][bridge][reload][1.4b]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createKnob('k', 0, 0, 48, 48);");
+    REQUIRE(bridge.widget("k") != nullptr);
+
+    WidgetReloadSnapshot snap;
+    bridge.snapshot_values(snap);
+    REQUIRE(snap.scalar_values.count("k") == 1);   // built-in still snapshotted by type
+    REQUIRE(snap.custom_state.empty());            // built-in Knob opts out of custom state
 }

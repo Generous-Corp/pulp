@@ -16,6 +16,9 @@ pulp_add_reload_logic(hot-reload-demo-logic
 
 # ── Shell plugin (what the host loads) ──────────────────────────────────────
 set(HRD_FORMATS VST3 CLAP Standalone)
+if(APPLE)
+    list(APPEND HRD_FORMATS AU)   # aufx; needs PLUGIN_CODE + MANUFACTURER_CODE (set below)
+endif()
 pulp_add_plugin(HotReloadDemo
     FORMATS         ${HRD_FORMATS}
     PLUGIN_NAME     "Pulp Hot-Reload Demo"
@@ -28,7 +31,7 @@ pulp_add_plugin(HotReloadDemo
 )
 
 # The shell must be built (and its logic published) together.
-foreach(_hrd_fmt VST3 CLAP Standalone)
+foreach(_hrd_fmt VST3 CLAP Standalone AU)
     if(TARGET HotReloadDemo_${_hrd_fmt})
         add_dependencies(HotReloadDemo_${_hrd_fmt} hot-reload-demo-logic)
     endif()

@@ -123,6 +123,15 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
+      # A self-hosted runner can leave external/skia-build as a symlink into a
+      # warm shared cache. Unpacking into that can collide: a dangling/partial
+      # tree makes mkdir see the build dir as both missing (for a child) and
+      # present (for itself). Remove the entry — the symlink itself, never the
+      # cache target — so the fetch below starts from a clean real directory.
+      - name: Ensure a clean Skia dir (release path)
+        run: rm -rf external/skia-build
+        shell: bash
+
       # The whole point — exercise the prebuilt-Skia path that
       # release-cli.yml uses. PR build.yml does NOT do this, which is
       # exactly why fontconfig + skunicode breakage went undetected

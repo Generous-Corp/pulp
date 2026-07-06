@@ -1153,3 +1153,84 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   (their layout is driven from JS/Yoga, not C++ `bounds()`). This is SDK-level:
   every native editor is sized correctly without per-plugin hardcoding — do not
   reintroduce per-plugin window-size constants to work around clipped editors.
+
+## In-DAW scripted-UI hot reload is opt-in (dev only)
+
+The DAW editor paths (`au_view_controller_mac.mm`, `au_v2_cocoa_view.mm`,
+`au_view_controller_ios.mm`) build the `ViewBridge` with
+`.enable_hot_reload = pulp::format::dev_editor_hot_reload_enabled()` — a
+header-inline helper in `view_bridge.hpp` that returns true only when the host's
+environment sets `PULP_DEV_HOT_RELOAD=1` (or `t`/`T`/`y`/`Y`). Default is OFF: a
+shipping plugin must never watch + reload scripted UI / `theme.json` from disk
+inside a host. The standalone app (`standalone.cpp`) always enables it — it is
+the dev tool. Editor polling runs every tick regardless; the flag only decides
+whether the watcher acts. To use the in-DAW edit→see-it loop, export
+`PULP_DEV_HOT_RELOAD=1` in the DAW's environment before launching it. (Live-swap
+plan item 1.3.)
+
+## Scripted UI joins a unified live-swap transaction (SwapUnit)
+
+`ScriptedUiSwapUnit` (`core/format/include/pulp/format/reload/scripted_ui_swap_unit.hpp`)
+adapts a `ScriptedUiSession` to the `SwapUnit` contract so a UI swap composes with
+a DSP swap (`DspReloadSwapUnit`) under `apply_live_swap` — a content pack that
+carries both UI and DSP applies as ONE transaction (item 1.8b/2.5b). Notes:
+- The adapter is **path-based**: `to_stage()` captures `session.script_path()`,
+  `apply` = `reload_from(new_script)`, `rollback` = `reload_from(prev_script)`.
+  It reuses the public `reload_from` (last-good, state-preserving) — no new view
+  API. The UX unit is ordered FIRST (cheap to re-apply); a later DSP failure rolls
+  it back to the previous bundle.
+- It lives in the FORMAT layer (format→view is the allowed direction; view never
+  links format), in its own header so DSP-only users don't pull in view.
+- Value-perfect widget-state restore across a rollback is a refinement (rollback
+  re-runs the previous script; `reload_from`'s own snapshot/restore preserves
+  matching widget values across the rebuild).
+
+## Custom widgets carry their own reload state (item 1.4b)
+
+`WidgetBridge` snapshots/restores BUILT-IN widget state by type across a scripted-
+UI reload (knob/fader/range/toggle/checkbox/togglebutton scalar; combo/segmented
+selection index; xy pad — `widget_bridge.cpp` `snapshot_values`/`restore_values`).
+A CUSTOM widget (a `View` subclass) opts into carrying its OWN state by overriding
+the `View` virtuals `save_reload_state(std::string&)` / `restore_reload_state(std::string_view)`
+(default return false → existing widgets unaffected). The bridge calls them for
+every widget in `widgets_` and stores the opaque blob in
+`WidgetReloadSnapshot::custom_state` keyed by script id; restore hands the blob
+back to the widget still living under that id (id/type change → no match, fail-
+safe). Note: `widgets_` is populated by the JS `createX` registrars (built-ins
+only today), so end-to-end coverage through a JS-created custom widget awaits a
+custom-widget registration path — the `View` hook + bridge wiring are in place for
+when one exists.
+
+## Live editor reload (in-place rebuild on hot-swap) — 1.9
+
+A hot-reload plugin whose logic hot-swaps its `create_view()` needs the OPEN
+editor to rebuild in place — otherwise the DSP swaps live but the panel only
+updates when the DAW re-instantiates the plugin (the symptom that surfaced this).
+The mechanism is format-agnostic and driven by the shared idle pump:
+
+- **Signal, don't marshal.** `Processor::supports_editor_reload()` +
+  `editor_reload_generation()` (additive virtuals, defaults false/0).
+  `ReloadableShell` overrides them; an atomic counter bumps on each successful
+  swap (both `reload_now()` and the watcher). The editor **polls** the generation
+  on its UI-thread tick — the reload fires on the control/watcher thread, so
+  polling avoids cross-thread UI mutation. Don't wire `set_on_reloaded` straight
+  into UI work.
+- **Preserve the root object identity.** `PluginViewHost` captures `View& root`
+  at `create()` — there is no replace-root API. So `ViewBridge::rebuild_primary_view()`
+  TRANSPLANTS the fresh `create_view()` output (children + background) INTO the
+  same root `View` the host still references, rather than swapping `view_`. A
+  logic whose `create_view()` returns a custom `View` **subclass** with root-level
+  paint gets children+bg refreshed but not the subclass identity (fine for the
+  common container-root editor).
+- **Repaint after rebuild.** The CPU (CoreGraphics) mac host only repaints on
+  `setNeedsDisplay`, so `make_scripted_idle_pump` calls `View::request_repaint()`
+  after a rebuild. Mutating the tree alone does NOT repaint on CPU.
+- **One wiring point.** `make_scripted_idle_pump` (gpu_host_select.hpp) covers AU
+  v2/v3, VST3, CLAP, and both the CPU CVDisplayLink tick and GPU display link.
+  `set_idle_callback` reads "GPU only" in the base header, but the mac CPU host
+  (plugin_view_host_mac.mm) runs it via its own CVDisplayLink — so the pump does
+  tick on CPU editors.
+
+Test: `test_view_bridge.cpp` `[reload]` cases — a reloadable stub rebuilds into
+the same root object with new content/bg, is idempotent, and is inert for a normal
+processor. `examples/hot-reload-morph` exercises it end-to-end.

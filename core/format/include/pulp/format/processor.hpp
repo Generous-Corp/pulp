@@ -643,6 +643,36 @@ public:
     /// linear-phase EQs). Hosts use this for delay compensation.
     virtual int latency_samples() const { return 0; }
 
+    /// ── Opt-in DSP-state carry across a hot-reload (reload lane, item 1.6) ──
+    /// On a hot-reload the new processor binds to the live StateStore (params +
+    /// values preserved), but its DSP-internal state — delay lines, filter
+    /// history, reverb tails, oscillator phase — starts COLD. Override this pair
+    /// to carry that state so a delay's repeats or an LFO's phase survive the
+    /// swap seamlessly instead of resetting (the crossfade masks a cold start,
+    /// but the tail itself is otherwise lost).
+    ///
+    /// Contract:
+    ///   * `serialize_dsp_state()` returns an opaque blob of the OLD processor's
+    ///     DSP state (empty = "nothing to carry"; the default).
+    ///   * `restore_dsp_state(blob)` loads it into the NEW processor and returns
+    ///     true on success, false if the blob is unrecognized/incompatible.
+    ///   * The format is the PLUGIN's own private concern. It is only ever read
+    ///     back by the same plugin source across a hot-reload — the reload lane's
+    ///     build-fingerprint + parameter-contract gates guarantee the two sides
+    ///     are the same build, so a naive layout is safe (no versioning needed
+    ///     for the hot-reload case; version it if you also persist it elsewhere).
+    ///   * COLD-START FALLBACK IS ALWAYS SAFE: an empty blob or a `false` return
+    ///     just leaves the new processor freshly prepared — it must NEVER fail
+    ///     the swap. Called by ProcessorHotSwapSlot::swap() under its writer lock
+    ///     (no audio reader is inside the old processor), so both calls run
+    ///     off the audio thread; keep the blob bounded (it is copied while the
+    ///     lock is held, which briefly stalls the audio thread into passthrough).
+    ///
+    /// NOTE: the two virtuals are DECLARED at the end of this class (after
+    /// process(ProcessBuffers&)) — not here — to keep the Processor vtable
+    /// additive-only (node_abi_gate): new virtuals must be appended after every
+    /// pre-existing one. See the appended block below.
+
     /// Proposed bus layout passed to is_bus_layout_supported().
     ///
     /// Each entry's index matches the descriptor's input_buses /
@@ -907,6 +937,34 @@ public:
         process(*output, input ? *input : empty_input, midi_in, midi_out, context);
         sidechain_ = previous_sidechain;
     }
+
+    /// Opt-in DSP-state carry across a hot-reload (reload lane, item 1.6).
+    /// Documented in full next to `latency_samples()` above; DECLARED here (at the
+    /// end of the vtable) so the Processor virtual order stays additive-only
+    /// (node_abi_gate) after `is_bus_layout_supported`/`process` were frozen on
+    /// main. serialize returns the OLD processor's opaque DSP-state blob (empty =
+    /// nothing to carry); restore loads it into the NEW processor (false = cold
+    /// start, always safe). Appended to preserve additive-only vtable ordering.
+    virtual std::vector<std::byte> serialize_dsp_state() const { return {}; }
+    virtual bool restore_dsp_state(const std::vector<std::byte>& /*blob*/) { return false; }
+
+    /// Editor live-reload support (live-swap 1.9). A processor whose editor
+    /// should rebuild IN PLACE while it is open — e.g. a `ReloadableShell` whose
+    /// logic hot-swaps its `create_view()` — returns true here. The `ViewBridge`
+    /// then hosts the editor under a STABLE root container so its content can be
+    /// replaced live (the host keeps referencing the same root `View`) without
+    /// the DAW re-instantiating the plugin. Default false: normal plugins are
+    /// unaffected — no wrapper, no polling cost. Appended to preserve
+    /// additive-only vtable ordering.
+    virtual bool supports_editor_reload() const { return false; }
+
+    /// Monotonic counter that increments each time this processor's editor
+    /// content should be rebuilt (after a successful logic hot-swap). The editor
+    /// idle tick polls this; when it changes, the `ViewBridge` rebuilds the
+    /// primary view from `create_view()`. Only meaningful when
+    /// `supports_editor_reload()` is true. Must be safe to call from the UI
+    /// thread. Appended to preserve additive-only vtable ordering.
+    virtual std::uint64_t editor_reload_generation() const { return 0; }
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().

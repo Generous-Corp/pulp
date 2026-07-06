@@ -15,7 +15,7 @@ namespace pulp::gpu_audio {
 /// with a fixed impulse response, computed on the GPU via render::GpuCompute on
 /// the transport's non-RT worker. CPU fallback uses signal::Convolver.
 ///
-/// Correctness-first (Phase 3b-1): each block runs three GpuCompute calls (FFT,
+/// Correctness-first: each block runs three GpuCompute calls (FFT,
 /// complex-multiply, inverse FFT) each with its own blocking readback, so it is
 /// validated by golden test but is NOT yet real-time fast — the Phase-2 finding
 /// (readback dominates) means the real-time win needs a GPU-resident pipeline

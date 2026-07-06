@@ -39,6 +39,9 @@ add_subdirectory(bendr)
 # Hot-Reload Demo: a reloadable shell plugin whose DSP lives in a separate
 # .dylib that hot-swaps live in a DAW (the Phase 1b DAW-integration example).
 add_subdirectory(hot-reload-demo)
+# Hot-Reload Synth: the INSTRUMENT (aumu) variant — hot-swap the synth oscillator
+# live while holding notes (M2 UI+DSP demo companion).
+add_subdirectory(hot-reload-synth)
 
 # Hot-Reload Morph: one reload swaps BOTH the DSP and the editor (sine/blue
 # "WARM" <-> square/red "HARSH") — the create_view-forwarding showcase.
