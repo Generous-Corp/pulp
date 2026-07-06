@@ -1,19 +1,22 @@
 #pragma once
 
-// Reload capability model (live-swap trust, C2). A signed reload pack declares the
-// capabilities its scripted UI needs; the host grants a set; the WidgetBridge is
-// constructed capability-scoped so ungranted EFFECTFUL API groups are simply not
-// registered (the JS symbol is absent). Pure-UI groups (canvas/css/layout/widgets/
-// gpu/…) are always registered and need no capability.
+// Capability model for the scripted-UI bridge. A hot-reloaded UI declares the
+// capabilities it needs; the host grants a set; the WidgetBridge is constructed
+// capability-scoped so ungranted EFFECTFUL API groups are simply not registered —
+// the JS symbol is absent, not merely guarded. Pure-UI groups (canvas, css, layout,
+// widgets, gpu, …) carry no effect and are always registered.
 //
-// Enforcement seam: the `register_*_api()` groups in WidgetBridge. Native code is
-// NOT capability-gated (that's provenance-only, by design). See
-// planning/2026-07-05-reload-trust-and-safety-model.md (C2) for the audited
-// group→capability mapping and the rationale (signing = provenance, capabilities =
-// blast-radius cap).
+// This is the blast-radius bound for an untrusted or compromised UI: a UI granted
+// no `network`/`filesystem`/`exec` cannot reach those native surfaces at all, even
+// if it is otherwise valid. It is deliberately NOT a sandbox for native code —
+// native modules are trusted by provenance (signature), never capability-gated.
 //
-// Home is `view` (not `format`) because the bridge is the enforcement point and
-// `format` may include `view`, not the reverse.
+// The enforcement seam is the `register_*_api()` grouping in WidgetBridge: every
+// effectful native function is reached only through one of those groups, so gating
+// at the group is complete.
+//
+// This lives in `view` (not a lower trust layer) because the bridge is the sole
+// enforcement point and `format` may depend on `view`, not the reverse.
 
 #include <cstdint>
 #include <string>

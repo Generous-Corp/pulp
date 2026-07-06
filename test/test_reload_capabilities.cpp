@@ -1,6 +1,6 @@
-// Reload capability model (live-swap trust, C2). Verifies the capability set's
-// name round-trip, fail-closed parsing of an unknown token, and the empty-default /
-// all() postures that back the consumer-vs-dev enforcement modes.
+// Capability model for the scripted-UI bridge. Verifies the capability set's name
+// round-trip, fail-closed parsing of an unknown token, and the empty-default /
+// all() postures that back the restricted-vs-full-featured bridge modes.
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/reload_capabilities.hpp>

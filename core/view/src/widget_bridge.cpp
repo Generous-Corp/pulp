@@ -371,8 +371,10 @@ std::unordered_set<WidgetBridge*>& all_bridges_set() {
 }  // namespace
 
 WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& store,
-                           render::GpuSurface* gpu_surface)
-    : engine_(engine), root_(root), store_(store), gpu_surface_(gpu_surface) {
+                           render::GpuSurface* gpu_surface,
+                           CapabilitySet granted_capabilities)
+    : engine_(engine), root_(root), store_(store),
+      granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface) {
     {
         std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
         all_bridges_set().insert(this);
@@ -891,9 +893,19 @@ void WidgetBridge::service_frame_callbacks() {
     }
 }
 
+#ifndef PULP_BRIDGE_EXEC_ENABLED
+// Shell exec/execAsync is a development-only affordance. Compiled out of shipping
+// builds via -DPULP_BRIDGE_EXEC_ENABLED=0, and even when compiled in it is ALSO
+// gated behind the `exec` capability, so a UI with no granted capabilities never
+// receives it. Two independent locks, because shelling out is the sharpest edge.
+#define PULP_BRIDGE_EXEC_ENABLED 1
+#endif
+
 void WidgetBridge::register_api() {
     register_widget_factory_controls_api();
-    register_widget_assets_api();
+    // Reads arbitrary file paths (image/sprite assets) → gated by Filesystem.
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_widget_assets_api();
 
     register_widget_factory_form_api();
 
@@ -1148,28 +1160,42 @@ void WidgetBridge::register_api() {
 
     register_shader_widget_api();
 
-    register_widget_schema_api();
+    // Persists style presets to temp files → gated by Storage.
+    if (granted_capabilities_.has(ReloadCapability::Storage))
+        register_widget_schema_api();
 
 
     register_theme_api();
 
-    register_platform_services_ai_api();
+    if (granted_capabilities_.has(ReloadCapability::Ai))
+        register_platform_services_ai_api();
 
     register_metadata_computed_api();
 
-    register_platform_services_exec_api();
+    // Shell exec — dev-only (compiled out of ship) AND gated by the exec cap.
+#if PULP_BRIDGE_EXEC_ENABLED
+    if (granted_capabilities_.has(ReloadCapability::Exec))
+        register_platform_services_exec_api();
+#endif
 
     register_context_menu_event_api();
 
-    register_platform_services_dialog_api();
+    // Native file dialogs read/choose arbitrary paths → gated by Filesystem.
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_platform_services_dialog_api();
 
     register_runtime_api();
 
-    register_platform_services_clipboard_api();
+    if (granted_capabilities_.has(ReloadCapability::Clipboard))
+        register_platform_services_clipboard_api();
 
 
-    register_storage_key_value_api();
-    register_asset_loading_api();
+    // Key/value persistence → Storage; asset loading reads file:// paths →
+    // Filesystem (granted independently).
+    if (granted_capabilities_.has(ReloadCapability::Storage))
+        register_storage_key_value_api();
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_asset_loading_api();
 
 
     register_drop_event_api();
