@@ -62,6 +62,9 @@ endif()
 # PulpDrums: generative drum sequencer MIDI effect
 add_subdirectory(PulpDrums)
 
+# StepSequencer: synth-class step sequencer (UI <-> channel <-> Processor proof)
+add_subdirectory(StepSequencer)
+
 # PulpSynth: macro oscillator with DSP library
 add_subdirectory(PulpSynth)
 
