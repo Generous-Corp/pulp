@@ -9,6 +9,7 @@
 #include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
+#include "fig_lane.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
 // `_getpid` declaration in <process.h>. Wrap both to keep the
@@ -885,6 +886,7 @@ static void print_usage() {
     std::cout << "  pulp import-design --from <source> [options]\n\n";
     std::cout << "Sources:\n";
     std::cout << "  figma, figma-plugin  Figma JSON/normalized IR, or Pulp plugin envelope\n";
+    std::cout << "  fig      Local Figma .fig save file, decoded offline (no account/network)\n";
     std::cout << "  stitch   Google Stitch screen HTML or normalized IR file\n";
     std::cout << "  v0       v0.dev TSX/Tailwind output\n";
     std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
@@ -895,7 +897,10 @@ static void print_usage() {
     std::cout << "  --from <source>   Design source (required)\n";
     std::cout << "  --file <path>     Input file path\n";
     std::cout << "  --url <url>       Design URL (Figma file URL or v0 share link)\n";
-    std::cout << "  --frame <name>    Frame/artboard to import (Figma)\n";
+    std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig)\n";
+    std::cout << "  --page <name>     Restrict frame lookup to one page (--from fig)\n";
+    std::cout << "  --outline         List pages/frames of a .fig file and exit (--from fig)\n";
+    std::cout << "  --json            With --outline, emit the inventory as JSON\n";
     std::cout << "  --screen <name>   Screen to import (Stitch)\n";
     std::cout << "  --output <path>   Destination file for the primary artifact (default: ui.js)\n";
     std::cout << "  --emit {js|ir-json|cpp|swiftui}\n";
@@ -990,6 +995,8 @@ static void print_usage() {
     std::cout << "  pulp import-design --from pencil --file design.json --dry-run\n";
     std::cout << "  pulp import-design --from pencil --file design.json --validate --reference source.png\n";
     std::cout << "  pulp import-design --from claude --file design.html\n";
+    std::cout << "  pulp import-design --from fig --file design.fig --outline\n";
+    std::cout << "  pulp import-design --from fig --file design.fig --frame 'Main' --output ui.js\n";
     std::cout << "  pulp import-design --from figma --file design.json --format css-variables --tokens theme.css\n";
     std::cout << "  pulp import-design --export-tokens --format css-variables   # built-in dark theme → theme.css\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js\n";
@@ -1688,6 +1695,9 @@ int main(int argc, char* argv[]) {
     std::string input_url;           // --url: Figma file URL or v0 share link
     std::string frame_name;          // --frame: Figma frame/artboard name
     std::string screen_name;         // --screen: Stitch screen name
+    std::string page_name;           // --page: Figma page name (scopes the .fig lane)
+    bool outline_mode = false;       // --outline: read-only page/frame inventory (fig lane)
+    bool outline_json = false;       // --json: emit the outline as JSON
     std::string output_file = "ui.js";
     std::string tokens_file = "tokens.json";
     std::string export_format = "w3c";
@@ -1761,6 +1771,12 @@ int main(int argc, char* argv[]) {
             frame_name = argv[++i];
         } else if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) {
             screen_name = argv[++i];
+        } else if (std::strcmp(argv[i], "--page") == 0 && i + 1 < argc) {
+            page_name = argv[++i];
+        } else if (std::strcmp(argv[i], "--outline") == 0) {
+            outline_mode = true;
+        } else if (std::strcmp(argv[i], "--json") == 0) {
+            outline_json = true;
         } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             output_file = argv[++i];
             output_explicit = true;
@@ -2133,6 +2149,28 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: --from <source> is required\n";
         print_usage();
         return 1;
+    }
+
+    // `--from fig`: decode a local Figma save file offline. The lane either
+    // prints a read-only outline and returns, or rewrites source_str/input_file
+    // to the decoded figma-plugin envelope and lets the rest of the pipeline run.
+    // The scratch directory it writes is removed when main returns.
+    std::string fig_scratch_dir;
+    struct FigScratchCleanup {
+        const std::string& dir;
+        ~FigScratchCleanup() {
+            if (!dir.empty()) {
+                std::error_code ec;
+                fs::remove_all(dir, ec);
+            }
+        }
+    } fig_scratch_cleanup{fig_scratch_dir};
+
+    pulp::import_design::fig::LaneArgs fig_args{
+        source_str, input_file, frame_name, page_name, outline_mode, outline_json};
+    fig_args.created_tmp_dir = &fig_scratch_dir;
+    if (auto fig_code = pulp::import_design::fig::handle(fig_args)) {
+        return *fig_code;
     }
 
     auto source = parse_design_source(source_str);

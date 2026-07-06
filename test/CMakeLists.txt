@@ -5680,13 +5680,19 @@ add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz.c
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tdef.c
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz_tinfl.c
-    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c)
+    ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c
+    # Compile the fig lane in-process so its logic is exercised (and covered)
+    # directly, not only through the CLI subprocess.
+    ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp)
 target_include_directories(pulp-test-import-design-tool PRIVATE
-    ${CMAKE_SOURCE_DIR}/external/miniz)
+    ${CMAKE_SOURCE_DIR}/external/miniz
+    ${CMAKE_SOURCE_DIR}/tools/import-design)
 target_link_libraries(pulp-test-import-design-tool
     PRIVATE pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
-    PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>")
+    PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>"
+    PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
+    PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs")
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
@@ -5706,6 +5712,18 @@ else()
         PROPERTIES
             LABELS "parser-import"
             RESOURCE_LOCK "design-import-network")
+endif()
+
+# Offline .fig decoder unit tests (Node). Cover kiwi decode, container
+# unpacking, outline, and envelope materialization against a committed
+# synthetic fixture. Skipped when Node is unavailable.
+if(_PULP_NODE_FOR_TESTS)
+    add_test(NAME pulp-fig-decode-unit
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+                     ${CMAKE_SOURCE_DIR}/tools/import-design/fig/fig.test.mjs)
+    set_tests_properties(pulp-fig-decode-unit PROPERTIES
+        TIMEOUT 60
+        LABELS "parser-import;node")
 endif()
 
 # `--execute-bundle` harness end-to-end. Boots the

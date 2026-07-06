@@ -933,15 +933,21 @@ commands:
   - name: import-design
     status: partial
     summary: >
-      Import designs from Figma/Figma plugin, Stitch, v0, Pencil,
-      Claude Design, React JSX, or Google DESIGN.md into Pulp JS, DesignIR,
-      or baked C++ artifacts. The designmd source is tokens-only (no ui.js);
-      other sources can emit a full ui.js + tokens.json.
+      Import designs from Figma/Figma plugin, a local Figma .fig file, Stitch,
+      v0, Pencil, Claude Design, React JSX, or Google DESIGN.md into Pulp JS,
+      DesignIR, or baked C++ artifacts. The designmd source is tokens-only (no
+      ui.js); other sources can emit a full ui.js + tokens.json.
     args:
       - name: --from
         kind: option
         required: true
-        description: "Design source: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx"
+        description: "Design source: figma, figma-plugin, fig, stitch, v0, pencil, claude, designmd, jsx"
+      - name: --outline
+        kind: flag
+        description: "With --from fig: print a read-only inventory of the .fig file's pages and top-level frames (name, guid, size, node count) and exit. Use it to pick a frame before importing a large file. Add --json for machine-readable output."
+      - name: --page
+        kind: option
+        description: "With --from fig: restrict frame lookup to a named page"
       - name: --file
         kind: option
         description: Input file path (required if --url not given)

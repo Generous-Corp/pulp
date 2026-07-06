@@ -1,0 +1,167 @@
+// Unit tests for the offline .fig decoder. Run with: node --test
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+import { ByteReader, readSchema, makeDecoder } from './kiwi.mjs';
+import { unpackFig, isZip } from './container.mjs';
+import { buildScene, outline, findFrame, materializeFrame, countFramesByName } from './scene.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const FIXTURE = join(here, '../../../test/fixtures/imports/fig/synthetic.fig');
+const GENERATOR = join(here, 'testdata/make_synthetic_fig.mjs');
+
+function loadFixtureScene() {
+  const container = unpackFig(readFileSync(FIXTURE));
+  const schema = readSchema(new ByteReader(container.schemaBytes));
+  const decoder = makeDecoder(schema);
+  const message = decoder.decodeMessage(new ByteReader(container.messageBytes), decoder.rootIndex);
+  return { scene: buildScene(message), container, schema, decoder };
+}
+
+test('ByteReader round-trips varint, float, and string encodings', () => {
+  // Encode a few values with the generator's writer path by exercising the
+  // reader against known kiwi byte sequences.
+  const r = new ByteReader(Buffer.from([0x00])); // float zero optimization
+  assert.equal(r.float(), 0);
+
+  const s = new ByteReader(Buffer.from([0x96, 0x01])); // varuint 150
+  assert.equal(s.varUint(), 150);
+
+  const str = new ByteReader(Buffer.from([0x68, 0x69, 0x00, 0xff])); // "hi\0"
+  assert.equal(str.string(), 'hi');
+  assert.equal(str.byte(), 0xff);
+});
+
+test('fixture is a ZIP container with an inner canvas', () => {
+  const bytes = readFileSync(FIXTURE);
+  assert.ok(isZip(bytes), 'fixture should be a ZIP');
+  const container = unpackFig(bytes);
+  assert.equal(container.magic, 'fig-kiwi');
+  assert.equal(container.version, 106);
+  assert.ok(container.images.size >= 1, 'should bundle at least one image');
+  assert.equal(container.meta && container.meta.file_name, 'Synthetic Fixture');
+});
+
+test('schema decodes and exposes a root Message type', () => {
+  const { schema, decoder } = loadFixtureScene();
+  assert.ok(schema.length >= 5, 'schema should carry several definitions');
+  assert.notEqual(decoder.rootIndex, undefined, 'root Message must resolve');
+});
+
+test('outline lists pages and their top-level frames', () => {
+  const { scene, container } = loadFixtureScene();
+  const o = outline(scene, container.meta);
+  assert.equal(o.pageCount, 2);
+  const pageOne = o.pages.find((p) => p.name === 'Page One');
+  assert.ok(pageOne, 'Page One present');
+  assert.equal(pageOne.frameCount, 1);
+  assert.equal(pageOne.frames[0].name, 'Plugin UI');
+  assert.equal(pageOne.frames[0].width, 320);
+  assert.equal(pageOne.frames[0].height, 200);
+  const empty = o.pages.find((p) => p.name === 'Empty Page');
+  assert.equal(empty.frameCount, 0);
+});
+
+test('findFrame resolves by name and by guid', () => {
+  const { scene } = loadFixtureScene();
+  assert.equal(findFrame(scene, 'Plugin UI').name, 'Plugin UI');
+  assert.equal(findFrame(scene, '0:2').name, 'Plugin UI');
+  assert.equal(findFrame(scene, 'plugin ui').name, 'Plugin UI', 'case-insensitive');
+  assert.equal(findFrame(scene, 'nope'), null);
+});
+
+test('materializeFrame builds a valid figma-plugin envelope', () => {
+  const { scene, container } = loadFixtureScene();
+  const frame = findFrame(scene, 'Plugin UI');
+  const { envelope } = materializeFrame(scene, frame, {
+    images: container.images,
+    fileKey: 'TESTKEY',
+    parserVersion: '0.1.0-test',
+    compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z',
+  });
+  assert.equal(envelope.format_version, '2026.05-figma-plugin-v1');
+  assert.equal(envelope.provenance.adapter, 'figma-plugin');
+  assert.equal(envelope.root.name, 'Plugin UI');
+  assert.equal(envelope.root.style.width, 320);
+  assert.equal(envelope.root.style.background_color, '#14171c');
+  assert.equal(envelope.root.style.border_radius, 8);
+
+  // Recognition is the importer's job; the decoder only carries structure.
+  const knob = envelope.root.children.find((c) => c.name.startsWith('Knob'));
+  assert.ok(!('audio_widget' in knob), 'decoder does not classify widgets');
+  assert.ok(knob.asset_ref, 'knob carries its image asset ref');
+  assert.equal(knob.style.border_radius, 32);
+
+  const label = envelope.root.children.find((c) => c.name === 'Label');
+  assert.equal(label.type, 'text');
+  assert.equal(label.text, 'CUTOFF');
+  assert.equal(label.style.color, '#ffffff');
+  assert.ok(!('background_color' in label.style), 'text has no background');
+
+  assert.equal(envelope.asset_manifest.assets.length, 1);
+});
+
+test('unterminated string throws instead of hanging', () => {
+  const r = new ByteReader(Buffer.from([0x68, 0x69])); // "hi" with no NUL, then EOF
+  assert.throws(() => r.string(), /unterminated string/);
+});
+
+test('a cyclic parent graph does not recurse without bound', () => {
+  // Two frames that are each other's parent — a malformed graph.
+  const message = { nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'P' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'A',
+      parentIndex: { guid: { sessionID: 0, localID: 3 }, position: 'a' }, size: { x: 10, y: 10 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'B',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 10, y: 10 } },
+  ]};
+  const scene = buildScene(message);
+  // outline (countDescendants) and materialize (walk) must both terminate.
+  const o = outline(scene, null);
+  assert.ok(Array.isArray(o.pages));
+  const frameA = findFrame(scene, 'A');
+  const ctx = { images: new Map(), parserVersion: 't', compatSchemaVersion: '1', exportedAt: 'x' };
+  const { envelope } = materializeFrame(scene, frameA, ctx);
+  assert.equal(envelope.root.name, 'A');
+});
+
+test('fill alpha composites color.a * paint.opacity', () => {
+  const message = { nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Box', size: { x: 10, y: 10 },
+      fillPaints: [{ type: 'SOLID', visible: true, opacity: 0.5, color: { r: 0, g: 0, b: 0, a: 0.5 } }] },
+  ]};
+  const scene = buildScene(message);
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Box'), {
+    images: new Map(), parserVersion: 't', compatSchemaVersion: '1', exportedAt: 'x',
+  });
+  // 0.5 * 0.5 = 0.25 → alpha channel round(0.25*255)=64=0x40.
+  assert.ok(envelope.root.style.background_color.toLowerCase().endsWith('40'),
+    `expected 25% alpha suffix, got ${envelope.root.style.background_color}`);
+});
+
+test('countFramesByName detects duplicate frame names', () => {
+  const message = { nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'P' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Main',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Main',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'b' } },
+  ]};
+  const scene = buildScene(message);
+  assert.equal(countFramesByName(scene, 'Main'), 2);
+  assert.equal(countFramesByName(scene, 'Other'), 0);
+});
+
+test('generator output is deterministic (committed fixture is fresh)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fig-gen-'));
+  const regen = join(dir, 'synthetic.fig');
+  execFileSync('node', [GENERATOR, regen]);
+  assert.deepEqual(readFileSync(regen), readFileSync(FIXTURE),
+    'committed fixture is out of date — re-run make_synthetic_fig.mjs');
+});

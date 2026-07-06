@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6288,
-      "note": "shared test registration hotspot; exact ceiling tracks current registered CMake test manifest"
+      "max_loc": 6306,
+      "note": "shared test registration hotspot (+14 registering the fig decoder unit + CLI tests); exact ceiling tracks current registered CMake test manifest"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
@@ -82,8 +82,8 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3477,
-      "note": "import-design CLI orchestration hotspot; grew with the recognition-resolver + installed-package custom-control wiring, plus the --validate faithful_svg honesty caveat"
+      "max_loc": 3515,
+      "note": "import-design CLI orchestration hotspot (+24 for the --from fig lane arg/help surface; decode logic lives in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, plus the --validate faithful_svg honesty caveat"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",

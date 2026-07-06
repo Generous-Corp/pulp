@@ -78,6 +78,34 @@ build-gpu/tools/import-design/pulp-import-design \
   --reference <figma-node-render.png> --diff diff.png --render-size 1356x781
 ```
 
+### Offline `.fig` lane (`--from fig`) — no account, no network
+
+When you have a **local Figma save file** (`File → Save local copy…`, a `.fig`),
+`--from fig` decodes it offline — no Figma account, PAT, MCP, or network. It
+produces the same `figma-plugin` envelope as `figma_rest_export.py`, then runs
+the standard figma-plugin lane, so everything above (audio-widget/library
+matching, faithful-vector render, `--validate`) applies unchanged. Requires
+Node ≥ 22 on PATH (native zstd); the decoder is `tools/import-design/fig_decode.mjs`.
+
+A `.fig` can carry hundreds of frames across many pages, so **outline first,
+then pick a frame** — importing the whole file is never right:
+```bash
+# 1) Inventory the file (read-only): pages → frames with guid, size, node count.
+pulp import-design --from fig --file design.fig --outline          # or --outline --json
+
+# 2) Import ONE frame, by name or guid (from the outline). --page scopes the lookup.
+pulp import-design --from fig --file design.fig --frame '102:1624' --output ui.js
+```
+Frame selection accepts a guid (`102:1624`, unambiguous) or an exact
+case-insensitive name. The decoder is purely structural — geometry, style, text,
+and bundled raster assets; **widget recognition stays the importer's job** (a
+node's name flows through untouched for the resolver to classify). Fidelity
+losses are reported as named warnings in the emitted envelope's `diagnostics`
+(`vector-simplified`, `gradient-approximated`, `asset-missing`) rather than
+silently dropped. External-library instances and cross-file variables that a
+local file can't resolve surface the same way — treat them as data, not failures,
+and fill in the critical ones by hand.
+
 **THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
 cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
 SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
