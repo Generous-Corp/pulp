@@ -307,11 +307,7 @@ inline SwapPackVerifyResult verify_swap_pack(
 
 /// Lowercase-hex encode bytes (for signer/signature fields on the way out).
 inline std::string swap_pack_hex_encode(const std::vector<std::uint8_t>& bytes) {
-    static const char* d = "0123456789abcdef";
-    std::string out;
-    out.reserve(bytes.size() * 2);
-    for (auto b : bytes) { out.push_back(d[b >> 4]); out.push_back(d[b & 0xF]); }
-    return out;
+    return runtime::hex_encode(bytes);
 }
 
 /// Minimal JSON string escaper for the fields the manifest emits.

@@ -104,11 +104,7 @@ inline std::optional<std::vector<std::uint8_t>> srl_hex_decode(std::string_view 
 
 /// Encode bytes to lowercase hex.
 inline std::string srl_hex_encode(const std::vector<std::uint8_t>& bytes) {
-    static const char* d = "0123456789abcdef";
-    std::string out;
-    out.reserve(bytes.size() * 2);
-    for (auto b : bytes) { out.push_back(d[b >> 4]); out.push_back(d[b & 0xF]); }
-    return out;
+    return runtime::hex_encode(bytes);
 }
 
 // ── canonical signed message ───────────────────────────────────────────────
