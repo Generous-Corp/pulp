@@ -33,6 +33,16 @@ class DcOffset(NamedTuple):
     present: bool
 
 
+class LagEstimate(NamedTuple):
+    """Result of :func:`estimate_global_lag`. `lag_samples` is the candidate's constant offset
+    relative to the reference (positive = candidate is LATER); `confidence` is the normalized
+    cross-correlation peak in [0, 1] (1.0 = a perfect shifted match). A low confidence means no
+    single constant lag reliably aligns the two — the caller must refuse to trim rather than trust
+    a weak peak (a wrong alignment is worse than none)."""
+    lag_samples: int
+    confidence: float
+
+
 def highband(y: np.ndarray) -> np.ndarray:
     """Cheap high-pass via first difference — emphasizes attack edges (>~300 Hz)."""
     return np.diff(np.asarray(y, dtype=np.float64), prepend=0.0)
@@ -287,6 +297,73 @@ def normalized_correlate(long: np.ndarray, short: np.ndarray) -> np.ndarray:
     xc = np.correlate(long, short, mode="valid")
     sliding = np.sqrt(np.convolve(long * long, np.ones(L), mode="valid")[: len(xc)]) + 1e-12
     return xc / (sliding * (np.linalg.norm(short) + 1e-12))
+
+
+def estimate_global_lag(
+    reference: np.ndarray, candidate: np.ndarray, sr: int, max_lag_s: float = 0.5
+) -> LagEstimate:
+    """Estimate the single constant lag that best aligns `candidate` to `reference`.
+
+    Cross-correlates the two high-band (attack-emphasized) signals via FFT, unit-normalized so the
+    peak is a match confidence in [0, 1]. Searches lags in ±``max_lag_s``; the returned
+    ``lag_samples`` is the candidate offset (positive = candidate is later, so trimming its first
+    ``lag`` samples aligns the shared content). Zero-padded to 2N so the correlation is linear (no
+    circular wrap) over the search window. A low ``confidence`` means the difference is NOT a pure
+    delay (a real timbral/structural change, not just a shift) — the caller must then refuse to
+    trim. Pure numpy; deterministic."""
+    ref = highband(np.asarray(reference, dtype=np.float64))
+    cand = highband(np.asarray(candidate, dtype=np.float64))
+    n = min(ref.size, cand.size)
+    if n < 2:
+        return LagEstimate(0, 0.0)
+    ref, cand = ref[:n], cand[:n]
+    rn = ref / (np.linalg.norm(ref) + 1e-20)
+    cn = cand / (np.linalg.norm(cand) + 1e-20)
+    m = 1 << int(np.ceil(np.log2(2 * n)))                 # >= 2N → linear (non-circular) xcorr
+    xcorr = np.fft.irfft(np.fft.rfft(cn, m) * np.conj(np.fft.rfft(rn, m)), m)
+    # xcorr[k] peaks at k = the lag where cand[i] ≈ ref[i-k]; positive lags at [0..], negatives wrap
+    # to the tail [m-.. : m]. Assemble the ±max_lag window in increasing lag order.
+    max_lag = min(int(max_lag_s * sr), n - 1)
+    window = np.concatenate([xcorr[m - max_lag:], xcorr[: max_lag + 1]])  # lags -max_lag..+max_lag
+    lags = np.arange(-max_lag, max_lag + 1)
+    # Pick the POSITIVE-correlation peak (signed argmax), not abs(): a polarity-inverted or
+    # half-period-shifted candidate produces a strong NEGATIVE peak that abs() would lock onto,
+    # yielding a confident WRONG lag (e.g. aligning a sine to anti-phase).
+    best = int(np.argmax(window))
+    peak, lag = float(window[best]), int(lags[best])
+    confidence = max(0.0, min(peak, 1.0))
+    # Refuse two ambiguous cases (a wrong alignment is worse than none):
+    #  (1) Periodicity: a periodic/tonal signal has a COMB of near-equal peaks, so no single lag is
+    #      the true one. If a rival peak outside the main lobe rivals the best (>85%), the lag is
+    #      not unique → confidence 0. (Drums etc. have one dominant peak, ~30%, and pass.)
+    #  (2) Boundary: a best lag at the search edge means the true lag is probably OUTSIDE the
+    #      ±max_lag window (a delay longer than max_lag_s), so the in-window peak is spurious.
+    lobe = max(1, int(0.001 * sr))                        # ±1 ms main-lobe half-width
+    masked = window.copy()
+    masked[max(0, best - lobe): best + lobe + 1] = -np.inf
+    rival = float(np.max(masked))
+    if peak > 1e-9 and rival / peak > 0.85:
+        confidence = 0.0
+    if abs(lag) >= max_lag:
+        confidence = 0.0
+    return LagEstimate(lag, confidence)
+
+
+def apply_lag_trim(
+    reference: np.ndarray, candidate: np.ndarray, lag_samples: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Remove the constant lag (from :func:`estimate_global_lag`) by dropping the LEAD off whichever
+    signal starts later, so aligned content lines up at index 0. The tails are LEFT INTACT (unequal
+    lengths are fine): the downstream residual zero-pads the shorter, so a candidate that is a
+    delayed reference PLUS extra tail content still reads as material — trimming only the lead never
+    truncates a real difference into a false identity. Returns new arrays."""
+    ref = np.asarray(reference, dtype=np.float64)
+    cand = np.asarray(candidate, dtype=np.float64)
+    if lag_samples > 0:        # candidate is later → drop its lead
+        cand = cand[lag_samples:]
+    elif lag_samples < 0:      # candidate is earlier → drop the reference's lead
+        ref = ref[-lag_samples:]
+    return ref.copy(), cand.copy()
 
 
 def local_align(

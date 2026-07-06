@@ -39,13 +39,21 @@ pulp audio compare $ARGUMENTS --profile tonal-balance --json /tmp/compare.json
   *expected unchanged*. This is the ONLY mode that can return `regression_suspected`.
 - **default `--reference-role peer`** — a neutral A/B; a changed candidate reads as
   `material_change_detected`, never "regression" (we don't assume which side is right).
-- **`--profile`** — the measurement axis. Two today, both global/alignment-free:
-  - `tonal-balance` — LTAS spectral-centroid shift; the bad direction is **duller**.
-  - `added-hf` — high-frequency (≥8 kHz) energy fraction; the bad direction is **added fizz**.
+- **`--profile`** — the measurement axis. Five today, all global/alignment-free:
+  - `tonal-balance` — LTAS spectral-centroid shift; bad direction **duller**.
+  - `added-hf` — band-relative ≥8 kHz fraction ratio (dB); bad direction **added HF fizz**.
+  - `noise-roughness` — harmonic-to-noise ratio drop (dB); bad direction **rougher/noisier** (tonal material).
+  - `graininess` — relative spectral-flux increase; bad direction **grainier** (tonal material).
+  - `stereo-width` — RMS(side)/RMS(mid) width + interchannel correlation; bad direction **narrower/collapsed**, and an out-of-phase candidate is flagged (needs 2-channel input; mono → `not_applicable`).
   - `regression_suspected` also requires the change to be in that axis's bad direction — a
     brighter candidate on `tonal-balance`, or an HF-reduced one on `added-hf`, stays a neutral
-    `material_change_detected`. More profiles (distortion, level, pitch) arrive in later slices.
-- **`--threshold <t>`** — override the axis's own materiality default (must be in `(0, 1)`).
+    `material_change_detected`. New axes auto-appear in `--profile`; time-warp axes are deferred.
+- **`--align <none|latency>`** — time-align first. `latency` trims a constant delay/offset before
+  measuring, so a pure shift (delay plugin, tempo-sampler offset) reads as the tone change it is
+  (corroborated) instead of a false `not_corroborated`; it **refuses** and measures unaligned when
+  the difference isn't a reliable pure delay. Default `none`.
+- **`--threshold <t>`** — override the axis's own materiality default (per-axis unit/range; the tool
+  validates it — a fraction for `tonal-balance`, dB for `added-hf`/`noise-roughness`, etc.).
 
 ## Read the verdict
 
@@ -68,9 +76,17 @@ reference, in `db_rel_reference`; lower = more identical) plus a `corroboration`
 corroboration as a **materiality cross-check, NOT a trust score** — it only says whether that
 raw residual *also* registers a material change. The useful case is disagreement:
 `not_corroborated` with `raw_material:true, axis_exceeds:false` means a real difference this axis
-can't see (e.g. a pure delay — try another `--profile`). Both raw comparators and corroboration
-are `experimental` / `participates_in_verdict:false`; they never change the verdict — cite them as
-extra context, never as confidence.
+can't see — often a pure delay/offset, which **`--align latency`** now trims away so the residual
+reads identity (or another `--profile` catches a change the current axis is blind to). This
+disagreement is also promoted to a top-level `headline_flags` (structured, machine-suppressible for
+time-variant effects). Both raw comparators and corroboration are `experimental` /
+`participates_in_verdict:false`; they never change the verdict — cite them as extra context, never as
+confidence.
+
+For a standing before/after net over a preset bank or effect suite, use the **golden-render
+regression net** (`quality-lab regression-net --manifest net.json`): it runs each pair across the
+wired profiles and fails only on an axis `regression_suspected` (a broken/missing render is a
+distinct exit-2 error, never a silent pass). See the guide's "Golden-render regression net" section.
 
 ## Diff-integration: judging a DSP change in review (advisory)
 

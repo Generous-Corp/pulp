@@ -163,7 +163,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         report = compare.compare_files(
             args.reference, args.candidate,
             profile=args.profile, reference_role=args.reference_role,
-            threshold=args.threshold,
+            threshold=args.threshold, align=args.align,
         )
     except ValueError as exc:
         # A caller-contract error — in practice an out-of-range --threshold for this axis (profile
@@ -300,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "
                            "peer = neutral material_change_detected only")
+    cmp_.add_argument("--align", choices=["none", "latency"], default="none",
+                      help="time-align before measuring: none (default) or latency (trim a constant "
+                           "delay/offset so a pure shift isn't read as a material change; refuses if "
+                           "the difference isn't a reliable pure delay)")
     cmp_.add_argument("--threshold", type=float, default=None,
                       help="materiality threshold override (defaults to the axis's own default)")
     cmp_.add_argument("--json", default="", help="write the full report JSON to this path")
