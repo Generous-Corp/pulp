@@ -79,13 +79,24 @@ def ltas(y: np.ndarray, sr: int, n_fft: int = 2048, hop: int = 512):
     return np.fft.rfftfreq(n_fft, 1.0 / sr), acc / n
 
 
-def mean_spectral_flux(y: np.ndarray, sr: int, n_fft: int = 1024, hop: int = 256) -> float:
+def mean_spectral_flux(
+    y: np.ndarray, sr: int, n_fft: int = 1024, hop: int = 256, *, hop_scale: float = 1.0
+) -> float:
     """Mean frame-to-frame spectral flux (L1 magnitude change), energy-normalized so it
     is level-invariant. Higher = more frame-to-frame churn (graininess / instability). A
     global statistic, no alignment needed. NOTE: on transient-heavy material the
     onset flux dominates and this is not a good graininess discriminator — it is meant
-    for sustained / tonal material (where graininess is actually heard)."""
+    for sustained / tonal material (where graininess is actually heard).
+
+    `hop_scale` (Tier 3, `spectral_flux.v2-warp`): the effective hop is `round(hop * hop_scale)`,
+    `n_fft` unchanged. A pitch-preserving time-stretch by R slows content evolution, so a candidate
+    measured at the reference hop reads a FALSE lower flux ("smoother"); measuring the R×-stretched
+    candidate with `hop_scale=R` steps it through the same source-content interval per frame, undoing
+    the deflation. `hop_scale=1.0` (default) is byte-identical to the base metric. (Because the metric
+    is Σflux/Σnorm — a per-frame-step average — scaling the hop is the correct fix; a fixed `n_fft`
+    leaves a small window-span residual that never flips the sign at meaningful ratios.)"""
     y = np.asarray(y, dtype=np.float64)
+    hop = max(1, int(round(hop * hop_scale)))
     win = np.hanning(n_fft)
     n = max(0, (len(y) - n_fft) // hop + 1)
     if n < 2:
@@ -280,6 +291,58 @@ def null_residual_db(reference: np.ndarray, candidate: np.ndarray) -> NullResidu
         # -inf so the value stays JSON-friendly and orderable.
         return NullResidual(-160.0, float(ref_rms_db), level_matched)
     return NullResidual(float(20.0 * np.log10(res_rms / ref_rms)), float(ref_rms_db), level_matched)
+
+
+def ltas_log_spectral_distance_db(
+    reference: np.ndarray,
+    candidate: np.ndarray,
+    sr: int,
+    n_fft: int = 2048,
+    hop: int = 512,
+    floor_db: float = -100.0,
+) -> float:
+    """Long-term-average-spectrum log-spectral distance: the mean absolute dB difference between the
+    two signals' LTAS bins.
+
+    A warp-compatible companion to :func:`null_residual_db`. Where the sample-domain residual is
+    time-domain and phase-SENSITIVE (a pure delay or an unaligned time-stretch/pitch-shift inflates
+    it, so it is invalid as corroboration for ``stretch:R`` / ``pitch:S`` pairs), this measure is
+    computed from magnitude spectra only — phase-BLIND — and from the LTAS, whose bin count depends on
+    ``n_fft`` alone, not on signal length — so two DIFFERENT-length renders still compare with no
+    alignment and no shape crash. It fills the corroboration slot the residual cannot: an independent,
+    deterministic, algorithm-agnostic raw measure of *whether a material spectral change exists*
+    across a time warp.
+
+    Value: each signal's LTAS (:func:`ltas`) is converted to dB and the result is
+    ``mean(|ref_db - cand_db|)`` over the shared bins — 0.0 for identical magnitude spectra, growing
+    with the average per-bin dB deviation as the envelopes diverge. Each signal is RMS-normalized
+    first, so a broadband gain cancels and only spectral SHAPE contributes. A shared magnitude floor
+    ``floor_db`` below the louder peak bin bounds a real-vs-dead bin gap to ``<= |floor_db|`` (no
+    single dead bin sends the mean to +inf) while keeping a real spectral hole material and monotonic.
+
+    Blind spots (the honest inverse of the residual's): it sees only the long-term spectral ENVELOPE —
+    a pure phase/all-pass defect, a time reversal, or a delay leaves the average magnitude spectrum
+    intact → distance ≈ 0. It is bin-resolution- and level-guard-limited. That complementary blindness
+    is exactly why the two comparators coexist rather than one replacing the other."""
+    ref = np.asarray(reference, dtype=np.float64)
+    cand = np.asarray(candidate, dtype=np.float64)
+    ref_rms = np.sqrt(np.mean(ref * ref)) if ref.size else 0.0
+    cand_rms = np.sqrt(np.mean(cand * cand)) if cand.size else 0.0
+    if ref_rms > 1e-12:
+        ref = ref / ref_rms
+    if cand_rms > 1e-12:
+        cand = cand / cand_rms
+    _, m_ref = ltas(ref, sr, n_fft, hop)
+    _, m_cand = ltas(cand, sr, n_fft, hop)
+    n = min(m_ref.size, m_cand.size)  # identical for equal n_fft/sr; min() is a length-safety guard
+    if n == 0:
+        return 0.0
+    m_ref, m_cand = m_ref[:n], m_cand[:n]
+    peak = max(float(m_ref.max()), float(m_cand.max()), 1e-20)
+    floor = peak * (10.0 ** (floor_db / 20.0))
+    ref_db = 20.0 * np.log10(np.maximum(m_ref, floor))
+    cand_db = 20.0 * np.log10(np.maximum(m_cand, floor))
+    return float(np.mean(np.abs(ref_db - cand_db)))
 
 
 def normalized_correlate(long: np.ndarray, short: np.ndarray) -> np.ndarray:

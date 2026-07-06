@@ -222,6 +222,7 @@ COMPARE_ALIGN_NOT_REQUIRED = "not_required"      # alignment-free axis, or not r
 COMPARE_ALIGN_NOT_ALIGNED = "not_aligned"        # requested but refused (low confidence / declaration unsupported)
 COMPARE_ALIGN_FIXED_LATENCY = "fixed-latency-trim"  # a single constant lag was trimmed
 COMPARE_ALIGN_VARISPEED = "varispeed-resample"   # a declared varispeed ratio was undone by resampling
+COMPARE_ALIGN_STRETCH = "stretch-declared"       # a declared pitch-preserving stretch; axes measure unwarped
 
 
 def compare_alignment(policy: str, **fields: Any) -> dict[str, Any]:

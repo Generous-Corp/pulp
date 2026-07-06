@@ -22,6 +22,7 @@ from typing import Any, Callable, NamedTuple
 import numpy as np
 
 from . import schema
+from .align import detect_onsets
 from .dsp import apply_lag_trim, estimate_global_lag, resample_to_length
 
 # Below this cross-correlation confidence a constant-lag trim is REFUSED (a wrong alignment is worse
@@ -35,6 +36,19 @@ _ALIGN_CONFIDENCE_FLOOR = 0.7
 # does not support the declaration, so we REFUSE (a wrong warp is worse than none) — §6.1 sanity. The
 # resample itself is length-based (to reference.size), so the record carries the OBSERVED ratio too.
 _VARISPEED_RATIO_TOL = 0.005
+# Declared-warp parameter domain: beyond this the §5 measurement assumptions degrade, so we refuse an
+# honest "outside supported warp range" rather than return unvalidated numbers.
+_WARP_RATIO_MIN, _WARP_RATIO_MAX = 0.25, 4.0
+# `stretch:R` duration sanity (§6.1): generous (renders carry latency pad + tail ring-out).
+_STRETCH_DUR_TOL = 0.03
+# §6.3 post-map verification — a single uniform ratio must fit onset-bearing material, else it is
+# non-uniformly warped and one declared ratio is wrong. Per matched onset, the residual of the
+# nearest actual candidate onset from the uniform prediction (ref_t·R) must have small MAD: a uniform
+# warp clusters near 0 ms (empirically ≤ ~3 ms across R∈[0.25,4]), a non-uniform one scatters (≥ ~60
+# ms). Fewer than this many onsets on either side → sustained material, which has no landmarks to
+# verify and whose time-average axes are unharmed by non-uniformity → accept as unverified.
+_ONSET_LAG_MAD_MS = 15.0
+_STRETCH_MIN_ONSETS = 4
 
 
 class AlignSpec(NamedTuple):
@@ -67,18 +81,18 @@ def parse(align: str) -> AlignSpec:
         if sep:
             raise ValueError(f"align {mode!r} takes no parameter (got {align!r})")
         return AlignSpec(raw=align, mode=mode, param=None)
-    if mode == "varispeed":
+    if mode in ("varispeed", "stretch"):
         if not param_str:
-            raise ValueError("align 'varispeed' needs a ratio, e.g. varispeed:1.5")
+            raise ValueError(f"align {mode!r} needs a ratio, e.g. {mode}:1.5")
         try:
             ratio = float(param_str)
         except ValueError:
-            raise ValueError(f"varispeed ratio must be a number, got {param_str!r}")
+            raise ValueError(f"{mode} ratio must be a number, got {param_str!r}")
         # Reject non-finite ratios: inf slips past `ratio > 0` AND makes the downstream verification
         # gate `abs(observed - ratio)/ratio` evaluate to nan (nan > tol is False), which would silently
         # disable the refusal for every candidate. nan is already caught by `> 0` — guard both.
         if not math.isfinite(ratio) or ratio <= 0.0:
-            raise ValueError(f"varispeed ratio must be a positive finite number, got {ratio}")
+            raise ValueError(f"{mode} ratio must be a positive finite number, got {ratio}")
         return AlignSpec(raw=align, mode=mode, param=ratio)
     # unreachable while _HANDLERS is none/latency/varispeed — a guard for a mis-registered handler.
     raise ValueError(f"align {mode!r} has no parameter grammar defined")
@@ -135,19 +149,83 @@ def _align_varispeed(reference, candidate, sr, param, extra):
         declared_ratio=ratio, observed_ratio=round(observed, 4))
 
 
-# Mode → handler. A new declared-warp class (stretch/pitch/ratio) is ONE entry here plus one handler
-# function (and, if it needs a new policy string, one constant in schema.py).
+def _verify_uniform_stretch(
+    reference: np.ndarray, candidate: np.ndarray, sr: int, ratio: float
+) -> tuple[bool, str, dict[str, Any]]:
+    """§6.3 post-map verification: does a SINGLE uniform ratio actually fit, using evidence independent
+    of the axes measured? On onset-bearing material, match each reference onset to the nearest ACTUAL
+    candidate onset around its uniform-ratio prediction (ref_t·R) — matched independently per onset, so
+    (unlike a strict monotonic 1:1 map) it does not drift when a compression's refractory folds close
+    onsets together — and take the robust MAD of the residuals: a uniform warp clusters near 0, a
+    non-uniform one scatters past the floor → REFUSE. Too few onsets on either side is sustained
+    material with no landmarks to verify and time-average axes unharmed by non-uniformity → ACCEPT as
+    unverified (refusing there would only reject valid clean stretches). Returns (ok, reason, evidence)."""
+    ref_onsets = detect_onsets(reference, sr)
+    cand_onsets = np.asarray(detect_onsets(candidate, sr))
+    if len(ref_onsets) < _STRETCH_MIN_ONSETS or cand_onsets.size < _STRETCH_MIN_ONSETS:
+        return True, "", {"uniformity": "unverified — too few onsets (sustained material)"}
+    resid = np.array([float(cand_onsets[np.argmin(np.abs(cand_onsets - ref_t * ratio))]) - ref_t * ratio
+                      for ref_t in ref_onsets])
+    mad_ms = float(np.median(np.abs(resid - np.median(resid)))) * 1000.0
+    evidence = {"onset_lag_mad_ms": round(mad_ms, 1)}
+    if mad_ms > _ONSET_LAG_MAD_MS:
+        return (False, f"onset lags inconsistent with a uniform ratio (MAD {mad_ms:.0f} ms) — "
+                "material appears non-uniformly warped", evidence)
+    return True, "", evidence
+
+
+def _align_stretch(reference, candidate, sr, param, extra):
+    """A declared `stretch:R` (pitch-preserving time-stretch): the axes measure the UNWARPED pair
+    directly — LTAS/HNR/width are time-average and warp-invariant, so a resample would only add
+    artifacts. The record carries the ratio so the graininess kernel (hop-scaled flux) and the
+    corroborator (LTAS residual, phase-blind) normalize for the warp. First VERIFY: §6.1 duration
+    sanity + parameter domain, then §6.3 that a single uniform ratio actually fits (else the material
+    is non-uniformly warped and one ratio is wrong) — REFUSE rather than measure a bad map."""
+    ratio = float(param)
+    requested = extra.get("requested")
+    if not (_WARP_RATIO_MIN <= ratio <= _WARP_RATIO_MAX):
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested=requested, applied=False,
+            reason=f"stretch ratio {ratio} outside the supported range [{_WARP_RATIO_MIN}, {_WARP_RATIO_MAX}]")
+    if reference.size == 0 or candidate.size == 0:
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested=requested, applied=False,
+            reason="cannot verify a stretch ratio against an empty signal")
+    observed = candidate.size / reference.size
+    if abs(observed - ratio) / ratio > _STRETCH_DUR_TOL:
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested=requested, applied=False,
+            declared_ratio=ratio, observed_ratio=round(observed, 4),
+            reason=(f"declared stretch {ratio}× but the candidate is {observed:.3f}× the reference "
+                    "duration — the audio does not support the stated transform"))
+    ok, reason, evidence = _verify_uniform_stretch(reference, candidate, sr, ratio)
+    if not ok:
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested=requested, applied=False,
+            declared_ratio=ratio, observed_ratio=round(observed, 4), reason=reason, **evidence)
+    return reference, candidate, schema.compare_alignment(
+        schema.COMPARE_ALIGN_STRETCH, applied=True, requested=requested,
+        declared_ratio=ratio, observed_ratio=round(observed, 4), **evidence)
+
+
+# Mode → handler. A new declared-warp class (pitch/ratio) is ONE entry here plus one handler function
+# (and, if it needs a new policy string, one constant in schema.py).
 _HANDLERS: dict[str, AlignHandler] = {
     "none": _align_none,
     "latency": _align_latency,
     "varispeed": _align_varispeed,
+    "stretch": _align_stretch,
 }
 
 # Modes that change the TIME BASE (a warp), not just a constant offset. The capability axes that skip
 # a constant-lag alignment (stereo image, per-onset self-alignment) are NOT invariant to a warp — a
-# varispeed stretches the attacks themselves — so a warp mode is still applied for them. New warp
-# classes (stretch/pitch/ratio) join this set.
-_WARP_MODES = frozenset({"varispeed"})
+# time-stretch stretches the attacks themselves — so a warp mode is still applied/routed for them.
+# New warp classes (pitch/ratio) join this set.
+_WARP_MODES = frozenset({"varispeed", "stretch"})
+# Warp modes whose axes measure the UNWARPED pair (no resample) and therefore need per-axis warp
+# normalization downstream: graininess hop-scaling + the LTAS-residual corroborator. `varispeed` is
+# NOT here — it resamples back, so the standard pipeline applies verbatim.
+_MEASURE_UNWARPED_MODES = frozenset({"stretch"})
 
 
 # ── entry point (called by compare.compare_arrays) ─────────────────────────────────────────────────
@@ -183,6 +261,24 @@ def apply(
     return _HANDLERS[spec.mode](reference, candidate, sr, spec.param, extra)
 
 
+# ── warp-normalization hooks (compare.py routes graininess + corroboration through these) ───────────
+def measures_unwarped(spec: AlignSpec) -> bool:
+    """True when the axes measure the UNWARPED pair (a `stretch`/later `pitch` class): the phase- and
+    time-sensitive sample residual is invalid for corroboration and must be replaced by the phase-blind
+    LTAS residual, and the graininess flux must be warp-normalized. False for none/latency/varispeed
+    (varispeed resamples back, so the standard pipeline applies verbatim)."""
+    return spec.mode in _MEASURE_UNWARPED_MODES
+
+
+def flux_hop_scale(spec: AlignSpec) -> float:
+    """The hop-scale the graininess flux should apply to the candidate: the declared ratio for a
+    measure-unwarped stretch (so both flux series step through the same source-content interval),
+    else 1.0 (no warp, or already resampled back)."""
+    if spec.mode in _MEASURE_UNWARPED_MODES and spec.param:
+        return float(spec.param)
+    return 1.0
+
+
 # ── presentation (owns the alignment prose, so a new policy adds its clause in one file) ────────────
 def describe(record: dict[str, Any]) -> str | None:
     """The one-line summary clause for an alignment record, or None when the record is silent (the
@@ -194,6 +290,10 @@ def describe(record: dict[str, Any]) -> str | None:
     if policy == schema.COMPARE_ALIGN_VARISPEED and record.get("applied"):
         return (f"Aligned: undid a declared {record['declared_ratio']}× varispeed by resampling the "
                 f"candidate to the reference time base (observed {record['observed_ratio']}×).")
+    if policy == schema.COMPARE_ALIGN_STRETCH and record.get("applied"):
+        return (f"Declared {record['declared_ratio']}× pitch-preserving stretch (observed "
+                f"{record['observed_ratio']}×): measured warp-invariant axes directly; graininess + "
+                "corroboration warp-normalized.")
     if policy == schema.COMPARE_ALIGN_NOT_ALIGNED:
         return f"Alignment refused ({record.get('reason', 'low confidence')}) — measured unaligned."
     return None
