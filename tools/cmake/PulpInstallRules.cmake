@@ -399,6 +399,7 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_internal.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_view.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"

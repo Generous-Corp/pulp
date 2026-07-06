@@ -55,6 +55,8 @@ namespace pulp::view {
 NSArray* pulp_text_accessibility_all_elements_macos();
 }
 
+extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
+
 // ── PulpPluginView: NSView subclass for DAW embedding ────────────────────────
 
 @interface PulpPluginView : NSView
@@ -73,6 +75,7 @@ NSArray* pulp_text_accessibility_all_elements_macos();
 // paint_all so the rendered surface matches the standalone host.
 @property (nonatomic, assign) float designW;
 @property (nonatomic, assign) float designH;
+@property (nonatomic, assign) BOOL designTopAlign;
 @end
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
@@ -378,7 +381,7 @@ static bool pulp_text_input_focused_under_root(pulp::view::View* root) {
     return fv != nullptr && fv->accepts_text_input();
 }
 
-bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
+bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) {
   try {
     if (!root) return false;
     // Only dispatch to a focused widget that belongs to THIS editor's tree —
@@ -392,6 +395,15 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // into its own musical typing; that fights the host. (The standalone drives its
     // own QWERTY musical typing through a different window host.)
     if (!fv) return false;
+
+    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
+        if (te->has_marked_text()) {
+            [host interpretKeyEvents:@[ event ]];
+            root->request_repaint();
+            return true;
+        }
+    }
+
     pulp::view::KeyEvent ke;
     ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
     ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
@@ -402,28 +414,14 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // command — if so it must NOT also be inserted as text.
     const bool consumed = fv->on_key_event(ke);
 
-    // Printable characters → text insertion, but only when the key was NOT
-    // consumed as a command above. Without the !consumed gate an arrow key both
-    // moves the caret AND inserts its character: macOS reports arrows/function
-    // keys as private-use codepoints (0xF700–0xF8FF, e.g. 0xF702 = left arrow),
-    // which are >= 0x20 and would otherwise pass the printable test and render
-    // as tofu (□) in the field (pulp: AU hosted-view key routing).
-    // (Full IME / marked-text via NSTextInputClient is a follow-up; this covers
-    // ASCII + most Latin typing.)
+    // Text insertion is offered to AppKit's text input manager so dead keys and
+    // IME composition reach insertText:/setMarkedText:. Command/control chords
+    // stay on the key-command path above and must not also insert text.
     if (!consumed) {
-        NSString* chars = event.characters;
         const NSEventModifierFlags cmd_ctrl =
             NSEventModifierFlagCommand | NSEventModifierFlagControl;
-        const bool has_cmd_ctrl = (event.modifierFlags & cmd_ctrl) != 0;
-        if (chars.length > 0 && !has_cmd_ctrl) {
-            unichar c0 = [chars characterAtIndex:0];
-            const bool is_function_key = (c0 >= 0xF700 && c0 <= 0xF8FF);
-            if (c0 >= 0x20 && c0 != 0x7f && !is_function_key) {
-                pulp::view::TextInputEvent te;
-                te.text = chars.UTF8String;
-                fv->on_text_input(te);
-            }
-        }
+        if ((event.modifierFlags & cmd_ctrl) == 0)
+            [host interpretKeyEvents:@[ event ]];
     }
 
     // Focus-release affordance — hand the keyboard back to the DAW. While a text
@@ -660,7 +658,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
-    if (!pulp_plugin_key_down(self.rootView, event)) {
+    if (!pulp_plugin_key_down(self, self.rootView, event)) {
         // No focused field consumed it — try to hand it to the DAW host
         // (transport keys), then fall back to the normal responder chain.
         if (!pulp_plugin_forward_key_to_host(self, event)) {
@@ -979,6 +977,7 @@ public:
     MacPluginViewHost(View& root, Size size)
         : root_(root), size_(size) {
         @autoreleasepool {
+            pulp_mac_plugin_text_input_client_category_anchor();
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             view_ = [[PulpPluginView alloc] initWithFrame:frame];
             view_.rootView = &root_;
@@ -1187,6 +1186,7 @@ public:
         @autoreleasepool {
             view_.designW = design_w;
             view_.designH = design_h;
+            view_.designTopAlign = design_top_align_;
             if (design_w > 0.0f && design_h > 0.0f) {
                 __block MacPluginViewHost* host = this;
                 view_.pointTransform = ^pulp::view::Point(pulp::view::Point pt) {
@@ -1273,6 +1273,9 @@ private:
 // before hit_test. Mirrors PulpPluginView + the standalone host. nil =
 // identity. Set by MacGpuPluginViewHost::set_design_viewport.
 @property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
+@property (nonatomic, assign) float designW;
+@property (nonatomic, assign) float designH;
+@property (nonatomic, assign) BOOL designTopAlign;
 @end
 
 @implementation PulpGpuPluginView {
@@ -1310,7 +1313,7 @@ private:
     return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
-    if (!pulp_plugin_key_down(self.rootView, event)) {
+    if (!pulp_plugin_key_down(self, self.rootView, event)) {
         // No focused field consumed it — try to hand it to the DAW host
         // (transport keys), then fall back to the normal responder chain.
         if (!pulp_plugin_forward_key_to_host(self, event)) {
@@ -1522,6 +1525,7 @@ public:
         : root_(root), size_(size),
           alive_(std::make_shared<std::atomic<bool>>(true)) {
         @autoreleasepool {
+            pulp_mac_plugin_text_input_client_category_anchor();
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             metal_view_ = [[PulpGpuPluginView alloc] initWithFrame:frame];
@@ -1696,6 +1700,9 @@ public:
         design_viewport_w_ = design_w;
         design_viewport_h_ = design_h;
         @autoreleasepool {
+            metal_view_.designW = design_w;
+            metal_view_.designH = design_h;
+            metal_view_.designTopAlign = design_top_align_;
             if (design_w > 0.0f && design_h > 0.0f) {
                 __block MacGpuPluginViewHost* host = this;
                 metal_view_.pointTransform = ^pulp::view::Point(pulp::view::Point pt) {
@@ -1710,6 +1717,9 @@ public:
 
     void set_design_viewport_top_align(bool top_align) override {
         design_top_align_ = top_align;
+        @autoreleasepool {
+            metal_view_.designTopAlign = top_align;
+        }
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 

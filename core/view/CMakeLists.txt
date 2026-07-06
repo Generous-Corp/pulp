@@ -786,6 +786,7 @@ if(APPLE)
             platform/mac/window_host_mac_text_input.mm
             platform/mac/window_manager_mac.mm
             platform/mac/plugin_view_host_mac.mm
+            platform/mac/plugin_view_host_mac_text_input.mm
             platform/mac/screenshot_mac.mm
             platform/mac/drag_drop_mac.mm
             platform/mac/accessibility_mac.mm
