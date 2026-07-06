@@ -534,6 +534,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_tokens.cpp
         src/design_manifest.cpp
         src/design_adherence.cpp
+        src/design_ledger.cpp
         src/design_codegen.cpp
         src/design_fidelity.cpp
         src/design_fidelity_ledger.cpp
