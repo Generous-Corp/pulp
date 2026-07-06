@@ -219,8 +219,9 @@ COMPARE_CORROBORATION_NA = "not_applicable"
 # measuring), disclosed on the envelope's `alignment` field — NEVER a verdict input. The policy
 # names live here; later tiers add onset-map / warp policies behind the same record shape.
 COMPARE_ALIGN_NOT_REQUIRED = "not_required"      # alignment-free axis, or not requested
-COMPARE_ALIGN_NOT_ALIGNED = "not_aligned"        # requested but refused (low confidence)
+COMPARE_ALIGN_NOT_ALIGNED = "not_aligned"        # requested but refused (low confidence / declaration unsupported)
 COMPARE_ALIGN_FIXED_LATENCY = "fixed-latency-trim"  # a single constant lag was trimmed
+COMPARE_ALIGN_VARISPEED = "varispeed-resample"   # a declared varispeed ratio was undone by resampling
 
 
 def compare_alignment(policy: str, **fields: Any) -> dict[str, Any]:

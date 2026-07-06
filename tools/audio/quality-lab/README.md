@@ -150,12 +150,15 @@ signal (mono input → `not_applicable`) and flags an out-of-phase candidate; `t
 needs onset-bearing (percussive) material (too few onsets → `not_applicable`) and is one-directional
 (a softening is the regression; a sharper candidate reads no change).
 
-- **Time-alignment (`--align latency`).** By default the axes are alignment-free, so a constant
-  delay/offset false-alarms the sample residual (`not_corroborated`). `--align latency` estimates a
-  single constant lag, trims to a common time base, and measures the aligned pair — a pure delay then
-  reads `no_material_change` + corroborated, and a change hidden behind a delay is measured cleanly.
-  It **refuses** (records `alignment: not_aligned`) when the difference isn't a reliable pure delay;
-  default `none` is unchanged. Time-*stretch* (a non-constant warp) is deferred.
+- **Time-alignment (`--align`).** By default the axes are alignment-free, so a constant delay/offset
+  false-alarms the sample residual (`not_corroborated`). `--align latency` estimates a single constant
+  lag, trims to a common time base, and measures the aligned pair — a pure delay then reads
+  `no_material_change` + corroborated, and a change hidden behind a delay is measured cleanly.
+  `--align varispeed:R` undoes a **declared** tape-style speed change (candidate = reference resampled
+  by R) by resampling the candidate back to the reference time base — exact for that class, so the full
+  pipeline (incl. the sample residual) applies. Both **verify** their request and **refuse** (record
+  `alignment: not_aligned`) when the audio doesn't support it; default `none` is unchanged.
+  Pitch-preserving stretch + pitch-shift are later Tier 3 classes.
 - **Verdicts:** `regression_suspected` · `material_change_detected` · `no_material_change_detected`
   · `inconclusive` · `invalid` (a per-measurement `not_applicable` rolls up to `inconclusive`).
 - **Intent-safe:** `regression_suspected` is only emitted with `--reference-role golden` (reference
