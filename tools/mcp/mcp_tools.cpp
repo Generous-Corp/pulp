@@ -1117,6 +1117,12 @@ std::string handle_audio_compare(const std::string& params_json) {
             return arg_error("Error: reference_role must be peer or golden");
         flags += " --reference-role " + shell_quote(role);
     }
+    auto align = extract_string(params_json, "align");
+    if (!align.empty()) {
+        if (align != "none" && align != "latency")
+            return arg_error("Error: align must be none or latency");
+        flags += " --align " + shell_quote(align);
+    }
     if (auto raw = extract_raw(params_json, "threshold"); !raw.empty() && raw != "null") {
         double t = extract_double(params_json, "threshold", -1.0);
         // Passthrough: the VALID range is per-axis and lives in the Python registry (a
