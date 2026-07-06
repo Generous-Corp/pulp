@@ -2658,6 +2658,33 @@ The design-viewport approach sidesteps all three by doing the resize at the
 renderer (paint-time scale of the design surface), which is what a browser
 webview effectively does at the layer level.
 
+### Read-only verifier + verdict contract (hardens the loop)
+
+The diff loop above tells you *how far off* a render is; it does not stop the two
+failure modes that have cost real review cycles: a reviewer that **edits while
+reviewing** (hiding the defect it was meant to catch) and a **verdict-less
+"looks good"** on a render nobody actually saw. Harden it with three contracts:
+
+1. **Vision probe first.** Before reading any capture into context for a visual
+   judgment, run the vision probe (see the `screenshot` skill): a one-shot
+   `VISION_OK` / `VISION_UNSUPPORTED` check against a tiny known PNG. On failure,
+   save captures, report only paths, and disclose "visual review skipped". Never
+   describe an image the harness may have dropped.
+
+2. **Read-only verifier subagent.** Hand a fresh-context subagent only {project
+   dir, changed files, render/log outputs, image-input status} and the prompt in
+   [`verifier-prompt.md`](verifier-prompt.md). It checks logs, runs the
+   unresolved-token audit (`pulp design lint-adherence`, exact and non-visual),
+   and does root-cause layout probes (`pulp_inspect_dom` /
+   `pulp_inspect_evaluate` — dump the offending element AND its parent so the
+   finding names the *constraint*, not the pixel). It **may not edit**.
+
+3. **Verdict contract.** The verifier's entire final message is `done` or
+   `needs_work: <root cause>` — never prose. The main agent fixes the named
+   cause and re-invokes the verifier with fresh context; loop until `done`. This
+   degrades honestly when image input is unavailable (the token/log half still
+   gates) instead of emitting confident fiction.
+
 ## CLI Alternative
 
 The deterministic import tool is also available:
