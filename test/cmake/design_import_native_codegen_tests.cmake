@@ -3,7 +3,7 @@
 
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
-    SOURCES test_design_import_ir.cpp test_design_import_codegen.cpp test_design_import_sources.cpp test_design_import_fidelity.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp
+    SOURCES test_design_import_ir.cpp test_design_import_codegen.cpp test_design_import_sources.cpp test_design_import_fidelity.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]"

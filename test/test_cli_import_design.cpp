@@ -1302,3 +1302,122 @@ TEST_CASE("pulp design variants --help prints usage", "[cli][design-variants][sh
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design variants") != std::string::npos);
 }
+
+// ── `pulp design tweak` — the EDITMODE parameter-block CLI ────────────────────
+
+namespace {
+fs::path write_tweak_artifact(const fs::path& dir, const std::string& body) {
+    auto p = dir / "ui.js";
+    std::ofstream f(p, std::ios::binary);
+    f << body;
+    return p;
+}
+const char* kTweakBody =
+    "export const ui = () => {\n"
+    "  const p = /*EDITMODE-BEGIN*/{\"accent\":\"#33aaff\",\"radius\":8}/*EDITMODE-END*/;\n"
+    "  return render(p);\n"
+    "};\n";
+}  // namespace
+
+TEST_CASE("pulp design tweak lists parameters", "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-tweak-list");
+    auto art = write_tweak_artifact(dir, kTweakBody);
+    auto r = run_pulp({"design", "tweak", art.string()});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("accent = \"#33aaff\"") != std::string::npos);
+    REQUIRE(r.stdout_output.find("radius = 8") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design tweak --json prints the payload", "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-tweak-json");
+    auto art = write_tweak_artifact(dir, kTweakBody);
+    auto r = run_pulp({"design", "tweak", art.string(), "--json"});
+    REQUIRE(r.exit_code == 0);
+    auto v = choc::json::parse(r.stdout_output);
+    REQUIRE(v["radius"].getWithDefault<int>(0) == 8);
+    REQUIRE(v["accent"].getString() == "#33aaff");
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design tweak --set rewrites in place, preserving surrounding bytes",
+          "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-tweak-set");
+    auto art = write_tweak_artifact(dir, kTweakBody);
+    // A number stays a number; a bare color string is auto-quoted.
+    auto r = run_pulp({"design", "tweak", art.string(),
+                       "--set", "radius=16", "--set", "accent=#ff0000"});
+    REQUIRE(r.exit_code == 0);
+    auto after = read_text(art);
+    REQUIRE(after.find("\"radius\":16") != std::string::npos);
+    REQUIRE(after.find("\"accent\":\"#ff0000\"") != std::string::npos);
+    // The prose around the block is untouched.
+    REQUIRE(after.rfind("export const ui = () => {", 0) == 0);
+    REQUIRE(after.find("return render(p);") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design tweak stores an injection-shaped value as a plain string",
+          "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-tweak-inject");
+    auto art = write_tweak_artifact(dir, kTweakBody);
+    // A crafted value must not smuggle structure into the block; it is quoted.
+    auto r = run_pulp({"design", "tweak", art.string(), "--set", "n=1],x:[2"});
+    REQUIRE(r.exit_code == 0);
+    auto after = read_text(art);
+    REQUIRE(after.find("\"n\":\"1],x:[2\"") != std::string::npos);
+    // Still exactly one object between the markers — re-reading succeeds.
+    auto ps = run_pulp({"design", "tweak", art.string(), "--json"});
+    REQUIRE(ps.exit_code == 0);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design tweak rejects a non-UTF-8 --set value, leaving the file intact",
+          "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-tweak-badutf8");
+    auto art = write_tweak_artifact(dir, kTweakBody);
+    auto before = read_text(art);
+    // 0xF0 is a 4-byte-sequence lead with no continuation bytes; choc's JSON
+    // writer would over-read it. The CLI must reject the value, not crash/write.
+    std::string bad = "label=";
+    bad += static_cast<char>(0xF0);
+    auto r = run_pulp({"design", "tweak", art.string(), "--set", bad});
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(read_text(art) == before);  // untouched
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design tweak --out with no value is fatal, not in-place",
+          "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-tweak-outmissing");
+    auto art = write_tweak_artifact(dir, kTweakBody);
+    auto before = read_text(art);
+    auto r = run_pulp({"design", "tweak", art.string(), "--set", "radius=9", "--out"});
+    REQUIRE(r.exit_code == 2);
+    // The artifact must be untouched — no silent fallback to in-place write.
+    REQUIRE(read_text(art) == before);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design tweak errors when there is no block", "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-tweak-noblock");
+    auto art = write_tweak_artifact(dir, "const x = 1;\n");
+    auto r = run_pulp({"design", "tweak", art.string()});
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_output.find("no well-formed EDITMODE block") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pulp design tweak --help prints usage", "[cli][design-tweak][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"design", "tweak", "--help"});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp design tweak") != std::string::npos);
+}
