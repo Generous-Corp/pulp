@@ -9,11 +9,13 @@
 #include <pulp/design/design_handoff.hpp>
 #include <pulp/design/design_ledger.hpp>
 #include <pulp/design/design_manifest.hpp>
+#include <pulp/design/design_tweaks.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_tokens.hpp>
 
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_UTF8.h>
 
 #include <algorithm>
 #include <cctype>
@@ -958,6 +960,209 @@ int run_variants(const std::vector<std::string>& rest) {
     return 0;
 }
 
+void print_tweak_usage() {
+    std::cout <<
+        "Usage: pulp design tweak <file> [--set key=value ...] [options]\n"
+        "\n"
+        "  Read or update the EDITMODE parameter block an imported design\n"
+        "  carries. The block is the artifact's own parameter store:\n"
+        "      /*EDITMODE-BEGIN*/{\"accent\":\"#33aaff\",\"radius\":8}/*EDITMODE-END*/\n"
+        "  With no --set, the current parameters are listed. Each --set updates\n"
+        "  one key in place (or appends it), rewriting only the bytes between the\n"
+        "  markers so the change survives a reload and shows in the diff.\n"
+        "\n"
+        "  <file>              The artifact to read/rewrite (e.g. ui.js).\n"
+        "  --set key=value     Set one parameter. `value` is a JSON number / true\n"
+        "                      / false / null literal (8, true); anything else is\n"
+        "                      stored as a JSON string (#33aaff, Hello). Repeatable.\n"
+        "  --out <path>        Write the rewritten artifact here (default: in place).\n"
+        "  --json              Print the parameters as a JSON object and exit.\n";
+}
+
+// Is `s` exactly a JSON number literal (no leading/trailing junk)? A strict
+// grammar check, so a value like `1],x:[2` is NOT a number and gets quoted as a
+// string rather than smuggling structure into the block.
+bool is_json_number(const std::string& s) {
+    size_t i = 0, n = s.size();
+    if (n == 0) return false;
+    if (s[i] == '-') ++i;
+    if (i >= n) return false;
+    if (s[i] == '0') {
+        ++i;  // a leading zero may not be followed by more digits
+    } else if (std::isdigit(static_cast<unsigned char>(s[i]))) {
+        while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    } else {
+        return false;
+    }
+    if (i < n && s[i] == '.') {  // fraction
+        ++i;
+        if (i >= n || !std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+        while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    }
+    if (i < n && (s[i] == 'e' || s[i] == 'E')) {  // exponent
+        ++i;
+        if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
+        if (i >= n || !std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+        while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    }
+    return i == n;
+}
+
+// Coerce a CLI-supplied value into JSON text. A JSON number / true / false /
+// null literal passes through verbatim; everything else is quoted as a JSON
+// string, so `--set radius=8` stores a number while `--set accent=#33aaff` and
+// `--set label=Hello` store strings. Values are never parsed as arrays/objects,
+// which keeps a crafted value from smuggling extra JSON into the block. Returns
+// nullopt for non-UTF-8 input: choc's JSON writer over-reads on a truncated
+// multibyte sequence (its bounds assert is compiled out in Release).
+std::optional<std::string> cli_value_to_json(const std::string& raw) {
+    if (choc::text::findInvalidUTF8Data(raw.data(), raw.size()) != nullptr) return std::nullopt;
+    if (raw == "true" || raw == "false" || raw == "null") return raw;
+    if (is_json_number(raw)) return raw;
+    return choc::json::toString(choc::value::createString(raw));
+}
+
+int run_tweak(const std::vector<std::string>& rest) {
+    fs::path file, out;
+    bool json_out = false;
+    bool arg_error = false;
+    std::vector<std::pair<std::string, std::string>> sets;  // key -> json value
+    for (size_t i = 0; i < rest.size(); ++i) {
+        const std::string& a = rest[i];
+        auto next = [&](const char* flag) -> std::string {
+            if (i + 1 >= rest.size()) {
+                std::cerr << "pulp design tweak: " << flag << " requires a value\n";
+                arg_error = true;
+                return {};
+            }
+            return rest[++i];
+        };
+        if (a == "--help" || a == "-h") { print_tweak_usage(); return 0; }
+        else if (a == "--json") json_out = true;
+        else if (a == "--out") { out = next("--out"); if (arg_error) return 2; }
+        else if (a == "--set") {
+            std::string kv = next("--set");
+            if (arg_error) return 2;
+            auto eq = kv.find('=');
+            if (eq == std::string::npos || eq == 0) {
+                std::cerr << "pulp design tweak: --set expects key=value, got '" << kv << "'\n";
+                return 2;
+            }
+            std::string key = kv.substr(0, eq);
+            if (choc::text::findInvalidUTF8Data(key.data(), key.size()) != nullptr) {
+                std::cerr << "pulp design tweak: --set key is not valid UTF-8\n";
+                return 2;
+            }
+            auto val = cli_value_to_json(kv.substr(eq + 1));
+            if (!val) {
+                std::cerr << "pulp design tweak: --set value for '" << key
+                          << "' is not valid UTF-8\n";
+                return 2;
+            }
+            sets.emplace_back(std::move(key), *val);
+        } else if (!a.empty() && a[0] == '-') {
+            std::cerr << "pulp design tweak: unknown option '" << a << "'\n";
+            return 2;
+        } else if (file.empty()) {
+            file = a;
+        } else {
+            std::cerr << "pulp design tweak: unexpected extra argument '" << a << "'\n";
+            return 2;
+        }
+    }
+    if (file.empty()) { print_tweak_usage(); return 2; }
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec)) {
+        std::cerr << "Error: cannot read " << file << "\n";
+        return 1;
+    }
+
+    std::string text;
+    {
+        std::ifstream f(file, std::ios::binary);
+        if (!f) {
+            std::cerr << "Error: cannot open " << file << "\n";
+            return 1;
+        }
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        text = ss.str();
+    }
+
+    auto params = pulp::design::read_edit_block(text);
+    if (!params) {
+        std::cerr << "Error: no well-formed EDITMODE block in " << file << "\n";
+        return 1;
+    }
+
+    if (sets.empty()) {
+        if (json_out) {
+            auto payload = pulp::design::edit_block_payload(*params);
+            if (!payload) {
+                std::cerr << "Error: the block holds a value that is not valid JSON\n";
+                return 1;
+            }
+            std::cout << *payload << "\n";
+        } else {
+            std::cout << "Parameters in " << file.filename().string() << ":\n";
+            for (const auto& p : *params)
+                std::cout << "  " << p.key << " = " << p.json_value << "\n";
+        }
+        return 0;
+    }
+
+    // Apply the sets in order, then rewrite once.
+    for (const auto& [key, val] : sets) {
+        bool found = false;
+        for (auto& p : *params) {
+            if (p.key == key) { p.json_value = val; found = true; break; }
+        }
+        if (!found) params->push_back({key, val});
+    }
+    auto rewritten = pulp::design::rewrite_edit_block(text, *params);
+    if (!rewritten) {
+        std::cerr << "Error: could not rewrite the EDITMODE block in " << file << "\n";
+        return 1;
+    }
+    if (!rewritten->outside_bytes_intact) {
+        // A rewrite must never disturb bytes outside the block; refuse to write.
+        std::cerr << "Error: refusing to write — bytes outside the block changed\n";
+        return 1;
+    }
+    fs::path dest = out.empty() ? file : out;
+    // Write atomically: a full write to a sibling temp file, verified, then a
+    // rename over the destination — so a crash or a full disk mid-write leaves
+    // the original artifact intact rather than truncated.
+    fs::path tmp = dest;
+    tmp += ".pulp-tweak.tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) {
+            std::cerr << "Error: cannot write " << dest << "\n";
+            return 1;
+        }
+        f << rewritten->text;
+        f.flush();
+        if (!f.good()) {
+            std::cerr << "Error: failed writing " << dest << "\n";
+            f.close();
+            std::error_code rm;
+            fs::remove(tmp, rm);
+            return 1;
+        }
+    }
+    std::error_code rn;
+    fs::rename(tmp, dest, rn);
+    if (rn) {
+        std::cerr << "Error: cannot replace " << dest << ": " << rn.message() << "\n";
+        std::error_code rm;
+        fs::remove(tmp, rm);
+        return 1;
+    }
+    std::cout << "Updated " << sets.size() << " parameter(s) -> " << dest.string() << "\n";
+    return 0;
+}
+
 } // namespace
 
 int cmd_design(const std::vector<std::string>& args) {
@@ -982,6 +1187,9 @@ int cmd_design(const std::vector<std::string>& args) {
         }
         if (args[0] == "gallery") {
             return run_gallery(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "tweak") {
+            return run_tweak(std::vector<std::string>(args.begin() + 1, args.end()));
         }
         if (args[0] == "handoff") {
             return run_handoff(std::vector<std::string>(args.begin() + 1, args.end()));

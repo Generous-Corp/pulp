@@ -551,6 +551,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_variants.cpp
         src/design_gallery.cpp
         src/design_handoff.cpp
+        src/design_tweaks.cpp
         src/lock_to_source.cpp
         src/jsx_lock.cpp
         src/design_import_shortcuts.cpp

@@ -903,6 +903,18 @@ commands:
           - name: --json
             kind: flag
             description: Print the contract JSON instead of a human summary.
+      - name: tweak
+        summary: Read or update the EDITMODE parameter block an imported design carries (/*EDITMODE-BEGIN*/{...}/*EDITMODE-END*/). With no --set, lists the parameters; each --set rewrites only the bytes between the markers so an edit survives reload and shows in the diff.
+        args:
+          - name: --set
+            kind: option
+            description: Set one parameter as key=value (repeatable). value is a JSON number/true/false/null literal; anything else is stored as a JSON string.
+          - name: --out
+            kind: option
+            description: Write the rewritten artifact to this path (default is rewriting the file in place).
+          - name: --json
+            kind: flag
+            description: Print the parameters as a JSON object and exit.
     docs: reference/cli.md#design
 
   - name: design-debug
