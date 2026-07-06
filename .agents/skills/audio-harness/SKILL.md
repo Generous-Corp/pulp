@@ -510,7 +510,19 @@ harness or `ctest`.
   `spec.param` — the generalized threading that replaced T3.2's single `flux_hop_scale` param. Known
   advisory imperfection: the log-frequency LTAS compensation carries bin-interpolation error on
   discrete partials, so a clean shift can read `not_corroborated` (advisory only, never the verdict).
-  `ratio:auto` is a later Tier 3 slice; a non-constant warp / DTW stays on the engine path, not compare.
+  a non-constant warp / DTW stays on the engine path, not compare.
+
+  **`--align ratio:auto`** (Tier 3 / T3.4) — ESTIMATE a uniform stretch ratio, double-gated (§6.2):
+  two independent estimators — the duration ratio and the onset-time slope (`dsp.theil_sen_slope` over
+  `map_onsets` pairs, ≥ 6) — must agree within 2%, else REFUSE (`not_aligned`, "ratio estimators
+  disagree" / "needs ≥ 6 matched onsets"). On agreement `_align_ratio_auto` delegates to
+  `_align_stretch` with the onset-slope estimate (interior evidence) and tags the record
+  `estimated=True` + both estimator values. The estimated ratio reaches the warp-aware axes via
+  `alignment.effective_spec(spec, record)`, which resolves a `ratio:auto` spec to `stretch:<estimated>`
+  so graininess hop-scales off the ACCEPTED transform, not the "auto" request string. Reliable on
+  onset-bearing uniform EXPANSIONS; compressions (map_onsets drift) + non-uniform + sustained refuse
+  (conservative — declare stretch:R). This is the last declared-warp class; a non-constant warp / DTW
+  stays on the engine path, not compare.
 
   **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
   mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is

@@ -230,6 +230,21 @@ the dulling. **Only `tonal-balance` is valid under `--align pitch`** — the oth
 (a shift genuinely moves the HF band, the harmonic-to-noise lag, and the attack high band, so they
 would false-flag a clean shift), and each declines with `not_applicable` under a pitch alignment.
 
+#### Estimate the stretch ratio (`--align ratio:auto`)
+
+When you don't know the stretch ratio, `--align ratio:auto` estimates it — but only when it can
+verify the estimate two independent ways: the duration ratio (candidate vs reference length) and the
+slope of the onset times must agree. If they do, it applies the estimated ratio through the same
+`stretch:R` path; if they disagree, or the material has too few onsets to check, it **refuses** (a
+one-way guess is not trustworthy — declare `stretch:R` yourself in that case).
+
+```bash
+pulp audio compare source.wav longer_take.wav --reference-role golden --align ratio:auto
+```
+
+It reliably estimates onset-bearing uniform expansions; compressions and non-uniform or ambiguous
+material refuse rather than guess.
+
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build
 --target stretchcli`); the lab finds it via `PULP_STRETCHCLI` or by walking up from your

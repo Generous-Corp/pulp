@@ -309,9 +309,10 @@ def main(argv: list[str] | None = None) -> int:
                            "time base), or stretch:R (a declared pitch-preserving time-stretch — measure "
                            "warp-invariant axes directly, warp-normalize graininess + corroboration), or "
                            "pitch:S (a declared duration-preserving pitch shift in semitones — "
-                           "compensate tonal-balance for the expected centroid move; refuses if the "
-                           "audio doesn't support the declaration). Validated by alignment.parse — "
-                           "an unknown mode errors")
+                           "compensate tonal-balance for the expected centroid move), or ratio:auto "
+                           "(estimate a uniform stretch ratio, double-gated; refuses if the audio "
+                           "doesn't support the declaration). Validated by alignment.parse — an "
+                           "unknown mode errors")
     cmp_.add_argument("--threshold", type=float, default=None,
                       help="materiality threshold override (defaults to the axis's own default)")
     cmp_.add_argument("--json", default="", help="write the full report JSON to this path")
