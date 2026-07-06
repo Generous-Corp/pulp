@@ -215,7 +215,7 @@ inline SwapPackVerifyResult verify_swap_pack_integrity(const std::filesystem::pa
     return {SwapPackVerify::Ok, ""};
 }
 
-/// Deterministic canonical payload the pack signature covers (item 3.1b). Binds
+/// Deterministic canonical payload the pack signature covers. Binds
 /// pack identity, target plugin, format version, and every file's path + hash +
 /// kind — so a tampered file hash OR a re-pointed/re-kinded file breaks the
 /// signature. Independent of JSON formatting (re-serialization can't break it).
@@ -262,7 +262,7 @@ inline std::vector<std::uint8_t> swap_pack_signed_message(const SwapPackManifest
     return out;
 }
 
-/// Verify the pack's Ed25519 signature (item 3.1b). Fails closed on: a signer key
+/// Verify the pack's Ed25519 signature. Fails closed on: a signer key
 /// that is not @p trusted_public_key (UntrustedSigner), or a malformed/inauthentic
 /// signature (BadSignature). Does NOT touch files — pair with
 /// verify_swap_pack_integrity for the hash layer (or use verify_swap_pack).

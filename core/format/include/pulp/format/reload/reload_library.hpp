@@ -2,7 +2,7 @@
 
 /// @file reload_library.hpp
 /// Dynamic-library handle for the DSP hot-reload path, with an explicit and
-/// deliberately conservative leak policy (v2 plan §4.4 / Phase 0).
+/// deliberately conservative leak policy.
 ///
 /// THE LEAK POLICY — why the default is to NOT unload:
 ///   Once a freshly-built logic library has been `dlopen`ed and a `Processor`
@@ -48,7 +48,7 @@ namespace pulp::format::reload {
 
 #if !defined(_WIN32)
 /// Promote the HOST image's symbols to global loader scope, once per process
-/// (the P0.1 fix for in-DAW UI-from-logic reload, item 1.9).
+///.
 ///
 /// A DAW loads a plugin bundle (.vst3/.component/.clap) with `RTLD_LOCAL`, so
 /// the bundle's `pulp::*` SDK symbols are NOT in the global scope that thin
@@ -66,7 +66,7 @@ namespace pulp::format::reload {
 /// the promoted symbols). No-op on Windows (the static model is used there).
 ///
 /// DEV-ONLY: the thin-logic dlopen path is compiled out of shipping builds
-/// (D5 / item 1.12). Multi-instance caveat (dev-time only): two DIFFERENT Pulp
+///. Multi-instance caveat (dev-time only): two DIFFERENT Pulp
 /// plugins reloading thin logic in the SAME host would share one global set of
 /// `pulp::*` symbols; that is a niche dev scenario and the shared symbols are the
 /// same SDK build, so stateless SDK calls are unaffected (only process-global
@@ -175,7 +175,7 @@ private:
 #else
         // Ensure the host bundle's pulp::* SDK symbols are globally visible
         // BEFORE loading (possibly thin) logic that resolves them at dlopen via
-        // flat-namespace lookup — the in-DAW RTLD_LOCAL fix (item 1.9). Once per
+        // flat-namespace lookup — the in-DAW RTLD_LOCAL fix. Once per
         // process; a no-op after the first load and for the static-link model.
         promote_host_symbols_once();
         handle_ = ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file reloadable_shell.hpp
-/// A ready-made hot-reloadable plugin shell (v2 plan §4.4 / Phase 1b — DAW
+/// A ready-made hot-reloadable plugin shell (DAW
 /// integration). This is the piece that makes DSP hot-reload work inside a real
 /// host (REAPER, Logic, a DAW): a `Processor` the format adapters (VST3 / AU /
 /// CLAP / Standalone) wrap exactly like any other, except its DSP lives in a
@@ -71,7 +71,7 @@
 #include <unistd.h>    // getpid
 #endif
 
-// Ship-safety gate (live-swap item 1.12 / D5). The dev filesystem WATCHER — the
+// Ship-safety gate. The dev filesystem WATCHER — the
 // background thread that polls a source path and dlopen()s whatever compiled
 // artifact appears — is a development affordance, not something a shipped plugin
 // should carry. Define PULP_RELOAD_DEV_WATCHER=0 in a release build and the
@@ -231,7 +231,7 @@ public:
     std::uint64_t reload_attempts() const { return reload_attempts_.load(std::memory_order_relaxed); }
     std::uint64_t successful_reloads() const { return successful_reloads_.load(std::memory_order_relaxed); }
     ReloadOutcome::Status last_status() const { return last_status_.load(std::memory_order_relaxed); }
-    /// Total wall-clock of the last successful DSP reload, ms (item 1.2 diagnostic).
+    /// Total wall-clock of the last successful DSP reload, ms.
     double last_reload_ms() const { return last_reload_ms_.load(std::memory_order_relaxed); }
     std::uint64_t contention_blocks() const { return slot_.contention_blocks(); }
     bool has_active_dsp() const { return slot_.has_active(); }
@@ -404,7 +404,7 @@ private:
         if (outcome.ok()) {
             successful_reloads_.fetch_add(1, std::memory_order_relaxed);
             last_reload_ms_.store(outcome.metrics.total_ms, std::memory_order_relaxed);
-            // `swapped in NNN ms` dev diagnostic + per-phase breakdown (item 1.2).
+            // `swapped in NNN ms` dev diagnostic + per-phase breakdown.
             const auto& m = outcome.metrics;
             runtime::log_info(
                 "[reload-shell] swapped DSP in {:.2f} ms "
@@ -443,7 +443,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> reload_attempts_{0};
     std::atomic<std::uint64_t> successful_reloads_{0};
-    std::atomic<double> last_reload_ms_{0.0};     // wall-clock of the last swap (item 1.2)
+    std::atomic<double> last_reload_ms_{0.0};     // wall-clock of the last swap
     std::atomic<ReloadOutcome::Status> last_status_{ReloadOutcome::Status::RejectedLoadFailed};
     std::atomic<std::uint64_t> reload_generation_{0};  // editor rebuild counter (1.9; UI-thread read)
     std::function<void()> on_reloaded_;           // host editor-rebuild hook (control thread)

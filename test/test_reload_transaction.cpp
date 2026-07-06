@@ -1,4 +1,4 @@
-// Phase 1 — the standalone DSP hot-reload transaction, end to end.
+// The standalone DSP hot-reload transaction, end to end.
 //
 // Drives reload_processor_from_library() against two real dlopen'd logic-library
 // fixtures (paths injected as RELOAD_LOGIC_COMPATIBLE / RELOAD_LOGIC_INCOMPATIBLE)
@@ -235,7 +235,7 @@ TEST_CASE("ReloadSession owns the session state across multiple reloads",
     REQUIRE(render_one(slot) == 1.0f);             // still the compatible processor
 }
 
-TEST_CASE("hot-reload records DSP-axis phase metrics (item 1.2)",
+TEST_CASE("hot-reload records DSP-axis phase metrics",
           "[reload][transaction][metrics]") {
     state::StateStore live;
     auto initial = std::make_unique<InitialGain>();
@@ -281,7 +281,7 @@ TEST_CASE("hot-reload records DSP-axis phase metrics (item 1.2)",
 }
 
 #ifdef RELOAD_LOGIC_NAN
-// item 1.10 behavioral probe: a candidate that passes every static gate but
+// Behavioral probe: a candidate that passes every static gate but
 // emits NaN at runtime must be rejected PRE-commit — the live DSP stays.
 TEST_CASE("hot-reload rejects a candidate that fails the behavioral probe (NaN)",
           "[reload][transaction][probe]") {
@@ -593,7 +593,7 @@ TEST_CASE("verify-before-load: a revocation list that does not name this pack le
 #endif  // RELOAD_LOGIC_CTOR_MARKER
 
 #if defined(RELOAD_LOGIC_COMPATIBLE) && defined(RELOAD_LOGIC_INCOMPATIBLE)
-// item 1.8b/2.5b: the real DSP SwapUnit adapter drives a reload through the
+// The real DSP SwapUnit adapter drives a reload through the
 // unified transaction — a compatible pack swaps, an incompatible one fails the
 // transaction and leaves the live DSP untouched (atomic; DSP stage is terminal).
 TEST_CASE("DspReloadSwapUnit swaps DSP through apply_live_swap",

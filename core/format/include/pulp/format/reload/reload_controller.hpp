@@ -1,8 +1,8 @@
 #pragma once
 
 /// @file reload_controller.hpp
-/// Watch a logic library on disk and hot-reload it when it changes (v2 plan
-/// §4.4 / Phase 1, the standalone dev loop).
+/// Watch a logic library on disk and hot-reload it when it changes (the
+/// standalone dev loop).
 ///
 /// The shell drives poll() on a control-thread timer (the standalone app ticks
 /// it from its UI/event loop). When the watched logic library's modification
@@ -115,7 +115,7 @@ public:
           stage_dir_(stage_dir.empty() ? path_.parent_path() : std::move(stage_dir)) {
         // Startup housekeeping: clear dead-process staged litter so a long dev
         // history doesn't leave hundreds of <stem>.initial.*/<stem>.reload.*
-        // copies behind (bounds the item 1.11 accumulation across restarts).
+        // copies behind (bounds staged-copy accumulation across restarts).
         reap_stale_staged(stage_dir_, path_.stem().string());
     }
 
@@ -134,7 +134,7 @@ public:
         if (*mtime == last_mtime_) return std::nullopt;  // unchanged mtime
         last_mtime_ = *mtime;                     // act once per distinct mtime
 
-        // Content-hash gate (item 1.10): an mtime bump does not prove the BYTES
+        // Content-hash gate: an mtime bump does not prove the BYTES
         // changed. Distinguish the three non-reload cases from a real edit:
         //   - empty / unreadable right now (a rebuild mid-write) → skip; the next
         //     completed write (new mtime) is retried.
@@ -238,7 +238,7 @@ private:
         // module's file is locked, so remove() fails and is ignored. Only reaps
         // our own files — never another instance's, and never the just-staged
         // one. (Cross-restart orphans from dead PIDs are a separate startup-reap
-        // follow-up under item 1.11's staged-file bookkeeping.)
+        // follow-up under the staged-file bookkeeping.)
         if (!last_staged_.empty() && last_staged_ != staged) {
             std::error_code rm_ec;
             std::filesystem::remove(last_staged_, rm_ec);
@@ -252,7 +252,7 @@ private:
     std::filesystem::path stage_dir_;
     std::filesystem::file_time_type last_mtime_{};
     std::filesystem::path last_staged_;  // this instance's prior staged copy (reaped on next stage)
-    std::uint64_t last_hash_ = 0;        // content hash last acted on (item 1.10)
+    std::uint64_t last_hash_ = 0;        // content hash last acted on
     bool hash_valid_ = false;            // last_hash_ has been established
     bool baseline_set_ = false;
     std::uint64_t attempts_ = 0;

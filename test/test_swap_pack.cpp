@@ -31,7 +31,7 @@ fs::path make_root(const std::string& name) {
 }
 }  // namespace
 
-TEST_CASE("swap-pack manifest parses required fields + kinds", "[reload][swap-pack][3.1]") {
+TEST_CASE("swap-pack manifest parses required fields + kinds", "[reload][swap-pack]") {
     std::string err;
     auto m = parse_swap_pack_manifest(R"({
         "id": "pack.reverb.hall",
@@ -50,7 +50,7 @@ TEST_CASE("swap-pack manifest parses required fields + kinds", "[reload][swap-pa
     REQUIRE(m->files[1].kind == SwapPackKind::DspGraph);
 }
 
-TEST_CASE("swap-pack manifest rejects malformed JSON / missing fields", "[reload][swap-pack][3.1]") {
+TEST_CASE("swap-pack manifest rejects malformed JSON / missing fields", "[reload][swap-pack]") {
     std::string err;
     REQUIRE_FALSE(parse_swap_pack_manifest("not json", err).has_value());
     REQUIRE_FALSE(err.empty());
@@ -60,7 +60,7 @@ TEST_CASE("swap-pack manifest rejects malformed JSON / missing fields", "[reload
         R"({"id":"x","plugin_id":"y","files":[{"path":"a"}]})", err).has_value());    // file has no sha256
 }
 
-TEST_CASE("swap-pack integrity passes when every file matches its hash", "[reload][swap-pack][3.1]") {
+TEST_CASE("swap-pack integrity passes when every file matches its hash", "[reload][swap-pack]") {
     auto root = make_root("ok");
     write_file(root / "ui.js", "export default {}");
     write_file(root / "sub" / "graph.pulpgraph", "GRAPHBYTES");
@@ -76,7 +76,7 @@ TEST_CASE("swap-pack integrity passes when every file matches its hash", "[reloa
     REQUIRE(r.ok());
 }
 
-TEST_CASE("swap-pack integrity fails closed on a tampered file", "[reload][swap-pack][3.1]") {
+TEST_CASE("swap-pack integrity fails closed on a tampered file", "[reload][swap-pack]") {
     auto root = make_root("tamper");
     write_file(root / "ui.js", "original");
     SwapPackManifest m;
@@ -91,7 +91,7 @@ TEST_CASE("swap-pack integrity fails closed on a tampered file", "[reload][swap-
     REQUIRE(r.detail == "ui.js");
 }
 
-TEST_CASE("swap-pack integrity fails closed on a missing file", "[reload][swap-pack][3.1]") {
+TEST_CASE("swap-pack integrity fails closed on a missing file", "[reload][swap-pack]") {
     auto root = make_root("missing");
     SwapPackManifest m;
     m.id = "p"; m.plugin_id = "q";
@@ -101,7 +101,7 @@ TEST_CASE("swap-pack integrity fails closed on a missing file", "[reload][swap-p
     REQUIRE(r.detail == "gone.js");
 }
 
-// ── Ed25519 pack signature (item 3.1b) ────────────────────────────────────────
+// ── Ed25519 pack signature ────────────────────────────────────────
 namespace {
 // Sign a manifest with a keypair: set signer key + detached signature over the
 // canonical signed message.
@@ -116,7 +116,7 @@ void sign_manifest(SwapPackManifest& m, const pulp::runtime::Ed25519KeyPair& kp)
 }  // namespace
 
 TEST_CASE("swap-pack signature: a pack signed by the trusted key verifies end to end",
-          "[reload][swap-pack][3.1]") {
+          "[reload][swap-pack]") {
     auto kp = pulp::runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
     auto root = make_root("sig-ok");
@@ -214,7 +214,7 @@ TEST_CASE("swap-pack signature: policy fields are bound (tampering any of them f
     REQUIRE(rejects([](SwapPackManifest& t) { t.declared_capabilities.push_back("exec"); }));
 }
 
-TEST_CASE("swap-pack signature: an untrusted signer fails closed", "[reload][swap-pack][3.1]") {
+TEST_CASE("swap-pack signature: an untrusted signer fails closed", "[reload][swap-pack]") {
     auto kp = pulp::runtime::ed25519_keypair_generate();
     auto other = pulp::runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value()); REQUIRE(other.has_value());
@@ -226,7 +226,7 @@ TEST_CASE("swap-pack signature: an untrusted signer fails closed", "[reload][swa
     REQUIRE(r.status == SwapPackVerify::UntrustedSigner);
 }
 
-TEST_CASE("swap-pack signature: a flipped signature byte fails closed", "[reload][swap-pack][3.1]") {
+TEST_CASE("swap-pack signature: a flipped signature byte fails closed", "[reload][swap-pack]") {
     auto kp = pulp::runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
     SwapPackManifest m; m.id = "p"; m.plugin_id = "q";
@@ -238,7 +238,7 @@ TEST_CASE("swap-pack signature: a flipped signature byte fails closed", "[reload
 }
 
 TEST_CASE("swap-pack signature: tampering a signed file hash breaks the signature",
-          "[reload][swap-pack][3.1]") {
+          "[reload][swap-pack]") {
     auto kp = pulp::runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
     SwapPackManifest m; m.id = "p"; m.plugin_id = "q";
@@ -250,7 +250,7 @@ TEST_CASE("swap-pack signature: tampering a signed file hash breaks the signatur
 }
 
 TEST_CASE("swap-pack verify: signature passes but a tampered FILE still fails integrity",
-          "[reload][swap-pack][3.1]") {
+          "[reload][swap-pack]") {
     auto kp = pulp::runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
     auto root = make_root("sig-file-tamper");
@@ -265,7 +265,7 @@ TEST_CASE("swap-pack verify: signature passes but a tampered FILE still fails in
 }
 
 TEST_CASE("swap-pack signed message is unambiguous: newline-in-path can't collide (3.1b hardening)",
-          "[reload][swap-pack][3.1]") {
+          "[reload][swap-pack]") {
     // The length-prefixed encoding must NOT let a single file whose path embeds
     // the delimiter structure collide with a two-file manifest (the classic
     // newline-join forgery). Distinct manifests → distinct signed messages.

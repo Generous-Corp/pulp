@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file reload_transaction.hpp
-/// The verify-before-commit reload transaction (v2 plan §4.4 / Phase 1) — ties
+/// The verify-before-commit reload transaction — ties
 /// the Phase-0 primitives into one operation: load a candidate logic library,
 /// gate it on reload-ABI version, build-fingerprint, and parameter-contract
 /// compatibility, and only then construct + swap it into the live
@@ -79,7 +79,7 @@ struct ReloadOutcome {
     Status status = Status::RejectedLoadFailed;
     std::string detail;               ///< Short human summary (one line).
     std::vector<std::string> issues;  ///< Structured per-field diffs (fingerprint/contract).
-    ReloadMetrics metrics;            ///< DSP-axis phase timings (item 1.2).
+    ReloadMetrics metrics;            ///< DSP-axis phase timings.
 
     bool ok() const { return status == Status::Swapped; }
     explicit operator bool() const { return ok(); }
@@ -279,7 +279,7 @@ inline ReloadOutcome reload_processor_from_library(
     std::vector<ReloadLibrary>& retained_images,
     const SwapPackTrust* trust = nullptr) {
 
-    // Phase timing (item 1.2). steady_clock; this whole function is control-thread
+    // Phase timing. steady_clock; this whole function is control-thread
     // (off the audio path), so timing here is never an RT concern.
     using clock = std::chrono::steady_clock;
     const auto t0 = clock::now();
@@ -345,7 +345,7 @@ inline ReloadOutcome reload_processor_from_library(
         candidate->prepare(prepare_ctx);
         const auto t_prepare = clock::now();
 
-        // Behavioral entry-point probe (item 1.10): a candidate can pass every
+        // Behavioral entry-point probe: a candidate can pass every
         // STATIC gate (load / ABI / fingerprint / contract) yet still misbehave
         // at runtime — most dangerously by emitting NaN/Inf, which a swap would
         // push straight to the audio thread and silently corrupt the signal.

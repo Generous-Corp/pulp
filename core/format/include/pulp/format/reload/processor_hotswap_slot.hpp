@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file processor_hotswap_slot.hpp
-/// RT-safe hot-swap slot for a `Processor` (v2 plan §4.4; adversarial P0-A).
+/// RT-safe hot-swap slot for a `Processor`.
 ///
 /// The lifetime invariant: a `Processor` instance is destroyed only on the
 /// control thread, and only after that thread has *proven* no audio callback is
@@ -101,7 +101,7 @@ public:
         std::unique_ptr<Processor> superseded;  // a collapsed prior fade-out
         {
             std::unique_lock<std::shared_mutex> lock(mutex_);
-            // DSP-state carry (item 1.6): holding the writer lock proves no audio
+            // DSP-state carry: holding the writer lock proves no audio
             // reader is inside the old processor, so it is safe to serialize its
             // DSP state (delay tails / filter history / phase) and restore it into
             // the incoming one — off the audio thread. Opt-in + cold-start-safe:
@@ -131,7 +131,7 @@ public:
                 // it out to be freed AFTER unlock (not under the lock — a slow
                 // ~Processor() would lengthen the audio thread's passthrough
                 // contention window, as the instant path already avoids).
-                // MID-FADE RE-SWAP CONTRACT (item 1.7b): with a SINGLE fade slot,
+                // MID-FADE RE-SWAP CONTRACT: with a SINGLE fade slot,
                 // a re-swap arriving WITHIN the ~12ms window can only keep one
                 // fade-out — the just-displaced processor — and must drop the
                 // older fade-out's residual contribution, so the output can STEP
@@ -297,7 +297,7 @@ private:
         fade_midi_out_.clear();
         fading_out_->process(sv, in, fade_midi_in_, fade_midi_out_, ctx);
 
-        // Blend gains come from the shared TransitionMixer (item 2.1): old→new
+        // Blend gains come from the shared TransitionMixer: old→new
         // over the mixer's curve, click-free at both ends. Position is shared
         // across channels (advanced once, after the loop).
         const std::size_t base = fade_mixer_.position();
@@ -338,7 +338,7 @@ private:
     // ── Crossfade state ──────────────────────────────────────────────────────
     std::unique_ptr<Processor> fading_out_;       // retained old DSP during a fade
     std::size_t fade_samples_ = 0;                // configured fade length (0 = instant)
-    signal::TransitionMixer fade_mixer_;          // active fade: length + position + curve (item 2.1)
+    signal::TransitionMixer fade_mixer_;          // active fade: length + position + curve
     std::atomic<bool> fade_done_{true};           // audio thread sets; reclaim() reads
     std::vector<float> scratch_storage_;          // [channels * frames], allocated off-RT
     std::vector<float*> scratch_ptrs_;

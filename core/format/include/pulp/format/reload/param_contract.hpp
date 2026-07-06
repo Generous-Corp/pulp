@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file param_contract.hpp
-/// Parameter-contract equivalence check for DSP hot reload (v2 plan §4.5 / Phase 0).
+/// Parameter-contract equivalence check for DSP hot reload.
 ///
 /// A reload builds the candidate logic's parameters into a *scratch* StateStore,
 /// separate from the live one. Before swapping, the candidate's parameter
@@ -142,7 +142,7 @@ struct ParamSupersetResult {
 /// && added_ids.empty()`. When `is_superset` is true with non-empty `added_ids`,
 /// the reload can hot-swap AND the host must then rescan the parameter list to
 /// pick up the additions (the live-store registration + per-adapter host-notify
-/// is item 2.4b — this predicate is pure and mutates nothing). Fails closed on
+/// the check is pure and mutates nothing). Fails closed on
 /// duplicate IDs, exactly like the strict gate.
 inline ParamSupersetResult param_contract_superset(const state::StateStore& live,
                                                     const state::StateStore& candidate) {
