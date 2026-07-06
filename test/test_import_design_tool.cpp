@@ -2513,6 +2513,23 @@ TEST_CASE("pulp-import-design --from fig decodes a local .fig offline",
         REQUIRE(r.exit_code == 2);
     }
 
+    SECTION("--page restricts a name lookup to one page") {
+        TempDir tmp("fig-page");
+        const auto out = tmp.path / "ui.js";
+        // "Plugin UI" lives on "Page One" — a matching page resolves it.
+        auto ok = run_import_design(
+            {"--from", "fig", "--file", fixture, "--frame", "Plugin UI",
+             "--page", "Page One", "--output", out.string()});
+        REQUIRE(ok.exit_code == 0);
+        REQUIRE(fs::exists(out));
+        // The same frame name on a page that does not contain it is not found —
+        // proving --page actually scopes the lookup rather than being ignored.
+        auto miss = run_import_design(
+            {"--from", "fig", "--file", fixture, "--frame", "Plugin UI",
+             "--page", "Empty Page"});
+        REQUIRE(miss.exit_code == 2);
+    }
+
     SECTION("no frame without --outline is a usage error") {
         auto r = run_import_design({"--from", "fig", "--file", fixture});
         REQUIRE(r.exit_code == 1);

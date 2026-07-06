@@ -18,7 +18,7 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { unpackFig } from './fig/container.mjs';
 import { ByteReader, readSchema, makeDecoder } from './fig/kiwi.mjs';
-import { buildScene, outline, findFrame, materializeFrame, countFramesByName } from './fig/scene.mjs';
+import { buildScene, outline, findFrame, materializeFrame, framesByName, nodesByName } from './fig/scene.mjs';
 
 const PARSER_VERSION = '0.1.0-fig';
 const COMPAT_SCHEMA_VERSION = '1';
@@ -78,15 +78,50 @@ function cmdEmit(path, opts) {
   if (!opts.frame) fail('emit requires --frame <guid|name>', 1);
   if (!opts.out) fail('emit requires --out <dir>', 1);
   const { scene, container } = loadScene(path);
-  const frame = findFrame(scene, opts.frame);
-  if (!frame) fail(`frame not found: ${opts.frame}`, 2);
-  // A name (not a guid) can match several frames; warn so an ambiguous pick is
-  // visible rather than silently resolving to the first match.
-  if (!opts.frame.includes(':') && countFramesByName(scene, opts.frame) > 1) {
-    process.stderr.write(
-      `fig_decode: warning: multiple frames named '${opts.frame}'; using the first. ` +
-      `Pass its guid (see --outline) to disambiguate.\n`,
-    );
+  // A name (not a guid) may match several frames. Rather than silently resolving
+  // to the first — which, in a file with hundreds of frames, quietly imports the
+  // wrong one — fail with the candidates so the caller picks one by guid or by
+  // --page. Decide guid-ness by membership, exactly as findFrame does: a frame
+  // name can itself contain a colon ("16:9"), so a substring `:` test would
+  // wrongly treat such a name as a guid and skip this gate.
+  const isGuid = scene.byGuid.has(opts.frame);
+  if (!isGuid) {
+    const matches = framesByName(scene, opts.frame, opts.page);
+    if (matches.length > 1) {
+      const list = matches.map((m) => `  ${m.guid}  (page: ${m.page})`).join('\n');
+      const scope = opts.page ? ` on page '${opts.page}'` : '';
+      // A guid always disambiguates; --page only helps when the matches span
+      // more than one page, so only suggest it then.
+      const spanPages = new Set(matches.map((m) => m.page)).size > 1;
+      const hint = spanPages
+        ? 'Re-run with its guid (--frame <guid>), or narrow with --page <name>.'
+        : 'Re-run with its guid (--frame <guid>).';
+      fail(
+        `frame name '${opts.frame}'${scope} is ambiguous — ${matches.length} frames match:\n` +
+        `${list}\n${hint}`,
+        2,
+      );
+    }
+    // No top-level frame matches: findFrame falls back to any nested node with
+    // this name. Guard that fallback too so a name shared by several nested nodes
+    // is not silently resolved to the first. (A page restriction only scopes
+    // top-level frames, so the fallback is not taken when --page is set.)
+    if (matches.length === 0 && !opts.page) {
+      const nested = nodesByName(scene, opts.frame);
+      if (nested.length > 1) {
+        const list = nested.map((m) => `  ${m.guid}`).join('\n');
+        fail(
+          `name '${opts.frame}' is ambiguous — ${nested.length} nodes match:\n` +
+          `${list}\nRe-run with its guid (--frame <guid>).`,
+          2,
+        );
+      }
+    }
+  }
+  const frame = findFrame(scene, opts.frame, opts.page);
+  if (!frame) {
+    const scope = opts.page ? ` on page '${opts.page}'` : '';
+    fail(`frame not found: ${opts.frame}${scope}`, 2);
   }
 
   const ctx = {
