@@ -114,6 +114,26 @@ setParam(name, value)   // Write normalized parameter value by name
 
 Parameters are defined in C++ (`define_parameters`) and shared with the audio thread via lock-free atomics. `setParam` triggers DAW host notification automatically.
 
+### Declarative bindings (no per-frame JS)
+
+```js
+bindWidgetToParam(widgetId, paramName, transform?)  // knob/fader/slider/toggle/progress tracks a param
+bindMeter(widgetId, paramName, transform?)          // Meter fill tracks a param (drives rms + peak)
+unbindWidget(widgetId)                              // remove the binding(s) for a widget → count removed
+```
+
+Register a binding **once**; C++ then pushes the store value onto the widget every frame off the host FrameClock with **zero per-frame JS crossing** — the native replacement for a `requestAnimationFrame` metering loop. `bindWidgetToParam`/`bindMeter` return `true` when the named param exists and the binding was set (a widget has a single source, so re-binding replaces).
+
+The optional `transform` object remaps the source before it reaches the widget, applied in order — dB→linear map → `scale` → `offset` → clamp:
+
+| Field | Meaning |
+|-------|---------|
+| `db` / `dbMin` / `dbMax` | read the raw (non-normalized) param and map `[dbMin,dbMax]` dB → `[0,1]` |
+| `scale` / `offset` | `out = out * scale + offset` |
+| `min` / `max` / `clamp` | clamp the result to `[min,max]` (auto-enabled when `min`/`max` is present) |
+
+**Precedence:** a binding owns the widget's value. A bound value widget (knob/fader/slider/toggle/progress) is re-asserted from the store **every frame**, so a stray `setValue` on it is corrected on the next frame; a bound `Meter` updates whenever its source changes. Either way the binding yields **while the user is dragging that widget** — the gesture wins, and the binding resumes on the first frame after the drag ends.
+
 ## Flexbox Layout
 
 ```js

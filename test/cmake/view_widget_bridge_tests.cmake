@@ -159,6 +159,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-no-gpu-gates
 # Widget bridge — runtime-import handlers.
 pulp_add_test_suite(pulp-test-widget-bridge-runtime-import LIBRARIES pulp::view)
 
+# Widget bridge — declarative native→widget param/meter bindings
+# (bindWidgetToParam / bindMeter / unbindWidget + gesture precedence).
+pulp_add_test_suite(pulp-test-widget-bridge-param-binding LIBRARIES pulp::view pulp::state)
+
 # Widget bridge — Canvas2D surface. Covers canvasSetTransform /
 # canvasClip / canvasGlobalCompositeOperation, canvasMeasureText /
 # canvasSetLineDash / canvasDrawImage, canvasGetImageData /

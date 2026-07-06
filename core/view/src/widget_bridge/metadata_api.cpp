@@ -38,6 +38,9 @@ void WidgetBridge::register_metadata_removal_api() {
             if (parent) {
                 auto removed = parent->remove_child(w);
                 erase_widget_subtree(widgets_, removed.get());
+                // Drop param/meter bindings for any id in the removed subtree so
+                // a later widget reusing an id is not silently re-bound.
+                prune_dangling_bindings();
             }
         }
         return choc::value::Value();

@@ -205,6 +205,12 @@ public:
     /// Adjust the widget's value by a scroll-wheel delta (`delta_y` positive =
     /// scrolled down). Only called when wants_wheel_value() is true.
     virtual void on_wheel(float delta_y) { (void)delta_y; }
+    /// True while the user is actively manipulating this widget's value with a
+    /// pointer drag (knob turn, fader/slider drag, XY-pad move). Value-carrying
+    /// widgets that track a drag gesture override this. A declarative
+    /// native→widget binding (WidgetBridge::bindWidgetToParam) yields to an
+    /// active gesture so a live param push never fights the user mid-drag.
+    virtual bool is_gesture_active() const { return false; }
     /// Key event with modifiers and up/down state.
     /// Return true if handled (prevents propagation to parent).
     virtual bool on_key_event(const KeyEvent& event) { (void)event; return false; }

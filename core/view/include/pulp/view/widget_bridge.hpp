@@ -20,6 +20,7 @@
 namespace pulp::view { struct ClaudeBundle; }
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -175,6 +176,29 @@ public:
     // the host frame loop.
     void service_frame_callbacks();
 
+    // ── Declarative native→widget bindings (params / meters) ──────────────
+    //
+    // A binding is registered ONCE from JS via `bindWidgetToParam(widgetId,
+    // paramName, transform?)` or `bindMeter(widgetId, paramName, transform?)`.
+    // Thereafter the widget's value is pushed from the atomic param store to
+    // the widget every frame in C++ — off the host FrameClock, with ZERO
+    // per-frame JS bridge crossing — by service_param_bindings(), which
+    // service_frame_callbacks() drives on the host idle cadence.
+    //
+    // This replaces the requestAnimationFrame loop a live-metering / param-
+    // following UI would otherwise run (the one thing that guarantees QuickJS
+    // executes every vsync). Precedence: a value widget (knob/fader/slider/
+    // toggle/progress) is re-asserted from the store EVERY frame, so a stray
+    // explicit setValue is corrected on the next frame; a bound Meter is updated
+    // whenever its source changes (Meter::set_level repaints unconditionally, so
+    // it is not touched on a static frame). Either way the binding yields while
+    // the user is dragging that widget — the gesture wins (View::is_gesture_active()).
+    // See bind_* in state_binding_api.cpp.
+    void service_param_bindings();
+
+    // Number of live param/meter bindings (diagnostics + tests).
+    std::size_t param_binding_count() const noexcept { return param_bindings_.size(); }
+
     // ── Runtime design import ─────────────────────────────────────
     //
     // Registers the `__pulpRuntimeImport__(html, source)` and
@@ -312,6 +336,53 @@ private:
         bool repeating;
     };
     std::vector<PendingTimer> pending_timers_;
+
+    // Declarative native→widget binding (see service_param_bindings()).
+    // Transform applied to the source before it reaches the widget, in order:
+    // optional dB→linear map → scale → offset → clamp. The default is the
+    // identity on the store's already-normalized [0,1] value, which is the
+    // common case (a knob/fader/meter tracking a normalized param 1:1).
+    struct BindingTransform {
+        bool db = false;        ///< read the RAW param value and map [db_min,db_max]→[0,1]
+        float db_min = -60.0f;
+        float db_max = 0.0f;
+        float scale = 1.0f;
+        float offset = 0.0f;
+        bool clamp = true;      ///< clamp the result to [clamp_min, clamp_max]
+        float clamp_min = 0.0f;
+        float clamp_max = 1.0f;
+        float apply(float v) const;
+    };
+    struct ParamBinding {
+        enum class Target { value, meter };
+        std::string widget_id;
+        state::ParamID param_id = 0;   ///< source param (resolved once at bind time)
+        Target target = Target::value;
+        BindingTransform transform;
+        float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
+    };
+    std::vector<ParamBinding> param_bindings_;
+    // Register (or replace) a binding for `widget_id`. Resolves `param_name` to
+    // its id; returns false (no binding added) if the store has no such param.
+    // `transform` is the optional JS transform object (may be null → identity).
+    bool add_param_binding(const std::string& widget_id,
+                           const std::string& param_name,
+                           ParamBinding::Target target,
+                           const choc::value::Value* transform);
+    // Parse the optional JS transform object (`{db,dbMin,dbMax,scale,offset,
+    // min,max,clamp}`) into a BindingTransform. Null / non-object → identity.
+    static BindingTransform parse_transform(const choc::value::Value* v);
+    // Resolve a param NAME to its id via the store. Returns false when the
+    // store has no param with that name (the binding is then not registered).
+    bool resolve_param_id(const std::string& name, state::ParamID& out) const;
+    // Drop bindings whose widget id no longer resolves in widgets_ (after a
+    // removeWidget subtree teardown) so a later widget reusing that id is not
+    // silently re-bound.
+    void prune_dangling_bindings();
+    // Push one binding's transformed source value onto the resolved widget.
+    // Writes the widget only when the transformed value changed since the last
+    // frame; returns true on a change so the caller schedules one repaint.
+    bool apply_param_binding(ParamBinding& binding, View* w);
 
     std::function<void()> repaint_callback_;
 

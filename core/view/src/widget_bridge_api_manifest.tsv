@@ -33,6 +33,9 @@ setOrientation	widget_value	function	core/view/src/widget_bridge/widget_value_co
 setAccentColor	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 getParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 setParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+bindWidgetToParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+bindMeter	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+unbindWidget	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 animate	animation	function	core/view/src/widget_bridge/animation_api.cpp
 setMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
 getMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
