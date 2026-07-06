@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05710"></a>
+## [0.571.0] - 2026-07-06
+
+- chore: raise frozen LOC ceilings for widget_bridge + test manifest (live-swap growth) ([#5505](https://github.com/danielraffel/pulp/pull/5505))
+- feat/design fidelity taxonomy ([#5513](https://github.com/danielraffel/pulp/pull/5513))
+
 <a id="v05700"></a>
 ## [0.570.0] - 2026-07-06
 
@@ -5861,6 +5867,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.571.0]: https://github.com/danielraffel/pulp/releases/tag/v0.571.0
 [0.570.0]: https://github.com/danielraffel/pulp/releases/tag/v0.570.0
 [0.569.0]: https://github.com/danielraffel/pulp/releases/tag/v0.569.0
 [0.568.0]: https://github.com/danielraffel/pulp/releases/tag/v0.568.0
