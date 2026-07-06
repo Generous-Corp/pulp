@@ -477,6 +477,10 @@ public:
         if (nv != value_) { set_value(nv); if (on_change) on_change(value_); }
     }
 
+    // True while a value drag (or modulation-handle drag) is in progress so a
+    // declarative param binding yields the value to the user mid-turn.
+    bool is_gesture_active() const override { return gesture_active_ || mod_drag_ring_ >= 0; }
+
 private:
     std::vector<ModulationRing> mod_rings_;
     float mod_phase_ = 0.0f;       ///< live source value in [-1,1] (indicator)
@@ -586,6 +590,9 @@ public:
         float nv = std::clamp(value_ + (-delta_y) * 0.004f, 0.0f, 1.0f);
         if (nv != value_) { set_value(nv); if (on_change) on_change(value_); }
     }
+
+    // True while the thumb is being dragged so a param binding yields mid-drag.
+    bool is_gesture_active() const override { return dragging_; }
 
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }
@@ -804,6 +811,9 @@ public:
         set_value(value_ + (-delta_y) * 0.004f * (max_ - min_));
         if (value_ != prev && on_change) on_change(value_);
     }
+
+    // True while the handle is being dragged so a param binding yields mid-drag.
+    bool is_gesture_active() const override { return dragging_; }
 
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }
@@ -1288,6 +1298,9 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+
+    // True while the puck is being dragged so a param binding yields mid-drag.
+    bool is_gesture_active() const override { return dragging_; }
 
 private:
     void update_from_pos(Point pos);

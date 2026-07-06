@@ -201,6 +201,26 @@ declare global {
     function setMeterLevel(id: string, level: number): void;
     function setProgress(id: string, fraction: number): void;
     function setValue(id: string, value: number): void;
+
+    // ── Declarative param/meter bindings (no per-frame JS) ───────────
+    /// Remaps a bound param before it reaches the widget. Applied in order:
+    /// dB→linear map → scale → offset → clamp. Absent → identity on the
+    /// store's normalized [0,1] value.
+    interface BindingTransform {
+        db?: boolean; dbMin?: number; dbMax?: number;
+        scale?: number; offset?: number;
+        min?: number; max?: number; clamp?: boolean;
+    }
+    /// Bind a value widget (knob/fader/slider/toggle/progress) to a param.
+    /// Registered once; C++ pushes the store value each frame with zero
+    /// per-frame JS crossing. Returns true when the param exists.
+    const bindWidgetToParam:
+        ((widgetId: string, paramName: string, transform?: BindingTransform) => boolean) | undefined;
+    /// Bind a Meter's fill to a param (drives rms + peak). Same contract.
+    const bindMeter:
+        ((widgetId: string, paramName: string, transform?: BindingTransform) => boolean) | undefined;
+    /// Remove the binding(s) for a widget. Returns the number removed.
+    const unbindWidget: ((widgetId: string) => number) | undefined;
     /// `<Image src>` forwards to ImageView::set_image_path via
     /// WidgetBridge::register_widget_assets_api
     /// (core/view/src/widget_bridge/widget_assets_api.cpp). The path is
