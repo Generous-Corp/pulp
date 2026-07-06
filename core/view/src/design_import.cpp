@@ -10,6 +10,7 @@
 #include <pulp/runtime/temporary_file.hpp>
 #include <pulp/state/store.hpp>
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_StringUtilities.h>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -184,14 +185,6 @@ std::string css_prop_to_camel_case(const std::string& prop) {
     return out;
 }
 
-// Trim ASCII whitespace from both ends of a string view in place.
-std::string trim_ascii_ws(std::string_view sv) {
-    size_t i = 0, j = sv.size();
-    while (i < j && std::isspace(static_cast<unsigned char>(sv[i]))) ++i;
-    while (j > i && std::isspace(static_cast<unsigned char>(sv[j - 1]))) --j;
-    return std::string(sv.substr(i, j - i));
-}
-
 // Strip CSS `/* ... */` comments from a block. Multi-line safe. We
 // don't need to be a full CSS tokenizer — Claude Design exports use
 // vanilla rules, not CSS-in-JS or nested at-rules.
@@ -223,8 +216,8 @@ std::map<std::string, std::string> parse_css_declarations(const std::string& bod
         i = (semi == std::string::npos) ? body.size() : semi + 1;
         auto colon = decl.find(':');
         if (colon == std::string::npos) continue;
-        auto prop = trim_ascii_ws(std::string_view(decl).substr(0, colon));
-        auto value = trim_ascii_ws(std::string_view(decl).substr(colon + 1));
+        auto prop = std::string(choc::text::trim(std::string_view(decl).substr(0, colon)));
+        auto value = std::string(choc::text::trim(std::string_view(decl).substr(colon + 1)));
         if (prop.empty() || value.empty()) continue;
         out[css_prop_to_camel_case(prop)] = value;
     }
@@ -276,8 +269,8 @@ void collect_classnames_from_css(const std::string& css_in,
         size_t s_start = 0;
         for (size_t k = 0; k <= selector_list.size(); ++k) {
             if (k == selector_list.size() || selector_list[k] == ',') {
-                selectors.push_back(trim_ascii_ws(
-                    std::string_view(selector_list).substr(s_start, k - s_start)));
+                selectors.push_back(std::string(choc::text::trim(
+                    std::string_view(selector_list).substr(s_start, k - s_start))));
                 s_start = k + 1;
             }
         }
@@ -461,13 +454,6 @@ std::string serialize_claude_classnames(const ClaudeClassNameRules& rules) {
 
 // ── Audio widget detection ──────────────────────────────────────────────
 
-static std::string to_lower(const std::string& s) {
-    std::string result = s;
-    std::transform(result.begin(), result.end(), result.begin(),
-        [](unsigned char c) { return std::tolower(c); });
-    return result;
-}
-
 // Split a layer name into lowercase WORD tokens. Boundaries: any non-alnum
 // char, camelCase (lower→Upper), acronym→Word (Upper→Upper-then-lower), and
 // letter↔digit. So "GainKnob"→{gain,knob}, "VUMeter"→{vu,meter},
@@ -523,7 +509,7 @@ AudioWidgetType detect_audio_widget(const std::string& name) {
 }
 
 AudioWidgetType audio_widget_from_id(const std::string& id) {
-    const auto lower = to_lower(id);
+    const auto lower = choc::text::toLowerCase(id);
     if (lower == "knob") return AudioWidgetType::knob;
     if (lower == "fader") return AudioWidgetType::fader;
     if (lower == "meter") return AudioWidgetType::meter;
@@ -1544,7 +1530,7 @@ struct HtmlAssetCandidate {
 };
 
 static std::string strip_matching_css_quotes(std::string value) {
-    value = trim_ascii_ws(value);
+    value = std::string(choc::text::trim(value));
     if (value.size() >= 2
         && ((value.front() == '"' && value.back() == '"')
          || (value.front() == '\'' && value.back() == '\''))) {

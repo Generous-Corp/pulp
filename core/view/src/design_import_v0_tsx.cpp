@@ -1,6 +1,8 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/anchor_strategy.hpp>
 
+#include <choc/text/choc_StringUtilities.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -17,20 +19,6 @@
 
 namespace pulp::view {
 namespace {
-
-std::string trim_ascii_ws(std::string_view sv) {
-    size_t i = 0;
-    size_t j = sv.size();
-    while (i < j && std::isspace(static_cast<unsigned char>(sv[i]))) ++i;
-    while (j > i && std::isspace(static_cast<unsigned char>(sv[j - 1]))) --j;
-    return std::string(sv.substr(i, j - i));
-}
-
-std::string to_lower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
-}
 
 ImportDiagnostic make_v0_import_diagnostic(ImportDiagnosticSeverity severity,
                                            ImportDiagnosticKind kind,
@@ -53,10 +41,10 @@ struct V0SourceContracts {
 };
 
 std::optional<float> parse_jsx_css_number(std::string_view raw) {
-    auto value = trim_ascii_ws(raw);
+    auto value = std::string(choc::text::trim(raw));
     if (value.empty()) return std::nullopt;
     if (value.size() >= 2 && value.front() == '{' && value.back() == '}')
-        value = trim_ascii_ws(std::string_view(value).substr(1, value.size() - 2));
+        value = std::string(choc::text::trim(std::string_view(value).substr(1, value.size() - 2)));
     if (value.size() >= 2 &&
         ((value.front() == '"' && value.back() == '"') ||
          (value.front() == '\'' && value.back() == '\''))) {
@@ -76,9 +64,9 @@ std::optional<float> parse_jsx_css_number(std::string_view raw) {
 }
 
 std::string strip_jsx_value_quotes(std::string value) {
-    value = trim_ascii_ws(value);
+    value = std::string(choc::text::trim(value));
     if (value.size() >= 2 && value.front() == '{' && value.back() == '}')
-        value = trim_ascii_ws(std::string_view(value).substr(1, value.size() - 2));
+        value = std::string(choc::text::trim(std::string_view(value).substr(1, value.size() - 2)));
     if (value.size() >= 2 &&
         ((value.front() == '"' && value.back() == '"') ||
          (value.front() == '\'' && value.back() == '\''))) {
@@ -160,11 +148,11 @@ V0SourceContracts extract_v0_source_contracts(const std::string& tsx) {
 
 std::optional<std::string> state_from_value_expression(std::string_view expression,
                                                        const V0SourceContracts& contracts) {
-    auto value = trim_ascii_ws(expression);
+    auto value = std::string(choc::text::trim(expression));
     if (is_identifier_like(value) && contracts.state_initial_values.count(value) != 0)
         return value;
     if (auto bracket = value.find('['); bracket != std::string::npos) {
-        const auto base = trim_ascii_ws(std::string_view(value).substr(0, bracket));
+        const auto base = std::string(choc::text::trim(std::string_view(value).substr(0, bracket)));
         if (is_identifier_like(base) && contracts.state_initial_values.count(base) != 0)
             return value;
     }
@@ -173,7 +161,7 @@ std::optional<std::string> state_from_value_expression(std::string_view expressi
 
 std::optional<std::string> state_from_event_expression(std::string_view expression,
                                                        const V0SourceContracts& contracts) {
-    auto value = trim_ascii_ws(expression);
+    auto value = std::string(choc::text::trim(expression));
     if (is_identifier_like(value)) {
         if (auto it = contracts.handler_to_state.find(value); it != contracts.handler_to_state.end())
             return it->second;
@@ -232,16 +220,16 @@ std::vector<std::string> split_jsx_top_level(std::string_view text, char delimit
         else if (c == '[') ++bracket_depth;
         else if (c == ']' && bracket_depth > 0) --bracket_depth;
         else if (c == delimiter && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0) {
-            out.push_back(trim_ascii_ws(text.substr(start, i - start)));
+            out.push_back(std::string(choc::text::trim(text.substr(start, i - start))));
             start = i + 1;
         }
     }
-    out.push_back(trim_ascii_ws(text.substr(start)));
+    out.push_back(std::string(choc::text::trim(text.substr(start))));
     return out;
 }
 
 std::optional<std::string> extract_jsx_style_body(const std::string& value) {
-    auto raw = trim_ascii_ws(value);
+    auto raw = std::string(choc::text::trim(value));
     if (raw.size() >= 4 && raw.rfind("{{", 0) == 0 &&
         raw.substr(raw.size() - 2) == "}}") {
         return raw.substr(2, raw.size() - 4);
@@ -462,7 +450,7 @@ std::string normalize_jsx_text(std::string_view raw) {
         out += static_cast<char>(c);
         in_ws = false;
     }
-    auto text = trim_ascii_ws(out);
+    auto text = std::string(choc::text::trim(out));
     if (text.find('{') != std::string::npos || text.find('}') != std::string::npos)
         return {};
     return text;
@@ -644,7 +632,7 @@ void apply_v0_jsx_attribute(IRNode& node,
 }
 
 std::string input_contract_family(const IRNode& node) {
-    const auto subtype = to_lower(attr_value(node, "type").value_or("text"));
+    const auto subtype = choc::text::toLowerCase(attr_value(node, "type").value_or("text"));
     if (subtype == "range") return "input:range";
     if (subtype == "checkbox") return "input:checkbox";
     return "input:" + subtype;
@@ -661,7 +649,7 @@ void attach_v0_value_contract(IRNode& node,
     // pulpInitialValue instead of silently dropping it.
     std::string lookup_key = state_key;
     if (auto bracket = lookup_key.find('['); bracket != std::string::npos)
-        lookup_key = std::string(trim_ascii_ws(std::string_view(lookup_key).substr(0, bracket)));
+        lookup_key = std::string(std::string(choc::text::trim(std::string_view(lookup_key).substr(0, bracket))));
     if (auto it = contracts.state_initial_values.find(lookup_key);
         it != contracts.state_initial_values.end()) {
         set_contract_attr(node, "pulpInitialValue", it->second);
@@ -671,7 +659,7 @@ void attach_v0_value_contract(IRNode& node,
 
 void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts) {
     const auto tag = attr_value(node, "jsxTag").value_or(node.name);
-    const auto lower_tag = to_lower(tag);
+    const auto lower_tag = choc::text::toLowerCase(tag);
     const auto value_expr = attr_value(node, "value");
     const auto checked_expr = attr_value(node, "checked");
     const auto on_change = attr_value(node, "onChange");
@@ -703,7 +691,7 @@ void attach_v0_source_contracts(IRNode& node, const V0SourceContracts& contracts
     }
 
     if (lower_tag == "input") {
-        const auto subtype = to_lower(attr_value(node, "type").value_or("text"));
+        const auto subtype = choc::text::toLowerCase(attr_value(node, "type").value_or("text"));
         if (subtype == "range") {
             set_contract_attr(node, "pulpEventContract", on_change ? "range:onChange:setState" : "range:value");
             set_contract_attr(node, "pulpGestureContract", "range:drag");
@@ -789,7 +777,7 @@ bool parse_v0_tsx_structural(const std::string& tsx, DesignIR& ir) {
         auto maybe_end = find_jsx_tag_end(tsx, tag_start + 1);
         if (!maybe_end) break;
         const auto tag_end = *maybe_end;
-        auto inner = trim_ascii_ws(std::string_view(tsx).substr(tag_start + 1, tag_end - tag_start - 1));
+        auto inner = std::string(choc::text::trim(std::string_view(tsx).substr(tag_start + 1, tag_end - tag_start - 1)));
         last_text_end = tag_end + 1;
         pos = tag_end + 1;
 
@@ -798,13 +786,13 @@ bool parse_v0_tsx_structural(const std::string& tsx, DesignIR& ir) {
         bool closing = false;
         if (inner.front() == '/') {
             closing = true;
-            inner = trim_ascii_ws(std::string_view(inner).substr(1));
+            inner = std::string(choc::text::trim(std::string_view(inner).substr(1)));
         }
 
         bool self_closing = false;
         if (!inner.empty() && inner.back() == '/') {
             self_closing = true;
-            inner = trim_ascii_ws(std::string_view(inner).substr(0, inner.size() - 1));
+            inner = std::string(choc::text::trim(std::string_view(inner).substr(0, inner.size() - 1)));
         }
 
         size_t name_end = 0;
@@ -816,7 +804,7 @@ bool parse_v0_tsx_structural(const std::string& tsx, DesignIR& ir) {
         if (name_end == 0) continue;
 
         auto tag = inner.substr(0, name_end);
-        const auto lower_tag = to_lower(tag);
+        const auto lower_tag = choc::text::toLowerCase(tag);
         if (closing) {
             for (size_t i = stack.size(); i > 1; --i) {
                 if (stack[i - 1].tag == lower_tag) {

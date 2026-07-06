@@ -1,9 +1,9 @@
 // design_handoff.cpp — parse a Claude Design project handoff into a contract.
 
 #include <pulp/design/design_handoff.hpp>
-#include <pulp/design/design_text_util.hpp>
 
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_StringUtilities.h>
 
 #include <algorithm>
 #include <cctype>
@@ -12,13 +12,10 @@ namespace pulp::design {
 
 namespace {
 
-using text::to_lower;
-using text::trim;
-
 // Strip surrounding Markdown emphasis markers (**bold**, *italic*, `code`) and
 // list-bullet/hash prefixes so a value compares cleanly.
 std::string_view strip_emphasis(std::string_view s) {
-    s = trim(s);
+    s = choc::text::trim(s);
     for (bool changed = true; changed;) {
         changed = false;
         for (std::string_view mark : {"**", "*", "`", "_"}) {
@@ -26,16 +23,12 @@ std::string_view strip_emphasis(std::string_view s) {
                 s.substr(s.size() - mark.size()) == mark) {
                 s.remove_prefix(mark.size());
                 s.remove_suffix(mark.size());
-                s = trim(s);
+                s = choc::text::trim(s);
                 changed = true;
             }
         }
     }
     return s;
-}
-
-bool contains(std::string_view haystack, std::string_view needle) {
-    return haystack.find(needle) != std::string_view::npos;
 }
 
 // Strip any leading/trailing Markdown emphasis characters and whitespace. Unlike
@@ -53,7 +46,7 @@ std::string_view strip_marker_chars(std::string_view s) {
 
 // Heading level (number of leading '#'), or 0 if the line is not an ATX heading.
 int heading_level(std::string_view line) {
-    line = trim(line);
+    line = choc::text::trim(line);
     int n = 0;
     while (n < static_cast<int>(line.size()) && line[n] == '#') ++n;
     if (n == 0 || n >= static_cast<int>(line.size()) || line[n] != ' ') return 0;
@@ -61,19 +54,19 @@ int heading_level(std::string_view line) {
 }
 
 std::string_view heading_text(std::string_view line) {
-    line = trim(line);
+    line = choc::text::trim(line);
     size_t n = 0;
     while (n < line.size() && line[n] == '#') ++n;
-    return trim(line.substr(n));
+    return choc::text::trim(line.substr(n));
 }
 
 // A `- key: value` (or `* key: value`) bullet. Returns false if the line is not
 // a key/value bullet.
 bool parse_kv_bullet(std::string_view line, std::string& key, std::string& value) {
-    std::string_view t = trim(line);
+    std::string_view t = choc::text::trim(line);
     if (t.empty() || (t.front() != '-' && t.front() != '*')) return false;
     t.remove_prefix(1);
-    t = trim(t);
+    t = choc::text::trim(t);
     auto colon = t.find(':');
     if (colon == std::string_view::npos) return false;
     key = std::string(strip_emphasis(t.substr(0, colon)));
@@ -83,10 +76,10 @@ bool parse_kv_bullet(std::string_view line, std::string& key, std::string& value
 
 // The bullet text of a `-`/`*` list item, or "" if the line is not a bullet.
 std::string_view bullet_text(std::string_view line) {
-    std::string_view t = trim(line);
+    std::string_view t = choc::text::trim(line);
     if (t.empty() || (t.front() != '-' && t.front() != '*')) return {};
     t.remove_prefix(1);
-    return trim(t);
+    return choc::text::trim(t);
 }
 
 // Split a heading like "Home (screens/home.html)" into name + optional path.
@@ -98,18 +91,18 @@ void split_name_path(std::string_view text, std::string& name, std::string& path
     auto open = text.rfind('(');
     auto close = text.rfind(')');
     if (open != std::string_view::npos && close == text.size() - 1 && close > open) {
-        std::string_view inner = trim(text.substr(open + 1, close - open - 1));
-        bool path_like = contains(inner, "/") || contains(inner, ".htm") ||
-                         contains(inner, ".js") || contains(inner, ".html");
+        std::string_view inner = choc::text::trim(text.substr(open + 1, close - open - 1));
+        bool path_like = choc::text::contains(inner, "/") || choc::text::contains(inner, ".htm") ||
+                         choc::text::contains(inner, ".js") || choc::text::contains(inner, ".html");
         // The contract promises a *relative* source path that a consumer joins onto
         // the project dir. An absolute path or a ".." segment would escape that root,
         // so reject those: keep the whole heading as the name and emit no path.
         bool traversal = !inner.empty() && (inner.front() == '/' || inner == ".." ||
-                                            inner.starts_with("../") || contains(inner, "/../") ||
+                                            inner.starts_with("../") || choc::text::contains(inner, "/../") ||
                                             inner.ends_with("/.."));
         if (path_like && !traversal) {
             path = std::string(inner);
-            name = std::string(trim(text.substr(0, open)));
+            name = std::string(choc::text::trim(text.substr(0, open)));
             return;
         }
     }
@@ -124,7 +117,7 @@ std::vector<std::string> split_systems(std::string_view v) {
     size_t start = 0;
     for (size_t i = 0; i <= v.size(); ++i) {
         if (i == v.size() || v[i] == ',' || v[i] == '/') {
-            auto item = trim(v.substr(start, i - start));
+            auto item = choc::text::trim(v.substr(start, i - start));
             if (!item.empty()) out.emplace_back(item);
             start = i + 1;
         }
@@ -139,16 +132,16 @@ void sort_unique(std::vector<std::string>& v) {
 
 // A Markdown table separator row (cells are only dashes/colons/spaces).
 bool is_table_separator(std::string_view line) {
-    line = trim(line);
+    line = choc::text::trim(line);
     if (line.empty() || line.front() != '|') return false;
     for (char c : line)
         if (c != '|' && c != '-' && c != ':' && c != ' ') return false;
-    return contains(line, "-");
+    return choc::text::contains(line, "-");
 }
 
 std::vector<std::string> table_cells(std::string_view line) {
     std::vector<std::string> cells;
-    std::string_view t = trim(line);
+    std::string_view t = choc::text::trim(line);
     if (!t.empty() && t.front() == '|') t.remove_prefix(1);
     if (!t.empty() && t.back() == '|') t.remove_suffix(1);
     size_t start = 0;
@@ -165,12 +158,12 @@ std::vector<std::string> table_cells(std::string_view line) {
 enum class Section { none, fidelity, systems, screens, tokens, interactions };
 
 Section classify_section(std::string_view htext) {
-    std::string h = to_lower(strip_emphasis(htext));
-    if (contains(h, "fidelity")) return Section::fidelity;
-    if (contains(h, "design system") || contains(h, "bound")) return Section::systems;
-    if (contains(h, "screen")) return Section::screens;
-    if (contains(h, "token")) return Section::tokens;
-    if (contains(h, "interaction") || contains(h, "state") || contains(h, "behavior"))
+    std::string h = choc::text::toLowerCase(std::string(strip_emphasis(htext)));
+    if (choc::text::contains(h, "fidelity")) return Section::fidelity;
+    if (choc::text::contains(h, "design system") || choc::text::contains(h, "bound")) return Section::systems;
+    if (choc::text::contains(h, "screen")) return Section::screens;
+    if (choc::text::contains(h, "token")) return Section::tokens;
+    if (choc::text::contains(h, "interaction") || choc::text::contains(h, "state") || choc::text::contains(h, "behavior"))
         return Section::interactions;
     return Section::none;
 }
@@ -187,12 +180,12 @@ std::string_view fidelity_intent_name(FidelityIntent intent) {
 }
 
 FidelityIntent fidelity_intent_from_text(std::string_view text) {
-    std::string t = to_lower(strip_emphasis(text));
+    std::string t = choc::text::toLowerCase(std::string(strip_emphasis(text)));
     // An explicit hi-fi/lo-fi token is a deliberate declaration and wins
     // outright over incidental prose — "lo-fi (don't trace pixels)" is lo-fi
     // even though it mentions "pixels". A line carrying both is contradictory.
-    bool hi = contains(t, "hi-fi") || contains(t, "hifi") || contains(t, "hi fi");
-    bool lo = contains(t, "lo-fi") || contains(t, "lofi") || contains(t, "lo fi");
+    bool hi = choc::text::contains(t, "hi-fi") || choc::text::contains(t, "hifi") || choc::text::contains(t, "hi fi");
+    bool lo = choc::text::contains(t, "lo-fi") || choc::text::contains(t, "lofi") || choc::text::contains(t, "lo fi");
     if (hi != lo) return hi ? FidelityIntent::hifi : FidelityIntent::lofi;
     if (hi && lo) return FidelityIntent::unspecified;  // both declared — ambiguous
     // No explicit token: fall back to weaker intent keywords. Conflicting weak
@@ -202,10 +195,10 @@ FidelityIntent fidelity_intent_from_text(std::string_view text) {
     bool hi_kw = false, lo_kw = false;
     for (std::string_view w : {"high", "pixel", "exact", "faithful", "recreate",
                                "1:1", "one-to-one"})
-        if (contains(t, w)) { hi_kw = true; break; }
+        if (choc::text::contains(t, w)) { hi_kw = true; break; }
     for (std::string_view w : {"low", "restyle", "re-style", "reskin", "re-skin",
                                "adapt", "reinterpret"})
-        if (contains(t, w)) { lo_kw = true; break; }
+        if (choc::text::contains(t, w)) { lo_kw = true; break; }
     if (hi_kw != lo_kw) return hi_kw ? FidelityIntent::hifi : FidelityIntent::lofi;
     return FidelityIntent::unspecified;
 }
@@ -264,7 +257,7 @@ HandoffContract parse_handoff_readme(std::string_view markdown, std::string_view
             continue;
         }
 
-        std::string_view t = trim(line);
+        std::string_view t = choc::text::trim(line);
 
         // A list bullet (`- `/`* ` + space) belongs to its section (a screen
         // spec or an interaction note), never the global key parser — otherwise
@@ -280,7 +273,7 @@ HandoffContract parse_handoff_readme(std::string_view markdown, std::string_view
             std::string_view stripped = strip_emphasis(t);
             auto colon = stripped.find(':');
             if (colon != std::string_view::npos) {
-                std::string key = to_lower(strip_marker_chars(stripped.substr(0, colon)));
+                std::string key = choc::text::toLowerCase(std::string(strip_marker_chars(stripped.substr(0, colon))));
                 std::string_view val = stripped.substr(colon + 1);
                 if (key == "fidelity") {
                     set_fidelity(fidelity_intent_from_text(val));
@@ -312,7 +305,7 @@ HandoffContract parse_handoff_readme(std::string_view markdown, std::string_view
                 if (!t.empty() && t.front() == '|') {
                     auto cells = table_cells(t);
                     if (cells.size() >= 2 && !cells[0].empty()) {
-                        std::string k0 = to_lower(cells[0]);
+                        std::string k0 = choc::text::toLowerCase(cells[0]);
                         if (k0 != "token" && k0 != "name" && k0 != "key")  // skip header row
                             c.tokens.emplace_back(cells[0], cells[1]);
                     }

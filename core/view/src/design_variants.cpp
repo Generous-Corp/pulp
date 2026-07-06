@@ -1,9 +1,9 @@
 // design_variants.cpp — variant sets -> typed parameterized component contract.
 
 #include <pulp/design/design_variants.hpp>
-#include <pulp/design/design_text_util.hpp>
 
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_StringUtilities.h>
 
 #include <algorithm>
 #include <cctype>
@@ -14,20 +14,17 @@ namespace pulp::design {
 
 namespace {
 
-using text::to_lower;
-using text::trim;
-
 // Is this enum boolean-shaped, and if so what is its falsey value? Returns the
 // falsey value ("Off"/"False"/"No") or "" when the enum is not boolean-shaped.
 std::string boolean_falsey(const std::vector<std::string>& values) {
     if (values.size() != 2) return {};
-    std::string a = to_lower(values[0]), b = to_lower(values[1]);
+    std::string a = choc::text::toLowerCase(values[0]), b = choc::text::toLowerCase(values[1]);
     auto pair_is = [&](const char* t, const char* f) {
         return (a == t && b == f) || (a == f && b == t);
     };
     for (auto [t, f] : {std::pair{"on", "off"}, std::pair{"true", "false"},
                         std::pair{"yes", "no"}, std::pair{"enabled", "disabled"}}) {
-        if (pair_is(t, f)) return to_lower(values[0]) == f ? values[0] : values[1];
+        if (pair_is(t, f)) return choc::text::toLowerCase(values[0]) == f ? values[0] : values[1];
     }
     return {};
 }
@@ -42,7 +39,7 @@ std::vector<std::string_view> variant_segments(std::string_view name) {
     size_t start = 0;
     for (size_t i = 0; i <= name.size(); ++i) {
         if (i == name.size() || name[i] == ',') {
-            std::string_view seg = trim(name.substr(start, i - start));
+            std::string_view seg = choc::text::trim(name.substr(start, i - start));
             start = i + 1;
             if (!seg.empty()) segs.push_back(seg);
         }
@@ -58,7 +55,7 @@ std::vector<VariantProperty> parse_variant_name(std::string_view name) {
         auto eq = seg.find('=');
         if (eq == std::string_view::npos) continue;  // malformed segment: caller flags it
         props.push_back(
-            {std::string(trim(seg.substr(0, eq))), std::string(trim(seg.substr(eq + 1)))});
+            {std::string(choc::text::trim(seg.substr(0, eq))), std::string(choc::text::trim(seg.substr(eq + 1)))});
     }
     return props;
 }
@@ -103,8 +100,8 @@ ComponentContract build_component_contract(std::string_view component,
                 malformed.emplace_back(vn, std::string(seg));  // segment with no Prop=Value
                 continue;
             }
-            std::string key(trim(seg.substr(0, eq)));
-            std::string val(trim(seg.substr(eq + 1)));
+            std::string key(choc::text::trim(seg.substr(0, eq)));
+            std::string val(choc::text::trim(seg.substr(eq + 1)));
             if (key.empty() || val.empty()) {  // "=Primary" / "State=" — not a usable assignment
                 malformed.emplace_back(vn, std::string(seg));
                 continue;
@@ -136,7 +133,7 @@ ComponentContract build_component_contract(std::string_view component,
         // Default: explicit "default" value, else boolean falsey, else modal.
         std::string def;
         for (const auto& v : cp.values)
-            if (to_lower(v) == "default") { def = v; break; }
+            if (choc::text::toLowerCase(v) == "default") { def = v; break; }
         if (def.empty()) def = boolean_falsey(cp.values);
         if (def.empty()) {
             int best = -1;

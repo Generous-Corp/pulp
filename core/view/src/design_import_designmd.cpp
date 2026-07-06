@@ -23,6 +23,8 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <choc/text/choc_StringUtilities.h>
+
 #include <algorithm>
 #include <cctype>
 #include <regex>
@@ -75,19 +77,6 @@ FrontmatterSlice split_frontmatter(const std::string& markdown) {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-std::string trim(std::string s) {
-    auto not_space = [](unsigned char c) { return !std::isspace(c); };
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
-    s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
-    return s;
-}
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
 // Convert a dimension string ("48px", "1.5rem", "0.1em") to a float in px.
 // Returns std::nullopt for values that aren't dimensions (e.g. plain strings).
 std::optional<float> parse_dimension(const std::string& raw) {
@@ -119,7 +108,7 @@ bool looks_like_hex_color(const std::string& s) {
 bool is_css_functional_color(const std::string& s) {
     auto paren = s.find('(');
     if (paren == std::string::npos || s.empty() || s.back() != ')') return false;
-    std::string fn = lower(trim(s.substr(0, paren)));
+    std::string fn = choc::text::toLowerCase(choc::text::trim(s.substr(0, paren)));
     static const std::unordered_set<std::string> fns = {
         "rgb", "rgba", "hsl", "hsla", "hwb",
         "lab", "lch", "oklab", "oklch",
@@ -164,7 +153,7 @@ bool is_css_named_color(const std::string& s) {
         "teal", "thistle", "tomato", "turquoise", "violet", "wheat", "white",
         "whitesmoke", "yellow", "yellowgreen",
     };
-    return names.count(lower(trim(s))) != 0;
+    return names.count(choc::text::toLowerCase(choc::text::trim(s))) != 0;
 }
 
 bool looks_like_css_color(const std::string& s) {
@@ -190,7 +179,7 @@ std::vector<std::string> walk_sections(const std::string& body) {
     std::string line;
     while (std::getline(iss, line)) {
         if (line.size() >= 3 && line[0] == '#' && line[1] == '#' && line[2] != '#') {
-            std::string heading = trim(line.substr(2));
+            std::string heading = choc::text::trim(line.substr(2));
             if (!heading.empty()) sections.push_back(heading);
         }
     }
@@ -464,10 +453,10 @@ void resolve_references(DesignMdParseResult& result) {
 enum class BodySection { none, colors, spacing, radius, shadows };
 
 std::string strip_md_emphasis(std::string s) {
-    s = trim(s);
+    s = choc::text::trim(s);
     auto strip_pair = [&](char c) {
         while (s.size() >= 2 && s.front() == c && s.back() == c) {
-            s = trim(s.substr(1, s.size() - 2));
+            s = choc::text::trim(s.substr(1, s.size() - 2));
         }
     };
     strip_pair('*');
@@ -477,7 +466,7 @@ std::string strip_md_emphasis(std::string s) {
 }
 
 std::string normalize_body_name(const std::string& raw) {
-    std::string s = lower(strip_md_emphasis(raw));
+    std::string s = choc::text::toLowerCase(strip_md_emphasis(raw));
     std::string out;
     bool last_dash = false;
     for (char c : s) {
@@ -517,20 +506,20 @@ bool value_has_digit(const std::string& s) {
 // Split a `name: value` list item or `| name | value |` table row into parts.
 // Returns false for blank lines, table separators (---|---), and non-token rows.
 bool parse_body_token_line(const std::string& line, std::string& name, std::string& value) {
-    std::string t = trim(line);
+    std::string t = choc::text::trim(line);
     if (t.empty()) return false;
     if (t.front() == '|') {
         std::vector<std::string> cells;
         std::string cur;
         for (size_t i = 1; i < t.size(); ++i) {
             if (t[i] == '|') {
-                cells.push_back(trim(cur));
+                cells.push_back(choc::text::trim(cur));
                 cur.clear();
             } else {
                 cur += t[i];
             }
         }
-        if (!trim(cur).empty()) cells.push_back(trim(cur));
+        if (!choc::text::trim(cur).empty()) cells.push_back(choc::text::trim(cur));
         if (cells.size() < 2) return false;
         bool sep = true;
         for (char c : cells[0] + cells[1]) {
@@ -542,11 +531,11 @@ bool parse_body_token_line(const std::string& line, std::string& name, std::stri
         return !name.empty() && !value.empty();
     }
     if (t.front() == '-' || t.front() == '*') {
-        std::string rest = trim(t.substr(1));
+        std::string rest = choc::text::trim(t.substr(1));
         auto colon = rest.find(':');
         if (colon == std::string::npos) return false;
         name = rest.substr(0, colon);
-        value = trim(rest.substr(colon + 1));
+        value = choc::text::trim(rest.substr(colon + 1));
         return !name.empty() && !value.empty();
     }
     return false;
@@ -559,10 +548,10 @@ int parse_body_tokens(const std::string& body, DesignMdParseResult& result) {
     std::istringstream iss(body);
     std::string line;
     while (std::getline(iss, line)) {
-        std::string t = trim(line);
+        std::string t = choc::text::trim(line);
         // `## Section`
         if (t.size() >= 3 && t[0] == '#' && t[1] == '#' && t[2] != '#') {
-            std::string h = lower(trim(t.substr(2)));
+            std::string h = choc::text::toLowerCase(choc::text::trim(t.substr(2)));
             mode.clear();
             if (h == "colors" || h == "color" || h == "colours" || h == "color palette" || h == "palette")
                 section = BodySection::colors;
@@ -580,7 +569,7 @@ int parse_body_tokens(const std::string& body, DesignMdParseResult& result) {
         }
         // `### Subsection` → light/dark mode within the current section
         if (t.size() >= 4 && t[0] == '#' && t[1] == '#' && t[2] == '#' && t[3] != '#') {
-            std::string h = lower(trim(t.substr(3)));
+            std::string h = choc::text::toLowerCase(choc::text::trim(t.substr(3)));
             if (h.find("dark") != std::string::npos)        mode = "dark";
             else if (h.find("light") != std::string::npos)  mode = "light";
             else                                            mode.clear();
@@ -598,10 +587,10 @@ int parse_body_tokens(const std::string& body, DesignMdParseResult& result) {
                 // Only accept rows whose value is actually a color — this also
                 // skips table header rows like `| Token | Value |`.
                 auto hex = first_hex(rawValue);
-                std::string lv = lower(rawValue);
+                std::string lv = choc::text::toLowerCase(rawValue);
                 bool is_func = lv.rfind("rgb", 0) == 0 || lv.rfind("hsl", 0) == 0;
-                if (!hex && !is_token_reference(trim(rawValue)) && !is_func) break;
-                std::string value = hex ? *hex : trim(rawValue);
+                if (!hex && !is_token_reference(choc::text::trim(rawValue)) && !is_func) break;
+                std::string value = hex ? *hex : choc::text::trim(rawValue);
                 std::string key = (mode == "dark") ? name + ".dark" : name;
                 if (result.ir.tokens.colors.emplace(key, value).second) ++emitted;
                 break;
@@ -616,7 +605,7 @@ int parse_body_tokens(const std::string& body, DesignMdParseResult& result) {
             }
             case BodySection::shadows: {
                 if (!value_has_digit(rawValue)) break;  // skip header rows
-                if (result.ir.tokens.strings.emplace("shadow-" + name, trim(rawValue)).second) ++emitted;
+                if (result.ir.tokens.strings.emplace("shadow-" + name, choc::text::trim(rawValue)).second) ++emitted;
                 break;
             }
             case BodySection::none:
@@ -642,7 +631,7 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     {
         std::set<std::string> seen;
         for (const auto& s : result.sections) {
-            auto key = lower(s);
+            auto key = choc::text::toLowerCase(s);
             if (seen.count(key)) {
                 result.diagnostics.push_back(make_diag(
                     DesignMdSeverity::error, "duplicate-section", s, 0, 0,
