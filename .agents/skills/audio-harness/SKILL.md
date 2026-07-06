@@ -361,8 +361,8 @@ harness or `ctest`.
   agent-facing **measure → compare → judge** surface. Level-matches, runs one curated **axis**
   (`--profile`), and emits a typed evidence envelope + an action-oriented verdict
   (`regression_suspected` / `material_change_detected` / `no_material_change_detected` /
-  `inconclusive` / `invalid`). Five axes today, all global/alignment-free — a new axis is one
-  `_AXES` registry entry in `compare.py`, the shared `_measure`/`_verdict` machinery does the rest:
+  `inconclusive` / `invalid`). Six axes today — a new axis is one `_AXES` registry entry in
+  `compare.py`, the shared `_measure`/`_verdict` machinery does the rest:
 
   | `--profile` | axis | measures | bad direction (`bad_sign`) |
   |-------------|------|----------|----------------------------|
@@ -371,6 +371,7 @@ harness or `ctest`.
   | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | rougher/noisier (−1) |
   | `graininess` | `graininess` | relative spectral-flux increase | grainier (+1) |
   | `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | narrower/collapsed (−1) |
+  | `transient-integrity` | `transient_integrity` | per-onset attack-smear deficit (onset-aligned) | softer/smeared (+1) |
 
   `noise-roughness` (HNR, pitch range 40–1000 Hz so bass fundamentals count) and `graininess`
   (relative `mean_spectral_flux` increase) are meaningful on tonal/sustained material — a
@@ -382,8 +383,17 @@ harness or `ctest`.
   `audio_io.load_wav_multichannel`, the `_Axis.needs_stereo` flag, and the `_measure_stereo` path)
   rather than the mono downmix; mono input on either side is `not_applicable`, its metric is
   level-invariant (no level-match), and a candidate whose correlation goes negative is flagged out
-  of phase (mono-incompatible) in the summary. That takes compare to **5 of the lab's 7 detectors**
-  reachable from the agent-facing surface (up from 2). `compare.MONO_PROFILES` /
+  of phase (mono-incompatible) in the summary. **`transient-integrity`** (the `_Axis.needs_onsets`
+  flag) is "did my DSP soften/smear the attacks?" — it detects+matches onsets (`align.detect_onsets`
+  / `map_onsets`), locks each attack (`dsp.local_align`), and compares the high-band attack rise
+  (`dsp.attack_rise`, the SAME primitive the `transient_sharpness` detector uses — extracted to dsp
+  so there is no forked DSP). One-directional (a softening is the regression; a sharper candidate
+  reads no change); needs onset-bearing material (< 3 matched onsets → `not_applicable`); self-aligns
+  per onset so `--align` is a no-op and the global sample-domain advisory is suppressed. That takes
+  compare to **6 of the lab's 7 detectors** reachable from the agent-facing surface (up from 2).
+  `compare.STEREO_PROFILES` / `ONSET_PROFILES` mark the capability-specific axes, and
+  `NET_DEFAULT_PROFILES` (the regression net's default) excludes them so they don't emit spurious
+  `not_applicable` rows on the wrong material — a suite opts in. `compare.MONO_PROFILES` /
   `compare.STEREO_PROFILES` split which axes need 2-channel input — the regression net defaults to
   the mono set so a mono comparison doesn't emit a spurious not_applicable stereo-width row.
 

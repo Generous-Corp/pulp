@@ -366,6 +366,49 @@ def apply_lag_trim(
     return ref.copy(), cand.copy()
 
 
+def attack_rise(seg: np.ndarray, sr: int) -> float:
+    """Attack sharpness of an anchored window = amplitude / 10-90% rise time of the smoothed
+    high-band energy envelope (energy per sample). Higher = sharper. Shared by the
+    `transient_sharpness` detector and `compare`'s `transient-integrity` axis so the two measure
+    attacks identically (no forked DSP)."""
+    env, hop = smooth_energy_env(seg, sr)
+    if env.size < 4:
+        return 0.0
+    peak = int(np.argmax(env))
+    if peak < 1:
+        return 0.0
+    base = float(np.min(env[: peak + 1]))
+    amp = float(env[peak]) - base
+    if amp <= 1e-12:
+        return 0.0
+    lo_th, hi_th = base + 0.1 * amp, base + 0.9 * amp
+    pre = env[: peak + 1]
+    below_lo = np.where(pre <= lo_th)[0]
+    below_hi = np.where(pre <= hi_th)[0]
+    i_lo = int(below_lo[-1]) if below_lo.size else 0
+    i_hi = int(below_hi[-1]) if below_hi.size else peak
+    rise_samples = max(1, (i_hi - i_lo) * hop)
+    return (0.8 * amp) / rise_samples
+
+
+def onset_attack_deficit(
+    reference: np.ndarray, candidate: np.ndarray, sr: int, ref_t: float, cand_t: float
+) -> float | None:
+    """Attack-smear deficit in [0,1] for ONE onset pair (0 = faithful/sharper, 1 = fully softened),
+    or None when the window can't be measured (boundary, or a silent reference attack). Locks the
+    pair with sub-hop cross-correlation (:func:`local_align`) then compares the high-band attack rise
+    (:func:`attack_rise`). Clipping to [0,1] tames the small-``s_ref`` blow-up a raw ratio has. The
+    single home for the per-onset attack measurement — shared by the transient_sharpness detector and
+    compare's transient-integrity axis (no forked loop)."""
+    ref_seg, cand_seg, _lag = local_align(reference, candidate, sr, ref_t, cand_t)
+    if ref_seg is None:
+        return None
+    s_ref, s_cand = attack_rise(ref_seg, sr), attack_rise(cand_seg, sr)
+    if s_ref <= 1e-9:
+        return None
+    return float(np.clip(1.0 - s_cand / s_ref, 0.0, 1.0))
+
+
 def local_align(
     reference: np.ndarray,
     candidate: np.ndarray,

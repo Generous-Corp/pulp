@@ -5,12 +5,14 @@ runs one curated **axis** (selected by `--profile`), and emits a typed *evidence
 plus a defended, action-oriented verdict. It exists so an agent tuning DSP can measure a
 change, compare before/after, and weigh in with cited evidence — not a bare pass/fail.
 
-Axes are registered in `_AXES`: each is a global, alignment-free, reference-vs-candidate
-metric that mirrors the same contract, so adding one is a single registry entry (the shared
-`_measure`/`_verdict` machinery does level-matching, applicability, materiality, and the
-intent-safe verdict). Today: `tonal-balance` (LTAS spectral-centroid shift) and `added-hf`
-(high-frequency fizz fraction). Axes that need a controlled stimulus (THD/response) or
-alignment (transients/timing) are deliberately NOT here.
+Axes are registered in `_AXES`: each is a reference-vs-candidate metric that mirrors the same
+contract, so adding one is a single registry entry (the shared `_measure`/`_verdict` machinery does
+level-matching, applicability, materiality, and the intent-safe verdict). Most are global and
+alignment-free (`tonal-balance`, `added-hf`, `noise-roughness`, `graininess`); `stereo-width` reads
+the original 2-channel signal (`needs_stereo`); `transient-integrity` self-aligns per onset
+(`needs_onsets`). An optional `--align latency` step trims a constant delay before measuring. Axes
+that need a controlled stimulus (THD/response) or a non-constant time-warp are deferred (see the
+alignment plan).
 
 Boundaries (see planning/2026-07-01-agent-audio-measurement-substrate.md and the audio-harness
 skill for the full rationale):
@@ -29,6 +31,7 @@ from typing import Any, Callable
 import numpy as np
 
 from . import audio_io, schema
+from .align import detect_onsets, map_onsets
 from .dsp import (
     apply_lag_trim,
     dc_offset_metrics,
@@ -39,6 +42,7 @@ from .dsp import (
     interchannel_correlation,
     mean_spectral_flux,
     null_residual_db,
+    onset_attack_deficit,
     relative_centroid_shift,
     stereo_width_ratio,
 )
@@ -99,6 +103,17 @@ _HF_FRACTION_FLOOR = 1e-6
 # a candidate whose correlation goes negative is out of phase (mono-incompatible) — a defect the
 # width delta alone (which a phase flip pushes *up*) does not name.
 _STEREO_WIDTH_THRESHOLD = 0.1
+# transient-integrity needs enough judgeable onsets to measure attack sharpness — below this the
+# material is not percussive/onset-bearing enough and the axis is not_applicable (a caller-declared
+# material contract like roughness/graininess, surfaced honestly rather than guessed).
+_ONSET_MIN_MATCHED = 3
+# A reference onset whose mapped candidate onset is farther than this (normalized time) is a
+# dropped/moved attack, not the same event — scored as a FULL deficit (1.0), never silently skipped.
+# A dropped attack is the maximal transient loss the axis exists to catch.
+_ONSET_MATCH_TOL_NORM = 0.05
+# A single onset softened at least this much fires the verdict even when the mean is diluted across
+# many faithful onsets (the sparse-catastrophe gate) — while a lone noisy onset below it does not.
+_WORST_HARD_DEFICIT = 0.5
 
 # Above this level-matched, reference-relative residual, an algorithm-agnostic sample-domain
 # difference is present (the two renders are not effectively identical). Heuristic floor: -60 dB
@@ -130,6 +145,10 @@ class _Axis:
     # dimensionless fractions in (0, 1); a future dB-unit axis declares its own range here
     # so the guard travels with the axis instead of being baked into `compare_arrays`.
     threshold_range: tuple[float, float] = (0.0, 1.0)
+    # When True the axis measures per-onset attacks (transient-integrity): it self-aligns each onset,
+    # so the global `--align` step is skipped and the global sample-domain advisory (a different,
+    # non-onset-aligned domain) is suppressed. Its kernel does onset detect/match/attack internally.
+    needs_onsets: bool = False
     # When True the kernel is fed the ORIGINAL 2-channel signals (candidate, reference), not the mono
     # downmix — the stereo-image axes measure L/R relationships the mono path throws away. `compare`
     # supplies the stereo pair; mono input makes such an axis not_applicable.
@@ -282,6 +301,72 @@ def _stereo_width_summary(verdict: str, env: dict[str, Any]) -> str:
     return f"Material stereo-width change: image is {p['direction']} ({m}).{phase}"
 
 
+def _transient_integrity_kernel(matched: np.ndarray, reference: np.ndarray, sr: int) -> dict[str, Any]:
+    """Per-onset attack-sharpness ratio of candidate vs reference. Detects onsets on both signals,
+    maps them (align.map_onsets), locks each pair with sub-hop cross-correlation (dsp.local_align),
+    and compares the high-band attack rise (dsp.attack_rise — the SAME primitive the
+    transient_sharpness detector uses). Aggregates to the mean cand/ref sharpness ratio; delta =
+    ratio − 1 (signed: < 0 = attacks softened/smeared). not_applicable on too few matched onsets."""
+    ref_onsets = detect_onsets(reference, sr)
+    if len(ref_onsets) < _ONSET_MIN_MATCHED:
+        return {"applicable": False,
+                "reason": (f"too few onsets in the reference ({len(ref_onsets)} < {_ONSET_MIN_MATCHED}) "
+                           "— transient-integrity needs percussive/onset-bearing material")}
+    cand_onsets = detect_onsets(matched, sr)
+    ref_dur, cand_dur = reference.size / sr, matched.size / sr
+    mapped = dict(map_onsets(ref_onsets, cand_onsets, ref_dur, cand_dur))   # {ref_t: cand_t}
+    # Score EVERY reference onset. A per-onset deficit is clip(1 − s_cand/s_ref, 0, 1): 0 = faithful
+    # (or sharper), 1 = fully softened. Crucially, a reference attack with NO candidate onset nearby
+    # (unmatched, or the mapped one is a different event > tol away) is DROPPED/moved → a full
+    # deficit, never silently skipped — a dropped drum hit is the maximal transient loss the axis
+    # exists to catch. Only an unmeasurable window (boundary / silent reference attack) is skipped.
+    deficits: list[float] = []
+    lost = scored = skipped = 0
+    for ref_t in ref_onsets:
+        cand_t = mapped.get(ref_t)
+        if cand_t is None or abs(cand_t / cand_dur - ref_t / ref_dur) > _ONSET_MATCH_TOL_NORM:
+            deficits.append(1.0)
+            lost += 1
+            continue
+        d = onset_attack_deficit(reference, matched, sr, ref_t, cand_t)
+        if d is None:
+            skipped += 1
+            continue
+        deficits.append(d)
+        scored += 1
+    if len(deficits) < _ONSET_MIN_MATCHED:
+        return {"applicable": False,
+                "reason": f"too few judgeable onsets ({len(deficits)} < {_ONSET_MIN_MATCHED})"}
+    mean_deficit, worst_deficit = float(np.mean(deficits)), float(np.max(deficits))
+    # Two-part severity: a single catastrophic loss fires via `worst` even when diluted across many
+    # faithful onsets; a broad gentle smear fires via `mean`; a lone noisy onset does not false-fire.
+    delta = worst_deficit if worst_deficit >= _WORST_HARD_DEFICIT else mean_deficit
+    direction = "softer/smeared attacks" if delta > 1e-4 else "faithful attacks"
+    return {"applicable": True, "delta": delta, "unit": "attack_smear_deficit",
+            "tolerance_class": "transient_integrity.v1",
+            "payload": {"kind": "scalar", "mean_deficit": round(mean_deficit, 4),
+                        "worst_deficit": round(worst_deficit, 4), "onsets_detected": len(ref_onsets),
+                        "cand_onsets_detected": len(cand_onsets), "onsets_scored": scored,
+                        "onsets_lost": lost, "onsets_skipped": skipped,
+                        "coverage": round(len(deficits) / len(ref_onsets), 3), "direction": direction}}
+
+
+def _transient_integrity_summary(verdict: str, env: dict[str, Any]) -> str:
+    head = _generic_head(verdict, env)
+    if head:
+        return head
+    p = env["payload"]
+    judged = p["onsets_scored"] + p["onsets_lost"]
+    lost_note = f", {p['onsets_lost']} dropped" if p["onsets_lost"] else ""
+    m = (f"mean attack-smear deficit {p['mean_deficit']:.2f} (worst {p['worst_deficit']:.2f}) across "
+         f"{judged}/{p['onsets_detected']} onsets{lost_note}")
+    if verdict == VERDICT_NO_CHANGE:
+        return f"No material transient-integrity change ({m})."
+    if verdict == VERDICT_REGRESSION:
+        return f"Regression suspected: attacks are softer/smeared vs the golden reference ({m})."
+    return f"Material transient-integrity change: candidate has {p['direction']} ({m})."
+
+
 _TONAL_BALANCE = _Axis(
     profile="tonal-balance", axis="tonal_balance", tool="quality-lab:spectral_centroid",
     default_threshold=0.05, bad_sign=-1, kernel=_centroid_kernel, summarize=_tonal_summary,
@@ -308,16 +393,32 @@ _STEREO_WIDTH = _Axis(
     threshold_range=(0.0, 10.0),   # RMS(side)/RMS(mid) delta — a phase flip can push it well past 1
     needs_stereo=True,
 )
+_TRANSIENT_INTEGRITY = _Axis(
+    profile="transient-integrity", axis="transient_integrity", tool="quality-lab:transient_sharpness",
+    default_threshold=0.15, bad_sign=+1, kernel=_transient_integrity_kernel,
+    summarize=_transient_integrity_summary,
+    threshold_range=(0.0, 1.0),   # mean attack-smear deficit in [0,1] (0 = faithful, 1 = fully soft)
+    needs_onsets=True,
+)
 _AXES: dict[str, _Axis] = {a.profile: a for a in
-                           (_TONAL_BALANCE, _ADDED_HF, _NOISE_ROUGHNESS, _GRAININESS, _STEREO_WIDTH)}
+                           (_TONAL_BALANCE, _ADDED_HF, _NOISE_ROUGHNESS, _GRAININESS,
+                            _STEREO_WIDTH, _TRANSIENT_INTEGRITY)}
 
 PROFILES = tuple(sorted(_AXES))
 DEFAULT_THRESHOLD = _TONAL_BALANCE.default_threshold  # back-compat alias
-# Profiles that require 2-channel input (stereo-width). A mono-defaulting caller (the regression
-# net) excludes these so it doesn't emit a spurious not_applicable row on every mono comparison; a
-# stereo suite opts in explicitly.
+# Capability groupings. `stereo-width` needs 2 channels; `transient-integrity` needs onset-bearing
+# (percussive) material. MONO_PROFILES = anything not needing stereo. NET_DEFAULT_PROFILES is the
+# regression net's default: the broadly-applicable axes, EXCLUDING the capability-specific stereo +
+# onset axes (which would emit spurious not_applicable rows on the wrong material). Those are opt-in
+# per the suite's material.
 STEREO_PROFILES = tuple(sorted(p for p, a in _AXES.items() if a.needs_stereo))
+ONSET_PROFILES = tuple(sorted(p for p, a in _AXES.items() if a.needs_onsets))
+# NOTE: MONO_PROFILES means "does not need 2 channels" — it INCLUDES the onset axis
+# (transient-integrity), which is material-specific. A caller wanting broadly-applicable axes should
+# use NET_DEFAULT_PROFILES, not MONO_PROFILES, to avoid not_applicable rows on the wrong material.
 MONO_PROFILES = tuple(p for p in PROFILES if p not in set(STEREO_PROFILES))
+NET_DEFAULT_PROFILES = tuple(p for p, a in sorted(_AXES.items())
+                             if not a.needs_stereo and not a.needs_onsets)
 
 
 # ── Shared measurement + verdict machinery ──────────────────────────────────────────────
@@ -598,14 +699,21 @@ def _apply_alignment(
     was aligned. On low confidence it REFUSES (records `not_aligned`) and returns the signals
     untouched: a wrong alignment is worse than none, and the residual will still flag the offset
     (correct, since we couldn't align)."""
+    # Capability-specific axes disclose their OWN alignment story regardless of the flag (checked
+    # before the generic `none` case so the record is honest, not a stale "global_ltas_metric").
+    # `requested` is recorded only when latency alignment was actually asked for.
+    extra = {"requested": align} if align != "none" else {}
+    if axis.needs_stereo:
+        # stereo width/correlation are global over the whole render → invariant to a constant delay.
+        return reference, candidate, schema.compare_alignment_not_required(
+            reason="stereo-width is invariant to a constant delay", **extra)
+    if axis.needs_onsets:
+        # transient-integrity self-aligns each onset (sub-hop cross-correlation), so a global
+        # constant-lag trim is redundant.
+        return reference, candidate, schema.compare_alignment_not_required(
+            reason="transient-integrity aligns each onset locally", **extra)
     if align == "none":
         return reference, candidate, schema.compare_alignment_not_required()
-    if axis.needs_stereo:
-        # stereo width/correlation are global over the whole render → invariant to a constant delay,
-        # and the mono ref/cand only feed a suppressed advisory for the stereo axis. Disclose that
-        # latency was requested and deliberately skipped, rather than a stale "not requested".
-        return reference, candidate, schema.compare_alignment_not_required(
-            reason="stereo-width is invariant to a constant delay", requested=align)
     est = estimate_global_lag(reference, candidate, sr)   # align == "latency"
     if est.confidence < _ALIGN_CONFIDENCE_FLOOR:
         return reference, candidate, schema.compare_alignment(
@@ -669,7 +777,10 @@ def compare_arrays(
         # makes the mono residual read "identity" and would wrongly flag the real stereo change as
         # phase-only. Suppress the mono advisory rather than emit a misleading cross-check (a
         # stereo-domain residual is future work).
-        advisory = None if axis.needs_stereo else _advisory_block(aref, acand, env)
+        # Suppress the global sample-domain advisory for axes measuring a DIFFERENT domain than the
+        # mono null-residual can cross-check: the stereo image, or per-onset attacks (the onset axis
+        # self-aligns, so the un-onset-aligned residual would false-disagree).
+        advisory = None if (axis.needs_stereo or axis.needs_onsets) else _advisory_block(aref, acand, env)
 
     # Disclose the mono fold — UNLESS this axis actually measured the stereo image (stereo-width),
     # where "stereo not compared" would be false.
