@@ -168,6 +168,35 @@ It is emitted regardless of `--strict-fidelity`: warnings are data, not
 failures. The taxonomy in `fidelity_taxonomy()` must stay in step with the kinds
 `design_fidelity.hpp` emits — add a kind to one, add it to the other.
 
+### Adherence lint (`pulp design lint-adherence`) — the mechanical backstop
+
+The binding prompt tells the model what's allowed; the adherence lint proves the
+generated JS actually stayed inside the contract. It flags three high-signal
+drifts and is the CI-gateable counterpart to the prompt:
+
+```bash
+# Lint an imported/generated UI against the built-in system (or a manifest):
+pulp design lint-adherence ui.js
+pulp design lint-adherence ui.js --manifest build/design/design-manifest.json
+pulp design lint-adherence ui.js --design-md DESIGN.md --strict
+```
+
+- **raw-color** (error): a hex literal (`#rrggbb`/`#rgb`/`#rrggbbaa`) where a
+  bound theme should be referenced via `var(--token)`. When the value is one the
+  system defines, the finding names the token to bind instead.
+- **unknown-token** (error): a `var(--name)` reference whose token is not in the
+  manifest — a hallucinated or renamed token that silently falls back at runtime
+  (`resolve_color` returns the default). This is the exact failure the binding
+  prompt exists to prevent, caught mechanically.
+- **raw-dimension** (info): an `<n>px` literal whose value matches a dimension
+  token — prefer the token.
+
+Exit 0 when clean, 1 on any error-severity finding (`--strict` fails on info too).
+The scan is purely lexical (`core/view/src/design_adherence.cpp`,
+`pulp::design::lint_adherence`): line/block comments are ignored, string literals
+are scanned, and token→`var(--x)` mapping mirrors `export_css_variables`
+(`.`→`-`). Pair it with `compile` — the prompt and the lint share one manifest.
+
 **THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
 cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
 SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →

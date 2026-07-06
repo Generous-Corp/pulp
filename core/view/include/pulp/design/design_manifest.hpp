@@ -77,6 +77,12 @@ DesignManifest compile_ink_signal_manifest(bool dark = false);
 /// the output is byte-deterministic for a given manifest.
 std::string manifest_to_json(const DesignManifest& manifest);
 
+/// Parse a manifest back from the JSON that manifest_to_json produces. Missing
+/// or malformed fields degrade to empty/default rather than throwing, so a
+/// partial file still yields a usable (if smaller) contract. Round-trips:
+/// manifest_from_json(manifest_to_json(m)) preserves tokens and components.
+DesignManifest manifest_from_json(const std::string& json);
+
 /// Emit an LLM-ready binding prompt (Markdown): the closed token allowlist and
 /// the component contracts, with an explicit adherence directive. This is the
 /// text an importer/codegen prompt embeds so generated UI binds only to real

@@ -762,6 +762,28 @@ commands:
           - name: --stdout
             kind: flag
             description: Print to stdout instead of writing files.
+      - name: lint-adherence
+        summary: Lint UI JS against the design contract — flags raw hex colors, unknown var(--token) references, and px literals that match a design token. Exit 1 on any error-severity finding.
+        args:
+          - name: js
+            kind: positional
+            required: true
+            description: The UI JS file to lint.
+          - name: --manifest
+            kind: option
+            description: Lint against a compiled design-manifest.json.
+          - name: --design-md
+            kind: option
+            description: Build the contract from a DESIGN.md instead.
+          - name: --theme
+            kind: option
+            description: Build the contract from a saved Theme JSON instead.
+          - name: --dark
+            kind: flag
+            description: Resolve the dark appearance (default is light).
+          - name: --strict
+            kind: flag
+            description: Exit non-zero on any finding, not just error-severity ones.
     docs: reference/cli.md#design
 
   - name: design-debug
