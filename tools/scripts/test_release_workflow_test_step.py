@@ -25,7 +25,7 @@ Three distinct failures were silently breaking the release pipeline:
 3. **sign-and-release.yml** had no `permissions:` block, so the job
    inherited a read-only GITHUB_TOKEN. The final `Create GitHub
    Release` step (softprops/action-gh-release@v2 with
-   generate_release_notes: true) then failed with "Resource not
+   release mutation) then failed with "Resource not
    accessible by integration" — the generate-release-notes endpoint
    requires contents:write. Every prior step succeeded, but the
    pipeline still exited non-zero and macOS artifacts never landed on
@@ -98,6 +98,16 @@ class SignAndReleaseNoTestGate(unittest.TestCase):
                 "silently block Releases. Smoke the built ARTIFACT instead.\n"
                 f"Found run block:\n{match.group(1)}"
             )
+
+    def test_appcast_writer_does_not_generate_release_notes(self) -> None:
+        self.assertNotIn(
+            "generate_release_notes: true",
+            self.text,
+            "sign-and-release.yml only attaches appcast.xml. release-cli.yml "
+            "owns the humanized body plus GitHub generated notes; generating "
+            "notes here can duplicate the What's Changed block depending on "
+            "which workflow updates the draft last.",
+        )
 
 
 class ReleaseCliLinuxNoWebView(unittest.TestCase):
@@ -412,6 +422,15 @@ class ReleaseCliLatestPointer(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.text = RELEASE_CLI.read_text(encoding="utf-8")
 
+    def _find_release_job_block(self) -> str:
+        match = re.search(
+            r"^  release:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+            self.text,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(match, "could not locate release-cli.yml release job")
+        return match.group("body")
+
     def _find_step_block(self, step_name: str) -> str:
         pattern = re.compile(
             rf"-\s*name:\s*{re.escape(step_name)}\s*\n"
@@ -445,14 +464,19 @@ class ReleaseCliLatestPointer(unittest.TestCase):
             "move GitHub's /releases/latest pointer backward.",
         )
 
+    def test_release_job_permissions_cover_body_composition(self) -> None:
+        job_block = self._find_release_job_block()
+        self.assertIn("contents: write", job_block)
+        self.assertIn("issues: read", job_block)
+
 
 class SignAndReleaseContentsWriteTest(unittest.TestCase):
     """#724: sign-and-release.yml must declare `contents: write` on its
-    macOS job so the final `Create GitHub Release` step can call the
-    generate-release-notes API. Without this scope, every sign-and-release
-    run fails at the last step with `Resource not accessible by integration`
-    and macOS-signed artifacts never land on the release — classic silent
-    release failure pattern (CLAUDE.md § Silent release failures are critical).
+    macOS job so the final `Create GitHub Release` step can upload appcast.xml
+    to the draft Release. Without this scope, every sign-and-release run fails
+    at the last step with `Resource not accessible by integration` and
+    macOS-signed artifacts never land on the release — classic silent release
+    failure pattern.
     """
 
     @classmethod
@@ -487,11 +511,9 @@ class SignAndReleaseContentsWriteTest(unittest.TestCase):
             "sign-and-release.yml `build-and-sign-macos` job must declare "
             "`permissions: contents: write` (issue #724). Without this, the "
             "final `Create GitHub Release` step fails with `Resource not "
-            "accessible by integration` because softprops/action-gh-release@v2 "
-            "calls the generate-release-notes API which requires the scope. "
-            "Every sign-and-release run then silently fails, macOS-signed "
-            "artifacts never land on the release, and the next release is a "
-            "ghost.",
+            "accessible by integration` while uploading appcast.xml. Every "
+            "sign-and-release run then silently fails and macOS-signed "
+            "artifacts never land on the release.",
         )
 
 

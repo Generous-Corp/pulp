@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Single-source-of-truth check for the Shipyard pin (D1).
+"""Single-source-of-truth check for the Shipyard pin.
 
 `tools/shipyard.toml` is the canonical pin used by
-`tools/install-shipyard.sh` and `shipyard pr`. Two release workflows
-(`.github/workflows/release-cli.yml` and `.github/workflows/post-tag-sync.yml`)
-also bake the version into a `SHIPYARD_VERSION` env value. Prior drift
-between those locations broke release-note generation (#719), and the
-fix at the time was "remember to update both".
+`tools/install-shipyard.sh` and `shipyard pr`. The post-tag changelog
+sync workflow also bakes the version into a `SHIPYARD_VERSION` env
+value. Prior drift between those locations caused local and tag-time
+Shipyard behavior to diverge.
 
 This script makes the drift mechanically impossible to ship by
 validating that every workflow's `SHIPYARD_VERSION` matches the pin in
@@ -21,12 +20,11 @@ Exits:
 
 The vacuous-pass case is gated by `REQUIRED_PIN_WORKFLOWS` — the
 explicit set of workflow filenames that MUST carry the pin. Regression
-coverage for #2131 ensures a silent removal of the env entry would
-otherwise let the script exit 0 even though the pin was no longer
-enforced anywhere. If a future refactor removes the pin from one of
-those workflows (e.g. replaces the inline env with a step that reads
-`tools/shipyard.toml` at runtime), update `REQUIRED_PIN_WORKFLOWS`
-in the same diff with a comment explaining why.
+coverage ensures a silent removal of the env entry would otherwise let
+the script exit 0 even though the pin was no longer enforced anywhere. If
+a workflow replaces the inline env with a step that reads
+`tools/shipyard.toml` at runtime, update `REQUIRED_PIN_WORKFLOWS` in the
+same diff with a comment explaining why.
 
 Pure stdlib; no third-party deps.
 """
@@ -43,13 +41,10 @@ PIN_FILE = REPO_ROOT / "tools" / "shipyard.toml"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
 # Workflows that MUST carry a `SHIPYARD_VERSION` env entry. The check
-# fails if any of these workflows exists but no longer declares the
-# pin — #2131 covers the silent-removal case as the exact class of
-# breakage this script is meant to prevent. A
-# legitimate switch to a runtime-read shape should update this tuple
-# in the same diff and document why.
+# fails if any of these workflows exists but no longer declares the pin.
+# A legitimate switch to a runtime-read shape should update this tuple in
+# the same diff and document why.
 REQUIRED_PIN_WORKFLOWS: tuple[str, ...] = (
-    "release-cli.yml",
     "post-tag-sync.yml",
 )
 
@@ -97,10 +92,9 @@ def main() -> int:
     pinned = read_pinned_version()
     workflow_versions = find_workflow_versions()
 
-    # Regression guard for #2131: a required workflow that EXISTS but no
-    # longer declares `SHIPYARD_VERSION` is the vacuous-pass case —
-    # the pin is no longer enforced anywhere, and the gate would
-    # otherwise go green. Fail loudly instead.
+    # Required workflows that exist but no longer declare
+    # `SHIPYARD_VERSION` would otherwise let the gate pass while the pin
+    # stopped being enforced.
     declared = {wf.name for wf, _ in workflow_versions}
     missing_required: list[str] = []
     for name in REQUIRED_PIN_WORKFLOWS:

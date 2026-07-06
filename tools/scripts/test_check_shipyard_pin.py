@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/scripts/check_shipyard_pin.py (D1).
+"""Tests for tools/scripts/check_shipyard_pin.py.
 
 Verifies that the workflow-pin-vs-shipyard.toml drift check exits
 correctly. Uses temp directories so the test doesn't depend on the
@@ -204,12 +204,7 @@ class ShipyardPinCheckTests(unittest.TestCase):
                 self.assertEqual(csp.main(), 0)
             self.assertIn("No workflows declare SHIPYARD_VERSION", stderr.getvalue())
 
-    def test_required_workflow_exists_but_missing_pin_is_failure(self) -> None:
-        """A required workflow that exists but no longer declares
-        SHIPYARD_VERSION must hard-fail (#2131). Otherwise
-        an accidental removal goes green and the pin is silently
-        unenforced everywhere. Override REQUIRED_PIN_WORKFLOWS in the
-        shim so the test uses our fixture filenames."""
+    def test_release_cli_can_omit_shipyard_pin(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             tmp = pathlib.Path(td)
@@ -219,8 +214,6 @@ class ShipyardPinCheckTests(unittest.TestCase):
             )
             wf = tmp / ".github" / "workflows"
             wf.mkdir(parents=True)
-            # release-cli.yml exists but has NO SHIPYARD_VERSION entry —
-            # vacuous-pass case the gate must catch.
             (wf / "release-cli.yml").write_text(
                 "name: release-cli\nenv:\n  OTHER: \"x\"\n",
                 encoding="utf-8",
@@ -230,8 +223,33 @@ class ShipyardPinCheckTests(unittest.TestCase):
                 encoding="utf-8",
             )
             r = run_check_in_fake_repo(tmp)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+
+    def test_required_workflow_exists_but_missing_pin_is_failure(self) -> None:
+        """A required workflow that exists but no longer declares
+        SHIPYARD_VERSION must hard-fail. Otherwise
+        an accidental removal goes green and the pin is silently
+        unenforced everywhere."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            (tmp / "tools").mkdir(parents=True)
+            (tmp / "tools" / "shipyard.toml").write_text(
+                'version = "v1.2.3"\n', encoding="utf-8",
+            )
+            wf = tmp / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "release-cli.yml").write_text(
+                "name: release-cli\nenv:\n  OTHER: \"x\"\n",
+                encoding="utf-8",
+            )
+            (wf / "post-tag-sync.yml").write_text(
+                "name: post-tag\nenv:\n  OTHER: \"x\"\n",
+                encoding="utf-8",
+            )
+            r = run_check_in_fake_repo(tmp)
             self.assertEqual(r.returncode, 1, msg=r.stderr)
-            self.assertIn("release-cli.yml", r.stderr)
+            self.assertIn("post-tag-sync.yml", r.stderr)
             self.assertIn("no SHIPYARD_VERSION declared", r.stderr)
 
 

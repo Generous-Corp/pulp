@@ -40,14 +40,6 @@ concurrency:
   group: release-cli-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # Pin shipyard to the same version post-tag-sync.yml uses so
-  # `shipyard changelog regenerate --release-notes` produces the
-  # same output as the hook that writes CHANGELOG.md. Must track
-  # tools/shipyard.toml to avoid split behavior between local flows
-  # and release-time jobs (PR #719).
-  SHIPYARD_VERSION: "0.68.0"
-
 jobs:
   # Resolve the macOS runner for the darwin-arm64 matrix legs.
   #
@@ -778,14 +770,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
+      issues: read
 
     steps:
       - uses: actions/checkout@v5
         with:
-          # regenerate_changelog.py --release-notes walks `git tag` +
-          # tag-to-tag ranges; default shallow checkout has no tags so
-          # the script falls back to "See CHANGELOG.md" and the release
-          # body loses its per-release content. (#265.)
+          # compose_release_notes.py walks tag-to-tag ranges, and
+          # GitHub's generated-notes endpoint needs the release tag in
+          # this checkout. A shallow checkout loses the per-release body.
           fetch-depth: 0
           fetch-tags: true
 
@@ -803,28 +795,33 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Install shipyard
-        # Pipe to bash, not sh — install.sh uses bashisms (shipyard 0.11
-        # fixed the earlier post-tag-sync.yml bug where /bin/sh (dash)
-        # rejected the script).
-        run: |
-          curl -fsSL https://generouscorp.com/Shipyard/install.sh \
-            | SHIPYARD_VERSION="$SHIPYARD_VERSION" bash
-
-      - name: Generate release notes
-        id: changelog
-        # Uses `shipyard changelog regenerate --release-notes` to build the
-        # same markdown shape as CHANGELOG.md itself, so the Releases page
-        # and CHANGELOG.md stay in sync (one generator, one source of
-        # truth — issue #262). Migrated from tools/scripts/regenerate_changelog.py
-        # (shipyard issue #53 + PR #73).
+      - name: Compose release highlights
+        id: highlights
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          NOTES=$(shipyard changelog regenerate --release-notes "$TAG" 2>/dev/null \
-              || echo "See [CHANGELOG.md](https://github.com/danielraffel/pulp/blob/main/CHANGELOG.md) for details.")
-          echo "notes<<CHANGELOG_EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "CHANGELOG_EOF" >> $GITHUB_OUTPUT
+          NOTES=$(python3 tools/scripts/compose_release_notes.py "$TAG" \
+            --github-repo "$GITHUB_REPOSITORY" \
+            --detect-github-labels)
+          echo "notes<<HIGHLIGHTS_EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "HIGHLIGHTS_EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Generate GitHub release notes
+        id: github_notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          NOTES=$(gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            --jq .body)
+          echo "notes<<GITHUB_NOTES_EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "GITHUB_NOTES_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -832,7 +829,11 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Pulp CLI ${{ steps.version.outputs.tag }}
           body: |
-            ${{ steps.changelog.outputs.notes }}
+            ${{ steps.highlights.outputs.notes }}
+
+            ---
+
+            ${{ steps.github_notes.outputs.notes }}
 
             ---
 
