@@ -680,6 +680,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             ctx.position_beats =
                 static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
         }
+        if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
+            const double seconds =
+                static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
+            ctx.position_samples = static_cast<int64_t>(
+                std::llround(seconds * ctx.sample_rate));
+        }
         if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
             ctx.time_sig_numerator = static_cast<int>(tr->tsig_num);
             ctx.time_sig_denominator = static_cast<int>(tr->tsig_denom);

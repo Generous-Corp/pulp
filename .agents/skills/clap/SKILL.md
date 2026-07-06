@@ -253,6 +253,27 @@ Serialisation goes through the single `StateStore::serialize()` /
 the Pulp binary blob — identical bytes across CLAP / VST3 / AU, so
 round-trip parity is trivial to test.
 
+### Transport context
+
+`clap_process()` maps `process->transport` into `ProcessContext` when
+the host supplies it:
+
+- `is_playing` / `is_recording` from the CLAP transport flags.
+- `tempo_bpm` only when `CLAP_TRANSPORT_HAS_TEMPO` is set.
+- `position_beats` from `song_pos_beats / CLAP_BEATTIME_FACTOR` when
+  `CLAP_TRANSPORT_HAS_BEATS_TIMELINE` is set.
+- `position_samples` from `song_pos_seconds / CLAP_SECTIME_FACTOR *
+  sample_rate` when `CLAP_TRANSPORT_HAS_SECONDS_TIMELINE` is set.
+  Leave it at 0 when the host omits the seconds timeline; deriving an
+  absolute sample position from beats + current tempo is not authoritative
+  in tempo-mapped projects and can create false transport jumps.
+- time signature, loop range, and bar from the matching CLAP fields.
+
+Keep `position_samples` non-zero when the host provides a seconds timeline;
+native-core processors forward it as `playhead_frames`, so leaving it at the
+default 0 makes CLAP-only playhead-sensitive processors think every block
+starts at the song origin.
+
 ### Editor
 
 Gated on `PULP_CLAP_GUI`; for desktop CLAP, both the shared

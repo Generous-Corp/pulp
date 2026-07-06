@@ -1666,9 +1666,12 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     transport.flags = CLAP_TRANSPORT_IS_PLAYING
                     | CLAP_TRANSPORT_HAS_TEMPO
                     | CLAP_TRANSPORT_HAS_BEATS_TIMELINE
+                    | CLAP_TRANSPORT_HAS_SECONDS_TIMELINE
                     | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
     transport.tempo = 132.25;
     transport.song_pos_beats = 25 * (CLAP_BEATTIME_FACTOR / 2);
+    transport.song_pos_seconds = static_cast<clap_sectime>(
+        2.25 * static_cast<double>(CLAP_SECTIME_FACTOR));
     transport.tsig_num = 7;
     transport.tsig_denom = 8;
 
@@ -1688,9 +1691,36 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     REQUIRE_FALSE(g_capturing->captured_context.is_maintenance_render());
     REQUIRE(g_capturing->captured_context.tempo_bpm == 132.25);
     REQUIRE(g_capturing->captured_context.position_beats == 12.5);
+    REQUIRE(g_capturing->captured_context.position_samples == 108000);
     REQUIRE(g_capturing->captured_context.time_sig_numerator == 7);
     REQUIRE(g_capturing->captured_context.time_sig_denominator == 8);
     REQUIRE(g_capturing->captured_context.num_samples == static_cast<int>(Harness::kFrames));
+}
+
+TEST_CASE("CLAP transport without seconds timeline leaves sample position unset",
+          "[clap][transport]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_HAS_TEMPO
+                    | CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+    transport.tempo = 120.0;
+    transport.song_pos_beats = 16 * CLAP_BEATTIME_FACTOR;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_capturing->captured_context.is_playing);
+    REQUIRE(g_capturing->captured_context.tempo_bpm == 120.0);
+    REQUIRE(g_capturing->captured_context.position_beats == 16.0);
+    REQUIRE(g_capturing->captured_context.position_samples == 0);
 }
 
 TEST_CASE("CLAP transport jumps request processor reset through ProcessContext",
