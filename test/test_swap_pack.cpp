@@ -130,6 +130,58 @@ TEST_CASE("swap-pack signature: a pack signed by the trusted key verifies end to
     REQUIRE(verify_swap_pack(root, m, kp->public_key).ok());   // sig + integrity
 }
 
+TEST_CASE("swap-pack manifest parses the policy fields", "[reload][swap-pack][policy]") {
+    std::string err;
+    auto m = parse_swap_pack_manifest(
+        R"({"id":"p","plugin_id":"q","pack_version":5,"pack_type":"ui-script",)"
+        R"("update_channel":"stable","min_host_version":8,)"
+        R"("capabilities":["filesystem","network"],)"
+        R"("files":[{"path":"ui.js","sha256":"ab","kind":"ui-script"}]})",
+        err);
+    REQUIRE(m.has_value());
+    REQUIRE(m->pack_version == 5u);
+    REQUIRE(m->pack_type == SwapPackKind::UiScript);
+    REQUIRE(m->update_channel == "stable");
+    REQUIRE(m->min_host_version == 8);
+    REQUIRE(m->declared_capabilities == std::vector<std::string>{"filesystem", "network"});
+    // Absent policy fields keep their safe defaults (older manifests still parse).
+    auto legacy = parse_swap_pack_manifest(
+        R"({"id":"p","plugin_id":"q","files":[{"path":"ui.js","sha256":"ab"}]})", err);
+    REQUIRE(legacy.has_value());
+    REQUIRE(legacy->pack_version == 0u);
+    REQUIRE(legacy->declared_capabilities.empty());
+}
+
+TEST_CASE("swap-pack signature: policy fields are bound (tampering any of them fails)",
+          "[reload][swap-pack][policy]") {
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    SwapPackManifest m;
+    m.id = "p"; m.plugin_id = "q";
+    m.files = {{"ui.js", hash_of("UI"), SwapPackKind::UiScript}};
+    m.pack_version = 3;
+    m.pack_type = SwapPackKind::UiScript;
+    m.update_channel = "stable";
+    m.min_host_version = 8;
+    m.declared_capabilities = {"filesystem", "network"};
+    sign_manifest(m, *kp);
+    REQUIRE(verify_swap_pack_signature(m, kp->public_key).ok());
+
+    // Every policy field is covered by the signature: mutating it without re-signing
+    // breaks verification. A CDN or installer cannot swap the version, kind, channel,
+    // host floor, or (critically) the granted capabilities under a still-valid sig.
+    auto rejects = [&](auto mutate) {
+        auto t = m; mutate(t);
+        return !verify_swap_pack_signature(t, kp->public_key).ok();
+    };
+    REQUIRE(rejects([](SwapPackManifest& t) { t.pack_version = 2; }));            // downgrade
+    REQUIRE(rejects([](SwapPackManifest& t) { t.pack_type = SwapPackKind::DspGraph; }));
+    REQUIRE(rejects([](SwapPackManifest& t) { t.update_channel = "beta"; }));
+    REQUIRE(rejects([](SwapPackManifest& t) { t.min_host_version = 1; }));
+    REQUIRE(rejects([](SwapPackManifest& t) { t.declared_capabilities = {"filesystem"}; }));
+    REQUIRE(rejects([](SwapPackManifest& t) { t.declared_capabilities.push_back("exec"); }));
+}
+
 TEST_CASE("swap-pack signature: an untrusted signer fails closed", "[reload][swap-pack][3.1]") {
     auto kp = pulp::runtime::ed25519_keypair_generate();
     auto other = pulp::runtime::ed25519_keypair_generate();

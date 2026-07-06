@@ -68,6 +68,15 @@ struct SwapPackManifest {
     std::string plugin_id;      ///< the plugin this pack targets
     int format_version = 1;
     std::vector<SwapPackFile> files;
+    // Policy fields. These are covered by the signature (see swap_pack_signed_message)
+    // so a CDN or installer cannot swap the declared capabilities, version, or kind
+    // while keeping a valid signature — the manifest is the single sanctioned place
+    // these are trusted from.
+    std::uint64_t pack_version = 0;               ///< monotonic; a loader rejects a downgrade
+    SwapPackKind pack_type = SwapPackKind::Unknown; ///< overall pack kind (gates delivery lanes)
+    std::vector<std::string> declared_capabilities; ///< capability names the UI is granted
+    std::string update_channel;                   ///< delivery channel (also namespaces revocation)
+    int min_host_version = 0;                     ///< minimum host ABI/app version that may load it
     std::vector<std::uint8_t> signer_public_key;  ///< 32 bytes (Ed25519), empty if unsigned
     std::vector<std::uint8_t> signature;          ///< 64 bytes (Ed25519 detached), empty if unsigned
 };
@@ -147,6 +156,21 @@ inline std::optional<SwapPackManifest> parse_swap_pack_manifest(std::string_view
                           : SwapPackKind::Unknown;
             m.files.push_back(std::move(pf));
         }
+        // Policy fields. All optional with safe defaults so an older manifest still
+        // parses; whatever is present is bound into the signed message below.
+        if (v.hasObjectMember("pack_version") && v["pack_version"].isInt())
+            m.pack_version = static_cast<std::uint64_t>(v["pack_version"].getInt64());
+        if (v.hasObjectMember("pack_type") && v["pack_type"].isString())
+            m.pack_type = swap_pack_kind_from_string(v["pack_type"].getString());
+        if (v.hasObjectMember("update_channel") && v["update_channel"].isString())
+            m.update_channel = v["update_channel"].getString();
+        if (v.hasObjectMember("min_host_version") && v["min_host_version"].isInt())
+            m.min_host_version = static_cast<int>(v["min_host_version"].getInt64());
+        if (v.hasObjectMember("capabilities") && v["capabilities"].isArray()) {
+            const auto& caps = v["capabilities"];
+            for (uint32_t i = 0; i < caps.size(); ++i)
+                if (caps[i].isString()) m.declared_capabilities.emplace_back(caps[i].getString());
+        }
         // Optional signature fields (hex). Absent → unsigned manifest (empty
         // vectors); a malformed hex string is left empty so verification fails
         // closed rather than parsing to garbage bytes.
@@ -213,10 +237,22 @@ inline std::vector<std::uint8_t> swap_pack_signed_message(const SwapPackManifest
         put_u32(static_cast<std::uint32_t>(s.size()));
         out.insert(out.end(), s.begin(), s.end());
     };
-    put_field("pulp-swap-pack-v1");
+    auto put_u64 = [&out](std::uint64_t n) {
+        for (int i = 0; i < 8; ++i) out.push_back(static_cast<std::uint8_t>((n >> (8 * i)) & 0xFF));
+    };
+    // v2 binds the policy fields (version, kind, capabilities, channel, min-host)
+    // into the signature so a CDN/installer cannot alter them while keeping a valid
+    // signature. The tag bump also means a v1 signature can never verify as v2.
+    put_field("pulp-swap-pack-v2");
     put_field(m.id);
     put_field(m.plugin_id);
     put_u32(static_cast<std::uint32_t>(m.format_version));
+    put_u64(m.pack_version);
+    put_field(swap_pack_kind_to_string(m.pack_type));
+    put_field(m.update_channel);
+    put_u32(static_cast<std::uint32_t>(m.min_host_version));
+    put_u32(static_cast<std::uint32_t>(m.declared_capabilities.size()));  // bind the count
+    for (const auto& c : m.declared_capabilities) put_field(c);
     put_u32(static_cast<std::uint32_t>(m.files.size()));   // bind the file count
     for (const auto& f : m.files) {
         put_field(f.path);
