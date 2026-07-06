@@ -184,11 +184,27 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                 me.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(
                     event.modifierFlags);
                 me.is_down = true;
+                me.phase = pulp::view::MousePhase::press;
                 me.click_count = static_cast<int>(event.clickCount);
             })) {
         *drag_target = combo;
         return;
     }
+
+    pulp::view::MouseEvent gesture_event;
+    gesture_event.position = pt;
+    gesture_event.window_position = pt;
+    gesture_event.button = pulp::view::MouseButton::left;
+    gesture_event.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(
+        event.modifierFlags);
+    gesture_event.is_down = true;
+    gesture_event.phase = pulp::view::MousePhase::press;
+    gesture_event.click_count = static_cast<int>(event.clickCount);
+    if (root->dispatch_gesture_pointer_event(gesture_event)) {
+        *drag_target = nullptr;
+        return;
+    }
+
     *drag_target = root->hit_test(pt);
     pulp::view::ComboBox::notify_global_click(*drag_target);
     if (!*drag_target) return;
@@ -251,6 +267,7 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     me.button = pulp::view::MouseButton::left;
     me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
     me.is_down = true;
+    me.phase = pulp::view::MousePhase::press;
     me.click_count = static_cast<int>(event.clickCount);
     (*drag_target)->on_mouse_event(me);
     (*drag_target)->on_mouse_down(local);
@@ -272,7 +289,16 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, pulp::view::Point pt,
                             pulp::view::View** drag_target) {
   try {
     using namespace pulp::view::mac_geometry;
-    if (!*drag_target || !root) return;
+    if (!root) return;
+    pulp::view::MouseEvent gesture_event;
+    gesture_event.position = pt;
+    gesture_event.window_position = pt;
+    gesture_event.button = pulp::view::MouseButton::left;
+    gesture_event.is_down = true;
+    gesture_event.phase = pulp::view::MousePhase::drag;
+    if (root->dispatch_gesture_pointer_event(gesture_event))
+        return;
+    if (!*drag_target) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
     auto local = to_local(pt, *drag_target, root);
     (*drag_target)->on_mouse_drag(local);
@@ -292,7 +318,20 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
                           pulp::view::Point pt, pulp::view::View** drag_target) {
   try {
     using namespace pulp::view::mac_geometry;
-    if (!*drag_target || !root) return;
+    if (!root) return;
+    pulp::view::MouseEvent gesture_event;
+    gesture_event.position = pt;
+    gesture_event.window_position = pt;
+    gesture_event.button = pulp::view::MouseButton::left;
+    gesture_event.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+    gesture_event.is_down = false;
+    gesture_event.phase = pulp::view::MousePhase::release;
+    gesture_event.click_count = static_cast<int>(event.clickCount);
+    if (root->dispatch_gesture_pointer_event(gesture_event)) {
+        *drag_target = nullptr;
+        return;
+    }
+    if (!*drag_target) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
     auto local = to_local(pt, *drag_target, root);
     auto* released = root->hit_test(pt);
@@ -307,6 +346,7 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     up.button = pulp::view::MouseButton::left;
     up.modifiers = modifiers_from_ns_flags(event.modifierFlags);
     up.is_down = false;
+    up.phase = pulp::view::MousePhase::release;
     up.click_count = static_cast<int>(event.clickCount);
     (*drag_target)->on_mouse_event(up);
     for (auto* b = (*drag_target)->parent(); b; b = b->parent()) {
@@ -1223,6 +1263,7 @@ public:
                 // shared state, so leaving it set after teardown is harmless
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
+                self->root_.advance_gesture_recognizers();
                 advance_widget_animations(&self->root_, 1.0f / 60.0f);
                 if (self->view_ && pulp::view::needs_continuous_frames(&self->root_))
                     [self->view_ setNeedsDisplay:YES];
@@ -2129,6 +2170,7 @@ private:
                         return;
                     }
                     self->frame_clock_.tick(1.0f / 60.0f);
+                    self->root_.advance_gesture_recognizers();
                     advance_widget_animations(&self->root_, 1.0f / 60.0f);
                     if (animate || tick_subscribers) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);

@@ -57,6 +57,9 @@ pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
 # ViewSize::aspect_ratio field
 pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
 
+# Declarative gesture recognizers and arbiter state.
+pulp_add_test_suite(pulp-test-gesture-recognizer LIBRARIES pulp::view)
+
 # WindowHost::set_design_viewport pure-math
 # coverage. Locks down the scale + letterbox transform that the mac
 # GPU host (and any other future platform host) uses to fit

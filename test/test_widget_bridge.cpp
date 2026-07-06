@@ -1617,6 +1617,133 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
     REQUIRE(engine.evaluate("shortcut_count").getWithDefault<int>(0) == 1);
 }
 
+TEST_CASE("WidgetBridge native gesture recognizers dispatch real pointer positions",
+          "[view][bridge][events]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var tap_client_x = -1;
+        var tap_offset_x = -1;
+        var tap_count = 0;
+        var long_client_x = -1;
+        var long_offset_x = -1;
+
+        createLabel('surface', 'Surface', '');
+        on('surface', 'tap', function(e) {
+            tap_client_x = e.clientX;
+            tap_offset_x = e.offsetX;
+            tap_count = e.tapCount;
+        });
+        on('surface', 'longpress', function(e) {
+            long_client_x = e.clientX;
+            long_offset_x = e.offsetX;
+        });
+        registerTapGesture('surface');
+        registerLongPressGesture('surface');
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    surface->set_bounds({10, 20, 100, 80});
+
+    MouseEvent down{};
+    down.phase = MousePhase::press;
+    down.is_down = true;
+    down.button = MouseButton::left;
+    down.position = {42.0f, 64.0f};
+    down.window_position = down.position;
+    REQUIRE(root.dispatch_gesture_pointer_event(down, 0.10));
+
+    MouseEvent up = down;
+    up.phase = MousePhase::release;
+    up.is_down = false;
+    REQUIRE(root.dispatch_gesture_pointer_event(up, 0.15));
+
+    REQUIRE_THAT(engine.evaluate("tap_client_x").getWithDefault<double>(0.0),
+                 WithinAbs(42.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("tap_offset_x").getWithDefault<double>(0.0),
+                 WithinAbs(32.0, 0.001));
+    REQUIRE(engine.evaluate("tap_count").getWithDefault<int>(0) == 1);
+
+    down.pointer_id = 7;
+    down.position = {55.0f, 70.0f};
+    down.window_position = down.position;
+    REQUIRE(root.dispatch_gesture_pointer_event(down, 1.00));
+    root.advance_gesture_recognizers(1.60);
+
+    REQUIRE_THAT(engine.evaluate("long_client_x").getWithDefault<double>(0.0),
+                 WithinAbs(55.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("long_offset_x").getWithDefault<double>(0.0),
+                 WithinAbs(45.0, 0.001));
+}
+
+TEST_CASE("WidgetBridge remounts native event registrations for reused widget ids",
+          "[view][bridge][events][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var pointer_downs = 0;
+        var wheel_events = 0;
+        var taps = 0;
+        function installSurfaceCallbacks() {
+            on('surface', 'pointerdown', function() { pointer_downs += 1; });
+            on('surface', 'wheel', function() { wheel_events += 1; });
+            on('surface', 'tap', function() { taps += 1; });
+        }
+
+        createLabel('surface', 'Surface', '');
+        installSurfaceCallbacks();
+        registerPointer('surface');
+        registerWheel('surface');
+        registerTapGesture('surface');
+
+        removeWidget('surface');
+
+        createLabel('surface', 'Surface again', '');
+        installSurfaceCallbacks();
+        registerPointer('surface');
+        registerWheel('surface');
+        registerTapGesture('surface');
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    surface->set_bounds({10, 20, 100, 80});
+    REQUIRE(surface->gesture_recognizer_count() == 1);
+
+    MouseEvent down{};
+    down.phase = MousePhase::press;
+    down.is_down = true;
+    down.button = MouseButton::left;
+    down.position = {42.0f, 64.0f};
+    down.window_position = down.position;
+    surface->on_mouse_event(down);
+    REQUIRE(engine.evaluate("pointer_downs").getWithDefault<int>(0) == 1);
+
+    MouseEvent wheel{};
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = -3.0f;
+    wheel.position = {42.0f, 64.0f};
+    wheel.window_position = wheel.position;
+    surface->on_mouse_event(wheel);
+    REQUIRE(engine.evaluate("wheel_events").getWithDefault<int>(0) == 1);
+
+    REQUIRE(root.dispatch_gesture_pointer_event(down, 0.10));
+    MouseEvent up = down;
+    up.phase = MousePhase::release;
+    up.is_down = false;
+    REQUIRE(root.dispatch_gesture_pointer_event(up, 0.15));
+    REQUIRE(engine.evaluate("taps").getWithDefault<int>(0) == 1);
+}
+
 TEST_CASE("WidgetBridge style and layout setters update native view state",
           "[view][bridge][style][layout]") {
     ScriptEngine engine;

@@ -159,7 +159,12 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 )
             }
             MotionEvent.ACTION_CANCEL -> {
-                nativeOnTouchCancel()
+                for (i in 0 until event.pointerCount) {
+                    nativeOnTouchCancel(
+                        event.getPointerId(i),
+                        event.getX(i), event.getY(i)
+                    )
+                }
             }
         }
         return true
@@ -303,7 +308,7 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private external fun nativeOnTouchDown(pointerId: Int, x: Float, y: Float, pressure: Float)
     private external fun nativeOnTouchMove(pointerId: Int, x: Float, y: Float, pressure: Float)
     private external fun nativeOnTouchUp(pointerId: Int, x: Float, y: Float)
-    private external fun nativeOnTouchCancel()
+    private external fun nativeOnTouchCancel(pointerId: Int, x: Float, y: Float)
 
     // File drop — absolute cache-file paths resolved from the drag's ClipData
     private external fun nativeOnDrop(paths: Array<String>, x: Float, y: Float)

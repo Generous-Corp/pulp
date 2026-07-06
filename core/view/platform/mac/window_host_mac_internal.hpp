@@ -96,6 +96,13 @@ bool clip_child_view_in_host(NSView* container,
 // Translate an NSEvent modifier-flags mask into Pulp's kMod* bitmask.
 uint16_t modifiers_from_ns_flags(NSEventModifierFlags flags);
 
+// Build a root-space mouse event and let the gesture arbiter consume it first.
+bool dispatch_mac_gesture_pointer_event(pulp::view::View* root,
+                                        pulp::view::Point pt,
+                                        NSEvent* event,
+                                        pulp::view::MousePhase phase,
+                                        bool is_down);
+
 // Convert window-space `pos` into `target`'s local-pre-scale coordinates,
 // peeling off each ancestor's set_scale transform. `root` bounds the walk.
 pulp::view::Point to_local(pulp::view::Point pos,

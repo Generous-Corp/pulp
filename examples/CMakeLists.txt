@@ -92,6 +92,9 @@ add_subdirectory(faust-tremolo)
 # ViewBridge demo: custom create_view() + secondary-view attach
 add_subdirectory(view-bridge-demo)
 
+# Touch gesture recognizer proof: arbiter-first pan, pinch, and nested scroll.
+add_subdirectory(gesture-touch-demo)
+
 # Live Audio Inspector harness: run_with_editor plus steady output tone.
 if(NOT IOS)
     add_subdirectory(audio-inspector-demo)

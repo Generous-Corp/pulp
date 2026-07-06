@@ -3,6 +3,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
 
+#include <pulp/view/gesture.hpp>
 #include <pulp/platform/popup_menu.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -46,6 +47,32 @@ void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
     } catch (...) {
         std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
     }
+}
+
+Point local_to_root(const View* view, Point point) {
+    for (auto* cur = view; cur; cur = cur->parent()) {
+        point.x += cur->bounds().x;
+        point.y += cur->bounds().y;
+    }
+    return point;
+}
+
+std::string point_payload(const View* owner, Point local) {
+    const Point root = local_to_root(owner, local);
+    return "clientX:" + std::to_string(root.x) + "," +
+           "clientY:" + std::to_string(root.y) + "," +
+           "offsetX:" + std::to_string(local.x) + "," +
+           "offsetY:" + std::to_string(local.y);
+}
+
+void dispatch_gesture_js(const std::shared_ptr<std::atomic<bool>>& alive,
+                         ScriptEngine* engine,
+                         const std::string& id,
+                         const std::string& event_name,
+                         const std::string& data) {
+    safe_dispatch_eval(alive, engine,
+        "__dispatch__('" + id + "', '" + event_name + "', {" + data + "})",
+        "recognizer gesture");
 }
 
 } // namespace
@@ -268,6 +295,199 @@ void WidgetBridge::register_pointer_event_api() {
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "gesture");
             };
         }
+        return choc::value::Value();
+    });
+
+    auto add_recognizer_once = [this](
+            const std::string& id,
+            const std::string& key,
+            std::unique_ptr<GestureRecognizer> recognizer) {
+        if (!recognizer) return;
+        auto it = widgets_.find(id);
+        if (it == widgets_.end() || !it->second)
+            return;
+        const std::string gate = id + ":" + key;
+        if (!gesture_recognizer_registered_.insert(gate).second)
+            return;
+        it->second->add_gesture_recognizer(std::move(recognizer));
+    };
+
+    auto allow_pinch_rotate_simultaneous = [this](const std::string& id) {
+        auto it = widgets_.find(id);
+        if (it == widgets_.end() || !it->second) return;
+        PinchRecognizer* pinch = nullptr;
+        RotateRecognizer* rotate = nullptr;
+        const size_t count = it->second->gesture_recognizer_count();
+        for (size_t i = 0; i < count; ++i) {
+            auto* recognizer = it->second->gesture_recognizer_at(i);
+            if (!recognizer) continue;
+            if (!pinch) pinch = dynamic_cast<PinchRecognizer*>(recognizer);
+            if (!rotate) rotate = dynamic_cast<RotateRecognizer*>(recognizer);
+        }
+        if (pinch && rotate)
+            pinch->allow_simultaneous_with(*rotate);
+    };
+
+    register_bridge_function(api, "registerTapGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto tap = std::make_unique<TapRecognizer>(1);
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        tap->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            auto& tap_ref = static_cast<TapRecognizer&>(recognizer);
+            dispatch_gesture_js(alive, engine, id, "tap",
+                point_payload(recognizer.owner(), tap_ref.position()) + ",tapCount:1");
+        };
+        add_recognizer_once(id, "tap", std::move(tap));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "registerDoubleTapGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto tap = std::make_unique<TapRecognizer>(2);
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        tap->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            auto& tap_ref = static_cast<TapRecognizer&>(recognizer);
+            dispatch_gesture_js(alive, engine, id, "doubletap",
+                point_payload(recognizer.owner(), tap_ref.position()) + ",tapCount:2");
+        };
+        add_recognizer_once(id, "doubletap", std::move(tap));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "registerLongPressGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto long_press = std::make_unique<LongPressRecognizer>();
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        long_press->on_began = [alive, engine, id](GestureRecognizer& recognizer) {
+            auto& long_press_ref = static_cast<LongPressRecognizer&>(recognizer);
+            dispatch_gesture_js(alive, engine, id, "longpress",
+                point_payload(recognizer.owner(), long_press_ref.position()));
+        };
+        add_recognizer_once(id, "longpress", std::move(long_press));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "registerPanGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto pan = std::make_unique<PanRecognizer>();
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        auto dispatch_pan = [alive, engine, id](const char* event_name,
+                                                GestureRecognizer& recognizer) {
+            auto& pan_ref = static_cast<PanRecognizer&>(recognizer);
+            const auto t = pan_ref.translation();
+            const auto v = pan_ref.velocity();
+            dispatch_gesture_js(alive, engine, id, event_name,
+                "translationX:" + std::to_string(t.x) + "," +
+                "translationY:" + std::to_string(t.y) + "," +
+                "velocityX:" + std::to_string(v.x) + "," +
+                "velocityY:" + std::to_string(v.y));
+        };
+        pan->on_began = [dispatch_pan](GestureRecognizer& recognizer) {
+            dispatch_pan("panstart", recognizer);
+        };
+        pan->on_changed = [dispatch_pan](GestureRecognizer& recognizer) {
+            dispatch_pan("panchange", recognizer);
+        };
+        pan->on_ended = [dispatch_pan](GestureRecognizer& recognizer) {
+            dispatch_pan("panend", recognizer);
+        };
+        add_recognizer_once(id, "pan", std::move(pan));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "registerSwipeGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto swipe = std::make_unique<SwipeRecognizer>();
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        swipe->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            auto& swipe_ref = static_cast<SwipeRecognizer&>(recognizer);
+            const auto t = swipe_ref.translation();
+            const auto v = swipe_ref.velocity();
+            dispatch_gesture_js(alive, engine, id, "swipe",
+                "translationX:" + std::to_string(t.x) + "," +
+                "translationY:" + std::to_string(t.y) + "," +
+                "velocityX:" + std::to_string(v.x) + "," +
+                "velocityY:" + std::to_string(v.y));
+        };
+        add_recognizer_once(id, "swipe", std::move(swipe));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "registerFlingGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto fling = std::make_unique<FlingRecognizer>();
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        fling->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            auto& fling_ref = static_cast<FlingRecognizer&>(recognizer);
+            const auto t = fling_ref.translation();
+            const auto v = fling_ref.velocity();
+            dispatch_gesture_js(alive, engine, id, "fling",
+                "translationX:" + std::to_string(t.x) + "," +
+                "translationY:" + std::to_string(t.y) + "," +
+                "velocityX:" + std::to_string(v.x) + "," +
+                "velocityY:" + std::to_string(v.y));
+        };
+        add_recognizer_once(id, "fling", std::move(fling));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "registerPinchGesture", [this, add_recognizer_once, allow_pinch_rotate_simultaneous](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto pinch = std::make_unique<PinchRecognizer>();
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        auto dispatch_pinch = [alive, engine, id](const char* event_name,
+                                                  GestureRecognizer& recognizer) {
+            auto& pinch_ref = static_cast<PinchRecognizer&>(recognizer);
+            dispatch_gesture_js(alive, engine, id, event_name,
+                point_payload(recognizer.owner(), pinch_ref.center()) + "," +
+                "scale:" + std::to_string(pinch_ref.scale()) + "," +
+                "deltaScale:" + std::to_string(pinch_ref.delta_scale()));
+        };
+        pinch->on_began = [dispatch_pinch](GestureRecognizer& recognizer) {
+            dispatch_pinch("pinchstart", recognizer);
+        };
+        pinch->on_changed = [dispatch_pinch](GestureRecognizer& recognizer) {
+            dispatch_pinch("pinchchange", recognizer);
+        };
+        pinch->on_ended = [dispatch_pinch](GestureRecognizer& recognizer) {
+            dispatch_pinch("pinchend", recognizer);
+        };
+        add_recognizer_once(id, "pinch", std::move(pinch));
+        allow_pinch_rotate_simultaneous(id);
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "registerRotateGesture", [this, add_recognizer_once, allow_pinch_rotate_simultaneous](choc::javascript::ArgumentList args) mutable {
+        auto id = args.get<std::string>(0, "");
+        auto rotate = std::make_unique<RotateRecognizer>();
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        auto dispatch_rotate = [alive, engine, id](const char* event_name,
+                                                   GestureRecognizer& recognizer) {
+            auto& rotate_ref = static_cast<RotateRecognizer&>(recognizer);
+            dispatch_gesture_js(alive, engine, id, event_name,
+                point_payload(recognizer.owner(), rotate_ref.center()) + "," +
+                "rotation:" + std::to_string(rotate_ref.rotation()) + "," +
+                "deltaRotation:" + std::to_string(rotate_ref.delta_rotation()));
+        };
+        rotate->on_began = [dispatch_rotate](GestureRecognizer& recognizer) {
+            dispatch_rotate("rotatestart", recognizer);
+        };
+        rotate->on_changed = [dispatch_rotate](GestureRecognizer& recognizer) {
+            dispatch_rotate("rotatechange", recognizer);
+        };
+        rotate->on_ended = [dispatch_rotate](GestureRecognizer& recognizer) {
+            dispatch_rotate("rotateend", recognizer);
+        };
+        add_recognizer_once(id, "rotate", std::move(rotate));
+        allow_pinch_rotate_simultaneous(id);
         return choc::value::Value();
     });
 

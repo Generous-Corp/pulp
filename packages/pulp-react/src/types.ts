@@ -7,6 +7,7 @@
 // name when you need to dig deeper.
 
 import type { ReactNode, Key } from 'react';
+import type { SyntheticEvent } from './synthetic-event.js';
 
 // ── Flex / layout ───────────────────────────────────────────────────
 // One prop per setFlex(id, key, value) key. Pulp's setFlex covers the
@@ -357,7 +358,27 @@ export interface BoxShadow {
 }
 
 // ── Common base props ──────────────────────────────────────────────
-export interface BaseProps extends FlexProps, StyleProps {
+export interface GestureProps {
+    onTap?: (event: SyntheticEvent) => void;
+    onDoubleTap?: (event: SyntheticEvent) => void;
+    onLongPress?: (event: SyntheticEvent) => void;
+    onPan?: (event: SyntheticEvent) => void;
+    onPanStart?: (event: SyntheticEvent) => void;
+    onPanChange?: (event: SyntheticEvent) => void;
+    onPanEnd?: (event: SyntheticEvent) => void;
+    onSwipe?: (event: SyntheticEvent) => void;
+    onFling?: (event: SyntheticEvent) => void;
+    onPinch?: (event: SyntheticEvent) => void;
+    onPinchStart?: (event: SyntheticEvent) => void;
+    onPinchChange?: (event: SyntheticEvent) => void;
+    onPinchEnd?: (event: SyntheticEvent) => void;
+    onRotate?: (event: SyntheticEvent) => void;
+    onRotateStart?: (event: SyntheticEvent) => void;
+    onRotateChange?: (event: SyntheticEvent) => void;
+    onRotateEnd?: (event: SyntheticEvent) => void;
+}
+
+export interface BaseProps extends FlexProps, StyleProps, GestureProps {
     /// Optional explicit ID. If omitted, an auto-incrementing ID is
     /// generated. Useful for testing + debugging the bridge log.
     id?: string;

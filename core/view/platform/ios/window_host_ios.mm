@@ -8,6 +8,7 @@
 
 #include <pulp/canvas/cg_canvas.hpp>
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #include <atomic>
 #include <memory>
 #include <unordered_map>
@@ -41,6 +42,7 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     std::unordered_map<void*, int> _touchIdMap;
     int _nextTouchId;
     NSArray<UIAccessibilityElement *>* _cachedAccessibilityElements;
+    CADisplayLink* _gestureDisplayLink;
 }
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, copy) void (^onResize)(float, float);
@@ -56,9 +58,16 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
         self.contentMode = UIViewContentModeRedraw;
         _nextTouchId = 0;
         _cachedAccessibilityElements = nil;
+        _gestureDisplayLink = nil;
         [self setupHoverIfAvailable];
     }
     return self;
+}
+
+- (void)dealloc {
+    [_gestureDisplayLink invalidate];
+    _gestureDisplayLink = nil;
+    [super dealloc];
 }
 
 - (int)stableIdForTouch:(UITouch*)touch {
@@ -125,6 +134,34 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     }
 }
 
+- (void)syncGestureDisplayLink {
+    const bool wants_frames =
+        self.rootView && self.rootView->has_time_driven_gestures();
+    if (wants_frames) {
+        if (_gestureDisplayLink) return;
+        _gestureDisplayLink = [CADisplayLink displayLinkWithTarget:self
+                                                           selector:@selector(gestureDisplayLinkTick:)];
+        [_gestureDisplayLink addToRunLoop:[NSRunLoop mainRunLoop]
+                                   forMode:NSRunLoopCommonModes];
+        return;
+    }
+    if (_gestureDisplayLink) {
+        [_gestureDisplayLink invalidate];
+        _gestureDisplayLink = nil;
+    }
+}
+
+- (void)gestureDisplayLinkTick:(CADisplayLink*)link {
+    (void)link;
+    if (!self.rootView) {
+        [self syncGestureDisplayLink];
+        return;
+    }
+    self.rootView->advance_gesture_recognizers();
+    [self setNeedsDisplay];
+    [self syncGestureDisplayLink];
+}
+
 // ── Touch events ────────────────────────────────────────────────────────────
 
 - (pulp::view::MouseEvent)mouseEventFromTouch:(UITouch*)touch isDown:(BOOL)isDown {
@@ -155,6 +192,12 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     if (!self.rootView) return;
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:YES];
+        me.phase = pulp::view::MousePhase::press;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_down(me.position);
     }
 }
@@ -163,6 +206,12 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     if (!self.rootView) return;
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:YES];
+        me.phase = pulp::view::MousePhase::drag;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_drag(me.position);
     }
 }
@@ -171,6 +220,13 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     if (!self.rootView) return;
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:NO];
+        me.phase = pulp::view::MousePhase::release;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self removeTouchId:touch];
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_up(me.position);
         [self removeTouchId:touch];
     }
@@ -181,6 +237,13 @@ static pulp::events::MainThreadDispatcher::Backend make_uikit_main_thread_backen
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:NO];
         me.is_cancelled = true;
+        me.phase = pulp::view::MousePhase::release;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self removeTouchId:touch];
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_cancel(me.position);
         [self removeTouchId:touch];
     }
@@ -478,6 +541,10 @@ public:
             idle_callback_();
             if (!alive_token || !alive_token->load(std::memory_order_acquire))
                 return;
+        }
+        if (root_.has_time_driven_gestures()) {
+            root_.advance_gesture_recognizers();
+            needs_repaint_.store(true, std::memory_order_relaxed);
         }
         if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {
             render_frame();
