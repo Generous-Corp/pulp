@@ -15,14 +15,14 @@ if(NOT SKIA_DIR)
     # Default: look in external/skia-build or SKIA_DIR env var
     if(DEFINED ENV{SKIA_DIR})
         set(SKIA_DIR $ENV{SKIA_DIR})
-    elseif(EXISTS "${CMAKE_SOURCE_DIR}/external/skia-build")
-        set(SKIA_DIR "${CMAKE_SOURCE_DIR}/external/skia-build")
+    elseif(EXISTS "${PULP_ROOT_DIR}/external/skia-build")
+        set(SKIA_DIR "${PULP_ROOT_DIR}/external/skia-build")
     endif()
 endif()
 
 # Convert to absolute path
 if(SKIA_DIR AND NOT IS_ABSOLUTE "${SKIA_DIR}")
-    set(SKIA_DIR "${CMAKE_SOURCE_DIR}/${SKIA_DIR}")
+    set(SKIA_DIR "${PULP_ROOT_DIR}/${SKIA_DIR}")
 endif()
 
 if(NOT SKIA_DIR)

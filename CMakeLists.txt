@@ -1,11 +1,21 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.568.0
+    VERSION 0.569.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
 )
+
+# Pulp's own source-tree root. Use this — NOT CMAKE_SOURCE_DIR — when referencing
+# Pulp's own files (tools/cmake helpers, external SDKs, bundled fonts, git dir).
+# CMAKE_SOURCE_DIR is the *top-level* project's dir, which is Pulp only when Pulp
+# is the top-level build; when Pulp is consumed via add_subdirectory() (e.g. a
+# plugin repo vendoring Pulp as a submodule) CMAKE_SOURCE_DIR is the CONSUMER's
+# root and those paths don't exist. PULP_ROOT_DIR always resolves to this file's
+# directory in both cases. (The find_package(Pulp) path instead keys off
+# CMAKE_CURRENT_LIST_DIR in the installed helpers.)
+set(PULP_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "Pulp source tree root")
 
 # ── C++20 Standard ──────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)
@@ -232,6 +242,9 @@ endif()
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
+# After core/render so the GPU convolver node can link pulp::render when GPU is
+# enabled. The transport itself is GPU-agnostic and builds regardless.
+add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
 add_subdirectory(core/osc)
 add_subdirectory(core/native-components)
@@ -277,7 +290,10 @@ if(PULP_ENABLE_GPU AND NOT ANDROID)
     add_subdirectory(inspect)
 endif()
 add_subdirectory(ship)
-add_subdirectory(tools/audio)
+# tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/audio)
+endif()
 
 # ── Testing ─────────────────────────────────────────────────────────────────
 # Tests are not built on iOS or Android — they assume a desktop POSIX shell,
@@ -324,7 +340,7 @@ include(PulpUtils)
 # GPU guard, PULP_ENABLE_GPU=OFF builds (sanitizer matrix in
 # .github/workflows/sanitizers.yml) fail at CMake configure with
 # "Target ... links to pulp::inspect but the target was not found".
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()
 
@@ -340,31 +356,41 @@ endif()
 # cargo happens to be on PATH, introducing unrelated Rust-toolchain
 # / network failures (and minutes of cargo build time) in lanes that
 # intentionally disable the CLI/GPU paths.
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU
+# PROJECT_IS_TOP_LEVEL: Pulp's own experimental CLI builds only when Pulp is the
+# top-level project. A consumer that vendors Pulp via add_subdirectory() wants the
+# libraries + pulp_add_plugin(), not Pulp's dev CLIs.
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
     add_subdirectory(experimental/pulp-rs)
 endif()
 
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
-if(NOT ANDROID AND NOT IOS)
+# Dev tools below build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
+if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
 endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────
-add_subdirectory(tools/screenshot)
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/screenshot)
+endif()
 
 # ── Out-of-process plugin scan worker ─────────────────────────────────────
-if(NOT IOS AND NOT ANDROID)
+if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/scan-worker)
 endif()
 
 # ── Design Tool ───────────────────────────────────────────────────────────
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/design/CMakeLists.txt)
+if(PROJECT_IS_TOP_LEVEL AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/design/CMakeLists.txt)
     add_subdirectory(tools/design)
 endif()
 
 # ── Import Design Tool ────────────────────────────────────────────────────
-add_subdirectory(tools/import-design)
+# Dev tool — only when Pulp is the top-level project (see PROJECT_IS_TOP_LEVEL
+# note above); an embedding consumer doesn't build Pulp's authoring CLIs.
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/import-design)
+endif()
 
 # ── Python Bindings ────────────────────────────────────────────────────────
 option(PULP_BUILD_PYTHON "Build Python bindings via pybind11" OFF)
@@ -404,7 +430,7 @@ if(ANDROID)
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
     target_include_directories(pulp-jni PRIVATE
-        ${CMAKE_SOURCE_DIR}/core/platform/include
+        ${PULP_ROOT_DIR}/core/platform/include
     )
     target_link_libraries(pulp-jni PRIVATE
         pulp::platform
@@ -497,7 +523,7 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
         set(${out_var} "${_acc}" PARENT_SCOPE)
     endfunction()
 
-    _pulp_collect_executables_recursive(_all_executables "${CMAKE_SOURCE_DIR}")
+    _pulp_collect_executables_recursive(_all_executables "${PULP_ROOT_DIR}")
     foreach(_exec ${_all_executables})
         pulp_link_fontconfig_after_skia(${_exec})
     endforeach()

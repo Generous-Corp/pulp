@@ -156,6 +156,31 @@ Full recipe (macOS framework + stub .appex + container .app, signing,
 notarization, PlugInKit diagnostics) is in
 `.agents/skills/auv3/SKILL.md → "macOS AU v3 packaging"`.
 
+### AU v3 teardown must ALSO run on the main thread
+
+The same off-main hazard applies to `-dealloc`. A GPU-backed
+`PluginViewHost` owns a `CVDisplayLink` whose idle pump
+(`make_scripted_idle_pump`) is `dispatch_async`'d to the **main queue**
+and dereferences the `ViewBridge`. If the last controller release lands
+on the XPC connection queue (it can — `createAudioUnit…` and the rebuild
+bounce arrive off-main), destroying the host + bridge off-main races a
+main-queue idle block already past its `alive` liveness check → the pump
+touches a freed bridge (SIGSEGV in `display_link_callback`). This is the
+same use-after-free the AU v2 Cocoa view fixed by serializing teardown.
+Both AU v3 `dealloc`s (`au_view_controller_mac.mm`,
+`au_view_controller_ios.mm`) reset `_viewHost` on the main thread first
+(`[NSThread isMainThread] ? reset : dispatch_sync(main, reset)`) — that
+flips the host's liveness token and stops the display link before any
+freeing — then let the remaining ivars destroy in the documented
+reverse-declaration order. **Don't** remove the main-thread reset, and
+**don't** instead try to clear `idle_callback_` from the off-main
+`dealloc`: writing the `std::function` while the main-queue block is
+calling it is just a different data race. Only main-thread serialization
+closes it. The GPU host's `display_link_callback` block additionally
+copies the idle callback locally and **re-checks `alive` after** running
+idle (a scripted `poll()` can reentrantly close the editor and free
+`self`) — parity with the CPU host's `render_link_callback`.
+
 ### macOS AU v3: editor attach is now DEFERRED until a settled host size
 
 `rebuildEditorIfReady` no longer creates the `PluginViewHost` (or calls

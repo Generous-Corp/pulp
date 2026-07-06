@@ -619,6 +619,21 @@ assigns to `self.audioUnit`, bypassing your thread check. The hard
 guard inside `rebuildEditorIfReady` is the only safe place. Same
 gotcha on iOS — `au_view_controller_ios.mm` has the same guard.
 
+**`dealloc` is on the XPC queue too — reset the host on main.** The
+same off-main hazard bites teardown: a GPU-backed `PluginViewHost`'s
+`CVDisplayLink` idle pump is dispatched to the main queue and
+dereferences the `ViewBridge`, so if the last controller release lands
+on the XPC queue, freeing host + bridge off-main races a queued
+main-queue idle block → SIGSEGV in `display_link_callback` (Ableton
+Live "add plugin then delete" repro). Both `au_view_controller_mac.mm`
+and `au_view_controller_ios.mm` `dealloc` now reset `_viewHost` via
+`[NSThread isMainThread] ? reset : dispatch_sync(main, reset)` before
+the reverse-order ivar destruction (flips the host liveness token +
+stops the link first). Do NOT instead clear `idle_callback_` from the
+off-main `dealloc` — that just swaps in a data race on the
+`std::function`. See the `view-bridge` skill, "AU v3 teardown must ALSO
+run on the main thread," for the full lifecycle.
+
 ### Logic's per-plugin failed-state cache
 
 Logic Pro remembers AU v3 plugins that previously failed to validate
@@ -920,6 +935,24 @@ calls `Processor::process`. **MIDI output stays empty** so bypassed
 MIDI FX don't leak notes. Diagnostic: read `pulpBypassParameterId`
 on `PulpAudioUnit` (also exposed from the shared `au_audio_unit.h`
 header) to confirm which ParamID got picked up.
+
+### Offline-render routing — `renderingOffline` → `ProcessMode::Offline`
+
+A host doing a faster-than-real-time bounce sets `AUAudioUnit.renderingOffline =
+YES` before rendering and back to `NO` afterward. The adapter mirrors the bypass
+pattern: `setRenderingOffline:` calls `super` and stores the flag in a bridge-local
+atomic (`rendering_offline`), and the render block reads it (acquire) to set
+`ctx.process_mode = Offline` / `render_speed_hint = FasterThanRealtime`. This lets a
+processor switch to an offline-only code path — e.g. an async GPU engine that, in
+realtime, hands the audio thread a worker-produced result and **drops to silence on
+a miss**; an offline render runs faster than the wall-clock worker, so without this
+hook every block misses and the wet (reverb/delay tail) is dropped from the bounce.
+The processor's offline path should drive that work **synchronously** (blocking
+readback is fine offline — no RT deadline). Trust model is the same as bypass: the
+host is expected to clear `renderingOffline` when returning to live playback; a host
+that leaves it set would keep the processor on the (blocking) offline path during
+realtime. VST3 already surfaces this via `ProcessSetup.processMode == kOffline`;
+AU v2 and CLAP do not surface offline intent (documented limitation).
 
 ### Latency / tail change notifications
 

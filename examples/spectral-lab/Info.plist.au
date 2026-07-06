@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>SpectralLab</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.pulp.spectrallab.au</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>SpectralLab</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.2</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.2</string>
+    <key>AudioComponents</key>
+    <array>
+        <dict>
+            <key>name</key>
+            <string>Pulp: SpectralLab</string>
+            <key>description</key>
+            <string>SpectralLab GPU Spectral Freeze</string>
+            <key>manufacturer</key>
+            <string>Pulp</string>
+            <key>type</key>
+            <string>aufx</string>
+            <key>subtype</key>
+            <string>SpLb</string>
+            <key>version</key>
+            <integer>65538</integer>
+            <key>factoryFunction</key>
+            <string>SpectralLabAUFactory</string>
+            <key>sandboxSafe</key>
+            <true/>
+        </dict>
+    </array>
+</dict>
+</plist>

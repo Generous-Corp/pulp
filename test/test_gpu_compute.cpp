@@ -152,6 +152,798 @@ TEST_CASE("GpuCompute matches CPU FFT magnitude", "[render][gpu][compute]") {
     }
 }
 
+// ── FFT Tests ─────────────────────────────────────────────────────────────
+
+TEST_CASE("GpuCompute FFT forward magnitude matches CPU", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 1024;
+    Fft fft(static_cast<int>(N));
+
+    std::vector<std::complex<float>> sig(N);
+    for (uint32_t i = 0; i < N; ++i) {
+        const float t = static_cast<float>(i);
+        const float v = std::sin(2.0f * 3.14159265f * 5.0f * t / N)
+                      + 0.5f * std::cos(2.0f * 3.14159265f * 17.0f * t / N);
+        sig[i] = std::complex<float>(v, 0.0f);
+    }
+
+    std::vector<std::complex<float>> cpu = sig;  // in-place forward
+    fft.forward(cpu.data());
+
+    std::vector<float> in(N * 2), out(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        in[i * 2]     = sig[i].real();
+        in[i * 2 + 1] = sig[i].imag();
+    }
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+
+    // Compare magnitudes (independent of the library's sign convention).
+    for (uint32_t i = 0; i < N; ++i) {
+        const float gpu_mag = std::sqrt(out[i * 2] * out[i * 2]
+                                      + out[i * 2 + 1] * out[i * 2 + 1]);
+        const float cpu_mag = std::abs(cpu[i]);
+        REQUIRE(std::abs(gpu_mag - cpu_mag) < 1e-2f * (1.0f + cpu_mag));
+    }
+}
+
+TEST_CASE("GpuCompute FFT impulse and DC", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 256;
+    std::vector<float> in(N * 2, 0.0f), out(N * 2, 0.0f);
+
+    // Unit impulse at n=0 → flat spectrum: every bin = (1, 0).
+    in[0] = 1.0f;
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+    for (uint32_t i = 0; i < N; ++i) {
+        REQUIRE(std::abs(out[i * 2]     - 1.0f) < 1e-3f);
+        REQUIRE(std::abs(out[i * 2 + 1] - 0.0f) < 1e-3f);
+    }
+
+    // DC (all ones) → X[0] = (N, 0), all other bins ≈ 0.
+    std::fill(in.begin(), in.end(), 0.0f);
+    for (uint32_t i = 0; i < N; ++i) in[i * 2] = 1.0f;
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+    REQUIRE(std::abs(out[0] - static_cast<float>(N)) < 1e-2f);
+    REQUIRE(std::abs(out[1]) < 1e-2f);
+    for (uint32_t i = 1; i < N; ++i) {
+        REQUIRE(std::abs(out[i * 2])     < 1e-2f);
+        REQUIRE(std::abs(out[i * 2 + 1]) < 1e-2f);
+    }
+}
+
+TEST_CASE("GpuCompute FFT round-trip identity", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 512;
+    std::vector<float> in(N * 2), fwd(N * 2), back(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        in[i * 2]     = std::sin(2.0f * 3.14159265f * 7.0f * i / N);
+        in[i * 2 + 1] = 0.3f * std::cos(2.0f * 3.14159265f * 3.0f * i / N);
+    }
+    REQUIRE(compute->fft_forward(in.data(), fwd.data(), N));
+    REQUIRE(compute->fft_inverse(fwd.data(), back.data(), N));
+    for (uint32_t i = 0; i < N * 2; ++i) {
+        REQUIRE(std::abs(back[i] - in[i]) < 2e-3f);
+    }
+}
+
+TEST_CASE("GpuCompute FFT matches direct DFT (complex, phase-exact)",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr double kPi = 3.14159265358979323846;
+    constexpr uint32_t N = 8;
+
+    // Complex input with nonzero real AND imaginary parts so the test would
+    // catch a conjugation, a wrong bin permutation, or a sign flip — things
+    // the magnitude/impulse/round-trip tests cannot see.
+    std::vector<std::complex<float>> x(N);
+    for (uint32_t n = 0; n < N; ++n) {
+        x[n] = std::complex<float>(0.5f + 0.1f * n, -0.2f + 0.3f * n);
+    }
+
+    // Direct DFT with the documented forward convention:
+    //   X[k] = sum_n x[n] * exp(-2*pi*i*k*n/N)
+    std::vector<std::complex<float>> ref(N);
+    for (uint32_t k = 0; k < N; ++k) {
+        std::complex<double> acc(0.0, 0.0);
+        for (uint32_t n = 0; n < N; ++n) {
+            const double ang = -2.0 * kPi * static_cast<double>(k * n) / N;
+            acc += std::complex<double>(x[n].real(), x[n].imag())
+                 * std::complex<double>(std::cos(ang), std::sin(ang));
+        }
+        ref[k] = std::complex<float>(static_cast<float>(acc.real()),
+                                     static_cast<float>(acc.imag()));
+    }
+
+    std::vector<float> in(N * 2), out(N * 2);
+    for (uint32_t n = 0; n < N; ++n) {
+        in[n * 2]     = x[n].real();
+        in[n * 2 + 1] = x[n].imag();
+    }
+    REQUIRE(compute->fft_forward(in.data(), out.data(), N));
+
+    for (uint32_t k = 0; k < N; ++k) {
+        REQUIRE(std::abs(out[k * 2]     - ref[k].real()) < 1e-3f);
+        REQUIRE(std::abs(out[k * 2 + 1] - ref[k].imag()) < 1e-3f);
+    }
+}
+
+TEST_CASE("GpuCompute FFT timed reports true GPU compute time", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 1024;
+    std::vector<float> in(N * 2), out(N * 2), ref(N * 2);
+    for (uint32_t i = 0; i < N; ++i) { in[i * 2] = std::sin(0.02f * i); in[i * 2 + 1] = 0.0f; }
+
+    // Timed forward must produce the same result as the plain forward.
+    REQUIRE(compute->fft_forward(in.data(), ref.data(), N));
+    double gpu_us = -123.0;
+    REQUIRE(compute->fft_forward_timed(in.data(), out.data(), N, &gpu_us));
+    for (uint32_t i = 0; i < N * 2; ++i) REQUIRE(std::abs(out[i] - ref[i]) < 1e-4f);
+
+    const auto caps = compute->capabilities();
+    if (caps.timestamp_query) {
+        // True GPU compute time is positive and far below the ~ms-scale
+        // wall-clock round trip (this is the readback-dominates finding).
+        REQUIRE(gpu_us > 0.0);
+        REQUIRE(gpu_us < 5000.0);
+    } else {
+        REQUIRE(gpu_us == -1.0);  // timing unavailable -> sentinel
+    }
+}
+
+TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+    std::vector<float> in(200, 0.0f), out(200, 0.0f);
+    REQUIRE_FALSE(compute->fft_forward(in.data(), out.data(), 100));
+    REQUIRE_FALSE(compute->fft_inverse(in.data(), out.data(), 100));
+}
+
+// ── FFT Benchmark (GPU vs CPU crossover) ─────────────────────────────────────
+//
+// Measures the current GPU FFT path (upload + log2(N) dispatches + readback)
+// against pulp::signal::Fft across sizes, to locate the crossover and quantify
+// per-call overhead. Prints a table; asserts only that GPU output is produced
+// (no perf assertion — GPU timing is host-load sensitive on shared runners).
+// The per-pass-submit overhead this exposes motivates the single-submit FFT
+// fusion tracked for the RT transport work.
+
+TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    const std::vector<uint32_t> sizes = {256, 1024, 4096, 16384, 65536};
+    constexpr int iters = 20;
+
+    std::printf("\n");
+    std::printf("  FFT: CPU (pulp::signal::Fft) vs GPU (Stockham, single submit + sync readback)\n");
+    std::printf("  %8s | %12s | %12s | %14s | %s\n",
+                "N", "CPU us", "GPU wall us", "GPU compute us", "winner (wall)");
+    std::printf("  ---------+--------------+--------------+----------------+--------------\n");
+
+    for (uint32_t n : sizes) {
+        // CPU baseline: complex forward FFT.
+        Fft fft(static_cast<int>(n));
+        std::vector<std::complex<float>> cbuf(n);
+        for (uint32_t i = 0; i < n; ++i) {
+            cbuf[i] = std::complex<float>(std::sin(0.01f * i), 0.0f);
+        }
+        auto cpu_t0 = std::chrono::high_resolution_clock::now();
+        for (int it = 0; it < iters; ++it) {
+            auto tmp = cbuf;
+            fft.forward(tmp.data());
+        }
+        auto cpu_t1 = std::chrono::high_resolution_clock::now();
+        const double cpu_us =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(cpu_t1 - cpu_t0).count()
+            / 1000.0 / iters;
+
+        // GPU: interleaved input, full forward (upload + dispatches + readback).
+        std::vector<float> in(n * 2), out(n * 2);
+        for (uint32_t i = 0; i < n; ++i) { in[i * 2] = std::sin(0.01f * i); in[i * 2 + 1] = 0.0f; }
+        double gpu_compute_us = -1.0;
+        REQUIRE(compute->fft_forward_timed(in.data(), out.data(), n,
+                                           &gpu_compute_us));  // warm-up + true GPU time
+        auto gpu_t0 = std::chrono::high_resolution_clock::now();
+        for (int it = 0; it < iters; ++it) {
+            REQUIRE(compute->fft_forward(in.data(), out.data(), n));
+        }
+        auto gpu_t1 = std::chrono::high_resolution_clock::now();
+        const double gpu_us =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(gpu_t1 - gpu_t0).count()
+            / 1000.0 / iters;
+
+        const double speedup = gpu_us > 0.0 ? cpu_us / gpu_us : 0.0;
+        std::printf("  %8u | %12.1f | %12.1f | %14.2f | %s\n",
+                    n, cpu_us, gpu_us, gpu_compute_us, speedup > 1.0 ? "GPU" : "CPU");
+    }
+    std::printf("\n");
+}
+
+TEST_CASE("GpuCompute fused convolve vs 3-call readback cost",
+          "[render][gpu][compute][.benchmark]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 4096;
+    std::vector<float> ir_spec(N * 2, 0.0f);
+    for (uint32_t i = 0; i < N; ++i) { ir_spec[i * 2] = 0.5f; ir_spec[i * 2 + 1] = 0.1f; }
+    REQUIRE(compute->prepare_convolution(N, ir_spec.data()));
+
+    std::vector<float> in(N * 2), out(N * 2), spec(N * 2), prod(N * 2);
+    for (uint32_t i = 0; i < N; ++i) { in[i * 2] = std::sin(0.01f * i); in[i * 2 + 1] = 0.0f; }
+
+    constexpr int iters = 30;
+    compute->convolve(in.data(), out.data(), N);  // warm
+
+    auto f0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it) compute->convolve(in.data(), out.data(), N);
+    auto f1 = std::chrono::high_resolution_clock::now();
+    const double fused_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(f1 - f0).count() / 1000.0 / iters;
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it) {
+        compute->fft_forward(in.data(), spec.data(), N);
+        compute->complex_multiply(spec.data(), ir_spec.data(), prod.data(), N);
+        compute->fft_inverse(prod.data(), out.data(), N);
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    const double three_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0 / iters;
+
+    std::printf("\n  Convolution (N=%u): fused 1-readback = %.1f us/block | "
+                "3-call (3 readbacks) = %.1f us/block | speedup %.2fx\n",
+                N, fused_us, three_us, three_us / fused_us);
+}
+
+TEST_CASE("GpuCompute batched convolve matches single", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 256, B = 5;
+    std::vector<float> irspec(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        irspec[i * 2]     = 0.5f * std::cos(0.10f * i);
+        irspec[i * 2 + 1] = 0.3f * std::sin(0.07f * i);
+    }
+    REQUIRE(compute->prepare_convolution(N, irspec.data()));
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), B));
+
+    std::vector<float> in(N * 2 * B, 0.0f), out_batch(N * 2 * B, 0.0f);
+    for (uint32_t b = 0; b < B; ++b)
+        for (uint32_t i = 0; i < N; ++i)
+            in[(b * N + i) * 2] = std::sin(0.05f * (i + b * 7));
+
+    REQUIRE(compute->convolve_batch(in.data(), out_batch.data(), N, B));
+
+    // Each batched block must equal the same block run through single convolve().
+    for (uint32_t b = 0; b < B; ++b) {
+        std::vector<float> single(N * 2, 0.0f);
+        REQUIRE(compute->convolve(in.data() + b * N * 2, single.data(), N));
+        for (uint32_t i = 0; i < N * 2; ++i) {
+            REQUIRE(std::abs(out_batch[b * N * 2 + i] - single[i])
+                    < 1e-3f * (1.0f + std::abs(single[i])));
+        }
+    }
+
+    // Wrong batch count is rejected.
+    REQUIRE_FALSE(compute->convolve_batch(in.data(), out_batch.data(), N, B + 1));
+}
+
+TEST_CASE("GpuCompute batched convolve isolates batches", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 128, B = 4;
+    std::vector<float> irspec(N * 2);
+    for (uint32_t i = 0; i < N; ++i) { irspec[i * 2] = 0.7f; irspec[i * 2 + 1] = -0.2f; }
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), B));
+
+    // Only batch index 2 has a nonzero input (an impulse). With zero inputs in
+    // the other batches, any cross-transform bleed would show as nonzero output
+    // there.
+    std::vector<float> in(N * 2 * B, 0.0f), out(N * 2 * B, 0.0f);
+    in[(2u * N + 0u) * 2] = 1.0f;  // batch 2, sample 0, real
+    REQUIRE(compute->convolve_batch(in.data(), out.data(), N, B));
+
+    for (uint32_t b : {0u, 1u, 3u}) {
+        for (uint32_t i = 0; i < N * 2; ++i) {
+            REQUIRE(std::abs(out[b * N * 2 + i]) < 1e-4f);
+        }
+    }
+    double energy = 0.0;
+    for (uint32_t i = 0; i < N * 2; ++i) energy += std::abs(out[2u * N * 2 + i]);
+    REQUIRE(energy > 0.1);  // batch 2 actually produced output
+}
+
+TEST_CASE("GpuCompute convolve_batch B=1 equals single convolve", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 512;
+    std::vector<float> irspec(N * 2);
+    for (uint32_t i = 0; i < N; ++i) {
+        irspec[i * 2]     = 0.3f * std::cos(0.02f * i);
+        irspec[i * 2 + 1] = 0.4f * std::sin(0.03f * i);
+    }
+    REQUIRE(compute->prepare_convolution(N, irspec.data()));
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), 1));
+
+    std::vector<float> in(N * 2), single(N * 2), batched(N * 2);
+    for (uint32_t i = 0; i < N; ++i) in[i * 2] = std::sin(0.05f * i);
+    REQUIRE(compute->convolve(in.data(), single.data(), N));
+    REQUIRE(compute->convolve_batch(in.data(), batched.data(), N, 1));
+    for (uint32_t i = 0; i < N * 2; ++i) {
+        REQUIRE(std::abs(batched[i] - single[i]) < 1e-4f * (1.0f + std::abs(single[i])));
+    }
+}
+
+TEST_CASE("GpuCompute batched convolve amortizes readback",
+          "[render][gpu][compute][.benchmark]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 2048, B = 16;
+    std::vector<float> irspec(N * 2, 0.0f);
+    for (uint32_t i = 0; i < N; ++i) { irspec[i * 2] = 0.4f; irspec[i * 2 + 1] = 0.1f; }
+    REQUIRE(compute->prepare_convolution(N, irspec.data()));
+    REQUIRE(compute->prepare_convolution_batch(N, irspec.data(), B));
+
+    std::vector<float> in(N * 2 * B), out(N * 2 * B), one(N * 2);
+    for (uint32_t i = 0; i < N * B; ++i) in[i * 2] = std::sin(0.01f * i);
+
+    constexpr int iters = 10;
+    compute->convolve_batch(in.data(), out.data(), N, B);  // warm
+
+    auto s0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it)
+        for (uint32_t b = 0; b < B; ++b) compute->convolve(in.data() + b * N * 2, one.data(), N);
+    auto s1 = std::chrono::high_resolution_clock::now();
+    const double single_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(s1 - s0).count() / 1000.0 / (iters * B);
+
+    auto b0 = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iters; ++it) compute->convolve_batch(in.data(), out.data(), N, B);
+    auto b1 = std::chrono::high_resolution_clock::now();
+    const double batch_us =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(b1 - b0).count() / 1000.0 / (iters * B);
+
+    std::printf("\n  Convolution (N=%u, batch=%u): single = %.1f us/block | "
+                "batched = %.1f us/block | speedup %.2fx\n",
+                N, B, single_us, batch_us, single_us / batch_us);
+}
+
+TEST_CASE("GpuCompute matmul matches CPU", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t M = 6, K = 4, N = 5;
+    std::vector<float> a(M * K), b(K * N), c(M * N, 0.0f), ref(M * N, 0.0f);
+    for (uint32_t i = 0; i < M * K; ++i) a[i] = std::sin(0.3f * i) + 0.5f;
+    for (uint32_t i = 0; i < K * N; ++i) b[i] = std::cos(0.2f * i) - 0.25f;
+
+    REQUIRE(compute->matmul(a.data(), b.data(), c.data(), M, K, N));
+
+    for (uint32_t r = 0; r < M; ++r)
+        for (uint32_t col = 0; col < N; ++col) {
+            double acc = 0.0;
+            for (uint32_t kk = 0; kk < K; ++kk)
+                acc += static_cast<double>(a[r * K + kk]) * b[kk * N + col];
+            ref[r * N + col] = static_cast<float>(acc);
+        }
+    for (uint32_t i = 0; i < M * N; ++i)
+        REQUIRE(std::abs(c[i] - ref[i]) < 1e-4f * (1.0f + std::abs(ref[i])));
+
+    REQUIRE_FALSE(compute->matmul(a.data(), b.data(), c.data(), 0, K, N));  // invalid
+}
+
+TEST_CASE("GpuCompute additive synth produces the requested partials",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 2048;
+    constexpr float SR = 48000.0f;
+    constexpr uint32_t K1 = 10, K2 = 20, K3 = 40;  // exact FFT bins (integer cycles)
+    std::vector<float> partials = {
+        K1 * SR / N, 1.00f, 0.0f,
+        K2 * SR / N, 0.50f, 0.0f,
+        K3 * SR / N, 0.25f, 0.0f,
+    };
+    std::vector<float> out(N, 0.0f);
+    REQUIRE(compute->additive_synth(partials.data(), out.data(), 3, N, SR, 0.0f));
+
+    std::vector<std::complex<float>> s(N);
+    for (uint32_t i = 0; i < N; ++i) s[i] = std::complex<float>(out[i], 0.0f);
+    pulp::signal::Fft fft(static_cast<int>(N));
+    fft.forward(s.data());
+    auto mag = [&](uint32_t k) { return std::abs(s[k]); };
+
+    // Sharp peaks at exactly K1/K2/K3, magnitudes in the amplitude ratio.
+    REQUIRE(mag(K1) > 50.0f * mag(K1 + 5));
+    REQUIRE(mag(K1) > mag(K2));
+    REQUIRE(mag(K2) > mag(K3));
+    REQUIRE(std::abs(mag(K2) / mag(K1) - 0.5f) < 0.05f);
+    REQUIRE(std::abs(mag(K3) / mag(K1) - 0.25f) < 0.05f);
+
+    REQUIRE_FALSE(compute->additive_synth(partials.data(), out.data(), 0, N, SR, 0.0f));
+}
+
+TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 8192;
+    constexpr float SR = 48000.0f;
+    const float fA = 300.0f, fB = 1200.0f;
+    // [freq, amp, decay, phase]; fB decays much faster than fA. Decay rates
+    // chosen so the strike clearly decays >2x across the ~0.17 s buffer.
+    std::vector<float> modes = {fA, 1.0f, 12.0f, 0.0f, fB, 1.0f, 40.0f, 0.0f};
+    std::vector<float> out(N, 0.0f);
+    REQUIRE(compute->modal_strike(modes.data(), out.data(), 2, N, SR, 0.0f));
+
+    auto rms = [&](uint32_t a, uint32_t b) {
+        double e = 0.0; for (uint32_t i = a; i < b; ++i) e += out[i] * out[i];
+        return std::sqrt(e / (b - a));
+    };
+    const float early = rms(0, 1024), late = rms(N - 1024, N);
+    REQUIRE(early > 0.01f);
+    REQUIRE(early > late * 2.0f);  // the strike decays
+
+    std::vector<std::complex<float>> s(N);
+    for (uint32_t i = 0; i < N; ++i) s[i] = std::complex<float>(out[i], 0.0f);
+    pulp::signal::Fft fft(static_cast<int>(N));
+    fft.forward(s.data());
+    auto band = [&](uint32_t c) {
+        float m = 0.0f;
+        for (int k = static_cast<int>(c) - 3; k <= static_cast<int>(c) + 3; ++k)
+            m = std::max(m, std::abs(s[static_cast<uint32_t>(k)]));
+        return m;
+    };
+    const uint32_t binA = static_cast<uint32_t>(fA * N / SR + 0.5f);
+    const uint32_t binB = static_cast<uint32_t>(fB * N / SR + 0.5f);
+    REQUIRE(band(binA) > 5.0f * band(binA + 60));   // clear resonance at fA
+    REQUIRE(band(binB) > band(binB + 60));          // energy at fB too
+
+    REQUIRE_FALSE(compute->modal_strike(modes.data(), out.data(), 0, N, SR, 0.0f));
+}
+
+TEST_CASE("GpuCompute granular cloud places windowed grains", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t SRCLEN = 4096, N = 2048;
+    std::vector<float> source(SRCLEN);
+    for (uint32_t i = 0; i < SRCLEN; ++i) source[i] = std::sin(0.1f * i);
+
+    // Two grains: [onset, duration, src_pos, pitch, amp].
+    std::vector<float> grains = {
+        100.0f, 256.0f, 0.0f,   1.0f, 1.0f,
+        1000.0f, 256.0f, 500.0f, 1.0f, 1.0f,
+    };
+    std::vector<float> out(N, 0.0f);
+    REQUIRE(compute->granular_cloud(grains.data(), source.data(), out.data(), 2, SRCLEN, N));
+
+    auto rms = [&](uint32_t a, uint32_t b) {
+        double e = 0.0; for (uint32_t i = a; i < b; ++i) e += out[i] * out[i];
+        return std::sqrt(e / (b - a));
+    };
+    REQUIRE(rms(0, 90) < 1e-4f);          // silence before grain 1
+    REQUIRE(rms(150, 350) > 0.05f);        // energy inside grain 1
+    REQUIRE(rms(400, 950) < 1e-4f);        // silent gap between grains
+    REQUIRE(rms(1050, 1250) > 0.05f);      // energy inside grain 2
+    REQUIRE(rms(1300, N) < 1e-4f);         // silence after grain 2
+
+    // Hann window: grain center louder than its edge.
+    REQUIRE(rms(220, 240) > rms(102, 112));
+
+    REQUIRE_FALSE(compute->granular_cloud(grains.data(), source.data(), out.data(), 0, SRCLEN, N));
+}
+
+TEST_CASE("GpuCompute dense_tanh matches CPU", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t IN = 5, OUT = 4;
+    std::vector<float> x(IN), w(OUT * IN), b(OUT), out(OUT, 0.0f), ref(OUT, 0.0f);
+    for (uint32_t i = 0; i < IN; ++i) x[i] = std::sin(0.4f * i) - 0.2f;
+    for (uint32_t i = 0; i < OUT * IN; ++i) w[i] = std::cos(0.15f * i) * 0.5f;
+    for (uint32_t j = 0; j < OUT; ++j) b[j] = 0.1f * j - 0.15f;
+
+    REQUIRE(compute->dense_tanh(x.data(), w.data(), b.data(), out.data(), IN, OUT));
+
+    for (uint32_t j = 0; j < OUT; ++j) {
+        double acc = b[j];
+        for (uint32_t i = 0; i < IN; ++i) acc += static_cast<double>(w[j * IN + i]) * x[i];
+        ref[j] = std::tanh(static_cast<float>(acc));
+    }
+    for (uint32_t j = 0; j < OUT; ++j)
+        REQUIRE(std::abs(out[j] - ref[j]) < 1e-4f);
+
+    REQUIRE_FALSE(compute->dense_tanh(x.data(), w.data(), b.data(), out.data(), 0, OUT));
+}
+
+// ── Fused WaveNet inference ─────────────────────────────────────────────────
+
+namespace {
+// Scalar CPU reference for the simplest WaveNet: 1 array, 1 layer, channels=1,
+// kernel=1, ungated, no head bias. With kernel=1 there is no dilation history so
+// each output sample depends only on the current input:
+//   layer_in = Wre * x
+//   z        = Wconv * layer_in + bconv + Wmix * x   (condition = the raw input)
+//   a        = tanh(z)                               (the head accumulates a)
+//   out      = Whr * a * head_scale
+// The layer1x1 (residual) weights exist in the blob but do not affect a
+// single-layer array's output (nothing downstream consumes the residual).
+float wavenet_ref_1x1(float x, float Wre, float Wconv, float bconv, float Wmix,
+                      float Whr, float head_scale) {
+    const float layer_in = Wre * x;
+    const float z = Wconv * layer_in + bconv + Wmix * x;
+    return Whr * std::tanh(z) * head_scale;
+}
+
+// Two chained arrays (each channels=1/kernel=1/1 layer/ungated/head_size=1). The
+// point of coverage: array 1's head accumulator is SEEDED with array 0's head
+// output before it accumulates its own activation, and array 0's accumulator
+// starts cleared. If the seed were dropped (or array 0 not cleared) the result
+// changes grossly — so this pins the submission-diet's "clear array 0 only, seed
+// the rest" contract. rechannel of array 1 reads array 0's residual output; the
+// input mixin uses the original mono input for every array.
+float wavenet_ref_1x1_2arrays(float x,
+                              float Wre0, float Wconv0, float bconv0, float Wmix0,
+                              float W1x1_0, float b1x1_0, float Whr0,
+                              float Wre1, float Wconv1, float bconv1, float Wmix1,
+                              float Whr1, float head_scale) {
+    const float lin0 = Wre0 * x;
+    const float z0 = Wconv0 * lin0 + bconv0 + Wmix0 * x;
+    const float a0 = std::tanh(z0);
+    const float head0 = Whr0 * a0;                       // array 0 head output = the seed
+    const float res0 = lin0 + b1x1_0 + W1x1_0 * a0;      // residual → array 1 rechannel input
+    const float lin1 = Wre1 * res0;
+    const float z1 = Wconv1 * lin1 + bconv1 + Wmix1 * x;
+    const float headacc1 = head0 + std::tanh(z1);        // SEED + array 1 activation
+    return head_scale * (Whr1 * headacc1);
+}
+}  // namespace
+
+TEST_CASE("GpuCompute wavenet_forward matches a scalar reference",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    // Weight blob for 1 array / 1 layer / channels=1 / kernel=1 / ungated:
+    // [rechannel Wre][conv Wconv][conv bconv][mixin Wmix]
+    // [layer1x1 W1x1][layer1x1 b1x1][head_rechannel Whr][trailing head_scale].
+    const float Wre = 0.7f, Wconv = 1.3f, bconv = -0.2f, Wmix = 0.5f;
+    const float W1x1 = 0.9f, b1x1 = 0.1f, Whr = 1.1f, head_scale = 0.8f;
+    std::vector<float> weights = {Wre, Wconv, bconv, Wmix, W1x1, b1x1, Whr, head_scale};
+
+    std::vector<uint32_t> dilations = {1};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = 1;
+    spec.kernel = 1; spec.head_size = 1; spec.gated = 0; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = 1;
+
+    const uint32_t B = 16;
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(),
+                                     static_cast<uint32_t>(weights.size()), B, head_scale));
+
+    std::vector<float> in(B), out(B, 0.0f);
+    for (uint32_t i = 0; i < B; ++i) in[i] = 0.3f * std::sin(0.2f * i) - 0.1f;
+    REQUIRE(compute->wavenet_forward(in.data(), out.data(), B));
+
+    for (uint32_t i = 0; i < B; ++i) {
+        const float expect =
+            wavenet_ref_1x1(in[i], Wre, Wconv, bconv, Wmix, Whr, head_scale);
+        REQUIRE(std::abs(out[i] - expect) < 1e-5f);
+    }
+}
+
+TEST_CASE("GpuCompute wavenet_forward is deterministic across a gated multi-layer net",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    // 1 array, 2 gated dilated layers, channels=4, kernel=3, head_size=4. This
+    // exercises the gated (tanh*sigmoid) path, multi-channel conv, dilation
+    // history, and the head accumulate/rechannel — not a hand reference, but a
+    // determinism + finiteness contract on the full forward.
+    const uint32_t C = 4, K = 3, L = 2, H = 4, Z = 2 * C;
+    const uint32_t need = C /*rechannel*/
+        + L * (Z * C * K + Z /*conv W+b*/ + Z /*mixin*/ + C * C + C /*1x1 W+b*/)
+        + H * C /*head rechannel*/ + 1 /*trailing head_scale*/;
+    std::vector<float> weights(need);
+    for (uint32_t i = 0; i < need; ++i)
+        weights[i] = 0.15f * std::sin(0.37f * i) - 0.05f * std::cos(0.11f * i);
+
+    std::vector<uint32_t> dilations = {1, 2};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = C;
+    spec.kernel = K; spec.head_size = H; spec.gated = 1; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = L;
+
+    const uint32_t B = 32;
+    const float head_scale = 0.6f;
+    std::vector<float> in(B);
+    for (uint32_t i = 0; i < B; ++i) in[i] = 0.4f * std::sin(0.23f * i);
+
+    std::vector<float> a(B, 0.0f), b(B, 0.0f);
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+    REQUIRE(compute->wavenet_forward(in.data(), a.data(), B));
+    // A fresh plan on the same input must reproduce it bit-for-bit.
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+    REQUIRE(compute->wavenet_forward(in.data(), b.data(), B));
+    for (uint32_t i = 0; i < B; ++i) {
+        REQUIRE(std::isfinite(a[i]));
+        REQUIRE(a[i] == b[i]);
+    }
+}
+
+TEST_CASE("GpuCompute wavenet_forward chains two arrays through the head seed",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    // Two arrays, each channels=1/kernel=1/1 layer/ungated/head_size=1. This is
+    // the multi-array topology real .nam WaveNets use, and the one the submission
+    // diet optimizes: only array 0's head accumulator is cleared, and array 1's
+    // is seeded from array 0's head output. Weight blob is [array0 7][array1 7]
+    // [trailing head_scale] = 15 floats, laid out as prepare_wavenet consumes it.
+    const float Wre0 = 0.7f, Wconv0 = 1.3f, bconv0 = -0.2f, Wmix0 = 0.5f;
+    const float W1x1_0 = 0.9f, b1x1_0 = 0.1f, Whr0 = 1.1f;
+    const float Wre1 = 0.6f, Wconv1 = -0.8f, bconv1 = 0.15f, Wmix1 = 0.4f;
+    const float W1x1_1 = 0.5f, b1x1_1 = -0.05f, Whr1 = 0.95f;
+    const float head_scale = 0.8f;
+    std::vector<float> weights = {
+        Wre0, Wconv0, bconv0, Wmix0, W1x1_0, b1x1_0, Whr0,
+        Wre1, Wconv1, bconv1, Wmix1, W1x1_1, b1x1_1, Whr1,
+        head_scale};
+
+    std::vector<uint32_t> dilations = {1};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = 1;
+    spec.kernel = 1; spec.head_size = 1; spec.gated = 0; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = 1;
+    GpuCompute::WavenetLayerArraySpec specs[2] = {spec, spec};
+
+    const uint32_t B = 16;
+    REQUIRE(compute->prepare_wavenet(specs, 2, weights.data(),
+                                     static_cast<uint32_t>(weights.size()), B, head_scale));
+
+    std::vector<float> in(B), out(B, 0.0f);
+    for (uint32_t i = 0; i < B; ++i) in[i] = 0.3f * std::sin(0.2f * i) - 0.1f;
+    REQUIRE(compute->wavenet_forward(in.data(), out.data(), B));
+
+    for (uint32_t i = 0; i < B; ++i) {
+        const float expect = wavenet_ref_1x1_2arrays(
+            in[i], Wre0, Wconv0, bconv0, Wmix0, W1x1_0, b1x1_0, Whr0,
+            Wre1, Wconv1, bconv1, Wmix1, Whr1, head_scale);
+        REQUIRE(std::abs(out[i] - expect) < 5e-5f);
+    }
+}
+
+TEST_CASE("GpuCompute wavenet_forward keeps two instances independent on one device",
+          "[render][gpu][compute]") {
+    // Two WaveNet streams (e.g. stereo channels) prepared on ONE device with the
+    // SAME block_size but different weights must not collide: each instance keeps
+    // its own device buffers and produces its own reference. Before the plans were
+    // keyed by (block_size, instance) the second prepare clobbered the shared plan,
+    // so instance 0 would have run instance 1's weights — this pins the isolation
+    // that lets a stereo plugin share one device instead of one per channel.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    std::vector<uint32_t> dilations = {1};
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = 1;
+    spec.kernel = 1; spec.head_size = 1; spec.gated = 0; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = 1;
+
+    // Distinct weights per instance so a collision would be caught by value.
+    const float head_scale0 = 0.8f, head_scale1 = 0.6f;
+    std::vector<float> w0 = {0.7f, 1.3f, -0.2f, 0.5f, 0.9f, 0.1f, 1.1f, head_scale0};
+    std::vector<float> w1 = {0.4f, 0.9f,  0.3f, 1.2f, 0.6f, 0.2f, 0.7f, head_scale1};
+
+    const uint32_t B = 16;
+    // Prepare BOTH instances before forwarding EITHER — the ordering under which a
+    // shared-plan bug would let instance 1's prepare overwrite instance 0.
+    REQUIRE(compute->prepare_wavenet(&spec, 1, w0.data(),
+                                     static_cast<uint32_t>(w0.size()), B, head_scale0, 0));
+    REQUIRE(compute->prepare_wavenet(&spec, 1, w1.data(),
+                                     static_cast<uint32_t>(w1.size()), B, head_scale1, 1));
+
+    std::vector<float> in0(B), in1(B), out0(B, 0.0f), out1(B, 0.0f);
+    for (uint32_t i = 0; i < B; ++i) {
+        in0[i] = 0.3f * std::sin(0.2f * i) - 0.1f;
+        in1[i] = 0.25f * std::cos(0.17f * i) + 0.05f;
+    }
+    REQUIRE(compute->wavenet_forward(in0.data(), out0.data(), B, 0));
+    REQUIRE(compute->wavenet_forward(in1.data(), out1.data(), B, 1));
+
+    for (uint32_t i = 0; i < B; ++i) {
+        const float e0 = wavenet_ref_1x1(in0[i], w0[0], w0[1], w0[2], w0[3], w0[6], head_scale0);
+        const float e1 = wavenet_ref_1x1(in1[i], w1[0], w1[1], w1[2], w1[3], w1[6], head_scale1);
+        REQUIRE(std::abs(out0[i] - e0) < 1e-5f);
+        REQUIRE(std::abs(out1[i] - e1) < 1e-5f);
+    }
+}
+
+TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    std::vector<uint32_t> dilations = {1};
+    auto base = [&]() {
+        GpuCompute::WavenetLayerArraySpec s;
+        s.input_size = 1; s.condition_size = 1; s.channels = 1; s.kernel = 1;
+        s.head_size = 1; s.gated = 0; s.head_bias = 0;
+        s.dilations = dilations.data(); s.num_layers = 1;
+        return s;
+    };
+    // A valid 8-weight blob for the base (channels=1/kernel=1/1 layer) shape.
+    std::vector<float> ok = {0.7f, 1.3f, -0.2f, 0.5f, 0.9f, 0.1f, 1.1f, 0.8f};
+    const uint32_t B = 8;
+
+    // Sanity: the base shape is accepted.
+    { auto s = base(); REQUIRE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // A non-mono condition is not modeled.
+    { auto s = base(); s.condition_size = 2;
+      REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // Channel count above the fixed cap.
+    { auto s = base(); s.channels = 65;
+      REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // Zero layers.
+    { auto s = base(); s.num_layers = 0;
+      REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f)); }
+
+    // A weight blob that does not match the declared shape.
+    { auto s = base(); REQUIRE_FALSE(compute->prepare_wavenet(&s, 1, ok.data(), 7, B, 0.8f)); }
+
+    // wavenet_forward before a matching prepare (wrong block size) fails.
+    { auto s = base(); REQUIRE(compute->prepare_wavenet(&s, 1, ok.data(), 8, B, 0.8f));
+      std::vector<float> in(B, 0.1f), out(B * 2, 0.0f);
+      REQUIRE_FALSE(compute->wavenet_forward(in.data(), out.data(), B * 2)); }
+}
+
+// ── Capability Report Tests ─────────────────────────────────────────────────
+
+TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute) return;
+
+    // Before initialization the device is unavailable.
+    REQUIRE_FALSE(compute->capabilities().available);
+
+    if (!compute->initialize_standalone()) return;
+
+    const auto caps = compute->capabilities();
+    REQUIRE(caps.available);
+    REQUIRE_FALSE(caps.backend.empty());
+    REQUIRE(caps.max_storage_buffer_binding_size > 0);
+    REQUIRE(caps.max_buffer_size > 0);
+    // Our compute kernels dispatch at workgroup_size(256).
+    REQUIRE(caps.max_compute_invocations_per_workgroup >= 256u);
+    REQUIRE(caps.max_compute_workgroup_size_x >= 256u);
+    // Derived FFT cap is a power of two and covers the sizes the FFT tests use.
+    REQUIRE(caps.max_fft_size >= 1024u);
+    REQUIRE((caps.max_fft_size & (caps.max_fft_size - 1u)) == 0u);
+}
+
 // ── Device Sharing Tests ────────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute device sharing with GpuSurface", "[render][gpu][compute]") {

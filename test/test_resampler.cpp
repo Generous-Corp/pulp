@@ -176,6 +176,123 @@ TEST_CASE("Resampler preserves in-band sine amplitude (44.1→48k)",
     REQUIRE_THAT(static_cast<double>(peak), WithinAbs(1.0, 5e-3));
 }
 
+TEST_CASE("Resampler integer-ratio fast path preserves in-band amplitude",
+          "[signal][resampler]") {
+    // Integer ratios (2x down, 2x up) drive the phase accumulator onto exact phase
+    // boundaries, so the fractional weight is exactly 0 and only the first polyphase
+    // branch contributes — the case the inner loop skips the second MAC for. A
+    // 1 kHz tone well inside both passbands must survive the fast path at full gain.
+    struct Case { double in; double out; };
+    for (const Case c : {Case{96000.0, 48000.0}, Case{48000.0, 96000.0}}) {
+        Resampler r;
+        r.prepare(c.in, c.out, 1, 8192);
+        const auto in = sine(1000.0, c.in, 8192);
+        const auto out = resample_mono(r, in, r.max_output_for(in.size()));
+        REQUIRE(out.size() > 1024u);
+        for (float v : out) REQUIRE(std::isfinite(v));
+        const float peak = steady_peak(out, 256);
+        INFO("ratio " << c.in << "->" << c.out << " peak=" << peak);
+        REQUIRE_THAT(static_cast<double>(peak), WithinAbs(1.0, 5e-3));
+    }
+}
+
+TEST_CASE("Resampler output is invariant to input block chunking",
+          "[signal][resampler]") {
+    // The streaming phase accumulator + delay line must make the resampled stream
+    // independent of how the input is chunked across process_block calls. Feeding
+    // the same signal in one shot vs in odd 37-sample chunks exercises the delay
+    // line at every write position — including the dual-write mirror that keeps the
+    // tap window contiguous — so a ring-index off-by-one surfaces here as a
+    // one-shot-vs-chunked mismatch. The two runs must be bit-identical.
+    struct Case { double in; double out; };
+    for (const Case c : {Case{44100.0, 48000.0}, Case{48000.0, 44100.0}, Case{48000.0, 96000.0}}) {
+        const auto in = sine(1234.0, c.in, 6000);
+
+        Resampler one;
+        one.prepare(c.in, c.out, 1, in.size());
+        const auto ref = resample_mono(one, in, one.max_output_for(in.size()));
+
+        Resampler chunked;
+        chunked.prepare(c.in, c.out, 1, 4096);
+        std::vector<float> got;
+        for (std::size_t off = 0; off < in.size();) {
+            const std::size_t chunk = std::min<std::size_t>(37u, in.size() - off);
+            std::vector<float> obuf(chunked.max_output_for(chunk) + 4u, 0.0f);
+            const std::size_t produced =
+                chunked.process_block_mono(in.data() + off, chunk, obuf.data(), obuf.size());
+            got.insert(got.end(), obuf.begin(), obuf.begin() + static_cast<std::ptrdiff_t>(produced));
+            off += chunk;
+        }
+        INFO("ratio " << c.in << "->" << c.out << " one=" << ref.size() << " chunked=" << got.size());
+        REQUIRE(got.size() == ref.size());
+        for (std::size_t i = 0; i < ref.size(); ++i) REQUIRE(got[i] == ref[i]);
+    }
+}
+
+TEST_CASE("Resampler float MAC keeps distortion below the stopband",
+          "[signal][resampler]") {
+    // The polyphase convolution accumulates in single precision across four
+    // independent lanes so the compiler can vectorize the reduction. That
+    // reassociation trades the last few ulps for speed, so this guards that the
+    // added round-off stays far below the design's stopband: a full-scale in-band
+    // tone must resample with a noise+distortion floor near the filter's own
+    // limit, not lifted by the accumulator.
+    //
+    // THD+N is estimated with a Hann-windowed least-squares fit of the output to
+    // A·cos + B·sin at the tone frequency; the residual after subtracting the
+    // fundamental is the noise+distortion energy. The window suppresses the
+    // spectral leakage that would otherwise dominate a single-bin estimate.
+    const auto thdn_db = [](double in, double out, double f0) {
+        Resampler r;
+        r.prepare(in, out, 1, 4096);
+        const std::size_t n_in = static_cast<std::size_t>(in * 1.2);
+        std::vector<float> input(n_in);
+        for (std::size_t i = 0; i < n_in; ++i)
+            input[i] = 0.9f * static_cast<float>(std::sin(2.0 * kPi * f0 / in * i));
+        std::vector<float> outbuf(r.max_output_for(n_in) + 8u, 0.0f);
+        const std::size_t n =
+            r.process_block_mono(input.data(), input.size(), outbuf.data(), outbuf.size());
+        // Drop the filter transient at both ends before measuring steady state.
+        const std::size_t start = 1024u;
+        const std::size_t end = (n > 1024u) ? n - 1024u : n;
+        const std::size_t N = (end > start) ? end - start : 0u;
+        if (N < 4096u) return 0.0;  // too short — treat as a failure
+        const double th = 2.0 * kPi * f0 / out;
+        double scc = 0, sss = 0, syc = 0, sys = 0;
+        for (std::size_t i = 0; i < N; ++i) {
+            const double w = 0.5 - 0.5 * std::cos(2.0 * kPi * i / (N - 1));
+            const double c = std::cos(th * i), s = std::sin(th * i), y = outbuf[start + i];
+            scc += w * c * c; sss += w * s * s; syc += w * y * c; sys += w * y * s;
+        }
+        const double A = syc / scc, B = sys / sss;
+        double noise = 0, sig = 0;
+        for (std::size_t i = 0; i < N; ++i) {
+            const double w = 0.5 - 0.5 * std::cos(2.0 * kPi * i / (N - 1));
+            const double c = std::cos(th * i), s = std::sin(th * i), y = outbuf[start + i];
+            const double fit = A * c + B * s, e = y - fit;
+            noise += w * e * e; sig += w * fit * fit;
+        }
+        return 10.0 * std::log10(noise / sig + 1e-300);
+    };
+
+    // Non-integer audio ratios: the floor is set by the 64-phase linear
+    // interpolation, so the single-precision MAC leaves it unchanged. Measured
+    // ≈ -80 dB (48→44.1) and ≈ -74 dB (44.1→48); assert with margin.
+    REQUIRE(thdn_db(48000.0, 44100.0, 1000.0) < -70.0);
+    REQUIRE(thdn_db(44100.0, 48000.0, 1000.0) < -68.0);
+    // Integer ratio: no inter-phase interpolation masks the accumulation, so this
+    // directly exercises the float MAC's precision. Measured ≈ -143 dB (double is
+    // ≈ -150); a broken reassociation would lift this floor by tens of dB.
+    REQUIRE(thdn_db(96000.0, 48000.0, 1000.0) < -120.0);
+    // Worst case for accumulation error: an extreme downsample drives the Kaiser
+    // design to the tap-count ceiling (taps_per_phase ≈ 1024, the longest supported
+    // filter), and the integer 24:1 ratio again bypasses interpolation — so the
+    // float sum runs over the most terms it ever will. Even here the floor stays
+    // ≈ -140 dB, confirming the 4-lane reduction error grows far slower than the
+    // stopband; a regression in the long-filter regime would surface here.
+    REQUIRE(thdn_db(192000.0, 8000.0, 1000.0) < -120.0);
+}
+
 TEST_CASE("Resampler 1 kHz round-trip 44.1→48→44.1 reconstructs the sine",
           "[signal][resampler]") {
     // Acceptance check uses sample-by-sample RMS-error against a

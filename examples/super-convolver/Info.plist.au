@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>SuperConvolver</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.pulp.superconvolver.au</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>SuperConvolver</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.1.2</string>
+    <key>CFBundleVersion</key>
+    <string>1.1.2</string>
+    <key>AudioComponents</key>
+    <array>
+        <dict>
+            <key>name</key>
+            <string>Pulp: SuperConvolver</string>
+            <key>description</key>
+            <string>SuperConvolver Convolution Reverb</string>
+            <key>manufacturer</key>
+            <string>Pulp</string>
+            <key>type</key>
+            <string>aufx</string>
+            <key>subtype</key>
+            <string>SpCv</string>
+            <key>version</key>
+            <integer>65794</integer>
+            <key>factoryFunction</key>
+            <string>SuperConvolverAUFactory</string>
+            <key>sandboxSafe</key>
+            <true/>
+        </dict>
+    </array>
+</dict>
+</plist>

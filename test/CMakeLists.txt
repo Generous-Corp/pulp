@@ -2068,6 +2068,40 @@ pulp_add_test_suite(pulp-test-convolver-bg-swap LIBRARIES pulp::signal pulp::run
 # head (small block) + tail (K× larger block) with zero-latency mixing.
 pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 
+# GPU audio runtime: real-time transport (fixed-latency proxy + non-RT worker
+# pump + lock-free rings + miss policy). GPU-agnostic scheduling logic, so it
+# runs on no-GPU CI too.
+pulp_add_test_suite(pulp-test-gpu-audio-transport
+    SOURCES test_gpu_audio_transport.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
+# GPU convolver node (first real GPU audio node): golden test vs direct
+# convolution. Only when GPU/render is available; skips at runtime without a
+# Skia device.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-gpu-convolver
+        SOURCES test_gpu_convolver.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio)
+    # GPU STFT primitive (Phase 4 spectral toolkit): window+FFT analyze,
+    # inverse-FFT synthesize, COLA overlap-add reconstruction.
+    pulp_add_test_suite(pulp-test-gpu-stft
+        SOURCES test_gpu_stft.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+    # Spectral freeze (Phase 5): capture + sustain a spectral frame.
+    pulp_add_test_suite(pulp-test-gpu-spectral-freeze
+        SOURCES test_gpu_spectral_freeze.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+    # Spectral morph (Phase 5): blend between two captured spectra.
+    pulp_add_test_suite(pulp-test-gpu-spectral-morph
+        SOURCES test_gpu_spectral_morph.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+    # Hyper-Freeze (Phase 5, hardcore): multi-layer frozen stack + weighted
+    # morph + spectral smear.
+    pulp_add_test_suite(pulp-test-gpu-hyper-freeze
+        SOURCES test_gpu_hyper_freeze.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+endif()
+
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 # Standalone editor chrome helpers
@@ -2158,7 +2192,7 @@ target_link_libraries(pulp-test-events-timer-helpers PRIVATE pulp::events Catch2
 catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
 
 # Audio file I/O tests
-pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio pulp::signal)
 
 # Phase-vocoder offline time-stretch / pitch-shift.
 pulp_add_test_suite(pulp-test-phase-vocoder LIBRARIES pulp::signal)

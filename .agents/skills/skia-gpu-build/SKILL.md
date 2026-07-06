@@ -108,9 +108,69 @@ without opening a window.
 - **First GPU link is slow-ish** (~45s here for the view lib + Skia/Dawn link),
   but subsequent incremental builds are fast.
 
+## GPU bundles MUST be relocatable (the libwgpu_native.dylib rpath footgun)
+
+A GPU plugin/app links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
+copies the dylib INTO the bundle's `Contents/MacOS` but rpaths the binary only at
+the **build cache** (`~/Library/Caches/Pulp/fetchcontent-src/.../lib`). On the
+build machine that path exists, so the build, codesign, notarize, `auval`,
+`pluginval`, and even loading in a *local* DAW all PASS — a **false pass**.
+Copied to any other Mac (or after the cache is cleared) the dylib isn't found:
+
+- standalone app crashes at launch — `Library not loaded: @rpath/libwgpu_native.dylib`
+- AU/VST3/CLAP show no editor / "couldn't load" in the DAW
+
+Pulp's `@loader_path`-adding override only runs on the installed-SDK path, so
+**source-built example/plugin bundles do NOT get it automatically.** Fix + guard
+every distributable GPU bundle target with `PulpBundleRelocatable.cmake`:
+
+```cmake
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake)
+pulp_make_bundle_relocatable(MyPlugin_CLAP)      # bakes @loader_path (BUILD_WITH_INSTALL_RPATH)
+pulp_validate_bundle_relocatable(MyPlugin_CLAP)  # POST_BUILD: FAILS the build if not self-contained
+```
+
+`tools/cmake/scripts/check_bundle_relocatable.py <bundle> --strict` is the
+standalone validator (reads Mach-O rpaths + `@rpath` deps — stronger than the
+string-based `check_portable_binary.py`). Wire it into `pulp ship` / CI too.
+
+**Definitive manual proof** that a bundle is self-contained — hide the build
+cache and confirm it still loads (this is what a string/auval check can't tell
+you):
+
+```bash
+CACHE=~/Library/Caches/Pulp/fetchcontent-src/wgpu-macos-aarch64-*/lib/libwgpu_native.dylib
+mv "$CACHE" "$CACHE.hidden"
+python3 -c "import ctypes; ctypes.CDLL('.../MyPlugin.clap/Contents/MacOS/MyPlugin')"  # loads?
+mv "$CACHE.hidden" "$CACHE"
+```
+
+`otool -l <binary> | grep -A2 LC_RPATH` should show `@loader_path`, NOT a
+`/Users/.../Caches/...` path. Caveat for V8/other-dylib plugins: prefer an
+additive `install_name_tool -add_rpath @loader_path` over
+`BUILD_WITH_INSTALL_RPATH` (which drops ALL auto build rpaths) — see the note in
+`PulpBundleRelocatable.cmake`.
+
+## Embedding Pulp as a submodule (standalone plugin repos)
+
+When Pulp is consumed via `add_subdirectory(pulp)` from another repo (a
+standalone plugin like pulp-gpu-nam that pins Pulp as a git submodule),
+`CMAKE_SOURCE_DIR` is the **consumer's** root, not Pulp's. Anything that resolves
+Pulp-relative paths off `CMAKE_SOURCE_DIR` breaks — including `FindSkia.cmake`'s
+`external/skia-build` autodiscovery, which would look under the consumer repo and
+silently fall back to no-Skia (CPU-only host, no GPU). Pulp now keys these off
+`PULP_ROOT_DIR` (a `CACHE INTERNAL` set to Pulp's own source dir in the root
+`CMakeLists.txt`) so submodule builds find the prebuilt Skia libs. If a submodule
+GPU build comes out CPU-only, confirm `PULP_ROOT_DIR` points at the Pulp checkout
+and that `external/skia-build/*-gpu/lib/Release` (or `SKIA_DIR` env) is populated
+there — a headers-only submodule checkout hits the same locked-raster trap as the
+in-tree case above.
+
 ## When to reach for this
 
 Any time GPU rendering "isn't working", a window looks CPU-ish (no aspect-lock,
 dark fill past the design surface), a `skia`-backend screenshot looks identical
-to CoreGraphics, or you need a live GPU window of native UI (e.g. the
-`ink-signal-showcase` / `gpu-demo` examples).
+to CoreGraphics, you need a live GPU window of native UI (e.g. the
+`ink-signal-showcase` / `gpu-demo` examples), or a GPU plugin/app loads on the
+build machine but crashes / shows no UI on another Mac (the dylib rpath footgun
+above).
