@@ -246,7 +246,7 @@ if(PULP_JS_ENGINE STREQUAL "v8")
             "PULP_JS_ENGINE=v8 is not supported on iOS: V8 requires JIT, which iOS "
             "apps and AUv3 extensions forbid. iOS uses JSC (the default on Apple).")
     endif()
-    include(${CMAKE_SOURCE_DIR}/tools/cmake/FindV8.cmake)
+    include(${PULP_ROOT_DIR}/tools/cmake/FindV8.cmake)
     if(NOT PULP_V8_FOUND)
         message(FATAL_ERROR
             "PULP_JS_ENGINE=v8 selected but no sealed V8 was found. Populate it with:\n"
@@ -265,8 +265,8 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     set(PULP_V8_PROVIDER_KIND "v8builder")
     set(PULP_V8_PROVIDER_PATH "${V8_RUNTIME_LIBRARY}")
     set(PULP_V8_EXPECTED_RUNTIME_VERSION "")
-    if(EXISTS "${CMAKE_SOURCE_DIR}/tools/deps/manifest.json")
-        file(READ "${CMAKE_SOURCE_DIR}/tools/deps/manifest.json" _pulp_v8_manifest_text)
+    if(EXISTS "${PULP_ROOT_DIR}/tools/deps/manifest.json")
+        file(READ "${PULP_ROOT_DIR}/tools/deps/manifest.json" _pulp_v8_manifest_text)
         # Match the V8 dependency's pinned tag (e.g. "v8-15.1.27") and reduce it
         # to the bare runtime version (15.1.27) the runtime reports at startup.
         if(_pulp_v8_manifest_text MATCHES "\"name\"[ \t]*:[ \t]*\"V8\"[^}]*\"version\"[ \t]*:[ \t]*\"v8-([0-9][^\"]*)\"")
@@ -287,7 +287,7 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     # with clang-cl + that libc++ + V8_COMPRESS_POINTERS. This is a no-op off
     # Windows; on Windows it hard-fails if the compiler is MSVC cl rather
     # than clang-cl. See tools/cmake/PulpV8Windows.cmake.
-    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpV8Windows.cmake)
+    include(${PULP_ROOT_DIR}/tools/cmake/PulpV8Windows.cmake)
     pulp_v8_windows_apply_abi(pulp-view-script)
 endif()
 

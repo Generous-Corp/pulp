@@ -80,6 +80,20 @@ modules:
     dependencies: [runtime, canvas]
     docs: reference/rendering.md#render
 
+  - name: gpu_audio
+    summary: >
+      GPU audio compute runtime — a fixed-latency RT/non-RT bridge
+      (GpuAudioTransport + GpuAudioNode: lock-free input/output rings, polling
+      worker, miss policy) over render::GpuCompute. Nodes: GpuConvolver
+      (GPU-resident fused/batched convolution) plus a spectral toolkit
+      (GpuStft and the GpuSpectralFreeze / GpuSpectralMorph / GpuHyperFreeze
+      capture-and-render engines). Not real-time-safe at the device boundary
+      (each op is upload → dispatch → blocking readback); the transport is the
+      RT seam.
+    status: experimental
+    dependencies: [render, signal, audio]
+    docs: guides/gpu-audio-sdk.md
+
   - name: view
     summary: >
       Full widget toolkit with CSS parity: flexbox, grid layout, transforms, animations,

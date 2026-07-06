@@ -1054,6 +1054,44 @@ GPU surface management — you rarely use this directly. Canvas and View handle 
 
 ---
 
+## gpu_audio
+
+**Experimental.** A fixed-latency bridge that lets a real-time `process()` block
+offload heavy DSP to the GPU without blocking the audio thread. `GpuAudioTransport`
+owns lock-free input/output rings and a polling worker; a `GpuAudioNode` submits
+whole blocks to `render::GpuCompute` and reads results back one block later, so the
+audio thread never waits on the device. When the GPU can't keep up (an offline
+bounce running faster than real time, or a cold pipeline), a configurable **miss
+policy** falls back to CPU or silence rather than glitching.
+
+**Link:** `pulp::gpu-audio` · **Include prefix:** `<pulp/gpu_audio/...>` ·
+**Depends on:** `render`, `signal`, `audio`
+
+| Node / primitive | What It Does |
+|------------------|-------------|
+| `GpuAudioTransport` | Fixed-latency RT↔non-RT bridge: lock-free rings + polling worker over `GpuCompute` |
+| `GpuConvolver` | GPU-resident fused / batched partitioned convolution (long IRs, many instances) |
+| `GpuStft` | GPU STFT / ISTFT primitive — the spectral toolkit's analysis/synthesis stage |
+| `GpuSpectralFreeze` / `GpuSpectralMorph` / `GpuHyperFreeze` | Capture-and-render spectral engines (freeze, morph, N-layer cloud) |
+
+The node boundary is **not** real-time-safe at the device level by design — the
+GPU round-trip is amortized across a block of fixed latency, not paid per sample.
+The subsystem is gated on `pulp::render`; a build without the GPU stack doesn't
+compile or link it.
+
+**Example plugins built on it** (in-tree, `examples/`):
+
+| Example | Uses | Docs |
+|---------|------|------|
+| [SuperConvolver](../examples/super-convolver.md) | `GpuConvolver` — convolution reverb with live IR swap; GPU carries very long IRs / many rooms | [super-convolver](../examples/super-convolver.md) |
+| [Spectral Lab](../examples/spectral-lab.md) | GPU spectral stack — N-layer freeze / morph "cloud" | [spectral-lab](../examples/spectral-lab.md) |
+| [GPU NAM](../examples/gpu-nam.md) | `render::GpuCompute::wavenet_forward` neural-inference primitive (own repo) | [gpu-nam](../examples/gpu-nam.md) |
+
+**SDK guide:** [GPU Audio SDK](../guides/gpu-audio-sdk.md) — building nodes,
+the transport contract, and the validation checklist.
+
+---
+
 ## ship
 
 Packaging and distribution — from code signing to installer to update feed.

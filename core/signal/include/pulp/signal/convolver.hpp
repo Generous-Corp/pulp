@@ -81,8 +81,14 @@ public:
             return false;
 
         auto previous = std::move(state_);
+        // Carry the input delay line from the displaced IR into the incoming one so
+        // the swap doesn't truncate the convolver's history (the tail dip the class
+        // comment promises to avoid). The FDL is IR-independent; this moves the
+        // overlapping recent history (buffer swaps, no per-sample copy) and returns
+        // the ring cursor to resume at.
+        partition_index_ =
+            previous ? detail::carry_input_history(*previous, *next, partition_index_) : 0;
         state_ = std::move(next);
-        partition_index_ = 0;
 
         if (previous) {
             // We pre-checked capacity above (single-producer ring +
@@ -116,12 +122,37 @@ public:
 
         std::fill(s.accum.begin(), s.accum.end(),
                   std::complex<float>{0.0f, 0.0f});
+        // Input and IR are FFTs of real data, so every spectrum is Hermitian
+        // (bin N-i is the conjugate of bin i). The frequency-domain product is
+        // therefore Hermitian too, so only the lower half + Nyquist (N/2+1 bins)
+        // is independent — the upper half is reconstructed by conjugate symmetry
+        // below instead of being multiply-accumulated, halving the dominant MAC.
+        const int half = s.fft_size / 2;   // Nyquist bin; MAC bins [0, half]
         for (std::size_t p = 0; p < s.num_partitions; ++p) {
             const std::size_t idx =
                 (partition_index_ + s.num_partitions - p) % s.num_partitions;
-            for (int i = 0; i < s.fft_size; ++i)
-                s.accum[i] += s.input_spectra[idx][i] * s.ir_spectra[p][i];
+            const std::complex<float>* in = s.input_spectra[idx].data();
+            const std::complex<float>* ir = s.ir_spectra[p].data();
+            for (int i = 0; i <= half; ++i) {
+                // Complex MAC written as explicit float ops: this is the
+                // finite-value result of std::complex::operator* without its
+                // libm NaN/Inf-recovery branch, so the loop is a plain float
+                // multiply-add the compiler can vectorize. Matches operator*
+                // for the finite spectra a convolver sees (any difference is a
+                // sub-ulp FMA-contraction detail, well inside golden tolerance).
+                const float ar = in[i].real(), ai = in[i].imag();
+                const float br = ir[i].real(), bi = ir[i].imag();
+                s.accum[i] += std::complex<float>(ar * br - ai * bi,
+                                                  ar * bi + ai * br);
+            }
         }
+        // Mirror the lower half onto the conjugate-symmetric upper half so the
+        // inverse transform sees a full spectrum. Bins 0 and `half` (DC and
+        // Nyquist) have no distinct partner, so they keep their MAC'd values
+        // unchanged — any residual imaginary part there is the same FFT-roundoff
+        // term the full-spectrum path carried, not a new bias.
+        for (int i = half + 1; i < s.fft_size; ++i)
+            s.accum[i] = std::conj(s.accum[s.fft_size - i]);
 
         s.fft->inverse(s.accum.data());
 

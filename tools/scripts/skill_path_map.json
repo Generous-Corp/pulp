@@ -303,7 +303,9 @@
       "paths": [
         "tools/cmake/FindSkia.cmake",
         "tools/build-skia.sh",
-        "tools/build-skia-android.sh"
+        "tools/build-skia-android.sh",
+        "tools/cmake/PulpBundleRelocatable.cmake",
+        "tools/cmake/scripts/check_bundle_relocatable.py"
       ]
     },
     "ship": {
@@ -312,7 +314,8 @@
         "tools/cli/cmd_ship.cpp",
         "tools/scripts/release-cli-local.sh",
         ".github/workflows/sign-and-release.yml",
-        ".github/workflows/release-cli.yml"
+        ".github/workflows/release-cli.yml",
+        "tools/scripts/build_combined_installer.sh"
       ]
     },
     "streams": {

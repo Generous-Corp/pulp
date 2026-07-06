@@ -36,6 +36,9 @@ These examples explore features that are not yet stable across all platforms.
 | Example | Summary | Formats |
 |---------|---------|---------|
 | [UI Preview](example-ui-preview.html) | Standalone app for testing the view/widget and GPU rendering pipeline | Standalone (macOS only) |
+| [SuperConvolver](super-convolver.html) | GPU convolution reverb with live IR swap — built on the [GPU audio runtime](../reference/modules.md#gpu_audio) | VST3, AU v2, CLAP, Standalone |
+| [Spectral Lab](spectral-lab.html) | N-layer GPU spectral freeze / morph cloud — built on the [GPU audio runtime](../reference/modules.md#gpu_audio) | VST3, AU v2, CLAP, Standalone |
+| [GPU NAM](gpu-nam.html) | Neural Amp Modeler (`.nam`) player with a GPU audio engine — now in [its own repo](https://github.com/danielraffel/pulp-gpu-nam) | VST3, AU v2, CLAP, Standalone |
 
 ## Building Examples
 

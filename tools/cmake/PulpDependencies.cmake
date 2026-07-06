@@ -97,7 +97,7 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     endif()
     unset(_pulp_restore_arch)
     unset(_pulp_webgpu_processor)
-    set(PULP_HAS_WEBGPU TRUE)
+    set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
     message(STATUS "Pulp: WebGPU (Dawn) enabled")
 
 endif()
@@ -121,7 +121,7 @@ option(PULP_SKIA_AUTOFETCH "Auto-fetch pinned Skia into a shared cache when miss
 if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         AND NOT DEFINED ENV{SKIA_DIR} AND NOT ANDROID
         AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS"))
-    file(GLOB _pulp_local_skia "${CMAKE_SOURCE_DIR}/external/skia-build/build/*-gpu/lib/Release/libskia.a")
+    file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/*-gpu/lib/Release/libskia.a")
     if(NOT _pulp_local_skia)
         if(DEFINED ENV{PULP_SKIA_CACHE})
             set(_pulp_skia_cache "$ENV{PULP_SKIA_CACHE}")
@@ -146,7 +146,7 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
                 execute_process(
                     COMMAND ${_pulp_python3} tools/scripts/fetch_skia_for_release.py
                             ${_pulp_skia_plat} --dest "${_pulp_skia_cache}"
-                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+                    WORKING_DIRECTORY ${PULP_ROOT_DIR})
                 file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
             endif()
         endif()
@@ -157,11 +157,11 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
     endif()
 endif()
 
-set(PULP_HAS_SKIA FALSE)
+set(PULP_HAS_SKIA FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 if(PULP_ENABLE_GPU)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)
     if(SKIA_FOUND)
-        set(PULP_HAS_SKIA TRUE)
+        set(PULP_HAS_SKIA TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
         # On Android + iOS, Dawn is bundled in Skia's pre-built libs.
         # Set PULP_HAS_WEBGPU so the render subsystem builds without
         # needing the desktop wgpu-native FetchContent path. iOS in
@@ -169,7 +169,7 @@ if(PULP_ENABLE_GPU)
         # viable backend, which matches
         # how pulp::render uses Dawn when PULP_HAS_SKIA is set.
         if(ANDROID OR IOS)
-            set(PULP_HAS_WEBGPU TRUE)
+            set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
         endif()
 
         # Text shaping via SkParagraph (HarfBuzz + ICU, bundled in Skia pre-built)
@@ -336,9 +336,9 @@ if(PULP_ENABLE_SCENE3D)
 endif()
 
 # VST3 SDK (MIT license) — cloned into external/vst3sdk/
-set(VST3_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
+set(VST3_SDK_DIR "${PULP_ROOT_DIR}/external/vst3sdk" CACHE INTERNAL "VST3 SDK dir (visible to embedding consumers)" FORCE)
 if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
-    set(PULP_HAS_VST3 TRUE)
+    set(PULP_HAS_VST3 TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 
     # Build the minimal VST3 SDK base library
     file(GLOB_RECURSE VST3_BASE_SOURCES
@@ -382,7 +382,7 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
 
     message(STATUS "Pulp: VST3 SDK found at ${VST3_SDK_DIR}")
 else()
-    set(PULP_HAS_VST3 FALSE)
+    set(PULP_HAS_VST3 FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
     message(STATUS "Pulp: VST3 SDK not found — VST3 format disabled")
 endif()
 
@@ -399,7 +399,7 @@ target_include_directories(clap INTERFACE
     $<BUILD_INTERFACE:${clap_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:external/clap/include>
 )
-set(PULP_HAS_CLAP TRUE)
+set(PULP_HAS_CLAP TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 message(STATUS "Pulp: CLAP SDK available")
 
 # LV2 (ISC license) — header-only plugin format (Linux-first)
@@ -417,7 +417,7 @@ target_include_directories(lv2-headers INTERFACE
     $<BUILD_INTERFACE:${lv2_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:external/lv2/include>
 )
-set(PULP_HAS_LV2 TRUE)
+set(PULP_HAS_LV2 TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 message(STATUS "Pulp: LV2 SDK available")
 
 # Facebook Yoga (MIT license) — cross-platform CSS Flexbox/Grid layout engine
@@ -509,7 +509,7 @@ message(STATUS "Pulp: Mbed TLS crypto library enabled")
 # violation.
 add_library(pulp-cpp-httplib INTERFACE)
 target_include_directories(pulp-cpp-httplib INTERFACE
-    ${CMAKE_SOURCE_DIR}/external/cpp-httplib)
+    ${PULP_ROOT_DIR}/external/cpp-httplib)
 if(TARGET mbedcrypto)
     target_compile_definitions(pulp-cpp-httplib INTERFACE CPPHTTPLIB_MBEDTLS_SUPPORT)
     if(IOS OR PULP_IOS)
@@ -590,7 +590,7 @@ endif()
 # Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support (macOS only, not iOS)
 set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")
 if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
-    set(PULP_HAS_AUSDK TRUE)
+    set(PULP_HAS_AUSDK TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 
     file(GLOB AUSDK_SOURCES "${AUSDK_DIR}/src/AudioUnitSDK/*.cpp")
     add_library(ausdk STATIC ${AUSDK_SOURCES})
@@ -619,6 +619,6 @@ if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
 
     message(STATUS "Pulp: AudioUnitSDK found — AU v2 support enabled")
 else()
-    set(PULP_HAS_AUSDK FALSE)
+    set(PULP_HAS_AUSDK FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
     message(STATUS "Pulp: AudioUnitSDK not found — AU v2 format disabled")
 endif()

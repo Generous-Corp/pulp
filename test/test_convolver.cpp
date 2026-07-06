@@ -81,6 +81,41 @@ TEST_CASE("Convolver: multi-partition IR", "[signal][convolver]") {
     REQUIRE(conv.latency() == 0);
 }
 
+TEST_CASE("Convolver: half-spectrum output matches a direct convolution",
+          "[signal][convolver]") {
+    // The frequency-domain product is MAC'd over only the lower half of the
+    // Hermitian spectrum and the upper half is reconstructed by conjugate
+    // symmetry. Stream several blocks through a long, non-block-aligned,
+    // multi-partition IR and require the streamed (zero-latency overlap-save)
+    // output to match a direct time-domain FIR convolution of the same input.
+    constexpr size_t block = 64;
+    const size_t ir_len = block * 3 + 17;   // spans partitions; unaligned tail
+    std::vector<float> ir(ir_len);
+    for (size_t k = 0; k < ir_len; ++k)
+        ir[k] = std::sin(0.3f * static_cast<float>(k) + 0.5f)
+                * std::exp(-0.01f * static_cast<float>(k));
+
+    PartitionedConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block);
+
+    const size_t nblocks = 6;
+    std::vector<float> x(nblocks * block);
+    for (size_t n = 0; n < x.size(); ++n)
+        x[n] = std::sin(0.21f * static_cast<float>(n))
+               - 0.4f * std::cos(0.07f * static_cast<float>(n));
+
+    std::vector<float> y(x.size(), 0.0f);
+    for (size_t b = 0; b < nblocks; ++b)
+        conv.process(&x[b * block], &y[b * block], block);
+
+    for (size_t n = 0; n < x.size(); ++n) {
+        double ref = 0.0;   // y[n] = Σ_k ir[k]*x[n-k]
+        for (size_t k = 0; k < ir_len && k <= n; ++k)
+            ref += static_cast<double>(ir[k]) * static_cast<double>(x[n - k]);
+        REQUIRE_THAT(y[n], WithinAbs(ref, 2e-3));
+    }
+}
+
 TEST_CASE("Convolver: block size is rounded to a processable power of two",
           "[signal][convolver][issue-645]") {
     const std::vector<float> ir = {1.0f};
