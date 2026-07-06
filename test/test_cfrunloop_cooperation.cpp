@@ -111,15 +111,19 @@ TEST_CASE("plugin backend marshals call_async onto the main thread",
 
     std::atomic<bool> ran{false};
     std::atomic<bool> ran_on_main{false};
+    std::atomic<bool> posted{false};
 
     // Post from a worker thread so the dispatch is genuinely cross-thread.
+    // Catch2 assertions are not thread-safe, so the worker records the post
+    // result and the test thread asserts after join() (thread_assert_check.py).
     std::thread worker([&] {
-        REQUIRE(MainThreadDispatcher::call_async([&] {
+        posted.store(MainThreadDispatcher::call_async([&] {
             ran_on_main.store(MainThreadDispatcher::is_main_thread());
             ran.store(true);
-        }));
+        }), std::memory_order_relaxed);
     });
     worker.join();
+    REQUIRE(posted.load());
 
     // Cocoa's main-queue work runs when CFRunLoop is serviced. The
     // dispatch_get_main_queue() runloop source fires only when the runloop

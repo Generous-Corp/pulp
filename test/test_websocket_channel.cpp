@@ -215,6 +215,10 @@ TEST_CASE("WebSocketChannel rejects handshake without upgrade header", "[websock
     }
 
     std::atomic<bool> ready{false};
+    // Catch2 assertions are not thread-safe: the server thread records its
+    // result and the test thread asserts after join() (thread_assert_check.py).
+    std::atomic<bool> handshake_checked{false};
+    std::atomic<bool> ws_was_null{false};
     std::thread server_thread([&] {
         ready.store(true);
         auto accepted = listener.accept();
@@ -222,7 +226,8 @@ TEST_CASE("WebSocketChannel rejects handshake without upgrade header", "[websock
         auto tcp = std::make_unique<TcpStream>(std::move(*accepted));
         // Server should refuse the non-upgrade request.
         auto ws = WebSocketChannel::accept(std::move(tcp));
-        REQUIRE(ws == nullptr);
+        ws_was_null.store(ws == nullptr, std::memory_order_relaxed);
+        handshake_checked.store(true, std::memory_order_relaxed);
     });
     while (!ready.load()) std::this_thread::sleep_for(1ms);
 
@@ -234,6 +239,9 @@ TEST_CASE("WebSocketChannel rejects handshake without upgrade header", "[websock
                 std::strlen(plain_http));
     client.close();
     server_thread.join();
+    // The server accepted the connection and refused the non-upgrade request.
+    REQUIRE(handshake_checked.load());
+    REQUIRE(ws_was_null.load());
 }
 
 // ── WebSocketChannel additional coverage ────────────────────────────────

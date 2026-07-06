@@ -71,6 +71,7 @@ TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
+THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -262,6 +263,19 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
     echo "" >&2
     echo "▸ conflict-marker guard (no committed <<<<<<< / ======= / >>>>>>>)" >&2
     if ! "$PYTHON" "$CONFLICT_MARKER_GUARD"; then
+        fail=1
+    fi
+fi
+
+# ── 13. thread-safe-assertions guard ───────────────────────────────────────
+# Catch2 3.7.1 assertion macros aren't thread-safe; a REQUIRE/CHECK inside a
+# std::thread/async lambda in test/ is UB that bare metal tolerates but VM
+# scheduler timing trips (it reddened the required macOS gate on the Tart-VM
+# graduation). Also a ctest case, but running it here catches it pre-push.
+if [ -f "$THREAD_ASSERT_GUARD" ]; then
+    echo "" >&2
+    echo "▸ thread-safe-assertions guard (no Catch2 assert in a worker thread)" >&2
+    if ! "$PYTHON" "$THREAD_ASSERT_GUARD"; then
         fail=1
     fi
 fi
