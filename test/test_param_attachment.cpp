@@ -226,3 +226,121 @@ TEST_CASE("poll_bindings forwards external parameter changes",
     REQUIRE(callback_count == 1);
     REQUIRE_THAT(last_value, WithinAbs(5000.0, 0.001));
 }
+
+// ── External (lambda-backed) attachment overloads ────────────────────────────
+
+namespace {
+struct HostParam { float v = 0.0f; };
+}  // namespace
+
+TEST_CASE("attach_knob(ExternalBindingConfig) labels + seeds from the getter",
+          "[view][attachment][external]") {
+    HostParam h;
+    h.v = 50.0f;
+    ExternalBindingConfig cfg;
+    cfg.get = [&h] { return h.v; };
+    cfg.set = [&h](float x) { h.v = x; };
+    cfg.range = ParamRange{.min = 0.0f, .max = 100.0f, .default_value = 0.0f};
+    cfg.name = "Drive";
+    auto [knob, binding] = attach_knob(cfg, 72.0f);
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->id() == "Drive");
+    REQUIRE_THAT(knob->value(), WithinAbs(0.5, 0.01));           // 50/100
+    REQUIRE_THAT(knob->flex().preferred_width, WithinAbs(72.0, 0.1));
+}
+
+TEST_CASE("attach_knob(ExternalBindingConfig) writes through the setter (denormalized)",
+          "[view][attachment][external]") {
+    HostParam h;
+    ExternalBindingConfig cfg;
+    cfg.get = [&h] { return h.v; };
+    cfg.set = [&h](float x) { h.v = x; };
+    cfg.range = ParamRange{.min = 0.0f, .max = 100.0f, .default_value = 0.0f};
+    auto [knob, binding] = attach_knob(cfg);
+    REQUIRE(knob->on_change);
+    knob->on_change(0.25f);                                      // normalized
+    REQUIRE_THAT(h.v, WithinAbs(25.0, 0.001));                  // wrote plain value
+}
+
+TEST_CASE("attach_fader(ExternalBindingConfig) writes through the setter",
+          "[view][attachment][external]") {
+    HostParam h;
+    ExternalBindingConfig cfg;
+    cfg.get = [&h] { return h.v; };
+    cfg.set = [&h](float x) { h.v = x; };
+    cfg.range = ParamRange{.min = 0.0f, .max = 10.0f, .default_value = 0.0f};
+    cfg.name = "Mix";
+    auto [fader, binding] = attach_fader(cfg);
+    REQUIRE(fader->id() == "Mix");
+    fader->on_change(0.5f);
+    REQUIRE_THAT(h.v, WithinAbs(5.0, 0.001));
+}
+
+TEST_CASE("attach_toggle(ExternalBindingConfig) maps on/off through the setter",
+          "[view][attachment][external]") {
+    HostParam h;
+    ExternalBindingConfig cfg;
+    cfg.get = [&h] { return h.v; };
+    cfg.set = [&h](float x) { h.v = x; };
+    cfg.range = ParamRange{.min = 0.0f, .max = 1.0f, .default_value = 0.0f};
+    auto [toggle, binding] = attach_toggle(cfg);
+    toggle->on_toggle(true);
+    REQUIRE_THAT(h.v, WithinAbs(1.0, 0.001));
+    toggle->on_toggle(false);
+    REQUIRE_THAT(h.v, WithinAbs(0.0, 0.001));
+}
+
+TEST_CASE("attach_knob(ExternalBindingConfig) returned binding polls the external source",
+          "[view][attachment][external]") {
+    HostParam h;
+    ExternalBindingConfig cfg;
+    cfg.get = [&h] { return h.v; };
+    cfg.set = [&h](float x) { h.v = x; };
+    cfg.range = ParamRange{.min = 0.0f, .max = 100.0f, .default_value = 0.0f};
+    auto [knob, binding] = attach_knob(cfg);
+    int fires = 0;
+    binding.on_change([&](float) { ++fires; });
+    h.v = 40.0f;                    // host changes it out of band
+    REQUIRE(binding.poll());
+    REQUIRE(fires == 1);
+}
+
+TEST_CASE("attach_knob(ExternalBindingConfig) wires gesture brackets to the host",
+          "[view][attachment][external]") {
+    HostParam h;
+    int begins = 0, ends = 0;
+    ExternalBindingConfig cfg;
+    cfg.get = [&h] { return h.v; };
+    cfg.set = [&h](float x) { h.v = x; };
+    cfg.range = ParamRange{.min = 0.0f, .max = 1.0f, .default_value = 0.0f};
+    cfg.begin_gesture = [&begins] { ++begins; };
+    cfg.end_gesture = [&ends] { ++ends; };
+    auto [knob, binding] = attach_knob(cfg);
+    // Without the gesture wiring a host never records a UI drag as automation.
+    REQUIRE(knob->on_gesture_begin);
+    REQUIRE(knob->on_gesture_end);
+    knob->on_gesture_begin();
+    knob->on_change(0.5f);
+    knob->on_gesture_end();
+    REQUIRE(begins == 1);
+    REQUIRE(ends == 1);
+    REQUIRE_THAT(h.v, WithinAbs(0.5, 0.001));
+}
+
+TEST_CASE("attach_toggle(ExternalBindingConfig) brackets its write in a host gesture",
+          "[view][attachment][external]") {
+    HostParam h;
+    int begins = 0, ends = 0;
+    ExternalBindingConfig cfg;
+    cfg.get = [&h] { return h.v; };
+    cfg.set = [&h](float x) { h.v = x; };
+    cfg.range = ParamRange{.min = 0.0f, .max = 1.0f, .default_value = 0.0f};
+    cfg.begin_gesture = [&begins] { ++begins; };
+    cfg.end_gesture = [&ends] { ++ends; };
+    auto [toggle, binding] = attach_toggle(cfg);
+    toggle->on_toggle(true);
+    // The discrete change is bracketed begin→set→end so hosts record it.
+    REQUIRE(begins == 1);
+    REQUIRE(ends == 1);
+    REQUIRE_THAT(h.v, WithinAbs(1.0, 0.001));
+}

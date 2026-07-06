@@ -6,6 +6,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/state/binding.hpp>
+#include <pulp/state/external_binding.hpp>
 #include <memory>
 
 namespace pulp::view {
@@ -144,6 +145,97 @@ attach_combo(state::StateStore& store, state::ParamID id,
 ///       remains for hosts without a vblank-driven `RenderLoop`.
 inline void poll_bindings(std::vector<state::Binding>& bindings) {
     for (auto& b : bindings) b.poll();
+}
+
+// ── External (lambda-backed) attachments ─────────────────────────────────────
+// The same widgets, bound to an arbitrary get/set source instead of a StateStore
+// parameter — e.g. a host-side value in an embedding app. The widget writes
+// through the config's setter; the returned ExternalBinding is the host-side
+// handle for poll()/notify()/gestures/on_change. See state::ExternalBinding.
+
+inline std::pair<std::unique_ptr<Knob>, state::ExternalBinding>
+attach_knob(state::ExternalBindingConfig cfg, float size = 60.0f) {
+    auto setter = cfg.set;
+    auto range = cfg.range;
+    auto begin = cfg.begin_gesture;
+    auto end = cfg.end_gesture;
+    std::string name = cfg.name;
+    std::string unit = cfg.unit;
+
+    state::ExternalBinding binding(std::move(cfg));
+    auto knob = std::make_unique<Knob>();
+    if (!name.empty()) {
+        knob->set_label(name);
+        knob->set_id(name);
+    }
+    knob->set_format([unit, range](float norm) {
+        float val = range.denormalize(norm);
+        char buf[32];
+        if (std::abs(val) >= 100) std::snprintf(buf, sizeof(buf), "%.0f", val);
+        else if (std::abs(val) >= 10) std::snprintf(buf, sizeof(buf), "%.1f", val);
+        else std::snprintf(buf, sizeof(buf), "%.2f", val);
+        return std::string(buf) + (unit.empty() ? "" : " " + unit);
+    });
+    knob->set_value(binding.get_normalized());
+    knob->flex().preferred_width = size;
+    knob->flex().preferred_height = size;
+    knob->on_change = [setter, range](float norm) {
+        if (setter) setter(range.denormalize(norm));
+    };
+    // Bracket the drag in the host's gesture callbacks so DAWs record UI moves
+    // as automation (same rationale as the StateStore overload above).
+    knob->on_gesture_begin = [begin]() { if (begin) begin(); };
+    knob->on_gesture_end   = [end]()   { if (end) end(); };
+    return {std::move(knob), std::move(binding)};
+}
+
+inline std::pair<std::unique_ptr<Fader>, state::ExternalBinding>
+attach_fader(state::ExternalBindingConfig cfg) {
+    auto setter = cfg.set;
+    auto range = cfg.range;
+    auto begin = cfg.begin_gesture;
+    auto end = cfg.end_gesture;
+    std::string name = cfg.name;
+
+    state::ExternalBinding binding(std::move(cfg));
+    auto fader = std::make_unique<Fader>();
+    if (!name.empty()) {
+        fader->set_label(name);
+        fader->set_id(name);
+    }
+    fader->set_value(binding.get_normalized());
+    fader->on_change = [setter, range](float norm) {
+        if (setter) setter(range.denormalize(norm));
+    };
+    fader->on_gesture_begin = [begin]() { if (begin) begin(); };
+    fader->on_gesture_end   = [end]()   { if (end) end(); };
+    return {std::move(fader), std::move(binding)};
+}
+
+inline std::pair<std::unique_ptr<Toggle>, state::ExternalBinding>
+attach_toggle(state::ExternalBindingConfig cfg) {
+    auto setter = cfg.set;
+    auto range = cfg.range;
+    auto begin = cfg.begin_gesture;
+    auto end = cfg.end_gesture;
+    std::string name = cfg.name;
+
+    state::ExternalBinding binding(std::move(cfg));
+    auto toggle = std::make_unique<Toggle>();
+    if (!name.empty()) {
+        toggle->set_label(name);
+        toggle->set_id(name);
+    }
+    // Snap (don't animate) the initial seed so the first frame / a headless
+    // screenshot paints the stored state (matches the StateStore overload).
+    toggle->set_on(binding.get_normalized() > 0.5f, /*animate=*/false);
+    toggle->on_toggle = [setter, range, begin, end](bool on) {
+        // Discrete change bracketed in a one-shot gesture so hosts record it.
+        if (begin) begin();
+        if (setter) setter(range.denormalize(on ? 1.0f : 0.0f));
+        if (end) end();
+    };
+    return {std::move(toggle), std::move(binding)};
 }
 
 } // namespace pulp::view
