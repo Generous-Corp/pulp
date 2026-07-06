@@ -187,6 +187,70 @@ class FetchSkiaForReleaseExtraTests(unittest.TestCase):
                 self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 1)
             self.assertIn("expected library not found", err.getvalue())
 
+    def _fetch_over_prepopulated_dest(self, seed_build: "callable") -> None:
+        """Run a full fetch when external/skia-build/build already exists, seeded
+        by ``seed_build`` (which receives the dest_root path)."""
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            data = make_zip_bytes(pathlib.Path("build/mac-gpu/lib/Release/libskia.a"), b"fresh")
+            digest = hashlib.sha256(data).hexdigest()
+            manifest = pathlib.Path("tools/deps/manifest.json")
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(
+                json.dumps({
+                    "dependencies": [{
+                        "name": "skia",
+                        "determinism": {
+                            "release_assets": {
+                                "mac-arm64": {"url": "https://example.invalid/skia.zip", "sha256": digest}
+                            }
+                        },
+                    }]
+                }),
+                encoding="utf-8",
+            )
+            dest_root = pathlib.Path("external/skia-build")
+            dest_root.mkdir(parents=True)
+            seed_build(dest_root)  # leave a stale build/ tree the way a warm runner does
+
+            with mock.patch.object(skia.urllib.request, "urlopen", return_value=_FakeResponse(data)), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                # The pre-existing build/ must not raise FileExistsError; the fetch
+                # overwrites the tree and the pinned library ends up in place.
+                self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 0)
+            lib = skia.expected_library_path("darwin-arm64")
+            self.assertTrue(lib.is_file())
+            self.assertEqual(lib.read_bytes(), b"fresh")
+
+    def test_unpack_is_idempotent_over_existing_build_dir(self) -> None:
+        # A warm self-hosted runner (clean: false) or a golden VM image leaves a
+        # plain build/ directory behind; re-fetching onto it must succeed.
+        def seed_plain(dest_root: pathlib.Path) -> None:
+            stale = dest_root / "build" / "mac-gpu" / "lib" / "Release"
+            stale.mkdir(parents=True)
+            (stale / "libskia.a").write_bytes(b"stale")
+        self._fetch_over_prepopulated_dest(seed_plain)
+
+    def test_unpack_is_idempotent_over_build_symlink(self) -> None:
+        # build/ may be a symlink into a shared cache; extraction must follow it
+        # rather than choke on the existing path.
+        def seed_symlink(dest_root: pathlib.Path) -> None:
+            cache = pathlib.Path("skia-cache")
+            cache.mkdir()
+            (dest_root / "build").symlink_to(cache.resolve(), target_is_directory=True)
+        self._fetch_over_prepopulated_dest(seed_symlink)
+
+    def test_extract_over_rejects_zip_slip(self) -> None:
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            dest = pathlib.Path("dest")
+            dest.mkdir()
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as zf:
+                zf.writestr("../escape.txt", b"nope")
+            with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as zf:
+                with self.assertRaises(ValueError):
+                    skia._extract_over(zf, dest)
+            self.assertFalse((pathlib.Path("escape.txt")).exists())
+
 
 class BakedSkiaShortCircuit(unittest.TestCase):
     """PULP_USE_BAKED_SKIA: the Tart VM runner bakes Skia at $SKIA_DIR, so the

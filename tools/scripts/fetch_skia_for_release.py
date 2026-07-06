@@ -58,6 +58,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sys
 import urllib.parse
 import urllib.request
@@ -139,6 +140,35 @@ def _version_doc_has_asset_digest(
     except OSError:
         return False
     return any(asset_name in line and expected_sha in line.lower() for line in lines)
+
+
+def _extract_over(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extract every member of *zf* under *dest*, overwriting files and reusing
+    any directory that already exists.
+
+    ``zipfile.extractall`` creates each directory member with a bare
+    ``os.mkdir``, which raises ``FileExistsError`` when the target directory (or
+    a symlink to one) is already there — exactly the state a warm self-hosted
+    runner (``clean: false``) or a golden VM image leaves behind under
+    ``external/skia-build/build``. Re-fetching the pinned asset onto that tree
+    has to succeed (the script's whole point is to be idempotent across jobs),
+    so create directories with ``exist_ok`` and stream file members over
+    whatever is present. Member paths are validated lexically to stay within
+    *dest* — reject absolute paths and ``..`` escapes (zip-slip) — without
+    resolving symlinks, so a ``build`` symlink into a shared cache still works.
+    """
+    for member in zf.infolist():
+        name = member.filename
+        parts = Path(name).parts
+        if Path(name).is_absolute() or ".." in parts:
+            raise ValueError(f"unsafe zip member path: {name!r}")
+        target = dest / name
+        if member.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(member) as src, open(target, "wb") as out:
+            shutil.copyfileobj(src, out)
 
 
 def main(argv: list[str]) -> int:
@@ -299,7 +329,7 @@ def main(argv: list[str]) -> int:
     dest.mkdir(parents=True, exist_ok=True)
     print(f"Unpacking → {dest}")
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(dest)
+        _extract_over(zf, dest)
 
     # Free the ~hundreds-of-MiB download once unpacked.
     zip_path.unlink(missing_ok=True)

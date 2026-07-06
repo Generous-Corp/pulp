@@ -107,6 +107,16 @@ without opening a window.
   live window.
 - **First GPU link is slow-ish** (~45s here for the view lib + Skia/Dawn link),
   but subsequent incremental builds are fast.
+- **`fetch_skia_for_release.py` must be idempotent on warm runners.** On a
+  self-hosted runner (`clean: false`) or a golden VM image, `external/skia-build/
+  build` persists between jobs. The fetch script re-downloads only when the
+  pinned lib+stamp are absent, but the *unpack* must still not choke on that
+  pre-existing tree — plain `zipfile.extractall` `os.mkdir`s each dir member and
+  raises `FileExistsError` on an already-present `build/`. Unpack member-wise
+  with `mkdir(exist_ok=True)` (see `_extract_over`) so a re-fetch overwrites the
+  tree instead of crashing. This bit the VM CI lane while bare-metal stayed green
+  (their goldens left `build/` in different states) — a warm-runner idempotency
+  bug, not a Skia problem.
 
 ## GPU bundles MUST be relocatable (the libwgpu_native.dylib rpath footgun)
 
