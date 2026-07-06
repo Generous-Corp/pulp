@@ -1182,6 +1182,10 @@ pulp_add_test_suite(pulp-test-hotswap-slot LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-param-contract LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-reload-capabilities LIBRARIES pulp::view)
 
+# Signed Revocation List (SRL) + namespaced monotonic epoch floor.
+pulp_add_test_suite(pulp-test-reload-revocation LIBRARIES pulp::format
+    DISCOVERY_ARGS TEST_PREFIX "revocation.")
+
 # DSP hot reload — dynamic-library handle + leak policy (Phase 0). Builds a tiny
 # MODULE fixture and dlopens it by absolute path (RELOAD_PROBE_PATH).
 add_library(pulp-reload-probe MODULE fixtures/reload_probe.cpp)
@@ -1203,8 +1207,12 @@ add_library(pulp-reload-logic-compat MODULE fixtures/reload_logic_compatible.cpp
 add_library(pulp-reload-logic-incompat MODULE fixtures/reload_logic_incompatible.cpp)
 add_library(pulp-reload-logic-throwing MODULE fixtures/reload_logic_throwing.cpp)
 add_library(pulp-reload-logic-nan MODULE fixtures/reload_logic_nan.cpp)
+# C1 (verify-before-load): a fixture whose static constructor writes a marker file
+# at load time, so the test can prove a rejected pack is NEVER dlopen'd.
+add_library(pulp-reload-logic-ctor-marker MODULE fixtures/reload_logic_ctor_marker.cpp)
 foreach(_pulp_reload_logic pulp-reload-logic-compat pulp-reload-logic-incompat
-                           pulp-reload-logic-throwing pulp-reload-logic-nan)
+                           pulp-reload-logic-throwing pulp-reload-logic-nan
+                           pulp-reload-logic-ctor-marker)
     set_target_properties(${_pulp_reload_logic} PROPERTIES
         PREFIX "" POSITION_INDEPENDENT_CODE ON)
     target_link_libraries(${_pulp_reload_logic} PRIVATE pulp::format)
@@ -1212,12 +1220,13 @@ endforeach()
 pulp_add_test_suite(pulp-test-reload-transaction LIBRARIES pulp::format)
 add_dependencies(pulp-test-reload-transaction
     pulp-reload-logic-compat pulp-reload-logic-incompat pulp-reload-logic-throwing
-    pulp-reload-logic-nan)
+    pulp-reload-logic-nan pulp-reload-logic-ctor-marker)
 target_compile_definitions(pulp-test-reload-transaction PRIVATE
     RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
     RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
     RELOAD_LOGIC_THROWING="$<TARGET_FILE:pulp-reload-logic-throwing>"
-    RELOAD_LOGIC_NAN="$<TARGET_FILE:pulp-reload-logic-nan>")
+    RELOAD_LOGIC_NAN="$<TARGET_FILE:pulp-reload-logic-nan>"
+    RELOAD_LOGIC_CTOR_MARKER="$<TARGET_FILE:pulp-reload-logic-ctor-marker>")
 if(NOT WIN32)
     target_link_libraries(pulp-test-reload-transaction PRIVATE ${CMAKE_DL_LIBS})
 endif()
@@ -4836,6 +4845,7 @@ if(TARGET pulp-render)
     list(APPEND _pulp_widget_bridge_test_libs pulp::render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test_libs})
+pulp_add_test_suite(pulp-test-widget-bridge-capabilities LIBRARIES ${_pulp_widget_bridge_test_libs})
 
 # Widget bridge — source-level API contract. Keeps JS-native registrations
 # unique and matched to the reviewed bridge API manifest so future registrar
