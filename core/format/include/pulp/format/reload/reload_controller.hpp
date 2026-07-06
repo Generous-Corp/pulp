@@ -39,6 +39,7 @@
 /// it defaults to the watched file's own directory.
 
 #include <pulp/format/reload/reload_transaction.hpp>
+#include <pulp/format/reload/reload_trust_policy.hpp>
 
 #include <array>
 #include <atomic>
@@ -110,9 +111,11 @@ public:
     /// @param stage_dir where versioned copies are staged before loading; must
     /// be dlopen-safe. Defaults to the watched file's directory.
     ReloadController(ReloadSession& session, std::filesystem::path logic_path,
-                     std::filesystem::path stage_dir = {})
+                     std::filesystem::path stage_dir = {},
+                     ReloadTrustPolicy trust_policy = {})
         : session_(session), path_(std::move(logic_path)),
-          stage_dir_(stage_dir.empty() ? path_.parent_path() : std::move(stage_dir)) {
+          stage_dir_(stage_dir.empty() ? path_.parent_path() : std::move(stage_dir)),
+          trust_policy_(std::move(trust_policy)) {
         // Startup housekeeping: clear dead-process staged litter so a long dev
         // history doesn't leave hundreds of <stem>.initial.*/<stem>.reload.*
         // copies behind (bounds staged-copy accumulation across restarts).
@@ -203,6 +206,20 @@ private:
     // path it already opened.
     ReloadOutcome stage_and_reload() {
         ++attempts_;
+        // require_signed enforcement (opt-in; default OFF = the frictionless dev
+        // loop). Verify the WATCHED file's signed pack BEFORE staging: the pack
+        // manifest pins the watched path as its member, but we load a renamed
+        // stage copy, so membership is checked here on the source and the faithful
+        // copy_file below carries those exact verified bytes into the loaded image.
+        // Fail closed — a refusal returns without staging or loading anything.
+        if (trust_policy_.require_signed) {
+            auto decision = resolve_reload_trust(path_, trust_policy_);
+            if (auto* refused = std::get_if<ReloadOutcome>(&decision)) return *refused;
+            if (auto* trust = std::get_if<SwapPackTrust>(&decision)) {
+                if (auto rejected = verify_pack_before_load(*trust, path_.string()))
+                    return *rejected;
+            }
+        }
         // Stage to a name unique per-INSTANCE and per-process. Two shells
         // watching the same logic_path share a default stage_dir (the watched
         // file's directory), so a name keyed only on a per-controller counter
@@ -250,6 +267,7 @@ private:
     ReloadSession& session_;
     std::filesystem::path path_;
     std::filesystem::path stage_dir_;
+    ReloadTrustPolicy trust_policy_;  // opt-in require_signed enforcement (default OFF)
     std::filesystem::file_time_type last_mtime_{};
     std::filesystem::path last_staged_;  // this instance's prior staged copy (reaped on next stage)
     std::uint64_t last_hash_ = 0;        // content hash last acted on
