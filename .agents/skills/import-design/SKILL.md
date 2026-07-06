@@ -106,6 +106,18 @@ silently dropped. External-library instances and cross-file variables that a
 local file can't resolve surface the same way — treat them as data, not failures,
 and fill in the critical ones by hand.
 
+**Gotcha — the `.fig` fixture-determinism test compares decoded content, not raw
+bytes.** `fig.test.mjs`'s "generator output is deterministic" test regenerates
+`synthetic.fig` and compares it to the committed fixture. It must compare the
+*decompressed* schema + message + rasters (`unpackFig(...)`), never the raw file
+bytes: the inner fig-kiwi chunks are DEFLATE-compressed, and zlib's exact output
+varies by Node/zlib version, so a raw byte-compare tests zlib rather than the
+generator and goes red on any CI host whose zlib differs from the one that
+committed the fixture (this is exactly what reddened a VM runner while the same
+commit stayed green on bare-metal). If you touch `make_synthetic_fig.mjs`,
+regenerate the fixture from the canonical toolchain, but keep the comparison at
+the decoded layer.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the
