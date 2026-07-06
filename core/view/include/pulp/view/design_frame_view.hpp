@@ -188,6 +188,16 @@ bool has_design_control_factory(const std::string& factory_id);
 // Test/teardown helper: drop all registered factories.
 void clear_design_control_factories();
 
+// A Kind::custom element whose `factory_id` had no registered factory when the
+// overlay was built, so it rendered inert (the baked SVG still shows). Surfaced
+// via DesignFrameView's opt-in diagnostic so a developer learns which ids were
+// referenced-but-unregistered (a forgotten register_design_control_factory or a
+// typo'd id) instead of getting a silently missing control.
+struct UnregisteredCustomControl {
+    std::string factory_id;      ///< the id that had no factory
+    std::string source_node_id;  ///< the design-source node id (e.g. Figma), if any
+};
+
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
 // the given box, returning true if one was erased. Used to suppress a design's
 // BAKED selected-tab highlight so the live overlay's pill is the only one shown
@@ -346,6 +356,30 @@ public:
     // The native-overlay child widget for element `i`, or nullptr (e.g. for a
     // knob, or out of range). For tests/bindings.
     View* overlay_widget(int i) const;
+
+    // ── Unregistered-custom-control diagnostic (opt-in, default off) ──────
+    // A Kind::custom element whose factory_id has NO registered factory renders
+    // inert (the baked SVG still shows) — by design a custom control never
+    // blanks. But that means a forgotten register_design_control_factory or a
+    // typo'd id is otherwise silent. Set this callback to be told which ids were
+    // referenced-but-unregistered so a developer / a --validate check can flag
+    // them. Fires once per inert Kind::custom element during overlay build, on
+    // the UI thread. Because the constructor builds the initial frame before a
+    // caller can attach this, setting the callback also REPLAYS the unregistered
+    // controls seen in the most recent build — so a callback attached right after
+    // construction still learns about them. Default (no callback set) is EXACTLY
+    // the old behavior: silent inert render, SVG intact. It never changes what
+    // renders — only ADDS the diagnostic signal.
+    void set_on_unregistered_custom_control(
+        std::function<void(const UnregisteredCustomControl&)> cb);
+    // The set of unregistered custom-control factory_ids seen during the last
+    // overlay build (rebuilt on every frame activation), in first-seen order and
+    // de-duplicated. Empty when every Kind::custom element resolved to a factory.
+    // Queryable without a callback — handy for a `--validate` style assertion.
+    const std::vector<UnregisteredCustomControl>&
+    unregistered_custom_controls() const {
+        return unregistered_custom_;
+    }
 
     // Fired when the USER changes an element (knob drag, dropdown/tab/stepper
     // select) — index + the new normalized value. NOT fired by set_element_value
@@ -559,6 +593,10 @@ private:
     int drag_ = -1;
     float drag_start_x_ = 0.0f, drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
     int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
+    // Opt-in diagnostic for referenced-but-unregistered Kind::custom controls,
+    // plus the accumulator rebuilt on every overlay build. UI-thread-only.
+    std::function<void(const UnregisteredCustomControl&)> on_unregistered_custom_;
+    std::vector<UnregisteredCustomControl> unregistered_custom_;
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered
     bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()

@@ -334,7 +334,21 @@ void DesignFrameView::set_active_frame(int index) {
     request_repaint();
 }
 
+void DesignFrameView::set_on_unregistered_custom_control(
+    std::function<void(const UnregisteredCustomControl&)> cb) {
+    on_unregistered_custom_ = std::move(cb);
+    // The constructor already built the initial frame's overlays before a caller
+    // could attach this callback, so replay any unregistered controls seen in the
+    // most recent build. A callback set right after construction still learns
+    // about them; thereafter it fires live from build_overlays on each rebuild.
+    if (on_unregistered_custom_)
+        for (const auto& miss : unregistered_custom_) on_unregistered_custom_(miss);
+}
+
 void DesignFrameView::build_overlays() {
+    // Rebuilt fresh each activation: the diagnostic reflects the active frame's
+    // current element set, not an accumulation across frame swaps.
+    unregistered_custom_.clear();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
         std::unique_ptr<View> widget;
@@ -403,6 +417,20 @@ void DesignFrameView::build_overlays() {
                 ctx.source_node_id = e.source_node_id;
                 ctx.default_value = e.value;
                 widget = it->second(ctx);
+            } else {
+                // No factory registered (or a null one): the element stays inert
+                // and the baked SVG still shows — rendering is unchanged. Record
+                // the id (de-duplicated, first-seen order) and, if a diagnostic
+                // callback is set, hand it the id + source node so a developer or
+                // a --validate check learns which controls were unwired.
+                UnregisteredCustomControl miss{e.factory_id, e.source_node_id};
+                const bool seen = std::any_of(
+                    unregistered_custom_.begin(), unregistered_custom_.end(),
+                    [&](const UnregisteredCustomControl& u) {
+                        return u.factory_id == miss.factory_id;
+                    });
+                if (!seen) unregistered_custom_.push_back(miss);
+                if (on_unregistered_custom_) on_unregistered_custom_(miss);
             }
         }
         if (widget) {

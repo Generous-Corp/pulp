@@ -16,6 +16,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 
+#include <memory>
 #include <string>
 
 using namespace pulp::view;
@@ -877,4 +878,101 @@ TEST_CASE("DesignFrameView rotates a <rect> indicator needle (tag-agnostic)",
     if (cmp.similarity >= 0.999f)
         SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
     CHECK(cmp.similarity < 0.999f);         // the rect needle visibly moved
+}
+
+namespace {
+
+// A Kind::custom element referencing the given factory id (with a source node so
+// the diagnostic can carry provenance). Sits inside the 80x80 panel.
+DesignFrameElement make_custom(std::string factory_id, std::string source_node = "1:42") {
+    DesignFrameElement e;
+    e.kind = DesignFrameElement::Kind::custom;
+    e.x = 20; e.y = 20; e.w = 40; e.h = 40;
+    e.factory_id = std::move(factory_id);
+    e.source_node_id = std::move(source_node);
+    return e;
+}
+
+}  // namespace
+
+TEST_CASE("DesignFrameView reports an unregistered custom control to the diagnostic",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();   // ensure "my_widget" is genuinely absent
+
+    DesignFrameView v(make_design_svg(), {make_custom("my_widget", "3:7")});
+
+    // The element is inert: no overlay widget is built, and the frame still
+    // renders (the baked SVG shows) — nothing crashes, nothing blanks.
+    CHECK(v.overlay_widget(0) == nullptr);
+
+    // The accumulator records the referenced-but-unregistered id + its node.
+    REQUIRE(v.unregistered_custom_controls().size() == 1);
+    CHECK(v.unregistered_custom_controls()[0].factory_id == "my_widget");
+    CHECK(v.unregistered_custom_controls()[0].source_node_id == "3:7");
+
+    // The callback fires exactly once, with the same id + node. (Attaching it
+    // after construction replays the initial build's miss.)
+    int calls = 0;
+    UnregisteredCustomControl seen;
+    v.set_on_unregistered_custom_control([&](const UnregisteredCustomControl& u) {
+        ++calls;
+        seen = u;
+    });
+    CHECK(calls == 1);
+    CHECK(seen.factory_id == "my_widget");
+    CHECK(seen.source_node_id == "3:7");
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("DesignFrameView builds a registered custom control without firing the diagnostic",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+    int built = 0;
+    std::string built_id;
+    register_design_control_factory(
+        "my_widget", [&](const DesignControlContext& ctx) -> std::unique_ptr<View> {
+            ++built;
+            built_id = ctx.factory_id;
+            return std::make_unique<View>();
+        });
+
+    int misses = 0;
+    DesignFrameView v(make_design_svg(), {make_custom("my_widget")});
+    v.set_on_unregistered_custom_control(
+        [&](const UnregisteredCustomControl&) { ++misses; });
+
+    CHECK(built == 1);                                   // factory ran
+    CHECK(built_id == "my_widget");                      // with the right ctx
+    CHECK(v.overlay_widget(0) != nullptr);               // overlay added as a child
+    CHECK(v.unregistered_custom_controls().empty());     // nothing unregistered
+    CHECK(misses == 0);                                  // callback never fired
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("DesignFrameView with no diagnostic callback is inert-safe for an unregistered custom",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+
+    // A knob alongside an unregistered custom: default path (no callback set)
+    // must build fine, leave the custom inert, and keep the knob fully working.
+    DesignFrameView v(make_design_svg(), {make_knob(), make_custom("ghost")});
+
+    CHECK(v.element_count() == 2);
+    CHECK(v.overlay_widget(1) == nullptr);               // custom stays inert
+    CHECK(v.element_value(0) == 0.5f);                   // knob unaffected
+
+    // The knob still turns — the inert custom neighbor doesn't break interaction.
+    v.set_bounds({0, 0, 80, 80});   // view == panel, so view coords map 1:1
+    v.on_mouse_down({40, 40});      // -> SVG (50,50), the knob center
+    v.on_mouse_drag({40, 10});      // drag up
+    v.on_mouse_up({40, 10});
+    CHECK(v.element_value(0) > 0.6f);
+
+    // The getter still records the miss even with no callback attached.
+    REQUIRE(v.unregistered_custom_controls().size() == 1);
+    CHECK(v.unregistered_custom_controls()[0].factory_id == "ghost");
+
+    clear_design_control_factories();
 }
