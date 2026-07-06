@@ -43,7 +43,7 @@ TEST_CASE("plugin-side consumer can iterate UMP packets via the sidecar",
 }
 
 TEST_CASE("UmpBuffer sorts, iterates, and clears sample-accurate events",
-          "[midi][buffer][ump][coverage]") {
+          "[midi][buffer][ump]") {
     UmpBuffer ump;
     ump.add(UmpPacket::note_on_2(0, 2, 67, 0x4000), 96);
     ump.add(UmpEvent{UmpPacket::note_off_2(0, 1, 60, 0), 12});
@@ -91,7 +91,7 @@ TEST_CASE("attached UMP sidecar remains externally owned across MidiBuffer edits
 }
 
 TEST_CASE("MidiBuffer move assignment preserves attached UMP sidecar pointer",
-          "[midi][buffer][ump][coverage]") {
+          "[midi][buffer][ump]") {
     UmpBuffer sidecar;
     sidecar.add(UmpPacket::cc_2(0, 3, 74, 0x80000000u), 24);
 

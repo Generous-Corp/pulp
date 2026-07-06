@@ -329,7 +329,7 @@ TEST_CASE("AudioFocusRegistry: publish with no subscribers still updates state",
 }
 
 TEST_CASE("AudioFocusRegistry: subscriber added during publish waits for next signal",
-          "[audio][focus][large]") {
+          "[audio][focus]") {
     AudioFocusRegistry::instance().reset_for_test();
 
     std::vector<AudioFocusState> first_seen;

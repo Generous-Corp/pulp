@@ -94,6 +94,12 @@
         "tools/scripts/hotspot_size_guard.json",
         "tools/scripts/test_hotspot_size_guard.py",
         "tools/scripts/gates.sh",
+        "tools/scripts/scheduled_workflow_fork_guard_check.py",
+        "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
+        "tools/scripts/host_vitals.sh",
+        "tools/scripts/test_host_vitals.sh",
+        "tools/scripts/host_vitals_sensor.sh",
+        "tools/scripts/install_host_vitals_sensor.sh",
         "tools/scripts/single_backend_guard.py",
         "tools/scripts/processing_model_terms_lint.py",
         "tools/launchd/**",
@@ -118,6 +124,12 @@
         "tools/scripts/cli_mcp_parity_baseline.json",
         ".claude/commands/**"
       ]
+    },
+    "code-comments": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "Process/guidance skill (how to write durable source comments + test names/tags) — applies when writing any code, not tied to a source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+      }
     },
     "kits": {
       "paths": [
@@ -244,6 +256,11 @@
         "examples/mpe-*/**"
       ]
     },
+    "moonbase": {
+      "paths": [
+        "examples/moonbase-activation/**"
+      ]
+    },
     "packages": {
       "paths": [
         "tools/packages/**",
@@ -251,6 +268,12 @@
         "NOTICE.md",
         "tools/deps/manifest.json"
       ]
+    },
+    "pr-review-sweep": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "Process skill (sweep a PR's review comments and act on them) — not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+      }
     },
     "prototype-loop": {
       "paths": [

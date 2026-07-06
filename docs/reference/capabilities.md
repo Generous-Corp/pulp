@@ -17,26 +17,26 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
-| `formats.clap` | Bus 0 routes to Processor::process() and bus 1 routes to Processor::set_sidechain(); additional input buses and secondary output buses are not exposed through the simple Processor process surface. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
+| `formats.clap` | Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
 | `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | [link](../../planning/production-readiness/01-format-adapters.md#1.1) |
-| `formats.vst3` | Bus 0 and one sidechain input are routed through ProcessBuffers; secondary output buses are zero-filled today rather than exposed as writable processor outputs. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.vst3` | Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
-| `formats.vst3` | MIDI vocabulary routes note on/off and sysex; controller, poly pressure, and note expression are not routed. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route. | [link](../../planning/production-readiness/01-format-adapters.md#1.2) |
 | `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
 | `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | [link](../../planning/production-readiness/01-format-adapters.md#1.3) |
 | `formats.auv3` | Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](../../planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](../../planning/production-readiness/05-auv3-mobile.md) |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](../../planning/production-readiness/01-format-adapters.md#1.5) |
-| `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.1) |
+| `audio_io.wasapi` | Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.1) |
 | `audio_io.alsa` | No input capture path. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
-| `audio_io.jack` | Dead code — factory always returns AlsaSystem; JACK is never selected at runtime. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `audio_io.jack` | Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.2) |
 | `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.6) |
 | `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.4) |
 | `midi_io.alsa_midi` | Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually. | [link](../../planning/production-readiness/02-audio-midi-io.md#2.5) |
-| `platform_maturity.accessibility.windows` | UIA provider tree and event emission pending (UIAutomationCore linked, session init wired). | [link](../../planning/production-readiness/04-accessibility.md#4.1) |
-| `platform_maturity.accessibility.linux` | AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place). | [link](../../planning/production-readiness/04-accessibility.md#4.2) |
+| `platform_maturity.accessibility.windows` | Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source. | [link](../../planning/production-readiness/04-accessibility.md#4.1) |
+| `platform_maturity.accessibility.linux` | Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus. | [link](../../planning/production-readiness/04-accessibility.md#4.2) |
 <!-- generated:end id=limitations -->
 
 ---
@@ -74,16 +74,20 @@ this section mirrors it for human readers. A status of `usable` means the
 adapter compiles and loads — not that every host-facing feature is wired.
 
 - **VST3** — Dynamic bus arrangements limited; `setBusArrangements` only
-  renegotiates the primary stereo bus today. Tracked: production-readiness
-  workstream 01.
+  renegotiates the primary stereo bus today. Descriptor-declared secondary
+  output buses are routed through `ProcessBuffers`, so a multi-out processor
+  that overrides `process(ProcessBuffers&)` writes each aux output bus.
+  Tracked: production-readiness workstream 01.
 - **Audio Unit v2** — Outbound parameter changes are not emitted to the host;
   automation read on AU v2 effects only flows host → plugin. Tracked:
   workstream 01.
 - **CLAP** — Bus 0 routes to `Processor::process()` and bus 1 routes to
-  `Processor::set_sidechain()`. Additional input buses and secondary output
-  buses are not exposed through the simple `Processor` process surface. CLAP
-  `PARAM_MOD` note identity fields are accepted but not routed with per-note
-  modulation scope.
+  `Processor::set_sidechain()`. Descriptor-declared secondary output buses are
+  routed through `ProcessBuffers`, so a multi-out processor that overrides
+  `process(ProcessBuffers&)` writes each aux output bus; additional input buses
+  beyond the sidechain are not exposed through the simple `Processor` process
+  surface. CLAP `PARAM_MOD` note identity fields are accepted but not routed
+  with per-note modulation scope.
 - **LV2** — Atom sysex is ignored; the `run()` loop only promotes 1–3-byte
   short MIDI messages out of the input atom sequence.
 - **AAX** — Custom editor surface not wired; Pro Tools shows the
@@ -93,7 +97,8 @@ adapter compiles and loads — not that every host-facing feature is wired.
 - **AUv3** — iOS jetsam pressure not modeled; heavy V8 / WebView workloads in
   the AUv3 process risk termination at ~50 MB. Tracked: workstream 05.
 - **WAM v2 / WebCLAP** — Browser origin sandbox only; no Pulp-side capability
-  manifest yet. Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
+  manifest yet, and the Pulp browser-host runtime wiring is still scaffolded.
+  Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
 
 If you hit a limitation not listed, check
 `planning/production-readiness/01-format-adapters.md` and file an issue.
@@ -108,7 +113,7 @@ If you hit a limitation not listed, check
 | Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
 | Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, CI |
 | iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
-| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2, WebCLAP, Emscripten pipeline |
+| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2 (Emscripten) canary loads + renders in Chrome; WebCLAP (wasi-sdk) builds + is Node-hosted with audio + parameter control; in-browser WebCLAP host pending |
 
 Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 
@@ -253,7 +258,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | ScrollView (smooth scroll, fade bars) | usable | [view](modules.md#view) | |
 | Meter (RMS + peak hold), ProgressBar | usable | [view](modules.md#view) | |
 | XYPad, WaveformView, SpectrumView | usable | [view](modules.md#view) | |
-| ImageView | usable | [view](modules.md#view) | Placeholder rendering |
+| ImageView | usable | [view](modules.md#view) | File-backed decode with placeholder fallback |
 | TreeView, Tooltip, Panel, Icon | usable | [view](modules.md#view) | |
 | SpectrogramView (scrolling STFT) | usable | [view](modules.md#view) | |
 | MultiMeter, CorrelationMeter | usable | [view](modules.md#view) | |
@@ -266,7 +271,9 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | ConcertinaPanel, SplitView, Breadcrumb, Toolbar | usable | [view](modules.md#view) | |
 | ColorPicker, Lasso, PropertyList, CodeEditor | usable | [view](modules.md#view) | |
 | CanvasWidget (25 draw commands) | usable | [view](modules.md#view) | [custom-rendering](../guides/custom-rendering.md) |
-| ModulationMatrix, A/B compare, sortable TableView | planned | [view](modules.md#view) | Production-readiness workstream 07 |
+| ModulationMatrixWidget (source-to-destination routes) | usable | [view](modules.md#view) | [widgets](widgets.md#audio-specific) |
+| TableListBox (sortable columns) | partial | [view](modules.md#view) | Click-to-sort columns and themed rows are implemented; built-in table scrolling/scrollbar remains planned |
+| A/B compare | planned | [view](modules.md#view) | Production-readiness workstream 07 |
 
 ### Web-Compat Layer
 
@@ -293,12 +300,12 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | VoiceOver accessibility | usable | macOS | NSAccessibilityElement + AccessRole |
 | VoiceOver accessibility | usable | iOS | UIAccessibilityElement with slider increment/decrement |
 | TalkBack accessibility | usable | Android | JNI bridge: role, label, value, table metadata, actions |
-| UIA accessibility | partial | Windows | Role map only; provider pending (production-readiness 04) |
-| AT-SPI accessibility | partial | Linux | Role map only; D-Bus registration pending (production-readiness 04) |
+| UIA accessibility | partial | Windows | Provider tree, WM_GETOBJECT, and value/focus/name event helpers exist; direct UIA client regression still pending |
+| AT-SPI accessibility | partial | Linux | Direct D-Bus provider exposes per-widget tree/value paths with loopback tests; real registry/Orca signal receipt still pending |
 | IME composition (marked text) | usable | macOS | Full NSTextInputClient |
-| Right-click context menu | usable | macOS | on_context_menu + PopupMenu |
+| Right-click context menu | partial | all | on_context_menu/registerContextMenu fire; view-tree ContextMenu is actionable; native showContextMenu currently renders only on macOS and does not report selection |
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
-| File dialogs (open, save, folder) | usable | macOS | NSOpenPanel/NSSavePanel |
+| File dialogs (open, save, folder) | partial | macOS, Windows, Linux | macOS NSOpenPanel/NSSavePanel; opt-in Windows IFileDialog and Linux xdg-desktop-portal backends via `FileDialog::install_native_backend()` |
 | Drag and drop | usable | macOS | File + text drop targets |
 | Plugin view hosting | usable | macOS/iOS, Windows, Linux | Native NSView/UIView/HWND/X11 plugin-editor hosts. Windows requires Skia; Linux requires Skia + X11 and degrades to headless capture when no display is available. Android/custom targets still require a host-registered `PluginViewHost::Factory`. Native child attach/bounds/detach inside plugin editors is built in on macOS/iOS only; non-Apple child embedding remains factory-backed. |
 | Native child view embedding (WindowHost) | partial | macOS + factory-backed non-Apple | Built-in standalone support is macOS-only. Built-in iOS `WindowHost` does not expose the embedding handles. Windows/Linux/Android require a host-registered `WindowHost::Factory` that implements attach/bounds/detach. |
@@ -464,8 +471,8 @@ The `pulp` CLI wraps common development workflows.
 | Appcast XML parsing | usable | ship | |
 | Ed25519 update signing | usable | ship | Sparkle appcast signatures via `sign_file_ed25519()` and `pulp ship appcast --sign-key` |
 | Semantic version comparison | usable | ship | |
-| Windows code signing | partial | ship | Stub exists |
-| Linux packaging | partial | ship | Stub exists |
+| Windows code signing | partial | ship | [windows](../guides/platforms/windows.md) — Authenticode via Windows SDK `signtool`; signing is implemented, but certificate provisioning and real signing validation remain host-owned |
+| Linux packaging | usable | ship | [linux](../guides/platforms/linux.md) — tested `.deb` path with `.tar.gz` fallback independent of runtime platform maturity, plus standalone AppImage wrapping when `appimagetool` is installed |
 
 Key headers: `pulp/ship/codesign.hpp`, `pulp/ship/appcast.hpp`
 

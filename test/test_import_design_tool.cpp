@@ -597,7 +597,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(source.find("std::make_unique<pulp::view::Knob>()") != std::string::npos);
         REQUIRE(source.find("->set_anchor_id(\"pr_2c\");") != std::string::npos);
         REQUIRE(source.find("->set_label(\"freq\");") != std::string::npos);
-        REQUIRE(source.find("->set_value(/* TODO: bind to param */ 0.35f);") != std::string::npos);
+        REQUIRE(source.find("->set_value(/* imported static param value */ 0.35f);") != std::string::npos);
         REQUIRE(source.find("tokens::kChainerOrange") != std::string::npos);
         REQUIRE(binding_manifest.find("\"id\": \"chainer.knob.0.osc_freq\"") != std::string::npos);
         REQUIRE(binding_manifest.find("\"native_primitive\": \"knob\"") != std::string::npos);
@@ -1275,6 +1275,104 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
     REQUIRE(js.find("createKnob('Cutoff_Knob") != std::string::npos);
     REQUIRE(js.find("setValue('Cutoff_Knob") != std::string::npos);
     REQUIRE(js.find("880") != std::string::npos);
+}
+
+TEST_CASE("pulp-import-design --param-binding-manifest: wiring + error paths",
+          "[cli][import-design][tool][figma-plugin][param-binding]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-param-binding");
+    const auto zip = tmp.path / "scene.pulp.zip";
+    const auto output = tmp.path / "ui.js";
+
+    // A minimal figma-plugin envelope that parses cleanly, so the run reaches the
+    // --param-binding-manifest step (the binding-count correctness is covered by
+    // the library unit tests in test_design_import_ir.cpp).
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame", "name": "TestRoot", "figma_node_id": "1:1",
+            "style": { "width": 200, "height": 200 },
+            "layout": { "direction": "column" },
+            "children": [
+                { "type": "frame", "name": "Cutoff Knob", "figma_node_id": "1:2",
+                  "audio_widget": "knob", "label": "Cutoff",
+                  "min": 20, "max": 20000, "default": 880,
+                  "style": { "width": 56, "height": 56 },
+                  "layout": { "direction": "column" }, "children": [] }
+            ]
+        }
+    })JSON";
+    REQUIRE(make_pulp_zip(zip, envelope));
+
+    SECTION("a missing manifest file is a hard error, never a silent skip") {
+        auto r = run_import_design({"--from", "figma-plugin", "--file", zip.string(),
+                                    "--output", output.string(),
+                                    "--param-binding-manifest",
+                                    (tmp.path / "nope.json").string()});
+        REQUIRE_FALSE(r.timed_out);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("could not read --param-binding-manifest")
+                != std::string::npos);
+    }
+
+    SECTION("an invalid (non-JSON) manifest is a hard error") {
+        const auto bad = tmp.path / "bad.json";
+        write_text(bad, "{ not json");
+        auto r = run_import_design({"--from", "figma-plugin", "--file", zip.string(),
+                                    "--output", output.string(),
+                                    "--param-binding-manifest", bad.string()});
+        REQUIRE_FALSE(r.timed_out);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("invalid --param-binding-manifest")
+                != std::string::npos);
+    }
+
+    SECTION("a manifest binds a descriptive faithful_svg control end-to-end") {
+        // A faithful_svg frame with a geometry knob that carries provenance
+        // (source_node_id "1:2") but NO param_key — the real descriptive-name
+        // case. The manifest binds it by node id; ir-json --dry-run round-trips
+        // the IR so the bound param_key is observable without a render.
+        const auto svgzip = tmp.path / "faithful.pulp.zip";
+        const std::string faithful = R"JSON({
+            "format_version": "2026.05-figma-plugin-v1",
+            "parser_version": "0.1.0",
+            "compat_schema_version": "0.3",
+            "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+            "asset_manifest": { "version": 1, "assets": [] },
+            "diagnostics": [],
+            "root": {
+                "type": "frame", "name": "Panel", "figma_node_id": "1:1",
+                "render_mode": "faithful_svg", "svg_asset_id": "panel-svg",
+                "style": { "width": 200, "height": 200 },
+                "interactive_elements": [
+                    { "kind": "knob", "cx": 50, "cy": 50, "hit_radius": 20,
+                      "source_node_id": "1:2" }
+                ]
+            }
+        })JSON";
+        REQUIRE(make_pulp_zip(svgzip, faithful));
+
+        const auto man = tmp.path / "bindings.json";
+        write_text(man, R"({"1:2": "filter.cutoff"})");
+        auto r = run_import_design({"--from", "figma-plugin", "--file", svgzip.string(),
+                                    "--emit", "ir-json", "--dry-run",
+                                    "--param-binding-manifest", man.string()});
+        REQUIRE_FALSE(r.timed_out);
+        INFO("stderr: " << r.stderr_output);
+        INFO("stdout: " << r.stdout_output);
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(r.stderr_output.find("param-binding: bound 1 control")
+                != std::string::npos);
+        REQUIRE(r.stdout_output.find("filter.cutoff") != std::string::npos);
+    }
 }
 
 TEST_CASE("pulp-import-design persists .pulp.zip assets beside generated output",
@@ -2142,6 +2240,128 @@ TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 2);
     REQUIRE(r.stderr_output.find("--screenshot-backend must be") != std::string::npos);
+}
+
+// --validate renders the generated JS (native-materialized widget tree), not the
+// embedded faithful SVG. For a faithful_svg scene the reported similarity is the
+// native-materialize fidelity — which understates the true 1:1 render — so the
+// tool must SAY SO. The note prints before the render, so it appears regardless
+// of whether a headless Skia render is available in the test environment.
+TEST_CASE("pulp-import-design --validate labels faithful_svg fidelity honestly",
+          "[cli][import-design][tool][faithful-svg][validate]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    SECTION("faithful_svg scene prints the native-materialize caveat") {
+        TempDir tmp("pulp-validate-faithful");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                          R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                          R"("source_uri":"figma://x/1:1"},)"
+                          R"("root":{"type":"frame","name":"Faithful","figma_node_id":"1:1",)"
+                          R"("render_mode":"faithful_svg","svg_asset_id":"frame-svg"}})");
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--validate"});
+        REQUIRE_FALSE(r.timed_out);
+        // The honesty note fires on faithful_svg detection, before the render.
+        REQUIRE(r.stdout_output.find("faithful_svg render mode") != std::string::npos);
+        REQUIRE(r.stdout_output.find("native-materialize fidelity") != std::string::npos);
+        REQUIRE(r.stdout_output.find("pulp-svg-probe") != std::string::npos);
+    }
+
+    SECTION("a faithful_svg node nested below a normal root still triggers the caveat") {
+        // The detection is recursive; a normal root with a faithful child must
+        // still be flagged (a Figma frame wrapping a faithful panel).
+        TempDir tmp("pulp-validate-faithful-child");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                          R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                          R"("source_uri":"figma://x/1:1"},)"
+                          R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1",)"
+                          R"("children":[{"type":"frame","name":"Panel","figma_node_id":"1:2",)"
+                          R"("render_mode":"faithful_svg","svg_asset_id":"panel-svg"}]}})");
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--validate"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.stdout_output.find("native-materialize fidelity") != std::string::npos);
+    }
+
+    SECTION("a normal (non-faithful) scene prints no such caveat") {
+        TempDir tmp("pulp-validate-normal");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                          R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                          R"("source_uri":"figma://x/1:1"},)"
+                          R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--validate"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.stdout_output.find("native-materialize fidelity") == std::string::npos);
+    }
+}
+
+TEST_CASE("pulp-import-design validates style selector values",
+          "[cli][import-design][tool][style]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-style-selector-values");
+    auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, R"({"format_version":"2026.05-figma-plugin-v1",)"
+                      R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+                      R"("source_uri":"figma://x/1:1"},)"
+                      R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})");
+
+    const std::vector<std::vector<std::string>> ok_cases = {
+        {"--knob-style", "auto"},
+        {"--knob-style=sprite"},
+        {"--fader-style", "skin"},
+        {"--fader-style=plain"},
+        {"--meter-style", "skinned"},
+        {"--meter-style=default"},
+    };
+
+    for (std::size_t idx = 0; idx < ok_cases.size(); ++idx) {
+        auto args = std::vector<std::string>{"--from", "figma-plugin",
+                                             "--file", scene.string(),
+                                             "--output", (tmp.path / ("ok" + std::to_string(idx) + ".js")).string(),
+                                             "--no-tokens"};
+        args.insert(args.end(), ok_cases[idx].begin(), ok_cases[idx].end());
+        auto ok = run_import_design(args);
+        INFO(ok.stderr_output);
+        REQUIRE_FALSE(ok.timed_out);
+        REQUIRE(ok.exit_code == 0);
+    }
+
+    struct BadCase {
+        std::vector<std::string> args;
+        const char* error;
+    };
+    const std::vector<BadCase> cases = {
+        {{"--knob-style", "chrome"}, "--knob-style must be"},
+        {{"--knob-style=chrome"}, "--knob-style must be"},
+        {{"--fader-style", "chrome"}, "--fader-style must be"},
+        {{"--fader-style=chrome"}, "--fader-style must be"},
+        {{"--meter-style", "chrome"}, "--meter-style must be"},
+        {{"--meter-style=chrome"}, "--meter-style must be"},
+    };
+
+    for (const auto& c : cases) {
+        auto args = std::vector<std::string>{"--from", "figma-plugin",
+                                             "--file", scene.string(),
+                                             "--output", (tmp.path / "bad.js").string(),
+                                             "--no-tokens"};
+        args.insert(args.end(), c.args.begin(), c.args.end());
+        auto r = run_import_design(args);
+        INFO(r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.error) != std::string::npos);
+    }
 }
 
 // `--emit swiftui` per-view theme naming. The theme artifact/type derive from

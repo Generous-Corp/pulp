@@ -59,8 +59,9 @@ enum class StretchTransientMode { phase_reset, verbatim_relocate };
 ///                   Natural, time != pitch. Best for tonal/melodic/sustained.
 ///   varispeed     — pitch+time LINKED (pure resample) + speed-scaled tape head EQ.
 ///                   Tape character, NO stretch artifacts. Pitch follows tempo.
-///   phase_vocoder — reserved for clean + verbatim transient relocation; currently
-///                   renders as `clean` until seam handling passes the quality gate.
+///   phase_vocoder — reserved character mode; currently renders through the
+///                   `clean` spectral path. Use relocate_transients for opt-in
+///                   tempo-only transient grafting.
 ///   granular      — reserved for grain/stutter texture; currently renders as `clean`.
 enum class StretchCharacter { clean, varispeed, phase_vocoder, granular };
 
@@ -296,8 +297,8 @@ public:
         // Character-mode dispatch. `varispeed` is pitch+time-linked (tape): a pure
         // resample + a speed-scaled head EQ, no phase-vocoder artifacts. The
         // `phase_vocoder` and `granular` characters are reserved modes that fall
-        // through to the clean spectral path for now (relocate_transients is a
-        // documented no-op until seam-clean relocation is enabled).
+        // through to the clean spectral path for now; the tempo-only spectral path
+        // can still opt into verbatim transient relocation.
         if (opts.character == StretchCharacter::varispeed)
             return varispeed_render(in, in_frames, out, out_frames, opts.time_ratio);
 

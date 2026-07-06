@@ -37,6 +37,27 @@ TEST_CASE("MusicalTyping maps the QWERTY row to chromatic notes", "[view][musica
     CHECK(ev[4] == std::make_pair(64, true));
 }
 
+TEST_CASE("MusicalTyping covers the full 18-key span incl. ; and ' (top two keys)",
+          "[view][musical-typing]") {
+    // The Logic-style layout is a..' = 18 semitones (0..17). `;` and `'` are the
+    // two keys past `p` — previously unmapped, so they silently did nothing while
+    // their on-screen keys still drew + clicked (the slice-unreachable bug).
+    CHECK(MusicalTypingController::semitone_for_key(KeyCode::p) == 15);
+    CHECK(MusicalTypingController::semitone_for_key(KeyCode::semicolon) == 16);
+    CHECK(MusicalTypingController::semitone_for_key(KeyCode::apostrophe) == 17);
+
+    MusicalTypingController mt;
+    mt.set_base_note(60);
+    std::vector<std::pair<int, bool>> ev;
+    mt.on_note_on = [&](int n, float) { ev.emplace_back(n, true); };
+    mt.on_note_off = [&](int n) { ev.emplace_back(n, false); };
+    REQUIRE(mt.handle_key(key(KeyCode::semicolon, true)));   // 60 + 16
+    REQUIRE(mt.handle_key(key(KeyCode::apostrophe, true)));  // 60 + 17
+    REQUIRE(ev.size() == 2);
+    CHECK(ev[0] == std::make_pair(76, true));
+    CHECK(ev[1] == std::make_pair(77, true));
+}
+
 TEST_CASE("MusicalTyping de-dups auto-repeat and releases on key-up", "[view][musical-typing]") {
     MusicalTypingController mt;
     mt.set_base_note(48);

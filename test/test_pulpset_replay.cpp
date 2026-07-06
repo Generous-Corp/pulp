@@ -7,12 +7,60 @@
 
 #include <pulp/format/pulpset.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/detail/locale_independent_float.hpp>
 
+#include <clocale>
 #include <cmath>
+#include <cstring>
+#include <locale>
+#include <stdexcept>
+#include <string>
 
 using namespace pulp;
 
 namespace {
+
+// RAII guard: force a comma-decimal locale for the test body, then restore.
+// The pulpset parser used std::istringstream, whose float reads honor the C++
+// std::locale::global() in effect when the stream is constructed — so we set
+// BOTH the C locale (setlocale) AND the global C++ locale here, otherwise the
+// old istringstream bug would not even reproduce. If a comma-decimal std::locale
+// can be constructed and uses a comma decimal point, comma_decimal() is true and
+// the strict assertions are meaningful; otherwise the from_chars round-trip is
+// still proven by construction.
+class ScopedCommaLocale {
+public:
+    ScopedCommaLocale() : prev_cpp_(std::locale()) {
+        const char* prev = std::setlocale(LC_NUMERIC, nullptr);
+        if (prev) prev_c_ = prev;
+        for (const char* name : {"de_DE.UTF-8", "de_DE", "fr_FR.UTF-8",
+                                 "fr_FR", "nl_NL.UTF-8", "nl_NL"}) {
+            try {
+                std::locale loc(name);
+                std::locale::global(loc);  // affects istringstream default locale
+                std::setlocale(LC_NUMERIC, name);
+                const auto& np = std::use_facet<std::numpunct<char>>(loc);
+                comma_decimal_ = (np.decimal_point() == ',');
+                applied_ = true;
+                break;
+            } catch (const std::exception&) {
+                // Locale not installed on this box — try the next name.
+            }
+        }
+    }
+    ~ScopedCommaLocale() {
+        std::locale::global(prev_cpp_);
+        if (!prev_c_.empty()) std::setlocale(LC_NUMERIC, prev_c_.c_str());
+    }
+    bool applied() const { return applied_; }
+    bool comma_decimal() const { return comma_decimal_; }
+
+private:
+    std::locale prev_cpp_;
+    std::string prev_c_;
+    bool applied_ = false;
+    bool comma_decimal_ = false;
+};
 
 // Deterministic instrument: a 440 Hz sine, gated by MIDI note-on/off, scaled by param 0.
 class GatedSine : public format::Processor {
@@ -111,4 +159,128 @@ TEST_CASE("Pulpset replay is deterministic (bit-exact across runs)", "[pulpset][
     auto h2 = make_host(); auto b = format::render(*h2, ps, 8000, 512);
     REQUIRE(a.left == b.left);
     REQUIRE(a.right == b.right);
+}
+
+TEST_CASE("Pulpset parse is locale-independent (comma-decimal host)", "[pulpset][locale]") {
+    // Under a comma-decimal global C locale, the previous std::istringstream
+    // >> float path parsed "0.5" as 0 (stopping at the dot). std::from_chars
+    // always uses the C decimal point, so the fractional value survives.
+    ScopedCommaLocale guard;
+    if (!guard.comma_decimal()) {
+        SKIP("no comma-decimal locale (de_DE/fr_FR/nl_NL) installed on this box "
+             "— the istringstream regression cannot be proven here");
+    }
+
+    auto ps = format::Pulpset::parse("0 param 0 0.5\n");
+    REQUIRE(ps.events.size() == 1);
+    REQUIRE(ps.events.front().kind == format::PulpsetEvent::Kind::Param);
+    REQUIRE(ps.events.front().value == Catch::Approx(0.5f));
+
+    auto ps2 = format::Pulpset::parse("0 note_on 60 64.5\n");
+    REQUIRE(ps2.events.size() == 1);
+    REQUIRE(ps2.events.front().value == Catch::Approx(64.5f));
+}
+
+TEST_CASE("Pulpset rejects a legacy comma-decimal value instead of truncating",
+          "[pulpset][locale]") {
+    // A `.pulpset` written under a comma-decimal locale would contain "0,5".
+    // from_chars parses just the "0" prefix; without a full-token-consumption
+    // check that would SILENTLY replay 0.5 as 0.0. We reject the line instead —
+    // a clean drop is correct; a silent 0.0 is the bug. Locale-independent, so
+    // no comma-locale install is needed to exercise it.
+    auto comma = format::Pulpset::parse("0 param 0 0,5\n");
+    REQUIRE(comma.events.empty());
+
+    // Trailing junk on a required numeric field is also rejected, not truncated.
+    auto junk = format::Pulpset::parse("0 param 0 0.5foo\n");
+    REQUIRE(junk.events.empty());
+    auto idjunk = format::Pulpset::parse("0 param 123abc 0.5\n");
+    REQUIRE(idjunk.events.empty());
+
+    // A well-formed line on either side of a bad line still parses.
+    auto mixed = format::Pulpset::parse(
+        "0 param 0 0.25\n"
+        "10 param 0 0,5\n"      // rejected
+        "20 param 0 0.75\n");
+    REQUIRE(mixed.events.size() == 2);
+    REQUIRE(mixed.events.front().value == Catch::Approx(0.25f));
+    REQUIRE(mixed.events.back().value == Catch::Approx(0.75f));
+}
+
+TEST_CASE("Pulpset write->read round-trips a fractional value under any locale",
+          "[pulpset][locale]") {
+    ScopedCommaLocale guard;
+    if (!guard.comma_decimal()) {
+        SKIP("no comma-decimal locale (de_DE/fr_FR/nl_NL) installed on this box "
+             "— the istringstream regression cannot be proven here");
+    }
+
+    format::Pulpset ps;
+    ps.events.push_back({.sample = 12000,
+                         .kind = format::PulpsetEvent::Kind::Param,
+                         .id = 0,
+                         .value = 0.5f});
+    ps.events.push_back({.sample = 24000,
+                         .kind = format::PulpsetEvent::Kind::NoteOn,
+                         .id = 60,
+                         .value = 100.0f});
+
+    // Written text must use a dot, never a comma — even under a comma locale.
+    std::string text = ps.to_text();
+    REQUIRE(text.find("0.5") != std::string::npos);
+    REQUIRE(text.find("0,5") == std::string::npos);
+
+    auto round = format::Pulpset::parse(text);
+    REQUIRE(round.events.size() == 2);
+    REQUIRE(round.events.front().value == Catch::Approx(0.5f));
+    REQUIRE(round.events.front().sample == 12000);
+}
+
+// Direct contract test for the shared C-locale float parser that backs both the
+// `.pulpset` value field and CLAP `params_text_to_value`. This is the portable
+// replacement for `std::from_chars`'s =deleted float overload;
+// unlike the comma-locale cases above it needs no special locale installed, so
+// it always runs and locks the consume/range semantics the callers depend on.
+TEST_CASE("parse_double_c_locale: locale-independent, full-consume aware",
+          "[pulpset][format][locale][issue-5218]") {
+    using pulp::format::detail::parse_double_c_locale;
+    double v = -1.0;
+
+    SECTION("plain decimal, fully consumed") {
+        auto r = parse_double_c_locale("0.5", v);
+        REQUIRE(r.consumed == 3);
+        REQUIRE_FALSE(r.range_error);
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("negative and signed values") {
+        REQUIRE(parse_double_c_locale("-3.25", v).consumed == 5);
+        REQUIRE(v == Catch::Approx(-3.25));
+        REQUIRE(parse_double_c_locale("+0.5", v).consumed == 4);  // strtod accepts '+'
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("leading whitespace is skipped (consumed counts it)") {
+        auto r = parse_double_c_locale("  0.5", v);
+        REQUIRE(r.consumed == 5);
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("trailing text => partial consume (CLAP unit-suffix path)") {
+        auto r = parse_double_c_locale("0.5 dB", v);
+        REQUIRE(r.consumed == 3);  // caller decides whether trailing text is OK
+        REQUIRE(v == Catch::Approx(0.5));
+    }
+    SECTION("comma decimal is NOT a decimal point under the C locale") {
+        auto r = parse_double_c_locale("0,5", v);
+        REQUIRE(r.consumed == 1);  // only "0" — full-consume callers reject this
+        REQUIRE_FALSE(r.range_error);
+    }
+    SECTION("non-numeric and empty => nothing consumed") {
+        REQUIRE(parse_double_c_locale("%", v).consumed == 0);
+        REQUIRE(parse_double_c_locale("", v).consumed == 0);
+        REQUIRE(parse_double_c_locale("   ", v).consumed == 0);
+    }
+    SECTION("out-of-range magnitude is flagged, not silently zeroed") {
+        auto r = parse_double_c_locale("1e999999", v);
+        REQUIRE(r.consumed > 0);
+        REQUIRE(r.range_error);
+    }
 }

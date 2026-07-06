@@ -19,7 +19,7 @@ TEST_CASE("PsdfAtlas builds with the requested glyphs", "[canvas][psdf]") {
 }
 
 TEST_CASE("PsdfAtlas keeps the SdfAtlas lookup and move surface",
-          "[canvas][psdf][coverage][issue-650]") {
+          "[canvas][psdf][issue-650]") {
     PsdfAtlas atlas;
     REQUIRE(atlas.build("stub", {U'P', U'S'}, 24, 3, 256));
     REQUIRE(atlas.base_size() == 24);
@@ -33,7 +33,7 @@ TEST_CASE("PsdfAtlas keeps the SdfAtlas lookup and move surface",
 }
 
 TEST_CASE("PsdfAtlas default and invalid builds leave atlas empty",
-          "[canvas][psdf][coverage]") {
+          "[canvas][psdf]") {
     PsdfAtlas atlas;
     REQUIRE(atlas.glyph_count() == 0);
     REQUIRE(atlas.base_size() == 0);
@@ -50,7 +50,7 @@ TEST_CASE("PsdfAtlas default and invalid builds leave atlas empty",
 }
 
 TEST_CASE("PsdfAtlas packs glyph tiles and preserves metrics",
-          "[canvas][psdf][coverage]") {
+          "[canvas][psdf]") {
     PsdfAtlas atlas;
     REQUIRE(atlas.build("stub", {U'P', U'S', U'D'}, 12, 2, 32));
     REQUIRE(atlas.width() == 32);
@@ -72,7 +72,7 @@ TEST_CASE("PsdfAtlas packs glyph tiles and preserves metrics",
 }
 
 TEST_CASE("PsdfAtlas de-duplicates and can be rebuilt",
-          "[canvas][psdf][coverage]") {
+          "[canvas][psdf]") {
     PsdfAtlas atlas;
     REQUIRE(atlas.build("stub", {U'P', U'P', U'S'}, 16, 2, 128));
     REQUIRE(atlas.glyph_count() == 2);
@@ -88,7 +88,7 @@ TEST_CASE("PsdfAtlas de-duplicates and can be rebuilt",
 }
 
 TEST_CASE("PsdfAtlas move assignment transfers the built atlas",
-          "[canvas][psdf][coverage]") {
+          "[canvas][psdf]") {
     PsdfAtlas source;
     PsdfAtlas destination;
     REQUIRE(source.build("stub", {U'A', U'B'}, 18, 2, 128));
@@ -122,7 +122,7 @@ TEST_CASE("vector_fallback threshold picks SDF vs path rendering",
 }
 
 TEST_CASE("vector_fallback equality and negative thresholds are strict",
-          "[canvas][psdf][fallback][coverage][issue-650]") {
+          "[canvas][psdf][fallback][issue-650]") {
     REQUIRE_FALSE(should_use_vector_fallback(96.0f, 48.0f, 2.0f));
     REQUIRE(should_use_vector_fallback(96.1f, 48.0f, 2.0f));
     REQUIRE(should_use_vector_fallback(1.0f, 48.0f, -1.0f));
@@ -130,7 +130,7 @@ TEST_CASE("vector_fallback equality and negative thresholds are strict",
 }
 
 TEST_CASE("vector_fallback scales render size against the selected base",
-          "[canvas][psdf][fallback][coverage]") {
+          "[canvas][psdf][fallback]") {
     REQUIRE_FALSE(should_use_vector_fallback(63.9f, 16.0f, 4.0f));
     REQUIRE_FALSE(should_use_vector_fallback(64.0f, 16.0f, 4.0f));
     REQUIRE(should_use_vector_fallback(64.1f, 16.0f, 4.0f));

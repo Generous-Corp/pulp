@@ -7,6 +7,47 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## LOCAL-FIRST — never start with the REST script when Figma desktop is open (read this first)
+
+The headless REST exporter (`figma_rest_export.py`, used in the steps below) is
+the **CI / true-headless fallback**. On a dense real file it **WILL be
+rate-limited** (HTTP 429): Figma's `/images` render endpoint is a strict Tier-1
+budget keyed to the *file's* plan, so a big frame can 429 for many minutes.
+
+**But the Figma MCP is ALSO quota-limited — do not treat it as free.** On a
+**View/Collab seat the MCP is 6 tool calls per MONTH** (any plan); Dev/Full seats
+get 200–600/day + a per-minute cap. Every *read* tool counts (`get_metadata`,
+`get_screenshot`, `get_design_context`); write tools (`whoami`,
+`generate_figma_design`) are exempt. This is a hard MONTHLY quota — **backoff
+cannot clear it**. So be maximally frugal. Order of preference, smartest first:
+
+0. **Reuse a CACHED artifact.** Prior sessions cache Figma PNGs/scenes under the
+   session scratchpad. `find … -iname '<file>*'` BEFORE spending a call — a cached
+   source screenshot suffices for source-vs-implementation checks with zero calls.
+1. **Export a scene for import** → the **Pulp Figma desktop plugin**
+   (`tools/figma-plugin`) exports the `figma-plugin-export-v1` envelope (SVG +
+   node tree) directly from the open file — **no MCP tool call, no REST budget**.
+   This is the truly-unlimited local path; once you hold the envelope, all
+   importer/render work is offline forever. Prefer this to spend ZERO quota.
+2. **Inspect / verify a design** → the **Figma desktop MCP**, but BUDGET the
+   6/month. When you must call, use ONE `get_design_context` (reference code +
+   screenshot + metadata together) instead of separate `get_metadata` +
+   `get_screenshot`, and never re-fetch what you cached.
+3. **Only in true headless / CI** (no desktop, no MCP) → `figma_rest_export.py`.
+   Its `figma_get` honors `429 Retry-After` with backoff; if it 429s it prints a
+   loud one-time advisory pointing back here — **switch to (0)/(1), don't wait out
+   6×300s of backoff.** Pass **`--cache-dir DIR`** to memoize the two REST-heavy
+   payloads (the `/nodes` geometry JSON + the frame SVG) per `(file_key, node_id)`:
+   the first run populates the cache, every re-run reads it with **ZERO REST calls**
+   and needs **no token** — so iterating on the importer against a real Triaz frame
+   costs one fetch, not one per test. `--refresh-cache` busts it. This is the
+   transparent form of the manual `--node-json` / `--frame-svg` inputs.
+
+Everything below documents lane (3)'s mechanics because it's the scriptable one,
+but the ordering above governs *which lane to start in*. `figma_rest_export.py`
+mirrors the desktop plugin field-for-field, so a scene from lane (2) or (3) is
+interchangeable downstream.
+
 ## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
 
 When the goal is a **visually faithful (1:1)** import of a component that lives in
@@ -45,7 +86,12 @@ SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
 (`build_native_view_tree`/codegen materialization), NOT the faithful SVG — so it
 mis-lays composite vectors (e.g. piano black keys grouped/dropped) and reports
 ~18/255 *even though the faithful render is pixel-perfect*. **Do not trust
-`--validate`'s number as the faithful fidelity.**
+`--validate`'s number as the faithful fidelity.** The CLI now DETECTS a
+`faithful_svg` scene and prints a caveat before the similarity number ("…renders
+the native-materialized widget tree, NOT the 1:1 faithful SVG… native-materialize
+fidelity… will UNDERSTATE the true faithful render. Verify with pulp-svg-probe"),
+so the trap is self-documenting — but the note is a signpost, not a fix: still run
+`pulp-svg-probe` for the real 1:1 number.
 
 **Validate the FAITHFUL render with `pulp-svg-probe`** (renders an SVG via
 `DesignFrameView`/SkSVGDOM, the real 1:1 path):
@@ -73,6 +119,30 @@ Then paste the printed lines into `core/view/CMakeLists.txt`, the
 (`test_faithful_specimens.cpp` pattern). Validate with `pulp-svg-probe` +
 `verify_region.py`. This is how Musical Typing, Channel Strip, and 7 specimen
 components were built — never hand-paint.
+
+**No-metadata source? Use the annotated-capture lane (`pulp-annotated-capture-import`).**
+`make_catalog_component.py` needs Figma as the source of truth — typed nodes,
+node ids, component names. A **bare SVG capture** (a vectorized screenshot, a
+hand-authored asset, or a JUCE UI run through an extractor) has none of that: it
+is just paths and rects. The annotated-capture lane
+(`tools/import-design/annotated_capture.{hpp,cpp}` + the
+`pulp-annotated-capture-import` CLI) is the no-metadata analog: feed it the bare
+SVG plus a **sidecar manifest** that supplies the missing semantics per element,
+and it emits the SAME artifacts (populated `DesignFrameElement` table +
+`DesignFrameView` subclass + `<snake>_svg.cpp` + CMake paste-ins).
+```bash
+build/tools/import-design/pulp-annotated-capture-import \
+  --svg capture.svg --manifest ui_manifest.json --class ReverbPanelView
+```
+The sidecar schema is intentionally aligned with **pulp-import-juce's
+`ui_manifest.json`** so a JUCE UI extractor (component-type → `kind`, bounds →
+`geometry`, parameterID → `param_key`) can emit a manifest this lane consumes
+directly. Each element declares `{selector, kind, param_key, geometry, needle,
+options, …}` (full field list in `annotated_capture.hpp`). When any element
+carries a `param_key`, the generated ctor calls
+`route_changes_to_host_params(true)` so the view runs unchanged embedded in
+JUCE / iPlug2 / native. Gotcha baked into a regression test: emitted float
+literals must be valid C++ (`120.f`, never the invalid `120f`).
 
 **Under the hood: a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
 See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
@@ -116,6 +186,54 @@ for swap, value patterns for value_label) land with P2's unified resolver. An
 **unknown** kind string no longer silent-knobs: `interactive_kind_from_id`
 reports it unrecognized and the parser emits a `log_warn` (the full ordered
 resolution ladder + import report is the P7 work).
+
+**Binding an interactive element to a host parameter (`param_key`).** A
+faithful_svg interactive element carries an optional `param_key` (e.g.
+`"filter.cutoff"`) that flows schema → `interactive_element.param_key` → IR
+`IRInteractiveElement::param_key` → `to_frame_elements()` →
+`DesignFrameElement::param_key`. This is the binding channel for
+**geometry-detected** controls — the Triaz case, where a knob is a custom design
+component (not a recognized Pulp-Library widget), so the recognized-widget path
+that lowers its binding through `IRNode` never fires. When ANY element in a frame
+carries a non-empty `param_key`, `make_faithful_svg_frame` auto-enables
+`route_changes_to_host_params(true)`, so a user gesture drives the
+framework-agnostic `HostParamSurface` (JUCE APVTS / iPlug2 / StateStore) directly
+via `element_for_param_key` / `sync_from_host_params`. It is inert until a
+producer emits a key: an all-unbound frame keeps routing OFF and behaves exactly
+as before (the public `on_element_changed` / `on_gesture_*` callbacks fire
+regardless of routing, so an existing consumer never changes).
+
+**Producer emission (both lanes).** `faithful-vector.ts` (`labelAndBindKnobs`) and
+`figma_rest_export.py` (`_label_elements`) resolve each geometry knob against the
+frame's Figma node tree by position and stamp three things from the matched node:
+a human `label`, provenance `source_node_id`, and — when the layer name carries an
+opt-in `param:`/`bind:`/`meter:` sigil — a `param_key`. `paramKeyFromLayerName` /
+`_param_key_from_layer_name` mirror the C++ `figma_binding_from_layer_name`
+EXACTLY (leading-ws tolerant, case-insensitive sigil, trimmed value, ≥1 alnum), so
+a sigil-named knob binds identically to a recognized widget. The **sigil is
+load-bearing**: a bare/DESCRIPTIVE name (the real Triaz case — "Cutoff", "Res")
+is NEVER auto-bound (verified: all Triaz panel captions classify as `label` with
+zero false bindings in both lanes) — it gets a `label` + `source_node_id` so the
+**annotated-manifest** lane can bind it by node id. Match tie-breaks: a sigil node
+beats a plain-named one; within a rank, nearest center then smallest area; the
+root frame is excluded so a panel name ("sound / main panel") never mis-binds a
+centered knob. Tests: `[layer-name-binding]`/knob cases in
+`faithful-vector.test.ts` + `ParamKeyBindingTest` in `test_figma_rest_export.py`.
+
+**Annotated-manifest binding (`--param-binding-manifest`) — the descriptive-name
+lane.** Real designs (Triaz) name knobs descriptively ("Cutoff"), not with a
+sigil, so the producer stamps `source_node_id` but no `param_key`. Supply a JSON
+object mapping that Figma node id to a host-param key —
+`{"10:42": "filter.cutoff"}` — via `pulp import-design … --param-binding-manifest
+bindings.json`. `apply_param_binding_manifest` (design_import.cpp) walks the parsed
+IR and sets `param_key` on each interactive element whose `source_node_id` is in
+the manifest AND whose key is still empty — so **an explicit layer-name sigil
+always wins**; the manifest never overwrites one. Applied once in the C++ import
+CLI after IR parse (before the import report), so all downstream lanes
+(materialize / codegen / DesignIR) see the binding. Get the node ids from the
+importer's provenance or the Figma MCP `get_metadata`. Tests: `[param-binding]`
+cases in `test_design_import_ir.cpp` (library) + `test_import_design_tool.cpp`
+(CLI wiring + error paths).
 
 **Custom controls (P7 Tier-3) — the `name→View` factory registry.** A genuinely
 novel control resolves to `kind=custom`, which carries a `factory_id` (+ opaque
@@ -392,6 +510,23 @@ mind when touching this:
 - **Recognized-widget gate.** Synthesis only fires when `audio_widget != none`.
   A generic/visual frame that happens to carry a `binding` attribute gets NO
   synthesized binding — it stays a generic node. Don't loosen this gate.
+- **Opt-in LAYER-NAME binding (`figma_binding_from_layer_name`).** A recognized
+  widget can declare its binding WITHOUT the explicit `binding` component
+  property, via a sigil-prefixed layer name — `param:`, `bind:`, or `meter:`
+  followed by `"<module>.<param>"` (e.g. a knob layer named
+  `param:filter.cutoff_hz`). `normalize_figma_plugin_binding` resolves the binding
+  from the `binding` attribute FIRST, then falls back to the layer-name sigil;
+  the rest of the lowering (module/param split, param-vs-meter routing by
+  `audio_widget`, `pulp*` synthesis) is identical either way. The **sigil is
+  load-bearing**: a bare/ordinary layer name is NEVER treated as a binding (no
+  false positives from names like "Big Cutoff Knob") — only a control the designer
+  explicitly tagged binds by name. An explicit `binding` attribute always wins
+  over the name. Case-insensitive on the sigil. This is the recognized-widget
+  path; binding a *geometry-detected* faithful-vector overlay (a knob the importer
+  found by geometry, not a Pulp Library component) by layer name is a separate
+  `param_key`-on-`IRInteractiveElement` path — keep the sigil convention identical
+  across both when you wire it. Pin any change with a
+  `[layer-name-binding]` case in `test_design_import_sources.cpp`.
 - **Name→kind resolution matches whole WORD TOKENS, not substrings — in ALL
   THREE lanes.** The C++ `detect_audio_widget`, the TS
   `audioWidgetKindFromName` (`extract-pure.ts`), and the Python
@@ -1588,6 +1723,7 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - Run `pulp import-design --from designmd --file path/to/DESIGN.md --tokens tokens.json`. **No `ui.js` is written** — the dispatch arm skips the codegen step. No bridge scaffold either.
 - Detection is strict (all-of fingerprint, 95% min-confidence): filename `DESIGN.md` + `---` frontmatter fence + `name:` key + at least one of `colors`/`typography`/`rounded`/`spacing`/`components`. Generic Jekyll/Hugo blog posts will not match.
 - Diagnostics: structured `[severity] code at path (line:col): message` on stderr. Exit codes — 0 OK, 1 usage/write, 2 detect-only no match, 3 parse error (malformed YAML, duplicate `##` section heading), 4 unsupported.
+- **Format spec pin: tag `0.3.0`** (`paws-and-paths` fixture is byte-identical across 0.1.1→0.3.0, so only the pin strings move — provenance/NOTICE/licensing/compat.json). Frontmatter format coverage tracking 0.3.0: (1) `colors.*` values are **any valid CSS color**, not just hex — `looks_like_css_color()` accepts hex (3/4/6/8-digit), named keywords, and functional `rgb()/hsl()/hwb()/oklch()/oklab()/lch()/lab()/color-mix()`; a real non-color value still emits `color-shape`. (2) `colors`/`rounded`/`spacing` nest to **arbitrary depth** — `walk_color_node`/`walk_dimension_node` recurse and key on the **dot-joined** path (`background.light`, not dashed), matching the `{colors.background.light}` reference syntax that `lookup_color`/`lookup_dimension` already resolve. (3) `spacing` accepts a **bare number** (`base: 8` → 8px) because `parse_dimension`'s unit is optional. (4) **Unknown top-level keys warn** (`unknown-key`, warning-not-error) — catches typo'd keys like `color:`/`typgrphy:`. Numeric/boolean component scalars (`fontWeight: 600`, `enabled: true`) already flow through as strings via yaml-cpp coercion.
 - **Frontmatter-less bodies** (Stitch / Brand-Kit exports authored as prose): when a file has no `---` frontmatter, `parse_designmd` falls back to scanning Markdown body sections so it doesn't import an empty token set. It reads `name: value` list items and `| name | value |` table rows under `## Colors` (color tokens), `## Spacing` (`spacing-*` dims), `## Border Radius`/`## Rounded` (`rounded-*` dims), and `## Shadows`/`## Elevation` (`shadow-*` strings). Table header/separator rows are skipped by requiring the value cell to be a real color/dimension/shadow. A `### Light Mode`/`### Dark Mode` subsection under `## Colors` routes to the bare name (light/default) or a `<name>.dark` suffix (dark) — the **same multi-mode convention the Figma plugin uses** (`tools/figma-plugin/src/tokens.ts`), so dark themes survive into the flat token maps. Emits a `body-tokens` info diagnostic when it recovers any.
 - See `docs/reference/imports/designmd.md` for the full reference (supported subset, reference-resolution rules, attribution).
 
@@ -2561,6 +2697,9 @@ source/version/token field JSON-escaped when touching
 `pulp-test-cli-import-detect`.
 
 Hand-edit the resulting JSON into a new entry under `compat.json[imports/<source>/detected-formats]`. The `notes` field is mandatory — describe the upstream change in one line.
+If no known source/version is close enough to detect, `candidate-source` and
+`candidate-format-version` are emitted as empty strings; fill both manually
+instead of treating them as detector evidence.
 
 ### Adding a fixture
 
@@ -2939,7 +3078,7 @@ These three pieces, all checked in this branch, are the standard inner-loop for 
 
 **Default for the figma-plugin lane: silver (native vector).** The native vector path is the durable answer for native UI rendering — crisp at any scale, no PNG bleed artefacts, no Skia Graphite raster→texture upload, works on CPU raster (`pulp-screenshot`) AND the GPU window. Knob captions ("VALUE") are synthesised when the original Figma component-instance had them baked into the PNG.
 
-**Opt back into PNG sprites: `--knob-style=sprite`.** Use when the design depends on Figma's pixel-exact knob rendering — for example, a hero plugin whose marketing screenshots show specific chrome highlights, or a multi-frame rotational filmstrip the designer supplied. The cost is visible PNG bleed (shadow halos around the knob bottom edges that read as "brush stroke" bands across the gradient panel) and bigger file size.
+**Opt back into PNG sprites: `--knob-style=sprite`.** Use when the design depends on Figma's pixel-exact knob rendering — for example, a hero plugin whose marketing screenshots show specific chrome highlights, or a multi-frame rotational filmstrip the designer supplied. The cost is visible PNG bleed (shadow halos around the knob bottom edges that read as "brush stroke" bands across the gradient panel) and bigger file size. Accepted global values are `silver`, `default`, `standard`, `auto`, and `sprite`; unknown values exit 2 instead of silently falling back.
 
 **Per-node override — Figma name suffix `@sprite` / `@silver`.** A node named `Knob/Hero@sprite` forces sprite for that one knob regardless of the global flag. `Knob/Send@silver` forces silver. Lets a designer cherry-pick a hero knob to be pixel-exact while everything else uses the crisper vector path. Convention chosen to match Figma's own `Knob/State=hover` variant syntax and Mitosis / Penpot's `@target` code-hint convention.
 
@@ -2951,7 +3090,7 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 
 - **How it works**: the import CLI's asset-resolution pass SAMPLES the captured PNG (via a minimal miniz-backed PNG→RGBA decoder in `pulp_import_design.cpp` — `AssetManager::decode_png` only stores raw bytes + IHDR dims, the real decode lives in Skia which isn't linked in the GPU-off importer build). `pulp::view::derive_fader_skin` / `derive_meter_skin` (`core/view/src/widget_skin_derive.cpp`) recover the fader's track/fill/thumb/border colours and the meter's gradient stops by locating the widget art (tallest opaque vertical run in the centre column) and classifying rows. The codegen emits `setFaderSkin(id, track, fill, thumb, border)` and `setMeterColors(id, bg, "#stop0,#stop1,...")`; the native `Fader`/`Meter` redraw those PROCEDURALLY so the thumb still moves with `setValue()` and the fill still tracks `setMeterLevel()`.
 - **No hardcoding**: every colour/stop is read from the exported pixels — there are no per-instance pixel offsets, Y-coords, or asset-name special-cases (per the repo "Figma-import fixes must generalize" rule).
-- **Opt-out**: `--fader-style=default` / `--meter-style=default` (aliases: `plain`) fall back to the plain native look; unskinned `createFader`/`createMeter` are unchanged (back-compat).
+- **Opt-out**: `--fader-style=default` / `--meter-style=default` (aliases: `plain`) fall back to the plain native look; `skin` / `skinned` keep derived skinning. Unknown style values exit 2 instead of silently selecting skinning.
 - **Value normalisation**: the codegen normalises `audio_default` from `[audio_min, audio_max]` to 0..1 before `setValue`/`setMeterLevel` (a raw dB value like `-6` would clamp to 0 and mis-place the thumb / read empty).
 - **Gotcha — top-level `asset_ref`**: the figma-plugin lane stamps `asset_ref` as a TOP-LEVEL node member, not under `attributes`. The JSON parser now promotes it into `node.attributes["asset_ref"]` so asset resolution (and therefore both knob sprite + fader/meter skin) can find it. Before this, no widget in a figma-plugin export ever picked up its captured PNG.
 - **Honest limitations**: the derived track/fill is drawn at a fraction of the widget width (the captured fader track is a thin line; the meter fill spans the full bar where the capture is slightly inset), and the meter background heuristic can pick a lighter dark row than the true near-black channel. The gradient colours, thumb shape/colour/position, and value-driven level clipping are faithful.

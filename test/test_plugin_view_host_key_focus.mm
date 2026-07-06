@@ -63,6 +63,12 @@ public:
         View::on_focus_changed(gained);
         if (!gained) ++lost_count;
     }
+    // The editor grabs the DAW keyboard ONLY for a focused TEXT field. Defaults
+    // true so the existing contract tests model a type-in; flip to false to model
+    // a focused NON-text widget (a ComboBox dropdown, a focusable container) that
+    // must NOT steal the host keyboard.
+    bool accepts_text_input() const override { return text_input; }
+    bool text_input = true;
     int lost_count = 0;
 };
 
@@ -83,8 +89,8 @@ NSView* find_pulp_plugin_view(NSView* parent) {
 
 }  // namespace
 
-TEST_CASE("PluginViewHost (mac CPU) — the editor keeps first responder to "
-          "forward keys; a host grab still ends text input",
+TEST_CASE("PluginViewHost (mac CPU) — the editor takes the keyboard only while a "
+          "field is focused; a host grab still ends text input",
           "[plugin-view-host][key-focus][mac][cpu]") {
     @autoreleasepool {
         FocusGuard guard;
@@ -117,19 +123,20 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor keeps first responder to "
         REQUIRE([window makeFirstResponder:host_field]);
         REQUIRE(window.firstResponder == host_field);
 
-        SECTION("claim takes the keyboard; release KEEPS first responder so the "
-                "view can forward non-text keys to the host") {
+        SECTION("claim takes the keyboard; release HANDS IT BACK to the host so DAW "
+                "transport / Musical Typing resume") {
             root.claim_input_focus();
             [pulp_view syncKeyFocus];
             REQUIRE(window.firstResponder == pulp_view);
+            REQUIRE([pulp_view acceptsFirstResponder]);  // a field is focused
 
             root.release_input_focus();
             [pulp_view syncKeyFocus];
-            // New contract: the editor does NOT resign on blur — it stays the
-            // key interceptor and forwards non-text keys (DAW transport /
-            // Musical Typing) to the host. Resigning here is what left Space/R
-            // dead after the user left a field.
-            REQUIRE(window.firstResponder == pulp_view);
+            // Contract: with no field focused the editor RESIGNS — a plugin must not
+            // hold the DAW keyboard, or transport keys (Space/R) + the host's
+            // Musical Typing die while the editor is open.
+            REQUIRE(window.firstResponder != pulp_view);
+            REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
         }
 
         SECTION("host re-grab while a widget holds the slot ends its text "
@@ -145,12 +152,11 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor keeps first responder to "
 
             // resignFirstResponder must have ended the widget's text input:
             // slot cleared, focus-lost delivered (the widget commits its
-            // type-in there). The view itself still accepts first responder
-            // (it stays the key interceptor and forwards non-text keys back to
-            // the host), but it no longer holds the text-input slot.
+            // type-in there). With no field focused the view no longer accepts
+            // first responder, so the DAW keeps the keyboard.
             REQUIRE(View::focused_input_ == nullptr);
             REQUIRE(root.lost_count == 1);
-            REQUIRE([pulp_view acceptsFirstResponder]);  // always YES now
+            REQUIRE_FALSE([pulp_view acceptsFirstResponder]);  // no field focused
         }
 
         SECTION("the host can still reclaim the keyboard explicitly (clicks its "
@@ -168,6 +174,69 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor keeps first responder to "
             REQUIRE(window.firstResponder == host_field);
         }
 
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+// A focused NON-text widget (a ComboBox dropdown, a focusable container/root)
+// must NOT make the editor grab the DAW keyboard — only a real text type-in
+// does. Regression: clicking the sampler's Direction/Loop dropdown focused a
+// focusable ComboBox, which left the editor first responder and swallowed every
+// later key, so Logic transport (Space/R) AND Musical Typing (QWERTY → notes)
+// died until the user clicked away. Pins acceptsFirstResponder/syncKeyFocus to
+// `accepts_text_input()`, not mere focusability.
+TEST_CASE("PluginViewHost (mac CPU) — a focused non-text widget does NOT steal "
+          "the DAW keyboard",
+          "[plugin-view-host][key-focus][mac][cpu][non-text-focus]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 800, 600)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — non-text-focus contract test skipped.");
+            return;
+        }
+
+        FocusRecordingView root;
+        PluginViewHost::Options opts;
+        opts.size = {800u, 600u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        PulpTestHostField* host_field =
+            [[PulpTestHostField alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+        [window.contentView addSubview:host_field];
+        REQUIRE([window makeFirstResponder:host_field]);
+
+        // Model clicking a focusable NON-text widget (e.g. the Direction dropdown):
+        // it claims the focus slot, but accepts_text_input() is false.
+        root.text_input = false;
+        root.claim_input_focus();
+        [pulp_view syncKeyFocus];
+        // The editor must NOT take the keyboard — the host keeps it (transport keys
+        // + Musical Typing keep working).
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == host_field);
+
+        // Flipping the same focused widget to a text field DOES grab — proving the
+        // gate is the text-input capability, not the focus slot alone.
+        root.text_input = true;
+        [pulp_view syncKeyFocus];
+        REQUIRE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == pulp_view);
+
+        root.release_input_focus();
+        [pulp_view syncKeyFocus];
         host->detach();
         host.reset();
         [window close];
@@ -224,11 +293,11 @@ TEST_CASE("PluginViewHost (mac CPU) — focus is scoped per editor; a second "
         rootA.claim_input_focus();
         REQUIRE(View::focused_input_ == &rootA);
 
-        // Both editors accept first responder (each is the key interceptor for
-        // its own window). The meaningful scoping is the TEXT-INPUT slot: only
-        // editor A owns it, so only editor A's syncKeyFocus grabs the keyboard.
+        // An editor accepts first responder ONLY when its OWN tree holds the focused
+        // text-input slot. focused_input_ is under editor A, so only A accepts it;
+        // editor B (no focused field) leaves the keyboard with the DAW.
         REQUIRE([viewA acceptsFirstResponder]);
-        REQUIRE([viewB acceptsFirstResponder]);
+        REQUIRE_FALSE([viewB acceptsFirstResponder]);
 
         // Editor B syncing focus must not steal first responder; editor A's does.
         [viewB syncKeyFocus];
@@ -366,6 +435,60 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
             REQUIRE(start == 0);
             REQUIRE(end == 3);
         }
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+// A View whose on_key_event records every key it is asked to handle — a stand-in
+// for an editor that might wire musical typing on on_key_event.
+namespace {
+struct NoteCaptureRoot : public pulp::view::View {
+    std::vector<pulp::view::KeyCode> seen;
+    bool on_key_event(const pulp::view::KeyEvent& e) override {
+        if (e.is_down) seen.push_back(e.key);
+        return e.is_down && e.key == pulp::view::KeyCode::a;
+    }
+};
+}  // namespace
+
+// Plugin contract: with NO focused input widget, a keystroke must NOT reach the
+// editor root's on_key_event — the editor isn't first responder, so the DAW keeps
+// the keyboard (transport keys + Musical Typing). A plugin must never route the
+// bare computer keyboard into its own handling. (The standalone drives QWERTY
+// musical typing through a different window host.)
+TEST_CASE("PluginViewHost (mac CPU) — unfocused keys stay with the DAW, not the "
+          "editor root",
+          "[plugin-view-host][key-routing][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted root-key test skipped.");
+            return;
+        }
+        NoteCaptureRoot root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+        REQUIRE(View::focused_input_ == nullptr);          // nothing focused
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);  // ...so we don't take keys
+
+        // Even if a key is delivered, with nothing focused pulp_plugin_key_down must
+        // NOT dispatch it to the editor root — it returns it to the host.
+        [pulp_view keyDown:make_key_event(0, 0, @"a")];
+        REQUIRE(root.seen.empty());
 
         host->detach();
         host.reset();

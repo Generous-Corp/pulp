@@ -34,7 +34,7 @@ TEST_CASE("copy preserves url + email", "[format][vendor-url]") {
 }
 
 TEST_CASE("PluginDescriptor bus helpers follow first bus and empty bus lists",
-          "[format][descriptor][coverage]") {
+          "[format][descriptor]") {
     PluginDescriptor d;
     REQUIRE(d.default_input_channels() == 2);
     REQUIRE(d.default_output_channels() == 2);
@@ -56,7 +56,7 @@ TEST_CASE("PluginDescriptor bus helpers follow first bus and empty bus lists",
 }
 
 TEST_CASE("PluginDescriptor modern capability flags default off",
-          "[format][vendor-url][coverage]") {
+          "[format][vendor-url]") {
     PluginDescriptor d;
     REQUIRE_FALSE(d.supports_mpe);
     REQUIRE_FALSE(d.supports_ump);

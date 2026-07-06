@@ -50,8 +50,8 @@ enum Command {
     /// Per-project SDK pin: `pin`, `unpin`, `undo`.
     Project(ProjectArgs),
 
-    /// Scan system paths for VST3 / AU / CLAP / LV2 plug-ins using
-    /// file enumeration rather than deep plug-in metadata.
+    /// File-enumerate VST3 / AU / AUv3 / CLAP / LV2 plug-in bundles
+    /// without loading plug-ins or querying factories.
     Scan(ScanArgs),
 
     /// Read + write `~/.pulp/config.toml`.
@@ -63,7 +63,8 @@ enum Command {
     /// Delegate to `shipyard pr`.
     Pr(PrArgs),
 
-    /// Manage the Pulp SDK cache (`status`, `clean`).
+    /// Manage the Pulp SDK cache (`status`, `clean`, delegated install/listing).
+    #[command(disable_help_flag = true)]
     Sdk(SdkArgs),
 
     /// Configure + build via `cmake`; watch/validate branches
@@ -203,11 +204,17 @@ struct ProjectArgs {
 }
 
 #[derive(clap::Args, Debug)]
+// Keep this visible flag list in sync with `cmd::scan::parse_args`.
+#[command(
+    after_help = "Flags:\n  --format <clap|vst3|au|auv3|lv2>, -f <fmt>\n      Restrict the filesystem inventory to one format.\n  --no-load\n      Compatibility no-op on Rust; Rust scan is already filesystem-only.\n\nNotes:\n  Names are filename-derived. Use `pulp-cpp scan` for rich PluginScanner\n  metadata when the C++ delegate is installed."
+)]
 struct ScanArgs {
-    /// The full tail — parsed by `cmd::scan::parse_args` so the flag
-    /// surface stays in lockstep with the C++ CLI without fighting
-    /// clap over `--format`.
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    /// Scan options: `--format <fmt>`, `-f <fmt>`, or `--no-load`.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "FLAGS"
+    )]
     tail: Vec<String>,
 }
 
@@ -261,11 +268,9 @@ struct PrArgs {
 
 #[derive(clap::Args, Debug)]
 struct SdkArgs {
-    /// Subcommand: `status`, `clean`, `install`, or empty for help.
-    subcommand: Option<String>,
-    /// Emit JSON output instead of human text where supported.
-    #[arg(long)]
-    json: bool,
+    /// SDK subcommand and flags. `install` / `available` delegate to `pulp-cpp`.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    tail: Vec<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -493,12 +498,26 @@ fn real_main() -> Result<(), ExitCode> {
             map_exit(cmd::pr::run(&parsed, root.as_deref(), &mut out))
         }
         Command::Sdk(args) => {
-            let slice: Vec<String> = args.subcommand.clone().into_iter().collect();
-            let sub = cmd::sdk::parse_sub(&slice).map_err(|_| {
-                eprintln!("pulp-rs sdk: unknown subcommand");
-                ExitCode::from(2)
+            let parsed = cmd::sdk::parse_args(&args.tail).map_err(|e| match e {
+                CliError::UnknownSubcommand => {
+                    eprintln!("pulp-rs sdk: unknown subcommand");
+                    ExitCode::from(2)
+                }
+                CliError::BadUsage(msg) => {
+                    eprintln!("{msg}");
+                    ExitCode::from(2)
+                }
+                other => {
+                    eprintln!("pulp-rs sdk: {other}");
+                    ExitCode::from(2)
+                }
             })?;
-            cmd::sdk::run(sub, args.json, &mut out).map_err(|e| map_err(&e))
+            map_exit(cmd::sdk::run_with_tail_exit(
+                parsed.sub,
+                parsed.json,
+                &args.tail,
+                &mut out,
+            ))
         }
         Command::Build(args) => {
             let parsed = cmd::orchestrate::parse_build_args(&args.tail);

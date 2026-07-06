@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "pulp_gain.hpp"
+#include <pulp/format/validation_assertions.hpp>
 #include <cmath>
 
 using namespace pulp;
@@ -105,6 +106,36 @@ TEST_CASE("PulpGain bypass", "[pulpgain]") {
 
     // Bypass = pass-through regardless of gain settings
     REQUIRE_THAT(out.channel(0)[0], WithinAbs(0.7, 0.001));
+}
+
+TEST_CASE("PulpGain passes shared validation assertions", "[pulpgain]") {
+    namespace v = pulp::format::validation;
+
+    GainFixture fx;
+    fx.store.set_value(kInputGain, 6.0f); // +6 dB
+
+    audio::Buffer<float> in(2, 256), out(2, 256);
+    for (std::size_t ch = 0; ch < 2; ++ch)
+        for (std::size_t i = 0; i < 256; ++i)
+            in.channel(ch)[i] = 0.25f;
+
+    fx.process(in, out);
+    auto out_view = out.view();
+
+    // Reusable SDK assertions (validation_assertions.hpp): no NaN/Inf, the
+    // stage actually produced signal, and +6 dB on a 0.25 input stays below
+    // unity so nothing clips.
+    auto finite = v::check_finite(out_view);
+    REQUIRE(finite.ok);
+    REQUIRE(v::check_any_nonzero(out.channel(0)).ok);
+    REQUIRE(v::check_peak_below(out.channel(0), 1.0f).ok);
+
+    // Every declared parameter's host-automation round trip is stable.
+    auto* input_info = fx.store.info(kInputGain);
+    REQUIRE(input_info != nullptr);
+    REQUIRE(v::check_param_round_trip(input_info->range, 6.0f).ok);
+    REQUIRE(v::check_param_round_trip(input_info->range, input_info->range.min).ok);
+    REQUIRE(v::check_param_round_trip(input_info->range, input_info->range.max).ok);
 }
 
 TEST_CASE("PulpGain state round-trip", "[pulpgain]") {

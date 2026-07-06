@@ -229,7 +229,7 @@ TEST_CASE("ValidationHarness creates and reports descriptor", "[harness]") {
 }
 
 TEST_CASE("ValidationHarness exposes the underlying headless host",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     const auto& const_harness = harness;
 
@@ -238,7 +238,7 @@ TEST_CASE("ValidationHarness exposes the underlying headless host",
 }
 
 TEST_CASE("ValidationHarness option and entry defaults match report schema",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationRunOptions options;
     REQUIRE(options.output_dir.empty());
     REQUIRE(options.sample_rate == 48000.0);
@@ -275,7 +275,7 @@ TEST_CASE("ValidationHarness set/get param", "[harness]") {
 }
 
 TEST_CASE("ValidationHarness configure creates artifact directory",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     auto out_dir = make_temp_dir("pulp-harness-output-dir");
     REQUIRE_FALSE(std::filesystem::exists(out_dir));
@@ -304,7 +304,7 @@ TEST_CASE("ValidationHarness processes silence blocks", "[harness]") {
 }
 
 TEST_CASE("ValidationHarness process_blocks zero blocks returns one silent buffer",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({.buffer_size = 8, .output_channels = 2});
 
@@ -333,7 +333,7 @@ TEST_CASE("ValidationHarness processes audio buffer with gain", "[harness]") {
 }
 
 TEST_CASE("ValidationHarness process_buffer auto-prepares with caller channel layout",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({.buffer_size = 3, .input_channels = 1, .output_channels = 1});
 
@@ -382,7 +382,7 @@ TEST_CASE("ValidationHarness MIDI note-off and CC helpers reach process_buffer",
 }
 
 TEST_CASE("ValidationHarness process_blocks consumes queued MIDI once",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({.buffer_size = 4});
     harness.prepare();
@@ -462,7 +462,7 @@ TEST_CASE("ValidationHarness generates valid report JSON", "[harness]") {
 }
 
 TEST_CASE("ValidationHarness report omits payload for unknown entry types",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -480,7 +480,7 @@ TEST_CASE("ValidationHarness report omits payload for unknown entry types",
 }
 
 TEST_CASE("ValidationHarness report includes sanitizer payloads",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -669,7 +669,7 @@ TEST_CASE("ValidationHarness rejects mismatched plugin runtime manifest id",
 }
 
 TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({
         .git_ref = "branch/quote\"slash\\",
@@ -692,7 +692,7 @@ TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",
 }
 
 TEST_CASE("ValidationHarness report escapes generic control characters",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -747,7 +747,7 @@ TEST_CASE("ValidationHarness write_report creates file", "[harness]") {
 }
 
 TEST_CASE("ValidationHarness write_report creates nested directories",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -762,7 +762,7 @@ TEST_CASE("ValidationHarness write_report creates nested directories",
 }
 
 TEST_CASE("ValidationHarness write_report reports failure for directory paths",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -809,7 +809,7 @@ TEST_CASE("ValidationHarness run_validator errors on missing plugin", "[harness]
 }
 
 TEST_CASE("ValidationHarness run_validator errors on unknown installed tool",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -876,7 +876,7 @@ TEST_CASE("ValidationHarness disables plugin editors for external validators",
 }
 
 TEST_CASE("ValidationHarness run_validator captures installed pluginval success",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -917,7 +917,7 @@ TEST_CASE("ValidationHarness run_validator captures installed pluginval success"
 }
 
 TEST_CASE("ValidationHarness run_validator records installed pluginval failures",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -955,7 +955,7 @@ TEST_CASE("ValidationHarness run_validator records installed pluginval failures"
 }
 
 TEST_CASE("ValidationHarness run_validator defaults clap-validator format",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -995,7 +995,7 @@ TEST_CASE("ValidationHarness run_validator defaults clap-validator format",
 }
 
 TEST_CASE("ValidationHarness run_validator defaults auval format",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -1031,7 +1031,7 @@ TEST_CASE("ValidationHarness run_validator defaults auval format",
 }
 
 TEST_CASE("ValidationHarness run_validator defaults vstvalidator format and trims CRLF versions",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -1111,7 +1111,7 @@ TEST_CASE("ValidationHarness screenshot passes when provider returns true",
 }
 
 TEST_CASE("ValidationHarness clearing screenshot provider restores skip behavior",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -1198,7 +1198,7 @@ TEST_CASE("ValidationHarness inspector passes with provider",
 }
 
 TEST_CASE("ValidationHarness clearing inspector provider restores skip behavior",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
@@ -1299,7 +1299,7 @@ TEST_CASE("ValidationHarness compare_screenshots differing files -> fail",
 }
 
 TEST_CASE("ValidationHarness report renders capture and diff payload sections",
-          "[harness][coverage]") {
+          "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({
         .diff_tolerance = 7,
@@ -1399,7 +1399,7 @@ TEST_CASE("ValidationStatus to_string covers all values", "[harness]") {
 }
 
 TEST_CASE("ValidationStatus to_string falls back to error for unknown values",
-          "[harness][coverage]") {
+          "[harness]") {
     using pulp::format::ValidationStatus;
     using pulp::format::to_string;
 

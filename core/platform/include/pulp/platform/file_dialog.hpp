@@ -16,14 +16,15 @@ struct FileFilter {
 // Native file open/save dialogs.
 //
 // Platform notes:
-//   - macOS/iOS: native NSOpenPanel/NSSavePanel/UIDocumentPicker.
-//   - Windows/Linux/Android: requires a host-registered Backend via
-//     FileDialog::set_backend(). Without one, every call returns
-//     std::nullopt / {} — explicitly "no backend" rather than
-//     silent success. The Windows shell (IFileDialog), Linux
-//     xdg-desktop-portal bridge, and Android SAF adapter live in
-//     the host application layer and register a backend at
-//     startup.
+//   - macOS: built-in NSOpenPanel/NSSavePanel dialogs.
+//   - Windows: opt-in built-in IFileDialog backend via
+//     FileDialog::install_native_backend().
+//   - Linux: opt-in built-in xdg-desktop-portal FileChooser backend via
+//     FileDialog::install_native_backend() when libdbus is loadable.
+//   - iOS/Android: no built-in backend yet; hosts can register one via
+//     FileDialog::set_backend().
+// Without a native or host-registered backend, calls return std::nullopt / {}
+// as explicit "no backend" rather than silent success.
 class FileDialog {
 public:
     // Show an open file dialog. Returns selected path or nullopt.
@@ -52,9 +53,11 @@ public:
 
     // ── Host-registered backend ────────────────────────────────────────
     //
-    // On platforms without a native built-in backend (Windows,
-    // Linux, Android) the host app can install a backend that
-    // implements real native dialogs. Without a backend installed,
+    // On platforms without an auto-available native dialog (Windows,
+    // Linux, iOS, Android) the host app can install a backend that
+    // implements real native dialogs. Windows and Linux ship opt-in
+    // built-in backends through install_native_backend(); iOS and
+    // Android remain host-provided for now. Without a backend installed,
     // each call returns no-selection and the JS bridge can probe
     // `has_backend()` to distinguish "user cancelled" from
     // "platform unsupported".
@@ -89,8 +92,9 @@ public:
     //     when libdbus is loadable (the portal service is probed lazily, per
     //     call), false otherwise.
     //   - macOS: a native impl is already compiled in; returns has_backend().
-    //   - iOS / Windows / Android: no built-in backend yet; returns
-    //     has_backend() (false unless a host registered one).
+    //   - Windows: Vista+ IFileDialog backend; returns true after installing.
+    //   - iOS / Android: no built-in backend yet; returns has_backend()
+    //     (false unless a host registered one).
     // Idempotent: an already-installed (incl. host-set) backend is left in
     // place. We deliberately do NOT auto-install — raising a portal dialog
     // blocks, so the default "no backend → no selection" contract must hold

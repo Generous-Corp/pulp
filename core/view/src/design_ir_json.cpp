@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <iomanip>
 #include <map>
 #include <optional>
@@ -496,14 +497,73 @@ bool is_asset_reference_key(std::string_view key) {
 // semantics so a node that already carries `pulp*` binding attributes (e.g. a
 // JSX/Claude import that happens to also carry a `binding` key) is left exactly
 // as-is — no regression to the existing pulp* path.
+// Opt-in LAYER-NAME binding convention. A figma-plugin control normally declares
+// its binding via an explicit `binding` component property; this lets a designer
+// instead declare it in the LAYER NAME with a sigil prefix — `param:`, `bind:`,
+// or `meter:` followed by "<module>.<param>" (e.g. a knob layer named
+// `param:filter.cutoff_hz`). The sigil is load-bearing: a bare layer name is
+// NEVER treated as a binding, so there are no false positives from ordinary
+// names — only a control the designer explicitly tagged binds by name. Returns
+// the binding string (sigil stripped, surrounding whitespace trimmed) or "" when
+// the name is not a binding declaration. Case-insensitive on the sigil.
+static std::string figma_binding_from_layer_name(const std::string& raw_name) {
+    // Tolerate leading whitespace on the layer name before the sigil.
+    const size_t name_start = raw_name.find_first_not_of(" \t");
+    if (name_start == std::string::npos)
+        return "";
+    const std::string name = raw_name.substr(name_start);
+
+    static const char* const kSigils[] = {"param:", "bind:", "meter:"};
+    for (const char* sigil : kSigils) {
+        const size_t slen = std::strlen(sigil);
+        if (name.size() <= slen)
+            continue;
+        bool match = true;
+        for (size_t i = 0; i < slen; ++i) {
+            if (std::tolower(static_cast<unsigned char>(name[i])) != sigil[i]) {
+                match = false;
+                break;
+            }
+        }
+        if (!match)
+            continue;
+        const std::string rest = name.substr(slen);
+        const size_t b = rest.find_first_not_of(" \t");
+        if (b == std::string::npos)
+            return "";  // sigil present but nothing after it → not a binding
+        const size_t e = rest.find_last_not_of(" \t");
+        std::string binding = rest.substr(b, e - b + 1);
+        // Reject pure-punctuation garbage (e.g. "param:.", "meter: . "): require
+        // at least one alphanumeric char. The module.param SHAPE is otherwise
+        // parsed identically to the explicit `binding` attribute path (dotless
+        // and partial bindings behave the same in both) — one downstream parser,
+        // not a stricter name-only validator that would diverge from it.
+        const bool has_alnum = std::any_of(
+            binding.begin(), binding.end(),
+            [](unsigned char c) { return std::isalnum(c) != 0; });
+        if (!has_alnum)
+            return "";
+        return binding;
+    }
+    return "";
+}
+
 void normalize_figma_plugin_binding(IRNode& node) {
     // Gate 1: only semantically-recognized widgets get a synthesized binding.
     if (node.audio_widget == AudioWidgetType::none)
         return;
 
-    // Gate 2: must carry a non-empty figma-plugin `binding` string.
-    auto binding_it = node.attributes.find("binding");
-    if (binding_it == node.attributes.end() || binding_it->second.empty())
+    // Gate 2: resolve the binding string. Prefer the explicit figma-plugin
+    // `binding` attribute (a component property the designer types); fall back
+    // to the opt-in layer-name sigil convention. Either path empty → no binding.
+    std::string binding;
+    if (auto binding_it = node.attributes.find("binding");
+        binding_it != node.attributes.end() && !binding_it->second.empty()) {
+        binding = binding_it->second;
+    } else {
+        binding = figma_binding_from_layer_name(node.name);
+    }
+    if (binding.empty())
         return;
 
     // Gate 3: if the node already carries any of the canonical single-param /
@@ -512,13 +572,12 @@ void normalize_figma_plugin_binding(IRNode& node) {
     // that was already lowered by the JSX/Claude writer.
     for (const char* existing : {"pulpParamKey", "pulpBindingModule",
                                  "pulpBindingParam", "pulpMeterSource",
-                                 "pulpMeterChannel"}) {
+                                 "pulpMeterChannel", "pulpRouteId",
+                                 "pulpRouteType"}) {
         auto it = node.attributes.find(existing);
         if (it != node.attributes.end() && !it->second.empty())
             return;
     }
-
-    const std::string& binding = binding_it->second;
 
     // Split on the first '.': "<module>.<param>". A binding with no '.' has an
     // empty module and the whole string as the param/channel.
@@ -884,6 +943,10 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             }
             if (e.hasObjectMember("source_node_id") && e["source_node_id"].isString())
                 el.source_node_id = get_string(e, "source_node_id");
+            // Host-param binding key for a geometry-detected control (e.g.
+            // "filter.cutoff"); DesignFrameView routes gestures on it to the
+            // framework-agnostic HostParamSurface. Absent for unbound knobs.
+            el.param_key = get_string(e, "param_key");
             node.interactive_elements.push_back(std::move(el));
         }
         if (!node.interactive_elements.empty()) break;
@@ -1867,6 +1930,8 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                 out << ']';
             }
             write_string_member(out, ef, "source_node_id", el.source_node_id);
+            if (!el.param_key.empty())
+                write_string_member(out, ef, "param_key", el.param_key);
             out << '}';
         }
         out << ']';

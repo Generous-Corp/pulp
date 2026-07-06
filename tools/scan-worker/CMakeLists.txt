@@ -12,7 +12,21 @@ endif()
 
 add_executable(pulp-scan-worker scan_worker_main.cpp)
 target_link_libraries(pulp-scan-worker PRIVATE pulp::host pulp::runtime)
-set_target_properties(pulp-scan-worker PROPERTIES OUTPUT_NAME "pulp-scan-worker")
+set_target_properties(pulp-scan-worker PROPERTIES
+    OUTPUT_NAME "pulp-scan-worker")
+
+# Match the CLI install layout so installed scan workers can resolve shared
+# dependencies such as libwgpu_native from the SDK prefix.
+if(APPLE)
+    set_target_properties(pulp-scan-worker PROPERTIES
+        INSTALL_RPATH "@executable_path/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE
+        MACOSX_RPATH TRUE)
+elseif(UNIX)
+    set_target_properties(pulp-scan-worker PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE)
+endif()
 
 if(PULP_BUILD_TESTS)
     add_executable(pulp-test-scan-worker test_scan_worker.cpp)

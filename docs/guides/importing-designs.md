@@ -84,6 +84,16 @@ Agent workflows may use Figma MCP tools to acquire source context or reference s
 
 Raw MCP responses are acquisition data, not a separate CLI source. Translate or export them into one of the supported file shapes before importing.
 
+> **Mind the Figma MCP quota.** The MCP read tools above are metered — as low as
+> **6 calls per _month_** on a View/Collab seat or any Starter plan. For repeated
+> or dense imports, prefer the **plugin export** (`--from figma-plugin`), which
+> uses no MCP quota at all. When you do call the MCP, use a single
+> `get_design_context` (code + screenshot + metadata together) over separate
+> calls. Full seat/plan limits:
+> [The Figma plugin — avoiding Figma's limits](figma-plugin.md#two-ways-to-get-a-design-into-pulp--and-which-one-avoids-figmas-limits);
+> the authoritative numbers are in
+> [Figma's MCP rate-limit docs](https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/).
+
 The raw Figma and Figma Make adapter lanes are tracked in the compatibility
 import reference, which records the current parser status instead of relying on
 a one-off issue link.
@@ -135,6 +145,11 @@ The parser handles the canonical frontmatter keys (`version`, `name`,
 `components`), resolves `{group.key}` references at parse time, and
 preserves composite typography references inside `components.*`
 verbatim so downstream tooling can resolve them in widget context.
+It tracks the upstream format spec at tag `0.3.0`: color values may be
+any valid CSS color (hex, named, `rgb()`/`hsl()`/`oklch()`/`color-mix()`,
+…), token groups nest to arbitrary depth (keyed on the dot-joined path),
+`spacing` accepts bare numbers, and an unrecognized top-level key is
+flagged with a warning rather than silently dropped.
 
 Detection is strict: filename must be `DESIGN.md`, the frontmatter
 fence must be present, and the frontmatter must declare `name:` plus

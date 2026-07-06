@@ -24,7 +24,7 @@ TEST_CASE("MsdfAtlas default state is empty", "[canvas][msdf][issue-641]") {
 }
 
 TEST_CASE("MsdfAtlas move operations preserve channel mode and glyph lookup",
-          "[canvas][msdf][coverage][issue-650]") {
+          "[canvas][msdf][issue-650]") {
     MsdfAtlas original;
     REQUIRE(original.build("stub", {U'A', U'B'}, 18, 3, 128,
                            /*include_alpha*/ true));
@@ -75,7 +75,7 @@ TEST_CASE("MsdfAtlas empty build records base size and channel mode",
 }
 
 TEST_CASE("MsdfAtlas rebuild resets channels and overflow failure clears glyphs",
-          "[canvas][msdf][coverage][issue-650]") {
+          "[canvas][msdf][issue-650]") {
     MsdfAtlas atlas;
     REQUIRE(atlas.build("stub", {U'A'}, 20, 2, 128,
                         /*include_alpha*/ true));

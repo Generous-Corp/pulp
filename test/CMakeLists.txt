@@ -181,6 +181,17 @@ if(UNIX)
         LABELS "cmake;sdk;issue-1817;slow"
         TIMEOUT 600)
 endif()
+# PULP_ENABLE_SWIFT is intentionally retained only as a compatibility/reserved
+# option. ON must produce a clear configure warning rather than silently doing
+# nothing or implying Swift is globally enabled.
+if(UNIX)
+    add_test(NAME cmake-swift-option-reserved
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_swift_option_reserved.sh
+                ${CMAKE_SOURCE_DIR})
+    set_tests_properties(cmake-swift-option-reserved PROPERTIES
+        LABELS "cmake;swift;config;slow"
+        TIMEOUT 600)
+endif()
 # retry_git_clone unit test: a partial clone target is
 # scrubbed between retries so attempt 2+ re-runs the fetch. Same UNIX block runs
 # the ensure_signing_ready.sh doctor test (PATH-shims security/xcrun, hermetic).
@@ -359,6 +370,10 @@ add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-contract)
 
+# WAMv2 Processor->WASM bridge: native coverage of the -fno-exceptions bridge TU (compiled directly; links real pulp libs; PulpWam.cmake's lib target can replace this later).
+add_executable(pulp-test-wam-adapter test_wam_adapter.cpp ${CMAKE_SOURCE_DIR}/core/format/src/wasm/wam_adapter.cpp)
+target_link_libraries(pulp-test-wam-adapter PRIVATE Catch2::Catch2WithMain pulp::format pulp::state pulp::runtime pulp::events pulp::midi pulp::audio)
+catch_discover_tests(pulp-test-wam-adapter)
 # CLI design binding tests
 add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/design_binding.cpp
@@ -503,7 +518,6 @@ if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
-
 if(TARGET pulp::inspect)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
@@ -513,21 +527,18 @@ if(TARGET pulp::inspect)
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()
-
 # `pulp loop` shell-out tests. Shares test_cli_shellout_helpers.hpp
 # with the parent CLI shell-out target and the scan/projects sibling.
 add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
 target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-loop)
 catch_discover_tests(pulp-test-cli-shellout-loop)
-
 # `pulp scan` + `pulp projects list` shell-out tests. Shares the CLI
 # shell-out helpers with the sibling shell-out targets.
 add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
 target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-scan-projects)
 catch_discover_tests(pulp-test-cli-shellout-scan-projects)
-
 # `pulp pr` shell-out tests: pr.workflow validation, Shipyard binary pin
 # handling, and native fallback. Shares the helper header with the
 # sibling shell-out targets.
@@ -920,7 +931,7 @@ configure_file(
     @ONLY)
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/cli_delegate.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
@@ -1138,8 +1149,9 @@ pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
 # suite runs on every platform via the virtual-endpoint half.
 pulp_add_test_suite(pulp-test-ump-session LIBRARIES pulp::midi)
 
-# AsyncStream tests
+# AsyncStream + portable-exceptions macro tests
 pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-exceptions LIBRARIES pulp::runtime)
 
 # Network Stream tests
 pulp_add_test_suite(pulp-test-network-stream
@@ -1148,7 +1160,6 @@ pulp_add_test_suite(pulp-test-network-stream
 
 # MessageChannel tests
 pulp_add_test_suite(pulp-test-memory-message-channel LIBRARIES pulp::runtime)
-
 pulp_add_test_suite(pulp-test-websocket-channel LIBRARIES pulp::runtime)
 
 pulp_add_test_suite(pulp-test-osc-channel LIBRARIES pulp::osc)
@@ -1158,6 +1169,93 @@ pulp_add_test_suite(pulp-test-json-rpc LIBRARIES pulp::runtime)
 # Validation harness tests
 pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 
+# Reusable validation assertion helpers (validation_assertions.hpp)
+pulp_add_test_suite(pulp-test-validation-assertions LIBRARIES pulp::format)
+
+# DSP hot reload — build-fingerprint gate (Phase 0)
+pulp_add_test_suite(pulp-test-build-fingerprint LIBRARIES pulp::format)
+
+# DSP hot reload — RT-safe processor hot-swap slot (Phase 0)
+pulp_add_test_suite(pulp-test-hotswap-slot LIBRARIES pulp::format)
+
+# DSP hot reload — parameter-contract equivalence checker (Phase 0)
+pulp_add_test_suite(pulp-test-param-contract LIBRARIES pulp::format)
+
+# DSP hot reload — dynamic-library handle + leak policy (Phase 0). Builds a tiny
+# MODULE fixture and dlopens it by absolute path (RELOAD_PROBE_PATH).
+add_library(pulp-reload-probe MODULE fixtures/reload_probe.cpp)
+set_target_properties(pulp-reload-probe PROPERTIES
+    PREFIX "" POSITION_INDEPENDENT_CODE ON)
+pulp_add_test_suite(pulp-test-reload-library LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-library pulp-reload-probe)
+target_compile_definitions(pulp-test-reload-library PRIVATE
+    RELOAD_PROBE_PATH="$<TARGET_FILE:pulp-reload-probe>")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-library PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# DSP hot reload — verify-before-commit transaction, end to end (Phase 1). Two
+# logic-library fixtures (compatible / incompatible parameter contract) are
+# built as MODULEs and dlopen'd by the transaction; the test asserts the
+# fingerprint + contract gates, the live swap, and parameter-state continuity.
+add_library(pulp-reload-logic-compat MODULE fixtures/reload_logic_compatible.cpp)
+add_library(pulp-reload-logic-incompat MODULE fixtures/reload_logic_incompatible.cpp)
+add_library(pulp-reload-logic-throwing MODULE fixtures/reload_logic_throwing.cpp)
+foreach(_pulp_reload_logic pulp-reload-logic-compat pulp-reload-logic-incompat
+                           pulp-reload-logic-throwing)
+    set_target_properties(${_pulp_reload_logic} PROPERTIES
+        PREFIX "" POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(${_pulp_reload_logic} PRIVATE pulp::format)
+endforeach()
+pulp_add_test_suite(pulp-test-reload-transaction LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-transaction
+    pulp-reload-logic-compat pulp-reload-logic-incompat pulp-reload-logic-throwing)
+target_compile_definitions(pulp-test-reload-transaction PRIVATE
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    RELOAD_LOGIC_THROWING="$<TARGET_FILE:pulp-reload-logic-throwing>")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-transaction PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# DSP hot reload — watch->reload dev loop (Phase 1). Reuses the compatible /
+# incompatible logic fixtures (above); the test copies them to a watched temp
+# path and drives ReloadController::poll().
+pulp_add_test_suite(pulp-test-reload-controller LIBRARIES pulp::format)
+add_dependencies(pulp-test-reload-controller
+    pulp-reload-logic-compat pulp-reload-logic-incompat)
+target_compile_definitions(pulp-test-reload-controller PRIVATE
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    # Watch a path inside the build tree, NOT /tmp: macOS dyld kills a process
+    # that dlopens an unsigned .dylib from a world-writable temp dir.
+    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reload-controller PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# DSP hot reload — DAW-integration shell, end to end (Phase 1b). The shell is a
+# Processor (format adapters wrap it) that loads its DSP from a logic library and
+# hot-swaps it via a background watcher. A "unity" (1x) fixture is the initial
+# logic so a swap to the 2x "compatible" fixture is observable in the output.
+add_library(pulp-reload-logic-unity MODULE fixtures/reload_logic_unity.cpp)
+set_target_properties(pulp-reload-logic-unity PROPERTIES
+    PREFIX "" POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(pulp-reload-logic-unity PRIVATE pulp::format)
+pulp_add_test_suite(pulp-test-reloadable-shell LIBRARIES pulp::format)
+add_dependencies(pulp-test-reloadable-shell
+    pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
+target_compile_definitions(pulp-test-reloadable-shell PRIVATE
+    RELOAD_LOGIC_UNITY="$<TARGET_FILE:pulp-reload-logic-unity>"
+    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(NOT WIN32)
+    target_link_libraries(pulp-test-reloadable-shell PRIVATE ${CMAKE_DL_LIBS})
+endif()
+find_package(Threads REQUIRED)
+target_link_libraries(pulp-test-reloadable-shell PRIVATE Threads::Threads)
+
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 
@@ -1166,6 +1264,30 @@ pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics LIBRARIES pulp::f
 
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
+
+# AAX MIDI bridge — SDK-gated runtime test. test_aax_midi.cpp covers the
+# reassembly/fragmentation SDK-free; this drives the thin SDK glue
+# (decode_midi_node / encode_midi_node in aax_midi_node.cpp) through the real
+# Avid AAX SDK types (AAX_IMIDINode / AAX_CMidiStream / AAX_CMidiPacket), so it
+# only builds when the developer-supplied SDK is configured (PULP_ENABLE_AAX=ON
+# + a valid PULP_AAX_SDK_DIR). The adapter source is compiled directly into the
+# test because aax_midi_node.cpp is otherwise only built per-plugin.
+if(PULP_HAS_AAX)
+    # Ensure the AAX SDK interface/library targets exist even when no AAX plugin
+    # (i.e. no example) is part of this configure. The helper is idempotent.
+    pulp_ensure_aax_sdk_targets()
+    pulp_add_test_suite(pulp-test-aax-midi-node
+        SOURCES test_aax_midi_node.cpp
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
+        LIBRARIES pulp::format pulp-aax-sdk-interface
+        INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
+    target_compile_options(pulp-test-aax-midi-node PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-multichar>
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-undef-prefix>)
+endif()
+
+# AAX MIDI/SysEx packet reassembly + fragmentation (SDK-free pure logic)
+pulp_add_test_suite(pulp-test-aax-midi LIBRARIES pulp::format)
 
 # Appcast/auto-update tests
 pulp_add_test_suite(pulp-test-appcast LIBRARIES pulp::ship)
@@ -1223,8 +1345,12 @@ pulp_add_test_suite(pulp-test-midi-ci-pe LIBRARIES pulp::midi)
 # not linked on non-Apple lanes).
 if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     add_executable(pulp-test-au-v2-effect test_au_v2_effect.cpp)
+    # Links ausdk directly: this test includes AudioUnitSDK headers, which
+    # pulp::format no longer exports (ausdk is PRIVATE on pulp-format to stop
+    # leaking those headers onto every consumer). AU-header access is opt-in
+    # via linking ausdk, same as _pulp_add_au does for real AU plugins.
     target_link_libraries(pulp-test-au-v2-effect PRIVATE
-        pulp::format pulp::midi Catch2::Catch2WithMain)
+        pulp::format pulp::midi ausdk Catch2::Catch2WithMain)
     # pulp::format on Apple compiles at C++23 (AudioUnitSDK 1.4 requires
     # std::expected). Match it here so the adapter header parses.
     set_target_properties(pulp-test-au-v2-effect PROPERTIES CXX_STANDARD 23)
@@ -1237,7 +1363,7 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
         test_au_v2_cocoa_ui.mm
         ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_cocoa_view.mm)
     target_link_libraries(pulp-test-au-v2-cocoa-ui PRIVATE
-        pulp::format pulp::view Catch2::Catch2WithMain
+        pulp::format pulp::view ausdk Catch2::Catch2WithMain
         "-framework AppKit" "-framework AudioToolbox" "-framework QuartzCore")
     target_compile_definitions(pulp-test-au-v2-cocoa-ui PRIVATE
         PULP_AU_GUI=1 PULP_AU_COCOA_VIEW_CLASS=PulpAUCocoaViewFactory_Test)
@@ -1324,6 +1450,14 @@ if(APPLE AND NOT PULP_IOS)
         PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
     catch_discover_tests(pulp-test-text-accessibility-macos)
 endif()
+# macOS hover delivery for a hosted PluginViewHost (tracking area +
+# host-window acceptsMouseMovedEvents).
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-plugin-view-hover-macos test_plugin_view_host_hover_macos.mm)
+    target_link_libraries(pulp-test-plugin-view-hover-macos
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-plugin-view-hover-macos)
+endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
@@ -1341,6 +1475,10 @@ pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
 # GPU host (and any other future platform host) uses to fit
 # fixed-design content into the current window.
 pulp_add_test_suite(pulp-test-view-design-viewport LIBRARIES pulp::view)
+
+# Shared continuous-frame predicate (needs_continuous_frames) the window /
+# plugin-view hosts and a foreign-host embed tick gate repaint on.
+pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the
@@ -2128,6 +2266,9 @@ pulp_add_test_suite(pulp-test-state
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
 
+# Structured non-param state channel (sequencer/mod-matrix transport)
+pulp_add_test_suite(pulp-test-sequencer-state-channel LIBRARIES pulp::state)
+
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-audio-inspector-demo-processor SOURCES test_audio_inspector_demo_processor.cpp LIBRARIES pulp::format pulp::audio pulp::midi)
@@ -2206,6 +2347,7 @@ if(APPLE AND PULP_HAS_AUSDK)
     )
     target_link_libraries(pulp-test-au-plugin-state PRIVATE
         pulp::format
+        ausdk
         Catch2::Catch2WithMain
         "-framework AudioToolbox"
         "-framework AVFoundation"
@@ -3941,6 +4083,9 @@ pulp_add_test_suite(pulp-test-animation LIBRARIES pulp::view)
 # FrameClock tests
 pulp_add_test_suite(pulp-test-frame-clock LIBRARIES pulp::view)
 
+# Meter/scalar host->view source + subscription lifecycle
+pulp_add_test_suite(pulp-test-meter-source LIBRARIES pulp::view)
+
 # Motion bedrock tests.
 pulp_add_test_suite(pulp-test-motion LIBRARIES pulp::view)
 
@@ -4721,11 +4866,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 # flexWrap value translations).
 pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 
-# Widget bridge — Canvas2D compatibility cheap-wiring surface.
-# Covers canvas2d/fill + canvas2d/clip evenodd, canvas2d/roundRect
-# 4-corner radii, canvas2d/ellipse rotation, canvas2d/strokeText
-# dedicated-command routing — five partial → supported
-# compat.json entries.
+# Widget bridge — recovered Canvas2D/CSS compatibility regressions.
+# The canonical Wave 2 Canvas2D cheap-wiring surface is in
+# pulp-test-widget-bridge-wave2-cheap below; this older split keeps
+# recovered CSS cases and later Canvas2D bridge regressions.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 
 # Widget bridge — yoga logical-edge fan-out + A4 OOS pins. Covers yoga
@@ -5321,6 +5465,26 @@ target_link_libraries(pulp-test-design-frame-view
 catch_discover_tests(pulp-test-design-frame-view
     PROPERTIES LABELS "view")
 
+# HostParamSurface / HostActionSurface — the SDK runtime host-param + action
+# surfaces: StateStore backing, DesignFrameView
+# sync/route/re-key, action forwarding, and cross-host binding via a fake.
+add_executable(pulp-test-host-param-surface
+    test_host_param_surface.cpp)
+target_link_libraries(pulp-test-host-param-surface
+    PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-host-param-surface
+    PROPERTIES LABELS "view")
+
+# Faithful port toolkit — SDK primitives
+# (SVG fragment handles, anchored popover, drag-to-reorder, paint-space painters).
+add_executable(pulp-test-faithful-port-toolkit
+    test_faithful_port_toolkit.cpp)
+target_include_directories(pulp-test-faithful-port-toolkit PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-faithful-port-toolkit
+    PRIVATE pulp::view pulp-annotated-capture Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-faithful-port-toolkit
+    PROPERTIES LABELS "view")
+
 # MusicalTypingKeyboard — Ink & Signal catalog component (faithful Figma SVG
 # via DesignFrameView). Pins SVG load, headless render, catalog registration.
 add_executable(pulp-test-musical-typing-keyboard
@@ -5761,6 +5925,11 @@ add_executable(pulp-test-cli-audio-validate test_cli_audio_validate.cpp)
 target_link_libraries(pulp-test-cli-audio-validate PRIVATE pulp::audio pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-validate)
 catch_discover_tests(pulp-test-cli-audio-validate)
+
+add_executable(pulp-test-cli-audio-compare test_cli_audio_compare.cpp)
+target_link_libraries(pulp-test-cli-audio-compare PRIVATE pulp::platform Catch2::Catch2WithMain)
+pulp_bind_cli_shellout_target(pulp-test-cli-audio-compare)
+catch_discover_tests(pulp-test-cli-audio-compare)
 # Audio-probe RT output-boundary allocation counters.
 add_executable(pulp-test-audio-probe test_audio_probe.cpp harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-audio-probe PRIVATE pulp::audio pulp::runtime Catch2::Catch2WithMain)

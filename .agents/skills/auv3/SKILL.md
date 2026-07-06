@@ -901,12 +901,33 @@ after input stops" and delay/reverb tails get chopped.
 
 ### Bypass routing — auto-detected Bypass parameter
 
-`initialize` auto-detects a plugin-declared "Bypass" parameter and
-routes both AU v3 bypass surfaces (the host's `bypass` AUValue and
-the plugin's automation lane) through the **same StateStore atomic**
-so they stay in lockstep (DAW quirks row 21). When no Bypass param
-exists the bridge falls back to a local atomic so the contract still
-holds for plugins that don't declare one.
+`initialize` auto-detects the plugin's bypass parameter via the shared
+`pulp::state::is_bypass_param` contract and routes both AU v3 bypass
+surfaces (the host's `bypass` AUValue and the plugin's automation lane)
+through the **same StateStore atomic** so they stay in lockstep (DAW
+quirks row 21). **Param designation:** a Processor can declare
+`ParamInfo::designation = ParamDesignation::Bypass` to mark its bypass
+control *independent of name*; the legacy boolean-`"Bypass"` name/range
+heuristic is the fallback for params that declare none, so existing
+plugins are unchanged. When no bypass param exists the bridge falls
+back to a local atomic so the contract still holds for plugins that
+don't declare one.
+
+**Trigger params:** the bridge calls `bridge->store.reset_triggers_rt()`
+to auto-reset trigger / momentary params (`ParamInfo::is_trigger`, or a
+`ParamDesignation::Reset` "reset/panic" control) back to their default as
+a **single-exit invariant** — both after `Processor::process` on the
+normal path AND before the bypass short-circuit's `return noErr`, so a
+panic/reset raised while bypassed clears this block instead of the next
+active one. The retained `AUParameterTree`'s `implementorValueProvider`
+reads the store **live** (`store.get_value(param.address)`), so the host
+reflects the settled value on its next poll/query of the parameter. Note
+there is no KVO push on the reset — `AUParameter.value` (the cached
+property) is not actively notified; AU hosts re-query through the value
+provider, which is the same "reflect on next read" contract VST3/CLAP
+have outside their output-event scan. If a future host needs an active
+push, add an AU-safe deferred main-thread notify keyed on reset trigger
+params.
 
 `internalRenderBlock` short-circuits to pass-through audio when
 bypassed (in→out for effects, silence for instruments) and never

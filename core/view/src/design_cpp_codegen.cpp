@@ -985,7 +985,7 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_label(" + cpp_string_literal(text) + ");");
             const auto value = float_expr(ctx, semantics.normalized_value);
             const auto default_value = float_expr(ctx, semantics.normalized_default);
-            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_value(/* TODO: bind to param */ " + value + ");");
+            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_value(/* imported static param value */ " + value + ");");
             emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_default_value(" + default_value + ");");
             if (semantics.widget_schema)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_widget_schema(" + cpp_string_literal(*semantics.widget_schema) + ");");
@@ -997,7 +997,7 @@ void emit_widget_specific(std::ostringstream& out,
             if (!text.empty())
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_label(" + cpp_string_literal(text) + ");");
             emit_line(out, depth, opts.indent_spaces,
-                      std::string(var) + "->set_value(/* TODO: bind to param */ " +
+                      std::string(var) + "->set_value(/* imported static param value */ " +
                           float_expr(ctx, semantics.normalized_value) + ");");
             if (semantics.horizontal)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_orientation(pulp::view::Fader::Orientation::horizontal);");
@@ -1025,7 +1025,7 @@ void emit_widget_specific(std::ostringstream& out,
             const auto value = float_expr(ctx, semantics.normalized_value);
             const auto peak = float_expr(ctx, semantics.peak_value);
             emit_line(out, depth, opts.indent_spaces,
-                      std::string(var) + "->set_level(/* TODO: bind to meter */ " + value + ", " + peak + ");");
+                      std::string(var) + "->set_level(/* imported static meter level */ " + value + ", " + peak + ");");
             if (semantics.horizontal)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_orientation(pulp::view::Meter::Orientation::horizontal);");
             break;
@@ -1324,6 +1324,10 @@ bool emit_faithful_frame(std::ostringstream& out,
         if (!e.custom_props.empty())
             emit_line(out, depth + 1, ctx.opts.indent_spaces,
                       "el.custom_props = " + cpp_string_literal(e.custom_props) + ";");
+        // Host-param binding key for a geometry-detected control.
+        if (!e.param_key.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.param_key = " + cpp_string_literal(e.param_key) + ";");
         emit_line(out, depth + 1, ctx.opts.indent_spaces,
                   var + "_els.push_back(std::move(el));");
         emit_line(out, depth, ctx.opts.indent_spaces, "}");
@@ -1332,6 +1336,14 @@ bool emit_faithful_frame(std::ostringstream& out,
     emit_line(out, depth, ctx.opts.indent_spaces,
               "auto " + var + " = std::make_unique<pulp::view::DesignFrameView>(std::move(" +
               var + "_svg), std::move(" + var + "_els));");
+    // If any control carries a binding key, self-wire gestures to the host-param
+    // surface — parity with the runtime materialize path (make_faithful_svg_frame).
+    const bool any_bound = std::any_of(
+        node.interactive_elements.begin(), node.interactive_elements.end(),
+        [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    if (any_bound)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  var + "->route_changes_to_host_params(true);");
     return true;
 }
 

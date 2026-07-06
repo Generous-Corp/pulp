@@ -78,7 +78,9 @@ TEST_CASE("LoopRenderer renders forward and reverse loops",
     REQUIRE(output.channel(0)[4] == 0.0f);
     REQUIRE(output.channel(0)[5] == 1.0f);
 
+    // Immediate reverse loop = Reverse shape + reverse ENTRY (Direction=Reverse).
     loop.playback_mode = LoopPlaybackMode::Reverse;
+    loop.reverse_entry = true;
     REQUIRE(renderer.set_region(loop, source.num_samples()));
     renderer.start();
     result = renderer.render(input, output.view(), 5);
@@ -88,6 +90,101 @@ TEST_CASE("LoopRenderer renders forward and reverse loops",
     REQUIRE(output.channel(0)[2] == 1.0f);
     REQUIRE(output.channel(0)[3] == 0.0f);
     REQUIRE(output.channel(0)[4] == 3.0f);
+}
+
+// Two-phase Direction × Loop: the ENTRY (reverse_entry) governs the first pass,
+// the loop SHAPE governs the steady state and overrides the entry at the far edge.
+TEST_CASE("LoopRenderer two-phase: forward entry then reverse loop",
+          "[audio][loop][render][two-phase]") {
+    Buffer<float> source(1, 4);
+    for (std::size_t i = 0; i < source.num_samples(); ++i)
+        source.channel(0)[i] = static_cast<float>(i);
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+
+    Buffer<float> output(1, 8);
+    LoopRenderer renderer;
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::Reverse;
+    loop.reverse_entry = false;  // Direction=Forward, Loop=Reverse
+    REQUIRE(renderer.set_region(loop, source.num_samples()));
+    renderer.start();
+    const auto result = renderer.render(input, output.view(), output.num_samples());
+    REQUIRE(result.wrapped);
+    // Forward first pass to the top, then loop backward: 0 1 2 3 2 1 0 3.
+    const float expected[8] = {0, 1, 2, 3, 2, 1, 0, 3};
+    for (std::size_t i = 0; i < 8; ++i) REQUIRE(output.channel(0)[i] == expected[i]);
+}
+
+TEST_CASE("LoopRenderer two-phase: reverse entry then forward loop",
+          "[audio][loop][render][two-phase]") {
+    Buffer<float> source(1, 4);
+    for (std::size_t i = 0; i < source.num_samples(); ++i)
+        source.channel(0)[i] = static_cast<float>(i);
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+
+    Buffer<float> output(1, 8);
+    LoopRenderer renderer;
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::Forward;
+    loop.reverse_entry = true;  // Direction=Reverse, Loop=Forward
+    REQUIRE(renderer.set_region(loop, source.num_samples()));
+    renderer.start();
+    const auto result = renderer.render(input, output.view(), output.num_samples());
+    REQUIRE(result.wrapped);
+    // Backward first pass to the bottom, then loop forward: 3 2 1 0 1 2 3 0.
+    const float expected[8] = {3, 2, 1, 0, 1, 2, 3, 0};
+    for (std::size_t i = 0; i < 8; ++i) REQUIRE(output.channel(0)[i] == expected[i]);
+}
+
+TEST_CASE("LoopRenderer ping-pong reflects at the loop boundaries",
+          "[audio][loop][render]") {
+    Buffer<float> source(1, 4);
+    for (std::size_t i = 0; i < source.num_samples(); ++i)
+        source.channel(0)[i] = static_cast<float>(i);
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+
+    Buffer<float> output(1, 8);
+    LoopRenderer renderer;
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::PingPong;
+    REQUIRE(renderer.set_region(loop, source.num_samples()));
+    renderer.start();
+    const auto result = renderer.render(input, output.view(), output.num_samples());
+    REQUIRE(result.rendered_frames == 8);
+    REQUIRE(result.wrapped);
+    // Forward to the top, reflect, back to the bottom, reflect: 0 1 2 3 2 1 0 1.
+    const float expected[8] = {0, 1, 2, 3, 2, 1, 0, 1};
+    for (std::size_t i = 0; i < 8; ++i)
+        REQUIRE(output.channel(0)[i] == expected[i]);
+}
+
+TEST_CASE("LoopRenderer ReverseOnce plays backward once then stops",
+          "[audio][loop][render]") {
+    Buffer<float> source(1, 4);
+    for (std::size_t i = 0; i < source.num_samples(); ++i)
+        source.channel(0)[i] = static_cast<float>(i);
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+
+    Buffer<float> output(1, 6);
+    LoopRenderer renderer;
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::ReverseOnce;
+    REQUIRE(renderer.set_region(loop, source.num_samples()));
+    renderer.start();
+    const auto result = renderer.render(input, output.view(), output.num_samples());
+    REQUIRE(result.rendered_frames == 6);
+    // End -> start (3,2,1,0), then silent (no wrap): 3 2 1 0 0 0.
+    REQUIRE(output.channel(0)[0] == 3.0f);
+    REQUIRE(output.channel(0)[1] == 2.0f);
+    REQUIRE(output.channel(0)[2] == 1.0f);
+    REQUIRE(output.channel(0)[3] == 0.0f);
+    REQUIRE(output.channel(0)[4] == 0.0f);
+    REQUIRE(output.channel(0)[5] == 0.0f);
+    REQUIRE(result.silent_frames >= 2);
 }
 
 TEST_CASE("LoopRenderer set_playback_mode flips Forward<->OneShot in place",

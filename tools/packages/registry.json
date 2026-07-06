@@ -4,7 +4,7 @@
     "alac": {
       "name": "Apple ALAC",
       "version": "master",
-      "description": "Apple Lossless Audio Codec encoder \u2014 cross-platform ALAC write",
+      "description": "Apple Lossless Audio Codec encoder — cross-platform ALAC write",
       "license": "Apache-2.0",
       "category": "audio-io",
       "url": "https://github.com/macosforge/alac",
@@ -57,7 +57,7 @@
     "aubio": {
       "name": "Aubio",
       "version": "0.4.9",
-      "description": "Audio labeling \u2014 pitch, onset, beat, and tempo detection",
+      "description": "Audio labeling — pitch, onset, beat, and tempo detection",
       "license": "GPL-3.0",
       "category": "dsp",
       "url": "https://github.com/aubio/aubio",
@@ -278,10 +278,10 @@
         "frequency-analysis"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Fast, accurate pitch detection using bitstream autocorrelation \u2014 no equivalent in Pulp built-ins",
+      "unique_value": "Fast, accurate pitch detection using bitstream autocorrelation — no equivalent in Pulp built-ins",
       "alternatives": [
-        "Aubio (GPL \u2014 requires commercial license)",
-        "Essentia (AGPL \u2014 incompatible)"
+        "Aubio (GPL — requires commercial license)",
+        "Essentia (AGPL — incompatible)"
       ],
       "migration_notes": {},
       "verification": {
@@ -376,8 +376,8 @@
       },
       "unique_value": "Physical modeling synthesis (Karplus-Strong, modal, pluck) and drum synthesis not available in Pulp built-ins",
       "alternatives": [
-        "STK (MIT with patent caveats \u2014 more physical models)",
-        "Maximilian (MIT \u2014 teaching-oriented)"
+        "STK (MIT with patent caveats — more physical models)",
+        "Maximilian (MIT — teaching-oriented)"
       ],
       "migration_notes": {},
       "verification": {
@@ -466,11 +466,11 @@
       "overlaps_with_builtin": {},
       "unique_value": "Zero-dependency single-header audio file decoding for WAV, FLAC, and MP3",
       "alternatives": [
-        "miniaudio (MIT-0 \u2014 includes device I/O too)",
-        "libsndfile (LGPL \u2014 copyleft)"
+        "miniaudio (MIT-0 — includes device I/O too)",
+        "libsndfile (LGPL — copyleft)"
       ],
       "migration_notes": {
-        "from:libsndfile": "dr_libs is MIT-0 and header-only but decode-only \u2014 no encode support for FLAC/MP3"
+        "from:libsndfile": "dr_libs is MIT-0 and header-only but decode-only — no encode support for FLAC/MP3"
       },
       "verification": {
         "last_verified": "2026-04-07",
@@ -560,7 +560,7 @@
     "fdk-aac": {
       "name": "FDK AAC",
       "version": "2.0.3",
-      "description": "AAC encoder/decoder \u2014 Fraunhofer FDK AAC codec",
+      "description": "AAC encoder/decoder — Fraunhofer FDK AAC codec",
       "license": "FDK-AAC",
       "category": "audio-io",
       "url": "https://github.com/mstorsjo/fdk-aac",
@@ -605,7 +605,7 @@
       ],
       "license_requires_acceptance": true,
       "license_note": "FDK AAC license is permissive for code but AAC patents may apply.",
-      "unique_value": "Cross-platform AAC encoder. FDK license \u2014 requires --accept-license.",
+      "unique_value": "Cross-platform AAC encoder. FDK license — requires --accept-license.",
       "verification": {
         "last_verified": "2026-04-07",
         "status": "metadata-only"
@@ -614,7 +614,7 @@
     "fftw": {
       "name": "FFTW",
       "version": "3.3.10",
-      "description": "Fastest Fourier Transform in the West \u2014 highly optimized FFT",
+      "description": "Fastest Fourier Transform in the West — highly optimized FFT",
       "license": "GPL-2.0",
       "category": "dsp",
       "url": "https://www.fftw.org",
@@ -678,10 +678,10 @@
       "overlaps_with_builtin": {
         "signal/fft.hpp": "FFT"
       },
-      "unique_value": "Highly optimized FFT with auto-tuning SIMD code generation \u2014 fastest available for large transforms",
+      "unique_value": "Highly optimized FFT with auto-tuning SIMD code generation — fastest available for large transforms",
       "alternatives": [
-        "PFFFT (BSD-3 \u2014 lighter, SIMD, power-of-two only)",
-        "KissFFT (BSD-3 \u2014 portable)"
+        "PFFFT (BSD-3 — lighter, SIMD, power-of-two only)",
+        "KissFFT (BSD-3 — portable)"
       ],
       "migration_notes": {},
       "verification": {
@@ -744,9 +744,9 @@
         "midi-synthesis"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Full SoundFont 2 synthesis engine \u2014 load .sf2 files for instrument playback",
+      "unique_value": "Full SoundFont 2 synthesis engine — load .sf2 files for instrument playback",
       "alternatives": [
-        "FluidLite (MIT \u2014 minimal SF2 subset)",
+        "FluidLite (MIT — minimal SF2 subset)",
         "For mobile: FluidLite (MIT) has no glib dependency and supports basic SF2 playback"
       ],
       "migration_notes": {},
@@ -829,7 +829,7 @@
         "icon-font"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Purpose-built audio icon font \u2014 knob, fader, waveform, speaker, MIDI, and plugin format icons",
+      "unique_value": "Purpose-built audio icon font — knob, fader, waveform, speaker, MIDI, and plugin format icons",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -850,7 +850,7 @@
     "freeverb": {
       "name": "Freeverb",
       "version": "1.0.0",
-      "description": "Classic Schroeder reverb algorithm \u2014 public domain reference implementation",
+      "description": "Classic Schroeder reverb algorithm — public domain reference implementation",
       "license": "Unlicense",
       "category": "dsp",
       "url": "https://github.com/sinshu/freeverb",
@@ -909,7 +909,7 @@
       "overlaps_with_builtin": {
         "signal/reverb.hpp": "reverb"
       },
-      "unique_value": "Reference Schroeder reverb \u2014 public domain, zero dependencies, educational",
+      "unique_value": "Reference Schroeder reverb — public domain, zero dependencies, educational",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -993,7 +993,7 @@
         "signal/fft.hpp": "FFT",
         "signal/biquad.hpp": "IIR filters"
       },
-      "unique_value": "Comprehensive SIMD-optimized DSP with expression templates \u2014 faster than hand-written loops",
+      "unique_value": "Comprehensive SIMD-optimized DSP with expression templates — faster than hand-written loops",
       "alternatives": [
         "PFFFT (BSD-3) + Signalsmith DSP (MIT) for FFT + filters separately"
       ],
@@ -1010,7 +1010,7 @@
     "kissfft": {
       "name": "KissFFT",
       "version": "131.1.0",
-      "description": "Portable FFT for any size \u2014 not just power-of-two",
+      "description": "Portable FFT for any size — not just power-of-two",
       "license": "BSD-3-Clause",
       "category": "dsp",
       "url": "https://github.com/mborgerding/kissfft",
@@ -1085,7 +1085,7 @@
     "lame": {
       "name": "LAME",
       "version": "3.100",
-      "description": "MP3 encoder \u2014 high-quality MP3 encoding for audio export",
+      "description": "MP3 encoder — high-quality MP3 encoding for audio export",
       "license": "LGPL-2.0",
       "category": "audio-io",
       "url": "https://lame.sourceforge.io",
@@ -1129,7 +1129,7 @@
       "provides": [
         "mp3-encode"
       ],
-      "unique_value": "Standard MP3 encoder. LGPL \u2014 requires --accept-license.",
+      "unique_value": "Standard MP3 encoder. LGPL — requires --accept-license.",
       "verification": {
         "last_verified": "2026-04-07",
         "status": "metadata-only"
@@ -1138,7 +1138,7 @@
     "libflac": {
       "name": "FLAC",
       "version": "1.4.3",
-      "description": "FLAC encoder \u2014 lossless audio compression",
+      "description": "FLAC encoder — lossless audio compression",
       "license": "BSD-3-Clause",
       "category": "audio-io",
       "url": "https://github.com/xiph/flac",
@@ -1182,7 +1182,7 @@
       "provides": [
         "flac-encode"
       ],
-      "unique_value": "Reference FLAC encoder \u2014 lossless, BSD-3 licensed.",
+      "unique_value": "Reference FLAC encoder — lossless, BSD-3 licensed.",
       "verification": {
         "last_verified": "2026-04-07",
         "status": "metadata-only"
@@ -1249,7 +1249,7 @@
         "dataflow-dsp"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Only way to embed Pure Data patches \u2014 enables live audio patching and visual programming",
+      "unique_value": "Only way to embed Pure Data patches — enables live audio patching and visual programming",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -1324,7 +1324,7 @@
         "midi2"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "C++20 native MIDI I/O with iOS+Android backends and MIDI 2.0 \u2014 replaces RtMidi",
+      "unique_value": "C++20 native MIDI I/O with iOS+Android backends and MIDI 2.0 — replaces RtMidi",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -1404,10 +1404,10 @@
       "overlaps_with_builtin": {},
       "unique_value": "Industry-standard sample rate conversion with multiple quality modes (sinc best, sinc medium, sinc fastest, linear, zero-order-hold)",
       "alternatives": [
-        "r8brain-free-src (MIT \u2014 different quality tradeoffs)"
+        "r8brain-free-src (MIT — different quality tradeoffs)"
       ],
       "migration_notes": {
-        "from:libsndfile": "libsamplerate handles resampling only, not file I/O \u2014 use dr-libs for file decoding"
+        "from:libsndfile": "libsamplerate handles resampling only, not file I/O — use dr-libs for file decoding"
       },
       "verification": {
         "last_verified": "2026-04-07",
@@ -1498,7 +1498,7 @@
       "overlaps_with_builtin": {},
       "unique_value": "Full-featured audio file I/O supporting 20+ formats with read and write",
       "alternatives": [
-        "dr_libs (MIT-0 \u2014 decode only, fewer formats)"
+        "dr_libs (MIT-0 — decode only, fewer formats)"
       ],
       "migration_notes": {},
       "verification": {
@@ -1513,7 +1513,7 @@
     "libvorbis": {
       "name": "libvorbis",
       "version": "v1.3.8",
-      "description": "OGG Vorbis audio codec \u2014 encode and decode",
+      "description": "OGG Vorbis audio codec — encode and decode",
       "license": "BSD-3-Clause",
       "category": "audio-io",
       "url": "https://github.com/xiph/vorbis",
@@ -1574,7 +1574,7 @@
         "audio-decode"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Standard OGG Vorbis codec for streaming audio and sample banks \u2014 BSD licensed",
+      "unique_value": "Standard OGG Vorbis codec for streaming audio and sample banks — BSD licensed",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -1652,7 +1652,7 @@
         "capture"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Complete audio device layer for mobile \u2014 Core Audio on iOS, AAudio on Android, single-header",
+      "unique_value": "Complete audio device layer for mobile — Core Audio on iOS, AAudio on Android, single-header",
       "alternatives": [
         "Oboe (Apache-2.0, Android-only)"
       ],
@@ -1663,6 +1663,70 @@
         "upstream_commit": "unknown",
         "upstream_latest": "0.11.21",
         "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "moonbase": {
+      "name": "Moonbase Licensing",
+      "version": "3.3.0",
+      "description": "Hosted license activation: online/offline/trial, RS256 JWT validation, seat management, in-app updates",
+      "license": "MIT",
+      "category": "utilities",
+      "url": "https://github.com/Moonbase-sh/moonbase-cpp",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/Moonbase-sh/moonbase-cpp.git",
+        "git_tag": "v3.3.0"
+      },
+      "cmake": {
+        "targets": [
+          "moonbase::licensing"
+        ],
+        "header_only": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": {
+          "architectures": [
+            "arm64",
+            "x86_64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ],
+          "notes": "Moonbase documents OpenSSL as a system requirement and v3.3.0 CMake links it unconditionally, so OpenSSL (libssl-dev) must be present at configure time; the integration uses the OpenSSL RS256 backend (OS-native crypto is optional and does not remove the OpenSSL requirement)"
+        }
+      },
+      "rt_safe": false,
+      "tags": [
+        "licensing",
+        "activation",
+        "copy-protection",
+        "drm"
+      ],
+      "provides": [
+        "license activation",
+        "entitlement gating"
+      ],
+      "overlaps_with_builtin": {},
+      "unique_value": "Hosted licensing with seat management and in-app updates from a header-only, MIT-licensed client; transport/fingerprint/storage are injected so it drops onto Pulp's HTTP stack with native OS crypto",
+      "alternatives": [],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-06-30",
+        "verified_version": "3.3.0",
+        "upstream_commit": "a8f9c06",
+        "upstream_latest": "a8f9c06",
+        "pulp_commit": "feature/moonbase-licensing",
         "build_status": {}
       }
     },
@@ -1783,7 +1847,7 @@
         "opus-decode"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "The standard audio codec for streaming, VOIP, and WebRTC \u2014 patent-free, royalty-free",
+      "unique_value": "The standard audio codec for streaming, VOIP, and WebRTC — patent-free, royalty-free",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -1869,8 +1933,8 @@
       },
       "unique_value": "SIMD-optimized FFT significantly faster than general-purpose implementations for power-of-two sizes",
       "alternatives": [
-        "KissFFT (BSD-3 \u2014 portable but not SIMD-optimized)",
-        "FFTW (GPL \u2014 requires commercial license)"
+        "KissFFT (BSD-3 — portable but not SIMD-optimized)",
+        "FFTW (GPL — requires commercial license)"
       ],
       "migration_notes": {
         "from:fftw": "PFFFT is BSD-licensed and lighter; covers real and complex FFT for power-of-two sizes"
@@ -1959,10 +2023,10 @@
       "overlaps_with_builtin": {},
       "unique_value": "Audiophile-grade sample rate conversion with configurable quality/latency tradeoffs",
       "alternatives": [
-        "libsamplerate (BSD-2 \u2014 industry standard, different quality profile)"
+        "libsamplerate (BSD-2 — industry standard, different quality profile)"
       ],
       "migration_notes": {
-        "from:libsamplerate": "r8brain offers different quality/latency tradeoffs \u2014 benchmark both for your use case"
+        "from:libsamplerate": "r8brain offers different quality/latency tradeoffs — benchmark both for your use case"
       },
       "verification": {
         "last_verified": "2026-04-07",
@@ -2039,9 +2103,9 @@
         "voice-enhancement"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Purpose-built neural noise suppression \u2014 removes keyboard, HVAC, crowd noise in real time",
+      "unique_value": "Purpose-built neural noise suppression — removes keyboard, HVAC, crowd noise in real time",
       "alternatives": [
-        "SpeexDSP (BSD-3, traditional AEC/NS \u2014 less effective but lighter)"
+        "SpeexDSP (BSD-3, traditional AEC/NS — less effective but lighter)"
       ],
       "migration_notes": {},
       "verification": {
@@ -2056,7 +2120,7 @@
     "rtmidi": {
       "name": "RtMidi",
       "version": "6.0.0",
-      "description": "Cross-platform MIDI I/O (legacy \u2014 prefer libremidi for new projects)",
+      "description": "Cross-platform MIDI I/O (legacy — prefer libremidi for new projects)",
       "license": "MIT",
       "category": "utilities",
       "url": "https://github.com/thestk/rtmidi",
@@ -2107,9 +2171,9 @@
         "midi-ports"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Established MIDI I/O library \u2014 useful for porting projects that already use RtMidi",
+      "unique_value": "Established MIDI I/O library — useful for porting projects that already use RtMidi",
       "alternatives": [
-        "libremidi (BSD-2, modern C++20, MIDI 2.0 \u2014 recommended for new projects)"
+        "libremidi (BSD-2, modern C++20, MIDI 2.0 — recommended for new projects)"
       ],
       "migration_notes": {},
       "verification": {}
@@ -2183,8 +2247,8 @@
       "overlaps_with_builtin": {},
       "unique_value": "Real-time safe neural network inference for amp modeling, vocal processing, and intelligent audio effects",
       "alternatives": [
-        "ONNX Runtime (MIT \u2014 heavier, more general)",
-        "nn-inference-template (MIT \u2014 template for multiple backends)"
+        "ONNX Runtime (MIT — heavier, more general)",
+        "nn-inference-template (MIT — template for multiple backends)"
       ],
       "migration_notes": {},
       "verification": {
@@ -2268,7 +2332,7 @@
       "overlaps_with_builtin": {},
       "unique_value": "Industry-standard time-stretching used in DAWs and production tools",
       "alternatives": [
-        "Signalsmith Stretch (MIT \u2014 polyphonic, lighter)"
+        "Signalsmith Stretch (MIT — polyphonic, lighter)"
       ],
       "migration_notes": {},
       "verification": {
@@ -2358,7 +2422,7 @@
       },
       "unique_value": "Comprehensive DSP toolkit with spectral processing and advanced envelope designs beyond Pulp built-ins",
       "alternatives": [
-        "KFR (GPL \u2014 requires commercial license)"
+        "KFR (GPL — requires commercial license)"
       ],
       "migration_notes": {},
       "verification": {
@@ -2444,7 +2508,7 @@
       "overlaps_with_builtin": {},
       "unique_value": "High-quality polyphonic pitch/time stretching with no GPL dependency",
       "alternatives": [
-        "Rubber Band (GPL \u2014 requires commercial license)"
+        "Rubber Band (GPL — requires commercial license)"
       ],
       "migration_notes": {
         "from:rubber-band": "Signalsmith Stretch is MIT-licensed and header-only; API differs but covers similar use cases"
@@ -2530,9 +2594,9 @@
         "rate-change"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Simple API for tempo/pitch/rate changes \u2014 widely used in media players",
+      "unique_value": "Simple API for tempo/pitch/rate changes — widely used in media players",
       "alternatives": [
-        "Signalsmith Stretch (MIT \u2014 more modern, polyphonic)"
+        "Signalsmith Stretch (MIT — more modern, polyphonic)"
       ],
       "migration_notes": {},
       "verification": {
@@ -2608,7 +2672,7 @@
         "noise-suppression"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "Only permissive AEC library \u2014 essential for voice recording, podcasting, and communication plugins",
+      "unique_value": "Only permissive AEC library — essential for voice recording, podcasting, and communication plugins",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -2623,7 +2687,7 @@
     "stk": {
       "name": "STK (Synthesis ToolKit)",
       "version": "5.0.1",
-      "description": "Physical modeling synthesis \u2014 waveguides, resonators, and instrument models",
+      "description": "Physical modeling synthesis — waveguides, resonators, and instrument models",
       "license": "MIT",
       "category": "dsp",
       "url": "https://github.com/thestk/stk",
@@ -2688,7 +2752,7 @@
         "feature": "signal/oscillator.hpp",
         "note": "Basic oscillators overlap, but STK provides unique waveguide and physical modeling"
       },
-      "unique_value": "Unique waveguide synthesis (strings, brass, woodwinds, percussion models) from CCRMA \u2014 not available in any other registry package",
+      "unique_value": "Unique waveguide synthesis (strings, brass, woodwinds, percussion models) from CCRMA — not available in any other registry package",
       "alternatives": [
         "DaisySP (MIT, simpler physical modeling)"
       ],
@@ -2758,7 +2822,7 @@
         "midi-synthesis"
       ],
       "overlaps_with_builtin": {},
-      "unique_value": "MIT-licensed SF2 synthesis \u2014 mobile-friendly alternative to FluidSynth (LGPL)",
+      "unique_value": "MIT-licensed SF2 synthesis — mobile-friendly alternative to FluidSynth (LGPL)",
       "alternatives": [
         "FluidSynth (LGPL-2.1, full-featured but heavy deps)"
       ],

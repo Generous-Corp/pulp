@@ -335,7 +335,7 @@ TEST_CASE("MultiChannelMeter treats non-finite samples as silence (no NaN poison
 }
 
 TEST_CASE("MultiChannelMeter accumulates short blocks until the emit threshold",
-          "[signal][meter][coverage]") {
+          "[signal][meter]") {
     MultiChannelMeter meter;
     meter.prepare(1000.0f, 1);  // 10-sample snapshot block
 
@@ -360,7 +360,7 @@ TEST_CASE("MultiChannelMeter accumulates short blocks until the emit threshold",
 }
 
 TEST_CASE("MultiChannelMeter first null channel clears stale stereo state",
-          "[signal][meter][coverage]") {
+          "[signal][meter]") {
     MultiChannelMeter meter;
     meter.prepare(100.0f, 2);
 
@@ -387,7 +387,7 @@ TEST_CASE("MultiChannelMeter first null channel clears stale stereo state",
 }
 
 TEST_CASE("MultiChannelMeter sanitizes non-finite stereo correlation samples",
-          "[signal][meter][coverage]") {
+          "[signal][meter]") {
     MultiChannelMeter meter;
     meter.prepare(100.0f, 2);
 
@@ -415,7 +415,7 @@ TEST_CASE("MultiChannelMeter sanitizes non-finite stereo correlation samples",
 }
 
 TEST_CASE("MultiChannelMeter zero sample rate still emits finite one-sample snapshots",
-          "[signal][meter][coverage]") {
+          "[signal][meter]") {
     MultiChannelMeter meter;
     meter.prepare(0.0f, 1);
 
@@ -432,7 +432,7 @@ TEST_CASE("MultiChannelMeter zero sample rate still emits finite one-sample snap
 }
 
 TEST_CASE("MultiChannelBallistics releases peaks RMS and clip holds independently",
-          "[signal][meter][coverage]") {
+          "[signal][meter]") {
     MultiChannelBallistics ballistics;
     ballistics.attack_time = 0.01f;
     ballistics.release_time = 0.01f;

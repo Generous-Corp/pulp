@@ -163,7 +163,7 @@ TEST_CASE("RemoteViewSession - handshake sends view.hello + view.metadata", "[re
 }
 
 TEST_CASE("RemoteViewSession - metadata escapes names as valid JSON",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     EscapedMetadataProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -198,7 +198,7 @@ TEST_CASE("RemoteViewSession - metadata escapes names as valid JSON",
 }
 
 TEST_CASE("RemoteViewSession - metadata includes exact size hints and multiple params",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     MultiParamProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -264,7 +264,7 @@ TEST_CASE("RemoteViewSession - remote sets param, host StateStore reflects it", 
 }
 
 TEST_CASE("RemoteViewSession - remote param_set accepts numeric JSON variants",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -320,7 +320,7 @@ TEST_CASE("RemoteViewSession - host set_parameter notifies remote", "[remote_vie
 }
 
 TEST_CASE("RemoteViewSession - closed peer channel disables outbound operations",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -344,7 +344,7 @@ TEST_CASE("RemoteViewSession - closed peer channel disables outbound operations"
 }
 
 TEST_CASE("RemoteViewSession - send_input forwards payload to remote",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -380,7 +380,7 @@ TEST_CASE("RemoteViewSession - send_input forwards payload to remote",
 }
 
 TEST_CASE("RemoteViewSession - remote view.param_get serves state values and errors",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -454,7 +454,7 @@ TEST_CASE("RemoteViewSession - host get_parameter reads remote result", "[remote
 }
 
 TEST_CASE("RemoteViewSession - host get_parameter ignores invalid remote results",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -480,7 +480,7 @@ TEST_CASE("RemoteViewSession - host get_parameter ignores invalid remote results
 }
 
 TEST_CASE("RemoteViewSession - host get_parameter ignores remote errors",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -533,7 +533,7 @@ TEST_CASE("RemoteViewSession - malformed remote param sets are ignored", "[remot
 }
 
 TEST_CASE("ViewBridge - attach_remote_channel rejects null channel",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -547,7 +547,7 @@ TEST_CASE("ViewBridge - attach_remote_channel rejects null channel",
 }
 
 TEST_CASE("ViewBridge - attach_remote_channel reports handshake send failure",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -617,7 +617,7 @@ TEST_CASE("RemoteViewSession - close detaches and closes underlying channel", "[
 }
 
 TEST_CASE("ViewBridge - custom view lifecycle and secondary view indexing",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     LifecycleProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -677,7 +677,7 @@ TEST_CASE("ViewBridge - custom view lifecycle and secondary view indexing",
 }
 
 TEST_CASE("ViewBridge - detach_remote is false for null and stale sessions",
-          "[remote_view][coverage]") {
+          "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);

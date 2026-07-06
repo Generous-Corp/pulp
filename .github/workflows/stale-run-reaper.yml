@@ -65,6 +65,7 @@ concurrency:
 
 jobs:
   reap:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     name: Cancel stuck workflow runs
 

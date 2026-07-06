@@ -216,6 +216,9 @@ If you want the dynamic runtime back, override with
 
 ## See also
 
+* [Putting a Pulp UI in a JUCE plugin](juce-embed.md) — the *other* direction:
+  keep your JUCE DSP and swap only the UI (import an existing plugin, start from
+  the template, or use the adapter directly).
 * [DSP threading](dsp-threading.md) — the audio-thread contract.
 * sudara, *"Big List of JUCE Tips and Tricks"* —
   https://melatonin.dev/blog/the-big-list-of-juce-tips-and-tricks/

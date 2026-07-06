@@ -129,9 +129,13 @@ export type InteractiveElement = {
    */
   label?: string;
   /**
-   * Figma node id (binding key).
+   * Figma node id — provenance for the inspector's Wiring lens (maps a control back to its source node). NOT the host-param key; that is param_key.
    */
   source_node_id?: string;
+  /**
+   * Host-parameter binding key for a geometry-detected control (e.g. "filter.cutoff"). Maps to IRNode.interactive_elements[].param_key → DesignFrameElement::param_key; DesignFrameView routes gestures on it to the framework-agnostic HostParamSurface (JUCE APVTS / iPlug2 / StateStore). Absent for an unbound knob.
+   */
+  param_key?: string;
 };
 
 /**

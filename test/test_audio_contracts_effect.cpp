@@ -1,4 +1,4 @@
-// test_audio_contracts_effect.cpp — harness PR 3: PulpEffect contracts.
+// test_audio_contracts_effect.cpp — PulpEffect contracts.
 // Separate TU within pulp-test-audio-contracts because pulp_effect.hpp and
 // pulp_gain.hpp define colliding unscoped enumerators (kBypass).
 //
@@ -46,7 +46,7 @@ RenderScenario lowpass_scenario(const char* name, float cutoff_hz,
 } // namespace
 
 TEST_CASE("Contract: PulpEffect lowpass attenuates high frequencies",
-          "[audio][contract][pulpeffect][harness-3]") {
+          "[audio][contract][pulpeffect]") {
     // Golden semantics: a 200 Hz lowpass must drop an 8 kHz, 0.5-amp sine
     // (RMS −9.05 dBFS) by ≥ 20 dB in steady state — measured after the
     // stated 100 ms warm-up (numeric). The biquad is per-sample state with
@@ -65,7 +65,7 @@ TEST_CASE("Contract: PulpEffect lowpass attenuates high frequencies",
 }
 
 TEST_CASE("Contract: PulpEffect lowpass preserves low frequencies",
-          "[audio][contract][pulpeffect][harness-3]") {
+          "[audio][contract][pulpeffect]") {
     // A 5 kHz lowpass passes a 100 Hz, 0.5-amp sine (RMS −9.05 dBFS)
     // within 1 dB in steady state (numeric; matches the golden suite's
     // "within ~2 dB" claim with margin).
@@ -82,7 +82,7 @@ TEST_CASE("Contract: PulpEffect lowpass preserves low frequencies",
 }
 
 TEST_CASE("Contract: PulpEffect bypass is transparent",
-          "[audio][contract][pulpeffect][harness-3]") {
+          "[audio][contract][pulpeffect]") {
     // Bypass copies samples and must win over an aggressive filter setup
     // (tolerance: exact).
     const auto input = make_sine(2, 9600, 1000.0f, kSampleRate, 0.5f);
@@ -104,7 +104,7 @@ TEST_CASE("Contract: PulpEffect bypass is transparent",
 }
 
 TEST_CASE("Contract: PulpEffect keeps silence silent",
-          "[audio][contract][pulpeffect][harness-3]") {
+          "[audio][contract][pulpeffect]") {
     // Zero input through a zero-state biquad stays exactly zero — no
     // self-noise, no denormal rumble (threshold −90 dBFS).
     AudioContract contract(

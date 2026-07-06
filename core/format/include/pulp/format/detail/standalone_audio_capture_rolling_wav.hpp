@@ -82,8 +82,12 @@ inline bool write_audio_capture_rolling_wav_file(
         const float* src = view.channel_ptr(c);
         data.channels[c].assign(src, src + copied);
     }
-    // Float WAV — preserve the full render below the int16 floor for compare/doctor.
-    return audio::write_wav_file(path, data, audio::WavBitDepth::Float32);
+    // Float WAV by default — preserves the full render below the int16 floor for
+    // compare/doctor; int24 on request (smaller, integer, ≈ −144 dBFS floor).
+    const auto bit_depth = config.audio_capture_rolling_int24
+                               ? audio::WavBitDepth::Int24
+                               : audio::WavBitDepth::Float32;
+    return audio::write_wav_file(path, data, bit_depth);
 }
 
 }  // namespace pulp::format::detail

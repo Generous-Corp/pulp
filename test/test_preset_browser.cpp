@@ -328,7 +328,7 @@ TEST_CASE("PresetBrowser mouse list selects and double-click activates", "[view]
 }
 
 TEST_CASE("PresetBrowser filtered list click uses filter offset and row height",
-          "[view][preset_browser][coverage][issue-655]") {
+          "[view][preset_browser][issue-655]") {
     TestPresetFixture f;
     PresetBrowser browser(*f.pm);
     browser.set_bounds({0, 0, 180, 180});
@@ -351,7 +351,7 @@ TEST_CASE("PresetBrowser filtered list click uses filter offset and row height",
 }
 
 TEST_CASE("PresetBrowser ignores filtered clicks before the list starts",
-          "[view][preset_browser][coverage][issue-655]") {
+          "[view][preset_browser][issue-655]") {
     TestPresetFixture f;
     PresetBrowser browser(*f.pm);
     browser.set_bounds({0, 0, 180, 180});

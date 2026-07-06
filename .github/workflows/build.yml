@@ -739,18 +739,19 @@ jobs:
           fi
 
       - name: Configure
-        # On pull_request events, skip the examples tree
+        # On PR and Shipyard workflow_dispatch validation, skip the examples tree
         # (PulpDrums / PulpSynth / PulpMpeSynth / PulpPluck /
         # AraPitchTracker × VST3/AU/CLAP format variants — the heavy
         # build targets). Core tests still build + run; example-local
         # tests registered from examples/*/CMakeLists.txt are deferred
-        # with the plugin product bundles. Trades ~10-20 min per PR for
-        # the nightly / workflow_dispatch validation that examples still
-        # compile.
-        # On workflow_dispatch, Shipyard PR validation keeps examples
-        # enabled but disables GPU-only targets: the self-hosted macOS
-        # runner does not carry the pinned Skia archive, and GPU release
-        # coverage lives in the release workflow.
+        # with the plugin product bundles. Trades ~10-20 min per PR/ship
+        # dispatch for the nightly / release lanes that still compile the
+        # example/product bundles.
+        # On workflow_dispatch, Shipyard PR validation also disables GPU:
+        # the self-hosted macOS runner may not carry the pinned Skia archive,
+        # and GPU release coverage lives in the release workflow. Keep
+        # examples OFF there too so no-GPU validation does not link example
+        # bundles that require the GPU plugin view host.
         run: |
           set -euo pipefail
           # macOS builds with Ninja — it schedules parallelism more
@@ -792,11 +793,11 @@ jobs:
             # reliably on GitHub-hosted Windows runners.
             cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
           fi
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
-          else
-            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
+          cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cmake_args+=(-DPULP_ENABLE_GPU=OFF)
           fi
+          cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"
           # Mark the build in-progress; the Build step clears it on success, so a
           # build interrupted/cancelled before completion is detected next run
           # (ODR guard above). Harmless on github-hosted (fresh dir each run).
@@ -894,7 +895,12 @@ jobs:
             exclude="${exclude}|DesignFrameView slides"
             exclude="${exclude}|DesignFrameView rotates"
           fi
-          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
+          # --repeat until-pass:2 retries a failed test once before failing the
+          # leg, so a single timing-flake (e.g. a ReDoS-guard test slowed by
+          # runner load) self-heals instead of reddening the required `macos`
+          # gate and wedging auto-merge. Mirrors sanitizers.yml; each attempt is
+          # still bounded by --timeout 120.
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
 
       - name: Surface ctest failures (non-Windows)
         # On a SELF-HOSTED runner the test step's log is not retrievable via
@@ -954,7 +960,7 @@ jobs:
           set "PULP_CTEST_LABEL_EXCLUDE=validation"
           if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
           if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
-          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
+          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's

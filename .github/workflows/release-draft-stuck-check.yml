@@ -59,6 +59,7 @@ concurrency:
 
 jobs:
   check:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     name: Check tag-vs-published-release invariant
 

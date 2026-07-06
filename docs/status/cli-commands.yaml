@@ -6,6 +6,9 @@ commands:
     status: usable
     summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects. When configure is needed, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1`.
     args:
+      - name: --format
+        kind: option
+        description: "Build a web plugin format instead of the native one: `wam` (Emscripten → AudioWorklet, into `build-wam/`) or `wclap` (wasi-sdk → CLAP-in-WebAssembly, into `build-wclap/`). `-f <fmt>` is the short form. Cannot be combined with `--install`/`--validate`/`--watch`. `wam` needs `emcmake` on PATH (source emsdk_env.sh); `wclap` needs `tools/cmake/wasi-toolchain.cmake` in the checkout."
       - name: --js-engine
         kind: option
         description: "JS engine backend: auto (default), quickjs, jsc (Apple only), v8 (requires V8 libs). Forces reconfigure."
@@ -201,6 +204,8 @@ commands:
         args:
           - name: --url
             required: true
+          - name: --download-url
+            required: false
           - name: --version
             required: false
           - name: --notes
@@ -566,6 +571,9 @@ commands:
       - name: --audio-capture-rolling-frames
         kind: option
         description: Window in samples for --audio-capture-rolling (0 = as much as the ring holds, clamped). Forwarded as --audio-capture-rolling-frames <n> and PULP_AUDIO_CAPTURE_ROLLING_FRAMES=<n>.
+      - name: --audio-capture-rolling-format
+        kind: option
+        description: "Sample format for --audio-capture-rolling: float (default, full precision) or int24 (smaller, integer, ~-144 dBFS floor, universal DAW compatibility). Forwarded as --audio-capture-rolling-format <fmt> and PULP_AUDIO_CAPTURE_ROLLING_FORMAT=<fmt>."
       - name: PULP_RUN_AUDIO_NOTICE
         kind: environment
         description: Set to 0/false/off/no to suppress the pre-launch notice that pulp run may activate system audio output.
@@ -827,6 +835,80 @@ commands:
         description: File path for the one-shot command response
     docs: reference/cli.md#inspect
 
+  - name: motion
+    status: experimental
+    summary: Agent-facing wrappers around the inspector `Motion.*` protocol. Requires a running inspector with the motion server enabled, then records traces, snapshots state, replays `.motion.jsonl` fixtures, and toggles motion-cost sampling from a terminal.
+    args:
+      - name: --host
+        kind: option
+        required: false
+        description: Inspector host, defaulting to 127.0.0.1
+      - name: --port
+        kind: option
+        required: false
+        description: Inspector port; defaults to the same temp-file auto-discovery as `pulp inspect`
+      - name: --json
+        kind: flag
+        required: false
+        description: Emit JSON for subcommands that support it
+    subcommands:
+      - name: record
+        summary: Start a `Motion.startTrace` session and print the trace id; `--out` names the intended fixture path and prints sink guidance but does not write JSONL itself.
+        args:
+          - name: --view
+            kind: option
+            required: false
+            description: Human-readable trace/view name
+          - name: --out
+            kind: option
+            required: false
+            description: Intended fixture path for sink guidance
+          - name: --fps
+            kind: option
+            required: false
+            description: Target sample rate in frames per second
+          - name: --metrics
+            kind: option
+            required: false
+            description: Metric probe spec; may be repeated
+      - name: stop
+        summary: Stop a previously started trace via `Motion.stopTrace`
+        args:
+          - name: --trace-id
+            kind: option
+            required: false
+            description: Trace id returned by record
+      - name: snapshot
+        summary: Print tracing, active-trace, emitted-event, and cost-attribution state via `Motion.snapshot`
+      - name: list-traces
+        summary: List inspector-owned trace ids via `Motion.listTraces`
+      - name: load-fixture
+        summary: Load a `.motion.jsonl` fixture into the scrubber via `Motion.loadFixture`
+        args:
+          - name: path
+            kind: positional
+            required: true
+            description: Fixture path
+      - name: scrub
+        summary: Move the scrubber playhead to a frame via `Motion.scrubTo`
+        args:
+          - name: frame
+            kind: positional
+            required: true
+            description: Target frame
+      - name: play
+        summary: Resume scrubber playback from the current playhead via `Motion.play`
+      - name: pause
+        summary: Pause scrubber playback via `Motion.pause`
+      - name: cost
+        summary: Toggle the cost-attribution channel via `Motion.enableCost` or `Motion.disableCost`
+        args:
+          - name: mode
+            kind: positional
+            required: true
+            description: enable or disable
+    docs: reference/cli.md#motion
+
   - name: tweaks
     status: experimental
     summary: Inspect the `pulp-tweaks.json` sidecar written by the inspector overlay. `tweaks diff` classifies stored tweaks against a design snapshot as clean, drifted (anchor survives, property gone), or orphaned (anchor gone) — the CLI mirror of the inspector drift drawer.
@@ -851,15 +933,15 @@ commands:
   - name: import-design
     status: partial
     summary: >
-      Import designs from Figma, Stitch, v0, Pencil, Claude Design, React JSX,
-      or Google DESIGN.md into Pulp JS, DesignIR, or baked C++ artifacts. The
-      designmd source is tokens-only (no ui.js); other sources can emit a full
-      ui.js + tokens.json.
+      Import designs from Figma/Figma plugin, Stitch, v0, Pencil,
+      Claude Design, React JSX, or Google DESIGN.md into Pulp JS, DesignIR,
+      or baked C++ artifacts. The designmd source is tokens-only (no ui.js);
+      other sources can emit a full ui.js + tokens.json.
     args:
       - name: --from
         kind: option
         required: true
-        description: "Design source: figma, stitch, v0, pencil, claude, designmd, jsx"
+        description: "Design source: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx"
       - name: --file
         kind: option
         description: Input file path (required if --url not given)
@@ -1618,6 +1700,17 @@ commands:
             kind: option
       - name: validate assert
         summary: Re-check a stored assertions.json (or an audio-run dir containing one); exits nonzero on any failing assertion
+      - name: compare
+        summary: "Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge). Delegates to the opt-in Audio Quality Lab tool (never links DSP into the CLI); level-matches, runs one --profile axis (tonal-balance | added-hf | noise-roughness | graininess | stereo-width), and prints a typed evidence envelope + verdict (regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Exits nonzero ONLY when it could not measure (invalid), never for a judgment. Distinct from `validate compare`, which is the deterministic pass/fail gate. Prints an install hint + exit 1 if the tool is absent."
+        args:
+          - name: --profile
+            kind: option
+          - name: --reference-role
+            kind: option
+          - name: --threshold
+            kind: option
+          - name: --json
+            kind: option
       - name: render
         summary: "Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load --plugin, drive it from declarative flags, write a WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
         args:
@@ -1683,6 +1776,8 @@ commands:
           - name: --local
             kind: flag
             required: false
+      - name: available
+        summary: List SDK versions available on GitHub releases
       - name: status
         summary: Show cached and locally-built SDK versions
       - name: clean
@@ -1691,29 +1786,29 @@ commands:
 
   - name: dev
     status: usable
-    summary: Unified development loop — watch, rebuild, and optionally test, validate, or relaunch an app on every change.
+    summary: Unified development loop — the Rust front end delegates to `pulp-cpp` for the live watch/rebuild loop when the sibling delegate is available; the Rust-only fallback performs one build/test/run pass and prints a watch-loop stub notice.
     args:
       - name: --test
         kind: flag
-        description: Run tests after each successful build
+        description: Run tests after each successful build in delegated watch mode, or after the one Rust fallback build pass
       - name: --test-filter
         kind: option
         description: Run only tests matching PATTERN (implies --test)
       - name: --validate
         kind: flag
-        description: Run quick plugin dlopen validation after build
+        description: Run quick plugin dlopen validation after build in the delegated C++ dev loop; Rust fallback prints a validator-not-ported notice and continues without validation
       - name: --run
         kind: option
-        description: Launch a build-dir binary and relaunch it on rebuild
+        description: Launch a build-dir binary and relaunch it on rebuild in delegated watch mode; Rust fallback launches once
       - name: --design
         kind: option
-        description: Build pulp-design-tool and launch it with the given JS script
+        description: Build pulp-design-tool and launch it with the given JS script; delegated watch mode relaunches on rebuild, Rust fallback launches once
       - name: --target
         kind: option
         description: Pass --target to cmake --build
       - name: --allow-unsupported-sdk
         kind: flag
-        description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
+        description: Bypass the CLI-vs-project SDK compatibility guard in the delegated C++ dev loop and continue anyway (unsupported)
       - name: passthrough
         kind: passthrough
         description: Arguments after `--` are forwarded to the launched binary
@@ -1721,7 +1816,7 @@ commands:
 
   - name: loop
     status: experimental
-    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" switch. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then drives the same watch + rebuild + screencap loop as `pulp dev` without paying the cross-platform configure cost. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
+    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" marker. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling may read the advisory marker for platform-specific behavior; `pulp loop` itself does not rewrite the build graph. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
     args:
       - name: --platform
         kind: option
@@ -1766,14 +1861,14 @@ commands:
 
   - name: scan
     status: usable
-    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in found. Mirrors pulp::host::PluginScanner.
+    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in bundle found. Installed Rust pulp scan is filesystem-only with filename-derived names; rich PluginScanner metadata remains in pulp-cpp scan.
     args:
       - name: --format
         kind: option
         description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f
       - name: --no-load
         kind: flag
-        description: Filesystem-only enumeration; names are filename-derived and vendor/version/unique-id metadata is omitted. Use when rich scanning crashes while dlopening malformed plug-ins.
+        description: Compatibility no-op on the Rust front end because it is already filesystem-only; on pulp-cpp, skip dlopen and use filename-derived enumeration when rich scanning crashes while loading malformed plug-ins.
     docs: reference/cli.md#scan
 
   - name: host
@@ -1854,6 +1949,30 @@ commands:
             kind: flag
             description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
     docs: reference/cli.md#import
+
+  - name: identity
+    status: experimental
+    summary: Manage `.pulp/identity.lock`, the committed pin of each plugin's AU 4CC, manufacturer code, AAX product code, optional VST3 FUID, optional CLAP plugin id, and version.
+    subcommands:
+      - name: record
+        summary: Write or refresh `.pulp/identity.lock`; refuses to overwrite drifted fields unless explicitly allowed.
+        args:
+          - name: --allow-identity-change
+            kind: flag
+            required: false
+            description: Accept host-visible identity drift and overwrite the lock
+          - name: --dry-run
+            kind: flag
+            required: false
+            description: Print what would be written without modifying the lockfile
+      - name: check
+        summary: Compare `.pulp/identity.lock` against the current project and exit 1 on drift.
+        args:
+          - name: --allow-identity-change
+            kind: flag
+            required: false
+            description: Treat drift as success
+    docs: reference/cli.md#identity
 
   - name: tool
     status: usable

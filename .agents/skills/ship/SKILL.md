@@ -238,9 +238,19 @@ pulp ship sign                                          # Uses identity from con
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
 pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg  # Submit the packaged artifact
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
+pulp ship appcast --url artifacts/Plugin.pkg --download-url https://example.com/Plugin.pkg --sign-key <base64-key>
 ```
 
 #### Notarization credentials (`pulp ship notarize`)
+
+**FIRST, on a set-up dev machine: check `~/.config/pulp/secrets/`.** It holds
+`notary.env` (the ASC API-key trio), the `AuthKey_*.p8`, `keychain.env`, and
+`pulp-signing.p12` — everything needed to sign AND notarize. Source it and go:
+`set -a; . ~/.config/pulp/secrets/notary.env; set +a` → `xcrun notarytool
+submit … --wait` → `xcrun stapler staple`. Do NOT conclude "no credentials"
+without looking there — these are machine-local and absent from fresh
+checkouts, but present on a configured machine. (Mirrored in the CLAUDE.md
+"Local macOS signing & notarization credentials" note.)
 
 Two lanes, resolved in this precedence (CLI > env > file > config.toml):
 
@@ -643,6 +653,12 @@ creating the output directory, guard empty `parent_path()` values before calling
 `std::filesystem::create_directories`; otherwise a bare filename can throw
 instead of writing the feed. Keep this covered in
 `test/test_cli_ship_shellout.cpp`.
+
+When signing appcast entries, `--url` must be the local artifact path used for
+file size and Ed25519 signing. Use `--download-url` to write the public
+Sparkle enclosure URL into the feed. The hosted file must be byte-identical to
+the local artifact passed as `--url`; otherwise Sparkle rejects the update
+because the feed length and signature describe different bytes.
 
 ### Android package tests fail only on Windows
 

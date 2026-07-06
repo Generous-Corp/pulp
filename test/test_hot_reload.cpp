@@ -201,8 +201,8 @@ TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader seeds observed JS files and ignores stale events",
-          "[view][hotreload][codecov]") {
+TEST_CASE("HotReloader seeds observed JS file content",
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_seed");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -214,9 +214,9 @@ TEST_CASE("HotReloader seeds observed JS files and ignores stale events",
 
     HotReloader reloader(tmp_dir, "main.js", [](const std::string&) {});
 
-    REQUIRE(reloader.observed_write_times_.count(entry.lexically_normal().string()) == 1);
-    REQUIRE(reloader.observed_write_times_.count(module.lexically_normal().string()) == 1);
-    REQUIRE(reloader.observed_write_times_.count(ignored.lexically_normal().string()) == 0);
+    REQUIRE(reloader.observed_content_hashes_.count(entry.lexically_normal().string()) == 1);
+    REQUIRE(reloader.observed_content_hashes_.count(module.lexically_normal().string()) == 1);
+    REQUIRE(reloader.observed_content_hashes_.count(ignored.lexically_normal().string()) == 0);
     std::string reloaded_code;
     HotReloader changed_reloader(tmp_dir, "main.js", [&](const std::string& code) {
         reloaded_code = code;
@@ -233,21 +233,65 @@ TEST_CASE("HotReloader seeds observed JS files and ignores stale events",
 }
 
 TEST_CASE("HotReloader file seed skips non-JS files and missing paths",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_non_js");
     auto text_file = tmp_dir / "notes.txt";
     write_js_file(text_file, "not javascript");
 
     HotReloader reloader(text_file, [](const std::string&) {});
 
-    REQUIRE(reloader.observed_write_times_.empty());
+    REQUIRE(reloader.observed_content_hashes_.empty());
     REQUIRE_FALSE(reloader.poll_reload());
 
     std::filesystem::remove_all(tmp_dir);
 }
 
+TEST_CASE("HotReloader ignores same-content rewrites",
+          "[view][hotreload]") {
+    auto tmp_dir = make_temp_dir("pulp_hotreload_same_content");
+    auto entry = tmp_dir / "main.js";
+
+    write_js_file(entry, "// entry v1");
+
+    HotReloader reloader(entry, [](const std::string&) {});
+    REQUIRE(reloader.observed_content_hashes_.count(entry.lexically_normal().string()) == 1);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    write_js_file(entry, "// entry v1");
+    REQUIRE_FALSE(reloader.should_reload_for_modified_file(entry));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    write_js_file(entry, "// entry v2");
+    REQUIRE(reloader.should_reload_for_modified_file(entry));
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("HotReloader content hash still reloads changed modules",
+          "[view][hotreload]") {
+    auto tmp_dir = make_temp_dir("pulp_hotreload_module_hash");
+    auto entry = tmp_dir / "main.js";
+    auto module = tmp_dir / "module.mjs";
+
+    write_js_file(entry, "// entry v1");
+    write_js_file(module, "// module v1");
+
+    HotReloader reloader(tmp_dir, "main.js", [](const std::string&) {});
+    REQUIRE(reloader.observed_content_hashes_.count(module.lexically_normal().string()) == 1);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    write_js_file(module, "// module v1");
+    REQUIRE_FALSE(reloader.should_reload_for_modified_file(module));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    write_js_file(module, "// module v2");
+    REQUIRE(reloader.should_reload_for_modified_file(module));
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
 TEST_CASE("HotReloader file watcher ignores unsupported changes",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_filter");
     auto entry = tmp_dir / "main.js";
     auto text_file = tmp_dir / "notes.txt";
@@ -273,7 +317,7 @@ TEST_CASE("HotReloader file watcher ignores unsupported changes",
 }
 
 TEST_CASE("HotReloader module file change reloads directory entry",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_module");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -298,7 +342,7 @@ TEST_CASE("HotReloader module file change reloads directory entry",
 }
 
 TEST_CASE("HotReloader pending reload without callback still drains",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_no_callback");
     auto entry = tmp_dir / "main.js";
     write_js_file(entry, "// entry");
@@ -315,7 +359,7 @@ TEST_CASE("HotReloader pending reload without callback still drains",
 }
 
 TEST_CASE("HotReloader empty or missing entry files do not schedule reloads",
-          "[view][hotreload][codecov]") {
+          "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_empty_entry");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";

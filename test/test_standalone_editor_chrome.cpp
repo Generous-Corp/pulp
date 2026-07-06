@@ -279,7 +279,7 @@ TEST_CASE("Standalone settings callbacks skip rebind when apply fails",
 }
 
 TEST_CASE("StandaloneApp apply_config updates idle configuration without starting audio",
-          "[standalone][coverage]") {
+          "[standalone]") {
     counted_null_processor_factory_calls = 0;
     StandaloneApp app(counted_null_processor_factory);
 
@@ -305,7 +305,7 @@ TEST_CASE("StandaloneApp apply_config updates idle configuration without startin
 }
 
 TEST_CASE("StandaloneApp rejects headless editor runs without screenshot before startup",
-          "[standalone][coverage]") {
+          "[standalone]") {
     counted_null_processor_factory_calls = 0;
     StandaloneApp app(counted_null_processor_factory);
 
@@ -401,7 +401,7 @@ TEST_CASE("SettingsPanel applies audio and MIDI selections",
 }
 
 TEST_CASE("SettingsPanel set_current_config prefers explicit output over default",
-          "[standalone][settings][coverage]") {
+          "[standalone][settings]") {
     StubAudioSystem audio;
     audio.devices = {
         {.id = "builtin-out",
@@ -759,7 +759,7 @@ TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
 }
 
 TEST_CASE("SettingsPanel uses fallback rate and buffer choices without output devices",
-          "[standalone][settings][coverage]") {
+          "[standalone][settings]") {
     StubAudioSystem audio;
     audio.devices = {
         {.id = "mic-only",

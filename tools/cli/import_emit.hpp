@@ -93,4 +93,9 @@ struct WritePlan {
 // `..` traversal) and that copy sources are absolute and named. Pure — no IO.
 WritePlan compute_write_plan(const Manifest& manifest, const fs::path& output_dir);
 
+// User-facing summary fragments for `pulp import emit`. Kept pure so the CLI
+// wording can be pinned without spawning an importer.
+std::string format_unresolved_summary(const Manifest& manifest);
+std::string format_parity_review_step(const Manifest& manifest);
+
 }  // namespace pulp::cli::import_emit

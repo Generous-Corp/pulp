@@ -109,6 +109,17 @@ public:
     /// True when the factory produced a processor instance.
     bool valid() const noexcept { return processor_ != nullptr; }
 
+    /// The wrapped processor instance (null when the factory returned nullptr).
+    /// Lets tests reach typed processor state — e.g. a custom meter readout —
+    /// that the generic host interface does not expose.
+    Processor* processor() noexcept { return processor_.get(); }
+    /// @copydoc processor()
+    const Processor* processor() const noexcept { return processor_.get(); }
+    /// Typed access to the wrapped processor; returns nullptr if the dynamic
+    /// type does not match @c T.
+    template <class T>
+    T* processor_as() noexcept { return dynamic_cast<T*>(processor_.get()); }
+
     /// Access the parameter store for reading/writing parameter values.
     state::StateStore& state() { return store_; }
     /// @copydoc state()

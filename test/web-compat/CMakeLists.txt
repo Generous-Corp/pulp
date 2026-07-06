@@ -32,10 +32,9 @@ target_include_directories(pulp-test-web-compat-layout PRIVATE ${WEBCOMPAT_INCLU
 target_compile_definitions(pulp-test-web-compat-layout PRIVATE
     PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
 )
-# pulp #1434 — test_layout_aspect_ratio.cpp exercises the CSS shim via
-# document.createElement + appendChild, which (like the events / prelude
-# targets) deep-recurses through QuickJS↔C++ DOM ops. Match the prelude
-# stack size so the CSS-shim end-to-end tests don't blow the default.
+# Aspect-ratio coverage exercises the CSS shim through document.createElement
+# and appendChild, which deep-recurses through QuickJS↔C++ DOM ops. Match the
+# prelude stack size so the CSS-shim end-to-end tests do not blow the default.
 if(APPLE)
     target_link_options(pulp-test-web-compat-layout PRIVATE -Wl,-stack_size,0x2000000)
 elseif(UNIX)
@@ -59,9 +58,9 @@ target_include_directories(pulp-test-web-compat-events PRIVATE ${WEBCOMPAT_INCLU
 target_compile_definitions(pulp-test-web-compat-events PRIVATE
     PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
 )
-# pulp #1323 — CSS-hover tests do appendChild + StyleSheet attach;
-# match the prelude target's 16 MB stack so QuickJS↔C++ interleaving
-# inside _processStyleElement → _applyTo doesn't blow the default.
+# CSS-hover tests use appendChild and StyleSheet attach; match the prelude
+# target's 16 MB stack so QuickJS↔C++ interleaving inside
+# _processStyleElement → _applyTo does not blow the default.
 if(APPLE)
     target_link_options(pulp-test-web-compat-events PRIVATE -Wl,-stack_size,0x2000000)
 elseif(UNIX)
@@ -85,6 +84,22 @@ elseif(UNIX)
     target_link_options(pulp-test-web-compat-prelude PRIVATE -Wl,-z,stacksize=16777216)
 endif()
 catch_discover_tests(pulp-test-web-compat-prelude)
+
+# Browser Animation API shim tests
+add_executable(pulp-test-web-compat-animation
+    test_web_compat_animation.cpp
+)
+target_link_libraries(pulp-test-web-compat-animation PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-web-compat-animation PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-web-compat-animation PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-web-compat-animation PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-web-compat-animation PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-web-compat-animation)
 
 # iOS-D.3c (#3217) — WebGPU mock GPUBuffer mapped-write + writeBuffer contract.
 # Runs under the default engine (no V8 / GPU / three.iife), so it executes in
@@ -214,11 +229,10 @@ elseif(UNIX)
 endif()
 catch_discover_tests(pulp-test-headless-frame-pump)
 
-# pulp #1434 batch 3 — CSS translator gap fills: backdropFilter,
-# textDecoration{Line,Color,Style}, fontWeight keyword translation.
-# Exercises the JS shim → bridge round trip via
-# document.createElement / appendChild / style.X = ... — same DOM-shim
-# stack-depth profile as the prelude / aspect-ratio targets, so match
+# CSS translator gap coverage: backdropFilter, textDecoration{Line,Color,Style},
+# and fontWeight keyword translation. Exercises the JS shim → bridge round trip
+# via document.createElement / appendChild / style.X = ... with the same
+# DOM-shim stack-depth profile as the prelude / aspect-ratio targets, so match
 # the 16 MB stack the rest of the web-compat suite uses.
 add_executable(pulp-test-css-translator-gaps-1434 test_css_translator_gaps_1434.cpp)
 target_link_libraries(pulp-test-css-translator-gaps-1434 PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -250,11 +264,11 @@ elseif(UNIX)
 endif()
 catch_discover_tests(pulp-test-popover-row-template-1147)
 
-# pulp #1926 — SVG primitives other than <path> (rect / line / circle)
-# routing via the web-compat shim + __domAppend fast path + attribute
-# replay. Exercises document.createElement('rect'|'line'|'circle')
-# round-trips through the bridge — same DOM-shim stack-depth profile as
-# the rest of the web-compat suite, so match the 16 MB stack.
+# SVG primitives other than <path> (rect / line / circle) route through the
+# web-compat shim, __domAppend fast path, and attribute replay. Exercises
+# document.createElement('rect'|'line'|'circle') round-trips through the bridge
+# with the same DOM-shim stack-depth profile as the rest of the suite, so match
+# the 16 MB stack.
 add_executable(pulp-test-svg-primitives-1926 test_svg_primitives_1926.cpp)
 target_link_libraries(pulp-test-svg-primitives-1926 PRIVATE pulp::view Catch2::Catch2WithMain)
 target_include_directories(pulp-test-svg-primitives-1926 PRIVATE ${WEBCOMPAT_INCLUDE_DIR})

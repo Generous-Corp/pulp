@@ -45,11 +45,6 @@ struct BumpOptions {
 BumpOptions parse_bump_options(const std::vector<std::string>& args,
                                bool& out_help);
 
-// ── Platform redirect snippets ──────────────────────────────────────────────
-
-const char* stderr_to_null();
-const char* output_to_null();
-
 // ── Help text ───────────────────────────────────────────────────────────────
 
 void print_project_help();

@@ -51,6 +51,7 @@ jobs:
   # ctest filters. GitHub-hosted ubuntu-latest only.
   linux:
     name: Linux build + test
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -132,6 +133,7 @@ jobs:
   # windows-latest only.
   windows:
     name: Windows build + test
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: windows-latest
     timeout-minutes: 60
     env:
@@ -211,6 +213,7 @@ jobs:
   # runners, see android.yml #487) and needs a KVM-capable runner.
   android:
     name: Android NDK build
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

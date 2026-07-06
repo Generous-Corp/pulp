@@ -36,6 +36,14 @@ add_subdirectory(pulp-compressor)
 # Bendr: pitch/time/freeze effect composed from public pulp::signal primitives
 add_subdirectory(bendr)
 
+# Hot-Reload Demo: a reloadable shell plugin whose DSP lives in a separate
+# .dylib that hot-swaps live in a DAW (the Phase 1b DAW-integration example).
+add_subdirectory(hot-reload-demo)
+
+# Hot-Reload Morph: one reload swaps BOTH the DSP and the editor (sine/blue
+# "WARM" <-> square/red "HARSH") — the create_view-forwarding showcase.
+add_subdirectory(hot-reload-morph)
+
 # UI Preview and Ink & Signal examples exercise the rendering pipeline and
 # design-system imports. These depend on the design-import authoring cluster,
 # so they are skipped in stripped (PULP_ENABLE_DESIGN_IMPORT=OFF) builds.
@@ -172,4 +180,16 @@ endif()
 # ARA pitch tracker example
 if(NOT ANDROID AND NOT IOS)
     add_subdirectory(ara-pitch-tracker)
+endif()
+
+# Moonbase licensing: optional copy-protection reference. Builds a loadable
+# plugin (CLAP + Standalone always; VST3/AU when their SDKs are present) with an
+# interactive activation editor, plus tests and a headless screenshot tool. Off
+# by default (fetches the third-party Moonbase SDK and needs OpenSSL at configure
+# time). Enable with -DPULP_BUILD_MOONBASE_EXAMPLE=ON. See
+# docs/guides/copyright-protection.md.
+option(PULP_BUILD_MOONBASE_EXAMPLE
+       "Build the optional Moonbase licensing example" OFF)
+if(PULP_BUILD_MOONBASE_EXAMPLE)
+    add_subdirectory(moonbase-activation)
 endif()

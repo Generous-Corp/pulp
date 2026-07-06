@@ -170,10 +170,6 @@ void MenuBar::set_key_mapping(const KeyMapping& keys) {
     }
 }
 
-void MenuBar::install_native() {
-    // Platform-specific: implemented in platform/mac/menu_bar_mac.mm etc.
-}
-
 // ── NativeToolbar ────────────────────────────────────────────────────────
 
 void NativeToolbar::add_item(Item item) {
@@ -182,10 +178,6 @@ void NativeToolbar::add_item(Item item) {
 
 void NativeToolbar::add_separator() {
     items_.push_back({"", "", "", {}, true});
-}
-
-void NativeToolbar::install_native(void*) {
-    // Platform-specific: implemented in platform/mac/toolbar_mac.mm etc.
 }
 
 // ── AppSettings ──────────────────────────────────────────────────────────

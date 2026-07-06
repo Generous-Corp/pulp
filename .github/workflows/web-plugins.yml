@@ -1,0 +1,130 @@
+# Web plugins CI — builds Pulp's WAMv2 (Emscripten) and WebCLAP (wasi-sdk) web
+# plugin formats and runs every web validation, including the browser fixtures in
+# headless Chrome. This turns the previously by-hand browser proofs into a CI
+# lane (RD11). Advisory: a Linux runner with emsdk + wasi-sdk + Chrome — no VM
+# and no self-hosted runner needed for a headless-browser web lane.
+name: Web Plugins
+
+on:
+  pull_request:
+    paths:
+      - "core/format/src/wasm/**"
+      - "core/format/include/pulp/format/web/**"
+      - "examples/web-demos/**"
+      - "examples/pulp-gain/**"
+      - "tools/cmake/PulpWam.cmake"
+      - "tools/cmake/PulpWclap.cmake"
+      - "tools/cmake/wasi-toolchain.cmake"
+      - ".github/workflows/web-plugins.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: web-plugins-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-plugins:
+    name: WAMv2 + WebCLAP (Linux, headless Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - name: Set up wasi-sdk
+        run: |
+          set -euo pipefail
+          ver=25
+          url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-x86_64-linux.tar.gz"
+          curl -fsSL "$url" -o /tmp/wasi-sdk.tar.gz
+          mkdir -p "$HOME/wasi-sdk"
+          tar -xzf /tmp/wasi-sdk.tar.gz -C "$HOME/wasi-sdk" --strip-components=1
+          echo "WASI_SDK_PREFIX=$HOME/wasi-sdk" >> "$GITHUB_ENV"
+
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Vendor choc for the WAM build
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch pulp-webview-dnd-poc1 \
+            https://github.com/danielraffel/choc.git "$HOME/choc-src"
+          echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
+
+      - name: Install playwright-core
+        run: npm install --no-save playwright-core
+
+      # ── WAMv2 (Emscripten) ────────────────────────────────────────────────
+      - name: Build WAMv2 plugins
+        working-directory: examples/web-demos/wasm-build
+        run: |
+          set -euo pipefail
+          emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_WAM_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
+          cmake --build build -j"$(nproc)"
+
+      - name: WAMv2 Node validations
+        working-directory: examples/web-demos/wasm-build
+        run: |
+          set -euo pipefail
+          # Effect + instrument feature coverage (the runner takes a built .wasm).
+          node wam_feature_runner.mjs build/PulpGain.wasm effect
+          node wam_feature_runner.mjs build/PulpPluck.wasm instrument
+          # Web-build report (UI strategy + parameter binding targets, both modes).
+          node ../../../core/format/src/wasm/wam_build_report.test.mjs --wasm build/PulpGain.wasm
+
+      - name: WAMv2 browser fixture (headless Chrome)
+        working-directory: examples/web-demos/wasm-build
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          cp build/PulpGainWorklet.js                       browser-test/wam-dsp.js
+          cp ../../../core/format/src/wasm/wam-processor.js  browser-test/
+          cp ../../../core/format/src/wasm/wam-runtime.mjs   browser-test/
+          cp ../../../core/format/src/wasm/wam-plugin.js     browser-test/
+          ln -s "$GITHUB_WORKSPACE/node_modules" browser-test/node_modules
+          node browser-test/validate.mjs --screenshot /tmp/wam-browser.png
+
+      # ── WebCLAP (wasi-sdk) ────────────────────────────────────────────────
+      - name: Build WebCLAP module + bundle
+        working-directory: examples/web-demos/wclap-build
+        run: |
+          set -euo pipefail
+          cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+
+      - name: WebCLAP Node validations
+        run: |
+          set -euo pipefail
+          node core/format/src/wasm/wclap_probe.mjs        examples/web-demos/wclap-build/build/PulpGain.wasm
+          node core/format/src/wasm/wclap_host_runner.mjs  examples/web-demos/wclap-build/build/PulpGain.wasm --gain-db 6
+          node core/format/src/wasm/pack-wclap.test.mjs
+
+      - name: WebCLAP browser host (headless Chrome)
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/wclap-build/browser-host/node_modules
+          node examples/web-demos/wclap-build/browser-host/validate.mjs --screenshot /tmp/wclap-browser.png
+
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-plugins-screenshots
+          path: /tmp/*-browser.png
+          if-no-files-found: ignore

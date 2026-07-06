@@ -115,6 +115,12 @@ jobs:
               --base "${{ steps.base.outputs.ref }}" \
               --mode=report --enforce
 
+      - name: Compat aggregate check
+        # Keeps the repo-root aggregate byte-identical to the split
+        # compat/ part files. No trailer bypass: regenerate the stale side.
+        run: |
+          python3 tools/scripts/compat_aggregate.py check
+
       - name: Node ABI virtual-order check
         run: |
           python3 tools/scripts/node_abi_gate.py \
@@ -140,9 +146,10 @@ jobs:
 
       - name: CLI ↔ MCP parity check (issue #1997)
         # Authoritative gate for the parity invariant: every top-level CLI
-        # command added to tools/cli/pulp_cli.cpp must have either a matching
-        # pulp_<command> tool in tools/mcp/pulp_mcp.cpp OR an entry in
-        # tools/scripts/cli_mcp_parity_baseline.json with a one-line reason.
+        # command added to the C++ tables or Rust front-end enum must have
+        # either a matching pulp_<command> tool in tools/mcp/pulp_mcp.cpp OR an
+        # entry in tools/scripts/cli_mcp_parity_baseline.json with a one-line
+        # reason.
         # Whole-tree check — no diff base needed. Same exit-1-on-new-gap
         # semantics as the skill-sync, docs-sync, and compat-sync gates.
         run: |
@@ -161,6 +168,17 @@ jobs:
           python3 tools/scripts/processing_model_terms_lint.py
           python3 tools/scripts/single_backend_guard.py
 
+      - name: Conflict-marker guard
+        # Whole-tree invariant: no tracked file may carry a git conflict marker.
+        # actions/checkout resolves a pull_request to the MERGE ref, so this
+        # scans the merged result — catching a marker born from the merge itself
+        # (the CMakeLists.txt VERSION-line incident), not only one committed on
+        # the PR head. Hard-fail, no bypass. A dedicated push:main workflow
+        # (conflict-marker-guard.yml) backstops the case where a squash lands a
+        # marker without a clean mergeable ref for this job to inspect.
+        run: |
+          python3 tools/scripts/conflict_marker_check.py
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
@@ -169,6 +187,8 @@ jobs:
           python3 tools/scripts/test_downstream_validation_manifest.py
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
+          python3 tools/scripts/test_compat_aggregate.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
+          python3 tools/scripts/conflict_marker_check.py --selftest

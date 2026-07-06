@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file audio_signal_generators.hpp
-/// Deterministic stimulus generators and event scripts (harness PR 2).
+/// Deterministic stimulus generators and event scripts.
 ///
 /// Test/tool layer only. Every generator here is deterministic by
 /// construction: identical arguments produce bit-identical buffers on a

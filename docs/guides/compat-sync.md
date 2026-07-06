@@ -1,23 +1,17 @@
 # Compat-Sync Policy
 
-Pulp's `@pulp/react`, `@pulp/css-adapt`, and the native bridge layer
-underneath them ship a **compatibility matrix** at the repo root
+Pulp ships a **compatibility matrix** at the repo root
 (`compat.json`) that tells users which React Native, CSS, Yoga, React,
 HTML, Canvas2D, and import-resolver props are supported on Pulp. The
-matrix is the contract — drifting it from the bridge code is the
-single most expensive mistake we can make for ecosystem trust.
+matrix is split into per-surface files under `compat/` for reviewable
+edits, then checked against the aggregate by
+`tools/scripts/compat_aggregate.py`.
 
-The compat-sync gate (issue #1029) generalizes the skill-sync /
-version-bump / docs-sync pattern to this domain: when a PR's diff
-touches a path mapped to a compat surface, the matching artifacts
-(compat.json prefix entry, doc page, test glob) must be updated in
-the same diff — or the PR must carry an explicit bypass trailer.
-
-> **Status (v0.59 era):** The infrastructure (script, hooks, CI gate,
-> bypass trailer, this doc) ships in #1029. The populated `compat.json`
-> matrix data ships in #1027. Until #1027 lands, empty sections in
-> `compat.json` are tolerated by the gate (treated as "no requirement
-> yet") so this scaffolding can land without blocking on the data.
+The compat-sync gate generalizes the skill-sync / version-bump /
+docs-sync pattern to this domain: when a PR's diff touches a path
+mapped to a compat surface, the matching artifacts (`compat.json`
+prefix entry, doc page, test glob) must be updated in the same diff,
+or the PR must carry an explicit bypass trailer.
 
 ## Three-layer enforcement
 
@@ -28,15 +22,16 @@ Layer 1 (fast, per-edit, agent-specific)
     hooks/scripts/cli-plugin-sync.sh, Claude Code PostToolUse hooks
     → compat_sync_check.py --mode=hint, advisory
 
-Layer 2 (pre-push, agent-agnostic, advisory)
+Layer 2 (pre-push, agent-agnostic, enforcing by default)
     .githooks/pre-push
-    → compat_sync_check.py --mode=report
-    → PULP_ENFORCE_PREPUSH=1 upgrades to hard fail
+    → compat_sync_check.py --mode=report --enforce
+    → PULP_DISABLE_PREPUSH_GATES=1 demotes failures to advisory
 
 Layer 3 (PR gate, authoritative)
     .github/workflows/version-skill-check.yml
     → compat_sync_check.py --mode=report --enforce
-    → no bypass without commit trailer
+    → compat_aggregate.py check
+    → compat-sync bypass requires a commit trailer; compat aggregate has no trailer bypass
 ```
 
 All three layers call into the same script
@@ -63,7 +58,7 @@ Three requirement kinds:
 
 | Kind          | Means                                                 |
 |---------------|-------------------------------------------------------|
-| `compat-json` | The named section in `compat.json` must exist (and, once #1027 lands, contain entries for the new prop). `prefix=*` means "any/all sections". |
+| `compat-json` | The named section in `compat.json` must exist and contain at least one entry, unless `compat.json` is modified in the same diff. `prefix=*` means "any/all sections". |
 | `doc`         | The named doc page must be touched in the same diff. `{prefix}` in the path expands per-prefix when the source spans multiple compat sections. |
 | `test`        | At least one file matching the glob must be touched in the same diff. Tests are the bridge's correctness contract. |
 
@@ -95,8 +90,8 @@ it doesn't apply.
 | Mode     | Behavior |
 |----------|----------|
 | `hint`   | Always exit 0. Print advisory text. Used by agent PostToolUse hooks. |
-| `report` | Print drift. Exit 1 iff `--enforce` or `PULP_ENFORCE_PREPUSH=1`. CI sets both; pre-push hook sets the env var only when promoted. |
-| `apply`  | Like `report` but also writes stub `{}` sections into `compat.json` for any missing prefixes. Doc and test stubs are NOT auto-created — those need human-authored content. |
+| `report` | Print drift. Exit 1 iff `--enforce` or `PULP_ENFORCE_PREPUSH=1`; otherwise print advisory drift and exit 0. CI uses `--enforce`; the pre-push hook blocks through its own gate aggregation unless demoted with `PULP_DISABLE_PREPUSH_GATES=1`. |
+| `apply`  | Like `report` but also writes missing top-level sections into `compat.json`. New sections are scaffolds; they still need real entries, docs, and tests before becoming a useful public contract. |
 
 ## Adding a new mapped path
 
@@ -132,7 +127,8 @@ it doesn't apply.
 new one:
 
 1. Add it to `KNOWN_PREFIXES` in `tools/scripts/compat_sync_check.py`.
-2. Add the empty section to `compat.json`.
+2. Add the populated section to `compat.json` and regenerate/sync the
+   split `compat/` part files.
 3. Update this doc, plus
    `tools/scripts/test_compat_sync_check.py` if the new section
    warrants a self-check coverage row.
@@ -145,6 +141,7 @@ new one:
   — the gate.
 - [tools/scripts/compat_path_map.json](../../tools/scripts/compat_path_map.json)
   — the path map.
-- [compat.json](../../compat.json) — the matrix (stub until #1027).
-- Issue #1027 — the populated matrix.
-- Issue #1029 — this gate's design and rollout.
+- [compat.json](../../compat.json) — the aggregate compatibility matrix.
+- [compat/](../../compat/) — split per-surface matrix files.
+- [tools/scripts/compat_aggregate.py](../../tools/scripts/compat_aggregate.py)
+  — split/aggregate consistency check.

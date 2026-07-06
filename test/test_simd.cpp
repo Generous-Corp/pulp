@@ -214,7 +214,7 @@ TEST_CASE("simd operations handle empty input", "[simd]") {
 }
 
 TEST_CASE("simd reductions return zero for empty max and min",
-          "[simd][coverage]") {
+          "[simd]") {
     float dummy = 42.0f;
     REQUIRE(simd_reduce_max(&dummy, 0) == 0.0f);
     REQUIRE(simd_reduce_min(&dummy, 0) == 0.0f);

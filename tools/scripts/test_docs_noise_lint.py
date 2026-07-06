@@ -366,6 +366,94 @@ class DocsNoiseLintTests(unittest.TestCase):
         stderr.write.assert_called_once()
         self.assertIn("boom", stderr.write.call_args.args[0])
 
+    # --- source-comment scope -------------------------------------------------
+
+    def _rules(self, *paths: str) -> set[str]:
+        """Run an explicit-path scan and return the set of rule names hit."""
+        abs_paths = [str(self.tmpdir / p) for p in paths]
+        findings = noise.scan(
+            self.tmpdir, abs_paths, base="x", head="y", scan_all=False
+        )
+        return {f.rule.name for f in findings}
+
+    def test_source_comment_breadcrumbs_are_flagged(self) -> None:
+        self._write("core/a.cpp", "// Phase 3 will add feedback\n")
+        self._write("core/b.cpp", "/* Tier A Slice 7 groundwork */\n")
+        self._write("core/c.mm", "// Codex P1: revisit later\n")
+        self._write("core/d.cpp", "// Future v2 will use AES\n")
+        self._write("core/e.cpp", "// see #1234 for context\n")
+        self._write("tools/f.py", "# Phase 2 cleanup pending\n")
+        self.assertIn("source-phase-label", self._rules("core/a.cpp"))
+        self.assertIn("source-milestone-label", self._rules("core/b.cpp"))
+        self.assertIn("source-agent-review-label", self._rules("core/c.mm"))
+        self.assertIn("source-future-version", self._rules("core/d.cpp"))
+        self.assertIn("source-issue-cite-phrase", self._rules("core/e.cpp"))
+        self.assertIn("source-phase-label", self._rules("tools/f.py"))
+
+    def test_catch2_workflow_tag_in_string_is_flagged(self) -> None:
+        self._write("test/t.cpp", 'TEST_CASE("does x", "[phase3][rt-safety]") {}\n')
+        self.assertIn("source-workflow-tag", self._rules("test/t.cpp"))
+
+    def test_code_and_strings_do_not_false_positive(self) -> None:
+        # `[coverage]` as an array index (not a string) is not a Catch2 tag.
+        self._write("core/idx.cpp", "int y = arr[coverage];\n")
+        # A `#1234` inside a string literal (URL) is not a comment cite.
+        self._write("core/url.cpp", 'const char* u = "http://x/#1234";\n')
+        # A `//` inside a string is not a comment.
+        self._write("core/str.cpp", 'auto s = "a // Phase 3 in a string";\n')
+        self.assertEqual(self._rules("core/idx.cpp"), set())
+        self.assertEqual(self._rules("core/url.cpp"), set())
+        self.assertEqual(self._rules("core/str.cpp"), set())
+
+    def test_durable_source_comments_stay_clean(self) -> None:
+        self._write("core/ok.mm", "// reconcile host param to avoid UI clobber\n")
+        self._write("core/rt.cpp", "// no allocation on the audio thread\n")
+        self.assertEqual(self._rules("core/ok.mm"), set())
+        self.assertEqual(self._rules("core/rt.cpp"), set())
+
+    def test_source_external_ref_and_skip_marker_are_exempt(self) -> None:
+        self._write("core/ext.cpp", "// see WebGPU spec issue #1234 for rationale\n")
+        self._write(
+            "core/skip.cpp",
+            "// Phase 3 name kept  docs-noise-lint: skip legacy public API name\n",
+        )
+        self.assertEqual(self._rules("core/ext.cpp"), set())
+        self.assertEqual(self._rules("core/skip.cpp"), set())
+
+    def test_source_is_diff_scoped_only_added_lines(self) -> None:
+        self._init_git_repo()
+        self._write("core/x.cpp", "// Phase 1 legacy note stays\nint x = 0;\n")
+        self.assertEqual(self._git("add", "core/x.cpp").returncode, 0)
+        self.assertEqual(self._git("commit", "-m", "seed").returncode, 0)
+        with (self.tmpdir / "core/x.cpp").open("a", encoding="utf-8") as handle:
+            handle.write("// Phase 9 new breadcrumb\n")
+        result = self._run("--mode=report", "--base", "HEAD", "--head", "HEAD")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Phase 9", result.stderr)
+        self.assertNotIn("Phase 1 legacy", result.stderr)
+
+    def test_all_mode_does_not_scan_source(self) -> None:
+        # --all is markdown-only; the source backlog must never block on it.
+        self._write("core/legacy.cpp", "// Phase 3 legacy note\n")
+        result = self._run("--mode=report", "--all")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_source_helpers_split_comments_and_strings(self) -> None:
+        self.assertTrue(noise._path_is_source("core/a.cpp"))
+        self.assertFalse(noise._path_is_source("external/x/a.cpp"))
+        self.assertFalse(noise._path_is_source("docs/reference/a.md"))
+        self.assertIsNone(noise._source_style("core/data.json"))
+        comment, strings, in_block = noise._split_c_line('x(); // hi "not a string"', False)
+        self.assertIn("hi", comment)
+        self.assertEqual(strings, "")
+        self.assertFalse(in_block)
+        _, strings2, _ = noise._split_c_line('TEST_CASE("n", "[phase3]")', False)
+        self.assertIn("[phase3]", strings2)
+        cont, _, still = noise._split_c_line("/* opening block", False)
+        self.assertIn("opening block", cont)
+        self.assertTrue(still)
+        self.assertEqual(noise._split_hash_line('x = "# not comment"  # real'), " real")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -370,8 +370,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -389,8 +389,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -412,8 +412,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup \u2014 animation-name resolution + direction enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
@@ -431,8 +431,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -454,8 +454,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup \u2014 fill-mode enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
@@ -473,8 +473,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -492,8 +492,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -529,8 +529,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setAnimation seeds Animation from registry\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
@@ -580,13 +580,16 @@
       "mapsTo": "if 'gradient' in value -> setBackgroundGradient; else parseCSSColor -> setBackground",
       "supportedValues": [
         "color",
-        "linear-gradient(...)"
+        "linear-gradient(...)",
+        "radial-gradient(...)",
+        "conic-gradient(...)"
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient parses linear / radial / conic into the right kind\"",
+        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\""
       ],
-      "notes": "Background shorthand supports only color OR a gradient. Wave 1 architectural reclassification \u2014 url() / image / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader and viewport-relative paint not in Pulp's pipeline); color + linear-gradient round-trip end-to-end. Wave 4 css extensive \u2014 url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim \u2014 image loading is the orthogonal follow-up). conic-gradient is arch-skia-no-conic-gradient (Skia's SkGradientShader doesn't natively support conical sweeps; angle-sweep emulation would require offscreen rasterization and is an explicit non-goal at this surface). multiple backgrounds + size-in-shorthand are arch-single-bg (the View::background_ slot stores a single background; mirrors the box-shadow single-shadow pattern). Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
+      "notes": "Background shorthand supports only color OR a single gradient. url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim \u2014 image loading is the orthogonal follow-up). linear-gradient, radial-gradient, and conic-gradient now parse through setBackgroundGradient; View::paint dispatches them to canvas linear/radial/sweep gradient paint (Skia sweep; CoreGraphics software-rasterized conic image). multiple backgrounds + size-in-shorthand are arch-single-bg (the View::background_ slot stores a single background; mirrors the box-shadow single-shadow pattern).",
       "issue": ""
     },
     "css/backgroundAttachment": {
@@ -647,13 +650,15 @@
       "mapsTo": "same path as background",
       "supportedValues": [
         "linear-gradient(...)",
-        "radial-gradient(...) (parsed)"
+        "radial-gradient(...)",
+        "conic-gradient(...)"
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient parses linear / radial / conic into the right kind\"",
+        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\""
       ],
-      "notes": "url() image backgrounds not implemented. Wave 1 architectural reclassification \u2014 url() / image-set() / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader not in Pulp's pipeline); linear-gradient + radial-gradient round-trip end-to-end. Wave 4 css extensive \u2014 url() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim). conic-gradient is arch-skia-no-conic-gradient. multiple is arch-single-bg. Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
+      "notes": "url() / image() / image-set() backgrounds are not implemented (arch-deferred-image-loader). linear-gradient, radial-gradient, and conic-gradient round-trip through the same setBackgroundGradient path and render as canvas linear/radial/sweep gradients. multiple backgrounds remain arch-single-bg.",
       "issue": ""
     },
     "css/backgroundOrigin": {
@@ -679,7 +684,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp::Wave5 css/backgroundPosition wires JS \u2192 bridge \u2192 View slot"
       ],
       "notes": "Wave 5 css.5 \u2014 registered the previously-missing setBackgroundPosition bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_position_ slot for a future raster-image paint pass to honor without a JS-side change. Solid-bg paint (which is what Pulp paints today) doesn't position because there's no raster image to position. Catalog stays `supported` since the value coverage (keyword / length / percentage) all parse and survive bridge round-trip; the architectural caveat is: with no raster background pipeline (arch-deferred-image-loader), the offsets have no visual effect.",
       "issue": ""
@@ -697,10 +702,9 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_css_misc.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View"
       ],
-      "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat \u2014 the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup \u2014 partial \u2192 supported (no unsupported values listed; wired through web-compat-style-decl.js).",
+      "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat \u2014 the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op; the entry is supported because the declared value parses and round-trips, with this storage-only paint caveat recorded here. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup \u2014 partial \u2192 supported (no unsupported values listed; wired through web-compat-style-decl.js).",
       "issue": "1552"
     },
     "css/backgroundSize": {
@@ -715,7 +719,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp::Wave5 css/backgroundSize wires JS \u2192 bridge \u2192 View slot"
       ],
       "notes": "Wave 5 css.5 \u2014 registered the previously-missing setBackgroundSize bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_size_ slot for a future raster-image paint pass. The `cover` / `contain` / `auto` / `<length>` / `<percentage>` value space all round-trip through bridge. Architectural caveat: arch-deferred-image-loader \u2014 without a raster bg pipeline these have no visual effect, but the catalog claim is honest because the value is captured and queryable.",
       "issue": ""
@@ -1648,8 +1652,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1667,8 +1671,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1686,8 +1690,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1705,8 +1709,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1724,8 +1728,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1743,8 +1747,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1762,8 +1766,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1781,8 +1785,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1800,8 +1804,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge_css_grid.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge_css_grid.cpp::\"parse_template_areas: simple 3x3 grid\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 \u2014 grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement \u2014 multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
@@ -1996,7 +2000,7 @@
     },
     "css/listStyleType": {
       "status": "supported",
-      "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStyleType; bridge stores View::ListStyleType (none / disc / circle / square / decimal / decimal-leading-zero / lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian). Marker glyph paint is deferred — `decimal` additionally needs sibling-index resolution from the parent's children, and the counter-style keywords need glyph rendering before they become visually distinct from disc.",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStyleType; bridge stores View::ListStyleType (none / disc / circle / square / decimal / decimal-leading-zero / lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian). Marker glyph paint is deferred \u2014 `decimal` additionally needs sibling-index resolution from the parent's children, and the counter-style keywords need glyph rendering before they become visually distinct from disc.",
       "supportedValues": [
         "none",
         "disc",
@@ -2015,7 +2019,7 @@
         "georgian"
       ],
       "unsupportedValues": [
-        "cjk-decimal / hebrew / hiragana / katakana / etc. (other CSS Counter Styles Level 3 keywords — storage-only follow-up)"
+        "cjk-decimal / hebrew / hiragana / katakana / etc. (other CSS Counter Styles Level 3 keywords \u2014 storage-only follow-up)"
       ],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
@@ -2024,7 +2028,7 @@
         "packages/pulp-react/test/prop-applier-list-style.test.ts",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1514 — Bridge stores the type keyword on a View::ListStyleType enum slot; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet. Wave 1 drift cleanup — decimal sibling-index + marker glyph paint shipped via #1551 catalog hygiene. Counter-style extension (lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian / decimal-leading-zero) is storage-only today; paint-side glyph rendering remains the follow-up.",
+      "notes": "pulp #1514 \u2014 Bridge stores the type keyword on a View::ListStyleType enum slot; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet. Wave 1 drift cleanup \u2014 decimal sibling-index + marker glyph paint shipped via #1551 catalog hygiene. Counter-style extension (lower-roman / upper-roman / lower-alpha / upper-alpha / lower-latin / upper-latin / lower-greek / armenian / georgian / decimal-leading-zero) is storage-only today; paint-side glyph rendering remains the follow-up.",
       "issue": "1514"
     },
     "css/margin": {
@@ -2096,7 +2100,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2167,7 +2171,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2183,7 +2187,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2199,7 +2203,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
@@ -2618,7 +2622,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -2691,7 +2695,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -2706,7 +2710,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -2721,7 +2725,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
@@ -2977,7 +2981,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
-        "test/test_widget_bridge.cpp [issue-1434][coverage]"
+        "test/test_widget_bridge.cpp [issue-1434]"
       ],
       "notes": "RN supports auto/justify; we don't. pulp #1434 Triage #11: bridge accepts start/end (LTR-only aliases for left/right), auto (LTR fallback), and justify. pulp #1434 follow-up: match-parent resolves at paint time by walking the View parent chain via inheritable_text_align(); falls back to left when no ancestor set a value (CSS spec default for text-align).",
       "issue": ""
@@ -3210,8 +3214,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3232,8 +3236,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3254,8 +3258,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3276,8 +3280,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
@@ -3298,8 +3302,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge_css_animations.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge_css_animations.cpp::\"parse_transition_shorthand: comma-separated entries\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 \u2014 transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",

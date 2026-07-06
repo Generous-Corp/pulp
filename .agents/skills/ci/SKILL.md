@@ -111,16 +111,116 @@ specific to that setup (App-dispatched workflows; local runners) — skip them. 
 tool-agnostic rule still holds: distinguish the *required* checks from *advisory*
 lanes, and verify a runner is actually busy before blaming capacity.
 
+## Host-vitals preflight — back off before a saturating CI host reboots
+
+The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
+interactive agent session and a heavy MCP stack (RepoPrompt, Figma,
+chrome-devtools, several pulp-mcp). When RAM fills, macOS jetsam starts killing
+processes, the window server crashes, and the host reboots uncleanly — taking any
+in-flight required-gate CI job down with it and reddening the leg for reasons that
+have nothing to do with the code (the 2026-07-01 incident). This whole class of
+failure is **predictable ~20 minutes out** from cheap metrics, so the agent, the
+CI pool, and Shipyard should all read one shared signal and back off.
+
+`tools/scripts/host_vitals.sh` is that signal. It reports `green` / `warn` /
+`critical` (exit `0` / `10` / `20`) keyed on **memory pressure first**
+(`kern.memorystatus_vm_pressure_level` + fresh `JetsamEvent-*` reports), with load
+only ever corroborating a warn — a healthy parallel build (load 1–2× cores, normal
+pressure) never trips it. Use it before heavy work:
+
+```bash
+tools/scripts/host_vitals.sh            # one-line summary; exit code = level
+tools/scripts/host_vitals.sh --json     # machine-readable
+```
+
+- **Agent admission control:** before launching a local build or a heavy MCP call
+  on a CI-host session, check `host_vitals.sh`. If `critical`, don't pile on —
+  ship via `shipyard pr` / GitHub-native auto-merge (survives a restart) instead
+  of a foreground `shipyard`/`ci` watch, and shed idle load (close RepoPrompt/Figma
+  /idle MCP) before building. `gates.sh` prints this banner advisorily on every
+  pre-push.
+- **Continuous sensor:** `tools/scripts/install_host_vitals_sensor.sh` installs a
+  per-user launchd agent (`com.pulp.host-vitals`, 60 s) that publishes the latest
+  reading to `~/.local/state/pulp/host_vitals.json` and a rotating
+  `host_vitals.log`. It is observation-only — it never stops a runner or kills a
+  process — so it is safe to run on the required-gate host. Installed on the m3/m5
+  /m1 pool. `install_host_vitals_sensor.sh --status` shows the launchd + latest
+  reading; `--uninstall` removes the agent.
+- **A whole-pool-fails-at-once red leg is infra, not code** (per
+  `macos-required-leg-timeout-saturation`): if `windows` + both `macos` legs fail
+  together and the diff can't explain it, correlate against host reboot / jetsam
+  time and **re-run the required leg** rather than debugging the change. Active
+  back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
+  gate + infra-vs-code classification) consume this same `host_vitals` state.
+
 ## GitHub workflow gotchas
 
+- **Every `on: schedule` workflow must carry the fork guard.** When someone forks
+  the repo, GitHub copies all workflows and runs the scheduled ones on the fork's
+  default branch — then emails the fork owner whenever one *fails*, which our
+  monitors reliably do on a fork (they probe this repo's state or use secrets the
+  fork lacks). So each entry job (a job with no `needs:` — dependents cascade-skip)
+  of a scheduled workflow gets:
+
+  ```yaml
+  jobs:
+    check:
+      if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+  ```
+
+  compose it with an existing condition as
+  `if: (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (<existing>)`.
+  It only suppresses the **schedule** event on forks — `push` / `pull_request` /
+  `workflow_dispatch` are untouched, so PRs to this repo (which run in this repo's
+  context) and manual dispatches behave exactly as before. A workflow that
+  *should* run on forks' schedules opts out with a top-of-file
+  `# fork-guard-exempt: <reason>` comment. This is **enforced**:
+  `tools/scripts/scheduled_workflow_fork_guard_check.py` runs in `gates.sh`, the
+  pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
+  guard fails the PR. Add the guard when you add the workflow.
+- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Two distinct guard layers exist and they catch different things: `test_codecov_components.py` / `test_codecov_config.py` (PR-gate) guard the **codecov.yml mapping** (a subsystem matching no component → invisible); `coverage-upload-watchdog.yml` (hourly, main) guards the **outcome** — "main had a *successful* Coverage run in the last N hours." The watchdog exists because the dashboard degrades silently when fresh complete uploads stop arriving, from causes the config gate can't see: coverage runs cancelled by `stale-run-reaper.yml` when a CI dispatch throttle makes them queue past the cutoff (the 2026-06-28 incident — 8 consecutive main Coverage runs cancelled), an `llvm-cov -object`-set regression (a `libpulp-*.a` drops out → a whole subsystem vanishes while `lines-valid` stays > 0, which `verify_cobertura_xml.py`'s `lines-valid > 0` check cannot catch), or Codecov's `after_n_builds` waiting forever on a missing per-OS leg. When triaging a coverage-surface complaint: first check `gh run list --workflow coverage.yml --branch main` for recent **successful** runs (cancelled ≠ uploaded); only then suspect codecov.yml. Note the config gate is **advisory** (not in branch protection), so a fleet-auto-merged PR can land config drift despite a red gate — the watchdog is the main-branch backstop.
+- **`web-plugins.yml` is the headless-browser web lane (advisory).** It builds
+  Pulp's WAMv2 (Emscripten) and WebCLAP (wasi-sdk) web plugin formats on a Linux
+  GitHub-hosted runner and runs every web validation, including the browser
+  fixtures in headless Chrome (`browser-actions/setup-chrome` +
+  `playwright-core`, which drives the system Chrome — no browser download). It is
+  deliberately NOT on the self-hosted VMs: a headless-Linux browser lane needs
+  emsdk + wasi-sdk + Chrome, all of which install cleanly on GitHub-hosted, so no
+  golden VM or QEMU work is warranted. The WAM build vendors choc by cloning the
+  pinned fork (PulpWam.cmake needs `PULP_WAM_CHOC_INCLUDE`; the WebCLAP build
+  FetchContents choc/clap itself). The browser drivers are
+  `examples/web-demos/*/{browser-test,browser-host}/validate.mjs`; run them
+  locally with a system Chrome/Canary via `node validate.mjs --screenshot out.png`
+  (set `CHROME_PATH` or pass `--browser`).
+- **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
+  intent-trailer model — and it ships DORMANT.** It exists to kill the
+  version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
+  `plugin.json` / `marketplace.json` re-conflict every time main advances). The
+  endgame: a PR declares `Version-Bump: <surface>=<level>` and touches NO
+  version files, and this workflow assigns the exact number after merge from
+  main's current version via `tools/scripts/apply_intent_bump.py`. **Phase 1
+  (current): no-op.** Nothing emits intent trailers yet (Shipyard still file-
+  bumps on the PR side; `version-skill-check.yml` still runs WITHOUT
+  `--accept-intent-trailers`), so every run finds no trailer and exits clean.
+  Two things must be verified before the **phase-2** flip (a separate, reviewed
+  change): (1) `RELEASE_BOT_TOKEN` can push a *commit* to protected `main`
+  (it already pushes tags from `auto-release.yml`; a commit needs the bot on the
+  branch-protection bypass list), and (2) the `Version-Bump:` trailer survives
+  squash-merge into main's commit message. The workflow has a recursion guard
+  (skips its own `chore: bump versions` commit) and a `concurrency` group so
+  near-simultaneous merges bump the version line one at a time. The
+  `chore: bump versions` commit it pushes triggers `auto-release.yml` exactly
+  like a PR-side bump.
 - **`test/CMakeLists.txt` is a frozen hotspot — bump its ceiling when you add a
   test.** `hotspot_size_guard.json` freezes its LOC, but it is a *test
   registration manifest* that legitimately grows whenever a new
   `add_test` / `pulp_add_test_suite` lands. Adding a test fails the
   `hotspot_size_guard` gate until you raise `max_loc` for `test/CMakeLists.txt`
   in the same change (compress the registration first, then bump by the small
-  remaining delta). This is expected, not a smell — unlike source hotspots, the
-  fix is to raise the ceiling, not to split the file.
+  remaining delta). Set `max_loc` to the exact current `wc -l test/CMakeLists.txt`
+  so the ceiling stays honest rather than accumulating headroom. This is
+  expected, not a smell — unlike source hotspots, the fix is to raise the
+  ceiling, not to split the file.
 - **Source hotspots (e.g. `core/view/src/design_cpp_codegen.cpp`) are frozen
   too — bump the ceiling for a *coherent* feature, split when it's accretion.**
   `hotspot_size_guard.json` also freezes large source files. When a single,
@@ -168,6 +268,35 @@ lanes, and verify a runner is actually busy before blaming capacity.
   escape), and the parity-registration check requires the test source to appear on
   a real `SOURCES`/`add_executable`/`target_sources`/`pulp_add_test_suite` line —
   a bare mention in a dead variable no longer counts.
+- **Conflict-marker guard (`conflict_marker_check.py`).** Whole-tree guard (not
+  diff-scoped): no tracked file may carry a git conflict marker. Born from the
+  incident where a squash-merge's stale side collided with an already-advanced
+  `project() VERSION` line and wrote `<<<<<<< / ======= / >>>>>>>` straight into
+  `CMakeLists.txt` (fixed in #5477), breaking every build until a human noticed.
+  Keyed on the start/base/end markers (`<<<<<<<` / `|||||||` / `>>>>>>>` at
+  column 0, followed by whitespace/EOL) — verified zero-false-positive across the
+  whole tracked tree, `external/` included; the `=======` separator is reported
+  only inside a real conflict block, so Markdown headings and ASCII banners stay
+  clean. Runs in three layers: `gates.sh` + the pre-push hook (local), the
+  `Versioning & Skill-Sync` workflow's **Conflict-marker guard** step (which scans
+  the pull_request MERGE ref, so a marker born from the merge itself is caught,
+  not only one on the PR head), and `conflict-marker-guard.yml` — a `push:main`
+  backstop that reddens the branch and opens a tracking issue if a marker reaches
+  main by any path (the squash case, where GitHub had no clean mergeable ref for
+  the PR job to inspect). Carries a `--selftest` in the fixture-test step. A
+  vendored fixture that legitimately ships markers is a reviewable `ALLOWLIST`
+  edit in the script. If the `push:main` guard reddens main, run
+  `python3 tools/scripts/conflict_marker_check.py` for the file:line list, resolve,
+  and push — the tracker auto-closes on the next clean push. Exit codes are
+  meaningful: `0` clean, `1` markers found (the backstop opens the tracker), `2+`
+  internal error (the backstop fails the run *without* opening a wrong "markers
+  committed" issue) — the selftest locks this contract. Documented scope
+  limitations (deliberate, to keep zero false positives): only default
+  seven-char markers (a non-default `.gitattributes` `conflict-marker-size` is
+  missed), submodule *contents* are out of scope (the superproject sees a
+  gitlink), and NUL-bearing/UTF-16 text is skipped as binary. The upstream fix
+  for the whole class — the merge tool refusing to commit a conflicted result —
+  is tracked in Shipyard #372; this guard is the consumer-side backstop.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a
@@ -476,6 +605,13 @@ Never run `gh pr create` + `shipyard ship` separately for a normal ship
 cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
 wires them together with the right flags.
 
+**After opening/merging a material PR, sweep its review comments.** `merge on
+green` fires before the automated reviewers (Codex, and cubic on Shipyard)
+finish, so a PR can land with unaddressed P1s. For any logic-bearing or
+destructive-path PR, follow the `pr-review-sweep` skill: read
+`pulls/<n>/comments` (via `ghapp`), verify each finding against the code, and
+ship a follow-up with a test for anything confirmed. Docs-only PRs can skip it.
+
 Direct `gh pr create` is an explicit emergency/manual bypass only. If the
 user asks for that path, state the tracking gap up front: the PR may not
 appear in Shipyard-managed state or the macOS GUI until it is reconciled or
@@ -523,6 +659,40 @@ Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
 diagnostics, experimental branches, existing Shipyard-managed PRs, or when
 `shipyard pr` itself is being debugged. Do not use them as the primary ship
 path.
+
+### A ship must survive the session dying — arm GitHub auto-merge as a backstop
+
+`shipyard pr` performs merge-on-green **inside the CLI/worker process**. If
+that process dies before the merge — the cmux app relaunching under resource
+starvation, or this Claude session running out of quota — the validated PR is
+**stranded unmerged** and its ship-state record **orphans**. This is a recurring
+real failure (521 orphaned records were reaped across the CI Macs on
+2026-06-30). The merge must not depend on any interactive session staying alive.
+
+**Standing policy — after creating/validating a pulp PR, arm GitHub-native
+auto-merge as a server-side backstop:**
+
+```bash
+ghapp pr merge <PR> --auto --merge      # merge commit, NOT --squash
+```
+
+GitHub then merges the moment required checks (`macos` + `Enforce version &
+skill sync`) go green, regardless of whether `shipyard pr`, cmux, or this
+session survive. Use `--merge` (merge commit), never `--squash`: a squash folds
+the `chore: bump versions` commit into the PR-title commit, which trips the
+auto-release watchdog into a false "merged without bump." It is safe alongside
+`shipyard pr` — whichever merges first wins; the other no-ops on already-merged.
+(The Shipyard repo has no branch protection, so GitHub auto-merge is
+unavailable there; the host-side queue janitor below covers it.)
+
+**Host-side backstop (both repos + orphan reaping):** a launchd queue-tick on
+each CI Mac (`tartci` `scripts/shipyard_queue_tick.sh`) periodically drives
+in-flight ship-state to completion via shipyard's own fail-closed `auto-merge`
+and reaps records whose PR GitHub reports merged/closed — independent of any
+session. Reap a stale local pile by hand with `shipyard ship-state list` →
+`shipyard ship-state discard <pr>` for each merged/closed PR (never discard an
+OPEN one). Full design: pulp
+`planning/2026-06-30-ship-queue-resilience-design.md`.
 
 ### Stale-SHA merge race — DO NOT push onto a PR that's being shipped
 
@@ -637,10 +807,12 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   workflow only needs the PulpEffect AU/VST3/CLAP bundles, not GPU examples
   such as `pulp-design-tool`.
 - **Build-and-Test workflow_dispatch is Shipyard PR validation.** Preserve
-  `-DPULP_ENABLE_GPU=OFF` on the workflow_dispatch configure path in
-  `.github/workflows/build.yml`: the local self-hosted macOS runner may not
-  have the pinned Skia archive, while pull_request validation already disables
-  example bundles and release workflows own GPU/SDK coverage.
+  `-DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF` on the
+  workflow_dispatch configure path in `.github/workflows/build.yml`: the local
+  self-hosted macOS runner may not have the pinned Skia archive, and no-GPU
+  dispatches must not link example bundles that require the GPU plugin view
+  host. Pull-request validation also disables example bundles, while nightly /
+  release workflows own full example/product and GPU coverage.
   When adding optional shell arguments in `build.yml` (for example macOS-only
   `-G Ninja`), use bash arrays and expand them as `"${args[@]}"`; scalar
   `$args` trips actionlint/shellcheck word-splitting checks.
@@ -910,6 +1082,44 @@ matrix. It should depend only on cheap setup/classification jobs and poll the
 macOS matrix leg by name, then exit as soon as that leg reports. Otherwise
 advisory Linux/Windows jobs can keep a green macOS leg from satisfying branch
 protection.
+
+**Flaky required-leg wedge + the rerun lock (recovery).** Even when the `macos`
+alias reports its failure promptly, a *flaky* failure on the required leg wedges
+auto-merge: the PR sits `mergeStateStatus: BLOCKED`, and `ghapp run rerun <run>
+--failed` refuses with **"cannot be rerun; This workflow is already running"**
+for as long as an advisory leg (Windows x64 / Coverage) keeps the run
+`in_progress`. So a slow advisory leg blocks the re-run of the flaky required
+leg. First confirm it's a flake, not the branch: the required `[local]` leg's
+log is NOT in the GHA store (`run view --job <id> --log` returns 0 lines), so
+read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
+`extract_keyboard_shortcuts does not catastrophically backtrack on large
+embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
+load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
+`gh pr merge <pr> --squash --auto`, then **`shipyard rescue <pr> --rerun-failed`**.
+`rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
+failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
+the provider so the rerun lands local-first on the idle Studios; the armed
+auto-merge then fires when it goes green. Do NOT hand-crank the cancel+rerun
+unless `rescue` is unavailable. `shipyard ship` now also *detects* this exact
+wedge (validated green + a red required check that maps to a validated-green
+target) and prints the `shipyard rescue … --rerun-failed` line for you in its
+hand-back, so on a fresh block you usually just copy it. Manual fallback only if
+`rescue` is missing/older: `ghapp run cancel <run>` (advisory legs are
+expendable), wait ~20–60s for `status: completed`, then `ghapp run rerun <run>
+--failed`; the per-run rerun lock is why the cancel must come first. (Or `ghapp
+workflow run build.yml --ref <branch>` for a fresh run whose newer `macos`
+context supersedes the stale failure — do one or the other, not both.)
+
+**Prevention: retry transient flakes on the required leg.** `build.yml`'s
+non-Windows and Windows `ctest` steps run `--repeat until-pass:2` (mirroring
+`sanitizers.yml`), so a single timing-flake retries once and self-heals instead
+of reddening the required `macos` gate. This is the right tool for *transient*
+flakes; reserve the `--exclude-regex` quarantine (above) for tests that fail
+*consistently* on `main`, and the `PROCESSORS` reservation for RT-teardown
+starvation hangs. Each retry attempt is still bounded by `--timeout 120`. The
+deeper structural fix for the rerun lock — splitting the required macOS leg into
+its own workflow so advisory legs can never hold its run open — is a tracked
+follow-up.
 
 ### Gotcha: the macOS overflow busy-probe must count only *running* M1 legs (#2467)
 
@@ -2386,20 +2596,21 @@ HEAD reporting.
 
 `pulp pr` orchestrates the full shipping flow. CI enforces the fast invariant gates on every PR to `main`:
 
-- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py`, `tools/scripts/skill_sync_check.py`, `tools/scripts/compat_sync_check.py`, `tools/scripts/node_abi_gate.py`, and `tools/scripts/hotspot_size_guard.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md` and `docs/guides/compat-sync.md`; the node ABI gate is fixed by preserving existing virtual declarations or appending new virtuals at the tail, and the hotspot-size guard is fixed by shrinking the tracked file, moving code behind a split, or intentionally raising the baseline in `tools/scripts/hotspot_size_guard.json` with the reason in the PR.
+- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py`, `tools/scripts/skill_sync_check.py`, `tools/scripts/compat_sync_check.py`, `tools/scripts/compat_aggregate.py check`, `tools/scripts/node_abi_gate.py`, and `tools/scripts/hotspot_size_guard.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md` and `docs/guides/compat-sync.md`; the node ABI gate is fixed by preserving existing virtual declarations or appending new virtuals at the tail, and the hotspot-size guard is fixed by shrinking the tracked file, moving code behind a split, or intentionally raising the baseline in `tools/scripts/hotspot_size_guard.json` with the reason in the PR.
 - `.shipyard/config.toml` → `[validation.gates]` pipeline — same scripts via `shipyard run --pipeline gates`. Runs with `PULP_ENFORCE_PREPUSH=1` so warnings become errors.
 
 Locally:
 
-- `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the node ABI and hotspot-size gates, advisory-by-default. `PULP_ENFORCE_PREPUSH=1` upgrades to hard fail; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
-- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
+- `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+- `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
+- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
 **Bypass-priority cheat sheet** — reach for the surgical knob first; the nuclear one masks fast checks too:
 
 | Symptom                                  | Surgical bypass                              | Nuclear bypass (avoid)        |
 |------------------------------------------|----------------------------------------------|-------------------------------|
 | `diff-cover` is the only failing gate    | `PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push` | `PULP_SKIP_PREPUSH=1 git push` |
-| skill-sync / version-bump / compat-sync  | fix the gate, OR add the documented trailer (`Skill-Update: skip …`, `Version-Bump: skip …`, `Compat-Update: skip …`) on the tip commit | `PULP_SKIP_PREPUSH=1 git push` |
+| skill-sync / version-bump / compat-sync / compat-aggregate | fix the gate, OR add the documented trailer (`Skill-Update: skip …`, `Version-Bump: skip …`, `Compat-Update: skip …`) on the tip commit; compat-aggregate has no trailer bypass, regenerate `compat.json` or `compat/` with `tools/scripts/compat_aggregate.py` | `PULP_SKIP_PREPUSH=1 git push` |
 | Rebase race after force-push (gates already ran cleanly on the pre-rebase tip) | `PULP_SKIP_PREPUSH=1 git push --force-with-lease` (the legitimate use of the nuclear bypass — gates already passed on the same content) | — |
 | All gates advisory, don't fail my push   | `PULP_DISABLE_PREPUSH_GATES=1 git push`      | `PULP_SKIP_PREPUSH=1 git push` |
 
@@ -2407,7 +2618,7 @@ The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a r
 
 **Gotcha:** changing anything under `.github/workflows/**`, `tools/shipyard.toml`, `.shipyard/**`, `.githooks/**`, `tools/install-shipyard.sh`, or `tools/scripts/install-githooks.sh` triggers the skill-sync gate for the `ci` skill — keep this file in sync when those paths move. The map lives at `tools/scripts/skill_path_map.json`.
 
-**Compat-sync (#1029):** `tools/scripts/compat_sync_check.py` is the new third leg, mirroring the skill-sync / version-bump shape for the `compat.json` matrix at the repo root. The bypass trailer is `Compat-Update: skip prefix=<section|*> reason="..."` (multiple lines allowed). Path map: `tools/scripts/compat_path_map.json`. Until #1027 ships the populated matrix, empty `compat.json` sections are tolerated. See `docs/guides/compat-sync.md` for the full design.
+**Compat-sync:** `tools/scripts/compat_sync_check.py` mirrors the skill-sync / version-bump shape for the populated `compat.json` matrix at the repo root. The bypass trailer is `Compat-Update: skip prefix=<section|*> reason="..."` (multiple lines allowed). Path map: `tools/scripts/compat_path_map.json`. A compat-json requirement is satisfied when `compat.json` changed in the same diff or the mapped section is already populated; empty sections are scaffolds and should fail until real matrix entries are added. `tools/scripts/compat_aggregate.py check` separately keeps the aggregate byte-identical to the split `compat/` parts. See `docs/guides/compat-sync.md` for the full design.
 
 **CLI ↔ MCP parity (pulp #1997):** `tools/scripts/check_cli_mcp_parity.py` is the fourth invariant gate, added by pulp #1997. It enforces that every top-level CLI command added to `tools/cli/pulp_cli.cpp` either gets a matching `pulp_<command>` tool in `tools/mcp/pulp_mcp.cpp` OR an entry in `tools/scripts/cli_mcp_parity_baseline.json` with a one-line reason. Whole-tree check (no diff base needed) — runs as the `CLI ↔ MCP parity check` step in `version-skill-check.yml` in `--mode=report` (hard fail) and as a hint in `hooks/scripts/cli-plugin-sync.sh`. There is no commit-trailer bypass — the baseline file is itself the bypass mechanism. To intentionally defer MCP exposure for a new CLI command, add an entry to `cli_mcp_parity_baseline.json` in the same PR. The full guidance lives in the `cli-maintenance` skill ("Decide: does this need an MCP tool?").
 
@@ -2416,6 +2627,10 @@ The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a r
 `tools/cli/kit_commands.cpp` is frozen at its pre-split 3,927-line baseline.
 When extracting kit-command modules, follow `tools/cli/KIT_COMMANDS_MODULE_MAP.md`
 and lower that ceiling to the new exact LOC in the same PR that moves code out.
+`tools/cli/cli_common.cpp` follows the same ratchet rule: when shared helper
+logic moves into a focused translation unit such as `cli_delegate.cpp`, lower
+the `cli_common.cpp` ceiling in `hotspot_size_guard.json` in that same PR so the
+extraction cannot quietly regrow.
 
 **Auto-release:** `.github/workflows/auto-release.yml` fires on push to `main`. It diffs the two version-bearing files (`CMakeLists.txt` project version, `.claude-plugin/plugin.json` version) against the previous push range and creates the corresponding `v<x.y.z>` or `plugin-v<x.y.z>` tag. The existing tag-triggered release workflows (`release-cli.yml`, `sign-and-release.yml`) then build and publish. `Release: skip reason="..."` on the merging commit suppresses the tag.
 

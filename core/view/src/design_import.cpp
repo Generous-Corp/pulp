@@ -2468,4 +2468,53 @@ void synthesize_primitive_paths(IRNode& root) {
         synthesize_primitive_paths(child);
 }
 
+int apply_param_binding_manifest(
+    IRNode& root,
+    const std::unordered_map<std::string, std::string>& node_id_to_param_key) {
+    if (node_id_to_param_key.empty())
+        return 0;
+    int applied = 0;
+    for (auto& el : root.interactive_elements) {
+        if (!el.param_key.empty())         // explicit producer binding (sigil) wins
+            continue;
+        if (!el.source_node_id)            // needs provenance to key on
+            continue;
+        auto it = node_id_to_param_key.find(*el.source_node_id);
+        if (it != node_id_to_param_key.end() && !it->second.empty()) {
+            el.param_key = it->second;
+            ++applied;
+        }
+    }
+    for (auto& child : root.children)
+        applied += apply_param_binding_manifest(child, node_id_to_param_key);
+    return applied;
+}
+
+std::optional<std::unordered_map<std::string, std::string>>
+parse_param_binding_manifest_json(const std::string& json, std::string* error) {
+    choc::value::Value parsed;
+    try {
+        parsed = choc::json::parse(json);
+    } catch (const std::exception& e) {
+        if (error) *error = e.what();
+        return std::nullopt;
+    }
+    if (!parsed.isObject()) {
+        if (error)
+            *error = "expected a JSON object mapping figma node id -> param key";
+        return std::nullopt;
+    }
+    std::unordered_map<std::string, std::string> out;
+    for (uint32_t i = 0; i < parsed.size(); ++i) {
+        auto m = parsed.getObjectMemberAt(i);
+        std::string key(m.name);
+        if (key.empty() || !m.value.isString())
+            continue;  // lenient: skip a blank key or a non-string binding value
+        std::string val(m.value.toString());
+        if (!val.empty())
+            out[std::move(key)] = std::move(val);
+    }
+    return out;
+}
+
 } // namespace pulp::view

@@ -7,7 +7,7 @@
 using namespace pulp::canvas;
 
 TEST_CASE("SdfEffectParams default to inactive shader-safe values",
-          "[canvas][sdf][effects][coverage][issue-650]") {
+          "[canvas][sdf][effects][issue-650]") {
     SdfEffectParams p;
     REQUIRE(p.active == 0);
     REQUIRE_FALSE(has_effect(p.active, SdfEffect::Outline));
@@ -30,7 +30,7 @@ TEST_CASE("SdfEffect bitmask composes with |", "[canvas][sdf][effects]") {
 }
 
 TEST_CASE("SdfEffect bitmask accepts manually combined active masks",
-          "[canvas][sdf][effects][coverage][issue-650]") {
+          "[canvas][sdf][effects][issue-650]") {
     const auto mask = static_cast<std::uint8_t>(SdfEffect::Outline)
                     | static_cast<std::uint8_t>(SdfEffect::Glow)
                     | static_cast<std::uint8_t>(SdfEffect::Bevel);
@@ -57,7 +57,7 @@ TEST_CASE("preset_outline width is respected",
 }
 
 TEST_CASE("SDF effect presets preserve explicit zero dimensions",
-          "[canvas][sdf][effects][presets][coverage][issue-650]") {
+          "[canvas][sdf][effects][presets][issue-650]") {
     auto outline = preset_outline(0.0f);
     REQUIRE(has_effect(outline.active, SdfEffect::Outline));
     REQUIRE(outline.outline_width == 0.0f);

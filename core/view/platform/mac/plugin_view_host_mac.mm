@@ -14,6 +14,7 @@
 #include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
 #import <Cocoa/Cocoa.h>
 // CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
@@ -143,10 +144,46 @@ static pulp::view::View* pulp_focus_under_root(pulp::view::View* root);
 // AppKit ObjC frame that delivered the event → undefined behavior / host crash.
 // Wrap each dispatch in try/catch, exactly as the standalone PulpView mouse
 // handlers do (window_host_mac.mm), so a throwing handler is contained.
+// Route an event at window-point `pt` to an open ComboBox popup when the point
+// falls inside its (flip/scroll/clamp-aware) menu rect. The dropdown paints as an
+// overlay OVER sibling views, so a plain hit_test lands on the sibling
+// underneath — this mirrors the standalone host's active_popup_ bypass so
+// dropdown selection + wheel-scroll work in an EMBEDDED plugin editor (Logic/AU
+// etc.), not just the standalone window. `configure` fills the event-specific
+// fields. Returns the routed combo, or nullptr when nothing was handled.
+pulp::view::ComboBox* pulp_plugin_route_to_open_popup(
+    pulp::view::View* root, pulp::view::Point pt,
+    const std::function<void(pulp::view::MouseEvent&)>& configure) {
+    auto* combo = pulp::view::ComboBox::active_popup_;
+    if (!combo || !root) return nullptr;
+    float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    pulp::view::MouseEvent me;
+    me.position = pulp::view::mac_geometry::to_local(pt, combo, root);
+    me.window_position = pt;
+    configure(me);
+    combo->on_mouse_event(me);
+    return combo;
+}
+
 void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
                             pulp::view::Point pt, pulp::view::View** drag_target) {
   try {
     if (!root) return;
+    // Route a click inside an open dropdown to the combo BEFORE hit_test (which
+    // would otherwise land on the sibling view the menu overlays).
+    if (auto* combo = pulp_plugin_route_to_open_popup(
+            root, pt, [&](pulp::view::MouseEvent& me) {
+                me.button = pulp::view::MouseButton::left;
+                me.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(
+                    event.modifierFlags);
+                me.is_down = true;
+                me.click_count = static_cast<int>(event.clickCount);
+            })) {
+        *drag_target = combo;
+        return;
+    }
     *drag_target = root->hit_test(pt);
     pulp::view::ComboBox::notify_global_click(*drag_target);
     if (!*drag_target) return;
@@ -257,6 +294,14 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
 void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* event) {
   try {
     if (!root) return;
+    // An open dropdown consumes the wheel to scroll its (clamped) item list,
+    // ahead of any enclosing ScrollView (whose scroll would close it).
+    if (pulp_plugin_route_to_open_popup(
+            root, pt, [&](pulp::view::MouseEvent& me) {
+                me.is_wheel = true;
+                me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+                me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+            })) return;
     auto* target = root->hit_test(pt);
     if (!target) return;
     pulp::view::MouseEvent me;
@@ -303,6 +348,20 @@ static pulp::view::View* pulp_focus_under_root(pulp::view::View* root) {
     return nullptr;
 }
 
+// Whether to grab the DAW keyboard: ONLY while a focused widget under this root
+// actually ACCEPTS TEXT INPUT (a TextEditor type-in). A focusable-but-non-text
+// widget — a ComboBox dropdown, a focusable container/root — must NOT make the
+// plugin steal the keyboard, or the host loses transport keys (Space/R) AND its
+// Musical Typing (e.g. clicking the Direction/Loop dropdown left the editor first
+// responder, swallowing every later key so QWERTY notes stopped reaching Logic).
+// This matches acceptsFirstResponder's own contract ("ONLY while a pulp text field
+// is focused") — the focusable check alone was too broad. (pulp: AU hosted-view
+// key routing.)
+static bool pulp_text_input_focused_under_root(pulp::view::View* root) {
+    auto* fv = pulp_focus_under_root(root);
+    return fv != nullptr && fv->accepts_text_input();
+}
+
 bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
   try {
     if (!root) return false;
@@ -310,6 +369,12 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // never another open plugin editor's focused field (focused_input_ is
     // process-global).
     auto* fv = pulp_focus_under_root(root);
+    // Only a FOCUSED text field consumes keys in a plugin host. With nothing
+    // focused the editor isn't first responder (acceptsFirstResponder is gated on a
+    // focused field), so the key never reaches here — it stays with the DAW for
+    // transport + Musical Typing. A plugin must NOT route the bare computer keyboard
+    // into its own musical typing; that fights the host. (The standalone drives its
+    // own QWERTY musical typing through a different window host.)
     if (!fv) return false;
     pulp::view::KeyEvent ke;
     ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
@@ -451,6 +516,15 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
 void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point local) {
   try {
     if (!root) return;
+    // Route hover over an OPEN dropdown to the combo so every row highlights —
+    // the menu overlays sibling views, so a plain hit_test/simulate_hover would
+    // land on the sibling under the lower rows and they'd never highlight.
+    if (auto* combo = pulp_plugin_route_to_open_popup(
+            root, local, [&](pulp::view::MouseEvent&) {})) {
+        (void)combo;
+        [[NSCursor arrowCursor] set];
+        return;
+    }
     root->simulate_hover(local);
     auto* target = root->hit_test(local);
     if (!target) { [[NSCursor arrowCursor] set]; return; }
@@ -537,23 +611,26 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 // but left no path to hand transport keys back after the user left a field;
 // the forward supersedes that approach.)
 - (BOOL)acceptsFirstResponder {
-    return YES;
+    // Take the keyboard ONLY while a pulp text field is focused. Otherwise the DAW
+    // owns it, so host transport keys (Space/R) and the host's Musical Typing keep
+    // working while the plugin editor is open — a plugin must not hijack the DAW
+    // keyboard. (The standalone uses a different window host that drives its own
+    // QWERTY musical typing; this path is DAW-only.)
+    return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
     if (!win) return;
-    const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
+    const bool wants = pulp_text_input_focused_under_root(self.rootView);
     if (wants && win.firstResponder != self) {
         [win makeFirstResponder:self];
+    } else if (!wants && win.firstResponder == self) {
+        // No field focused — hand the keyboard back to the DAW so transport keys
+        // and the host's Musical Typing resume immediately (e.g. after a type-in
+        // commits). Without this the editor would keep first responder and swallow
+        // DAW shortcuts until the user clicked a host control.
+        [win makeFirstResponder:nil];
     }
-    // No resign-on-blur. The editor KEEPS first responder so it keeps
-    // intercepting keys and forwards the non-text ones to the host (DAW
-    // transport Space/R AND Musical Typing) via pulp_plugin_forward_key_to_host
-    // in -keyDown:. Resigning here is exactly what left Space/R dead after the
-    // user left a field — the keyboard went to the editor's own window with no
-    // path back. The host still reclaims the keyboard through
-    // -resignFirstResponder: when it makes one of its own views first responder
-    // (e.g. the user clicks a host control), which ends any open text input.
 }
 // The host moved the keyboard elsewhere (click on a host control, window
 // switching) while a widget still held text-input focus: close that text
@@ -749,6 +826,23 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
+    if (self.window) {
+        // Accept dragged files/text so the editor's drop targets work when hosted
+        // in a DAW (the NSDraggingDestination behavior lives in drag_drop_mac.mm).
+        // Without this, drag-drop worked only in the standalone PulpView.
+        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
+        // The hover tracking area installed in -updateTrackingAreas carries
+        // NSTrackingMouseMoved, but a tracking area only fans -mouseMoved: out to
+        // its owner when the window itself accepts mouse-moved events, and NSWindow
+        // defaults that flag to NO. This window is owned by the foreign host (a DAW,
+        // or a JUCE/iPlug2 embed), not by Pulp, so nothing sets the flag for us and
+        // -mouseMoved: never arrives — CSS :hover / on_hover_enter / on_hover_leave
+        // stay dead in a hosted editor even though the same tree hovers correctly in
+        // the standalone window. Opt the host window into mouse-moved delivery so the
+        // shared -mouseMoved: -> simulate_hover path reaches the view tree, matching
+        // what the standalone window host does (window_host_mac.mm).
+        self.window.acceptsMouseMovedEvents = YES;
+    }
     [self setNeedsDisplay:YES];
 }
 
@@ -843,38 +937,10 @@ static void detach_child_view_from_host(NSView* container, void* child_view_hand
 
 namespace pulp::view {
 
-// Shared frame-pump helpers used by BOTH the CPU and GPU plugin hosts so the
-// continuous-repaint + widget-animation behaviour is identical on either path.
-// Pure functions over the view tree (no host state).
-static bool view_needs_continuous_frames(View* view) {
-    if (!view) return false;
-    if (view->wants_continuous_repaint()) return true;
-    if (auto* k = dynamic_cast<Knob*>(view)) {
-        if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-            return true;
-    }
-    if (auto* t = dynamic_cast<Toggle*>(view)) {
-        if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-            return true;
-    }
-    if (auto* f = dynamic_cast<Fader*>(view)) {
-        if (f->hover_scale() > 1.01f || f->shader_uses_time())
-            return true;
-    }
-    if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-        if (sv->scroll_animating()) return true;
-    }
-    if (view->animation_play_state() != "paused") {
-        for (const auto& a : view->active_animations()) {
-            if (a.active) return true;
-        }
-    }
-    for (size_t i = 0; i < view->child_count(); ++i) {
-        if (view_needs_continuous_frames(view->child_at(i))) return true;
-    }
-    return false;
-}
-
+// Shared frame-pump helper used by BOTH the CPU and GPU plugin hosts so the
+// widget-animation behaviour is identical on either path. Pure function over
+// the view tree (no host state). The companion continuous-frame predicate is
+// the shared pulp::view::needs_continuous_frames() (continuous_frames.hpp).
 static void advance_widget_animations(View* view, float dt) {
     if (!view) return;
     if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
@@ -1034,7 +1100,7 @@ public:
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
                 advance_widget_animations(&self->root_, 1.0f / 60.0f);
-                if (self->view_ && view_needs_continuous_frames(&self->root_))
+                if (self->view_ && pulp::view::needs_continuous_frames(&self->root_))
                     [self->view_ setNeedsDisplay:YES];
                 state->queued.store(false, std::memory_order_release);
             }
@@ -1189,17 +1255,20 @@ private:
 // focused field and forward everything else back to the host (transport +
 // Musical Typing) via pulp_plugin_forward_key_to_host in -keyDown:.
 - (BOOL)acceptsFirstResponder {
-    return YES;
+    // DAW-only path: take the keyboard ONLY while a pulp text field is focused, so
+    // the host keeps transport keys (Space/R) + Musical Typing. See
+    // PulpPluginView::acceptsFirstResponder.
+    return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
     if (!win) return;
-    const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
+    const bool wants = pulp_text_input_focused_under_root(self.rootView);
     if (wants && win.firstResponder != self) {
         [win makeFirstResponder:self];
+    } else if (!wants && win.firstResponder == self) {
+        [win makeFirstResponder:nil];  // hand the keyboard back to the DAW
     }
-    // No resign-on-blur — keep first responder and forward non-text keys to the
-    // host. See PulpPluginView::syncKeyFocus for the rationale.
 }
 // Host took the keyboard while a type-in was open: close it, don't re-claim.
 // See PulpPluginView::resignFirstResponder.
@@ -1384,6 +1453,17 @@ private:
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
+    if (self.window) {
+        // Accept dragged files/text when hosted in a DAW (drop dispatch lives in
+        // drag_drop_mac.mm) — same as the CPU host above and the standalone PulpView.
+        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
+        // Opt the host-owned window into mouse-moved delivery so the hover tracking
+        // area's -mouseMoved: -> simulate_hover path fires in a hosted editor. See
+        // the identical note in PulpPluginView above: a tracking area only receives
+        // -mouseMoved: when the window accepts those events, and a foreign host's
+        // window defaults the flag to NO.
+        self.window.acceptsMouseMovedEvents = YES;
+    }
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -1749,7 +1829,7 @@ private:
         paint_scene(*canvas);
 
         continuous_frames_.store(
-            view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path
@@ -1884,7 +1964,7 @@ private:
                     // self member (parity with the CPU host's render_link_callback).
                     if (!alive->load(std::memory_order_acquire)) return;
 
-                    bool animate = view_needs_continuous_frames(&self->root_);
+                    bool animate = pulp::view::needs_continuous_frames(&self->root_);
                     bool tick_subscribers = self->frame_clock_.has_active_subscribers();
                     if (!self->needs_repaint_.load(std::memory_order_relaxed) &&
                         !animate && !tick_subscribers) {
@@ -1966,35 +2046,8 @@ private:
     }
 
     // ── Continuous-frame / animation drivers (parity with MacGpuWindowHost) ──
-    static bool view_needs_continuous_frames(View* view) {
-        if (!view) return false;
-        if (view->wants_continuous_repaint()) return true;
-        if (auto* k = dynamic_cast<Knob*>(view)) {
-            if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-                return true;
-        }
-        if (auto* t = dynamic_cast<Toggle*>(view)) {
-            if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-                return true;
-        }
-        if (auto* f = dynamic_cast<Fader*>(view)) {
-            if (f->hover_scale() > 1.01f || f->shader_uses_time())
-                return true;
-        }
-        if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-            if (sv->scroll_animating()) return true;
-        }
-        if (view->animation_play_state() != "paused") {
-            for (const auto& a : view->active_animations()) {
-                if (a.active) return true;
-            }
-        }
-        for (size_t i = 0; i < view->child_count(); ++i) {
-            if (view_needs_continuous_frames(view->child_at(i))) return true;
-        }
-        return false;
-    }
-
+    // The continuous-frame predicate is the shared
+    // pulp::view::needs_continuous_frames() (continuous_frames.hpp).
     static void advance_widget_animations(View* view, float dt) {
         if (!view) return;
         if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);

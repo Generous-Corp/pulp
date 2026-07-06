@@ -235,6 +235,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         ${PULP_${target}_CORE_OBJECTS}
         ${aax_entry}
         ${_PULP_FORMAT_SOURCE_DIR}/aax_runtime.cpp
+        ${_PULP_FORMAT_SOURCE_DIR}/aax_midi_node.cpp
         $<TARGET_OBJECTS:pulp-aax-export>
     )
     target_link_libraries(${target}_AAX PRIVATE

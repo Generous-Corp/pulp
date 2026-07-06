@@ -40,7 +40,7 @@ TEST_CASE("Platform detection", "[platform]") {
 }
 
 TEST_CASE("Platform detection flags are mutually consistent",
-          "[platform][coverage]") {
+          "[platform]") {
     const int os_flags =
         static_cast<int>(is_macos) +
         static_cast<int>(is_ios) +
@@ -65,7 +65,7 @@ TEST_CASE("Platform detection flags are mutually consistent",
 }
 
 TEST_CASE("Architecture detection flags are mutually consistent",
-          "[platform][coverage]") {
+          "[platform]") {
     REQUIRE(is_arm == (current_arch == Arch::ARM64 || current_arch == Arch::ARM32));
     REQUIRE(is_x86 == (current_arch == Arch::x86_64 || current_arch == Arch::x86));
     REQUIRE(is_64bit == (current_arch == Arch::x86_64 || current_arch == Arch::ARM64));
@@ -132,7 +132,7 @@ TEST_CASE("PopupMenu records items and separators",
 }
 
 TEST_CASE("ProgressParser accepts payloads, empty payloads, and type-only lines",
-          "[platform][progress][coverage][issue-649]") {
+          "[platform][progress][issue-649]") {
     std::vector<ProgressEvent> events;
     ProgressParser parser([&](const ProgressEvent& e) {
         events.push_back(e);
@@ -155,7 +155,7 @@ TEST_CASE("ProgressParser accepts payloads, empty payloads, and type-only lines"
 }
 
 TEST_CASE("ProgressParser ignores non-progress lines and tolerates empty callbacks",
-          "[platform][progress][coverage][issue-649]") {
+          "[platform][progress][issue-649]") {
     int calls = 0;
     ProgressParser parser([&](const ProgressEvent&) { ++calls; });
 
@@ -172,7 +172,7 @@ TEST_CASE("ProgressParser ignores non-progress lines and tolerates empty callbac
 }
 
 TEST_CASE("ProgressParser preserves payload colons and empty event types",
-          "[platform][progress][coverage]") {
+          "[platform][progress]") {
     std::vector<ProgressEvent> events;
     ProgressParser parser([&](const ProgressEvent& e) {
         events.push_back(e);

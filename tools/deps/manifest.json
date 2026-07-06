@@ -595,6 +595,25 @@
       ]
     },
     {
+      "name": "Moonbase",
+      "category": "licensing",
+      "license": "MIT",
+      "version": "3.3.0",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/Moonbase-sh/moonbase-cpp.git",
+      "upstream": { "kind": "git-tag", "ref": "v3.3.0" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional, opt-in license-activation SDK (moonbase-cpp). Header-only, MIT; fetched via FetchContent only when a developer runs `pulp add moonbase` and exports the upstream target `moonbase::licensing`. Consumed by examples/moonbase-activation/. Built with MOONBASE_USE_CURL=OFF (upstream then defines MOONBASE_DISABLE_CURL_TRANSPORT; Pulp supplies the HTTP transport over cpp-httplib/mbedTLS). Moonbase documents OpenSSL as a system requirement and v3.3.0 CMake links it unconditionally, so OpenSSL must be present at configure time; the integration uses the OpenSSL RS256 backend (OS-native crypto is optional and does not remove the OpenSSL requirement).",
+      "source_files": [
+        "tools/packages/registry.json",
+        "examples/moonbase-activation/CMakeLists.txt",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "msdfgen",
       "category": "canvas",
       "license": "MIT",

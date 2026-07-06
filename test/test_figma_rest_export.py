@@ -559,7 +559,7 @@ class ElementLabelTest(unittest.TestCase):
             {"kind": "dropdown", "source_node_id": "d1"},
             {"kind": "text_field", "source_node_id": "s1"},
         ]
-        frx._label_elements(elements, figma_root, (100.0, 100.0))
+        frx._label_elements(elements, figma_root, (100.0, 100.0), (0.0, 0.0))
         self.assertEqual(elements[0].get("label"), "Delay Mode")
         self.assertNotIn("label", elements[1])  # "Search" filtered → key absent
 
@@ -581,10 +581,132 @@ class ElementLabelTest(unittest.TestCase):
             {"kind": "knob", "cx": 260.0, "cy": 60.0, "hit_radius": 30.0},   # over the ellipse
             {"kind": "knob", "cx": 900.0, "cy": 500.0, "hit_radius": 30.0},  # over nothing
         ]
-        frx._label_elements(elements, figma_root, (100.0, 100.0))
+        frx._label_elements(elements, figma_root, (100.0, 100.0), (0.0, 0.0))
         self.assertEqual(elements[0].get("label"), "Cutoff")
+        self.assertEqual(elements[0].get("source_node_id"), "k1")  # provenance stamped
         self.assertNotIn("label", elements[1])  # default-named node → no label
+        self.assertNotIn("source_node_id", elements[1])  # no owner → no provenance
         self.assertNotIn("label", elements[2])  # no overlapping named node
+
+
+class ParamKeyBindingTest(unittest.TestCase):
+    """Opt-in host-param binding for a geometry knob via a layer-name sigil,
+    lockstep with the C++ figma_binding_from_layer_name and the TS lane
+    (faithful-vector.test.ts)."""
+
+    def test_param_key_from_layer_name_sigil_or_empty(self):
+        self.assertEqual(frx._param_key_from_layer_name("param:filter.cutoff"), "filter.cutoff")
+        self.assertEqual(frx._param_key_from_layer_name("bind:gain"), "gain")
+        self.assertEqual(frx._param_key_from_layer_name("meter:out_l"), "out_l")
+        self.assertEqual(frx._param_key_from_layer_name("PARAM:Cutoff"), "Cutoff")   # case-insensitive
+        self.assertEqual(frx._param_key_from_layer_name("  param:cutoff "), "cutoff")  # ws + trim
+        self.assertEqual(frx._param_key_from_layer_name("param: a.b "), "a.b")
+        # Not a binding.
+        for bare in ("Cutoff", "param:", "param: ", "param:.", "xparam:y", ""):
+            self.assertEqual(frx._param_key_from_layer_name(bare), "", bare)
+
+    def test_sigil_knob_binds_param_key_and_provenance_not_label(self):
+        figma_root = {
+            "id": "root", "name": "TRIAZ",  # named root must NOT steal a centered knob
+            "absoluteBoundingBox": {"x": 100, "y": 100, "width": 1000, "height": 600},
+            "children": [
+                {"id": "k1", "name": "param:filter.cutoff",
+                 "absoluteBoundingBox": {"x": 140, "y": 140, "width": 40, "height": 40}},
+                {"id": "leaf", "name": "Ellipse 7",  # default leaf must NOT steal ownership
+                 "absoluteBoundingBox": {"x": 150, "y": 150, "width": 20, "height": 20}},
+            ],
+        }
+        elements = [{"kind": "knob", "cx": 60.0, "cy": 60.0, "hit_radius": 30.0}]
+        frx._label_elements(elements, figma_root, (100.0, 100.0), (0.0, 0.0))
+        self.assertEqual(elements[0].get("param_key"), "filter.cutoff")
+        self.assertEqual(elements[0].get("source_node_id"), "k1")  # the sigil node, not the leaf
+        self.assertNotIn("label", elements[0])  # a sigil is a binding, not a human label
+
+    def test_descriptive_knob_gets_label_and_provenance_no_param_key(self):
+        figma_root = {
+            "id": "root", "name": "TRIAZ",
+            "absoluteBoundingBox": {"x": 100, "y": 100, "width": 1000, "height": 600},
+            "children": [
+                {"id": "k1", "name": "Resonance",
+                 "absoluteBoundingBox": {"x": 140, "y": 140, "width": 40, "height": 40}},
+            ],
+        }
+        elements = [{"kind": "knob", "cx": 60.0, "cy": 60.0, "hit_radius": 30.0}]
+        frx._label_elements(elements, figma_root, (100.0, 100.0), (0.0, 0.0))
+        self.assertEqual(elements[0].get("label"), "Resonance")
+        self.assertEqual(elements[0].get("source_node_id"), "k1")
+        self.assertNotIn("param_key", elements[0])  # descriptive → manifest lane, not a sigil
+
+    def test_triaz_shaped_panel_descriptive_knobs_get_provenance_not_binding(self):
+        # Modeled on the real Triaz synth panel (file D1CT7a6gjCM0Yb773bse7v node
+        # 10578:288008 = "sound / main panel", 988x300): a DESCRIPTIVELY-named
+        # container with descriptively-named rotary-knob instances, no sigils.
+        # Each knob must get a human label + provenance source_node_id (so the
+        # annotated-manifest lane can bind it by node id) — and NO param_key,
+        # because a descriptive name is not an explicit binding. The panel's own
+        # descriptive name must NOT be mis-bound to a centered knob.
+        figma_root = {
+            "id": "10578:288008", "name": "sound / main panel",
+            "absoluteBoundingBox": {"x": 8, "y": 68, "width": 988, "height": 300},
+            "children": [
+                {"id": "k:cut", "name": "Cutoff",
+                 "absoluteBoundingBox": {"x": 100, "y": 150, "width": 56, "height": 56}},
+                {"id": "k:res", "name": "Resonance",
+                 "absoluteBoundingBox": {"x": 300, "y": 150, "width": 56, "height": 56}},
+                {"id": "k:lfo", "name": "LFO Rate",
+                 "absoluteBoundingBox": {"x": 500, "y": 150, "width": 56, "height": 56}},
+            ],
+        }
+        # Geometry knobs at each instance center, in frame-local SVG space (ox=8, oy=68).
+        elements = [
+            {"kind": "knob", "cx": 120.0, "cy": 110.0, "hit_radius": 28.0},  # Cutoff
+            {"kind": "knob", "cx": 320.0, "cy": 110.0, "hit_radius": 28.0},  # Resonance
+            {"kind": "knob", "cx": 520.0, "cy": 110.0, "hit_radius": 28.0},  # LFO Rate
+        ]
+        frx._label_elements(elements, figma_root, (8.0, 68.0), (0.0, 0.0))
+        self.assertEqual([e.get("label") for e in elements],
+                         ["Cutoff", "Resonance", "LFO Rate"])
+        self.assertEqual([e.get("source_node_id") for e in elements],
+                         ["k:cut", "k:res", "k:lfo"])  # provenance for the manifest lane
+        for e in elements:
+            self.assertNotIn("param_key", e)  # descriptive names never auto-bind
+
+    def test_drop_shadow_panel_margin_still_binds(self):
+        # Regression: parse_frame_knobs reports SVG coords `(node_abs - root_abs) +
+        # panel_origin`. A frame with a shadow margin has panel origin (73,50), so a
+        # sigil knob node at abs (140,240,40,40) under root (100,200) has SVG center
+        # (133,110). Without the panel_origin term the matcher looked at (60,60) —
+        # 88px off, outside the hit radius — and the knob silently stayed unbound.
+        figma_root = {
+            "id": "root", "name": "panel",
+            "absoluteBoundingBox": {"x": 100, "y": 200, "width": 500, "height": 400},
+            "children": [
+                {"id": "s1", "name": "param:filter.cutoff",
+                 "absoluteBoundingBox": {"x": 140, "y": 240, "width": 40, "height": 40}},
+            ],
+        }
+        elements = [{"kind": "knob", "cx": 133.0, "cy": 110.0, "hit_radius": 30.0}]
+        frx._label_elements(elements, figma_root, (100.0, 200.0), (73.0, 50.0))
+        self.assertEqual(elements[0].get("param_key"), "filter.cutoff")
+        self.assertEqual(elements[0].get("source_node_id"), "s1")
+
+    def test_sigil_node_wins_over_nearer_descriptive_caption(self):
+        # A sigil instance and a smaller descriptive caption both cover the knob;
+        # the explicit binding must win regardless of the caption being nearer.
+        figma_root = {
+            "id": "root",
+            "absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 400},
+            "children": [
+                {"id": "inst", "name": "param:lfo.rate",
+                 "absoluteBoundingBox": {"x": 40, "y": 40, "width": 40, "height": 40}},
+                {"id": "cap", "name": "Rate",  # nearer center, smaller — but not a binding
+                 "absoluteBoundingBox": {"x": 58, "y": 58, "width": 8, "height": 8}},
+            ],
+        }
+        elements = [{"kind": "knob", "cx": 60.0, "cy": 60.0, "hit_radius": 30.0}]
+        frx._label_elements(elements, figma_root, (0.0, 0.0), (0.0, 0.0))
+        self.assertEqual(elements[0].get("param_key"), "lfo.rate")  # sigil wins
+        self.assertEqual(elements[0].get("source_node_id"), "inst")
 
 
 class RateLimitRetryTest(unittest.TestCase):
@@ -723,6 +845,144 @@ class WidgetKindFromNameTest(unittest.TestCase):
         self.assertEqual(frx._tokenize_name("VUMeter"), ["vu", "meter"])
         self.assertEqual(frx._tokenize_name("Knob_1"), ["knob", "1"])
         self.assertEqual(frx._tokenize_name("Dialog"), ["dialog"])
+
+
+class RateLimitAdviceTest(unittest.TestCase):
+    """A terminal 429 must fail LOUDLY toward the local-first path (Figma desktop
+    MCP / plugin), not silently — this is the codified fix for reaching for the
+    rate-limited REST lane when the local paths are available."""
+
+    def setUp(self):
+        frx._rate_limit_advice_shown = False  # reset the one-time latch
+
+    def _raise_429(self, *a, **k):
+        raise frx.urllib.error.HTTPError(
+            "https://api.figma.com/v1/images/x", 429, "Too Many Requests",
+            {"Retry-After": "300", "X-Figma-Rate-Limit-Type": "image-render"}, None)
+
+    def test_terminal_429_advises_local_first_and_prints_once(self):
+        import contextlib, io
+        orig = frx.urllib.request.urlopen
+        frx.urllib.request.urlopen = self._raise_429
+        try:
+            err = io.StringIO()
+            # max_retries=0 → the first 429 is terminal (no backoff sleep in the test).
+            with contextlib.redirect_stderr(err):
+                with self.assertRaises(RuntimeError) as cm:
+                    frx.figma_get("https://api.figma.com/v1/images/x",
+                                  token="t", what="frame SVG render", max_retries=0)
+            # The raised error points at the local-first path…
+            self.assertIn("Local-first", str(cm.exception))
+            # …and the loud one-time advisory named the local MCP + plugin.
+            adv = err.getvalue()
+            self.assertIn("get_screenshot", adv)
+            self.assertIn("Pulp Figma desktop plugin", adv)
+        finally:
+            frx.urllib.request.urlopen = orig
+
+    def test_advice_latch_prints_only_once(self):
+        frx._advise_rate_limit_once()
+        import contextlib, io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            frx._advise_rate_limit_once()  # already shown → silent
+        self.assertEqual(err.getvalue(), "")
+
+
+class ExportCacheTest(unittest.TestCase):
+    """--cache-dir memoizes the two REST-heavy payloads per (file_key, node_id) so
+    re-testing the same frame does ZERO REST calls (the Figma MCP allows ~6/month
+    on a View seat). A hit must not touch the network; a miss fetches then writes."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.mkdtemp()
+        self._orig_nodes = frx.fetch_nodes
+        self._orig_svg = frx.fetch_frame_svg
+
+    def tearDown(self):
+        import shutil
+        frx.fetch_nodes = self._orig_nodes
+        frx.fetch_frame_svg = self._orig_svg
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_cache_key_normalizes_node_colon(self):
+        # Figma node ids embed ':' — the key must be a portable filename.
+        key = frx._export_cache_key("FILEKEY", "10578:288008")
+        self.assertNotIn(":", key)
+        self.assertEqual(key, "FILEKEY__10578_288008")
+
+    def test_nodes_miss_fetches_and_writes_then_hit_is_offline(self):
+        calls = {"n": 0}
+        doc = {"nodes": {"1:2": {"document": {"id": "1:2"}}}}
+        def fake_fetch(fk, nid, tok):
+            calls["n"] += 1
+            return doc
+        frx.fetch_nodes = fake_fetch
+        # Miss → fetches once and writes the cache file.
+        got = frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp)
+        self.assertEqual(got, doc)
+        self.assertEqual(calls["n"], 1)
+        import os
+        path = frx._cache_path(self._tmp, "FK", "1:2", frx._CACHE_NODES_SUFFIX)
+        self.assertTrue(os.path.exists(path))
+        # Hit → NO further fetch, even with a token that would otherwise be used.
+        def boom(*a, **k):
+            raise AssertionError("cache hit must not call fetch_nodes")
+        frx.fetch_nodes = boom
+        again = frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp)
+        self.assertEqual(again, doc)
+
+    def test_refresh_cache_forces_refetch(self):
+        calls = {"n": 0}
+        def fake_fetch(fk, nid, tok):
+            calls["n"] += 1
+            return {"v": calls["n"]}
+        frx.fetch_nodes = fake_fetch
+        frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp)
+        # refresh=True ignores the written cache and re-fetches (rewrites it).
+        again = frx.fetch_nodes_cached("FK", "1:2", "tok", cache_dir=self._tmp, refresh=True)
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(again, {"v": 2})
+
+    def test_no_cache_dir_is_passthrough(self):
+        calls = {"n": 0}
+        def fake_fetch(fk, nid, tok):
+            calls["n"] += 1
+            return {"ok": True}
+        frx.fetch_nodes = fake_fetch
+        frx.fetch_nodes_cached("FK", "1:2", "tok")  # no cache_dir → always fetch
+        frx.fetch_nodes_cached("FK", "1:2", "tok")
+        self.assertEqual(calls["n"], 2)
+
+    def test_svg_none_not_cached_but_text_is(self):
+        import os
+        # A None render must NOT be memoized as a permanent miss.
+        frx.fetch_frame_svg = lambda fk, nid, tok: None
+        self.assertIsNone(
+            frx.fetch_frame_svg_cached("FK", "1:2", "tok", cache_dir=self._tmp))
+        self.assertFalse(os.path.exists(
+            frx._cache_path(self._tmp, "FK", "1:2", frx._CACHE_SVG_SUFFIX)))
+        # A real SVG is cached, and the hit is offline (no token).
+        frx.fetch_frame_svg = lambda fk, nid, tok: "<svg/>"
+        self.assertEqual(
+            frx.fetch_frame_svg_cached("FK", "1:2", "tok", cache_dir=self._tmp), "<svg/>")
+        def boom(*a, **k):
+            raise AssertionError("cache hit must not call fetch_frame_svg")
+        frx.fetch_frame_svg = boom
+        self.assertEqual(
+            frx.fetch_frame_svg_cached("FK", "1:2", None, cache_dir=self._tmp), "<svg/>")
+
+    def test_svg_no_token_and_miss_returns_none(self):
+        # No token + cache miss → nothing to fetch, returns None (no crash).
+        called = {"n": 0}
+        def boom(*a, **k):
+            called["n"] += 1
+            raise AssertionError("must not fetch without a token")
+        frx.fetch_frame_svg = boom
+        self.assertIsNone(
+            frx.fetch_frame_svg_cached("FK", "1:2", None, cache_dir=self._tmp))
+        self.assertEqual(called["n"], 0)
 
 
 if __name__ == "__main__":

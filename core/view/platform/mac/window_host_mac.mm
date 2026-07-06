@@ -5,6 +5,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/continuous_frames.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
@@ -361,9 +362,41 @@ static void install_app_menu(NSString* appName) {
     return pt;
 }
 
+// Route an event at window-point `pt` to an open ComboBox popup when the point
+// is inside the popup's (flip/scroll/clamp-aware) menu rect — the single source
+// of truth shared with paint + hit_test. `configure` fills the event-specific
+// fields (button/is_down, or is_wheel + deltas). Returns the routed combo (for
+// drag-target bookkeeping) or nullptr when nothing was handled. Shared by
+// mouseDown and scrollWheel so an open menu takes precedence over sibling views
+// and any enclosing ScrollView (whose scroll would otherwise close the popup).
+- (pulp::view::ComboBox*)routeToOpenComboPopup:(pulp::view::Point)pt
+                                     configure:(void (^)(pulp::view::MouseEvent&))configure {
+    auto* combo = pulp::view::ComboBox::active_popup_;
+    if (!combo) return nullptr;
+    float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    pulp::view::MouseEvent me;
+    me.position = to_local(pt, combo, self.rootView);
+    me.window_position = pt;
+    if (configure) configure(me);
+    combo->on_mouse_event(me);
+    [self setNeedsDisplay:YES];
+    return combo;
+}
+
 - (void)scrollWheel:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
+
+    // An open ComboBox popup consumes the wheel to scroll its (clamped) item
+    // list, ahead of any enclosing ScrollView (whose scroll would close it).
+    if ([self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
+            me.is_wheel = true;
+            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+        }]) return;
+
     auto* target = self.rootView->hit_test(pt);
     if (!target) {
         // Hovering over empty background inside a scroll pane returns no hit
@@ -481,33 +514,18 @@ static void install_app_menu(NSString* appName) {
             }
         }
 
-        // Check if click is inside an active ComboBox dropdown overlay.
-        // The dropdown renders as a paint overlay with no view backing, so
-        // normal hit_test finds the view behind the dropdown. Route the click
-        // to the ComboBox instead so it can process the dropdown item selection.
-        if (pulp::view::ComboBox::active_popup_) {
-            auto* combo = pulp::view::ComboBox::active_popup_;
-            float abs_x = 0, abs_y = 0;
-            pulp::view::View* v = combo;
-            while (v) { abs_x += v->bounds().x; abs_y += v->bounds().y; v = v->parent(); }
-            float base_h = std::min(combo->local_bounds().height, 28.0f);
-            float dd_top = abs_y + base_h + 2;
-            float dd_w = combo->dropdown_width_hint();
-            float dd_h = static_cast<float>(combo->items().size()) * 24.0f;
-            if (pt.x >= abs_x && pt.x <= abs_x + dd_w &&
-                pt.y >= dd_top && pt.y <= dd_top + dd_h) {
-                _dragTarget = combo;
-                auto local = to_local(pt, combo, self.rootView);
-                pulp::view::MouseEvent me;
-                me.position = local;
-                me.window_position = pt;
+        // Route a click inside an active ComboBox dropdown overlay to the combo.
+        // The dropdown renders as a paint overlay with no view backing, so a
+        // normal hit_test would find the view behind it; the shared helper's
+        // flip/scroll/clamp-aware rect ensures a click never falls through to a
+        // sibling under the menu or misses a scrolled/flipped-up row.
+        if (auto* combo = [self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
                 me.button = pulp::view::MouseButton::left;
                 me.is_down = true;
                 me.click_count = 1;
-                combo->on_mouse_event(me);
-                [self setNeedsDisplay:YES];
-                return;
-            }
+            }]) {
+            _dragTarget = combo;
+            return;
         }
 
         // Generalized overlay-click routing for React popovers.
@@ -2423,45 +2441,8 @@ private:
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
 
-    static bool view_needs_continuous_frames(View* view) {
-        if (!view) return false;
-        if (view->wants_continuous_repaint()) return true;
-
-        if (auto* k = dynamic_cast<Knob*>(view)) {
-            if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-                return true;
-        }
-        if (auto* t = dynamic_cast<Toggle*>(view)) {
-            if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-                return true;
-        }
-        if (auto* f = dynamic_cast<Fader*>(view)) {
-            if (f->hover_scale() > 1.01f || f->shader_uses_time())
-                return true;
-        }
-        if (auto* sv = dynamic_cast<ScrollView*>(view)) {
-            if (sv->scroll_animating()) return true;
-        }
-
-        // CSS animations on a generic View must keep the CVDisplayLink loop
-        // alive. tick_animations()
-        // is called every frame in advance_widget_animations, but
-        // without a continuous-frame request the loop stalls after
-        // needs_repaint_ clears once. Check for any unpaused active
-        // CSS animation; matches the gate inside tick_animations()
-        // (early-out when animation_play_state_ == "paused").
-        if (view->animation_play_state() != "paused") {
-            for (const auto& a : view->active_animations()) {
-                if (a.active) return true;
-            }
-        }
-
-        for (size_t i = 0; i < view->child_count(); ++i) {
-            if (view_needs_continuous_frames(view->child_at(i))) return true;
-        }
-        return false;
-    }
-
+    // The continuous-frame predicate is the shared
+    // pulp::view::needs_continuous_frames() (continuous_frames.hpp).
     static void advance_widget_animations(View* view, float dt) {
         if (!view) return;
         if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
@@ -2642,7 +2623,7 @@ private:
         paint_scene(*canvas);
 
         continuous_frames_.store(
-            view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
         skia_surface_->end_frame();   // submit Graphite recording
@@ -2701,7 +2682,7 @@ private:
                             return;
                     }
 
-                    bool animate = view_needs_continuous_frames(&self->root_);
+                    bool animate = pulp::view::needs_continuous_frames(&self->root_);
                     bool tick_subscribers = self->frame_clock_.has_active_subscribers();
                     if (!self->needs_repaint_.load(std::memory_order_relaxed) && !animate && !tick_subscribers) {
                         self->continuous_frames_.store(false, std::memory_order_relaxed);

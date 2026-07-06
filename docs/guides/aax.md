@@ -72,6 +72,48 @@ $env:PULP_AAX_VALIDATOR_DIR="$env:USERPROFILE\SDKs\avid\aax-validator\current"
 `PULP_AAX_VALIDATOR_DIR` should point at the extracted validator root containing
 `CommandLineTools/`.
 
+### Worked example — watch the extra nested folder
+
+The Avid downloads unzip to a *versioned* directory, so it is easy to end up one
+level too deep. `current/` must **be** the root, not contain a wrapper folder.
+
+Concretely, with the latest releases (`AAX SDK 2.9.0` and
+`DigiShell and AAX Validator 24.6 Arm (Mac)`) the archives expand to:
+
+```text
+aax-sdk-2-9-0/                                   ← SDK root (has Interfaces/, Libs/)
+aax-validator-dsh-2024-6-0-…-mac-arm64/          ← validator root (has CommandLineTools/, Frameworks/)
+```
+
+Make `current/` point at those roots directly — move the contents up, or use a
+versioned dir plus a `current` symlink:
+
+```bash
+mkdir -p ~/SDKs/avid/aax-sdk ~/SDKs/avid/aax-validator
+
+# Option A — move the unpacked root into place as `current`
+mv ~/Downloads/aax-sdk-2-9-0                       ~/SDKs/avid/aax-sdk/current
+mv ~/Downloads/aax-validator-dsh-2024-6-0-*-arm64  ~/SDKs/avid/aax-validator/current
+
+# Option B — keep the version and symlink (lets you swap versions later)
+mv ~/Downloads/aax-sdk-2-9-0 ~/SDKs/avid/aax-sdk/2.9.0
+ln -s 2.9.0 ~/SDKs/avid/aax-sdk/current
+```
+
+Verify the layout — both of these must exist (not one folder deeper):
+
+```bash
+ls ~/SDKs/avid/aax-sdk/current/Interfaces/AAX.h          # SDK root OK
+ls ~/SDKs/avid/aax-validator/current/CommandLineTools    # validator root OK
+```
+
+`pulp doctor` confirms discovery once the paths are right:
+
+```text
+✓ AAX SDK (optional) — /Users/you/SDKs/avid/aax-sdk/current
+✓ AAX validator (optional) — /Users/you/SDKs/avid/aax-validator/current
+```
+
 ## Build Workflow
 
 Keep AAX off by default. Enable it only when you actually want to build `.aaxplugin`
@@ -91,8 +133,12 @@ Projects that want AAX must include `AAX` in `FORMATS` and provide:
 - `AAX_NATIVE_CODE`
 - `aax_entry.cpp`
 
-If the SDK is missing, `pulp status`, `pulp doctor`, and `pulp create` now point
-you back to the Avid download page instead of guessing.
+If the SDK is missing, `pulp status` and `pulp doctor` point you back to the
+Avid download page instead of guessing. `pulp create` follows the same optional
+boundary: default macOS/Windows plugin scaffolds include `AAX` and
+`aax_entry.cpp` only when an AAX SDK is configured via `PULP_AAX_SDK_DIR` or
+auto-discovered in a standard user-local SDK path; otherwise the generated
+project omits AAX and can opt in later.
 
 ## Validation Workflow
 
@@ -136,7 +182,9 @@ Pulp now handles AAX as a first-class optional format:
 
 - `pulp status` reports detected AAX SDKs on macOS/Windows and explicit unsupported status on Linux/Ubuntu
 - `pulp doctor` reports optional AAX SDK and validator discovery on macOS/Windows
-- `pulp create` scaffolds `aax_entry.cpp` on macOS/Windows but keeps AAX disabled until you opt in
+- `pulp create` scaffolds `aax_entry.cpp` on macOS/Windows only when the
+  optional AAX SDK is configured or auto-discovered; otherwise the default
+  project omits AAX and builds the other supported formats
 - `pulp validate` uses the validator when present and explains what to install when it is not
 
 That keeps the day-to-day developer UX clear without bundling any Avid code.

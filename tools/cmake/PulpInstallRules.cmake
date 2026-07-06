@@ -350,6 +350,7 @@ endif()
 # packaging fix tracked in the Linux/macOS Chainer gap-closure plan.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_audio_unit.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"
@@ -383,6 +384,16 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
         DESTINATION src/pulp/view/platform/mac
+    )
+    # Shared macOS render ObjC source (metal_surface_mac.mm), compiled per-binary
+    # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalView (the GPU-surface
+    # NSView, renamed to PulpMetalSurfaceView) doesn't collide across plug-ins. The
+    # helper probes src/pulp/render in an installed SDK; ship the source + the
+    # render names header it includes there.
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/render/src/pulp_render_objc_names.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/render/src/metal_surface_mac.mm"
+        DESTINATION src/pulp/render
     )
 endif()
 

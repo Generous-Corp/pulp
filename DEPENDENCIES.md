@@ -40,6 +40,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | mkdocs-awesome-pages-plugin | >=2.9,<3 | MIT | MkDocs plugin for nav ordering; build-time only | docs | 2026-04-22 |
 | mkdocs-git-revision-date-localized-plugin | >=1.2,<2 | MIT | MkDocs plugin for git-revision dates; build-time only | docs | 2026-04-22 |
 | mkdocs-material | >=9.5,<10 | MIT | MkDocs Material theme. CSS, JS, SVG icons, and search worker from this theme are redistributed in the generated docs site (generouscorp.com/pulp/) | docs | 2026-04-22 |
+| Moonbase | 3.3.0 | MIT | License activation / copy protection (optional, opt-in). Header-only `moonbase-cpp` SDK fetched via FetchContent only when a developer runs `pulp add moonbase`; exports target `moonbase::licensing`. Not part of the default dependency chain; consumed by `examples/moonbase-activation/` | examples/moonbase-activation | 2026-06-30 |
 | msdfgen | 1.12 | MIT | Reserved for multi-channel SDF glyph generation (FetchContent) | pulp-canvas | 2026-04-12 |
 | nanosvg | vendored-snapshot | zlib | SVG parsing and rasterization | pulp-canvas | 2026-03-25 |
 | node-addon-api | 8.x | MIT | Node.js bindings via Node-API (optional, npm install) | bindings/nodejs | 2026-03-25 |

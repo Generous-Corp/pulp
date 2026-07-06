@@ -19,16 +19,21 @@
 /// This sits on top of `HeadlessHost`; no audio device, no UI — CI-friendly.
 
 #include <pulp/format/headless.hpp>
+#include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::format {
@@ -53,20 +58,73 @@ struct Pulpset {
         while (std::getline(in, line)) {
             auto hash = line.find('#');
             if (hash != std::string::npos) line = line.substr(0, hash);
-            std::istringstream ls(line);
+
+            // Whitespace-delimited tokenizer over the line. Tokens are parsed
+            // with std::from_chars so numbers (including the fractional value)
+            // are locale-independent: a comma-decimal global locale can never
+            // make a `.pulpset` round-trip "0.5" as "0,5". (The previous
+            // std::istringstream >> path honored the stream's global locale.)
+            std::string_view rest{line};
+            auto next_token = [&rest]() -> std::string_view {
+                std::size_t b = rest.find_first_not_of(" \t\r");
+                if (b == std::string_view::npos) { rest = {}; return {}; }
+                std::size_t e = rest.find_first_of(" \t\r", b);
+                std::string_view tok = (e == std::string_view::npos)
+                                           ? rest.substr(b)
+                                           : rest.substr(b, e - b);
+                rest = (e == std::string_view::npos) ? std::string_view{}
+                                                     : rest.substr(e);
+                return tok;
+            };
+
+            std::string_view sample_tok = next_token();
+            std::string_view op = next_token();
+            if (sample_tok.empty() || op.empty()) continue;
+
+            // A required numeric field must parse AND fully consume its token.
+            // Full-token consumption is what rejects "0,5" (parses just the "0"
+            // prefix) and "123abc" — a comma-decimal legacy file is rejected
+            // cleanly rather than silently replaying 0.5 as 0.0.
+            auto parse_full = [](std::string_view tok, auto& out) {
+                if (tok.empty()) return false;
+                using T = std::remove_reference_t<decltype(out)>;
+                if constexpr (std::is_floating_point_v<T>) {
+                    // std::from_chars' float overload is =deleted on some
+                    // toolchains (see locale_independent_float.hpp),
+                    // so parse the fractional value via a C-locale strtod and
+                    // require the whole token to be consumed — the same
+                    // "0,5"/"0.5foo" rejection the integer path gives.
+                    double parsed = 0.0;
+                    const auto r = detail::parse_double_c_locale(tok, parsed);
+                    if (r.consumed != tok.size() || r.range_error) return false;
+                    out = static_cast<T>(parsed);
+                    return true;
+                } else {
+                    const char* first = tok.data();
+                    const char* last = first + tok.size();
+                    auto r = std::from_chars(first, last, out);
+                    return r.ec == std::errc{} && r.ptr == last;
+                }
+            };
+
             PulpsetEvent e;
-            std::string op;
-            if (!(ls >> e.sample >> op)) continue;
+            if (!parse_full(sample_tok, e.sample)) continue;
+
             if (op == "param") {
                 e.kind = PulpsetEvent::Kind::Param;
-                ls >> e.id >> e.value;
+                // id and value are required for a param steer.
+                if (!parse_full(next_token(), e.id)) continue;
+                if (!parse_full(next_token(), e.value)) continue;
             } else if (op == "note_on") {
                 e.kind = PulpsetEvent::Kind::NoteOn;
-                e.value = 100.0f;
-                ls >> e.id >> e.value;
+                e.value = 100.0f;  // default velocity
+                if (!parse_full(next_token(), e.id)) continue;
+                // Velocity is optional; if a token is present it must be valid.
+                std::string_view vel = next_token();
+                if (!vel.empty() && !parse_full(vel, e.value)) continue;
             } else if (op == "note_off") {
                 e.kind = PulpsetEvent::Kind::NoteOff;
-                ls >> e.id;
+                if (!parse_full(next_token(), e.id)) continue;
             } else {
                 continue;
             }
@@ -75,6 +133,40 @@ struct Pulpset {
         std::stable_sort(ps.events.begin(), ps.events.end(),
                          [](const PulpsetEvent& a, const PulpsetEvent& b) { return a.sample < b.sample; });
         return ps;
+    }
+
+    /// Serialize events back to `.pulpset` text. Floats are written with
+    /// std::to_chars so write+read round-trips under any global locale.
+    std::string to_text() const {
+        std::string out;
+        char buf[64];
+        auto append_num = [&](auto v) {
+            auto r = std::to_chars(buf, buf + sizeof(buf), v);
+            out.append(buf, r.ptr);
+        };
+        for (const auto& e : events) {
+            append_num(e.sample);
+            switch (e.kind) {
+                case PulpsetEvent::Kind::Param:
+                    out += " param ";
+                    append_num(e.id);
+                    out += ' ';
+                    append_num(e.value);
+                    break;
+                case PulpsetEvent::Kind::NoteOn:
+                    out += " note_on ";
+                    append_num(e.id);
+                    out += ' ';
+                    append_num(e.value);
+                    break;
+                case PulpsetEvent::Kind::NoteOff:
+                    out += " note_off ";
+                    append_num(e.id);
+                    break;
+            }
+            out += '\n';
+        }
+        return out;
     }
 
     static Pulpset from_file(const std::string& path) {

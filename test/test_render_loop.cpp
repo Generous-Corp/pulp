@@ -168,7 +168,7 @@ TEST_CASE("RenderLoop factory selects the timer backend under force-timer",
 }
 
 TEST_CASE("RenderLoop explicit timer factory is deterministic",
-          "[render][loop][coverage][large]") {
+          "[render][loop]") {
     auto loop = RenderLoop::create_timer_loop();
     REQUIRE(loop != nullptr);
     REQUIRE_FALSE(loop->is_running());

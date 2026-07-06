@@ -221,7 +221,7 @@ TEST_CASE("MotionScrubber scrub_to / play are no-ops when no fixture loaded",
 }
 
 TEST_CASE("MotionScrubber owns only passive replay protocol methods",
-          "[motion-scrubber][protocol][coverage][requested]") {
+          "[motion-scrubber][protocol]") {
     REQUIRE(MotionScrubber::owns_method("Motion.loadFixture"));
     REQUIRE(MotionScrubber::owns_method("Motion.scrubTo"));
     REQUIRE(MotionScrubber::owns_method("Motion.play"));
@@ -239,7 +239,7 @@ TEST_CASE("MotionScrubber owns only passive replay protocol methods",
 }
 
 TEST_CASE("MotionScrubber failed fixture load clears stale replay state",
-          "[motion-scrubber][coverage][requested]") {
+          "[motion-scrubber]") {
     FrameClock clock;
     const auto good_path = record_sample_fixture("failed-load-reset", clock);
     const auto bad_path = tmp_fixture_path("bad-version");
@@ -272,7 +272,7 @@ TEST_CASE("MotionScrubber failed fixture load clears stale replay state",
 }
 
 TEST_CASE("MotionScrubber sink removal and pause keep state deterministic",
-          "[motion-scrubber][coverage][requested]") {
+          "[motion-scrubber]") {
     FrameClock clock;
     const auto path = record_sample_fixture("sink-removal", clock);
 

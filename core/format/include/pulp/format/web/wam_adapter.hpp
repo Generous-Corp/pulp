@@ -64,7 +64,8 @@ struct WamParamInfo {
     float default_value;
     float min_value;
     float max_value;
-    int discrete_step;       // 0 for continuous
+    float step;              // raw parameter step (e.g. 0.1); 0 = continuous
+    int discrete_step;       // integer step for int/boolean params; 0 otherwise
     std::string unit;
 };
 
@@ -84,6 +85,9 @@ public:
 
     // Parameter access (WAMv2 uses string IDs)
     std::vector<WamParamInfo> get_parameter_info() const;
+    // Parameter metadata as a JSON array for generated web controls:
+    // [{id,label,type,unit,defaultValue,minValue,maxValue,discreteStep}, ...]
+    std::string parameters_json() const;
     float get_parameter_value(const std::string& id) const;
     void set_parameter_value(const std::string& id, float value);
 

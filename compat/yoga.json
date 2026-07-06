@@ -283,7 +283,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Yoga's YGNodeStyleSetMarginAuto is wired through `apply_margin` and `apply_logical_margin` in yoga_layout.cpp \u2014 `auto` works on every edge (top/right/bottom/left/start/end). The uniform shorthand stays px-only because there's no spec-defined `margin: auto` per-edge expansion that requires the shorthand itself to carry the unit; consumers that want centering set the per-edge keys.",
@@ -299,8 +299,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
@@ -316,8 +316,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
@@ -333,8 +333,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
@@ -350,8 +350,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
-        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
@@ -428,7 +428,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "semantic:yoga/box-sizing",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
@@ -444,7 +444,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
@@ -459,7 +459,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
@@ -474,7 +474,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
@@ -489,7 +489,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
@@ -706,7 +706,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1542]",
-        "test/test_widget_bridge.cpp::\"setFlex start/end accept 'auto' keyword\""
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. `auto` (the CSS default \u2014 \"don't anchor to this edge\") routes through Yoga's YGNodeStyleSetPositionAuto via FlexStyle::dim_start.unit = auto_; the bridge accepts `'auto'` verbatim. Wired DIVERGE\u2192PASS sweep.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
@@ -722,7 +722,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1542]",
-        "test/test_widget_bridge.cpp::\"setFlex start/end accept 'auto' keyword\""
+        "test/test_widget_bridge_css_per_edge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL. `auto` routes through YGNodeStyleSetPositionAuto. Wired DIVERGE\u2192PASS sweep.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
@@ -806,7 +806,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setOverflow accepts scroll keyword\"",
+        "test/test_widget_bridge_css_per_edge.cpp::\"setOverflow accepts scroll keyword\"",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 `scroll` is now accepted as a third keyword and propagates through both the layout engine (Yoga's overflow:scroll affects descendant-overflow contribution) and the paint clip path (matches CSS spec where `scroll` clips the painted box like `hidden`). Scrollbar UI / actual scroll-position state remains a roadmap item; the harness gap was about *layout-side* keyword acceptance, which is now covered.",
@@ -841,7 +841,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/web-compat/test_popover_row_template_1147.cpp",
-        "test/test_widget_bridge.cpp::\"flex shorthand keyword forms\""
+        "test/test_widget_bridge_css_per_edge.cpp::\"flex shorthand keyword forms\""
       ],
       "notes": "pulp #1544 \u2014 catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser; mirrors `css/flex`. DIVERGE\u2192PASS sweep \u2014 keyword forms (`flex: auto`/`none`/`initial`) now expand per the CSS Flexible Box spec instead of silently zeroing flex_grow.",
       "issue": ""

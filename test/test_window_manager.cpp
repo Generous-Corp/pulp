@@ -338,7 +338,7 @@ TEST_CASE("WindowManager send and broadcast skip missing handlers",
 }
 
 TEST_CASE("WindowManager ignores handlers for unknown windows",
-          "[view][multiwindow][coverage]") {
+          "[view][multiwindow]") {
     WindowManager mgr;
     int count = 0;
 
@@ -474,7 +474,7 @@ TEST_CASE("WindowManager all window types", "[view][multiwindow]") {
 }
 
 TEST_CASE("WindowManager replacing a message handler drops the previous callback",
-          "[view][multiwindow][coverage]") {
+          "[view][multiwindow]") {
     WindowManager mgr;
     View root;
     StubWindowHost host;
@@ -496,7 +496,7 @@ TEST_CASE("WindowManager replacing a message handler drops the previous callback
 }
 
 TEST_CASE("WindowManager saved state captures visibility and restore preserves other windows",
-          "[view][multiwindow][coverage]") {
+          "[view][multiwindow]") {
     WindowManager mgr;
     View first_root;
     View second_root;
@@ -528,7 +528,7 @@ TEST_CASE("WindowManager saved state captures visibility and restore preserves o
 }
 
 TEST_CASE("WindowManager shared theme getter and later registration stay in sync",
-          "[view][multiwindow][coverage]") {
+          "[view][multiwindow]") {
     WindowManager mgr;
     Theme theme = Theme::dark();
     theme.colors["bg.primary"] = color_from_hex(0x123456);

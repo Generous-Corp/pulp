@@ -7,6 +7,7 @@ on:
 
 jobs:
   audit:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     name: Audit dependency pins and notices
 

@@ -24,9 +24,10 @@ is not a new way to *write* DSP. Authoring still happens in a `Processor`.
 still the right tool when its internal DSP is:
 
 - **polyphonic** (synths, samplers — voices are not graph nodes),
-- **multi-bus** — sidechain and aux input buses via the `ProcessBuffers` surface,
-  not a graph (writable secondary *output* buses are still limited across host
-  adapters today),
+- **multi-bus** — sidechain input and descriptor-declared aux / secondary
+  output buses via the `ProcessBuffers` surface, not a graph. CLAP and VST3
+  route writable secondary outputs through `ProcessBuffers`; AUv3 currently
+  exposes the sidechain input but not secondary outputs.
 - **sidechained** (a sidechain is an input bus on the `Processor`),
 - **internally branching** (parallel/serial chains, mid/side, dry/wet) — compose
   `pulp::signal::*` blocks in `process()`,
@@ -43,7 +44,7 @@ and harder to reason about than a straight `process()`.
 |------|-------|
 | Reverb, compressor, EQ, filter | `Processor` |
 | Synth or sampler (any polyphony) | `Processor` |
-| Drum instrument with a sidechain/aux input | `Processor` + `ProcessBuffers` |
+| Drum instrument with a sidechain input or aux outputs | `Processor` + `ProcessBuffers` |
 | Sidechain compressor | `Processor` + sidechain input bus |
 | Parallel/serial FX *inside one plugin* | `Processor` (compose `signal::*`) |
 | A host app that loads and routes VST3/AU/CLAP plugins | `SignalGraph` |

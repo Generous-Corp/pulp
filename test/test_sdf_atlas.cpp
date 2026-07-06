@@ -29,7 +29,7 @@ TEST_CASE("SdfAtlas default state is empty", "[canvas][sdf][issue-641]") {
 }
 
 TEST_CASE("SdfAtlas move operations transfer atlas storage",
-          "[canvas][sdf][coverage][issue-650]") {
+          "[canvas][sdf][issue-650]") {
     SdfAtlas original;
     REQUIRE(original.build("stub", {U'A', U'B'}, 20, 2, 128));
     const auto* before = original.glyph(U'B');
@@ -89,7 +89,7 @@ TEST_CASE("SdfAtlas rejects invalid build arguments without allocation",
 }
 
 TEST_CASE("SdfAtlas invalid rebuild preserves prior atlas but overflow clears it",
-          "[canvas][sdf][coverage][issue-650]") {
+          "[canvas][sdf][issue-650]") {
     SdfAtlas atlas;
     REQUIRE(atlas.build("stub", {U'A'}, 16, 2, 128));
     REQUIRE(atlas.glyph_count() == 1);

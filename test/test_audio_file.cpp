@@ -537,7 +537,7 @@ TEST_CASE("sample conversion no-ops leave sentinel outputs untouched",
 }
 
 TEST_CASE("int24 to float preserves sign-extension boundaries",
-          "[audio][convert][coverage]") {
+          "[audio][convert]") {
     const uint8_t packed[] = {
         0x01, 0x00, 0x00, // +1
         0xFE, 0xFF, 0xFF, // -2
@@ -555,7 +555,7 @@ TEST_CASE("int24 to float preserves sign-extension boundaries",
 }
 
 TEST_CASE("float to int32 scales fractional values symmetrically",
-          "[audio][convert][coverage]") {
+          "[audio][convert]") {
     const float src[] = {-0.75f, -0.25f, 0.25f, 0.75f};
     int32_t dst[4] = {};
 
@@ -568,7 +568,7 @@ TEST_CASE("float to int32 scales fractional values symmetrically",
 }
 
 TEST_CASE("float to integer conversion maps non-finite samples to silence",
-          "[audio][convert][coverage]") {
+          "[audio][convert]") {
     const float src[] = {
         std::numeric_limits<float>::quiet_NaN(),
         std::numeric_limits<float>::infinity(),
@@ -669,6 +669,40 @@ TEST_CASE("Float32 WAV preserves precision below the int16 floor", "[audio][file
     std::filesystem::remove(default_path);
 }
 
+TEST_CASE("Int24 WAV sits between int16 and float precision", "[audio][file]") {
+    auto i24_path = std::filesystem::temp_directory_path() / "pulp_test_audio_i24.wav";
+    auto i16_path = std::filesystem::temp_directory_path() / "pulp_test_audio_i24_i16.wav";
+
+    // ~ -100 dBFS: below the int16 step (~3.05e-5, ≈ -90 dBFS) but well above the
+    // int24 step (~1.2e-7, ≈ -138 dBFS). int16 quantizes to 0; int24 keeps it.
+    AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels.resize(1);
+    data.channels[0] = {1.0e-5f, -1.0e-5f, 2.0e-5f, -2.0e-5f};
+
+    REQUIRE(write_wav_file(i24_path.string(), data, WavBitDepth::Int24));
+    REQUIRE(write_wav_file(i16_path.string(), data, WavBitDepth::Int16));
+
+    auto i24 = read_audio_file(i24_path.string());
+    auto i16 = read_audio_file(i16_path.string());
+    REQUIRE(i24.has_value());
+    REQUIRE(i16.has_value());
+
+    auto info = read_audio_file_info(i24_path.string());
+    REQUIRE(info.has_value());
+    REQUIRE(info->bits_per_sample == 24);
+
+    for (size_t i = 0; i < data.channels[0].size(); ++i) {
+        // int24 preserves the value within its quantization step…
+        REQUIRE(std::abs(i24->channels[0][i] - data.channels[0][i]) < 1.0e-6f);
+        // …while int16 collapses the same value to silence.
+        REQUIRE(i16->channels[0][i] == 0.0f);
+    }
+
+    std::filesystem::remove(i24_path);
+    std::filesystem::remove(i16_path);
+}
+
 TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
     auto result = read_audio_file("/nonexistent/path.wav");
     REQUIRE_FALSE(result.has_value());
@@ -678,7 +712,7 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
 }
 
 TEST_CASE("WAV reader reports zero-frame metadata but rejects loading data",
-          "[audio][file][coverage]") {
+          "[audio][file]") {
     auto path = unique_temp_audio_path("_zero_frames.wav");
     std::filesystem::remove(path);
 
@@ -715,7 +749,7 @@ TEST_CASE("WAV reader reports zero-frame metadata but rejects loading data",
 }
 
 TEST_CASE("WAV reader rejects zero sample-rate metadata",
-          "[audio][file][coverage]") {
+          "[audio][file]") {
     auto path = unique_temp_audio_path("_read_zero_rate.wav");
     std::filesystem::remove(path);
 
@@ -778,7 +812,7 @@ TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empti
 }
 
 TEST_CASE("WAV writer rejects zero sample-rate data without creating a file",
-          "[audio][file][coverage]") {
+          "[audio][file]") {
     AudioFileData data;
     data.sample_rate = 0;
     data.channels = {{0.0f, 0.5f}};
@@ -791,7 +825,7 @@ TEST_CASE("WAV writer rejects zero sample-rate data without creating a file",
 }
 
 TEST_CASE("WAV and AIFF writers reject channel counts that cannot fit file headers",
-          "[audio][file][coverage]") {
+          "[audio][file]") {
     AudioFileData data;
     data.sample_rate = 44100;
     data.channels.resize(static_cast<size_t>(std::numeric_limits<uint16_t>::max()) + 1u);
@@ -999,7 +1033,7 @@ TEST_CASE("MemoryMappedAudioReader zero-fills destinations past EOF",
 }
 
 TEST_CASE("MemoryMappedAudioReader rejects invalid destinations before decoding",
-          "[audio][file][mmap][coverage]") {
+          "[audio][file][mmap]") {
     auto path = unique_temp_audio_path("_mmap_destinations.wav");
     std::filesystem::remove(path);
 
@@ -1333,7 +1367,7 @@ TEST_CASE("StreamingWriter writes 32-bit PCM and destructor finalizes header",
 }
 
 TEST_CASE("StreamingWriter finalizes empty files with zero data size",
-          "[audio][file][streaming][coverage]") {
+          "[audio][file][streaming]") {
     auto path = unique_temp_audio_path("_stream_empty.wav");
     std::filesystem::remove(path);
 
@@ -1353,7 +1387,7 @@ TEST_CASE("StreamingWriter finalizes empty files with zero data size",
 }
 
 TEST_CASE("StreamingWriter accumulates multiple interleaved writes before close",
-          "[audio][file][streaming][coverage]") {
+          "[audio][file][streaming]") {
     auto path = unique_temp_audio_path("_stream_multi_write.wav");
     std::filesystem::remove(path);
 
@@ -1381,7 +1415,7 @@ TEST_CASE("StreamingWriter accumulates multiple interleaved writes before close"
 }
 
 TEST_CASE("StreamingWriter successful reopen finalizes prior file and resets state",
-          "[audio][file][streaming][coverage]") {
+          "[audio][file][streaming]") {
     auto first_path = unique_temp_audio_path("_stream_reopen_first.wav");
     auto second_path = unique_temp_audio_path("_stream_reopen_second.wav");
     std::filesystem::remove(first_path);
@@ -1422,7 +1456,7 @@ TEST_CASE("StreamingWriter successful reopen finalizes prior file and resets sta
 }
 
 TEST_CASE("StreamingWriter writes deinterleaved mono through channel dispatch",
-          "[audio][file][streaming][coverage]") {
+          "[audio][file][streaming]") {
     auto path = unique_temp_audio_path("_stream_deinterleaved_mono.wav");
     std::filesystem::remove(path);
 
@@ -1489,7 +1523,7 @@ TEST_CASE("FormatRegistry exposes built-in audio codecs", "[audio][file][registr
 }
 
 TEST_CASE("FormatRegistry ignores null custom handlers",
-          "[audio][file][registry][coverage]") {
+          "[audio][file][registry]") {
     auto& registry = FormatRegistry::instance();
 
     const auto read_before = registry.supported_read_extensions();
@@ -1505,7 +1539,7 @@ TEST_CASE("FormatRegistry ignores null custom handlers",
 }
 
 TEST_CASE("FormatRegistry rejects missing and extension-only paths",
-          "[audio][file][registry][coverage]") {
+          "[audio][file][registry]") {
     auto& registry = FormatRegistry::instance();
 
     REQUIRE(registry.find_reader("") == nullptr);
@@ -1639,7 +1673,7 @@ TEST_CASE("FormatRegistry reads a valid MP3 fixture through the built-in reader"
 }
 
 TEST_CASE("FormatRegistry rejects paths without dispatchable extensions",
-          "[audio][file][registry][coverage]") {
+          "[audio][file][registry]") {
     auto& registry = FormatRegistry::instance();
 
     REQUIRE(registry.find_reader("") == nullptr);
@@ -1717,7 +1751,7 @@ TEST_CASE("FormatRegistry routes CoreAudio compressed containers on Apple",
 }
 
 TEST_CASE("CoreAudio reader decodes generated CAF fixtures on Apple",
-          "[audio][file][registry][coreaudio][coverage]") {
+          "[audio][file][registry][coreaudio]") {
     auto& registry = FormatRegistry::instance();
     auto* reader = registry.find_reader(".CAF");
     REQUIRE(reader != nullptr);
@@ -1930,7 +1964,7 @@ TEST_CASE("FormatRegistry writes and reads AIFF files", "[audio][file][registry]
 }
 
 TEST_CASE("AIFF writer rejects invalid source data without creating files",
-          "[audio][file][registry][aiff][coverage]") {
+          "[audio][file][registry][aiff]") {
     auto& registry = FormatRegistry::instance();
 
     SECTION("zero sample rate") {
@@ -2100,7 +2134,7 @@ TEST_CASE("AIFF reader skips malformed SSND chunks before valid data", "[audio][
 }
 
 TEST_CASE("AIFF reader honors SSND offsets and rejects invalid offsets",
-          "[audio][file][registry][aiff][coverage]") {
+          "[audio][file][registry][aiff]") {
     auto& registry = FormatRegistry::instance();
 
     SECTION("valid offset skips pad bytes before PCM") {
@@ -2213,7 +2247,7 @@ TEST_CASE("AIFF reader rejects invalid COMM metadata and unsupported PCM depths"
 }
 
 TEST_CASE("AIFF reader rejects malformed container headers and missing chunks",
-          "[audio][file][registry][aiff][coverage]") {
+          "[audio][file][registry][aiff]") {
     auto& registry = FormatRegistry::instance();
 
     SECTION("missing file") {
@@ -2311,7 +2345,7 @@ TEST_CASE("AIFF reader rejects malformed container headers and missing chunks",
 }
 
 TEST_CASE("AIFF reader covers padding metadata and signed extended rates",
-          "[audio][file][registry][aiff][coverage]") {
+          "[audio][file][registry][aiff]") {
     auto& registry = FormatRegistry::instance();
 
     SECTION("COMM extra bytes and odd SSND padding") {
@@ -2412,7 +2446,7 @@ TEST_CASE("AIFF reader covers padding metadata and signed extended rates",
 }
 
 TEST_CASE("AIFF writer rejects edge shapes and writes AIF extension",
-          "[audio][file][registry][aiff][coverage]") {
+          "[audio][file][registry][aiff]") {
     auto& registry = FormatRegistry::instance();
 
     SECTION("empty first channel") {

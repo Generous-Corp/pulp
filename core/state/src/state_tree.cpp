@@ -60,35 +60,49 @@ std::vector<std::string> StateTree::property_names() const {
     return names;
 }
 
+bool StateTree::is_ancestor_of(const StateTree* node) const {
+    for (const StateTree* p = node; p != nullptr; p = p->parent_)
+        if (p == this) return true;
+    return false;
+}
+
 void StateTree::add_child(Ptr child) {
     if (!child) return;
+    // Reject anything that would form a parent/child cycle: a node cannot
+    // become its own descendant. Adding `child` under `this` is illegal iff
+    // `child` is `this` or `child` is already an ancestor of `this`. Such a
+    // cycle leaks a shared_ptr ring and makes deep_copy() / to_json() recurse
+    // forever. Leave the tree unchanged and fire no listeners on rejection.
+    if (child.get() == this || child->is_ancestor_of(this)) return;
     if (child->parent_ != nullptr)
         child->parent_->remove_child(child.get());
     child->parent_ = this;
     children_.push_back(child);
     int idx = static_cast<int>(children_.size()) - 1;
-    for (auto& [id, fn] : child_added_listeners_)
-        if (fn) fn(*this, *child, idx);
+    notify_child_added(*child, idx);
 }
 
 void StateTree::insert_child(int index, Ptr child) {
     if (!child) return;
+    // Same cycle guard as add_child — see the comment there.
+    if (child.get() == this || child->is_ancestor_of(this)) return;
     if (child->parent_ != nullptr)
         child->parent_->remove_child(child.get());
     index = std::clamp(index, 0, child_count());
     child->parent_ = this;
     children_.insert(children_.begin() + index, child);
-    for (auto& [id, fn] : child_added_listeners_)
-        if (fn) fn(*this, *child, index);
+    notify_child_added(*child, index);
 }
 
 void StateTree::remove_child(int index) {
     if (index < 0 || index >= child_count()) return;
+    // Copy the shared_ptr so the child stays alive while listeners run, then
+    // erase before dispatch so a re-entrant mutation from a callback sees the
+    // tree in its post-removal shape.
     auto child = children_[index];
     child->parent_ = nullptr;
-    for (auto& [id, fn] : child_removed_listeners_)
-        if (fn) fn(*this, *child, index);
     children_.erase(children_.begin() + index);
+    notify_child_removed(*child, index);
 }
 
 void StateTree::remove_child(StateTree* child) {
@@ -157,11 +171,69 @@ void StateTree::remove_child_removed_listener(int id) {
         child_removed_listeners_.end());
 }
 
+// Listener fan-out is snapshot-then-dispatch with a liveness recheck. A
+// callback may register or unregister listeners (or add/remove children) on
+// this same node while it runs, which would invalidate iterators/references
+// into the live backing vectors. We copy the {id, fn} entries up front, then
+// before each call confirm the id is STILL registered — so a listener removed
+// earlier in the same dispatch is not invoked, and a listener added during the
+// dispatch is not invoked for the in-flight notification. The single-listener
+// case (the common one) takes a fast path that skips the copy.
+
 void StateTree::notify_property_changed(std::string_view name,
                                         const PropertyValue& old_val,
                                         const PropertyValue& new_val) {
-    for (auto& [id, fn] : listeners_)
+    if (listeners_.size() == 1) {
+        // Copy the callable before invoking: a sole listener that removes
+        // itself mid-callback would otherwise free the std::function whose
+        // body is still executing (heap-use-after-free for heap-captured
+        // callables). The copy keeps the executing closure alive.
+        auto fn = listeners_.front().fn;
         if (fn) fn(*this, name, old_val, new_val);
+        return;
+    }
+    auto snapshot = listeners_;
+    for (auto& [id, fn] : snapshot) {
+        if (!fn) continue;
+        bool still_registered = std::any_of(
+            listeners_.begin(), listeners_.end(),
+            [id = id](const ListenerEntry& e) { return e.id == id; });
+        if (still_registered) fn(*this, name, old_val, new_val);
+    }
+}
+
+void StateTree::notify_child_added(StateTree& child, int index) {
+    if (child_added_listeners_.size() == 1) {
+        // Copy before invoking — see notify_property_changed for why.
+        auto fn = child_added_listeners_.front().second;
+        if (fn) fn(*this, child, index);
+        return;
+    }
+    auto snapshot = child_added_listeners_;
+    for (auto& [id, fn] : snapshot) {
+        if (!fn) continue;
+        bool still_registered = std::any_of(
+            child_added_listeners_.begin(), child_added_listeners_.end(),
+            [id = id](const auto& e) { return e.first == id; });
+        if (still_registered) fn(*this, child, index);
+    }
+}
+
+void StateTree::notify_child_removed(StateTree& child, int index) {
+    if (child_removed_listeners_.size() == 1) {
+        // Copy before invoking — see notify_property_changed for why.
+        auto fn = child_removed_listeners_.front().second;
+        if (fn) fn(*this, child, index);
+        return;
+    }
+    auto snapshot = child_removed_listeners_;
+    for (auto& [id, fn] : snapshot) {
+        if (!fn) continue;
+        bool still_registered = std::any_of(
+            child_removed_listeners_.begin(), child_removed_listeners_.end(),
+            [id = id](const auto& e) { return e.first == id; });
+        if (still_registered) fn(*this, child, index);
+    }
 }
 
 static choc::value::Value tree_to_choc(const StateTree& node) {

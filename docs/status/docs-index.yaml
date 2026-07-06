@@ -64,6 +64,11 @@ docs:
     kind: guide
     summary: End-to-end signing, notarization, packaging, and distribution
 
+  - slug: juce-embed
+    path: guides/juce-embed.md
+    kind: guide
+    summary: Put a Pulp UI in a JUCE plugin — import vs template vs adapter, the binding contract, build recipe
+
   - slug: troubleshooting
     path: guides/troubleshooting.md
     kind: guide
@@ -247,7 +252,7 @@ docs:
   - slug: web-plugins
     path: guides/web-plugins.md
     kind: guide
-    summary: WAMv2 and WebCLAP web plugin formats — build, deploy, and browser demo
+    summary: WAMv2 and WebCLAP web plugin formats — build helpers, host harnesses, and browser-host status
 
   - slug: from-react-css
     path: guides/from-react-css.md
@@ -352,6 +357,11 @@ docs:
     path: reference/capabilities.md
     kind: reference
     summary: All current capabilities organized by area with status
+
+  - slug: web-plugin-support
+    path: reference/web-plugin-support.md
+    kind: reference
+    summary: WAMv2 and WebCLAP web-plugin support — verified Processor features, toolchains, pinned upstream refs
 
   - slug: claim-audit-baseline
     path: reference/claim-audit-baseline.md

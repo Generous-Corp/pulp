@@ -600,3 +600,53 @@ TEST_CASE("pin_kind_name round-trips for all variants",
         REQUIRE(pb::parse_pin_kind(name) == k);
     }
 }
+
+// ── Breaking-change banner decision ─────────────────────────────────────────
+//
+// The post-bump report's "⚠ N breaking change(s)" banner suppression precedence
+// (env-truthy OR config-off) and count gate, exercised as pure predicates so the
+// behavior is pinned without env/config IO. `nullptr` env mirrors an unset var.
+
+TEST_CASE("breaking_banner_suppressed honors truthy env values only",
+          "[project-bump][upgrade]") {
+    // Truthy env ⇒ suppressed, regardless of config.
+    for (const char* v : {"1", "true", "on", "yes"})
+        REQUIRE(pb::breaking_banner_suppressed(v, ""));
+    // Falsy / unset env ⇒ NOT suppressed by env (config empty here).
+    REQUIRE_FALSE(pb::breaking_banner_suppressed(nullptr, ""));
+    REQUIRE_FALSE(pb::breaking_banner_suppressed("", ""));
+    REQUIRE_FALSE(pb::breaking_banner_suppressed("0", ""));
+    REQUIRE_FALSE(pb::breaking_banner_suppressed("false", ""));
+    REQUIRE_FALSE(pb::breaking_banner_suppressed("no", ""));
+}
+
+TEST_CASE("breaking_banner_suppressed honors config-off values",
+          "[project-bump][upgrade]") {
+    for (const std::string& c : {"false", "0", "off", "no"})
+        REQUIRE(pb::breaking_banner_suppressed(nullptr, c));
+    // On / empty / unrecognized config ⇒ NOT suppressed by config.
+    REQUIRE_FALSE(pb::breaking_banner_suppressed(nullptr, ""));
+    REQUIRE_FALSE(pb::breaking_banner_suppressed(nullptr, "true"));
+    REQUIRE_FALSE(pb::breaking_banner_suppressed(nullptr, "on"));
+}
+
+TEST_CASE("breaking_banner_suppressed — either source suppresses",
+          "[project-bump][upgrade]") {
+    // env-truthy beats config-on; config-off suppresses even with env unset.
+    REQUIRE(pb::breaking_banner_suppressed("1", "true"));
+    REQUIRE(pb::breaking_banner_suppressed(nullptr, "off"));
+    REQUIRE_FALSE(pb::breaking_banner_suppressed(nullptr, "true"));
+}
+
+TEST_CASE("should_show_breaking_banner gates on count then suppression",
+          "[project-bump][upgrade]") {
+    // No breaking notes ⇒ never shown, whatever env/config say.
+    REQUIRE_FALSE(pb::should_show_breaking_banner(0, nullptr, ""));
+    REQUIRE_FALSE(pb::should_show_breaking_banner(0, "1", "false"));
+    // Breaking notes + not suppressed ⇒ shown.
+    REQUIRE(pb::should_show_breaking_banner(1, nullptr, ""));
+    REQUIRE(pb::should_show_breaking_banner(3, "0", ""));
+    // Breaking notes but suppressed ⇒ hidden.
+    REQUIRE_FALSE(pb::should_show_breaking_banner(2, "1", ""));
+    REQUIRE_FALSE(pb::should_show_breaking_banner(2, nullptr, "off"));
+}

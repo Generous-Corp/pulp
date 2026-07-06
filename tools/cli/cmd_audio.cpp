@@ -22,6 +22,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/render/headless_surface.hpp>
 
+#include "cmd_audio_compare.hpp"
 #include "cmd_audio_render.hpp"
 #include "cmd_audio_validate.hpp"
 
@@ -41,6 +42,7 @@ static void print_audio_usage() {
     std::cout << "  pulp audio scope [target] --frames 90 --window 2048 --trigger rising-zero --channel 0 [--json <path>]\n";
     std::cout << "  pulp audio scope --input-wav <path> --window 2048 --trigger rising-zero --channel 0 [--json <path>] [--png <path>]\n";
     std::cout << "  pulp audio validate <verb> ...   (summarize|doctor|compare|assert)\n";
+    std::cout << "  pulp audio compare <reference.wav> <candidate.wav> [--profile <axis>] [--reference-role <peer|golden>] [--threshold <t>] [--json <path>]\n";
     std::cout << "  pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]\n";
 }
 
@@ -432,6 +434,10 @@ int cmd_audio(const std::vector<std::string>& args) {
 
     if (args[0] == "scope") {
         return cmd_audio_scope({args.begin() + 1, args.end()});
+    }
+
+    if (args[0] == "compare") {
+        return cmd_audio_compare({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "model") {

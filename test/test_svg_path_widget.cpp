@@ -539,7 +539,7 @@ TEST_CASE("SvgPathWidget unparseable gradient falls back to solid fill_color",
 }
 
 TEST_CASE("SvgPathWidget malformed gradient numbers fall back without throwing",
-          "[view][svg-path][issue-932][issue-1737][codecov]") {
+          "[view][svg-path][issue-932][issue-1737]") {
     using namespace pulp::view;
     using namespace pulp::canvas;
 

@@ -208,7 +208,7 @@ TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][me
 }
 
 TEST_CASE("MultiChannelBallistics clamps tiny levels and releases held peaks",
-          "[signal][meter][coverage]") {
+          "[signal][meter]") {
     MultiChannelBallistics ballistics;
     ballistics.peak_hold_time = 0.01f;
 

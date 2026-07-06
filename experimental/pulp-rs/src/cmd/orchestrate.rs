@@ -44,6 +44,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
+use super::aax_sdk;
 use crate::config::pulp_home;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
@@ -86,6 +87,10 @@ pub struct BuildArgs {
     /// treats drift as a soft warning instead of failing the build.
     /// Mirrors `pulp identity check --allow-identity-change`.
     pub allow_identity_change: bool,
+    /// `--format <fmt>` / `-f <fmt>` — build a web plugin format instead of
+    /// the native one. `wam` (Emscripten → AudioWorklet) or `wclap` (wasi-sdk
+    /// → CLAP-in-WebAssembly). `None` builds the native plugin formats.
+    pub web_format: Option<String>,
 }
 
 /// Parse `pulp-rs build` flags.
@@ -93,7 +98,9 @@ pub struct BuildArgs {
 pub fn parse_build_args(args: &[String]) -> BuildArgs {
     let mut out = BuildArgs::default();
     out.raw_tail = args.to_vec();
-    for a in args {
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
         match a.as_str() {
             "--watch" | "-w" => out.watch = true,
             "--test" | "-t" => out.test = true,
@@ -102,11 +109,25 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--skip-validation" => out.skip_validation = true,
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
+            // `--format <fmt>` / `-f <fmt>` consume the next token as the value.
+            "--format" | "-f" => {
+                if i + 1 < args.len() {
+                    out.web_format = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            _ if a.starts_with("--format=") => {
+                out.web_format = Some(a.trim_start_matches("--format=").to_owned());
+            }
+            _ if a.starts_with("-f=") => {
+                out.web_format = Some(a.trim_start_matches("-f=").to_owned());
+            }
             _ if a.starts_with("--js-engine=") => {
                 out.js_engine = Some(a.trim_start_matches("--js-engine=").to_owned());
             }
             _ => out.passthrough.push(a.clone()),
         }
+        i += 1;
     }
     out
 }
@@ -181,6 +202,19 @@ pub fn build_with<S: Spawner>(
         return Err(CliError::BadUsage(
             "--skip-validation only applies with --install".to_owned(),
         ));
+    }
+
+    // Web plugin formats build through a different toolchain and build dir, and
+    // are not part of the native install/validate/watch pipelines.
+    if let Some(fmt) = &args.web_format {
+        if args.install || args.validate || args.watch {
+            return Err(CliError::BadUsage(
+                "--format wam|wclap cannot be combined with --install, --validate, or --watch \
+                 (web plugin formats build to .wasm and are not installed to native plug-in folders)"
+                    .to_owned(),
+            ));
+        }
+        return build_web(proj, fmt, args, spawner, out);
     }
 
     if args.install && args.watch {
@@ -283,6 +317,84 @@ pub fn build_with<S: Spawner>(
         return spawner.run(&test);
     }
     Ok(rc)
+}
+
+/// Build a web plugin format (`wam` or `wclap`) for the project.
+///
+/// `wam` configures with the Emscripten wrapper (`emcmake cmake`) into a
+/// `build-wam/` dir; `wclap` configures plain `cmake` with the wasi-sdk
+/// toolchain (`tools/cmake/wasi-toolchain.cmake`) into `build-wclap/`. Both then
+/// run `cmake --build <dir>`. The build dir is reused if already configured.
+///
+/// # Errors
+///
+/// Returns [`CliError::BadUsage`] for an unknown format, and
+/// [`CliError::Other`] when the wclap toolchain file cannot be located.
+fn build_web<S: Spawner>(
+    proj: &ActiveProject,
+    fmt: &str,
+    args: &BuildArgs,
+    spawner: &S,
+    out: &mut impl Write,
+) -> Result<i32> {
+    let (build_subdir, configure): (&str, Invocation) = match fmt {
+        "wam" => {
+            let dir = proj.root.join("build-wam");
+            // emcmake is the Emscripten wrapper around cmake; it injects the
+            // Emscripten toolchain. It must be on PATH (source emsdk_env.sh).
+            let cfg = Invocation::new("emcmake")
+                .arg("cmake")
+                .arg("-B")
+                .arg(dir.to_string_lossy().into_owned())
+                .arg("-S")
+                .arg(proj.root.to_string_lossy().into_owned());
+            ("build-wam", cfg)
+        }
+        "wclap" => {
+            let dir = proj.root.join("build-wclap");
+            let toolchain = proj.root.join("tools/cmake/wasi-toolchain.cmake");
+            if !toolchain.exists() {
+                return Err(CliError::Other(format!(
+                    "wclap build needs the wasi-sdk toolchain at {}, which was not found. \
+                     Build from a checkout that vendors tools/cmake/wasi-toolchain.cmake, \
+                     or install the Pulp SDK.",
+                    toolchain.display()
+                )));
+            }
+            let cfg = Invocation::new("cmake")
+                .arg("-B")
+                .arg(dir.to_string_lossy().into_owned())
+                .arg("-S")
+                .arg(proj.root.to_string_lossy().into_owned())
+                .arg(format!(
+                    "-DCMAKE_TOOLCHAIN_FILE={}",
+                    toolchain.to_string_lossy()
+                ));
+            ("build-wclap", cfg)
+        }
+        other => {
+            return Err(CliError::BadUsage(format!(
+                "unknown --format '{other}' (expected 'wam' or 'wclap')"
+            )));
+        }
+    };
+
+    let build_dir = proj.root.join(build_subdir);
+    if !build_dir.join("CMakeCache.txt").exists() {
+        writeln!(out, "Configuring {} ({fmt})", proj.root.display()).map_err(io_err)?;
+        let rc = spawner.run(&configure)?;
+        if rc != 0 {
+            return Ok(rc);
+        }
+    }
+
+    let mut build = Invocation::new("cmake")
+        .arg("--build")
+        .arg(build_dir.to_string_lossy().into_owned());
+    for a in &args.passthrough {
+        build = build.arg(a.clone());
+    }
+    spawner.run(&build)
 }
 
 // ── test ─────────────────────────────────────────────────────────────
@@ -1104,14 +1216,12 @@ fn write_plugin_format_availability(proj: &ActiveProject, out: &mut impl Write) 
     )
     .map_err(io_err)?;
     writeln!(out, "  CLAP: available (fetched via CMake)").map_err(io_err)?;
-    if aax_supported_on_host() {
-        match std::env::var_os("PULP_AAX_SDK_DIR")
-            .filter(|v| !v.is_empty() && std::path::Path::new(v).exists())
-        {
-            Some(v) => writeln!(
+    if aax_sdk::supported_on_host() {
+        match aax_sdk::find_root() {
+            Some(root) => writeln!(
                 out,
                 "  AAX:  optional SDK found at {}",
-                std::path::Path::new(&v).display()
+                root.display()
             )
             .map_err(io_err)?,
             None => writeln!(
@@ -1124,16 +1234,6 @@ fn write_plugin_format_availability(proj: &ActiveProject, out: &mut impl Write) 
         writeln!(out, "  AAX:  unsupported on Linux/Ubuntu").map_err(io_err)?;
     }
     Ok(())
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn aax_supported_on_host() -> bool {
-    true
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn aax_supported_on_host() -> bool {
-    false
 }
 
 // ── cache ────────────────────────────────────────────────────────────
@@ -1369,6 +1469,17 @@ mod tests {
         std::fs::create_dir_all(root.join("examples/b")).unwrap();
     }
 
+    fn write_fake_aax_sdk(root: &Path) {
+        let interfaces = root.join("Interfaces");
+        std::fs::create_dir_all(&interfaces).unwrap();
+        std::fs::write(interfaces.join("AAX.h"), "// fake AAX SDK marker\n").unwrap();
+        std::fs::write(
+            interfaces.join("AAX_Exports.cpp"),
+            "// fake AAX SDK marker\n",
+        )
+        .unwrap();
+    }
+
     fn configure_build(proj: &ActiveProject) {
         std::fs::create_dir_all(&proj.build_dir).unwrap();
         std::fs::write(proj.build_dir.join("CMakeCache.txt"), "").unwrap();
@@ -1469,6 +1580,109 @@ mod tests {
         assert_eq!(calls[0].program, "cmake");
         assert!(calls[0].args.iter().any(|a| a == "-B"));
         assert!(calls[1].args.iter().any(|a| a == "--build"));
+    }
+
+    #[test]
+    fn parse_build_args_captures_web_format() {
+        assert_eq!(parse_build_args(&[]).web_format, None);
+        assert_eq!(
+            parse_build_args(&["--format".to_owned(), "wam".to_owned()]).web_format.as_deref(),
+            Some("wam")
+        );
+        assert_eq!(
+            parse_build_args(&["-f".to_owned(), "wclap".to_owned()]).web_format.as_deref(),
+            Some("wclap")
+        );
+        assert_eq!(
+            parse_build_args(&["--format=wam".to_owned()]).web_format.as_deref(),
+            Some("wam")
+        );
+        // The format value must not leak into cmake passthrough.
+        let a = parse_build_args(&["--format".to_owned(), "wclap".to_owned(), "-j8".to_owned()]);
+        assert_eq!(a.web_format.as_deref(), Some("wclap"));
+        assert_eq!(a.passthrough, vec!["-j8"]);
+    }
+
+    #[test]
+    fn build_wam_configures_with_emcmake_into_build_wam() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+        let args = BuildArgs { web_format: Some("wam".to_owned()), ..Default::default() };
+        let rc = build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].program, "emcmake");
+        assert_eq!(calls[0].args[0], "cmake");
+        assert!(calls[0].args.iter().any(|a| a.ends_with("build-wam")));
+        assert_eq!(calls[1].program, "cmake");
+        assert!(calls[1].args.iter().any(|a| a == "--build"));
+        assert!(calls[1].args.iter().any(|a| a.ends_with("build-wam")));
+    }
+
+    #[test]
+    fn build_wclap_configures_with_wasi_toolchain_into_build_wclap() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        // wclap requires the wasi-sdk toolchain file in the checkout.
+        std::fs::create_dir_all(proj.root.join("tools/cmake")).unwrap();
+        std::fs::write(proj.root.join("tools/cmake/wasi-toolchain.cmake"), "").unwrap();
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+        let args = BuildArgs { web_format: Some("wclap".to_owned()), ..Default::default() };
+        let rc = build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].program, "cmake");
+        assert!(calls[0]
+            .args
+            .iter()
+            .any(|a| a.starts_with("-DCMAKE_TOOLCHAIN_FILE=") && a.contains("wasi-toolchain.cmake")));
+        assert!(calls[0].args.iter().any(|a| a.ends_with("build-wclap")));
+        assert!(calls[1].args.iter().any(|a| a == "--build"));
+    }
+
+    #[test]
+    fn build_wclap_without_toolchain_errors() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = BuildArgs { web_format: Some("wclap".to_owned()), ..Default::default() };
+        let err = build_with(&proj, &args, &spawner, &mut out).unwrap_err();
+        assert!(matches!(err, CliError::Other(_)));
+        assert!(spawner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn build_unknown_web_format_errors() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = BuildArgs { web_format: Some("vst3".to_owned()), ..Default::default() };
+        let err = build_with(&proj, &args, &spawner, &mut out).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+        assert!(spawner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn build_web_format_rejects_install() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = BuildArgs {
+            web_format: Some("wam".to_owned()),
+            install: true,
+            ..Default::default()
+        };
+        let err = build_with(&proj, &args, &spawner, &mut out).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+        assert!(spawner.calls.borrow().is_empty());
     }
 
     #[test]
@@ -1723,6 +1937,63 @@ mod tests {
         assert!(s.contains("Plugin Formats:"));
         assert!(s.contains("VST3: SDK not found"));
         assert!(s.contains("CLAP: available"));
+    }
+
+    #[test]
+    fn status_aax_ignores_existing_non_sdk_env_path() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let home = tempfile::tempdir().unwrap();
+        let non_sdk = tempfile::tempdir().unwrap();
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_AAX_SDK_DIR", Some(non_sdk.path().to_str().unwrap())),
+            ("HOME", Some(home.path().to_str().unwrap())),
+            ("USERPROFILE", Some(home.path().to_str().unwrap())),
+        ]);
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        if aax_sdk::supported_on_host() {
+            assert!(s.contains("AAX:  optional (set PULP_AAX_SDK_DIR"), "{s}");
+            assert!(!s.contains("AAX:  optional SDK found"), "{s}");
+        } else {
+            assert!(s.contains("AAX:  unsupported on Linux/Ubuntu"), "{s}");
+        }
+    }
+
+    #[test]
+    fn status_aax_auto_discovers_standard_user_sdk() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let home = tempfile::tempdir().unwrap();
+        let sdk = home.path().join("SDKs/avid/aax-sdk/current");
+        write_fake_aax_sdk(&sdk);
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_AAX_SDK_DIR", None),
+            ("HOME", Some(home.path().to_str().unwrap())),
+            ("USERPROFILE", Some(home.path().to_str().unwrap())),
+        ]);
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        if aax_sdk::supported_on_host() {
+            assert!(
+                s.contains(&format!("AAX:  optional SDK found at {}", sdk.display())),
+                "{s}"
+            );
+        } else {
+            assert!(s.contains("AAX:  unsupported on Linux/Ubuntu"), "{s}");
+        }
     }
 
     #[test]

@@ -1,9 +1,9 @@
-// test_audio_contracts.cpp — harness PR 3: named contracts for the
-// example plugins (PulpGain effect + PulpTone instrument here; PulpEffect
-// lives in test_audio_contracts_effect.cpp because pulp_gain.hpp and
-// pulp_effect.hpp define colliding unscoped enumerators — same reason the
-// golden suites are split). Acceptance: a new effect copies one of
-// these fixtures; failures name the contract that broke.
+// test_audio_contracts.cpp — named contracts for the example plugins
+// (PulpGain effect + PulpTone instrument here; PulpEffect lives in
+// test_audio_contracts_effect.cpp because pulp_gain.hpp and pulp_effect.hpp
+// define colliding unscoped enumerators — same reason the golden suites are
+// split). Acceptance: a new effect copies one of these fixtures; failures
+// name the contract that broke.
 //
 // Analyzer Determinism Contract (uniform for every contract in this TU):
 // - stimulus: documented deterministic generators (sine / silence / MIDI
@@ -44,7 +44,7 @@ double window_rms_dbfs(const ScenarioResult& result, std::size_t start,
 } // namespace
 
 TEST_CASE("AudioContract verdict mechanics",
-          "[audio][contract][harness-3]") {
+          "[audio][contract]") {
     auto scenario = RenderScenario(pulp::examples::create_pulp_gain)
         .name("contract-meta")
         .sample_rate(48000.0)
@@ -83,7 +83,7 @@ TEST_CASE("AudioContract verdict mechanics",
 }
 
 TEST_CASE("Contract: PulpGain unity settings are transparent",
-          "[audio][contract][pulpgain][harness-3]") {
+          "[audio][contract][pulpgain]") {
     // Default gains (0 dB in / 0 dB out) multiply by exactly 1.0f, so the
     // output must be bit-identical to the stimulus (tolerance: exact).
     const auto input = make_sine(2, 9600, 440.0f, 48000.0, 0.5f);
@@ -102,7 +102,7 @@ TEST_CASE("Contract: PulpGain unity settings are transparent",
 }
 
 TEST_CASE("Contract: PulpGain scales level by the configured gain",
-          "[audio][contract][pulpgain][harness-3]") {
+          "[audio][contract][pulpgain]") {
     // -12 dBFS-peak sine has RMS -15.05 dBFS; -6 dB input gain and -6 dB
     // output gain compose to -12 dB → RMS -27.05 dBFS (numeric ±0.5 dB).
     // Gain is stateless per sample, so partitioning is exact.
@@ -126,7 +126,7 @@ TEST_CASE("Contract: PulpGain scales level by the configured gain",
 }
 
 TEST_CASE("Contract: PulpGain bypass is transparent",
-          "[audio][contract][pulpgain][harness-3]") {
+          "[audio][contract][pulpgain]") {
     // Bypass copies samples and must win over extreme gain settings
     // (tolerance: exact).
     const auto input = make_sine(2, 9600, 220.0f, 48000.0, 0.5f);
@@ -148,7 +148,7 @@ TEST_CASE("Contract: PulpGain bypass is transparent",
 }
 
 TEST_CASE("Contract: PulpGain keeps silence silent",
-          "[audio][contract][pulpgain][harness-3]") {
+          "[audio][contract][pulpgain]") {
     // Silence in → silence out: a gain stage adds no self-noise even at
     // +24 dB (threshold −90 dBFS, the metrics silence floor).
     AudioContract contract(
@@ -166,7 +166,7 @@ TEST_CASE("Contract: PulpGain keeps silence silent",
 }
 
 TEST_CASE("Contract: PulpTone note-on produces the claimed tone",
-          "[audio][contract][pulptone][harness-3]") {
+          "[audio][contract][pulptone]") {
     // A4 (note 69, velocity 100) at default −6 dB volume: amplitude
     // 0.5012 · (100/127) ≈ 0.395 → held RMS ≈ −11.2 dBFS including the
     // 10 ms attack (numeric ±1.3 dB window); pitch 440 Hz ±5 cents.
@@ -195,7 +195,7 @@ TEST_CASE("Contract: PulpTone note-on produces the claimed tone",
 }
 
 TEST_CASE("Contract: PulpTone is silent without MIDI",
-          "[audio][contract][pulptone][harness-3]") {
+          "[audio][contract][pulptone]") {
     // An instrument given no events must not self-oscillate or leak
     // voice state (threshold −90 dBFS).
     AudioContract contract(
@@ -213,7 +213,7 @@ TEST_CASE("Contract: PulpTone is silent without MIDI",
 }
 
 TEST_CASE("Contract: PulpTone release tail decays",
-          "[audio][contract][pulptone][harness-3]") {
+          "[audio][contract][pulptone]") {
     // Note-off at 200 ms with the default 200 ms release: the final 50 ms
     // of a 400 ms render must sit ≥ 20 dB below the held level (numeric;
     // a hand-built CheckResult — the vocabulary is open to custom claims).

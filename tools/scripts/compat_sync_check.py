@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compat-sync gate (#1029).
+"""Compat-sync gate.
 
 Generalizes the skill-sync / docs-sync pattern to the compat-matrix
 domain. Given a diff range (base..head), assert that every
@@ -25,21 +25,17 @@ Modes:
     --mode=hint    advisory text only, exit 0
     --mode=report  exit 1 on drift when --enforce or
                    PULP_ENFORCE_PREPUSH=1 is set (advisory otherwise)
-    --mode=apply   like report, but ALSO writes stub keys into
-                   compat.json so the user only has to fill in details
+    --mode=apply   like report, but ALSO writes missing top-level
+                   compat.json sections; the user still must fill
+                   real entries, docs, and tests
 
-Partial-blocker tolerance (#1027): until the compat.json sections are
-populated, empty sections are NOT a self-check failure. A compat-json
-requirement counts as satisfied when:
-    - the requested prefix already has a non-empty entry in compat.json, OR
-    - the section is empty (no compat-matrix data has been generated
-      yet — accept "no requirement yet" so this infrastructure can
-      land before #1027), OR
-    - the same diff modified compat.json (someone added a new entry).
+The compat matrix is populated. A compat-json requirement counts as
+satisfied when:
+    - the same diff modified compat.json, OR
+    - the requested prefix already has a non-empty object in compat.json.
 
-When #1027 ships the populated matrix, flip COMPAT_TOLERATE_EMPTY in the
-config or just remove the empty-tolerance branch in
-``_compat_json_satisfied``.
+An empty prefix object is treated as drift: it is a scaffold, not a
+usable compatibility contract.
 
 Uses JSON (not YAML) for zero-dependency execution on PEP-668 Python.
 Mirrors the shape of ``tools/scripts/skill_sync_check.py``.
@@ -156,8 +152,7 @@ def load_compat_map(path: Path) -> CompatMap:
 
 
 def load_compat_json(path: Path) -> dict:
-    """Load the repo-root compat.json. Tolerate missing/empty file —
-    #1027 may not have shipped yet."""
+    """Load the repo-root compat.json aggregate."""
     if not path.exists():
         return {}
     try:
@@ -242,23 +237,23 @@ def _compat_json_satisfied(
 ) -> tuple[bool, str]:
     """Decide whether the compat-json requirement is satisfied.
 
-    Tolerance rules per #1029 partial-blocker:
+    Rules:
         1. compat.json modified in this diff → satisfied.
-        2. section is non-empty (#1027 has populated it) → satisfied.
-        3. section exists but is empty → tolerated (no requirement
-           yet) → satisfied.
-        4. section absent from compat.json → fail with guidance.
+        2. section is present and non-empty → satisfied.
+        3. section absent, empty, or not an object → fail with guidance.
     """
     if compat_json_path in changed:
         return True, "compat.json modified in diff"
     if prefix not in compat_data:
         return False, (
             f"compat.json has no '{prefix}' section "
-            f"(expected `\"{prefix}\": {{}}` at minimum)"
+            f"(expected a populated `\"{prefix}\": {{...}}` object)"
         )
     section = compat_data[prefix]
-    if isinstance(section, dict) and len(section) == 0:
-        return True, "section empty — tolerated until #1027 populates"
+    if not isinstance(section, dict):
+        return False, f"compat.json section '{prefix}' is not an object"
+    if not section:
+        return False, f"compat.json section '{prefix}' is empty"
     return True, "section already populated"
 
 
@@ -451,9 +446,8 @@ def apply_stubs(
     sections added so the caller can report what changed.
 
     Doc and test stubs are NOT auto-created — those require
-    human-authored content per #1029's "user just has to fill in
-    details" directive (we add the JSON skeleton; the user authors
-    the prose and tests).
+    human-authored content. This only adds missing JSON skeletons; the
+    user authors the prose, tests, and actual matrix entries.
     """
     added: list[str] = []
     if not compat_data:
@@ -520,7 +514,7 @@ def render_report(
         lines.append("")
         lines.append("Compat-sync check FAILED.")
         lines.append("For each row above marked ✗, do ONE of:")
-        lines.append("  1. Update compat.json (add prefix entry), the doc,")
+        lines.append("  1. Update compat.json (add/update prefix entry), the doc,")
         lines.append("     or add a matching test in this branch, OR")
         lines.append("  2. Add a commit trailer with the exact form:")
         # Show one suggestion line per unique missing prefix.
@@ -548,7 +542,7 @@ def render_report(
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Compat-sync gate (#1029)")
+    parser = argparse.ArgumentParser(description="Compat-sync gate")
     parser.add_argument("--base", default="origin/main",
                         help="Diff base (default: origin/main)")
     parser.add_argument("--head", default="HEAD",
@@ -574,7 +568,7 @@ def main(argv: list[str]) -> int:
             "report: print drift, hard-fail iff --enforce or "
             "PULP_ENFORCE_PREPUSH=1; "
             "hint: advisory text only, exit 0; "
-            "apply: like report but auto-add stub compat.json sections"
+            "apply: like report but auto-add missing top-level compat.json sections"
         ),
     )
     parser.add_argument(

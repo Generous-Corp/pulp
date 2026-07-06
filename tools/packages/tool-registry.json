@@ -1,6 +1,21 @@
 {
   "schema_version": 1,
   "tools": {
+    "audio-quality-lab": {
+      "display_name": "Audio Quality Lab",
+      "category": "python_tool",
+      "description": "Offline reference-vs-candidate audio artifact detection (transient smear, dulling, metallic fizz, graininess) so an agent or CI can regression-guard DSP without a human A/B listen.",
+      "upstream_url": "https://github.com/danielraffel/pulp/tree/main/tools/audio/quality-lab",
+      "license": "MIT",
+      "install_method": "python_pip",
+      "source_dir": "tools/audio/quality-lab",
+      "module": "quality_lab.cli",
+      "pinned_version": "0.1.0",
+      "requires_tools": ["uv"],
+      "managed_by_pulp": true,
+      "bundleable": false,
+      "bundle_note": "Developer/agent + CI tool only. Never linked into the MIT core or shipped in a plugin."
+    },
     "uv": {
       "display_name": "UV (Python package manager)",
       "category": "runtime",
@@ -74,6 +89,7 @@
       "license": "Unlicense",
       "install_method": "python_pip",
       "pip_package": "yt-dlp",
+      "module": "yt_dlp",
       "pinned_version": "2025.3.31",
       "requires_tools": ["uv", "ffmpeg", "deno"],
       "managed_by_pulp": true,

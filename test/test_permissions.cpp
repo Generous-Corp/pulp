@@ -163,7 +163,7 @@ TEST_CASE("nested PermissionsOverride clear exposes backend then restores outer 
 }
 
 TEST_CASE("PermissionsOverride clear on missing entries is a no-op",
-          "[platform][permissions][override][coverage][issue-649]") {
+          "[platform][permissions][override][issue-649]") {
     const auto backend_microphone = query(Permission::Microphone);
     const auto backend_camera = query(Permission::Camera);
 
@@ -178,7 +178,7 @@ TEST_CASE("PermissionsOverride clear on missing entries is a no-op",
 }
 
 TEST_CASE("empty nested PermissionsOverride preserves outer entries",
-          "[platform][permissions][override][coverage][issue-649]") {
+          "[platform][permissions][override][issue-649]") {
     const auto backend_microphone = query(Permission::Microphone);
     const auto outer_state = state_different_from(backend_microphone);
 

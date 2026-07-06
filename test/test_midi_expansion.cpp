@@ -357,7 +357,7 @@ TEST_CASE("RpnParser reports NRPN increment and decrement metadata",
 }
 
 TEST_CASE("RpnParser reports highest non-null RPN parameter and maximum value",
-          "[midi][rpn][coverage]") {
+          "[midi][rpn]") {
     RpnParser rpn;
     uint8_t received_ch = 255;
     uint16_t received_param = 0;
@@ -380,7 +380,7 @@ TEST_CASE("RpnParser reports highest non-null RPN parameter and maximum value",
 }
 
 TEST_CASE("RpnParser suppresses increment while parameter is being reselected",
-          "[midi][rpn][coverage]") {
+          "[midi][rpn]") {
     RpnParser rpn;
     std::vector<uint16_t> params;
 
@@ -404,7 +404,7 @@ TEST_CASE("RpnParser suppresses increment while parameter is being reselected",
 }
 
 TEST_CASE("RpnParser reset clears selected parameters on every channel",
-          "[midi][rpn][coverage]") {
+          "[midi][rpn]") {
     RpnParser rpn;
     int calls = 0;
     rpn.on_rpn = [&](uint8_t, uint16_t, uint16_t) { ++calls; };
@@ -426,7 +426,7 @@ TEST_CASE("RpnParser reset clears selected parameters on every channel",
 }
 
 TEST_CASE("RpnParser combines data LSB with default zero MSB",
-          "[midi][rpn][coverage]") {
+          "[midi][rpn]") {
     RpnParser rpn;
     uint16_t received_value = 0xffff;
 
@@ -464,7 +464,7 @@ TEST_CASE("MidiKeyboardState note on vel=0 is note off", "[midi][keyboard]") {
 }
 
 TEST_CASE("MidiKeyboardState note on velocity zero fires note-off callback",
-          "[midi][keyboard][coverage]") {
+          "[midi][keyboard]") {
     MidiKeyboardState keys;
     std::vector<int> released;
     keys.on_note_off = [&](uint8_t channel, uint8_t note) {
@@ -625,7 +625,7 @@ TEST_CASE("MidiKeyboardState retrigger updates velocity without duplicating held
 }
 
 TEST_CASE("MidiKeyboardState tracks note range boundaries",
-          "[midi][keyboard][coverage]") {
+          "[midi][keyboard]") {
     MidiKeyboardState keys;
 
     keys.process(MidiEvent::note_on(15, 0, 1));

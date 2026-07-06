@@ -374,7 +374,7 @@ public:
     // Source values are clamped to [0,1] then mapped linearly to
     // [range_lo, range_hi] in the plugin's plain parameter domain.
     //
-    // smoothing_ms applies a per-source linear slew before mixing (TODO).
+    // smoothing_ms applies a per-source linear slew before mix/clamp.
     // MixMode::Replace is the default; a second Replace edge targeting the
     // same (dest, param) is rejected. MixMode::Add sums multiple edges,
     // then clamps to the param's range.
@@ -999,7 +999,32 @@ private:
     // transport). Control-thread writer (compile_) only.
     std::atomic<std::uint64_t> transport_suppressed_for_anticipation_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
-    std::atomic<std::uint32_t> active_process_readers_{0};
+    // mutable: const snapshot readers (extract_midi / node_latency_samples) must
+    // bump this reader pin via ProcessReadGuard. Pinning does not change logical
+    // const-ness of the graph.
+    mutable std::atomic<std::uint32_t> active_process_readers_{0};
+
+    // RCU-style read pin for the live CompiledGraph snapshot. Any thread that
+    // dereferences live_raw_ must hold one of these for the entire duration of
+    // the dereference so prune_retired_snapshots_() / wait_for_retired_snapshots_()
+    // can see it and defer the free. The audio process path uses it; so do the
+    // control-thread snapshot readers (inject_midi / extract_midi /
+    // node_latency_samples / set_node_gain) — none of which run on the
+    // prepare/release thread, so without the pin a concurrent prepare()/release()
+    // could retire+free the snapshot mid-dereference (use-after-free). The seq_cst
+    // add/sub pairs with prune/wait's seq_cst load (see prune_retired_snapshots_()).
+    struct ProcessReadGuard {
+        explicit ProcessReadGuard(const SignalGraph& owner) noexcept
+            : owner_(owner) {
+            owner_.active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
+        }
+        ~ProcessReadGuard() noexcept {
+            owner_.active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
+        }
+        ProcessReadGuard(const ProcessReadGuard&) = delete;
+        ProcessReadGuard& operator=(const ProcessReadGuard&) = delete;
+        const SignalGraph& owner_;
+    };
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};
     std::atomic<std::size_t> prepared_ordered_node_count_{0};
@@ -1025,8 +1050,68 @@ private:
     // it (it touches measurer OBJECTS via NodeRuntime::load, not the map).
     mutable std::mutex node_load_mu_;
 
+    // Serializes CONTROL-THREAD access to the source-of-truth topology — the
+    // nodes_ / connections_ vectors and the plain (non-atomic) GraphNode fields
+    // they own (gain, ports, plugin/custom identity, custom state) — AND the
+    // snapshot-publication state (live_ / live_raw_ / retired_snapshots_) that a
+    // re-prepare and a concurrent invalidate_live_() both mutate. The control
+    // surface is multi-threaded: a host thread calls prepare()/compile_() (which
+    // iterates nodes_/connections_ and reads GraphNode::gain) while a UI thread
+    // adds/removes nodes or connections, edits a GraphNode field
+    // (set_node_gain / set_node_parameter / set_custom_node_state), or reads one
+    // (node_gain / get_node_parameter / custom_node_state / node_loads). Without
+    // this lock those vector mutations + plain-field reads/writes race.
+    //
+    // Contract — EVERY public control-thread method that reads or writes
+    // nodes_ / connections_ / a mutable GraphNode field, or that publishes/retires
+    // a snapshot, holds this mutex for the duration of that access:
+    //   mutators  : add_input_node, add_output_node, add_plugin_node(×2),
+    //               add_unresolved_plugin_node, add_gain_node,
+    //               add_midi_input_node, add_midi_output_node,
+    //               add_unresolved_custom_node, register_custom_node_type,
+    //               remove_node, connect, connect_midi, connect_sidechain,
+    //               connect_automation, connect_audio_rate_modulation,
+    //               connect_feedback, disconnect, clear, set_node_gain,
+    //               set_node_parameter, set_custom_node_state, prepare, release.
+    //   readers   : node_gain, get_node_parameter, custom_node_state, node_loads.
+    // The low-level helpers node() / has_path() / would_create_cycle() /
+    // processing_order() / custom_node_type() / audio_rate_modulation_lane() /
+    // validate_generated_graph() / total_declared_ports_() are LOCK-FREE and
+    // assume the caller already holds this mutex; the public methods above are
+    // their only callers on the mutating path. Public methods that delegate to
+    // another public mutator (add_custom_node -> add_unresolved_custom_node) do
+    // NOT take the lock themselves — the leaf takes it once — to avoid
+    // self-deadlock on this non-recursive mutex.
+    //
+    // The nodes() / connections() accessors hand out a reference to the live
+    // vector and the live_*() snapshot getters read live_; both are governed by
+    // the same caller-side keepalive/serialization contract they always were and
+    // are intentionally NOT locked here (locking a reference-returning accessor
+    // can't protect the caller's later iteration anyway).
+    //
+    // Deadlock-free by construction:
+    //  - Taken ONLY on the control thread. The audio render path
+    //    (process_impl / the executor / the reference walk) reads the immutable
+    //    CompiledGraph snapshot — never nodes_ or GraphNode fields — so it must
+    //    never take this lock. Taking a mutex on the audio thread would be an
+    //    RT-safety violation.
+    //  - NEVER held while acquiring a ProcessReadGuard reader-pin. The methods
+    //    that both edit source state AND reflect into the live snapshot
+    //    (set_node_gain) take this mutex for the source write, RELEASE it, then
+    //    separately pin the snapshot — so this mutex can never invert lock order
+    //    with the RCU drain (prune_retired_snapshots_ / wait_for_retired_snapshots_,
+    //    the latter busy-waited under this mutex by release()).
+    mutable std::mutex graph_mutation_mutex_;
+
     bool has_path(NodeId from, NodeId to) const;
     std::size_t total_declared_ports_() const;
+    // Lock-free core of audio_rate_modulation_lane() — scans nodes_ via node() and
+    // assumes the caller already holds graph_mutation_mutex_. The public
+    // audio_rate_modulation_lane() locks and forwards here; connect_audio_rate_
+    // modulation() (already holding the mutex) calls this core directly to avoid
+    // re-locking the non-recursive mutex.
+    bool audio_rate_modulation_lane_locked_(const Connection& connection,
+                                            state::ModulationLane& lane) const;
     // Shared body of both process() overloads. `transport` is the host
     // transport context for the block, or nullptr for the no-transport path.
     // RT-safe (no allocation per block).

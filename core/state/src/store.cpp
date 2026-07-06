@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <pulp/events/event_loop.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
@@ -19,6 +21,15 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         ParamChangeCallback callback;
         ListenerThread thread = ListenerThread::Main;
     };
+
+    // Reads the current (live atomic) value for a parameter, or nullopt if
+    // the parameter is not (or no longer) registered. Installed by the
+    // owning StateStore at construction. drain_main_listeners() uses this
+    // so Main listeners settle on the param's latest value even when the
+    // RT change queue dropped intermediate updates under overflow, and so a
+    // change for an absent parameter is skipped rather than delivering a
+    // bogus default.
+    std::function<std::optional<float>(ParamID)> value_getter;
 
     using EntryList = std::vector<Entry>;
     using SharedEntries = std::shared_ptr<const EntryList>;
@@ -196,15 +207,50 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         }
     }
 
+    // Drain the RT->main queue and fan changes out to Main listeners.
+    //
+    // Contract: Main listeners receive CURRENT-VALUE notifications,
+    // coalesced to one call per changed parameter per pump. We drain the
+    // whole queue, collect the distinct changed param_ids (in first-seen
+    // order), then fire each parameter's Main listeners exactly once with
+    // a live value read at drain time. Two reasons:
+    //   1. Value coherence — under dense automation the queue drops the
+    //      newest pushes when full, so the queued value can be stale.
+    //      Reading the live atomic guarantees the latest value; the queue
+    //      is only the change-signal.
+    //   2. Notification coherence — a burst of N writes to one parameter
+    //      would otherwise fire N callbacks all carrying the same live
+    //      latest value. Coalescing yields a single, correct notification
+    //      per changed parameter.
+    // Drain runs on the main thread (not RT), so the small allocation for
+    // the distinct-id list is acceptable.
+    //
+    // @return Number of changes drained from the queue (NOT the number of
+    //         callbacks fired — coalescing makes those differ).
     std::size_t drain_main_listeners() {
         std::size_t drained = 0;
+        std::vector<ParamID> changed;  // distinct, first-seen order
         while (auto change = pending_rt.try_pop()) {
             ++drained;
-            auto snap = load_snapshot();
-            if (!snap || snap->empty()) continue;
+            if (std::find(changed.begin(), changed.end(), change->param_id) ==
+                changed.end()) {
+                changed.push_back(change->param_id);
+            }
+        }
+        if (changed.empty()) return drained;
+
+        auto snap = load_snapshot();
+        if (!snap || snap->empty()) return drained;
+        for (const ParamID id : changed) {
+            // Read the live value once per changed param. If the param is
+            // absent (not / no longer registered), skip it rather than
+            // delivering a bogus value.
+            std::optional<float> current =
+                value_getter ? value_getter(id) : std::nullopt;
+            if (!current) continue;
             for (const auto& entry : *snap) {
                 if (entry.callback && entry.thread == ListenerThread::Main) {
-                    entry.callback(change->param_id, change->value);
+                    entry.callback(id, *current);
                 }
             }
         }
@@ -228,7 +274,21 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
 } // namespace detail
 
 StateStore::StateStore()
-    : registry_(std::make_shared<detail::ListenerRegistry>()) {}
+    : registry_(std::make_shared<detail::ListenerRegistry>()) {
+    // Let the registry read live parameter values when draining queued
+    // RT changes to the main thread (see drain_main_listeners). The
+    // getter does the lock-free atomic load and runs only on the main
+    // thread. It returns nullopt for an unregistered id so the coalesced
+    // drain skips changes for absent parameters. `this` outlives registry_
+    // (member declaration order in store.hpp puts the parameter storage
+    // before registry_, so registry_ is destroyed first).
+    registry_->value_getter =
+        [this](ParamID id) -> std::optional<float> {
+            auto it = id_to_index_.find(id);
+            if (it == id_to_index_.end()) return std::nullopt;
+            return values_[it->second].get();
+        };
+}
 
 StateStore::~StateStore() {
     // Drop permanent tokens BEFORE the registry shared_ptr goes away so
@@ -240,9 +300,24 @@ StateStore::~StateStore() {
 
 void StateStore::add_parameter(const ParamInfo& info) {
     auto index = params_.size();
-    params_.push_back(info);
-    values_.emplace_back(info.range.default_value);
+    // Clamp the declared default into [min, max] so the stored default is
+    // consistent with set_value()/reset_to_default() (both clamp). Without this,
+    // a parameter declared with an out-of-range default would serialize an
+    // out-of-range value that deserialize() then clamps — a silent state
+    // round-trip failure. Clamping the ParamInfo too keeps get_default()/info()
+    // reporting the same effective default that the store actually holds.
+    ParamInfo clamped = info;
+    clamped.range.default_value =
+        std::clamp(info.range.default_value, info.range.min, info.range.max);
+    params_.push_back(clamped);
+    values_.emplace_back(clamped.range.default_value);
     id_to_index_[info.id] = index;
+    // Cache trigger/momentary params so the audio-thread auto-reset after each
+    // block touches only them, allocation-free. A Reset designation implies a
+    // trigger (auto_resets()), so it is captured here too.
+    if (info.auto_resets()) {
+        trigger_indices_.push_back(index);
+    }
 }
 
 void StateStore::add_group(const ParamGroup& group) {
@@ -346,6 +421,25 @@ void StateStore::reset_all_to_defaults() {
     for (const auto& p : params_) {
         set_value(p.id, p.range.default_value);
     }
+}
+
+bool StateStore::reset_triggers_rt() {
+    bool any = false;
+    for (auto index : trigger_indices_) {
+        // Duplicate-ParamID contract: add_parameter keeps every registration in
+        // params_/values_ but id_to_index_ resolves an ID to its LATEST slot, so
+        // get_value/set_value only ever touch that slot. Skip a cached trigger
+        // index that a later same-ID registration has superseded — resetting a
+        // dead slot would be a hidden write to a value no reader sees.
+        const auto live = id_to_index_.find(params_[index].id);
+        if (live == id_to_index_.end() || live->second != index) continue;
+        // Write straight to the lock-free atomic: RT-safe, no allocation, no
+        // listener dispatch. The host/UI already observed the raised value
+        // during the block; this returns the control to its resting default.
+        values_[index].set(params_[index].range.default_value);
+        any = true;
+    }
+    return any;
 }
 
 const ParamInfo* StateStore::info(ParamID id) const {

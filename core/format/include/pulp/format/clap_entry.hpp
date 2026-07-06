@@ -11,6 +11,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
@@ -21,8 +22,12 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 #include <clap/clap.h>
+#include <cctype>
+#include <charconv>
 #include <cstring>
 #include <cstdio>
+#include <string>
+#include <string_view>
 
 // Internal implementation — do not call directly
 namespace pulp::format::clap_generic {
@@ -169,18 +174,43 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
     if (info->to_string) {
         auto str = info->to_string(static_cast<float>(value));
         snprintf(display, size, "%s", str.c_str());
-    } else if (!info->unit.empty()) {
-        snprintf(display, size, "%.2f %s", value, info->unit.c_str());
-    } else {
-        snprintf(display, size, "%.2f", value);
+        return true;
     }
+
+    // Format the numeric value with locale-independent std::to_chars so a
+    // comma-decimal host locale (de_DE, fr_FR, …) can never turn "0.50" into
+    // "0,50". This matches the previous "%.2f": fixed notation, two fractional
+    // digits. The CLAP-supplied `size` is the byte cap of the `display` buffer.
+    // The buffer is sized generously because chars_format::fixed for a very
+    // large-magnitude double needs hundreds of integer digits; if it still
+    // overflows we return false rather than emit a host-visible lie.
+    char number[512];
+    auto conv = std::to_chars(number, number + sizeof(number), value,
+                              std::chars_format::fixed, 2);
+    if (conv.ec != std::errc{}) return false;
+    std::string out(number, conv.ptr);
+    if (!info->unit.empty()) {
+        out += ' ';
+        out += info->unit;
+    }
+    snprintf(display, size, "%s", out.c_str());
     return true;
 }
 
 inline bool params_text_to_value(const clap_plugin_t*, clap_id, const char* text, double* value) {
-    char* end;
-    *value = strtod(text, &end);
-    return end != text;
+    if (!text) return false;
+    // Locale-independent parse via a C-locale strtod. std::from_chars' float
+    // overload is =deleted on some toolchains (see locale_independent_float.hpp),
+    // so we cannot use it for the value. strtod skips leading whitespace and
+    // accepts a leading '+'/'-', and trailing text (e.g. a unit suffix) is
+    // allowed — matching the historical strtod leniency this path documents.
+    // Reject when nothing was consumed ("%", "", "   ") or the magnitude was
+    // out of range ("1e999999") rather than writing a garbage 0.
+    double parsed = 0.0;
+    const auto result = detail::parse_double_c_locale(std::string_view(text), parsed);
+    if (result.consumed == 0 || result.range_error) return false;
+    *value = parsed;
+    return true;
 }
 
 inline void params_flush(const clap_plugin_t* plugin, const clap_input_events_t* in,

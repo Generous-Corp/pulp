@@ -42,6 +42,7 @@ def make_repo(root: pathlib.Path) -> pathlib.Path:
     (root / "tools" / "cli").mkdir(parents=True)
     (root / "tools" / "mcp").mkdir(parents=True)
     (root / "tools" / "scripts").mkdir(parents=True)
+    (root / "experimental" / "pulp-rs" / "src").mkdir(parents=True)
     return root
 
 
@@ -57,6 +58,17 @@ def write_cli(root: pathlib.Path, *commands: str, with_audit: bool = False) -> N
         f"{body}\n"
         "};\n"
         f"{extra}"
+    )
+
+
+def write_rust_commands(root: pathlib.Path, body: str) -> None:
+    rust_main = root / "experimental" / "pulp-rs" / "src" / "main.rs"
+    rust_main.write_text(
+        "#[derive(Subcommand, Debug)]\n"
+        "enum Command {\n"
+        f"{body}\n"
+        "}\n",
+        encoding="utf-8",
     )
 
 
@@ -173,6 +185,36 @@ class CliExtractor(unittest.TestCase):
             self.assertEqual(
                 parity.extract_cli_commands(pathlib.Path(td) / "missing.cpp"),
                 set(),
+            )
+
+    def test_extracts_rust_frontend_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            write_rust_commands(
+                root,
+                """
+    Help,
+    CiLocal(PkgTailArgs),
+    #[command(name = "motion")]
+    Motion(PkgTailArgs),
+    Identity(PkgTailArgs),
+                """,
+            )
+
+            self.assertEqual(
+                parity.extract_rust_commands(root / "experimental" / "pulp-rs" / "src" / "main.rs"),
+                {"help", "ci-local", "motion", "identity"},
+            )
+
+    def test_repo_command_inventory_unions_cpp_and_rust(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            write_cli(root, "build")
+            write_rust_commands(root, "    Help,\n    Identity(PkgTailArgs),")
+
+            self.assertEqual(
+                parity.extract_repo_cli_commands(root),
+                {"build", "help", "identity"},
             )
 
 
@@ -313,6 +355,14 @@ class DiffComputation(unittest.TestCase):
         )
         self.assertEqual(diff.new_cli_only, set())
 
+    def test_help_is_excluded_from_parity_surface(self) -> None:
+        diff = parity.compute_diff(
+            cli_commands={"build", "help"},
+            mcp_tools={"pulp_build"},
+            baseline=parity.Baseline(),
+        )
+        self.assertEqual(diff.new_cli_only, set())
+
     def test_mcp_only_baseline_accepts_and_stales_entries(self) -> None:
         diff = parity.compute_diff(
             cli_commands={"build"},
@@ -396,6 +446,18 @@ class MainExitCodes(unittest.TestCase):
             rc, out, _ = self._run(root, "--mode=report")
             self.assertEqual(rc, 1)
             self.assertIn("ship", out)
+            self.assertIn("FAIL", out)
+
+    def test_report_mode_sees_unbaselined_rust_only_command(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            write_cli(root, "build")
+            write_rust_commands(root, "    Help,\n    Identity(PkgTailArgs),")
+            write_mcp(root, "pulp_build")
+            write_baseline(root, {"help": "fixture help"}, {})
+            rc, out, _ = self._run(root, "--mode=report")
+            self.assertEqual(rc, 1)
+            self.assertIn("identity", out)
             self.assertIn("FAIL", out)
 
     def test_report_mode_passes_with_baselined_gap(self) -> None:

@@ -2,7 +2,9 @@
 //! fuzzy "Did you mean...?" UX fixes.
 //!
 //! The reference file is `tests/fixtures/help/expected_cpp.txt`,
-//! captured from a built `pulp` binary by running `./pulp help`.
+//! captured from the C++ delegate by running `./pulp-cpp help`.
+//! The installed Rust front end intentionally adds Rust-native
+//! commands (`motion`, `identity`) to that shared command surface.
 //!
 //! The "Examples" section uses literal `pulp create ...` lines on
 //! both sides — those aren't the banner name, they're example
@@ -32,9 +34,22 @@ fn normalise_rust_banner(s: &str) -> String {
     .replace("Usage: pulp-rs <command>", "Usage: pulp <command>")
 }
 
+fn expected_installed_banner() -> String {
+    let expected = fs::read_to_string(fixture_dir().join("expected_cpp.txt")).expect("fixture");
+    expected
+        .replace(
+            "  inspect        Connect to a running plugin inspector\n",
+            "  inspect        Connect to a running plugin inspector\n  motion         Agent-facing wrappers around inspector Motion protocol\n",
+        )
+        .replace(
+            "  import         Detect a framework project and emit a Pulp migration scaffold\n",
+            "  import         Detect a framework project and emit a Pulp migration scaffold\n  identity       Manage the .pulp/identity.lock contract\n",
+        )
+}
+
 #[test]
 fn help_banner_matches_cpp_output() {
-    let expected = fs::read_to_string(fixture_dir().join("expected_cpp.txt")).expect("fixture");
+    let expected = expected_installed_banner();
     let output = Command::cargo_bin("pulp")
         .expect("binary")
         .arg("help")

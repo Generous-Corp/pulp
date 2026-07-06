@@ -70,8 +70,8 @@ pub const INSPECTOR_PORT_ENV: &str = "PULP_INSPECTOR_PORT";
 pub enum Sub {
     /// `pulp motion` with no verb — print the per-verb help blurb.
     Help,
-    /// `pulp motion record [...]` — start a trace, optionally pipe
-    /// fixture output to `--out`.
+    /// `pulp motion record [...]` — start a trace, optionally print
+    /// fixture-path guidance for `--out`.
     Record(RecordArgs),
     /// `pulp motion stop [--trace-id N]`.
     Stop { trace_id: Option<i64> },
@@ -108,7 +108,7 @@ pub struct RecordArgs {
     /// Logical trace name. Used as `view_name` in the
     /// `Motion.startTrace` params.
     pub view_name: String,
-    /// `--out <PATH>` for an on-disk JSONL fixture. The inspector
+    /// Requested `--out <PATH>` for an on-disk JSONL fixture. The inspector
     /// itself does not write fixtures — the CLI prints a sidecar
     /// hint pointing the user at `make_fixture_sink` for now (the
     /// trace itself is started normally).

@@ -60,7 +60,7 @@ TEST_CASE("Biquad default coefficients are an identity bypass",
 }
 
 TEST_CASE("Biquad zero and negative block lengths are no-ops",
-          "[signal][biquad][coverage]") {
+          "[signal][biquad]") {
     Biquad filter;
     filter.set_coefficients(Biquad::Type::lowpass, 1000.0f, 0.707f, kSampleRate);
     filter.process(1.0f);
@@ -74,7 +74,7 @@ TEST_CASE("Biquad zero and negative block lengths are no-ops",
 }
 
 TEST_CASE("Biquad impulse responses stay pinned for representative filters",
-          "[signal][biquad][coverage]") {
+          "[signal][biquad]") {
     const std::array<BiquadImpulseCase, 8> cases{{
         {{Biquad::Type::lowpass, 600.0f, 0.707f, 0.0f}, {0.00146030f, 0.00567915f, 0.01088156f}},
         {{Biquad::Type::highpass, 4000.0f, 0.707f, 0.0f}, {0.68927898f, -0.49656902f, -0.27527589f}},
@@ -100,7 +100,7 @@ TEST_CASE("Biquad impulse responses stay pinned for representative filters",
 }
 
 TEST_CASE("Biquad extreme valid controls still produce finite sample output",
-          "[signal][biquad][coverage]") {
+          "[signal][biquad]") {
     const std::array<BiquadCase, 8> cases{{
         {Biquad::Type::lowpass, 20.0f, 0.01f, 0.0f},
         {Biquad::Type::highpass, 20000.0f, 25.0f, 0.0f},

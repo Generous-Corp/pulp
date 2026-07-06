@@ -123,7 +123,7 @@ TEST_CASE("from_text skips malformed lines", "[host][blacklist]") {
 }
 
 TEST_CASE("from_text clears existing entries when every line is malformed",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     ScanBlacklist bl;
     REQUIRE(bl.from_text("/old.vst3|1|2|stale\n"));
     REQUIRE(bl.size() == 1);
@@ -138,7 +138,7 @@ TEST_CASE("from_text clears existing entries when every line is malformed",
 }
 
 TEST_CASE("from_text preserves empty blacklist reasons",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     ScanBlacklist bl;
     REQUIRE(bl.from_text("/plugin.vst3|10|20|\n"));
 
@@ -216,7 +216,7 @@ TEST_CASE("from_text tolerates signed stamp values from old blacklist files",
 }
 
 TEST_CASE("from_text rejects partially parsed numeric stamp fields",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     ScanBlacklist bl;
     REQUIRE(bl.from_text(
         "/mtime-junk.vst3|10junk|20|bad mtime\n"
@@ -234,7 +234,7 @@ TEST_CASE("from_text rejects partially parsed numeric stamp fields",
 }
 
 TEST_CASE("blacklisting a missing plugin records a durable manual block",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     TempFile f;
     ScanBlacklist bl;
 
@@ -253,7 +253,7 @@ TEST_CASE("blacklisting a missing plugin records a durable manual block",
 }
 
 TEST_CASE("from_text duplicate blacklist records keep the last valid entry",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     ScanBlacklist bl;
     REQUIRE(bl.from_text(
         "/plugin.vst3|1|2|first reason\n"
@@ -269,7 +269,7 @@ TEST_CASE("from_text duplicate blacklist records keep the last valid entry",
 }
 
 TEST_CASE("from_text keeps unknown percent escapes literal",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     ScanBlacklist bl;
     REQUIRE(bl.from_text("/plugin%2Fname.vst3|7|8|bad%2Greason%7Cok\n"));
 
@@ -283,7 +283,7 @@ TEST_CASE("from_text keeps unknown percent escapes literal",
 }
 
 TEST_CASE("from_text keeps trailing incomplete percent escapes literal",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     ScanBlacklist bl;
     REQUIRE(bl.from_text("/plugin.vst3|1|2|reason%"));
 
@@ -296,7 +296,7 @@ TEST_CASE("from_text keeps trailing incomplete percent escapes literal",
 }
 
 TEST_CASE("save_to creates nested blacklist parent directories",
-          "[host][blacklist][codecov]") {
+          "[host][blacklist]") {
     TempFile f;
     const auto root = f.path.parent_path() / (f.path.filename().string() + "-dir");
     const auto out_path = root / "nested" / "blacklist.txt";

@@ -16,8 +16,11 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
+#include <charconv>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -956,6 +959,221 @@ std::string handle_audio_scope(const std::string& params_json) {
         return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(message) + "}]}";
     }
 
+    return json_tool_payload(normalized_json);
+}
+
+std::string handle_audio_render(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+
+    auto plugin = extract_string(params_json, "plugin");
+    if (plugin.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: plugin is required (path to a plugin bundle)\"}]}";
+    }
+    if (plugin.front() == '-') {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: plugin must be a bundle path, not an option\"}]}";
+    }
+
+    auto out = extract_string(params_json, "out");
+    if (!out.empty() && out.front() == '-') {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: out must be a file path, not an option\"}]}";
+    }
+
+    auto has = [&](const char* key) {
+        auto raw = extract_raw(params_json, key);
+        return !raw.empty() && raw != "null";
+    };
+    auto arg_error = [](const std::string& msg) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(msg) + "}]}";
+    };
+
+    // ── Validate every argument BEFORE creating any temp dir, so an early
+    //    rejection can't leak one. The command flags are accumulated here. ──
+    std::string flags;
+
+    // Exactly one duration source (mirrors the CLI's mutually-exclusive contract).
+    const bool has_ms = has("duration_ms");
+    const bool has_frames = has("duration_frames");
+    if (has_ms == has_frames) {
+        return arg_error("Error: pass exactly one of duration_ms / duration_frames");
+    }
+    if (has_ms) {
+        int ms = extract_int(params_json, "duration_ms", -1);
+        if (ms <= 0) return arg_error("Error: duration_ms must be a positive integer");
+        flags += " --duration-ms " + std::to_string(ms);
+    } else {
+        int fr = extract_int(params_json, "duration_frames", -1);
+        if (fr <= 0) return arg_error("Error: duration_frames must be a positive integer");
+        flags += " --duration-frames " + std::to_string(fr);
+    }
+
+    auto add_str = [&](const char* key, const char* flag) {
+        auto v = extract_string(params_json, key);
+        if (!v.empty()) flags += std::string(" ") + flag + " " + shell_quote(v);
+    };
+    add_str("format", "--format");
+    add_str("id", "--id");
+    add_str("input", "--input");
+    add_str("input_signal", "--input-signal");
+    add_str("param", "--param");   // a single id=value[@frame]; multiple → use the CLI
+    add_str("midi", "--midi");     // a single note:n,vel,on[,off]; multiple → use the CLI
+
+    auto add_int = [&](const char* key, const char* flag, int min_value) -> std::string {
+        if (has(key)) {
+            int v = extract_int(params_json, key, min_value - 1);
+            if (v < min_value)
+                return std::string("Error: ") + key + " must be an integer >= " + std::to_string(min_value);
+            flags += std::string(" ") + flag + " " + std::to_string(v);
+        }
+        return {};
+    };
+    for (auto err : {add_int("block", "--block", 1),
+                     add_int("in_channels", "--in-channels", 0),
+                     add_int("out_channels", "--out-channels", 1)}) {
+        if (!err.empty()) return arg_error(err);
+    }
+    if (has("sample_rate")) {
+        double sr = extract_double(params_json, "sample_rate", -1.0);
+        if (sr <= 0.0) return arg_error("Error: sample_rate must be positive");
+        flags += " --sample-rate " + std::to_string(sr);
+    }
+
+    // ── All args valid. Now make a private temp dir (for the metrics manifest,
+    //    and the WAV when `out` is omitted); it is cleaned on every exit below. ──
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty()) {
+        return arg_error("Error: " + temp_error);
+    }
+    const fs::path temp_dir = temp.directory;
+    if (out.empty()) out = (temp_dir / "render.wav").string();
+    const auto manifest_path = (temp_dir / "metrics.json").string();
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio render";
+    cmd += " --plugin " + shell_quote(plugin);
+    cmd += " --out " + shell_quote(out);
+    cmd += " --manifest " + shell_quote(manifest_path);
+    cmd += flags;
+    // Read the manifest from a FILE (like audio scope) so stderr — plugin load /
+    // prepare / write failures, objc warnings — can be captured via 2>&1 and
+    // surfaced on failure instead of corrupting the JSON or vanishing.
+    cmd += " 2>&1";
+    auto output = exec(cmd);
+
+    auto manifest_json = read_text_file(manifest_path);
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+
+    if (manifest_json.empty()) {
+        std::string message = "Error: pulp audio render did not write a metrics manifest";
+        if (!output.empty()) message += "\n" + output;
+        return arg_error(message);
+    }
+
+    std::string normalized_json;
+    std::string parse_error;
+    if (!normalize_structured_json(manifest_json, normalized_json, parse_error)) {
+        std::string message = "Error: " + parse_error + "\n" + manifest_json;
+        if (!output.empty()) message += "\n" + output;
+        return arg_error(message);
+    }
+    return json_tool_payload(normalized_json);
+}
+
+std::string handle_audio_compare(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+    auto arg_error = [](const std::string& msg) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(msg) + "}]}";
+    };
+
+    auto reference = extract_string(params_json, "reference");
+    auto candidate = extract_string(params_json, "candidate");
+    if (reference.empty() || candidate.empty()) {
+        return arg_error("Error: reference and candidate are required (paths to WAV files)");
+    }
+    if (reference.front() == '-' || candidate.front() == '-') {
+        return arg_error("Error: reference and candidate must be WAV paths, not options");
+    }
+
+    std::string flags;
+    auto profile = extract_string(params_json, "profile");
+    if (!profile.empty()) {
+        // Passthrough: the valid profile SET lives in the Python `_AXES` registry (surfaced as the
+        // CLI's argparse `choices`), which is the single source of truth and grows as axes are
+        // added — so this mirror is not re-edited per new axis. Guard only that it is not an
+        // option-looking string; an unknown profile is rejected downstream by the delegated CLI.
+        if (profile.front() == '-')
+            return arg_error("Error: profile must be an axis name, not an option");
+        flags += " --profile " + shell_quote(profile);
+    }
+    auto role = extract_string(params_json, "reference_role");
+    if (!role.empty()) {
+        if (role != "peer" && role != "golden")
+            return arg_error("Error: reference_role must be peer or golden");
+        flags += " --reference-role " + shell_quote(role);
+    }
+    if (auto raw = extract_raw(params_json, "threshold"); !raw.empty() && raw != "null") {
+        double t = extract_double(params_json, "threshold", -1.0);
+        // Passthrough: the VALID range is per-axis and lives in the Python registry (a
+        // dimensionless fraction in (0,1) for tonal-balance, a dB magnitude for added-hf), which
+        // is the single source of truth and rejects an out-of-range value itself. Guarding only
+        // the universal invariant here — a threshold is a finite positive magnitude
+        // (abs(delta) >= threshold) — so a valid dB threshold like 3.0 is no longer rejected by a
+        // hardcoded (0,1) fraction bound that only fits one axis.
+        if (!(std::isfinite(t) && t > 0.0))
+            return arg_error("Error: threshold must be a finite positive number");
+        // Shortest round-trippable form — std::to_string fixes 6 decimals and would
+        // silently floor a small threshold (e.g. 1e-4 → "0.000100", 1e-7 → "0.000000").
+        std::array<char, 32> buf{};
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), t);
+        if (ec != std::errc())
+            return arg_error("Error: threshold could not be formatted");
+        flags += " --threshold " + shell_quote(std::string(buf.data(), ptr));
+    }
+
+    // Always capture the structured report to a temp file and return it — the MCP
+    // caller wants the typed evidence envelope, not the human summary line.
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty()) {
+        return arg_error("Error: " + temp_error);
+    }
+    const fs::path temp_dir = temp.directory;
+    const auto report_path = (temp_dir / "compare.json").string();
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio compare";
+    cmd += " " + shell_quote(reference) + " " + shell_quote(candidate);
+    cmd += flags;
+    cmd += " --json " + shell_quote(report_path);
+    cmd += " 2>&1";  // capture the install hint / tool stderr so failures surface as text
+    auto output = exec(cmd);
+
+    auto report_json = read_text_file(report_path);
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+
+    if (report_json.empty()) {
+        // No report written → the opt-in tool is absent or could not run. Surface the
+        // captured hint/output (e.g. "Audio Quality Lab is not installed …") verbatim.
+        std::string message =
+            "Error: pulp audio compare produced no report (is the Audio Quality Lab tool "
+            "installed? `pulp tool install audio-quality-lab`)";
+        if (!output.empty()) message += "\n" + output;
+        return arg_error(message);
+    }
+
+    std::string normalized_json;
+    std::string parse_error;
+    if (!normalize_structured_json(report_json, normalized_json, parse_error)) {
+        std::string message = "Error: " + parse_error + "\n" + report_json;
+        if (!output.empty()) message += "\n" + output;
+        return arg_error(message);
+    }
     return json_tool_payload(normalized_json);
 }
 

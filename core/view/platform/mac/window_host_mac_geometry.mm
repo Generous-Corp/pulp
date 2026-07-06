@@ -146,6 +146,10 @@ pulp::view::KeyCode key_code_from_ns(unsigned short code) {
         case 21: return KC::num4; case 23: return KC::num5; case 22: return KC::num6;
         case 26: return KC::num7; case 28: return KC::num8; case 25: return KC::num9;
         case 29: return KC::num0;
+        // Musical Typing's two top keys past `p` (semitones 16/17). Without these
+        // `;` (kVK_ANSI_Semicolon=41) and `'` (kVK_ANSI_Quote=39) arrive as
+        // `unknown`, so the physical keys never trigger their on-screen slices.
+        case 41: return KC::semicolon; case 39: return KC::apostrophe;
         case 36: return KC::enter; case 53: return KC::escape;
         case 48: return KC::tab; case 51: return KC::backspace;
         case 117: return KC::delete_;

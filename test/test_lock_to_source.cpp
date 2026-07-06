@@ -676,7 +676,7 @@ TEST_CASE("lock_tweak_into_source fails gracefully on unknown anchor", "[lock-to
 }
 
 TEST_CASE("lock_tweak_into_source rejects an empty anchor id",
-          "[lock-to-source][coverage]") {
+          "[lock-to-source]") {
     const std::string gen = make_generated_source();
 
     LockResult r = lock_tweak_into_source(gen, {"", "paint.backgroundColor", "#000000"});
@@ -714,7 +714,7 @@ TEST_CASE("lock_tweak_into_source escapes single quotes in the value", "[lock-to
 }
 
 TEST_CASE("lock_tweak_into_source escapes backslashes in inserted values",
-          "[lock-to-source][coverage]") {
+          "[lock-to-source]") {
     const std::string gen = make_generated_source();
     const std::string anchor = first_child_anchor();
 
@@ -743,7 +743,7 @@ TEST_CASE("lock_tweak_into_source escapes JS control characters in values",
 }
 
 TEST_CASE("lock_tweak_into_source preserves missing trailing newline",
-          "[lock-to-source][coverage]") {
+          "[lock-to-source]") {
     const std::string src =
         "// @pulp-anchor solo\n"
         "const solo = document.createElement('div');\n"
@@ -759,7 +759,7 @@ TEST_CASE("lock_tweak_into_source preserves missing trailing newline",
 }
 
 TEST_CASE("lock_tweak_into_source stops a block at the next anchor",
-          "[lock-to-source][coverage]") {
+          "[lock-to-source]") {
     const std::string src =
         "// @pulp-anchor first\n"
         "const first = document.createElement('div');\n"
@@ -782,7 +782,7 @@ TEST_CASE("lock_tweak_into_source stops a block at the next anchor",
 }
 
 TEST_CASE("lock_tweak_into_source falls back to el when declaration is missing",
-          "[lock-to-source][coverage]") {
+          "[lock-to-source]") {
     const std::string src =
         "// @pulp-anchor orphan\n"
         "setAnchor(orphan._id, 'orphan');\n";
@@ -795,7 +795,7 @@ TEST_CASE("lock_tweak_into_source falls back to el when declaration is missing",
 }
 
 TEST_CASE("lock_tweak_into_source appends when no tail call is present",
-          "[lock-to-source][coverage]") {
+          "[lock-to-source]") {
     const std::string src =
         "// @pulp-anchor solo\n"
         "const solo = document.createElement('div');\n"

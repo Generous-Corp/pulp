@@ -427,7 +427,7 @@ TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions
 }
 
 TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
-          "[host][serializer][migration][coverage]") {
+          "[host][serializer][migration]") {
     REQUIRE(GraphSerializer::current_format_version() == 2);
     REQUIRE_FALSE(GraphSerializer::register_migration(
         2, 2,
@@ -452,7 +452,7 @@ TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
 }
 
 TEST_CASE("GraphSerializer rejects non-integer and out-of-range graph versions",
-          "[host][serializer][migration][coverage]") {
+          "[host][serializer][migration]") {
     SignalGraph string_version;
     auto string_result = GraphSerializer::from_json(string_version, R"({
   "format_version": "2",
@@ -475,7 +475,7 @@ TEST_CASE("GraphSerializer rejects non-integer and out-of-range graph versions",
 }
 
 TEST_CASE("GraphSerializer reports broken graph migration outputs",
-          "[host][serializer][migration][coverage]") {
+          "[host][serializer][migration]") {
     REQUIRE(GraphSerializer::register_migration(
         -20, GraphSerializer::current_format_version(),
         [](const std::string&, std::string&) {
@@ -1201,7 +1201,7 @@ TEST_CASE("GraphSerializer resolves custom nodes by exact registry version",
 }
 
 TEST_CASE("GraphSerializer preserves unresolved custom nodes when registered ABI mismatches",
-          "[host][serializer][node-abi][coverage]") {
+          "[host][serializer][node-abi]") {
     SignalGraph src;
     REQUIRE(src.register_custom_node_type(make_custom_node_type(
         "pulp.test.mismatched-node", 7, 2, 1, "Wide Node")));
@@ -1267,7 +1267,7 @@ TEST_CASE("GraphSerializer serializes plugin formats and state blobs",
 }
 
 TEST_CASE("GraphSerializer serializes short plugin state blobs with stable padding",
-          "[host][serializer][coverage]") {
+          "[host][serializer]") {
     SignalGraph src;
     auto one_byte = make_fake_plugin_info("OneByteState", "pulp.test.state.one",
                                           PluginFormat::CLAP, 1, 1);
@@ -1407,7 +1407,7 @@ TEST_CASE("GraphSerializer clears partially loaded graphs after plugin field err
 }
 
 TEST_CASE("GraphSerializer reports plugin nodes missing plugin payload",
-          "[host][serializer][coverage]") {
+          "[host][serializer]") {
     SignalGraph dst;
     auto result = GraphSerializer::from_json(dst, R"({
   "format_version": 1,
@@ -1474,7 +1474,7 @@ TEST_CASE("GraphSerializer reports plugin nodes missing plugin payload",
 }
 
 TEST_CASE("GraphSerializer defaults missing gain and coerces non-numeric layout to zero",
-          "[host][serializer][coverage]") {
+          "[host][serializer]") {
     SignalGraph dst;
     auto result = GraphSerializer::from_json(dst, R"({
   "format_version": 2,

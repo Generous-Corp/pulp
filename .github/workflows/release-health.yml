@@ -45,6 +45,7 @@ env:
 
 jobs:
   release-health:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history + tags)

@@ -86,6 +86,9 @@ set(PULP_JS_PRELUDES
     # + _applyProperty prototype method are in scope when the IIFE
     # walks the property list and installs reflection.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
+    # Browser-shaped Element.animate() shim. Loaded after Element,
+    # event helpers, and style reflection; resolves rAF lazily at play time.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-animation.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
     # CSS selector engine. Loaded AFTER the parent so document + Element
     # are in scope when underscore-prefixed selector helpers are
@@ -364,6 +367,8 @@ target_sources(pulp-view-core PRIVATE
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
     src/view.cpp
+    src/continuous_frames.cpp
+    src/host_param_surface.cpp
     src/yoga_layout.cpp
     src/layout_snapshot.cpp
     src/widgets.cpp
@@ -390,6 +395,10 @@ target_sources(pulp-view-core PRIVATE
     src/app_framework.cpp
     src/canvas_widget.cpp
     src/design_frame_view.cpp
+    src/svg_fragment.cpp
+    src/callout_box.cpp
+    src/reorder_list.cpp
+    src/control_painters.cpp
     src/svg_path_widget.cpp
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp

@@ -538,6 +538,32 @@ theme are redistributed in the generated docs site (generouscorp.com/pulp/).
 
 ---
 
+## Moonbase
+
+Copyright (c) 2026 Moonbase AS
+
+MIT License
+
+https://github.com/Moonbase-sh/moonbase-cpp
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+The `moonbase-cpp` header-only license-activation SDK. Fetched via
+FetchContent only when a developer opts into the Moonbase integration
+(`pulp add moonbase`); not part of Pulp's default dependency chain. Used by
+the `examples/moonbase-activation/` reference plugin. See
+`docs/guides/copyright-protection.md`.
+
+---
+
 ## msdfgen
 
 Copyright (c) 2016-2024 Viktor Chlumský
@@ -1024,8 +1050,8 @@ Apache License, Version 2.0
 
 https://github.com/google-labs-code/design.md
 
-Upstream pin: tag `0.1.1` (commit `6589f05166473ddc54ca01a615254a673add492c`,
-published 2026-04-21). Update this pin together with `compat.json`'s
+Upstream pin: tag `0.3.0` (commit `2a19f5dd97ab887971b417ebdf1e7e8fda0c7f79`,
+published 2026-06-15). Update this pin together with `compat.json`'s
 `imports.designmd.detected-formats[].format-version` and the upstream
 attribution in `docs/reference/licensing.md` whenever the format spec
 moves to a new tag.
@@ -1037,7 +1063,7 @@ reimplemented in C++; no upstream source code is vendored. One
 example file from the upstream `examples/paws-and-paths/` directory
 is redistributed verbatim under this license as the test fixture
 `test/fixtures/imports/designmd/alpha/DESIGN.md` (byte-identical to
-the upstream copy at tag `0.1.1`).
+the upstream copy at tag `0.3.0`).
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

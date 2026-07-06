@@ -146,9 +146,9 @@ bool write_wav_file(const std::string& path, const AudioFileData& data,
         choc::audio::AudioFileProperties props;
         props.sampleRate = data.sample_rate;
         props.numChannels = data.num_channels();
-        props.bitDepth = bit_depth == WavBitDepth::Float32
-                             ? choc::audio::BitDepth::float32
-                             : choc::audio::BitDepth::int16;
+        props.bitDepth = bit_depth == WavBitDepth::Float32 ? choc::audio::BitDepth::float32
+                       : bit_depth == WavBitDepth::Int24   ? choc::audio::BitDepth::int24
+                                                           : choc::audio::BitDepth::int16;
 
         auto writer = wav.createWriter(std::filesystem::path(path), props);
         if (!writer) return false;

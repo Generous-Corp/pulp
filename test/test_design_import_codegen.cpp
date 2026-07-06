@@ -150,6 +150,7 @@ TEST_CASE("generate_pulp_cpp emits a DesignFrameView for a faithful_svg node",
     knob.cx = 50.0f; knob.cy = 60.0f; knob.hit_radius = 20.0f;
     knob.svg_patch_d = "M0 0 L1 1";
     knob.default_value = 0.25f;
+    knob.param_key = "osc.shape";   // host-param binding key (geometry-detected control)
     ir.root.interactive_elements.push_back(knob);
 
     IRInteractiveElement dd;
@@ -179,6 +180,10 @@ TEST_CASE("generate_pulp_cpp emits a DesignFrameView for a faithful_svg node",
     REQUIRE(result.source.find("el.needle_d = \"M0 0 L1 1\"") != std::string::npos);
     REQUIRE(result.source.find("el.options = {") != std::string::npos);
     REQUIRE(result.source.find("el.selected_index = 1;") != std::string::npos);
+    // The knob's host-param binding key is emitted, and the frame self-wires
+    // gestures to the host-param surface (parity with make_faithful_svg_frame).
+    REQUIRE(result.source.find("el.param_key = \"osc.shape\";") != std::string::npos);
+    REQUIRE(result.source.find("route_changes_to_host_params(true);") != std::string::npos);
 }
 
 TEST_CASE("generate_pulp_cpp falls back to native widgets when a faithful_svg asset is unresolved",
@@ -311,6 +316,8 @@ TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large
     REQUIRE(result.source.find("DesignFrameElement::Kind::custom") != std::string::npos);  // Tier-3
     REQUIRE(result.source.find("el.factory_id = \"acme.spinner\"") != std::string::npos);  // factory id
     REQUIRE(result.source.find("el.custom_props = ") != std::string::npos);                // opaque props
+    // No element carries a param_key here, so no host-param routing is wired.
+    REQUIRE(result.source.find("route_changes_to_host_params") == std::string::npos);
     // The base64 embed spans multiple chunk literals (the chunk loop ran > once):
     // each interior chunk ends with a `",` line, so at least one is present.
     REQUIRE(result.source.find("\",") != std::string::npos);
@@ -1124,7 +1131,7 @@ TEST_CASE("parse_figma_json parses IR format", "[view][import]") {
 }
 
 TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
-          "[view][import][coverage]") {
+          "[view][import]") {
     auto json = R"json({
         "type": "frame",
         "name": "Rack",
@@ -1891,7 +1898,7 @@ TEST_CASE("generate_pulp_js respects CodeGenOptions", "[view][import]") {
 }
 
 TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget edge branches",
-          "[view][import][coverage]") {
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::pencil;
     ir.root.type = "frame";
@@ -1998,7 +2005,7 @@ TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget
 }
 
 TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
-          "[view][import][coverage]") {
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::v0;
     ir.root.type = "frame";

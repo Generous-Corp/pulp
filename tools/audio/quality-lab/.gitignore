@@ -6,3 +6,7 @@ report.json
 *.report.json
 corpus_runs/
 .pytest_cache/
+# build artifacts from `pip install .` / `pulp tool install audio-quality-lab`
+*.egg-info/
+build/
+dist/

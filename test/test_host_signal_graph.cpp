@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -372,7 +373,7 @@ TEST_CASE("SignalGraph custom node registrations invalidate matching snapshots",
 }
 
 TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "Input");
     auto gain = graph.add_gain_node("Gain");
@@ -812,6 +813,201 @@ TEST_CASE("SignalGraph release waits for in-flight snapshot process",
 
     REQUIRE(release_called.load(std::memory_order_acquire));
     REQUIRE_FALSE(release_during_process.load(std::memory_order_acquire));
+}
+
+TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
+          "[host][graph][race][rt-safety][tsan]") {
+    // The control-thread snapshot readers (inject_midi / extract_midi /
+    // node_latency_samples / set_node_gain) load live_raw_ and dereference the
+    // CompiledGraph (cg->runtime / cg->shapes / per-runtime gain atomic). They
+    // run on a different thread than prepare()/release(), so they must pin the
+    // snapshot via the same reader-count handshake the audio path uses;
+    // otherwise a concurrent prepare()/release()/invalidate can retire+free the
+    // snapshot mid-dereference (use-after-free). The reader thread below touches
+    // ONLY the frozen snapshot (never the control-owned nodes_/connections_
+    // vectors), so the only cross-thread sharing under test is the snapshot
+    // lifetime — exactly what ProcessReadGuard protects. The retirer churns
+    // snapshots via prepare()/release()/topology edits. Definitive proof is
+    // under ThreadSanitizer: without the guards TSan flags a UAF on the retired
+    // CompiledGraph; with them it is clean.
+    //
+    // Note: set_node_gain ALSO writes the control-owned GraphNode::gain scalar
+    // and scans nodes_, which is a separate control-thread-vs-prepare ordering
+    // concern (a real host serializes structural edits against prepare) and is
+    // out of scope for the snapshot-lifetime fix. To keep this test focused on
+    // the snapshot UAF, set_node_gain's snapshot store is exercised separately
+    // below rather than raced against prepare()'s nodes_ read.
+    SignalGraph graph;
+    auto in   = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out  = graph.add_output_node(1, "out");
+    auto mi   = graph.add_midi_input_node("keys");
+    auto mo   = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.connect_midi(mi, mo));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    // set_node_gain's snapshot half (the per-runtime gain atomic store) is
+    // pinned by ProcessReadGuard; cover it directly so all four methods are
+    // represented even though it is not raced against prepare() below.
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+
+    pulp::midi::MidiBuffer in_events;
+    auto note = pulp::midi::MidiEvent::note_on(0, 60, 100);
+    note.sample_offset = 0;
+    in_events.add(note);
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> saw_crash{false};
+    std::atomic<long> reader_iterations{0};
+    std::atomic<long> retire_iterations{0};
+
+    // Reader thread: continuously dereference the live snapshot through the
+    // three pure-snapshot readers. None must crash or read freed memory while
+    // the retirer churns snapshots underneath them.
+    std::thread reader_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.inject_midi(mi, in_events);
+            pulp::midi::MidiBuffer arrived;
+            graph.extract_midi(mo, arrived);
+            const int latency = graph.node_latency_samples(gain);
+            if (latency < 0) saw_crash.store(true, std::memory_order_relaxed);
+            reader_iterations.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    // Retirer thread: force snapshot retirement + free. prepare() retires the
+    // previous snapshot; a topology edit invalidates+retires the live one;
+    // release() retires and waits. Each prune frees the retired CompiledGraph,
+    // which would dangle the reader's loaded pointer absent the guard.
+    std::thread retirer_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.prepare(48000.0, 64);
+            graph.disconnect(gain, 0, out, 0);
+            graph.connect(gain, 0, out, 0);
+            graph.release();
+            graph.prepare(48000.0, 64);
+            retire_iterations.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    reader_thread.join();
+    retirer_thread.join();
+
+    REQUIRE_FALSE(saw_crash.load(std::memory_order_relaxed));
+    REQUIRE(reader_iterations.load(std::memory_order_relaxed) > 0);
+    REQUIRE(retire_iterations.load(std::memory_order_relaxed) > 0);
+}
+
+TEST_CASE("SignalGraph control-thread node-field edits serialize against prepare",
+          "[host][graph][race][rt-safety][tsan]") {
+    // Companion to the snapshot-lifetime test above, which deliberately left the
+    // control-thread GraphNode-field race out of scope (see its note). The race
+    // closed here is between two CONTROL threads — never the audio thread:
+    //   * a UI thread mutating control-owned source-of-truth state —
+    //     set_node_gain() writes the plain GraphNode::gain scalar and scans nodes_
+    //     via node(); add_gain_node()/add_input_node()/add_plugin_node()/
+    //     remove_node()/connect()/disconnect() push/erase nodes_/connections_;
+    //   * a host thread calling prepare() -> compile_(), which iterates nodes_ /
+    //     connections_ and reads GraphNode::gain (signal_graph.cpp, `rt.gain =
+    //     ... n.gain`) plus validate_generated_graph()'s nodes_/connections_ scan.
+    // These touch the plain nodes_/connections_ vectors + GraphNode plain fields,
+    // which the ProcessReadGuard snapshot pin does NOT protect (that pins the
+    // compiled snapshot, not the source GraphNode). Without graph_mutation_mutex_
+    // this is a data race; with it the accesses are serialized. The audio render
+    // path is intentionally absent: it reads only the immutable CompiledGraph
+    // snapshot, never nodes_/GraphNode fields, so it takes no lock here.
+    //
+    // Thread A churns a spread of mutators — set_node_gain (GraphNode::gain),
+    // add_gain_node/add_input_node/add_plugin_node + remove_node (nodes_
+    // push/erase), and a connect/disconnect toggle (connections_) — so the race
+    // coverage is not limited to add_gain_node/remove_node. Proof is under
+    // ThreadSanitizer: reverting the locks reports write/read data races on the
+    // nodes_/connections_ vector storage and GraphNode::gain; with the locks the
+    // run is clean.
+    SignalGraph graph;
+    auto in   = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out  = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> all_gain_ok{true};
+    std::atomic<int> destroyed{0};  // for the churned plugin nodes
+    std::atomic<long> mutate_iterations{0};
+    std::atomic<long> prepare_iterations{0};
+
+    // Thread A — control-thread topology + node-field mutator. Each iteration
+    // exercises a different previously-unlocked surface so the test catches the
+    // broad mutator gap, not just add_gain_node/remove_node:
+    //   * set_node_gain  -> GraphNode::gain write + node() scan
+    //   * add_input_node / add_gain_node / add_plugin_node(unique_ptr) ->
+    //     nodes_.push_back on three distinct add paths
+    //   * remove_node    -> nodes_/connections_ erase
+    //   * connect/disconnect -> connections_ push/erase + node() scan
+    // The scratch nodes are added then removed so the graph size stays bounded
+    // while nodes_ is mutated under compile_()'s iteration.
+    std::thread mutate_thread([&] {
+        long i = 0;
+        while (!stop.load(std::memory_order_acquire)) {
+            const float g = static_cast<float>(i % 17) / 16.0f;
+            if (!graph.set_node_gain(gain, g)) {
+                all_gain_ok.store(false, std::memory_order_relaxed);
+            }
+            // Rotate across the previously-unlocked add_* paths.
+            NodeId scratch = 0;
+            switch (i % 3) {
+            case 0: scratch = graph.add_gain_node("scratch"); break;
+            case 1: scratch = graph.add_input_node(1, "scratch-in"); break;
+            case 2:
+                scratch = graph.add_plugin_node(
+                    std::make_unique<LifetimeTrackedPlugin>(destroyed),
+                    1, 1, "scratch-plugin");
+                break;
+            }
+            // connections_ churn: briefly wire the scratch node, then tear it down.
+            graph.connect(scratch, 0, out, 0);
+            graph.disconnect(scratch, 0, out, 0);
+            graph.remove_node(scratch);
+            mutate_iterations.fetch_add(1, std::memory_order_relaxed);
+            ++i;
+            if ((i % 64) == 0) std::this_thread::yield();
+        }
+    });
+
+    // Thread B — host prepare()/compile_() loop. compile_() reads GraphNode::gain
+    // and iterates nodes_; this is the read side of the race.
+    std::thread prepare_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.prepare(48000.0, 32);
+            prepare_iterations.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    mutate_thread.join();
+    prepare_thread.join();
+
+    REQUIRE(all_gain_ok.load(std::memory_order_relaxed));
+    REQUIRE(mutate_iterations.load(std::memory_order_relaxed) > 0);
+    REQUIRE(prepare_iterations.load(std::memory_order_relaxed) > 0);
+    graph.release();
 }
 
 TEST_CASE("SignalGraph retired snapshots do not own removed plugins",
@@ -1341,7 +1537,7 @@ TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing
 }
 
 TEST_CASE("SignalGraph rejects audio connections with invalid ports",
-          "[host][graph][routing][coverage]") {
+          "[host][graph][routing]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto gain = graph.add_gain_node("gain");
@@ -1476,7 +1672,7 @@ private:
 } // namespace
 
 TEST_CASE("SignalGraph prepare failure leaves process output silent",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto plugin = graph.add_plugin_node(std::make_unique<PrepareFailPlugin>(),
@@ -1503,7 +1699,7 @@ TEST_CASE("SignalGraph prepare failure leaves process output silent",
 }
 
 TEST_CASE("SignalGraph process silences oversized blocks",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1526,7 +1722,7 @@ TEST_CASE("SignalGraph process silences oversized blocks",
 }
 
 TEST_CASE("SignalGraph process ignores non-positive block sizes",
-          "[host][graph][coverage]") {
+          "[host][graph]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto output = graph.add_output_node(1, "out");
@@ -1550,7 +1746,7 @@ TEST_CASE("SignalGraph process ignores non-positive block sizes",
 }
 
 TEST_CASE("SignalGraph clears stale audio input channels",
-          "[host][graph][routing][coverage]") {
+          "[host][graph][routing]") {
     SignalGraph graph;
     auto input = graph.add_input_node(2, "in");
     auto gain = graph.add_gain_node("gain");
@@ -1587,7 +1783,7 @@ TEST_CASE("SignalGraph clears stale audio input channels",
 }
 
 TEST_CASE("SignalGraph placeholder plugin nodes preserve identity and clear extra outputs",
-          "[host][graph][routing][coverage]") {
+          "[host][graph][routing]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     PluginInfo missing = make_plugin_info("Missing CLAP", 1, 2);
@@ -2226,7 +2422,7 @@ TEST_CASE("SignalGraph MIDI sidecar drops are caller-visible",
 }
 
 TEST_CASE("SignalGraph MIDI injection and extraction require a live node runtime",
-          "[host][graph][midi][coverage]") {
+          "[host][graph][midi]") {
     SignalGraph graph;
     auto midi_in = graph.add_midi_input_node("keys");
     auto midi_out = graph.add_midi_output_node("thru");
@@ -2794,7 +2990,7 @@ TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
 }
 
 TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
-          "[host][graph][automation][coverage]") {
+          "[host][graph][automation]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1);
     auto out_node = graph.add_output_node(1);
@@ -2815,7 +3011,7 @@ TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
 }
 
 TEST_CASE("SignalGraph automation rejects non-writable params and cycle edges",
-          "[host][graph][automation][coverage]") {
+          "[host][graph][automation]") {
     SignalGraph graph;
     auto source = graph.add_input_node(1, "source");
     auto passthrough = graph.add_gain_node("passthrough");
@@ -2846,7 +3042,7 @@ TEST_CASE("SignalGraph automation rejects non-writable params and cycle edges",
 }
 
 TEST_CASE("SignalGraph automation clamps add-mode and stored smoothing",
-          "[host][graph][automation][coverage]") {
+          "[host][graph][automation]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1, "in");
     auto slot = std::make_unique<MockAutomatable>();
@@ -2945,7 +3141,7 @@ TEST_CASE("SignalGraph connect_audio_rate_modulation gates on audio-rate params"
 }
 
 TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cycle edges",
-          "[host][graph][automation][audio-rate][coverage]") {
+          "[host][graph][automation][audio-rate]") {
     SignalGraph graph;
     auto source = graph.add_input_node(1, "source");
     auto passthrough = graph.add_gain_node("passthrough");
@@ -3115,7 +3311,7 @@ TEST_CASE("SignalGraph audio-rate add modulation clamps independent of edge orde
 }
 
 TEST_CASE("SignalGraph audio-rate replace and add modulation clamp to parameter bounds",
-          "[host][graph][automation][audio-rate][coverage]") {
+          "[host][graph][automation][audio-rate]") {
     SignalGraph graph;
     auto in_node = graph.add_input_node(1, "in");
     auto slot = std::make_unique<MockAutomatable>(

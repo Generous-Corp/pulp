@@ -1,67 +1,246 @@
 # Audio Quality Lab
 
-The Audio Quality Lab is a perception-aware, **offline** developer/CI tool that lets
-an agent (not just a human ear) detect subtle DSP artifacts — transient smear, seam
-clicks, timing drift — that today require an A/B listen. It is the rigor upgrade that
-sits *beside* the basic A/B tooling (`examples/offline-stretch/eval/`,
-`pulp audio validate`); the basics keep working with zero new dependencies.
+The Audio Quality Lab answers one question automatically: **did a DSP change make a sound
+*worse* — and where?** It compares a candidate render against a reference and reports, per
+artifact (transient smear, dulling, metallic sizzle, graininess, …), whether the candidate
+degraded and the timestamp where it's worst.
 
-It is a **developer/CI tool, not an end-user plugin feature** — it never links into the
-MIT core or a shipped plugin (FFT/analysis stays tool-side). Full design lives in the
-private planning doc `2026-06-26-audio-quality-lab-perceptual-harness.md`.
+**Why it exists.** The hardest audio bugs gate on a human A/B listen — “the stretch sounds
+a bit crunchy now” — which peak/RMS/clip checks miss entirely and which no one wants to
+re-listen for on every change. The lab turns those judgments into objective, localized,
+testable signals so an **agent or CI can hear a regression** and fail a test, instead of a
+person catching it three commits later. It is perception-aware: targeted DSP detectors at
+the core, with optional perceptual models and an optional review model layered on top.
 
-## Who it's for
+> **This is a developer / CI tool, not an end-user plugin feature.** It is offline, opt-in,
+> and never links into the MIT core or a shipped plugin — the FFT/analysis stays tool-side,
+> and Pulp's basic audio tests keep working with zero new dependencies. It's for people
+> **tuning Pulp's own DSP** (and the agents doing it) and for **developers building on
+> Pulp** who want the same “did this get worse?” guardrail on their own sounds.
 
-- **Pulp's own DSP tuning** (and agents doing it) — close the A/B loop without a human
-  listening on every iteration.
-- **Plugin/app developers building on Pulp** — fine-tune or regression-guard *your own*
-  sounds with the same "did this change make it sound worse?" answer.
+## Install (opt-in)
 
-## Status — P0a (proving the architecture)
-
-The first slice proves the pipeline end to end on a synthetic drum break:
-
-```
-generate → level-match → onset-map align → transient-sharpness detector → report.json
-```
-
-The gate it had to pass: **localize** a known transient smear (within ±20 ms) AND stay
-**quiet** on an identity render. It does, and — crucially — the transient detector is
-validated **non-circularly** against an *independent* textbook phase vocoder
-(`reference_pv.py`), firing hard (scalar ≈ 1.0) on real PV attack smear. That is
-evidence it catches the real documented artifact, not a kernel matched to itself.
-
-## Install + run (opt-in)
+Managed install — provisions an isolated venv under `~/.pulp/tools/`, the same
+[`pulp tool`](../reference/extending-pulp.md) lane as `ffmpeg`/`uv`:
 
 ```bash
-cd tools/audio/quality-lab
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt          # numpy + soundfile (permissive); pytest to test
-
-python -m quality_lab.cli run-p0a --mode bad   # smeared candidate → FIRES + localizes
-python -m quality_lab.cli run-p0a --mode good  # identity render   → CLEAN
-pytest tests/ -q
+pulp tool install audio-quality-lab          # needs a Pulp source checkout + network (numpy/soundfile)
+pulp tool run audio-quality-lab -- run --case drum --degradation smear
 ```
 
-The lab's pytest suite is intentionally **not** wired into the default `ctest` — the
-lab's dependencies are opt-in and basic testing stays dependency-free.
+Or a plain checkout: `cd tools/audio/quality-lab && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`, then `python -m quality_lab.cli <args>`.
 
-## How it stays trustworthy
+## Try it in a minute
 
-- **Level-match first** — every comparison normalizes candidate RMS to the reference
-  (the skill's rule #1) so loudness never decides an A/B.
-- **Alignment before detection** — reference and candidate differ in length/latency;
-  an onset map (and local cross-correlation) aligns them before any detector runs.
-- **Coverage/confidence** — each detector reports how many onsets it actually measured;
-  a "clean" verdict with low coverage reads `UNCERTAIN`, never a silent pass.
-- **Provenance** — each report records the engine commit, recipe, and determinism
-  context so a good-sounding render is re-derivable ("same recipe" tier).
+```bash
+# 1. Score a synthetic case (degrade a drum break, see which detectors fire + where)
+python -m quality_lab.cli run --case drum  --degradation smear --out-dir out
+python -m quality_lab.cli run --case tonal --degradation grainy
+
+# 2. Point it at the REAL Pulp stretch engine (needs a built stretchcli, below)
+python -m quality_lab.cli engine --ratio 2.0 --character clean
+python -m quality_lab.cli engine --input yourfile.wav --character varispeed   # any WAV
+
+# 3. Regression gate: did an engine change make it worse than the committed baseline?
+python -m quality_lab.cli engine-baseline
+
+# 4. Agent-facing before/after judgment over two WAVs (advisory; not a gate)
+python -m quality_lab.cli compare before.wav after.wav --profile tonal-balance --json report.json
+python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --reference-role golden
+```
+
+`compare` is the agent-facing **measure → compare → judge** surface: it level-matches, runs one
+curated **axis** (selected by `--profile`), and returns a typed evidence envelope plus an
+action-oriented verdict (`regression_suspected` / `material_change_detected` /
+`no_material_change_detected` / `inconclusive` / `invalid`). Five axes today, all global and
+alignment-free:
+
+| `--profile` | axis | measures | bad direction (regression vs a golden reference) |
+|-------------|------|----------|--------------------------------------------------|
+| `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift (brighter/duller) | **duller** |
+| `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | **added HF fizz** |
+| `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | **rougher / noisier** |
+| `graininess` | `graininess` | relative spectral-flux increase | **grainier** |
+| `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | **narrower / collapsed** |
+
+`noise-roughness` and `graininess` are meaningful on tonal/sustained material — that is a
+caller-declared contract (you pick the profile), surfaced as a standing caveat in the summary
+rather than an automatic tonal/percussive classifier. `stereo-width` is the one axis that reads the
+**original 2-channel** signal (every other axis mean-downmixes to mono); mono input on either side
+is `not_applicable`, and a candidate whose interchannel correlation goes negative is flagged as out
+of phase (mono-incompatible) in the summary.
+
+Each axis carries its own materiality default (`--threshold` overrides). Adding an axis is one
+registry entry (`_AXES` in `compare.py`) — the shared machinery does the level-matching,
+applicability, materiality, and intent-safe verdict. `compare` is **intent-safe** —
+`regression_suspected` needs `--reference-role golden` AND a change in the axis's bad direction —
+and **advisory**: it exits non-zero only when it couldn't measure, never for a judgment. So an
+agent tuning DSP can weigh in on a change with cited evidence instead of a bare pass/fail.
+
+### Golden-render regression net (the daily-driver loop)
+
+Once you have `compare`, the highest-value thing to stand up is a **golden-render regression net**:
+keep a known-good ("golden") render per plugin/preset, render the candidate after a DSP change, and
+`compare` across every wired axis — attaching a cited, multi-axis verdict to the change.
+
+```bash
+# 1. render the candidate from the changed plugin (shipped CLI; any format/backend)
+pulp audio render --plugin build/MyEffect.vst3 --preset plate --in dry.wav --out cand/plate.wav
+
+# 2. run the net over a manifest of before/after pairs
+python -m quality_lab.cli regression-net --manifest net.json --json results.json
+```
+
+`net.json` lists the pairs (paths resolve relative to the manifest, so a suite commits a portable
+net):
+
+```json
+{
+  "reference_role": "golden",
+  "profiles": ["tonal-balance", "added-hf", "noise-roughness", "graininess"],
+  "pairs": [
+    {"name": "plate-reverb", "golden": "golden/plate.wav", "candidate": "cand/plate.wav"},
+    {"name": "saturator",    "golden": "golden/sat.wav",   "candidate": "cand/sat.wav"}
+  ]
+}
+```
+
+**Fail policy (the contract):** the *fail* signal keys off axis verdicts only — the net returns
+**exit 1** when (and only when) an axis reports `regression_suspected`. A pair that could not be
+measured (a missing/corrupt render → `invalid`, or a malformed manifest) is a broken pipeline, not
+a judgment, and returns a **distinct exit 2** so a missing render is never greenlit as clean;
+**exit 0** means every pair was measured and nothing regressed. The corroboration column is
+**informational and never affects the exit code** —
+because the modulated family (chorus / phaser / flanger / vibrato / tremolo / ring-mod) is
+time-variant, so its phase-sensitive sample-domain residual reads `not_corroborated` forever (a
+known, machine-suppressible false alarm — the `uncaptured_material_difference` headline flag carries
+`expected_for: ["time_variant_processing"]`). Gating **proper** stays `pulp audio validate compare`;
+this net is advisory reporting attached to a change, not a gate by accretion. The runner script for a
+specific plugin suite (e.g. `pulp-classic-effects`) lives with the plugins; `quality_lab.regression_net`
+is the reusable reference the suite wires its renders into.
+
+**Per-plugin applicability** — read the change class, not the backend (`compare` measures any render
+identically, CPU or GPU):
+
+| Change under test | Through the net? | Notes |
+|-------------------|------------------|-------|
+| Timbral (EQ / filter / saturation / amp-NAM / reverb tone / comp tone) | ✅ directly valid | the validated sweet spot — all four axes apply |
+| Modulated (chorus / phaser / flanger / tremolo / ring-mod) | ✅ valid; corroboration will read `not_corroborated` (expected, informational) | time-variant; the axis verdict is what matters |
+| bendr time-stretch — **fixed-ratio** A/B ("did my stretch *algorithm* get worse?") | ✅ valid | same ratio, so the renders are time-aligned |
+| bendr ratio changes / tempo-sampler **offsets** | ⚠ engine path, not this net | the candidate is time-misaligned; the null-residual flags the shift as a false alarm for "did the *tone* change?" — use the lab's reference-free engine path (or the deferred alignment axis) |
+| Stereo width / imaging (widener / panner / M-S / collapse) | ✅ via `stereo-width` (opt-in) | add `"stereo-width"` to the manifest's `profiles`; it reads the 2-channel signal and flags a collapse or an out-of-phase candidate. The mono default profiles skip it |
+
+`engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
+harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build
+--target stretchcli`); the lab finds it via `PULP_STRETCHCLI` or by walking up from your
+checkout. Without it those commands `skip` with an actionable message — nothing else needs
+it. Each run flows through pure stages — `generate/load → level-match → align → detect →
+report.json` — so loudness never decides an A/B and length/latency differences are aligned
+out before any detector runs.
+
+## What it detects (stable)
+
+These detectors are validated and **count toward the verdict and the regression gate**:
+
+| Detector | Catches | Material |
+|----------|---------|----------|
+| `transient_sharpness` | percussion attack smear (“compressed” drums) | percussive |
+| `spectral_centroid` | brightness loss / dulling | any |
+| `hf_fizz` | added metallic high-frequency sizzle | any |
+| `spectral_flux` | graininess / temporal instability | sustained |
+| `hnr` | added noise / roughness (tonal purity loss) | sustained |
+| `stereo_width` | stereo-image collapse / phase damage | stereo |
+
+Each fires on its own artifact and stays quiet on the others and on an identity render.
+They're validated **non-circularly** — against synthetic degradations, an independent
+textbook phase vocoder, *and* the real Pulp stretch engine — which is why they're trusted
+to gate. (`stereo_width` operates on `(N,2)` arrays directly; the rest run through the mono
+pipeline. Full list + module map: [`README.md`](https://github.com/danielraffel/pulp/blob/main/tools/audio/quality-lab/README.md).)
+
+## Maturity — how a feature earns the right to gate
+
+Every detector (and the optional layers below) carries a **`maturity`**, and that single
+field decides whether it can affect a pass/fail:
+
+| State | Counts toward `verdict`? | In the regression gate? | What it's for |
+|-------|:---:|:---:|---|
+| **`experimental`** | no (advisory) | no | a new, unproven signal — runs and reports under the report's `advisory` block so you can eyeball it while tuning, but it **cannot fail a build** |
+| **`beta`** | yes | no | trusted enough to call a verdict, not yet to freeze a baseline against |
+| **`stable`** | yes | yes | proven; participates everywhere |
+
+**This is the safety mechanism that lets us add unproven “ears” without risk:** an
+`experimental` detector that misfires changes nothing that matters. **It also tells you how
+to read a result** — a FIRED line marked `(advisory:experimental)` is a hint to investigate,
+not a regression. A feature **graduates** only when it clears the validation bar documented
+with it (a calibration sweep, an answer-key agreement score, a false-positive sweep) — never
+on vibes. Promotion is a one-line `maturity` change once the evidence is in.
+
+## Experimental & advisory features
+
+Useful but not yet proven — all **off the gate**, all developer-opt-in.
+
+**`onset_drift`** — timing / groove drift (the axis no other detector covers: a hit landing
+a few ms early/late while every spectral check reads clean). Runs on the percussive case;
+try it via `run --case drum`. *Honest state:* the metric (event-time residual after removing
+the common latency) recovers an injected drift to ~0.3 ms in calibration — far better than
+the earlier approach, which was deferred for being unreliable — but it's percussive-only and
+loses accuracy past a ~12 ms drift (it reports `UNCERTAIN` rather than guess). *Graduates to
+beta when:* the real-engine negative control + a false-positive sweep across tempos/seeds
+pass.
+
+**Perceptual models** — a coarse, full-reference “is it perceptually worse overall” guard,
+complementary to the localized detectors. Each is opt-in via its **own** env-path, never
+bundled, and skips independently when absent — so you enable any subset (or all) just by
+which env-paths you set, and public CI (none set) skips the whole layer:
+[ViSQOL](https://github.com/google/visqol) (`PULP_VISQOL_BIN`, MOS-LQO),
+[PEAQ](https://en.wikipedia.org/wiki/PEAQ) (`PULP_PEAQ_BIN`, ITU-R BS.1387 ODG), and
+[AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) (`PULP_AQUATK_BIN`, PEAQ-family ODG). GPL
+tools stay developer-local. Advisory only. This layer is deliberately **full-reference,
+music/general-audio**: speech-intelligibility metrics (PESQ, POLQA) and no-reference
+neural speech metrics (DNSMOS, NISQA) are out of scope — they’re band-limited or tuned to
+speech and don’t fit the reference-vs-candidate contract on musical material.
+
+**MIR structural oracle (aubio)** — a *separate*, advisory cross-check, not a quality
+metric. [aubio](https://github.com/aubio/aubio) (`PULP_AUBIO_BIN`, GPL-3.0,
+developer-local) is a feature extractor, not a MOS predictor, so it does not sit beside
+the perceptual models above. It gives an **independent** second opinion on onset/timing
+structure (surfaced under the report’s `advisory.mir_oracles` block) — useful for
+non-circularly validating the experimental `onset_drift` detector. Never a gate, never a
+committed baseline.
+
+**Advisory reviewer** — a model reads the report (+ optional clips) and names what sounds
+wrong in plain language, catching novel/compound artifacts no fixed detector encodes.
+Bring-your-own model: point `PULP_QLAB_REVIEWER_CMD` at any subprocess that reads
+`{report, assets}` JSON and returns `{summary, suspected_artifacts, confidence}`; run with
+`run --review`. *Honest state:* **never a gate** (a confidently-wrong model can't fail a good
+change), no network or audio leaves your machine unless your provider chooses to, and it's
+unvalidated until you measure it. *Graduates when:* `reviewer.score_agreement` (precision/
+recall vs the synthetic answer key) and a real-audio spot-check clear a bar.
+
+**Autonomous tuning loop** — `quality-lab loop` scores candidates, ranks them, and writes
+**label proposals** to `corpus/LABEL_PROPOSALS.json`. It is **proposal-only** — it never
+edits the corpus ground truth and never auto-promotes. A **Goodhart guard** refuses any
+candidate that games one detector while regressing another (normalized Pareto across a
+working + held-out slice); low-confidence wins are held `NEEDS-EAR` for a human listen. The
+loop proposes; you decide. *State:* first slice — wiring it to the full engine matrix is the
+next step.
+
+## How to trust a verdict
+
+- **Coverage** — a detector reports how many onsets it measured; a `clean` verdict with low
+  coverage reads `UNCERTAIN`, never a silent pass.
+- **Real-engine baseline** — `engine-baseline` freezes the stable detectors' scalars on the
+  actual engine; a future build that deviates is flagged. Experimental/beta detectors are
+  held out of it, so they can't cause a false regression.
+- **Provenance** — every report records the engine commit, recipe, and determinism context,
+  so a render you liked maps back to how it was made.
+- **License fence** — copyleft/heavy tools are reached only via an explicit env-path, never
+  bundled; the committed corpus stays permissively licensed.
 
 ## Relationship to the existing audio harness
 
-This builds on, and does not replace, the offline audio-observability harness
-documented in [testing.md](testing.md) and the `audio-harness` skill
-(`pulp::audio-analysis`, `pulp audio validate`). Those measure presence / level / THD /
-response; the Quality Lab adds *reference-vs-candidate perceptual artifact* detection
-for fine-tuning. See `tools/audio/quality-lab/README.md` for the module map and the
-honest status of deferred detectors.
+This builds on — does not replace — the offline audio-observability harness in
+[testing.md](testing.md) (presence / level / THD / response). The Quality Lab adds the
+*reference-vs-candidate perceptual artifact* layer for fine-tuning. Module map, full
+detector status, and the contributor guide:
+[`tools/audio/quality-lab/README.md`](https://github.com/danielraffel/pulp/blob/main/tools/audio/quality-lab/README.md).

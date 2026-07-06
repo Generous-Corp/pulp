@@ -3,7 +3,10 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/drag_drop.hpp>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <memory>
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -167,6 +170,71 @@ View::~View() {
     // focused-view pointer dangling; the next keypress crashes via dynamic_cast
     // on freed memory in -[PulpView focusedTextEditor].
     if (focused_input_ == this) focused_input_ = nullptr;
+    // Cancel any running animate() tweens so their FrameClock callbacks (which
+    // capture `this`) can't fire after this View is gone.
+    // Unsubscribe against the CACHED clock (not frame_clock()): a child detached
+    // via remove_child has parent_==null, so frame_clock() would return null and
+    // leave the root's still-live subscription firing on freed memory.
+    for (const auto& a : animations_) {
+        if (a.clock) a.clock->unsubscribe(a.clock_id);
+    }
+    animations_.clear();
+}
+
+int View::animate(std::function<void(float)> apply, float from, float to,
+                  float duration_s, std::function<float(float)> ease,
+                  std::function<void()> on_done, const std::string& tag) {
+    FrameClock* fc = frame_clock();
+    if (!fc || !apply) return -1;
+    if (!ease) ease = easing::linear;
+    if (!tag.empty()) {
+        // Self-cancelling: drop any prior animation sharing this tag.
+        for (int i = static_cast<int>(animations_.size()) - 1; i >= 0; --i) {
+            if (animations_[i].tag == tag) {
+                fc->unsubscribe(animations_[i].clock_id);
+                animations_.erase(animations_.begin() + i);
+            }
+        }
+    }
+    apply(from);  // seed the start value so there's no one-frame delay
+    auto elapsed = std::make_shared<float>(0.0f);
+    auto id_slot = std::make_shared<int>(-1);
+    const int cid = fc->subscribe(
+        [this, apply, from, to, duration_s, ease, on_done, elapsed, id_slot](float dt) -> bool {
+            *elapsed += dt;
+            const float t = duration_s > 0.0f
+                                ? std::clamp(*elapsed / duration_s, 0.0f, 1.0f)
+                                : 1.0f;
+            apply(from + (to - from) * ease(t));
+            request_repaint();
+            if (t >= 1.0f) {
+                // Reached the target: forget the record and fire on_done. Return
+                // false so the FrameClock auto-unsubscribes this callback.
+                for (int i = static_cast<int>(animations_.size()) - 1; i >= 0; --i) {
+                    if (animations_[i].clock_id == *id_slot) {
+                        animations_.erase(animations_.begin() + i);
+                        break;
+                    }
+                }
+                if (on_done) on_done();
+                return false;
+            }
+            return true;
+        });
+    *id_slot = cid;
+    animations_.push_back({cid, tag, fc});
+    return cid;
+}
+
+void View::cancel_animation(int id) {
+    if (id < 0) return;
+    for (int i = static_cast<int>(animations_.size()) - 1; i >= 0; --i) {
+        if (animations_[i].clock_id == id) {
+            if (animations_[i].clock) animations_[i].clock->unsubscribe(id);
+            animations_.erase(animations_.begin() + i);
+            return;
+        }
+    }
 }
 
 void View::paint_all(canvas::Canvas& canvas) {
@@ -800,12 +868,34 @@ void View::set_plugin_view_host(PluginViewHost* host) {
     }
 }
 
+void View::set_host_params(HostParamSurface* surface) {
+    host_params_ = surface;
+    for (auto& child : children_) {
+        child->set_host_params(surface);
+    }
+}
+
+void View::set_host_actions(HostActionSurface* surface) {
+    host_actions_ = surface;
+    for (auto& child : children_) {
+        child->set_host_actions(surface);
+    }
+}
+
 void View::add_child(std::unique_ptr<View> child) {
     child->parent_ = this;
     child->set_window_host(window_host_);
     child->set_plugin_view_host(plugin_view_host_);
+    child->set_host_params(host_params_);
+    child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
     children_.back()->on_attached();
+    // If this parent can already reach a FrameClock, tell the newly-grafted
+    // subtree so a self-subscribing descendant (a live Meter built offline)
+    // attaches to the already-present clock instead of silently missing it.
+    if (frame_clock()) {
+        children_.back()->notify_frame_clock_changed();
+    }
 }
 
 std::unique_ptr<View> View::remove_child(View* child) {
@@ -816,7 +906,14 @@ std::unique_ptr<View> View::remove_child(View* child) {
     child->on_detached();
     child->set_window_host(nullptr);
     child->set_plugin_view_host(nullptr);
+    child->set_host_params(nullptr);
+    child->set_host_actions(nullptr);
     child->parent_ = nullptr;
+    // The removed subtree can no longer reach this parent's clock. Notify it so
+    // self-subscribing descendants (a live Meter that never got its own
+    // on_detached — remove_child only fires that on the removed root) drop their
+    // subscription now instead of lingering until the next tick.
+    child->notify_frame_clock_changed();
     auto owned = std::move(*it);
     children_.erase(it);
     return owned;
@@ -1184,6 +1281,22 @@ FrameClock* View::frame_clock() const {
     if (frame_clock_) return frame_clock_;
     if (parent_) return parent_->frame_clock();
     return nullptr;
+}
+
+void View::set_frame_clock(FrameClock* clock) {
+    frame_clock_ = clock;
+    // Hosts build the tree first and install the clock afterward, so any
+    // descendant that self-subscribes on a reachable clock must be told the
+    // clock is now available — otherwise a Meter built before hosting would
+    // silently never subscribe.
+    notify_frame_clock_changed();
+}
+
+void View::notify_frame_clock_changed() {
+    on_frame_clock_changed();
+    for (auto& child : children_) {
+        if (child) child->notify_frame_clock_changed();
+    }
 }
 
 void View::request_repaint() {

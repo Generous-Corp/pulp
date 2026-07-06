@@ -22,10 +22,10 @@ The simplest possible Pulp plugin. A stereo gain effect with input gain, output 
 
 ## Try in Browser
 
-The same Processor code that runs as VST3/AU/CLAP is compiled to WebAssembly and
-can run in the local browser host via the Web Audio API. The repo does not yet
-publish a canonical Pages-hosted browser host, so use `tools/browser-host/`
-locally for now.
+The same Processor code that runs as VST3/AU/CLAP can be compiled to
+WebAssembly through the web-demo lane. The local `tools/browser-host/` app is
+currently a browser-host scaffold; end-to-end WAM plugin audio is not yet
+runtime-validated there.
 
 ## Supported Formats
 
@@ -37,8 +37,8 @@ locally for now.
 | CLAP | Yes |
 | AAX | Optional on macOS/Windows |
 | Standalone | Yes |
-| WAMv2 (Browser) | Yes |
-| WebCLAP (WASM) | Experimental helper path; no checked-in PulpGain WCLAP target yet |
+| WAMv2 (Browser) | Experimental; the PulpGain canary loads, renders audio, and shows generated controls in Chrome (fixture + Node runner) |
+| WebCLAP (WASM) | Experimental; checked-in PulpGain WebCLAP builds and is Node-hosted through the full CLAP lifecycle (audio + parameter control); not yet in-browser-hosted |
 
 ## Supported Platforms
 

@@ -38,7 +38,7 @@ TEST_CASE("Polynomial roots_quadratic complex roots", "[signal][poly]") {
 }
 
 TEST_CASE("Polynomial roots_quadratic reports repeated real roots",
-          "[signal][poly][coverage]") {
+          "[signal][poly]") {
     auto [r1, r2] = Polynomial::roots_quadratic(1.0f, -2.0f, 1.0f);
     REQUIRE_THAT(r1.real(), WithinAbs(1.0f, 0.001f));
     REQUIRE_THAT(r2.real(), WithinAbs(1.0f, 0.001f));
@@ -184,7 +184,7 @@ TEST_CASE("Mat3 determinant", "[signal][matrix]") {
 }
 
 TEST_CASE("Mat3 determinant and identity composition cover nontrivial matrices",
-          "[signal][matrix][coverage]") {
+          "[signal][matrix]") {
     Mat3 a{{{2.0f, -1.0f, 0.5f},
             {3.0f, 4.0f, -2.0f},
             {1.0f, 0.0f, 5.0f}}};
@@ -226,13 +226,13 @@ TEST_CASE("Polynomial eval_complex", "[signal][poly]") {
 }
 
 TEST_CASE("Polynomial eval handles higher order negative inputs",
-          "[signal][poly][codecov]") {
+          "[signal][poly]") {
     auto result = Polynomial::eval({-1.0f, 2.0f, -3.0f, 4.0f}, -2.0f);
     REQUIRE_THAT(result, WithinAbs(-49.0f, 0.001f));
 }
 
 TEST_CASE("Polynomial multiply handles constant factors",
-          "[signal][poly][codecov]") {
+          "[signal][poly]") {
     auto result = Polynomial::multiply({2.0f}, {1.0f, -3.0f, 5.0f});
     REQUIRE(result.size() == 3);
     REQUIRE_THAT(result[0], WithinAbs(2.0f, 0.001f));
@@ -241,7 +241,7 @@ TEST_CASE("Polynomial multiply handles constant factors",
 }
 
 TEST_CASE("Polynomial derivative handles cubic coefficients",
-          "[signal][poly][codecov]") {
+          "[signal][poly]") {
     auto result = Polynomial::derivative({-4.0f, 3.0f, -2.0f, 5.0f});
     REQUIRE(result.size() == 3);
     REQUIRE_THAT(result[0], WithinAbs(3.0f, 0.001f));
@@ -250,7 +250,7 @@ TEST_CASE("Polynomial derivative handles cubic coefficients",
 }
 
 TEST_CASE("Mat3 determinant handles singular and scaled matrices",
-          "[signal][matrix][codecov]") {
+          "[signal][matrix]") {
     Mat3 singular{{{1.0f, 2.0f, 3.0f}, {2.0f, 4.0f, 6.0f}, {0.0f, 1.0f, 0.0f}}};
     REQUIRE_THAT(singular.determinant(), WithinAbs(0.0f, 0.001f));
 
@@ -259,7 +259,7 @@ TEST_CASE("Mat3 determinant handles singular and scaled matrices",
 }
 
 TEST_CASE("Polynomial roots handle negative leading coefficient",
-          "[signal][poly][codecov]") {
+          "[signal][poly]") {
     auto [r1, r2] = Polynomial::roots_quadratic(-1.0f, 0.0f, 4.0f);
     REQUIRE_THAT(std::abs(r1.real()), WithinAbs(2.0f, 0.001f));
     REQUIRE_THAT(std::abs(r2.real()), WithinAbs(2.0f, 0.001f));
@@ -268,7 +268,7 @@ TEST_CASE("Polynomial roots handle negative leading coefficient",
 }
 
 TEST_CASE("Mat2 inverse handles negative determinants",
-          "[signal][matrix][codecov]") {
+          "[signal][matrix]") {
     Mat2 matrix{{{0.0f, 2.0f}, {3.0f, 0.0f}}};
     REQUIRE_THAT(matrix.determinant(), WithinAbs(-6.0f, 0.001f));
 
@@ -280,7 +280,7 @@ TEST_CASE("Mat2 inverse handles negative determinants",
 }
 
 TEST_CASE("Mat3 multiplication preserves identity on both sides",
-          "[signal][matrix][codecov]") {
+          "[signal][matrix]") {
     Mat3 matrix{{{1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f}, {7.0f, 8.0f, 9.0f}}};
     auto left = Mat3::identity() * matrix;
     auto right = matrix * Mat3::identity();

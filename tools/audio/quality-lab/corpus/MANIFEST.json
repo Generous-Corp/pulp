@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "name": "synthetic_drumbreak",
+      "kind": "generator",
+      "generator": "drum_break",
+      "material_class": "percussive",
+      "license": "synthetic",
+      "expected_artifacts": "transient attack smear under time-stretch",
+      "family": "time-stretch",
+      "params": {
+        "sr": 48000,
+        "bpm": 120.0,
+        "ratio": 1.0,
+        "seed": 0
+      }
+    },
+    {
+      "name": "synthetic_tonalpad",
+      "kind": "generator",
+      "generator": "tonal_pad",
+      "material_class": "tonal",
+      "license": "synthetic",
+      "expected_artifacts": "graininess / dulling on sustained material",
+      "family": "tonal",
+      "params": {
+        "sr": 48000,
+        "dur_s": 2.5,
+        "seed": 0
+      }
+    }
+  ]
+}

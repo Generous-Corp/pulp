@@ -10,7 +10,7 @@ if(PULP_BUILD_TESTS)
     catch_discover_tests(pulp-synth-test)
 endif()
 
-# ── Plugin (CLAP only for now — add VST3/AU when validated) ──────────────
+# ── Plugin (CLAP is validated; enable other formats after validation) ─────
 pulp_add_plugin(PulpSynth
     FORMATS         CLAP
     PLUGIN_NAME     "PulpSynth"

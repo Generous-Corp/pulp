@@ -16,12 +16,41 @@
 
 #include <cmath>
 #include <filesystem>
+#include <cstdlib>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace {
 
 namespace fs = std::filesystem;
+
+void set_rolling_format_env(const char* value) {
+#if defined(_WIN32)
+    _putenv_s("PULP_AUDIO_CAPTURE_ROLLING_FORMAT", value ? value : "");
+#else
+    if (value) ::setenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT", value, 1);
+    else ::unsetenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT");
+#endif
+}
+
+class ScopedRollingFormatEnv {
+public:
+    ScopedRollingFormatEnv() {
+        if (const char* value = std::getenv("PULP_AUDIO_CAPTURE_ROLLING_FORMAT")) {
+            had_value_ = true;
+            old_value_ = value;
+        }
+    }
+
+    ~ScopedRollingFormatEnv() {
+        set_rolling_format_env(had_value_ ? old_value_.c_str() : nullptr);
+    }
+
+private:
+    bool had_value_ = false;
+    std::string old_value_;
+};
 
 // Append one block of a per-channel, absolute-frame ramp to the rolling buffer.
 void append_block(pulp::audio::RollingAudioCaptureBuffer& rolling, int channels,
@@ -94,6 +123,36 @@ TEST_CASE("rolling capture WAV keeps the LAST window and preserves float precisi
     fs::remove(path);
 }
 
+TEST_CASE("rolling capture writes int24 when requested (default float)",
+          "[standalone][audio-capture-rolling]") {
+    constexpr int kChannels = 1;
+    constexpr int kBlock = 64;
+    constexpr std::uint64_t kWindow = 128;
+
+    pulp::audio::RollingAudioCaptureBuffer rolling;
+    pulp::audio::RollingAudioCaptureBufferConfig rc;
+    rc.num_channels = kChannels;
+    rc.max_frames = kWindow;
+    REQUIRE(rolling.prepare(rc));
+    auto sig = [](int, std::uint64_t f) { return 0.25f + static_cast<float>(f) * 1.0e-4f; };
+    for (int b = 0; b < 2; ++b)
+        append_block(rolling, kChannels, kBlock, static_cast<std::uint64_t>(b) * kBlock, sig);
+
+    pulp::format::StandaloneConfig cfg;
+    cfg.sample_rate = 48000.0;
+    cfg.audio_capture_rolling_frames = static_cast<int>(kWindow);
+    cfg.audio_capture_rolling_int24 = true;
+    const auto path =
+        (fs::temp_directory_path() / "pulp_capture_rolling_i24.wav").string();
+    fs::remove(path);
+
+    REQUIRE(pulp::format::detail::write_audio_capture_rolling_wav_file(path, rolling, cfg));
+    const auto info = pulp::audio::read_audio_file_info(path);
+    REQUIRE(info.has_value());
+    CHECK(info->bits_per_sample == 24);  // int24, not the float default
+    fs::remove(path);
+}
+
 TEST_CASE("rolling capture WAV trims to the delivered channel count",
           "[standalone][audio-capture-rolling]") {
     // The ring is prepared for 2 channels (the configured output bus), but the
@@ -143,6 +202,23 @@ TEST_CASE("rolling capture WAV with an empty path or unprepared buffer is a no-o
     CHECK_FALSE(pulp::format::detail::write_audio_capture_rolling_wav_file("", rolling, cfg));
     CHECK_FALSE(pulp::format::detail::write_audio_capture_rolling_wav_file(
         (fs::temp_directory_path() / "pulp_rolling_empty.wav").string(), rolling, cfg));
+}
+
+TEST_CASE("PULP_AUDIO_CAPTURE_ROLLING_FORMAT env parses int24/float and ignores junk",
+          "[standalone][audio-capture-rolling]") {
+    ScopedRollingFormatEnv env_guard;
+    auto parse = [](const char* value) {
+        set_rolling_format_env(value);
+        pulp::format::StandaloneConfig cfg;
+        cfg = pulp::format::detail::standalone_config_from_environment(cfg);
+        return cfg.audio_capture_rolling_int24;
+    };
+    CHECK(parse("int24") == true);
+    CHECK(parse("float") == false);
+    // Unrecognized values fall back to float (and log a warning — see the env parser).
+    CHECK(parse("int32") == false);
+    CHECK(parse("INT24") == false);
+    CHECK(parse(nullptr) == false);  // unset → default float
 }
 
 #if PULP_ENABLE_AUDIO_PROBES

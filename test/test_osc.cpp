@@ -148,7 +148,7 @@ TEST_CASE("OSC Message typed defaults cover every wrong-type accessor", "[osc][m
 }
 
 TEST_CASE("OSC Message defaults cover empty and wrong-type accessors",
-          "[osc][message][coverage]") {
+          "[osc][message]") {
     Message msg;
     REQUIRE(msg.get_int(0, -7) == -7);
     REQUIRE(msg.get_float(0, 2.5f) == 2.5f);
@@ -163,7 +163,7 @@ TEST_CASE("OSC Message defaults cover empty and wrong-type accessors",
 }
 
 TEST_CASE("OSC Message add overloads preserve fluent chaining and argument types",
-          "[osc][message][codecov]") {
+          "[osc][message]") {
     Message msg("/chain");
     auto* returned = &msg.add(7)
         .add(0.5f)
@@ -257,7 +257,7 @@ TEST_CASE("OSC 4-byte alignment", "[osc][codec]") {
 }
 
 TEST_CASE("OSC encode with no arguments emits an empty type-tag section",
-          "[osc][codec][codecov]") {
+          "[osc][codec]") {
     Message msg("/plain");
 
     auto data = encode(msg);
@@ -271,7 +271,7 @@ TEST_CASE("OSC encode with no arguments emits an empty type-tag section",
 }
 
 TEST_CASE("OSC decode accepts explicit comma tag with no arguments",
-          "[osc][codec][codecov]") {
+          "[osc][codec]") {
     std::vector<uint8_t> data;
     append_osc_string(data, "/empty-tags");
     append_osc_string(data, ",");
@@ -283,7 +283,7 @@ TEST_CASE("OSC decode accepts explicit comma tag with no arguments",
 }
 
 TEST_CASE("OSC decode ignores unknown type tags without adding arguments",
-          "[osc][codec][codecov]") {
+          "[osc][codec]") {
     std::vector<uint8_t> data;
     append_osc_string(data, "/unknown-tags");
     append_osc_string(data, ",TFNz");
@@ -295,7 +295,7 @@ TEST_CASE("OSC decode ignores unknown type tags without adding arguments",
 }
 
 TEST_CASE("OSC decode skips unknown tags without consuming later argument bytes",
-          "[osc][codec][codecov]") {
+          "[osc][codec]") {
     std::vector<uint8_t> data;
     append_osc_string(data, "/mixed");
     append_osc_string(data, ",xi");
@@ -308,7 +308,7 @@ TEST_CASE("OSC decode skips unknown tags without consuming later argument bytes"
 }
 
 TEST_CASE("OSC decode rejects truncated typed payloads as malformed",
-          "[osc][codec][coverage]") {
+          "[osc][codec]") {
     // A type tag string (",ifsb") with a truncated payload is malformed: the
     // decoder must fail closed to the empty-address sentinel rather than
     // fabricate 0/default args that would dispatch a real control change. The
@@ -325,7 +325,7 @@ TEST_CASE("OSC decode rejects truncated typed payloads as malformed",
 }
 
 TEST_CASE("OSC decode handles non-null-terminated bounded address payload",
-          "[osc][codec][codecov]") {
+          "[osc][codec]") {
     const std::vector<uint8_t> data{'/', 'b', 'a', 'r'};
 
     auto decoded = decode(data.data(), data.size());
@@ -335,7 +335,7 @@ TEST_CASE("OSC decode handles non-null-terminated bounded address payload",
 }
 
 TEST_CASE("OSC encode/decode preserves blob payloads at padding boundaries",
-          "[osc][codec][codecov]") {
+          "[osc][codec]") {
     Message msg("/blob-padding");
     msg.add(std::vector<uint8_t>{0x01, 0x02, 0x03});
     msg.add(std::vector<uint8_t>{0x04, 0x05, 0x06, 0x07});
@@ -352,7 +352,7 @@ TEST_CASE("OSC encode/decode preserves blob payloads at padding boundaries",
 }
 
 TEST_CASE("OSC decode preserves empty blob alignment before following arguments",
-          "[osc][codec][blob][codecov]") {
+          "[osc][codec][blob]") {
     Message msg("/zero-blob-next");
     msg.add(std::vector<uint8_t>{});
     msg.add(77);
@@ -440,7 +440,7 @@ TEST_CASE("OSC Sender rejects invalid hostnames", "[osc][udp][sender]") {
 }
 
 TEST_CASE("OSC Sender failed reconnect preserves the existing destination",
-          "[osc][udp][sender][codecov]") {
+          "[osc][udp][sender]") {
     std::atomic<int> handled{0};
 
     Receiver rx;
@@ -471,7 +471,7 @@ TEST_CASE("OSC Sender failed reconnect preserves the existing destination",
 }
 
 TEST_CASE("OSC Sender successful reconnect replaces the existing destination",
-          "[osc][udp][sender][codecov]") {
+          "[osc][udp][sender]") {
     std::atomic<int> first_receiver{0};
     std::atomic<int> second_receiver{0};
 
@@ -513,7 +513,7 @@ TEST_CASE("OSC Sender successful reconnect replaces the existing destination",
 }
 
 TEST_CASE("OSC Sender sends caller-owned raw packets over loopback",
-          "[osc][udp][sender][coverage]") {
+          "[osc][udp][sender]") {
     std::atomic<int> handled{0};
     Message received;
     std::mutex received_mutex;
@@ -551,7 +551,7 @@ TEST_CASE("OSC Sender sends caller-owned raw packets over loopback",
 }
 
 TEST_CASE("OSC Receiver routes direct messages through address-pattern listeners",
-          "[osc][udp][receiver][pattern][codecov]") {
+          "[osc][udp][receiver][pattern]") {
     std::atomic<int> all_messages{0};
     std::atomic<int> mix_messages{0};
     std::atomic<int> note_messages{0};
@@ -608,7 +608,7 @@ TEST_CASE("OSC Receiver routes direct messages through address-pattern listeners
 }
 
 TEST_CASE("OSC Sender sends typed bundles and Receiver dispatches bundle callbacks",
-          "[osc][udp][bundle][receiver][codecov]") {
+          "[osc][udp][bundle][receiver]") {
     std::atomic<int> bundle_callbacks{0};
     std::atomic<int> nested_bundle_callbacks{0};
     std::atomic<int> bundle_element_count{0};
@@ -682,7 +682,7 @@ TEST_CASE("OSC Sender sends typed bundles and Receiver dispatches bundle callbac
 }
 
 TEST_CASE("OSC Sender sends bundles after disconnect and reconnect",
-          "[osc][udp][bundle][sender][codecov]") {
+          "[osc][udp][bundle][sender]") {
     std::atomic<int> first_receiver{0};
     std::atomic<int> second_receiver{0};
 
@@ -734,7 +734,7 @@ TEST_CASE("OSC Sender sends bundles after disconnect and reconnect",
 }
 
 TEST_CASE("OSC Receiver dispatches empty bundles without message callbacks",
-          "[osc][udp][bundle][receiver][codecov]") {
+          "[osc][udp][bundle][receiver]") {
     std::atomic<int> empty_bundles{0};
     std::atomic<int> messages{0};
 
@@ -769,7 +769,7 @@ TEST_CASE("OSC Receiver dispatches empty bundles without message callbacks",
 }
 
 TEST_CASE("OSC Receiver accepts bundle datagrams larger than four kilobytes",
-          "[osc][udp][bundle][receiver][codecov]") {
+          "[osc][udp][bundle][receiver]") {
     std::atomic<int> bundle_callbacks{0};
     std::atomic<int> blob_size{0};
     std::atomic<int> blob_front{0};
@@ -826,7 +826,7 @@ TEST_CASE("OSC Receiver accepts bundle datagrams larger than four kilobytes",
 }
 
 TEST_CASE("OSC Sender disconnects idempotently and reconnects to loopback",
-          "[osc][udp][sender][codecov]") {
+          "[osc][udp][sender]") {
     std::atomic<int> handled{0};
 
     Receiver rx;
@@ -892,7 +892,7 @@ TEST_CASE("OSC Receiver drops invalid datagrams without invoking handler", "[osc
 }
 
 TEST_CASE("OSC Receiver reports malformed message and bundle packets",
-          "[osc][udp][receiver][error][codecov]") {
+          "[osc][udp][receiver][error]") {
     std::atomic<int> errors{0};
     std::atomic<int> malformed_messages{0};
     std::atomic<int> malformed_bundles{0};
@@ -948,7 +948,7 @@ TEST_CASE("OSC Receiver reports malformed message and bundle packets",
 }
 
 TEST_CASE("OSC Receiver reports empty UDP datagrams as malformed messages",
-          "[osc][udp][receiver][error][codecov]") {
+          "[osc][udp][receiver][error]") {
     std::atomic<int> errors{0};
     std::atomic<int> handled_messages{0};
 
@@ -977,7 +977,7 @@ TEST_CASE("OSC Receiver reports empty UDP datagrams as malformed messages",
 }
 
 TEST_CASE("OSC Receiver callbacks can request stop without self-joining",
-          "[osc][udp][receiver][lifecycle][codecov]") {
+          "[osc][udp][receiver][lifecycle]") {
     {
         std::atomic<int> errors{0};
         std::atomic<bool> stop_returned{false};
@@ -1103,7 +1103,7 @@ TEST_CASE("OSC Receiver callbacks can request stop without self-joining",
 }
 
 TEST_CASE("OSC Receiver stop short-circuits current datagram callback fanout",
-          "[osc][udp][receiver][lifecycle][codecov]") {
+          "[osc][udp][receiver][lifecycle]") {
     {
         std::atomic<int> bundles{0};
         std::atomic<int> messages{0};
@@ -1254,7 +1254,7 @@ TEST_CASE("OSC Receiver stop short-circuits current datagram callback fanout",
 }
 
 TEST_CASE("OSC Receiver can be destroyed from a receiver callback",
-          "[osc][udp][receiver][lifecycle][codecov]") {
+          "[osc][udp][receiver][lifecycle]") {
     struct Owner {
         Receiver rx;
     };
@@ -1292,7 +1292,7 @@ TEST_CASE("OSC Receiver can be destroyed from a receiver callback",
 }
 
 TEST_CASE("OSC Receiver with empty handler accepts datagrams until stopped",
-          "[osc][udp][receiver][codecov]") {
+          "[osc][udp][receiver]") {
     Receiver rx;
     REQUIRE(rx.listen(0, {}));
     REQUIRE(rx.is_listening());
@@ -1514,7 +1514,7 @@ TEST_CASE("OSC encode is deterministic for identical messages",
 }
 
 TEST_CASE("OSC encode preserves moved string and blob arguments",
-          "[osc][codec][coverage]") {
+          "[osc][codec]") {
     std::string label = "moved-label";
     std::vector<uint8_t> payload{0x10, 0x20, 0x30, 0x40};
 
@@ -1586,7 +1586,7 @@ TEST_CASE("OSC Sender::send without connect is rejected", "[osc][udp][sender]") 
 }
 
 TEST_CASE("OSC Sender::send bundle without connect is rejected",
-          "[osc][udp][sender][bundle][codecov]") {
+          "[osc][udp][sender][bundle]") {
     Sender tx;
     REQUIRE_FALSE(tx.is_connected());
 
@@ -1643,7 +1643,7 @@ TEST_CASE("OSC decode tolerates extra trailing padding bytes", "[osc][codec][iss
 }
 
 TEST_CASE("OSC decode keeps explicit defaults for out-of-range access",
-          "[osc][message][coverage]") {
+          "[osc][message]") {
     Message msg("/defaults");
     msg.add(12).add(std::string("name"));
 
@@ -1674,7 +1674,7 @@ TEST_CASE("OSC Receiver accepts an empty handler and stops cleanly",
 }
 
 TEST_CASE("OSC Receiver rejects binding to an already-used UDP port",
-          "[osc][udp][receiver][coverage]") {
+          "[osc][udp][receiver]") {
     Receiver first;
     REQUIRE(first.listen(0, [](const Message&) {}));
     const auto port = first.local_port();
@@ -1693,7 +1693,7 @@ TEST_CASE("OSC Receiver rejects binding to an already-used UDP port",
 // ── Bundles and address patterns ────────────────────────────────────────────
 
 TEST_CASE("OSC bundle serializes and restores nested messages and bundles",
-          "[osc][bundle][codecov]") {
+          "[osc][bundle]") {
     Bundle nested;
     Message nested_msg("/nested");
     nested_msg.add(std::string("ok"));
@@ -1722,7 +1722,7 @@ TEST_CASE("OSC bundle serializes and restores nested messages and bundles",
 }
 
 TEST_CASE("OSC bundle rejects malformed element boundaries",
-          "[osc][bundle][codecov]") {
+          "[osc][bundle]") {
     Bundle bundle;
     Message msg("/one");
     msg.add(1);
@@ -1744,7 +1744,7 @@ TEST_CASE("OSC bundle rejects malformed element boundaries",
 }
 
 TEST_CASE("OSC address pattern rejects incomplete classes and alternatives",
-          "[osc][pattern][codecov]") {
+          "[osc][pattern]") {
     REQUIRE(address_matches("/note/[0-9]", "/note/7"));
     REQUIRE(address_matches("/note/[!0-3]", "/note/8"));
     REQUIRE_FALSE(address_matches("/note/[!0-3]", "/note/2"));
@@ -1759,7 +1759,7 @@ TEST_CASE("OSC address pattern rejects incomplete classes and alternatives",
 }
 
 TEST_CASE("OSC address pattern covers boundary backtracking failures",
-          "[osc][pattern][coverage]") {
+          "[osc][pattern]") {
     REQUIRE(address_matches("/mix/*/tail", "/mix//tail"));
     REQUIRE_FALSE(address_matches("/mix/*/tail", "/mix/a/b/tail"));
     REQUIRE_FALSE(address_matches("/mix/*tail", "/mix/a/tail"));

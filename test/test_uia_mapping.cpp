@@ -21,7 +21,7 @@ TEST_CASE("role_to_control_type returns stable UIA IDs", "[a11y][uia]") {
 }
 
 TEST_CASE("UIA mapping falls back for unknown role values",
-          "[a11y][uia][coverage]") {
+          "[a11y][uia]") {
     auto unknown = static_cast<View::AccessRole>(999);
     REQUIRE(role_to_control_type(unknown) == kControlTypeCustom);
     REQUIRE(patterns_for_role(unknown).count == 0);

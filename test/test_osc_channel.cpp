@@ -164,13 +164,13 @@ TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]
 }
 
 TEST_CASE("OscChannel open rejects invalid remote hosts",
-          "[osc_channel][lifecycle][codecov]") {
+          "[osc_channel][lifecycle]") {
     auto channel = OscChannel::open("999.999.999.999", 29876, 0);
     REQUIRE_FALSE(channel);
 }
 
 TEST_CASE("OscChannel open fails cleanly when requested local port is occupied",
-          "[osc_channel][lifecycle][coverage]") {
+          "[osc_channel][lifecycle]") {
     Receiver occupied;
     REQUIRE(occupied.listen(0, [](const Message&) {}));
     const auto local_port = occupied.local_port();
@@ -203,7 +203,7 @@ TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]")
 }
 
 TEST_CASE("OscChannel accepts error callback replacement without changing state",
-          "[osc_channel][lifecycle][coverage]") {
+          "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
@@ -247,7 +247,7 @@ TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
 }
 
 TEST_CASE("OscChannel close uses the latest registered closed callback",
-          "[osc_channel][lifecycle][codecov]") {
+          "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
@@ -268,7 +268,7 @@ TEST_CASE("OscChannel close uses the latest registered closed callback",
 }
 
 TEST_CASE("OscChannel routes close callbacks through custom executor",
-          "[osc_channel][lifecycle][coverage]") {
+          "[osc_channel][lifecycle]") {
     std::vector<std::function<void()>> queued;
     OscChannelOptions options;
     options.executor = [&](std::function<void()> fn) {
@@ -333,7 +333,7 @@ TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
 }
 
 TEST_CASE("OscChannel leaves unhandled incoming messages as no-op deliveries",
-          "[osc_channel][raw][coverage]") {
+          "[osc_channel][raw]") {
     auto pair = open_loopback_pair();
     if (!pair) {
         SUCCEED("could not open loopback UDP pair; skipping");
@@ -358,7 +358,7 @@ TEST_CASE("OscChannel leaves unhandled incoming messages as no-op deliveries",
 }
 
 TEST_CASE("OscChannel message callback replacement uses latest callback",
-          "[osc_channel][raw][codecov]") {
+          "[osc_channel][raw]") {
     auto pair = open_loopback_pair();
     if (!pair) {
         SUCCEED("could not open loopback UDP pair; skipping");
@@ -401,7 +401,7 @@ TEST_CASE("OscChannel message callback replacement uses latest callback",
 }
 
 TEST_CASE("OscChannel routes received messages through custom executor",
-          "[osc_channel][raw][coverage]") {
+          "[osc_channel][raw]") {
     std::mutex queue_mu;
     std::vector<std::function<void()>> queued;
     OscChannelOptions options;

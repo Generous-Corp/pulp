@@ -3,6 +3,19 @@
 `figma-plugin-export-v1` envelope that `pulp import-design --from figma-plugin`
 consumes — no Figma desktop, no plugin click, no manual export.
 
+LOCAL-FIRST — READ THIS. This REST lane is the HEADLESS / CI fallback and it
+WILL be rate-limited (HTTP 429) on dense real files: `/images` is a strict
+Tier-1 endpoint budgeted by the *file's* plan, so a big frame can 429 for many
+minutes. When Figma desktop is open on this machine, DO NOT start here — the
+local paths have no REST rate limit:
+  1. INSPECT / verify a design (structure, screenshot, code context): the Figma
+     desktop MCP server — `get_metadata`, `get_screenshot`, `get_design_context`.
+  2. EXPORT a scene for import: the Pulp Figma desktop plugin (`tools/figma-plugin`)
+     exports the `figma-plugin-export-v1` envelope directly from the open file.
+  3. Only when neither is available (true headless / CI), use THIS script — and
+     if it 429s, switch to (1)/(2) rather than waiting out the backoff.
+The `.agents/skills/import-design` skill documents the ordering; keep it in sync.
+
 This is a faithful PORT of the Pulp Figma plugin's extractor, not an
 approximation: every field mapping mirrors
 `pulp-figma-plugin/tools/figma-plugin/src/extract.ts` + `serialize.ts`
@@ -37,9 +50,33 @@ import argparse, json, os, re, sys, time, urllib.error, urllib.parse, urllib.req
 # the documented diagnostic headers (rate-limit type, plan tier, upgrade link).
 FIGMA_MAX_RETRIES = 6
 
+# Shown ONCE, loudly, the first time a 429 forces a wait — so an interactive user
+# switches to a local path instead of silently waiting out minutes of backoff.
+_RATE_LIMIT_ADVICE = (
+    "\n"
+    "  ⚠  Figma REST is rate-limited (HTTP 429). This lane is the headless/CI\n"
+    "     FALLBACK. If Figma desktop is open, STOP waiting and use a LOCAL path\n"
+    "     (no REST rate limit):\n"
+    "       • inspect: Figma desktop MCP — get_metadata / get_screenshot /\n"
+    "         get_design_context\n"
+    "       • export a scene: the Pulp Figma desktop plugin (tools/figma-plugin)\n"
+    "     See the import-design skill's 'Local-first' section.\n"
+)
+_rate_limit_advice_shown = False
+
+def _advise_rate_limit_once():
+    global _rate_limit_advice_shown
+    if not _rate_limit_advice_shown:
+        _rate_limit_advice_shown = True
+        print(_RATE_LIMIT_ADVICE, file=sys.stderr)
+
 def figma_get(url, token=None, timeout=120, what="request", max_retries=FIGMA_MAX_RETRIES):
     """GET `url`, returning the response body as bytes. Honors Retry-After on 429
-    and retries transient failures up to `max_retries` times before raising."""
+    and retries transient failures up to `max_retries` times before raising.
+
+    On the FIRST 429 it prints a one-time local-first advisory (prefer the Figma
+    desktop MCP / plugin over this rate-limited REST lane) so an interactive run
+    doesn't sit silently through minutes of backoff."""
     RETRY_AFTER_CAP = 300  # never honor an absurd Retry-After (e.g. a misconfigured proxy)
     headers = {"X-Figma-Token": token} if token else {}
     attempt = 0
@@ -52,16 +89,20 @@ def figma_get(url, token=None, timeout=120, what="request", max_retries=FIGMA_MA
             transient = e.code == 429 or 500 <= e.code < 600
             if not transient or attempt >= max_retries:
                 if e.code == 429:
+                    _advise_rate_limit_once()
                     h = e.headers or {}
                     raise RuntimeError(
                         f"Figma {what}: rate-limited (HTTP 429) after {attempt} "
                         f"retr{'y' if attempt == 1 else 'ies'}. "
                         f"rate-limit-type={h.get('X-Figma-Rate-Limit-Type', '?')} "
                         f"plan-tier={h.get('X-Figma-Plan-Tier', '?')} "
-                        f"upgrade={h.get('X-Figma-Upgrade-Link', '')}".rstrip()) from e
+                        f"upgrade={h.get('X-Figma-Upgrade-Link', '')}".rstrip()
+                        + " — prefer the local Figma desktop MCP / plugin "
+                          "(see the import-design skill's Local-first section).") from e
                 raise
             wait = None
             if e.code == 429:
+                _advise_rate_limit_once()
                 try:
                     wait = int((e.headers or {}).get("Retry-After", ""))
                 except (TypeError, ValueError):
@@ -648,6 +689,63 @@ def fetch_nodes(file_key, node_id, token):
         f"https://api.figma.com/v1/files/{file_key}/nodes?ids={node_id}&geometry=paths",
         token=token, what="file nodes")
 
+# --- transparent (file_key, node_id) export cache ------------------------------
+# The Figma MCP server allows only ~6 calls/MONTH on a View/Collab seat, so
+# re-testing the same frame must not re-fetch. --cache-dir memoizes the two
+# REST-heavy payloads (the /nodes geometry JSON and the frame SVG) on disk; a hit
+# returns the stored payload with ZERO REST calls, so a populated cache lets the
+# importer re-run fully offline (no token needed).
+_CACHE_NODES_SUFFIX = ".nodes.json"
+_CACHE_SVG_SUFFIX = ".frame.svg"
+
+def _export_cache_key(file_key, node_id):
+    """Filesystem-safe cache basename for a (file_key, node_id) export. Figma node
+    ids embed ':' — normalize every non-portable char to '_' so the key is valid
+    on every platform."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", f"{file_key}__{node_id}")
+
+def _cache_path(cache_dir, file_key, node_id, suffix):
+    if not cache_dir:
+        return None
+    return os.path.join(cache_dir, _export_cache_key(file_key, node_id) + suffix)
+
+def fetch_nodes_cached(file_key, node_id, token, cache_dir=None, refresh=False):
+    """fetch_nodes() with the transparent on-disk cache. A cache hit returns the
+    stored /nodes JSON without touching the network; --refresh-cache forces a
+    re-fetch + rewrite."""
+    path = _cache_path(cache_dir, file_key, node_id, _CACHE_NODES_SUFFIX)
+    if path and not refresh and os.path.exists(path):
+        print(f"  cache hit (nodes): {path} — no REST call")
+        with open(path) as f:
+            return json.load(f)
+    doc = fetch_nodes(file_key, node_id, token)
+    if path:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(doc, f)
+        print(f"  cached nodes -> {path}")
+    return doc
+
+def fetch_frame_svg_cached(file_key, node_id, token, cache_dir=None, refresh=False):
+    """fetch_frame_svg() with the same transparent cache. Only a non-empty SVG is
+    cached — a None render (no image URL) must not be memoized as a permanent miss.
+    With no token and a cache miss there is nothing to fetch, so returns None."""
+    path = _cache_path(cache_dir, file_key, node_id, _CACHE_SVG_SUFFIX)
+    if path and not refresh and os.path.exists(path):
+        print(f"  cache hit (frame SVG): {path} — no REST call")
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    if not token:
+        return None
+    print("fetching frame SVG via /images?format=svg ...")
+    svg = fetch_frame_svg(file_key, node_id, token)
+    if path and svg:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(svg)
+        print(f"  cached frame SVG -> {path}")
+    return svg
+
 def resolve_image_fills(file_key, refs, token, out_dir):
     """Resolve IMAGE-fill imageRefs into real assets. The image fill on a node
     references a file image by `imageRef`; the file-images
@@ -750,6 +848,30 @@ def _node_label(name):
     if s.lower() in _LABEL_NOISE:
         return ""
     return s
+
+# Opt-in host-param binding sigil. A layer named `param:` / `bind:` / `meter:` +
+# "<module>.<param>" (e.g. `param:filter.cutoff`) declares its binding key in the
+# layer name. Mirrors the C++ figma_binding_from_layer_name (design_ir_json.cpp)
+# and the TS lane (paramKeyFromLayerName) EXACTLY.
+_BINDING_SIGILS = ("param:", "bind:", "meter:")
+
+def _param_key_from_layer_name(name):
+    """The host-param binding key from a layer-name sigil, or '' when the name is
+    not a binding declaration. Leading-whitespace tolerant, case-insensitive on
+    the sigil, value trimmed, and must carry at least one alphanumeric char. The
+    sigil is load-bearing: a bare or DESCRIPTIVE name ("Cutoff") is NEVER a
+    binding, so there are no false positives — a descriptive design binds via the
+    annotated manifest instead."""
+    s = (name or "").lstrip(" \t")
+    low = s.lower()
+    for sig in _BINDING_SIGILS:
+        if len(s) > len(sig) and low.startswith(sig):
+            key = s[len(sig):].strip(" \t")
+            # ASCII-only alnum to match C++ std::isalnum and the TS /[a-z0-9]/i
+            # (Python str.isalnum() is Unicode-aware and would diverge on a
+            # purely non-ASCII key).
+            return key if re.search(r"[A-Za-z0-9]", key) else ""
+    return ""
 
 def _solid_fill_hex(n):
     """The node's first visible SOLID fill as '#RRGGBB', or '' if none."""
@@ -1087,56 +1209,85 @@ def apply_faithful_vector(root_node, figma_root, svg, file_key, node_id, out_dir
     elements += _name_override_knobs(figma_root, knob_names, elements)
     elements += detect_overlay_controls(figma_root, root_abs, (px, py))
 
-    _label_elements(elements, figma_root, root_abs)
+    _label_elements(elements, figma_root, root_abs, (px, py))
 
     root_node["render_mode"] = "faithful_svg"
     root_node["svg_asset_id"] = asset_id
     root_node["interactive_elements"] = elements
     return entry
 
-def _label_elements(elements, figma_root, root_abs):
-    """Attach a human-readable `label` (the generated-parameter name) to each
-    interactive element from its source Figma layer name, when meaningful (see
-    _node_label). Overlay controls already carry source_node_id → look the node up
+def _label_elements(elements, figma_root, root_abs, panel_origin):
+    """Resolve each interactive element against the frame's Figma node tree to
+    stamp a human `label`, provenance `source_node_id`, and an opt-in host-param
+    `param_key`. Overlay controls already carry source_node_id → look the node up
     directly; geometry-detected knobs have no node link, so match the named node
-    whose frame-local center lands within the knob's hit radius (same coordinate
-    convention as _name_override_knobs). Sets `label` only when non-empty, so an
-    unnamed control keeps falling back to its binding key — no regression."""
+    whose SVG-space center lands within the knob's hit radius. Node centers are
+    mapped into the SAME SVG space `parse_frame_knobs` reports — `(node_abs -
+    root_abs) + panel_origin` — so a frame with a drop-shadow margin (panel not at
+    0,0) still matches (the exact convention `detect_overlay_controls` uses). A
+    sigil name (param:/bind:/meter:) yields a param_key binding (and no label — the
+    sigil is not a human name); a plain meaningful name yields a label. An unnamed
+    control keeps falling back to its synthetic key — no regression."""
     ox, oy = root_abs
-    # id -> node, and a flat list of (cx_local, cy_local, label) for named leaves.
+    pox, poy = panel_origin
+    # id -> node, and a flat list of (cx_svg, cy_svg, node) for the nodes eligible
+    # to own a knob: those with a meaningful label OR a binding sigil. Default-named
+    # leaves are excluded, so a bare inner ellipse never steals ownership from its
+    # named knob instance.
     id2node = {}
-    named_pts = []  # (cx, cy, label)
-    def walk(n):
+    named_pts = []  # (cx, cy, area, node)
+    def walk(n, is_root):
         nid = n.get("id")
         if nid:
             id2node[nid] = n
         bb = n.get("absoluteBoundingBox")
-        lbl = _node_label(n.get("name", ""))
-        if bb and lbl:
-            cx = bb.get("x", 0.0) - ox + bb.get("width", 0.0) / 2.0
-            cy = bb.get("y", 0.0) - oy + bb.get("height", 0.0) / 2.0
-            named_pts.append((cx, cy, lbl))
+        name = n.get("name", "")
+        # The root frame is excluded — it is the container, and its name (the
+        # design's own name) would otherwise be mis-bound to a knob near its center.
+        if not is_root and bb and (_node_label(name) or _param_key_from_layer_name(name)):
+            w, h = bb.get("width", 0.0), bb.get("height", 0.0)
+            cx = bb.get("x", 0.0) - ox + pox + w / 2.0
+            cy = bb.get("y", 0.0) - oy + poy + h / 2.0
+            named_pts.append((cx, cy, w * h, n))
         for c in n.get("children", []) or []:
-            walk(c)
-    walk(figma_root)
+            walk(c, False)
+    walk(figma_root, True)
+
+    def _apply(el, node):
+        name = node.get("name", "")
+        pk = _param_key_from_layer_name(name)
+        if pk:
+            el["param_key"] = pk  # binding sigil → host-param key (no human label)
+        else:
+            lbl = _node_label(name)
+            if lbl:
+                el["label"] = lbl
 
     for el in elements:
         sid = el.get("source_node_id")
         if sid and sid in id2node:
-            lbl = _node_label(id2node[sid].get("name", ""))
-            if lbl:
-                el["label"] = lbl
+            _apply(el, id2node[sid])
             continue
-        # Geometry knob: nearest named node whose center is within the hit radius.
+        # Geometry knob: the best candidate whose center is within the hit radius.
+        # Priority: a binding-sigil node beats a plain-named one; within a rank,
+        # nearest center wins, then smallest area (the tightest owner over an
+        # enclosing group at the same center).
         if el.get("kind") == "knob":
             kx, ky, r = el.get("cx", 0.0), el.get("cy", 0.0), el.get("hit_radius", 0.0)
-            best, bd = None, 1e18
-            for cx, cy, lbl in named_pts:
+            best, best_rank, bd, ba = None, -1, 1e18, 1e18
+            for cx, cy, area, node in named_pts:
                 d2 = (cx - kx) ** 2 + (cy - ky) ** 2
-                if d2 <= r * r and d2 < bd:
-                    bd, best = d2, lbl
-            if best:
-                el["label"] = best
+                if d2 > r * r:
+                    continue
+                rank = 1 if _param_key_from_layer_name(node.get("name", "")) else 0
+                better = rank > best_rank or (
+                    rank == best_rank and
+                    (d2 < bd - 1e-6 or (d2 <= bd + 1e-6 and area < ba)))
+                if better:
+                    best, best_rank, bd, ba = node, rank, d2, area
+            if best is not None:
+                el["source_node_id"] = best.get("id", "")  # provenance for the manifest lane
+                _apply(el, best)
 
 def _rewrite_image_fills(node, ref_to_rel):
     """Replace style.background_image 'pending:<ref>' with the resolved relative
@@ -1179,6 +1330,12 @@ def build_argparser():
     ap.add_argument("--knob-name", action="append", default=[],
                     help="name-override (repeatable): also treat any node whose name contains this "
                          "substring as a knob, supplementing geometry auto-detect (with --faithful-vector)")
+    ap.add_argument("--cache-dir",
+                    help="cache the /nodes JSON + frame SVG per (file-key,node) here; re-runs read the "
+                         "cache with ZERO REST calls (the Figma MCP allows ~6/month on a View seat). "
+                         "Populate once with a token, then re-test the same frame offline.")
+    ap.add_argument("--refresh-cache", action="store_true",
+                    help="ignore any cached payloads and re-fetch (rewrites the cache)")
     return ap
 
 
@@ -1194,11 +1351,16 @@ def main():
         ap.error("need --file-key + --node (or --url)")
 
     token = resolve_token(args.token)
-    if not token and not args.node_json:
+    # A populated cache is a valid token-free source: a cached /nodes payload lets
+    # the whole run proceed offline.
+    cached_nodes = _cache_path(args.cache_dir, file_key, node_id, _CACHE_NODES_SUFFIX)
+    have_cached_nodes = bool(cached_nodes) and not args.refresh_cache and os.path.exists(cached_nodes)
+    if not token and not args.node_json and not have_cached_nodes:
         ap.error("no Figma token (pass --token, set $FIGMA_TOKEN, or create ~/.config/pulp/figma-token). "
                  "Generate at figma.com -> Settings -> Security -> Personal access tokens (scope file_content:read).")
 
-    doc = json.load(open(args.node_json)) if args.node_json else fetch_nodes(file_key, node_id, token)
+    doc = (json.load(open(args.node_json)) if args.node_json
+           else fetch_nodes_cached(file_key, node_id, token, args.cache_dir, args.refresh_cache))
     root = doc["nodes"][node_id]["document"]
     root_node, ctx = node_tree_to_ir(root)
 
@@ -1224,9 +1386,9 @@ def main():
         svg = None
         if args.frame_svg:
             svg = open(args.frame_svg).read()
-        elif token:
-            print("fetching frame SVG via /images?format=svg ...")
-            svg = fetch_frame_svg(file_key, node_id, token)
+        elif token or args.cache_dir:
+            svg = fetch_frame_svg_cached(file_key, node_id, token,
+                                         args.cache_dir, args.refresh_cache)
         if svg:
             entry = apply_faithful_vector(root_node, root, svg, file_key, node_id,
                                           out_dir, args.knob_name)

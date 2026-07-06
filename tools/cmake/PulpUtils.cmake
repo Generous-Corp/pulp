@@ -83,6 +83,20 @@ else()
     set(_PULP_VIEW_PLATFORM_MAC_DIR "")
 endif()
 
+# Directory holding the shared macOS render Objective-C cluster
+# (metal_surface_mac.mm + render_loop_apple.mm and their private headers). These
+# define ObjC classes compiled once into pulp-render, so they get the same
+# per-binary suffix treatment as the view cluster. Probed in-tree and from an
+# installed SDK; empty when the sources aren't shipped (helper then skips the
+# render part and warns).
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../core/render/src/metal_surface_mac.mm")
+    set(_PULP_RENDER_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../../core/render/src")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../src/pulp/render/metal_surface_mac.mm")
+    set(_PULP_RENDER_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../src/pulp/render")
+else()
+    set(_PULP_RENDER_SRC_DIR "")
+endif()
+
 # Compile a per-binary copy of the macOS view/window/accessibility Objective-C
 # cluster into `target`, with every ObjC class name suffixed by the (sanitized)
 # target name. ObjC class names are process-global; the shared pulp-view-core
@@ -129,14 +143,38 @@ function(_pulp_apply_view_mac_objc_suffix target)
         endif()
     endforeach()
 
+    # metal_surface_mac.mm's PulpMetalView (the CAMetalLayer GPU-surface NSView) is
+    # the one shared-pulp-render macOS ObjC class that cross-plug-in-collides, so
+    # it gets the same per-binary suffix (renamed to a distinct base,
+    # PulpMetalSurfaceView). Only added when the render layer is actually present:
+    # the TU relies on pulp::render's include/link, wired below ONLY under
+    # PULP_HAS_SKIA — adding it in a no-Skia macOS build (a supported fallback)
+    # would fail to compile, so gate on the same condition. (render_loop_apple.mm's
+    # display-link class is iOS-only — inside TARGET_OS_IPHONE — so there is no
+    # macOS copy to namespace. The .mm's quote-include of the render names header
+    # resolves from its own source dir, so no extra include dir is needed.)
+    set(_pulp_render_objc_srcs "")
+    if(PULP_HAS_SKIA AND (TARGET pulp::render OR TARGET Pulp::render))
+        if(_PULP_RENDER_SRC_DIR AND EXISTS "${_PULP_RENDER_SRC_DIR}/metal_surface_mac.mm")
+            set(_pulp_render_objc_srcs "${_PULP_RENDER_SRC_DIR}/metal_surface_mac.mm")
+        else()
+            message(WARNING
+                "pulp: ${target}: core/render/metal_surface_mac.mm not found — its "
+                "GPU-surface ObjC class keeps its shared fixed name and may collide "
+                "when co-loaded with another Pulp plug-in. The SDK should ship it "
+                "under src/pulp/render.")
+        endif()
+    endif()
+
     # Sanitize the target name into a valid C identifier fragment. The format
     # target name (e.g. SuperConvolver_AU) is unique per shipped binary.
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _pulp_view_objc_suffix "${target}")
 
-    target_sources(${target} PRIVATE ${_pulp_view_objc_srcs})
-    # PULP_VIEW_OBJC_SUFFIX is consumed ONLY by pulp_mac_objc_names.h, which only
-    # the view cluster .mm files include — so a target-wide define affects just
-    # those TUs, never the rest of `target`. (A per-source COMPILE_DEFINITIONS
+    target_sources(${target} PRIVATE ${_pulp_view_objc_srcs} ${_pulp_render_objc_srcs})
+    # PULP_VIEW_OBJC_SUFFIX is consumed ONLY by pulp_mac_objc_names.h and
+    # pulp_render_objc_names.h, which only the view + render cluster .mm files
+    # include — so a target-wide define affects just those TUs, never the rest of
+    # `target`. (A per-source COMPILE_DEFINITIONS
     # would be wrong here: when every plug-in format target lives in one CMake
     # directory, set_source_files_properties shares the same shared-source scope
     # across them and the last-added target's value would win for all.)
@@ -574,11 +612,17 @@ endfunction()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;PRODUCES_MIDI"
+        "ACCEPTS_MIDI"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS"
         ${ARGN}
     )
+    if("PRODUCES_MIDI" IN_LIST PLUGIN_UNPARSED_ARGUMENTS)
+        message(WARNING
+            "pulp_add_plugin(${target}): PRODUCES_MIDI is ignored. "
+            "Set PluginDescriptor::produces_midi = true in the processor; "
+            "MIDI output is format/runtime metadata, not a CMake packaging flag.")
+    endif()
 
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)
@@ -839,6 +883,125 @@ function(pulp_add_plugin target)
         set(_built_formats_display "none")
     endif()
     message(STATUS "Pulp plugin: ${target} (formats: ${_built_formats_display})")
+endfunction()
+
+# ── pulp_add_reload_logic — a hot-reloadable DSP "logic" library ──────────
+#
+# Builds the DSP half of a hot-reloadable plugin: a MODULE shared library that
+# exports the reload ABI (PULP_RELOAD_LOGIC) and is dlopen'd + hot-swapped by a
+# pulp::format::reload::ReloadableShell while the host keeps the plugin alive.
+# Keep this target's sources separate from the shell plugin so the DSP can be
+# recompiled without rebuilding what the host has loaded.
+#
+#   pulp_add_reload_logic(<target>
+#       SOURCES <src>...                # the DSP translation unit(s)
+#       [OUTPUT_NAME <name>]            # built file stem (default: target name)
+#       [PUBLISH_DIR <dir>]             # if set, POST_BUILD copies the built
+#                                       # module here (dir created if needed) —
+#                                       # the path a ReloadableShell watches.
+#       [RESOLVE_FROM_HOST])            # thin mode: don't static-link the SDK;
+#                                       # resolve pulp::* symbols from the HOST at
+#                                       # dlopen (see below).
+#
+# The module gets no "lib" prefix and a platform-stable suffix (.dylib/.so/.dll)
+# so the watched path is predictable.
+#
+# Linking model — two choices:
+#  • DEFAULT (static): links pulp::format into the module. Simple; fine for
+#    DSP-only logic. The SDK ends up duplicated in the process (host copy + logic
+#    copy); harmless for format (POD/RT code, identical builds gated by the
+#    fingerprint), but a logic that pulls ObjC-heavy libs (e.g. pulp::view for a
+#    custom create_view()) would duplicate those classes — noisy and unsafe.
+#  • RESOLVE_FROM_HOST (thin): links NO SDK archives; adds the SDK headers and,
+#    on macOS, `-undefined dynamic_lookup` so pulp::* references resolve from the
+#    HOST at dlopen — ONE copy of the SDK in the process. Use this whenever the
+#    logic builds UI (links pulp::view). The host that loads it MUST export its
+#    symbols: call pulp_reload_host(<host_target>). (Linux resolves undefined
+#    shared-object symbols at load by default; Windows needs the static model.)
+function(pulp_add_reload_logic target)
+    cmake_parse_arguments(RL "RESOLVE_FROM_HOST" "OUTPUT_NAME;PUBLISH_DIR" "SOURCES" ${ARGN})
+    if(NOT RL_SOURCES)
+        message(FATAL_ERROR "pulp_add_reload_logic(${target}): SOURCES is required")
+    endif()
+    if(NOT RL_OUTPUT_NAME)
+        set(RL_OUTPUT_NAME "${target}")
+    endif()
+    if(APPLE)
+        set(_rl_suffix ".dylib")
+    elseif(WIN32)
+        set(_rl_suffix ".dll")
+    else()
+        set(_rl_suffix ".so")
+    endif()
+
+    add_library(${target} MODULE ${RL_SOURCES})
+    _pulp_pick_target(_RL_FORMAT_TARGET Pulp::format pulp::format)
+    if(RL_RESOLVE_FROM_HOST AND NOT WIN32)
+        # Thin: SDK headers only; resolve pulp::* from the host at dlopen so there
+        # is a single copy of the SDK in the process (no duplicate ObjC classes /
+        # statics). Enumerate the SDK targets' interface include dirs without
+        # linking their archives.
+        #
+        # Intentionally an explicit dual-prefix list, NOT the in-tree
+        # PULP_SDK_TARGETS (PulpInstallRules.cmake): this helper must also work for
+        # downstream find_package(Pulp) consumers, who get imported `Pulp::*`
+        # targets and no PULP_SDK_TARGETS. Each entry is if(TARGET)-guarded, so a
+        # missing module is skipped silently — when a NEW SDK module's headers are
+        # needed by thin logic, add it here.
+        foreach(_rl_dep Pulp::format pulp::format Pulp::view pulp::view Pulp::canvas pulp::canvas
+                        Pulp::state pulp::state Pulp::audio pulp::audio Pulp::midi pulp::midi
+                        Pulp::runtime pulp::runtime Pulp::platform pulp::platform
+                        Pulp::events pulp::events Pulp::signal pulp::signal)
+            if(TARGET ${_rl_dep})
+                target_include_directories(${target} PRIVATE
+                    $<TARGET_PROPERTY:${_rl_dep},INTERFACE_INCLUDE_DIRECTORIES>)
+            endif()
+        endforeach()
+        if(APPLE)
+            target_link_options(${target} PRIVATE -undefined dynamic_lookup)
+        endif()
+        # Linux: a MODULE may keep undefined symbols, resolved from the host at
+        # dlopen — no extra flag needed.
+    else()
+        if(RL_RESOLVE_FROM_HOST AND WIN32)
+            message(WARNING "pulp_add_reload_logic(${target}): RESOLVE_FROM_HOST is "
+                            "unsupported on Windows; using the static link model.")
+        endif()
+        target_link_libraries(${target} PRIVATE ${_RL_FORMAT_TARGET})
+    endif()
+    set_target_properties(${target} PROPERTIES
+        PREFIX "" OUTPUT_NAME "${RL_OUTPUT_NAME}" SUFFIX "${_rl_suffix}"
+        POSITION_INDEPENDENT_CODE ON)
+
+    if(RL_PUBLISH_DIR)
+        # Publish the freshly-built module to the watched path so the shell finds
+        # its DSP the moment the host loads it. NB: a literal $ENV{HOME} in
+        # PUBLISH_DIR is the CONFIGURING user's home (captured now); a plugin
+        # loaded by a different user should set PULP_RELOAD_LOGIC_PATH instead.
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${RL_PUBLISH_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:${target}>"
+                    "${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}"
+            COMMENT "Publishing reload logic to ${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}")
+    endif()
+endfunction()
+
+# ── pulp_reload_host — export a host's SDK symbols for thin reload logic ───
+#
+# A logic library built with pulp_add_reload_logic(... RESOLVE_FROM_HOST) leaves
+# its pulp::* references undefined, to be resolved from whatever HOST dlopen's it
+# (the standalone app, the plugin bundle, a capture tool). For that to work the
+# host must publish its (statically-linked) SDK symbols in its dynamic symbol
+# table. Call this on each host target that loads thin logic. No-op on Windows.
+function(pulp_reload_host target)
+    if(WIN32)
+        return()
+    elseif(APPLE)
+        target_link_options(${target} PRIVATE -Wl,-export_dynamic)
+    else()  # Linux / other ELF
+        target_link_options(${target} PRIVATE -rdynamic)
+    endif()
 endfunction()
 
 # ── Internal: VST3 target ────────────────────────────────────────────────

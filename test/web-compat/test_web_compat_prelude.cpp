@@ -1238,7 +1238,7 @@ TEST_CASE("WebCompat: class selector requires every class in classList (issue-15
 //      namespace context. The parser ignores the namespace prefix
 //      and the selector won't match.
 TEST_CASE("WebCompat: class selector is case-sensitive (CSS standards-mode spec)",
-          "[webcompat][css-selector][issue-1551][coverage]") {
+          "[webcompat][css-selector][issue-1551]") {
     TestEnvironment env;
     env.eval(R"JS(
         var __caseEl = document.createElement('div');
@@ -1880,7 +1880,7 @@ TEST_CASE("resolveCSSLength: malformed calc-family operands fall through to px",
 // isolation would pass even if the dispatcher stopped routing through
 // setLineClamp at all — this test catches that.
 TEST_CASE("WebCompat: el.style.lineClamp = 'none' routes through dispatcher to setLineClamp(id, 0)",
-          "[webcompat][issue-1552][coverage]") {
+          "[webcompat][issue-1552]") {
     TestEnvironment env;
     // Install a recording shim over setLineClamp BEFORE the dispatcher
     // runs. Captures every (id, n) pair so we can verify the routing.
@@ -1931,7 +1931,7 @@ TEST_CASE("WebCompat: el.style.lineClamp = 'none' routes through dispatcher to s
 // path: a real StyleSheet with `:focus` / `:active` rules attaches and
 // the pseudo-setup helpers run.
 TEST_CASE("WebCompat: StyleSheet with :focus rule wires _setupPseudoFocus end-to-end",
-          "[webcompat][issue-1149][coverage]") {
+          "[webcompat][issue-1149]") {
     TestEnvironment env;
     env.eval(R"JS(
         var __ffEl = document.createElement('input');
@@ -1947,7 +1947,7 @@ TEST_CASE("WebCompat: StyleSheet with :focus rule wires _setupPseudoFocus end-to
 }
 
 TEST_CASE("WebCompat: StyleSheet with :active rule wires _setupPseudoActive end-to-end",
-          "[webcompat][issue-1149][coverage]") {
+          "[webcompat][issue-1149]") {
     TestEnvironment env;
     env.eval(R"JS(
         var __aaEl = document.createElement('button');

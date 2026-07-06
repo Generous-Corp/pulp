@@ -32,6 +32,7 @@
 #include <pulp/view/musical_typing.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/parameter_binding.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -57,7 +58,7 @@
 
 namespace pulp::examples {
 
-inline constexpr const char* kPulpTempoSamplerVersion = "1.0.2";
+inline constexpr const char* kPulpTempoSamplerVersion = "1.7.0";
 
 // Inlined from PulpSampler's sampler_components.hpp so this example is
 // self-contained — pulp_add_plugin compiles the format entries without an
@@ -72,10 +73,27 @@ struct SamplerVoice {
     audio::LoopRegion region;   // stored so the UI playhead can map position->progress
     bool released = false;
     bool sustained = false;     // note-off arrived but held by the sustain pedal
+    // Base playback rate for this voice (repitch across the keyboard when NOT
+    // keeping tempo; 1.0 when the pitch is done by the keep-tempo shifter). The
+    // per-chunk expression (pitch-bend/vibrato) multiplies onto this at render.
+    double base_rate = 1.0;
+    // Keep-tempo transposition: when true the voice plays at rate 1.0 (tempo
+    // preserved) and its output is pitch-shifted by transpose_semitones through
+    // the per-voice realtime pitch shifter (Logic Flex). Engaged only for
+    // Classic/One-Shot non-root keys while LINK (follow-tempo) is on.
+    bool keep_tempo = false;
+    float transpose_semitones = 0.0f;
+    // A finite One-Shot (One-Shot mode + Loop=None) plays through to its end and
+    // IGNORES note-off. Captured per-voice at trigger so switching the global mode
+    // while a note is held can't strand it — a One-Shot LOOP still releases on
+    // note-off (or it would drone forever with no way to stop).
+    bool plays_through = false;
 
     void reset() {
         active = false; note = -1; velocity = 0.0f; sample = {}; released = false;
         sustained = false;
+        base_rate = 1.0; keep_tempo = false; transpose_semitones = 0.0f;
+        plays_through = false;
         adsr.reset(); renderer.reset();
     }
     bool start(int n, float vel, double speed, float host_sample_rate,
@@ -85,6 +103,7 @@ struct SamplerVoice {
         if (!renderer.set_region(region_in, source_frames)) return false;
         region = region_in;
         note = n; velocity = vel; sample = sample_view; active = true;
+        base_rate = speed;
         adsr.set_sample_rate(host_sample_rate); adsr.note_on();
         renderer.set_playback_rate(speed); renderer.start();
         return true;
@@ -122,7 +141,27 @@ enum TempoSamplerParams : state::ParamID {
     kTempoLoop    = 10,
     kRootNote     = 11, // MIDI note of slice 0 (slice idx = note - root)
     kOnsetSens    = 12, // 0..1 onset-detection sensitivity (higher = more slices)
+    kDirection    = 13, // read DIRECTION (Direction dropdown): 0 Forward, 1 Reverse.
+                        // Sets the play direction for a one-shot (LOOP = None).
+    kLoopMode     = 14, // loop SHAPE when looping (LOOP dropdown != None): 0 Forward,
+                        // 1 Reverse, 2 Ping-Pong. The LOOP dropdown (None / Forward /
+                        // Reverse / Ping-Pong) drives this + kTempoLoop (on/off).
+    kPlaybackMode = 15, // trigger MODE (3-way toggle): 0 Classic (held; note-off
+                        // releases; pitched across the keyboard; Direction+Loop apply),
+                        // 1 One-Shot (whole sample plays through; note-off ignored;
+                        // pitched; Direction+Loop apply), 2 Slice (each key = one slice,
+                        // forward one-shot; Direction+Loop hidden/forced Forward+None).
+                        // Default Classic. (Logic Quick Sampler / PlunderTube model.)
+    kGate         = 16, // 1 = key-up releases the envelope (default); 0 = play
+                        // through (the slice plays to its end, ignoring note-off).
+    kFlexSpeed    = 17, // Logic Flex Speed: index into {1/4, 1/2, 1, 2, 4}x of the
+                        // tempo-synced playback speed. Default index 2 (1x).
 };
+
+// Trigger mode (kPlaybackMode). Classic/One-Shot play the WHOLE sample pitched
+// across the keyboard (Direction+Loop apply); Slice plays one slice per key,
+// forward one-shot (Direction+Loop forced off). Logic Quick Sampler model.
+enum class TriggerMode { Classic = 0, OneShot = 1, Slice = 2 };
 
 // Editor waveform surface. Inherits WaveformEditor's waveform + slice-region
 // rendering, and adds: a "drop a sample" call-to-action when empty, audio-file
@@ -247,15 +286,8 @@ private:
         std::vector<float> mono; float sr = 48000.0f; std::vector<long> slices;
         if (snapshot(mono, sr, slices) && !mono.empty()) {
             set_audio_data(mono.data(), static_cast<int>(mono.size()), sr);
-            clear_regions();
-            for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
-                view::WaveformRegion r;
-                r.start_sample = static_cast<int>(slices[i]);
-                r.end_sample = static_cast<int>(slices[i + 1]);
-                r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
-                add_region(r);
-            }
             slices_ = std::move(slices);
+            rebuild_regions();  // only draws the slice bands when show_slice_regions_
             total_samples_ = static_cast<long>(mono.size());
             set_visible_range(0, static_cast<int>(total_samples_));  // zoom-to-fit new sample
             has_audio_ = true;
@@ -263,6 +295,28 @@ private:
             slices_.clear();
             total_samples_ = 0;
             has_audio_ = false;
+        }
+    }
+    // Slice bands are a Slice-mode affordance: Classic/One-Shot play the whole
+    // sample (pitched across the keyboard), so their waveform shows NO slice
+    // divisions. The mode toggle calls set_show_slice_regions(); rebuild_regions()
+    // re-applies it against the current slices_ without re-snapshotting.
+public:
+    void set_show_slice_regions(bool v) {
+        if (show_slice_regions_ == v) return;
+        show_slice_regions_ = v;
+        rebuild_regions();
+    }
+private:
+    void rebuild_regions() {
+        clear_regions();
+        if (!show_slice_regions_) return;
+        for (std::size_t i = 0; i + 1 < slices_.size(); ++i) {
+            view::WaveformRegion r;
+            r.start_sample = static_cast<int>(slices_[i]);
+            r.end_sample = static_cast<int>(slices_[i + 1]);
+            r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
+            add_region(r);
         }
     }
     // Scroll wheel / two-finger: vertical -> zoom around the cursor, horizontal
@@ -342,6 +396,7 @@ private:
     std::vector<long> slices_;
     long total_samples_ = 0;
     std::uint64_t last_gen_ = ~0ull;  // force first refresh
+    bool show_slice_regions_ = true;  // slice bands only in Slice mode (set by the mode toggle)
     view::ValueAnimation flash_{0.0f};
     std::chrono::steady_clock::time_point last_paint_{};
 };
@@ -412,16 +467,69 @@ public:
     // The FrameTick poller defaults the fader/readout to the detected loop BPM
     // whenever a new loop is analyzed (generation bump), so R≈1 on load.
     view::Fader* tempo_fader = nullptr;
+    // Tap-to-type BPM field. Idle it shows the live "120.0 BPM" readout (the
+    // FrameTick rewrites it from effective_bpm while it is NOT focused); click it
+    // to edit — the value highlights (select_on_focus), type a number, Return
+    // commits via set_target_bpm and the fader thumb re-syncs on the next frame.
+    // It is the readout AND the editor, so a click focuses it natively (the host
+    // focuses whatever was clicked) — no separate hit target to plumb focus for.
+    view::TextEditor* tempo_edit_ = nullptr;
+    view::ToggleButton* link_btn = nullptr;  // tempo LINK toggle (follow host vs manual)
+    // 3-way trigger-mode toggle (Classic / One-Shot / Slice) in the top-left,
+    // replacing the title; the selected one is highlighted.
+    std::array<view::ToggleButton*, 3> mode_btns_{nullptr, nullptr, nullptr};
+    // Direction + Loop controls — HIDDEN in Slice mode (they don't apply there).
+    view::View* dir_label_ = nullptr;
+    view::ComboBox* dir_combo_ = nullptr;
+    view::View* loop_label_ = nullptr;
+    view::ComboBox* loop_combo_ = nullptr;
+    // Slice-mode-ONLY controls — the tempo-slicing chrome. Classic/One-Shot play
+    // the whole sample (Quick Sampler has no slice count / tempo slider there —
+    // just LINK to follow host tempo), so these hide outside Slice mode.
+    WaveformDropView* wave_ = nullptr;      // to toggle the waveform slice bands
+    view::View* sens_label_ = nullptr;
+    view::Fader* sens_fader_ = nullptr;
+    view::View* slices_label_ = nullptr;    // "SLICES N" live readout
+    view::View* tempo_label_ = nullptr;     // tempo_fader + tempo_edit_ already members
+    // Reflect the current trigger mode across the UI: highlight the selected mode
+    // button and show/hide the Direction+Loop controls (hidden in Slice). Cheap;
+    // wired to a kPlaybackMode listener + called once at build.
+    void apply_mode_ui(int mode) {
+        for (int i = 0; i < 3; ++i)
+            if (mode_btns_[static_cast<size_t>(i)])
+                mode_btns_[static_cast<size_t>(i)]->set_on(i == mode);
+        const bool slice_mode = (mode == 2);  // 2 = Slice
+        const bool show = !slice_mode;
+        // Direction + Loop: apply to Classic/One-Shot, hidden in Slice.
+        if (dir_label_) dir_label_->set_visible(show);
+        if (dir_combo_) dir_combo_->set_visible(show);
+        if (loop_label_) loop_label_->set_visible(show);
+        if (loop_combo_) loop_combo_->set_visible(show);
+        // Slicing chrome (SENS, SLICES readout, TEMPO slider + its editor/label):
+        // Slice-mode ONLY. LINK stays visible in every mode (follow host tempo).
+        auto setv = [](view::View* w, bool v) { if (w) w->set_visible(v); };
+        setv(sens_label_, slice_mode);
+        setv(sens_fader_, slice_mode);
+        setv(slices_label_, slice_mode);
+        setv(tempo_label_, slice_mode);
+        setv(tempo_fader, slice_mode);
+        setv(tempo_edit_, slice_mode);
+        if (wave_) wave_->set_show_slice_regions(slice_mode);  // no slice bands off-Slice
+    }
+    view::View* detail_overlay_ = nullptr;   // Logic-style "Detail" page (Gate, Flex Speed, …)
+    bool hosted_in_standalone_ = false;      // resolved on view-open
     std::uint64_t tempo_seen_gen_ = ~0ull;  // force a first sync
 
     // Reveal the "Settings" button only when hosted in the standalone settings
     // chrome (a TabPanel ancestor carrying the Audio/MIDI Settings tab). Called
     // from Processor::on_view_opened — by then the editor is parented into the
     // chrome, so format::standalone_settings_available() can detect it. Cheap and
-    // allocation-free, so it is safe outside the paint no-alloc scope.
+    // allocation-free, so it is safe outside the paint no-alloc scope. Also records
+    // the standalone-vs-DAW verdict so the processor can resolve LINKED tempo.
     void update_standalone_chrome_affordances() {
+        hosted_in_standalone_ = format::standalone_settings_available(this);
         if (settings_button)
-            settings_button->set_visible(format::standalone_settings_available(this));
+            settings_button->set_visible(hosted_in_standalone_);
     }
 
     SamplerEditorRoot() {
@@ -447,10 +555,16 @@ public:
 
 private:
     bool on_musical_key(const view::KeyEvent& e) {
+        // The on-screen musical-typing keyboard (and its ⌘K toggle) is a STANDALONE
+        // app feature only. In a plugin (AU/VST3/CLAP) the DAW owns the computer
+        // keyboard — ⌘K, Space, R, etc. must pass straight through to the host, so
+        // we never capture a key here. (The macOS host still routes Cmd chords via
+        // performKeyEquivalent:, which is why ⌘K reached here and opened our window
+        // inside Logic — this gate stops that.)
+        if (!hosted_in_standalone_) return false;
         // ⌘K (macOS) / Ctrl+K (Win/Linux): toggle the MusicalTypingKeyboard
         // window. Checked before the modifier-chord rejection below so the
-        // command-combo reaches here (the macOS host routes Cmd chords via
-        // performKeyEquivalent:).
+        // command-combo reaches here.
         const uint16_t toggle_mod = view::kModCmd | view::kModCtrl;
         if (e.key == view::KeyCode::k && (e.modifiers & toggle_mod) && e.is_down && !e.is_repeat) {
             toggle_keyboard();
@@ -477,14 +591,24 @@ public:
     static constexpr int kMaxVoices = 8;
     static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
     static constexpr std::uint32_t kMaxOutputChannels = 8;
-    static constexpr int kDefaultRootNote = 60;  // C3 in C-2..C8 labeling (see note_name)
+    static constexpr int kDefaultRootNote = 48;  // C2 in C-2..C8 labeling (see note_name) —
+                                                 // aligns with the DAW Musical Typing default octave
     static constexpr int kRootNoteMin = 0;       // C-2
     static constexpr int kRootNoteMax = 120;     // C8
 
     // Onset sensitivity s in [0,1] maps to a slice COUNT (the strongest cuts by
     // confidence are kept): s=0 -> 1 slice (whole sample), s=1 -> kMaxSlices.
     static constexpr int kMaxSlices = 32;
-    static constexpr float kDefaultOnsetSensitivity = 0.5f;  // ~16 slices by default
+    // Default to the WHOLE loop (1 slice): a dropped loop plays + LOOPs as a
+    // single 2-bar region that tiles the bar grid. Raising SENS chops it into
+    // slices for per-key triggering. (A multi-slice default made holding the root
+    // loop only slice 0 — a quarter of the loop — which read as "the loop ends
+    // early.")
+    // Slice count default. Classic/One-Shot ignore slices (they play the whole
+    // sample), so this only shapes Slice mode — where we want a musically sensible
+    // number of slices, never 1. A mid sensitivity chops a typical loop into
+    // several transient-aligned slices (min-length + zero-crossing bounded below).
+    static constexpr float kDefaultOnsetSensitivity = 0.5f;
 
     // MIDI note name in the user-requested C-2..C8 convention (C3 = 60). NOTE:
     // this deliberately differs from Pulp's MidiKeyboard, which labels 60 as C4
@@ -532,6 +656,25 @@ public:
                                        static_cast<float>(kDefaultRootNote), 1}});
         store.add_parameter({.id = kOnsetSens, .name = "Onset Sensitivity", .unit = "",
                              .range = {0, 1, kDefaultOnsetSensitivity, 0.01f}});
+        // Read direction (Direction dropdown): 0 Forward, 1 Reverse. Default Forward.
+        store.add_parameter({.id = kDirection, .name = "Direction", .unit = "", .range = {0, 1, 0, 1}});
+        // Loop shape when looping: 0 Forward, 1 Reverse, 2 Ping-Pong. The LOOP
+        // dropdown (None / Forward / Reverse / Ping-Pong) writes this + kTempoLoop.
+        store.add_parameter({.id = kLoopMode, .name = "Loop Mode", .unit = "", .range = {0, 2, 0, 1}});
+        // Trigger mode: 0 Classic (default), 1 One-Shot, 2 Slice.
+        store.add_parameter({.id = kPlaybackMode, .name = "Mode", .unit = "", .range = {0, 2, 0, 1}});
+        // Gate: 1 = key-up releases the envelope (default), 0 = play through.
+        store.add_parameter({.id = kGate, .name = "Gate", .unit = "", .range = {0, 1, 1, 1}});
+        // Flex Speed: index into {1/4,1/2,1,2,4}x; default 1x (index 2).
+        store.add_parameter({.id = kFlexSpeed, .name = "Flex Speed", .unit = "", .range = {0, 4, 2, 1}});
+    }
+
+    // Logic Flex Speed factor: the loop plays this many times faster than the
+    // tempo-synced base (so a higher factor SHORTENS the stretched duration).
+    double flex_speed_factor() const noexcept {
+        static constexpr double kSpeeds[] = {0.25, 0.5, 1.0, 2.0, 4.0};
+        const int i = std::clamp(static_cast<int>(state().get_value(kFlexSpeed) + 0.5f), 0, 4);
+        return kSpeeds[i];
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -573,9 +716,19 @@ public:
         }
         resample_raw_to_host_locked();
         analyze_locked();
+        // A fresh drop while UNLINKED adopts the new sample's own (bar-snapped)
+        // tempo, so the loop plays at its natural fractional speed; LINKED stays
+        // following the host. deserialize re-applies a saved tempo AFTER load_loop,
+        // so a restored manual tempo still wins over this.
+        if (!tempo_linked()) {
+            const double det = loop_bpm_.load(std::memory_order_relaxed);
+            if (det > 0.0)
+                tempo_override_.store(std::clamp(det, kTargetBpmMin, kTargetBpmMax),
+                                      std::memory_order_relaxed);
+        }
         raw_generation_.fetch_add(1, std::memory_order_acq_rel);
         load_generation_.fetch_add(1, std::memory_order_acq_rel);  // NEW sample → tempo poller re-detects BPM
-        request_render(pending_host_bpm_.load(std::memory_order_relaxed));
+        request_render(effective_bpm());  // render at the resolved tempo (host / detected / manual)
         return true;
     }
 
@@ -601,7 +754,7 @@ public:
         std::vector<std::uint8_t> out;
         if (raw_frames_ <= 0) return out;  // nothing loaded
         const std::uint32_t magic = 0x504C5053u;  // 'PLPS'
-        const std::uint32_t version = 1;
+        const std::uint32_t version = 2;  // v2 appends the engaged target tempo
         const std::int32_t ch = raw_channels_;
         const std::int64_t frames = raw_frames_;
         const double sr = raw_sr_;
@@ -612,6 +765,11 @@ public:
         put(&magic, 4); put(&version, 4); put(&ch, 4); put(&frames, 8); put(&sr, 8);
         for (int c = 0; c < raw_channels_; ++c)
             put(raw_[c].data(), static_cast<std::size_t>(raw_frames_) * sizeof(float));
+        // v2: persist the TEMPO setting (0 = linked/follow-host, >0 = manual BPM) so
+        // a chosen tempo survives close+reopen / project reload. Trails the audio so
+        // a v1 reader simply ignores it.
+        const double tempo = tempo_override_.load(std::memory_order_relaxed);
+        put(&tempo, 8);
         return out;
     }
     bool deserialize_plugin_state(std::span<const std::uint8_t> data) override {
@@ -635,7 +793,19 @@ public:
             p += static_cast<std::size_t>(frames) * sizeof(float);
             ptrs[static_cast<std::size_t>(c)] = tmp[static_cast<std::size_t>(c)].data();
         }
+        // v2: an engaged target tempo trails the audio. Read it BEFORE load_loop
+        // (which resets generations but not the override), then apply it so the
+        // saved tempo wins over the load's default-to-host render.
+        bool have_tempo = false; double saved_tempo = 0.0;
+        if (version >= 2 && data.size() >= need + 8) {
+            std::memcpy(&saved_tempo, p, 8);
+            have_tempo = std::isfinite(saved_tempo) && saved_tempo >= 0.0;
+        }
         load_loop(ptrs.data(), ch, static_cast<long>(frames), sr);
+        if (have_tempo) {
+            if (saved_tempo > 0.0) set_target_bpm(saved_tempo);  // manual: re-engage + render
+            else set_tempo_linked(true);                         // linked: follow host
+        }
         return true;
     }
 
@@ -893,20 +1063,119 @@ public:
     // loop live and the slice regions refit. Off-audio-thread (UI) entry point.
     static constexpr double kTargetBpmMin = 20.0;
     static constexpr double kTargetBpmMax = 400.0;
+
+    // Derive the EXACT loop tempo so the loop tiles the bar grid perfectly at any
+    // host tempo. A loop is a whole number of beats, but the analyzer reports an
+    // integer (usually fractional-off) bpm, AND it can land an octave off (half /
+    // double tempo). Strategy:
+    //   1. Infer the analyzer's beat COUNT (round(dur·bpm/60)).
+    //   2. Consider that count and its octave neighbours (×¼…×4); each implies an
+    //      EXACT tempo N·60/dur that tiles the loop perfectly.
+    //   3. Pick the candidate whose tempo is closest to a REFERENCE in octave (log2)
+    //      space — the host transport when known, else the analyzer estimate. The
+    //      host prior resolves the half/double ambiguity (a loop dropped in a 120
+    //      project must be within an octave of 120) and lands the stretch near the
+    //      host tempo (R≈1, best quality).
+    // The result always makes raw_frames·loop_bpm == N·60·sr, so published_frames =
+    // round(N·60·sr / host) is an exact N beats at ANY host tempo. Pure + static so
+    // it is unit-testable. `reference_bpm <= 0` ⇒ no host hint (use the analyzer).
+    // Derive the loop tempo assuming the loop is a whole number of BARS (4/4).
+    // A tempo sampler loops on the bar, so the loop MUST be an integer bar count —
+    // otherwise it can never tile a DAW's bar grid (a 2.5-bar loop shifts its
+    // downbeat half a bar every pass, however you stretch it). We pick the bar
+    // count whose implied tempo is closest (octave-aware) to the reference (the
+    // host/project tempo when known, else the analyzer's estimate); stretching
+    // that to the host then yields an exact whole-bar loop that always lines up.
+    static double bar_exact_bpm(long frames, double sr, double reference_bpm,
+                                double analyzer_bpm) {
+        if (analyzer_bpm <= 0.0 || frames <= 0 || sr <= 0.0) return analyzer_bpm;
+        const double dur = static_cast<double>(frames) / sr;
+        if (dur <= 0.0) return analyzer_bpm;
+        constexpr double kBeatsPerBar = 4.0;
+        // The analyzer's estimate of how many BARS the loop is. Candidates are
+        // whole-bar counts around it (floor/ceil) plus octave neighbours (x2/x0.5)
+        // to correct a doubled/halved detection. We force a WHOLE-BAR count — a
+        // tempo sampler loops on the bar, so a non-integer-bar loop (e.g. 2.5 bars)
+        // could never tile a DAW's bar grid. The host/reference tempo only resolves
+        // which octave/neighbour is closest; it never overrides the content's bar
+        // count with a far-off one (a real 3-bar loop stays 3 bars).
+        const double est_bars = dur * analyzer_bpm / 60.0 / kBeatsPerBar;
+        if (est_bars <= 0.0) return analyzer_bpm;
+        const double ref = reference_bpm > 0.0 ? reference_bpm : analyzer_bpm;
+        // Whole-bar candidates around the analyzer's estimate, plus octave
+        // neighbours (x2 / /2) to correct a doubled/halved detection. The eps pad
+        // keeps a genuine integer estimate (e.g. 2.999 bars) from spuriously also
+        // offering its neighbour, while a truly ambiguous estimate (e.g. 2.5 bars)
+        // DOES offer both 2 and 3 so the host/reference tempo can pick the nearer.
+        constexpr double kEps = 0.06;
+        const long lo = std::max<long>(1, static_cast<long>(std::floor(est_bars + kEps)));
+        const long hi = std::max<long>(1, static_cast<long>(std::ceil(est_bars - kEps)));
+        const long cands[] = {lo, hi, lo * 2, hi * 2,
+                              std::max<long>(1, lo / 2), std::max<long>(1, hi / 2)};
+        double best = 0.0, best_d = 1e30;
+        for (long bars : cands) {
+            const double t = static_cast<double>(bars) * kBeatsPerBar * 60.0 / dur;
+            if (t < kTargetBpmMin || t > kTargetBpmMax) continue;
+            const double d = std::abs(std::log2(t / ref));
+            if (d < best_d) { best_d = d; best = t; }
+        }
+        return best > 0.0 ? best : analyzer_bpm;
+    }
     void set_target_bpm(double bpm) {
         const double clamped = std::clamp(bpm, kTargetBpmMin, kTargetBpmMax);
         tempo_override_.store(clamped, std::memory_order_relaxed);
         request_render(clamped);  // re-stretch to the new target now
     }
-    /// The tempo the loop is currently stretched TO: the override when engaged,
-    /// else the last host/standalone tempo seen by the worker (default 120).
+    /// The tempo the loop is currently stretched TO. With a manual override it is
+    /// that value; otherwise (LINKED) it follows the reference tempo — the loop's
+    /// own detected BPM in the standalone (no transport to link to), or the last
+    /// host transport tempo in a plugin host.
     double effective_bpm() const {
         const double o = tempo_override_.load(std::memory_order_relaxed);
-        return o > 0.0 ? o : pending_host_bpm_.load(std::memory_order_relaxed);
+        if (o > 0.0) return o;
+        if (standalone_host_.load(std::memory_order_relaxed)) {
+            const double det = loop_bpm_.load(std::memory_order_relaxed);
+            if (det > 0.0) return det;
+        }
+        return pending_host_bpm_.load(std::memory_order_relaxed);
+    }
+    /// The editor reports whether it is hosted in the standalone chrome (no DAW
+    /// transport), so the audio thread can resolve LINKED tempo to the loop's
+    /// natural BPM there instead of a host tempo.
+    void set_standalone_host(bool on) {
+        standalone_host_.store(on, std::memory_order_relaxed);
     }
     /// True once a UI target tempo is engaged (vs. following the host).
     bool tempo_override_active() const {
         return tempo_override_.load(std::memory_order_relaxed) > 0.0;
+    }
+
+    /// Tempo LINK state. Linked (override == 0) means the loop follows the host/
+    /// transport tempo and re-stretches automatically when the DAW tempo changes;
+    /// unlinked means a manual target BPM is engaged. This is the natural reading
+    /// of `tempo_override_` (0 = follow host), surfaced for the editor's link
+    /// toggle. (Distinct from kTempoLink, which is the pitch+time "vinyl" link.)
+    bool tempo_linked() const {
+        return tempo_override_.load(std::memory_order_relaxed) <= 0.0;
+    }
+    /// Toggle tempo LINK. Linking clears the override so playback follows the host;
+    /// unlinking seeds the manual target from the currently-engaged (host) tempo so
+    /// the slider/number start where the sound is now (no jump). Off-audio-thread.
+    void set_tempo_linked(bool linked) {
+        if (linked) {
+            tempo_override_.store(0.0, std::memory_order_relaxed);  // follow the reference again
+            request_render(effective_bpm());  // re-render at the now-linked source tempo
+        } else {
+            // Unlinking engages the SAMPLE's own tempo — its detected, bar-snapped
+            // value — so the loop plays (and the readout shows) its natural
+            // fractional tempo, free of the host. Fall back to the current effective
+            // tempo only if nothing is detected yet.
+            const double det = detected_bpm();
+            const double seed = std::clamp(det > 0.0 ? det : effective_bpm(),
+                                           kTargetBpmMin, kTargetBpmMax);
+            tempo_override_.store(seed, std::memory_order_relaxed);
+            request_render(seed);
+        }
     }
 
     std::size_t num_slices() const {
@@ -943,6 +1212,20 @@ public:
     /// independent of whether a sample is loaded.
     int slice_index_for_note_test(int note) const {
         return note - static_cast<int>(state().get_value(kRootNote));
+    }
+
+    /// Test-only: the [start,end) frame range region_for_note maps `note` to,
+    /// over the currently published (tempo-matched) sample, for the given playback
+    /// mode (0 Classic, 1 One-Shot, 2 Slice). Returns {0,0} when the note maps to
+    /// nothing (a Slice-mode key outside the slice range).
+    std::pair<std::uint64_t, std::uint64_t>
+    region_range_for_note_test(int note,
+                               int mode = static_cast<int>(TriggerMode::Slice)) const {
+        const auto sample = store_.read_published_view();
+        const auto r = region_for_note(note, sample,
+                                       static_cast<TriggerMode>(std::clamp(mode, 0, 2)));
+        if (!r) return {0, 0};
+        return {r->start_frame, r->end_frame};
     }
 
     /// Render synchronously (tests/headless). Real hosts use the worker.
@@ -1007,18 +1290,50 @@ public:
             v->set_background_color(c); root->add_child(std::move(v));
         };
         auto label = [&](float x, float y, float w, float h, std::string t, Color c,
-                         float size, int weight, LabelAlign al, bool monofont = false) {
+                         float size, int weight, LabelAlign al, bool monofont = false) -> Label* {
             auto l = std::make_unique<Label>(std::move(t)); place(*l, x, y, w, h);
             l->set_text_color(c); l->set_font_size(size); l->set_font_weight(weight);
             l->set_text_align(al);
             if (monofont) l->set_font_family(mono);
+            Label* p = l.get();
             root->add_child(std::move(l));
+            return p;
         };
 
         (void)panel; (void)raised; (void)text; (void)rect;
 
-        // ── Header ── (mockup tabs/transport removed — only wired controls remain)
-        label(20, 16, 360, 24, "PulpTempoSampler", textStr, 17, 600, LabelAlign::left);
+        // ── Header: 3-way trigger-mode toggle (Classic | One-Shot | Slice),
+        // replacing the title. Classic lit by default; the selected one highlights.
+        // Radio behavior: clicking any segment selects it (re-clicking the lit one
+        // keeps it lit). Drives kPlaybackMode; apply_mode_ui() also shows/hides the
+        // Direction+Loop controls (hidden in Slice).
+        {
+            SamplerEditorRoot* rp = root.get();
+            struct ModeDef { const char* text; int idx; float x; float w; };
+            const ModeDef modes[] = {{"Classic", 0, 20, 66}, {"One-Shot", 1, 90, 74},
+                                     {"Slice", 2, 168, 54}};
+            for (const auto& m : modes) {
+                auto btn = std::make_unique<ToggleButton>();
+                btn->set_label(m.text);
+                btn->set_font_size(11.0f);
+                btn->set_corner_radius(6.0f);
+                btn->set_on_background_color(teal);
+                btn->set_on_text_color(bg900);
+                btn->set_off_background_color(raised);
+                btn->set_off_text_color(muted);
+                btn->set_off_border_color(faint);
+                const int idx = m.idx;
+                btn->on_toggle = [this, rp, idx](bool) {
+                    state().begin_gesture(kPlaybackMode);
+                    state().set_value(kPlaybackMode, static_cast<float>(idx));
+                    state().end_gesture(kPlaybackMode);
+                    rp->apply_mode_ui(idx);  // immediate (no radio flicker)
+                };
+                place(*btn, m.x, 14, m.w, 26);
+                rp->mode_btns_[static_cast<size_t>(m.idx)] = btn.get();
+                root->add_child(std::move(btn));
+            }
+        }
 
         // Always-visible "Open…" button (top-right). A tap on the WAVEFORM
         // auditions a slice once a sample is loaded, so this is the reliable
@@ -1028,7 +1343,7 @@ public:
         TextButton* openBtn = nullptr;
         {
             auto btn = std::make_unique<TextButton>("Open…");
-            place(*btn, 656, 14, 84, 28);
+            place(*btn, 652, 14, 88, 28);
             openBtn = btn.get();
             root->add_child(std::move(btn));
         }
@@ -1042,7 +1357,7 @@ public:
             // Hidden until update_standalone_chrome_affordances() confirms we are
             // hosted in the standalone settings chrome (no Audio/MIDI tab in a DAW).
             auto btn = std::make_unique<TextButton>("Settings");
-            place(*btn, 476, 14, 82, 28);
+            place(*btn, 448, 14, 84, 28);
             btn->set_visible(false);
             btn->on_click = [root_ptr] { format::open_standalone_settings(root_ptr); };
             root->settings_button = btn.get();
@@ -1050,7 +1365,7 @@ public:
         }
         {
             auto btn = std::make_unique<TextButton>("Keyboard");
-            place(*btn, 566, 14, 82, 28);
+            place(*btn, 540, 14, 104, 28);
             // The button AND ⌘K hit the SAME path: SamplerEditorRoot::on_toggle_keyboard,
             // which the processor points at toggle_keyboard_window() below.
             btn->on_click = [root_ptr] { root_ptr->toggle_keyboard(); };
@@ -1099,6 +1414,7 @@ public:
         wf->snapshot = [this](std::vector<float>& mono, float& sr, std::vector<long>& sl) {
             return snapshot_for_view(mono, sr, sl);
         };
+        root->wave_ = wf.get();
         root->add_child(std::move(wf));
 
         // Musical typing: the SDK MusicalTypingController turns the QWERTY row
@@ -1158,12 +1474,13 @@ public:
 
         // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
         // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        root->sens_label_ = label(124, 324, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 162, 322, 86, 16);
+            place(*fader, 162, 322, 62, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
+            root->sens_fader_ = fader.get();
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
                 [this](state::ParamID id, float) {
@@ -1186,29 +1503,85 @@ public:
         auto norm_to_bpm = [](float v) {
             return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
         };
-        label(344, 324, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        root->tempo_label_ = label(316, 324, 44, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 396, 322, 86, 16);
-            fader->set_value(bpm_to_norm(detected_bpm() > 0.0 ? detected_bpm()
-                                                              : effective_bpm()));
+            place(*fader, 360, 322, 44, 16);
+            fader->set_value(bpm_to_norm(effective_bpm()));
+            // Dragging engages a manual target tempo — which auto-UNLINKS from the
+            // host (set_target_bpm sets the override). The FrameTick re-syncs the
+            // LINK toggle's lit state from tempo_linked() on the next frame.
             fader->on_change = [this, norm_to_bpm](float v) {
                 set_target_bpm(norm_to_bpm(v));
             };
             root->tempo_fader = fader.get();
             root->add_child(std::move(fader));
         }
-        // Live BPM readout for the TEMPO fader (shows the engaged target tempo).
+        // Tap-to-type BPM field. Idle it reads like the old teal readout
+        // ("120.0 BPM"); click it to dial an exact tempo — the value highlights,
+        // type, Return commits. Wide enough for the longest value ("400.0 BPM").
         {
-            auto live = std::make_unique<LiveText>();
-            live->font_family = mono;
-            live->color = teal;
-            live->text = [this] {
-                return std::to_string(static_cast<int>(std::lround(effective_bpm()))) + " BPM";
+            auto edit = std::make_unique<view::TextEditor>();
+            edit->numeric_only = true;          // digits + '.'; one decimal is enough
+            edit->select_on_focus = true;       // tap highlights the whole value
+            edit->max_length = 7;               // "400.0" plus a little slack
+            edit->set_font_size(11.0f);
+            // Teal text + a background that blends with the footer so it reads as a
+            // plain readout until focused; the select-all highlight + caret are the
+            // edit affordance. A small theme override recolors the editor's text and
+            // keeps selected glyphs legible (selected text is drawn in bg.primary).
+            view::Theme th;
+            th.colors["text.primary"]   = teal;     // idle + caret colour
+            th.colors["bg.primary"]     = bg900;    // selected-glyph colour (on the highlight)
+            th.colors["accent.primary"] = tealSoft; // selection highlight (soft teal)
+            edit->set_theme(th);
+            edit->set_background_color(bg900);
+            edit->set_border(Color::rgba8(0, 0, 0, 0), 0.0f);  // no chrome box
+            auto sync_text = [this](view::TextEditor* e) {
+                char buf[24];
+                std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
+                e->set_text(buf);
             };
-            place(*live, 488, 320, 64, 18);
-            root->add_child(std::move(live));
+            sync_text(edit.get());
+            auto* ePtr = edit.get();
+            edit->on_return = [this, ePtr](const std::string& s) {
+                // Parse the leading number (ignores a trailing " BPM" if present),
+                // clamp to range, engage it as the manual target (auto-unlinks),
+                // then blur so the live readout + fader thumb resume next frame.
+                const double v = std::strtod(s.c_str(), nullptr);
+                if (v > 0.0) set_target_bpm(v);   // set_target_bpm clamps to [20,400]
+                ePtr->on_focus_changed(false);
+                ePtr->release_input_focus();
+            };
+            edit->on_escape = [ePtr] {
+                ePtr->on_focus_changed(false);
+                ePtr->release_input_focus();
+            };
+            place(*edit, 408, 320, 70, 20);
+            root->tempo_edit_ = ePtr;
+            root->add_child(std::move(edit));
+        }
+        // TEMPO LINK toggle: ON = follow the reference tempo (host transport in a
+        // DAW; the loop's detected BPM in standalone) and re-stretch automatically
+        // when it changes. OFF = the manual TEMPO fader value. Tapping it re-links
+        // (clears the override) or unlinks (seeds the override from the current
+        // tempo, no jump). Defaults ON, so a fresh plugin instance follows the DAW.
+        {
+            auto linkBtn = std::make_unique<ToggleButton>();
+            linkBtn->set_label("LINK");
+            linkBtn->set_font_size(10.0f);
+            linkBtn->set_corner_radius(6.0f);
+            linkBtn->set_on_background_color(teal);
+            linkBtn->set_on_text_color(bg900);
+            linkBtn->set_off_background_color(raised);
+            linkBtn->set_off_text_color(muted);
+            linkBtn->set_off_border_color(faint);
+            linkBtn->set_on(tempo_linked());
+            linkBtn->on_toggle = [this](bool on) { set_tempo_linked(on); };
+            place(*linkBtn, 482, 316, 42, 26);
+            root->link_btn = linkBtn.get();
+            root->add_child(std::move(linkBtn));
         }
 
         // Live slice count, in green and sitting RIGHT OF THE SENS fader (which
@@ -1218,56 +1591,194 @@ public:
             live->font_family = mono;
             live->color = teal;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
-            place(*live, 252, 320, 84, 18);
+            place(*live, 230, 320, 84, 18);
+            root->slices_label_ = live.get();
             root->add_child(std::move(live));
         }
 
-        // Per-frame poller: when a new loop is analyzed (generation bump), default
-        // the TEMPO fader + override to the detected loop BPM so it plays at its
-        // natural tempo (R≈1) until the user drags. Lives in the UI (not the
-        // processor) so the headless / plugin paths keep following the host tempo.
+        // Per-frame poller: keep the TEMPO fader knob + LINK lit-state in sync with
+        // the live effective tempo. While LINKED the fader visually tracks the
+        // reference tempo (host transport / detected BPM) as it changes; while
+        // unlinked it matches the manual value (a no-op). Fader::set_value is silent
+        // (no on_change), so this never spuriously unlinks. A fresh loop stays in
+        // its current LINK state — no forced override — so a plugin instance follows
+        // the DAW by default and the standalone plays the loop at its natural tempo.
         {
             auto tick = std::make_unique<FrameTick>();
             SamplerEditorRoot* rp = root.get();
             tick->on_tick = [this, rp, bpm_to_norm] {
-                // Watch load_generation (new-sample only), NOT raw_generation — a
-                // re-slice bumps raw_generation but must keep the user's tempo.
-                const std::uint64_t g = load_generation();
-                if (g == rp->tempo_seen_gen_) return;
-                rp->tempo_seen_gen_ = g;
-                const double b = detected_bpm();
-                if (b > 0.0) {
-                    set_target_bpm(b);
-                    if (rp->tempo_fader) rp->tempo_fader->set_value(bpm_to_norm(b));
+                rp->tempo_seen_gen_ = load_generation();  // tracked for parity; no reset
+                if (rp->tempo_fader)
+                    rp->tempo_fader->set_value(bpm_to_norm(effective_bpm()));
+                if (rp->link_btn && rp->link_btn->is_on() != tempo_linked())
+                    rp->link_btn->set_on(tempo_linked());
+                // Live-track the BPM field UNLESS the user is editing it (focused) —
+                // overwriting mid-type would fight their input. On blur (Return/Esc/
+                // outside-click) has_focus() drops and the readout resumes.
+                if (rp->tempo_edit_ && !rp->tempo_edit_->has_focus()) {
+                    char buf[24];
+                    std::snprintf(buf, sizeof(buf), "%.1f BPM", effective_bpm());
+                    if (rp->tempo_edit_->text() != buf) rp->tempo_edit_->set_text(buf);
                 }
             };
             place(*tick, 0, 0, 0, 0);
             root->add_child(std::move(tick));
         }
 
-        // LOOP toggle: enable/disable Forward looping for triggered slices
-        // (one-shot when off). Bound to kTempoLoop; region_for_note reads it per
-        // note (playback_mode = loop ? Forward : OneShot). Top-level for now;
-        // per-slice loop / reverse are a future UX.
+        // DIRECTION dropdown — Forward / Reverse (the read direction; sets which way
+        // a one-shot plays). Default Forward. Drives kDirection.
         {
-            auto loopBtn = std::make_unique<ToggleButton>();
-            loopBtn->set_label("LOOP");
-            loopBtn->set_font_size(10.0f);
-            loopBtn->set_corner_radius(6.0f);
-            loopBtn->set_on_background_color(teal);
-            loopBtn->set_on_text_color(bg900);
-            loopBtn->set_off_background_color(raised);
-            loopBtn->set_off_text_color(muted);
-            loopBtn->set_off_border_color(faint);
-            place(*loopBtn, 560, 316, 84, 26);
-            root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
-            root->add_child(std::move(loopBtn));
+            auto dir = std::make_unique<ComboBox>();
+            dir->set_items({"Forward", "Reverse"});
+            dir->set_selected_silent(state().get_value(kDirection) >= 0.5f ? 1 : 0);
+            dir->on_change = [this](int idx) {
+                state().begin_gesture(kDirection);
+                state().set_value(kDirection, idx >= 1 ? 1.0f : 0.0f);
+                state().end_gesture(kDirection);
+            };
+            auto* dirPtr = dir.get();
+            root->dir_label_ = label(528, 324, 22, 18, "DIR", faint, 10, 600, LabelAlign::left, true);
+            place(*dir, 552, 316, 68, 26);
+            root->dir_combo_ = dirPtr;
+            root->listeners.push_back(state().add_listener(
+                [this, dirPtr](state::ParamID id, float v) {
+                    if (id == kDirection) dirPtr->set_selected_silent(v >= 0.5f ? 1 : 0);
+                },
+                state::ListenerThread::Main));
+            root->add_child(std::move(dir));
+        }
+
+        // LOOP dropdown — None / Forward / Reverse / Ping-Pong (replaces the loop
+        // button). None = play once; the others loop in that shape. Default None.
+        // Drives kTempoLoop (on/off) + kLoopMode (shape).
+        {
+            auto combo = std::make_unique<ComboBox>();
+            combo->set_items({"None", "Forward", "Reverse", "Ping-Pong"});
+            auto sel_for_state = [this]() -> int {
+                if (state().get_value(kTempoLoop) < 0.5f) return 0;  // None
+                return std::clamp(static_cast<int>(state().get_value(kLoopMode)) + 1, 1, 3);
+            };
+            combo->set_selected_silent(sel_for_state());
+            combo->on_change = [this](int idx) {
+                if (idx <= 0) {
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 0.0f);
+                    state().end_gesture(kTempoLoop);
+                } else {
+                    state().begin_gesture(kLoopMode);
+                    state().set_value(kLoopMode, static_cast<float>(idx - 1));
+                    state().end_gesture(kLoopMode);
+                    state().begin_gesture(kTempoLoop);
+                    state().set_value(kTempoLoop, 1.0f);
+                    state().end_gesture(kTempoLoop);
+                }
+            };
+            auto* loopPtr = combo.get();
+            root->loop_label_ = label(624, 324, 28, 18, "LOOP", faint, 10, 600, LabelAlign::left, true);
+            place(*combo, 654, 316, 80, 26);
+            root->loop_combo_ = loopPtr;
+            root->listeners.push_back(state().add_listener(
+                [this, loopPtr, sel_for_state](state::ParamID id, float) {
+                    if (id == kTempoLoop || id == kLoopMode) loopPtr->set_selected_silent(sel_for_state());
+                },
+                state::ListenerThread::Main));
+            root->add_child(std::move(combo));
+        }
+
+        // Mode -> UI: highlight the selected mode button + hide Direction/Loop in
+        // Slice. Listener handles external param changes (automation / state
+        // restore); the initial call sets the just-built widgets to the saved mode.
+        {
+            SamplerEditorRoot* rp = root.get();
+            root->listeners.push_back(state().add_listener(
+                [this, rp](state::ParamID id, float v) {
+                    if (id == kPlaybackMode)
+                        rp->apply_mode_ui(std::clamp(static_cast<int>(v + 0.5f), 0, 2));
+                },
+                state::ListenerThread::Main));
+            root->apply_mode_ui(
+                std::clamp(static_cast<int>(state().get_value(kPlaybackMode) + 0.5f), 0, 2));
         }
 
         // The musical-typing keyboard is NOT inline anymore: the SDK primitive
         // pulp::view::MusicalTypingKeyboard is hosted in its OWN secondary GPU
         // window (⌘K / the "Keyboard" button → toggle_keyboard_window()), so it
         // never overlaps the waveform editor.
+
+        // ── Main / Detail page toggle (header) ──
+        // A single button that flips between the main slice page and the Detail
+        // page; its label tracks the page you'd switch TO (Logic-style two-page UI).
+        {
+            auto btn = std::make_unique<TextButton>("Detail");
+            SamplerEditorRoot* rp = root.get();
+            auto* btnPtr = btn.get();
+            btn->on_click = [rp, btnPtr, shown = std::make_shared<bool>(false)] {
+                *shown = !*shown;
+                if (rp->detail_overlay_) rp->detail_overlay_->set_visible(*shown);
+                btnPtr->set_label(*shown ? "Main" : "Detail");
+                rp->request_repaint();
+            };
+            place(*btn, 350, 14, 82, 28);
+            root->add_child(std::move(btn));
+        }
+
+        // ── Detail page (Logic "Q-Sampler Detail"-style) ──
+        // An opaque overlay over the body (y>=50, header stays visible) holding the
+        // envelope-adjacent controls. Hidden until the Detail page toggle selects it.
+        // Gate + Flex Speed live here now; trim / fades / envelopes land here next.
+        {
+            auto detail = std::make_unique<View>();
+            place(*detail, 0, 50, 760, 322);
+            detail->set_background_color(bg900);   // opaque: hides the body behind it
+            detail->set_visible(false);
+            auto dlabel = [&](float x, float y, float w, const char* t, Color col, float sz, int wt) {
+                auto l = std::make_unique<Label>(std::string(t));
+                place(*l, x, y, w, 18);
+                l->set_text_color(col); l->set_font_size(sz); l->set_font_weight(wt);
+                l->set_text_align(LabelAlign::left); detail->add_child(std::move(l));
+            };
+            dlabel(20, 16, 200, "DETAIL", textStr, 13, 600);
+
+            // GATE: key-up releases the envelope (on) vs play-through (off).
+            dlabel(40, 70, 70, "GATE", faint, 10, 600);
+            {
+                auto g = std::make_unique<ToggleButton>();
+                g->set_label("GATE"); g->set_font_size(10.0f); g->set_corner_radius(6.0f);
+                g->set_on_background_color(teal); g->set_on_text_color(bg900);
+                g->set_off_background_color(raised); g->set_off_text_color(muted);
+                g->set_off_border_color(faint);
+                place(*g, 130, 64, 70, 26);
+                root->bindings.push_back(bind_parameter(*g, state(), kGate));
+                detail->add_child(std::move(g));
+            }
+
+            // FLEX SPEED: 1/4..4x of the tempo-synced playback speed (Logic Flex Speed).
+            dlabel(40, 112, 90, "FLEX SPEED", faint, 10, 600);
+            {
+                auto fs = std::make_unique<ComboBox>();
+                fs->set_items({"1/4x", "1/2x", "1x", "2x", "4x"});
+                fs->set_selected_silent(std::clamp(static_cast<int>(state().get_value(kFlexSpeed)), 0, 4));
+                fs->on_change = [this](int idx) {
+                    state().begin_gesture(kFlexSpeed);
+                    state().set_value(kFlexSpeed, static_cast<float>(std::clamp(idx, 0, 4)));
+                    state().end_gesture(kFlexSpeed);
+                    request_render(effective_bpm());   // re-stretch at the new speed
+                };
+                auto* fsPtr = fs.get();
+                place(*fs, 130, 106, 72, 26);
+                root->listeners.push_back(state().add_listener(
+                    [this, fsPtr](state::ParamID id, float v) {
+                        if (id == kFlexSpeed) fsPtr->set_selected_silent(std::clamp(static_cast<int>(v), 0, 4));
+                    },
+                    state::ListenerThread::Main));
+                detail->add_child(std::move(fs));
+            }
+
+            dlabel(40, 168, 520, "Trim, fades & envelopes — coming next", muted, 10, 400);
+
+            root->detail_overlay_ = detail.get();
+            root->add_child(std::move(detail));   // LAST = topmost over the body
+        }
 
         root->layout_children();
         return root;
@@ -1278,8 +1789,12 @@ public:
     // reveal the "Settings" button only when the Audio/MIDI panel is actually
     // reachable. In a DAW there is no such chrome, so the button stays hidden.
     void on_view_opened(view::View& view) override {
-        if (auto* root = dynamic_cast<SamplerEditorRoot*>(&view))
+        if (auto* root = dynamic_cast<SamplerEditorRoot*>(&view)) {
             root->update_standalone_chrome_affordances();
+            // Tell the audio thread whether to resolve LINKED tempo to the loop's
+            // detected BPM (standalone) or the host transport (DAW).
+            set_standalone_host(root->hosted_in_standalone_);
+        }
     }
 
     // ── Audio thread ───────────────────────────────────────────────────────
@@ -1299,7 +1814,19 @@ public:
         // user's pending_host_bpm_ back to the host's tempo.
         const double host_bpm = ctx.tempo_bpm > 0.0 ? ctx.tempo_bpm : 120.0;
         const double override_bpm = tempo_override_.load(std::memory_order_relaxed);
-        const double bpm = override_bpm > 0.0 ? override_bpm : host_bpm;
+        // Tempo source: a manual override wins; otherwise LINKED — follow the loop's
+        // own detected BPM in the standalone (no transport to link to), else the host
+        // transport. This makes a fresh plugin instance follow the DAW by default,
+        // while the standalone keeps playing loops at their natural tempo.
+        double bpm;
+        if (override_bpm > 0.0) {
+            bpm = override_bpm;
+        } else if (standalone_host_.load(std::memory_order_relaxed)) {
+            const double det = loop_bpm_.load(std::memory_order_relaxed);
+            bpm = det > 0.0 ? det : host_bpm;
+        } else {
+            bpm = host_bpm;
+        }
         if (ctx.tempo_changed || bpm != last_host_bpm_) {
             last_host_bpm_ = bpm;
             request_render(bpm);
@@ -1332,8 +1859,8 @@ public:
                     bool has = false;
                     for (auto& v : voices_)
                         if (v.active && v.note == n && !v.released) {
-                            v.region.playback_mode = audio::LoopPlaybackMode::Forward;
-                            v.renderer.set_playback_mode(audio::LoopPlaybackMode::Forward);
+                            v.region.playback_mode = params.loop_mode;
+                            v.renderer.set_playback_mode(params.loop_mode);
                             has = true;
                         }
                     // Re-trigger a finished one-shot ONLY into a free voice. Stealing
@@ -1347,10 +1874,13 @@ public:
                         trigger_note(n, held_velocity_[static_cast<size_t>(n)], published, params);
                 }
             } else {
+                // Loop turned off: switch held voices to the resolved no-loop mode
+                // (OneShot, or ReverseOnce when the direction is Reverse) so the
+                // current pass finishes and stops.
                 for (auto& v : voices_)
                     if (v.active) {
-                        v.region.playback_mode = audio::LoopPlaybackMode::OneShot;
-                        v.renderer.set_playback_mode(audio::LoopPlaybackMode::OneShot);
+                        v.region.playback_mode = params.loop_mode;
+                        v.renderer.set_playback_mode(params.loop_mode);
                     }
             }
             loop_prev_ = params.loop;
@@ -1439,6 +1969,9 @@ private:
         float gain = 1.0f;
         signal::Adsr::Params adsr;
         bool loop = false;
+        audio::LoopPlaybackMode loop_mode = audio::LoopPlaybackMode::OneShot;  // resolved loop/play mode
+        bool reverse_entry = false;  // first-pass direction for loop modes (Direction dropdown)
+        TriggerMode mode = TriggerMode::Classic;  // Classic / One-Shot / Slice
     };
 
     // Publish the most-recently-triggered active voice's slice + progress for
@@ -1524,6 +2057,22 @@ private:
     }
 
     // ── Analysis (under raw_mutex_) ──
+    // A clean loop is an integer number of BEATS, but the analyzer reports an
+    // INTEGER bpm — and a loop's true tempo is usually fractional, so stretching to
+    // the rounded value makes the loop tile slightly short/long ("ends a bit early",
+    // and the error scales when slowed). Use the rough bpm only to infer the beat
+    // COUNT, then derive the exact tempo that makes the file an exact musical length,
+    // so it loops perfectly at ANY host tempo. Only snaps when the file is already
+    // close to a whole-beat length (a real loop); otherwise keeps the raw estimate
+    // so non-loop one-shots aren't distorted. raw_mutex_ is held by analyze_locked.
+    double snap_loop_bpm(double analyzer_bpm) const {
+        // The last host transport tempo (project tempo in a DAW) is the prior that
+        // resolves the half/double-tempo ambiguity; 0 in a fresh standalone falls
+        // back to the analyzer estimate inside bar_exact_bpm.
+        return bar_exact_bpm(raw_frames_, raw_sr_,
+                             pending_host_bpm_.load(std::memory_order_relaxed), analyzer_bpm);
+    }
+
     void analyze_locked() {
         std::array<const float*, 2> ptrs{raw_[0].data(), raw_[1].data()};
         audio::BufferView<const float> view(ptrs.data(), static_cast<std::size_t>(raw_channels_),
@@ -1533,7 +2082,7 @@ private:
         kc.source_sample_rate = raw_sr_;
         kc.channels = static_cast<std::uint32_t>(raw_channels_);
         const auto kr = kt.analyze(view, kc);
-        loop_bpm_.store(kr.tempo_bpm, std::memory_order_relaxed);
+        loop_bpm_.store(snap_loop_bpm(kr.tempo_bpm), std::memory_order_relaxed);
 
         // Collect a generous candidate set, then keep the strongest cuts by
         // confidence so sensitivity maps DIRECTLY to a slice COUNT (predictable
@@ -1571,25 +2120,27 @@ private:
             return best;
         };
 
-        std::vector<audio::OnsetMarker> cand;
-        for (const auto& m : onsets.markers)
-            if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
-                cand.push_back(m);
-        std::sort(cand.begin(), cand.end(),
-                  [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
-
-        // Greedily accept the highest-confidence cuts (preserving the
-        // sensitivity->count mapping) that keep EVERY slice — including the first
-        // and last — at least kMinSlice long, snapping each to a zero-crossing.
+        // Onset slicing: greedily accept the highest-confidence cuts (preserving
+        // the sensitivity->count mapping) that keep EVERY slice — incl. first and
+        // last — at least kMinSlice long, each snapped to a zero-crossing so both
+        // shared edges declick.
         std::vector<long> cuts;
-        for (const auto& m : cand) {
-            if (static_cast<int>(cuts.size()) >= keep) break;
-            const long f = snap_zc(static_cast<long>(m.frame));
-            if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
-            bool ok = true;
-            for (long c : cuts)
-                if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
-            if (ok) cuts.push_back(f);
+        {
+            std::vector<audio::OnsetMarker> cand;
+            for (const auto& m : onsets.markers)
+                if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
+                    cand.push_back(m);
+            std::sort(cand.begin(), cand.end(),
+                      [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
+            for (const auto& m : cand) {
+                if (static_cast<int>(cuts.size()) >= keep) break;
+                const long f = snap_zc(static_cast<long>(m.frame));
+                if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
+                bool ok = true;
+                for (long c : cuts)
+                    if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
+                if (ok) cuts.push_back(f);
+            }
         }
         std::sort(cuts.begin(), cuts.end());
 
@@ -1617,6 +2168,8 @@ private:
 
         // Duration scales as loop_bpm / host_bpm (faster host => shorter loop).
         double R = (loop_bpm > 0.0 && host_bpm > 0.0) ? (loop_bpm / host_bpm) : 1.0;
+        // Flex Speed: playing N x faster shortens the stretched duration by N.
+        R /= flex_speed_factor();
         R = std::clamp(R, 1.0 / engine_.max_time_ratio(), engine_.max_time_ratio());
 
         const bool link = state().get_value(kTempoLink) >= 0.5f;
@@ -1769,7 +2322,33 @@ private:
         p.adsr.decay = state().get_value(kTempoDecay) / 1000.0f;
         p.adsr.sustain = state().get_value(kTempoSustain) / 100.0f;
         p.adsr.release = state().get_value(kTempoRelease) / 1000.0f;
+        p.mode = static_cast<TriggerMode>(
+            std::clamp(static_cast<int>(state().get_value(kPlaybackMode) + 0.5f), 0, 2));
+        // Slice ALWAYS plays forward one-shot (Direction+Loop don't apply — matches
+        // Logic/PlunderTube). Classic/One-Shot honor the Direction + Loop dropdowns.
+        if (p.mode == TriggerMode::Slice) {
+            p.loop = false;
+            p.loop_mode = audio::LoopPlaybackMode::OneShot;
+            return p;
+        }
+        // Two-phase Direction × Loop (PlunderTube / Logic model):
+        //   Direction = the FIRST pass (reverse_entry); Loop = the steady-state
+        //   that takes over at the far edge and OVERRIDES the entry direction.
+        const bool rev = state().get_value(kDirection) >= 0.5f;
         p.loop = state().get_value(kTempoLoop) >= 0.5f;
+        if (!p.loop) {
+            // LOOP = None: play the region ONCE in the Direction, then stop.
+            // OneShot / ReverseOnce already encode the entry direction.
+            p.loop_mode = rev ? audio::LoopPlaybackMode::ReverseOnce
+                              : audio::LoopPlaybackMode::OneShot;
+            p.reverse_entry = false;
+        } else {
+            const int lm = std::clamp(static_cast<int>(state().get_value(kLoopMode) + 0.5f), 0, 2);
+            p.loop_mode = (lm == 1) ? audio::LoopPlaybackMode::Reverse
+                        : (lm == 2) ? audio::LoopPlaybackMode::PingPong
+                                    : audio::LoopPlaybackMode::Forward;
+            p.reverse_entry = rev;  // Direction picks which way the first pass enters
+        }
         return p;
     }
 
@@ -1778,12 +2357,20 @@ private:
             std::fill_n(output.channel_ptr(ch), output.num_samples(), 0.0f);
     }
 
-    // Region for a note: a slice of the published (already tempo-matched) buffer.
-    std::optional<audio::LoopRegion> region_for_note(int note, const audio::PublishedSampleView& sample,
-                                                     bool loop) const noexcept {
+    // Region for a note within the published (already tempo-matched) buffer.
+    //  - Classic / One-Shot: EVERY key plays the WHOLE sample [0, num_frames);
+    //    the key's pitch is applied as a playback-rate in trigger_note (pitched
+    //    across the keyboard). Direction+Loop (engine_mode) govern how it plays.
+    //  - Slice: each key plays ONLY its slice ([slice k, slice k+1); idx = note -
+    //    root); a key outside [root, root + num_slices) maps to nothing (silent),
+    //    never the whole sample. engine_mode is OneShot (Slice is forward one-shot).
+    std::optional<audio::LoopRegion> region_for_note(
+        int note, const audio::PublishedSampleView& sample,
+        TriggerMode mode = TriggerMode::Slice,
+        audio::LoopPlaybackMode engine_mode = audio::LoopPlaybackMode::OneShot) const noexcept {
         std::uint64_t start = 0, end = 0;
-        const int root = static_cast<int>(state().get_value(kRootNote));
-        {
+        if (mode == TriggerMode::Slice) {
+            const int root = static_cast<int>(state().get_value(kRootNote));
             std::lock_guard<std::mutex> lock(slice_mutex_);
             if (slices_stretched_.size() >= 2) {
                 const int idx = note - root;
@@ -1792,18 +2379,17 @@ private:
                     end = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx) + 1]);
                 }
             }
+        } else {
+            // Classic / One-Shot: the whole tempo-matched sample.
+            start = 0;
+            end = sample.num_frames;
         }
-        // Each slice is mapped to its own chromatic note (idx = note - root). A
-        // note outside [root, root + num_slices) — or one with invalid stretched
-        // boundaries — maps to NO slice: play nothing. Never fall back to the
-        // whole sample (that mapped the entire sample across the keyboard, the
-        // Reaper/host MIDI bug).
         if (end <= start || end > sample.num_frames) return std::nullopt;
         audio::LoopRegion region;
         region.start_frame = start;
         region.end_frame = end;
         region.source_sample_rate = sample.sample_rate;
-        region.playback_mode = loop ? audio::LoopPlaybackMode::Forward : audio::LoopPlaybackMode::OneShot;
+        region.playback_mode = engine_mode;
         region.interpolation = audio::LoopInterpolationMode::Linear;
         region.crossfade_curve = audio::LoopCrossfadeCurve::Linear;
         return region;
@@ -1842,16 +2428,20 @@ private:
         std::uint32_t rendered = 0;
         while (rendered < frames) {
             const auto chunk = std::min(frames - rendered, max_block_frames_);
-            const float rate = apply_expression_rate(chunk);
+            const float expr_rate = apply_expression_rate(chunk);
             audio::BufferView<float> scratch(voice_scratch_ptrs_.data(), out_ch, chunk);
-            for (auto& voice : voices_) {
+            for (int vi = 0; vi < kMaxVoices; ++vi) {
+                SamplerVoice& voice = voices_[static_cast<size_t>(vi)];
                 if (!voice.active) continue;
                 std::array<const float*, kMaxSampleChannels> sptrs{};
                 if (!store_.populate_channel_ptrs(voice.sample, sptrs.data(), sptrs.size())) { voice.reset(); continue; }
                 audio::BufferView<const float> source(sptrs.data(), voice.sample.num_channels,
                                                       static_cast<std::size_t>(voice.sample.num_frames));
                 voice.adsr.set_params(params.adsr);
-                voice.renderer.set_playback_rate(rate);
+                // Classic/One-Shot repitch across the keyboard: the voice's base
+                // rate (2^((note-root)/12)) times the per-chunk expression. Slice
+                // + the root play at 1.0. (keep_tempo shifter path is a follow-up.)
+                voice.renderer.set_playback_rate(voice.base_rate * expr_rate);
                 const auto loop_result = voice.renderer.render(source, scratch, chunk);
                 bool finished = false;
                 for (std::uint32_t i = 0; i < chunk; ++i) {
@@ -1869,25 +2459,46 @@ private:
 
     void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
                       const RenderParams& params) {
-        const auto region = region_for_note(note, sample, params.loop);
-        if (!region) return;  // note maps to no slice -> silent (don't play the whole sample)
+        auto region = region_for_note(note, sample, params.mode, params.loop_mode);
+        if (!region) return;  // note maps to no slice -> silent
+        region->reverse_entry = params.reverse_entry;  // Direction = first-pass entry
         SamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }
         if (target == nullptr) target = &voices_[0];
-        // Buffer is already at host tempo -> play at native rate (1.0).
-        target->start(note, velocity, 1.0, host_sample_rate_, sample, *region, sample.num_frames);
+        // Slice: each key IS its own slice at native rate (1.0). Classic/One-Shot:
+        // the whole tempo-matched sample is PITCHED across the keyboard (rate =
+        // 2^((note-root)/12)), so the root plays at tempo and other keys transpose.
+        // NOTE (Phase C): this repitch also changes speed; when LINK is on we will
+        // swap it for keep-tempo/shift-pitch (Logic Flex). pitch-bend/mod apply per
+        // chunk on top of this base rate.
+        const double base_rate = (params.mode == TriggerMode::Slice)
+            ? 1.0
+            : std::pow(2.0, (static_cast<double>(note) - state().get_value(kRootNote)) / 12.0);
+        target->start(note, velocity, base_rate, host_sample_rate_, sample, *region, sample.num_frames);
+        // Finite One-Shot (One-Shot + Loop=None) ignores note-off; a One-Shot LOOP
+        // does NOT (it must be stoppable, or it drones forever). Captured now so a
+        // later mode change can't strand this voice.
+        target->plays_through = (params.mode == TriggerMode::OneShot && !params.loop);
         last_note_ = note;  // most-recently-triggered note drives the playhead
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = velocity;
     }
 
     void release_note(int note) {
         if (note >= 0 && note < 128) held_velocity_[static_cast<size_t>(note)] = 0.0f;  // key up -> not held
+        // Per-voice release (uses the mode each voice was TRIGGERED with, not the
+        // current dropdown): a finite One-Shot plays through (ignore note-off);
+        // Gate-off likewise plays/loops through; otherwise key-up releases (or the
+        // sustain pedal defers it). This stops a One-Shot LOOP on note-off instead
+        // of leaving a stuck drone.
+        const bool gate = state().get_value(kGate) >= 0.5f;
         const bool hold = sustain_pedal_.load(std::memory_order_relaxed);
-        for (auto& voice : voices_)
-            if (voice.active && voice.note == note && !voice.released) {
-                if (hold) voice.sustained = true;  // damper down: defer until the pedal lifts
-                else voice.release();
-            }
+        for (auto& voice : voices_) {
+            if (!(voice.active && voice.note == note && !voice.released)) continue;
+            if (voice.plays_through) continue;  // finite one-shot: note-off ignored
+            if (!gate) continue;                // Gate off: play/loop through
+            if (hold) voice.sustained = true;   // damper down: defer until the pedal lifts
+            else voice.release();
+        }
     }
 
     std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
@@ -1959,6 +2570,10 @@ private:
     std::atomic<double> pending_host_bpm_{120.0};
     // UI target-tempo override: 0 = follow host, else the BPM to stretch TO.
     std::atomic<double> tempo_override_{0.0};
+    // Set by the editor: true when hosted in the standalone chrome (no DAW
+    // transport), so process()/effective_bpm() resolve LINKED tempo to the loop's
+    // natural BPM instead of a host tempo. Default false = behave as a plugin host.
+    std::atomic<bool> standalone_host_{false};
     std::mutex drop_mutex_;
     std::string pending_drop_path_;
 

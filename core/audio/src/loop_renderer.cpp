@@ -35,22 +35,30 @@ bool LoopRenderer::set_region(const LoopRegion& region,
     return true;
 }
 
-void LoopRenderer::reset() noexcept {
-    position_ = region_.playback_mode == LoopPlaybackMode::Reverse
-                    ? static_cast<double>(region_.end_frame - 1)
-                    : static_cast<double>(region_.start_frame);
+// The first-pass entry: reverse_entry (or ReverseOnce, which always enters
+// backward) starts at the top edge travelling backward; otherwise at the bottom
+// edge travelling forward. The loop's steady direction (Forward/Reverse) takes
+// over later in advance_position().
+void LoopRenderer::init_entry() noexcept {
+    const bool enter_reverse =
+        region_.reverse_entry ||
+        region_.playback_mode == LoopPlaybackMode::ReverseOnce;
+    step_dir_ = enter_reverse ? -1 : 1;
+    pingpong_dir_ = step_dir_;  // PingPong starts bouncing in the entry direction
+    position_ = enter_reverse ? static_cast<double>(region_.end_frame - 1)
+                              : static_cast<double>(region_.start_frame);
     start_fade_position_ = 0;
     stop_fade_position_ = 0;
+}
+
+void LoopRenderer::reset() noexcept {
+    init_entry();
     active_ = false;
     stopping_ = false;
 }
 
 void LoopRenderer::start() noexcept {
-    position_ = region_.playback_mode == LoopPlaybackMode::Reverse
-                    ? static_cast<double>(region_.end_frame - 1)
-                    : static_cast<double>(region_.start_frame);
-    start_fade_position_ = 0;
-    stop_fade_position_ = 0;
+    init_entry();
     active_ = true;
     stopping_ = false;
 }
@@ -71,11 +79,13 @@ void LoopRenderer::set_playback_rate(double rate) noexcept {
 }
 
 double LoopRenderer::effective_step() const noexcept {
-    if (region_.playback_mode == LoopPlaybackMode::Reverse &&
-        playback_rate_ > 0.0) {
-        return -playback_rate_;
-    }
-    return playback_rate_;
+    // PingPong tracks its own bounce direction; every other mode follows
+    // step_dir_ (the entry direction, then the loop's steady direction after the
+    // first pass). playback_rate_ is a magnitude; the direction is the sign.
+    const int dir = (region_.playback_mode == LoopPlaybackMode::PingPong)
+                        ? pingpong_dir_
+                        : step_dir_;
+    return playback_rate_ * static_cast<double>(dir);
 }
 
 float LoopRenderer::fade_gain() noexcept {
@@ -108,8 +118,18 @@ float LoopRenderer::sample_with_crossfade(BufferView<const float> source,
                                           double position,
                                           double step,
                                           bool& wrapped) const noexcept {
+    // The wrap-crossfade is only for the STEADY loop wrap (jump start<->end in the
+    // loop's direction). Skip it for OneShot/ReverseOnce/PingPong (PingPong
+    // reflects, so it is already continuous), when disabled, and during a
+    // MISMATCHED first pass (step_dir_ != the loop's steady dir) — there the first
+    // pass turns around by reflection, not a wrap, so a crossfade toward the wrap
+    // target would be wrong.
+    const int loop_dir = (region_.playback_mode == LoopPlaybackMode::Reverse) ? -1 : 1;
     if (region_.playback_mode == LoopPlaybackMode::OneShot ||
-        region_.crossfade_frames == 0) {
+        region_.playback_mode == LoopPlaybackMode::ReverseOnce ||
+        region_.playback_mode == LoopPlaybackMode::PingPong ||
+        region_.crossfade_frames == 0 ||
+        step_dir_ != loop_dir) {
         return LoopReader::read_validated(source, region_, output_channel, position);
     }
 
@@ -165,13 +185,61 @@ float LoopRenderer::sample_with_crossfade(BufferView<const float> source,
     return LoopReader::read_validated(source, region_, output_channel, normalized);
 }
 
-double LoopRenderer::advance_position(double position, double step, bool& wrapped) const noexcept {
+double LoopRenderer::advance_position(double position, double step, bool& wrapped) noexcept {
     const auto next = position + step;
-    if (region_.playback_mode == LoopPlaybackMode::OneShot) return next;
+    // OneShot and ReverseOnce play once and stop — no wrap.
+    if (region_.playback_mode == LoopPlaybackMode::OneShot ||
+        region_.playback_mode == LoopPlaybackMode::ReverseOnce)
+        return next;
 
-    if (step >= 0.0 && next >= static_cast<double>(region_.end_frame)) wrapped = true;
-    if (step < 0.0 && next < static_cast<double>(region_.start_frame)) wrapped = true;
-    return LoopReader::normalize_position(region_, next);
+    if (region_.playback_mode == LoopPlaybackMode::PingPong) {
+        // Reflect at the loop boundaries and flip direction. Playable range is
+        // [start, last] with last = end - 1 (end is exclusive). Reflect any
+        // overshoot back into range so the position stays valid every frame.
+        const auto start = static_cast<double>(region_.start_frame);
+        const auto last = static_cast<double>(region_.end_frame) - 1.0;
+        if (last <= start) return start;  // degenerate 1-frame region
+        double reflected = next;
+        if (reflected > last) {
+            reflected = last - (reflected - last);  // bounce off the top
+            pingpong_dir_ = -1;
+            wrapped = true;
+        } else if (reflected < start) {
+            reflected = start + (start - reflected);  // bounce off the bottom
+            pingpong_dir_ = 1;
+            wrapped = true;
+        }
+        // A step larger than the loop could overshoot the far side too; clamp.
+        return std::clamp(reflected, start, last);
+    }
+
+    // Forward / Reverse loops — two-phase. Travel in the entry direction
+    // (step_dir_) until the first pass reaches the far edge, then switch to the
+    // loop's STEADY direction (Forward => +1, Reverse => -1). When entry and
+    // steady agree it is a plain seamless wrap; when they differ the first pass
+    // turns around ONCE (reflected, click-free) and then loops in the steady dir.
+    const auto start = static_cast<double>(region_.start_frame);
+    const auto end = static_cast<double>(region_.end_frame);
+    const auto last = end - 1.0;
+    const int loop_dir = (region_.playback_mode == LoopPlaybackMode::Reverse) ? -1 : 1;
+
+    if (step > 0.0 && next >= end) {
+        wrapped = true;
+        if (loop_dir > 0)  // forward first pass IS the forward loop → seamless wrap
+            return LoopReader::normalize_position(region_, next);
+        step_dir_ = -1;    // forward first pass done → loop backward from the top
+        if (last <= start) return start;
+        return std::clamp(last - (next - last), start, last);  // reflect at the top
+    }
+    if (step < 0.0 && next < start) {
+        wrapped = true;
+        if (loop_dir < 0)  // backward first pass IS the backward loop → seamless wrap
+            return LoopReader::normalize_position(region_, next);
+        step_dir_ = 1;     // backward first pass done → loop forward from the bottom
+        if (last <= start) return start;
+        return std::clamp(start + (start - next), start, last);  // reflect at the bottom
+    }
+    return next;  // still within range — keep advancing in the current direction
 }
 
 LoopRenderResult LoopRenderer::render(BufferView<const float> source,
@@ -187,7 +255,7 @@ LoopRenderResult LoopRenderer::render(BufferView<const float> source,
     const auto valid_source =
         source.num_channels() > 0 &&
         validate_loop_region(region_, static_cast<std::uint64_t>(source.num_samples())).ok;
-    const auto step = effective_step();
+    auto step = effective_step();  // PingPong re-reads this after each reflection (dir flips)
 
     for (std::uint64_t i = 0; i < output_frames; ++i) {
         const bool should_advance = active_ && valid_source;
@@ -216,7 +284,13 @@ LoopRenderResult LoopRenderer::render(BufferView<const float> source,
 
         if (should_advance) {
             position_ = advance_position(position_, step, sample_wrapped);
-            if (region_.playback_mode == LoopPlaybackMode::OneShot &&
+            // Re-read the step: PingPong flips its bounce direction at each edge,
+            // and a Forward/Reverse loop flips step_dir_ when the first pass turns
+            // around into the steady loop direction. Cheap; keeps the next frame's
+            // travel direction correct.
+            step = effective_step();
+            if ((region_.playback_mode == LoopPlaybackMode::OneShot ||
+                 region_.playback_mode == LoopPlaybackMode::ReverseOnce) &&
                 (position_ < static_cast<double>(region_.start_frame) ||
                  position_ >= static_cast<double>(region_.end_frame))) {
                 active_ = false;

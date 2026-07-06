@@ -9,7 +9,8 @@
 # `--mode=report`:
 #   - skill-sync (catches missing SKILL.md updates for mapped paths)
 #   - version-bump (catches feat:/fix: PRs without a chore: bump versions commit)
-#   - compat-sync (when compat.json is touched, requires matching test coverage)
+#   - compat-sync (mapped compat paths require matrix/docs/tests or a skip trailer)
+#   - compat-aggregate (compat.json stays byte-identical to compat/ parts)
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
@@ -57,6 +58,7 @@ BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
+COMPAT_AGG="$ROOT/tools/scripts/compat_aggregate.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
@@ -67,6 +69,8 @@ CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
 CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
+CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -96,6 +100,25 @@ fail=0
 
 echo "gates: base = $BASE" >&2
 
+# ── 0. host-vitals (ADVISORY) ──────────────────────────────────────────────
+# A pushing developer/agent on a self-hosted CI host is often the SAME machine
+# that runs the required macos gate. If that host is shedding memory (jetsam) or
+# at critical pressure, piling a foreground build/ship on top risks an unclean
+# reboot that kills the in-flight CI job. This banner surfaces that BEFORE the
+# push so you can ship via GitHub-native auto-merge (survives a restart) instead
+# of a foreground watch. Advisory only — it never changes the exit code.
+HOST_VITALS="$ROOT/tools/scripts/host_vitals.sh"
+if [ -x "$HOST_VITALS" ]; then
+    echo "" >&2
+    echo "▸ host-vitals (advisory)" >&2
+    vitals_out="$("$HOST_VITALS" 2>/dev/null)"; vitals_code=$?
+    echo "  $vitals_out" >&2
+    if [ "$vitals_code" -ge 20 ]; then
+        echo "  ⚠︎ host is CRITICAL — prefer 'shipyard pr' / GitHub auto-merge over a" >&2
+        echo "    foreground watch, and shed idle load (RepoPrompt/Figma/MCP) before builds." >&2
+    fi
+fi
+
 # ── 1. skill-sync ──────────────────────────────────────────────────────────
 echo "" >&2
 echo "▸ skill-sync check" >&2
@@ -116,12 +139,21 @@ COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     echo "" >&2
     echo "▸ compat-sync check" >&2
-    if ! "$PYTHON" "$CSC" --base "$BASE" --mode=report; then
+    if ! "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce; then
         fail=1
     fi
 fi
 
-# ── 4. node ABI virtual-order gate ─────────────────────────────────────────
+# ── 4. compat aggregate/part consistency ───────────────────────────────────
+if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; then
+    echo "" >&2
+    echo "▸ compat aggregate check" >&2
+    if ! "$PYTHON" "$COMPAT_AGG" check; then
+        fail=1
+    fi
+fi
+
+# ── 5. node ABI virtual-order gate ─────────────────────────────────────────
 if [ -f "$NAG" ]; then
     echo "" >&2
     echo "▸ node-ABI virtual-order check" >&2
@@ -130,7 +162,7 @@ if [ -f "$NAG" ]; then
     fi
 fi
 
-# ── 5. hotspot-size guard ──────────────────────────────────────────────────
+# ── 6. hotspot-size guard ──────────────────────────────────────────────────
 if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     echo "" >&2
     echo "▸ hotspot-size guard" >&2
@@ -140,7 +172,7 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     fi
 fi
 
-# ── 6. deps-audit ──────────────────────────────────────────────────────────
+# ── 7. deps-audit ──────────────────────────────────────────────────────────
 if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
     echo "▸ deps-audit (attribution drift)" >&2
@@ -152,7 +184,7 @@ if [ -f "$DEPS_AUDIT" ]; then
     fi
 fi
 
-# ── 7. codecov-config drift ────────────────────────────────────────────────
+# ── 8. codecov-config drift ────────────────────────────────────────────────
 # Global invariant — runs unconditionally (not diff-scoped), because the
 # usual way codecov.yml goes stale is a NEW core/<sub>/ subsystem landing
 # with no codecov.yml edit at all (graph/scene drifted onto main exactly
@@ -177,7 +209,7 @@ if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
     fi
 fi
 
-# ── 8. SignalGraph single-backend governance ──────────────────────────────
+# ── 9. SignalGraph single-backend governance ──────────────────────────────
 # Global structural invariants (not diff-scoped): one routing backend
 # (GraphRuntimeExecutor), no second authoring surface, no unsanctioned
 # generated-DSP ABI entrypoint, and the differential parity safety-net stays
@@ -195,7 +227,7 @@ if [ -f "$TERMS_LINT" ] && [ -f "$SINGLE_BACKEND_GUARD" ]; then
     fi
 fi
 
-# ── 9. import-provenance (opt-in) ──────────────────────────────────────────
+# ── 10. import-provenance (opt-in) ─────────────────────────────────────────
 # Audits that any emitted/migrated project carries a well-formed clean-room
 # provenance marker. No-op for normal Pulp-repo pushes; set
 # PULP_IMPORT_PROVENANCE_DIRS (space-separated project dirs) on a PR that lands
@@ -205,6 +237,31 @@ if [ -f "$IMPORT_PROV" ] && [ -n "${PULP_IMPORT_PROVENANCE_DIRS:-}" ]; then
     echo "▸ import-provenance check" >&2
     # shellcheck disable=SC2086
     if ! "$PYTHON" "$IMPORT_PROV" $PULP_IMPORT_PROVENANCE_DIRS; then
+        fail=1
+    fi
+fi
+
+# ── 11. scheduled-workflow fork guard ──────────────────────────────────────
+# Every `on: schedule` workflow's entry jobs must carry the fork guard so a
+# fork's copy doesn't cron-run our monitors and email the fork owner on failure.
+if [ -f "$FORK_GUARD" ]; then
+    echo "" >&2
+    echo "▸ scheduled-workflow fork-guard check" >&2
+    if ! "$PYTHON" "$FORK_GUARD"; then
+        fail=1
+    fi
+fi
+
+# ── 12. conflict-marker guard ──────────────────────────────────────────────
+# Global invariant (not diff-scoped): no tracked file may carry a git conflict
+# marker. A squash-merge whose stale side collided with an advanced line can
+# write markers straight onto main (it happened to CMakeLists.txt's VERSION
+# line). Sub-second whole-tree scan; zero-false-positive on the start/base/end
+# markers.
+if [ -f "$CONFLICT_MARKER_GUARD" ]; then
+    echo "" >&2
+    echo "▸ conflict-marker guard (no committed <<<<<<< / ======= / >>>>>>>)" >&2
+    if ! "$PYTHON" "$CONFLICT_MARKER_GUARD"; then
         fail=1
     fi
 fi

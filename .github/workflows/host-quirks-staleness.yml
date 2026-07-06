@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   staleness:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     name: Report stale host-quirk catalog entries
     steps:

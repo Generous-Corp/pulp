@@ -247,13 +247,17 @@ at `--sample-rate` — no resampling), `--param <id>=<value>[@frame]`, and
 
 **`--param` values are PLAIN domain** (the parameter's native `min..max`), **not
 normalized `[0,1]`** — matching `PluginSlot::set_parameter` /
-`ParameterEvent::value`. Parameters are delivered block-quantized via
-`set_parameter` (forwarding the per-block queue too would double-apply each
-change on loaders that honor sample-accurate events); MIDI stays sample-accurate.
-The block stepper is a deliberate, callback-driven parallel to
-`OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse
-the core renderer directly); a block-partition-invariance test guards the two
-against drift.
+`ParameterEvent::value`. Parameters are delivered **sample-accurately**: the
+stepper windows each block's events with per-block sample offsets and the queue
+is forwarded straight to `PluginSlot::process`, which every loader applies at the
+event offset (CLAP/VST3/AU sample-accurate; LV2 block-rate by its control-port
+contract). We do NOT also call `set_parameter` — that would double-apply each
+change (once at offset 0, once at its real offset). MIDI is likewise
+sample-accurate. (A plugin that reads its own params once per block still steps
+at block boundaries — that is the plugin's rate, not the CLI's.) The block
+stepper is a deliberate, callback-driven parallel to `OfflineRenderHost::render`
+(PluginSlot has no `ProcessContext`, so it can't reuse the core renderer
+directly); a block-partition-invariance test guards the two against drift.
 
 ## Live capture-to-WAV — two modes, both LANDED
 
@@ -265,39 +269,271 @@ audio validate` verbs read, then exits. Pick the mode by which window you need:
   `assert` (presence / level / clip / NaN); the wrong window for steady-state
   `doctor` and quantization-limited for `compare`. `--audio-capture-frames <n>`
   sets the window.
-- **`--audio-capture-rolling <file>` (last-N, float).** Keeps the LAST
+- **`--audio-capture-rolling <file>` (last-N, float or int24).** Keeps the LAST
   (steady-state) window in a `RollingAudioCaptureBuffer` and writes a **float**
   WAV (no int16 floor) — the window `doctor` (THD/response) and `compare`
   (sub-−96 dBFS residuals) actually want. `--audio-capture-rolling-frames <n>`
-  sets the window. Uses the hold protocol so the off-RT materialize is safe while
-  the audio thread is still appending. One capture mode per invocation (mutually
-  exclusive with `--audio-inspector` / `--audio-scope-json` / `--audio-capture-wav`).
+  sets the window; `--audio-capture-rolling-format int24` swaps the float WAV for
+  int24 (≈ −144 dBFS floor, smaller, universal DAW compatibility). Uses the hold
+  protocol so the off-RT materialize is safe while the audio thread is still
+  appending. One capture mode per invocation (mutually exclusive with
+  `--audio-inspector` / `--audio-scope-json` / `--audio-capture-wav`).
 
-Float WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth::Float32)`.
+WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth)` —
+`Int16` (default overload), `Int24`, or `Float32`.
 
 ## Roadmap
 
 The Phase-7 offline-render and live-capture slices have all landed: `pulp audio
-render` (offline plugin render), `pulp run --audio-capture-wav` (earliest-window
-int16), and `pulp run --audio-capture-rolling` (last-N float). The live realtime
-output tap they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live
-inspection* above). Remaining ideas are additive — e.g. a 24-bit-int capture
-alongside the float WAV, and sample-accurate (not block-quantized) `--param`
-automation in `render`.
+render` (offline plugin render, sample-accurate `--param @frame`), `pulp run
+--audio-capture-wav` (earliest-window int16), and `pulp run
+--audio-capture-rolling` (last-N, float or int24). The live realtime output tap
+they read from is gated behind `PULP_ENABLE_AUDIO_PROBES` (see *Live inspection*
+above). The harness's offline/live capture surface is feature-complete; further
+work is open-ended (e.g. additional analysis verbs), not a tracked backlog.
 
 ## Sibling: the Audio Quality Lab (reference-vs-candidate perceptual artifacts)
 
 This skill covers presence / level / THD / response. For **reference-vs-candidate
 perceptual artifact** detection — "did this DSP change make it sound *worse*?"
-(transient smear, seam clicks) — there is a separate **opt-in** developer/CI tool,
-`tools/audio/quality-lab/` (Python, numpy + soundfile). It is additive: it does NOT
-change anything here and is never required to run the basic harness or `ctest`.
+(transient smear, dulling, metallic fizz, graininess) — there is a separate **opt-in**
+developer/CI tool, `tools/audio/quality-lab/` (Python, numpy + soundfile). It is
+additive: it does NOT change anything here and is never required to run the basic
+harness or `ctest`.
 
-- Run: `cd tools/audio/quality-lab && python -m quality_lab.cli run-p0a --mode bad`.
-- The P0a slice aligns a candidate to a reference (onset-map + local cross-correlation),
-  runs a transient-sharpness detector, and writes a `report.json` with per-onset
-  localization, coverage/confidence, and provenance.
-- Credibility: the detector is validated against an *independent* textbook phase
-  vocoder (`reference_pv.py`), not just its own synthetic degradation.
+- **Install (managed):** `pulp tool install audio-quality-lab` — provisions an isolated
+  venv under `~/.pulp/tools/` (the same `pulp tool` lane as `ffmpeg`/`uv`/importers;
+  `pulp tool list` shows it). Then `pulp tool run audio-quality-lab -- <args>`. A plain
+  `cd tools/audio/quality-lab && pip install -r requirements.txt` venv works identically.
+- **Subcommands** (after `python -m quality_lab.cli` or `pulp tool run audio-quality-lab --`):
+  `run --case {drum,tonal} --degradation <kind>` (synthetic case + listenable clips),
+  `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
+  on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
+  `corpus list|add` (versioned, license-guarded corpus).
+- Aligns a candidate to a reference (onset-map + local cross-correlation), runs the
+  detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`, `hnr` —
+  tonal noise/roughness via autocorrelation HNR; plus the standalone `stereo_width` for
+  image-collapse/phase damage on `(N,2)` stereo arrays; and the EXPERIMENTAL `onset_drift`
+  — timing/groove drift via event-time residual after common-latency removal, advisory-only
+  until promoted), and
+  writes a `report.json` with per-onset localization, coverage/confidence, and provenance.
+- Credibility: detectors are validated against an *independent* textbook phase vocoder
+  (`reference_pv.py`) AND the real product engine, not just their own synthetic degradation.
+- **`engine`/`engine-baseline` need a built `stretchcli`.** `engine.resolve()` finds it via,
+  in order: the `PULP_STRETCHCLI` env-path, a `build/examples/offline-stretch/stretchcli`
+  found by **walking up from the current directory** (so the engine path works even when the
+  lab is `pulp tool install`-ed into a managed venv, as long as you run it from a Pulp
+  checkout that built stretchcli), then the package-relative repo build. Absent → a clean,
+  actionable `skipped` (build command + env-path), never a failure. Build it with
+  `cmake --build build --target stretchcli`.
+- **Maturity gate:** each detector has `maturity` (`experimental`/`beta`/`stable`). An
+  `experimental` detector runs and reports under the report's `advisory` block but its
+  `fired`/`low_coverage` are excluded from the `verdict` AND `engine_baseline` — route
+  every verdict/gate path through `schema.detectors_for_verdict` /
+  `detectors_for_engine_baseline`, never re-implement the filter. New detectors ship
+  `experimental`. (Plan: planning/2026-06-29-audio-quality-lab-postmvp-detectors-maturity-gate.md.)
+- **Perceptual models** (`perceptual.py`, opt-in, license-fenced): full-reference,
+  music/general-audio quality predictors, each behind its OWN env-path and each
+  `skipped`-independently when absent — set only the ones you want. `evaluate()` consults
+  all: ViSQOL (`PULP_VISQOL_BIN`, Apache-2.0, MOS-LQO), PEAQ (`PULP_PEAQ_BIN`, GPL, ITU-R
+  BS.1387 ODG), AQUA-Tk (`PULP_AQUATK_BIN`, GPL-3.0, ODG). Results land under
+  `report["perceptual"]`, ADVISORY ONLY. Deliberately excludes speech/telephony (PESQ,
+  POLQA) and no-reference neural speech (DNSMOS, NISQA) metrics — wrong domain/contract.
+- **MIR structural oracle** (`mir.py`, opt-in, license-fenced): aubio (`PULP_AUBIO_BIN`,
+  GPL-3.0) — a *feature extractor*, NOT a quality metric, so it is a SEPARATE layer from
+  `perceptual.py`. Gives an independent onset-count cross-check under
+  `report["advisory"]["mir_oracles"]` to non-circularly validate `onset_drift`. ADVISORY,
+  never a gate/baseline. **License fence for both layers:** GPL tools (PEAQ/AQUA-Tk/aubio)
+  are reached ONLY via a developer-set env-path over a process boundary, never bundled,
+  fetched, linked, or added to `tool-registry.json` — so no copyleft obligation attaches
+  and no runtime warning is needed (consistent with how the lab already treats PEAQ).
+- **Advisory reviewer** (`reviewer.py`, opt-in `PULP_QLAB_REVIEWER_CMD` subprocess, `run
+  --review`): an LLM/multimodal model names artifacts in plain language under
+  `advisory.reviewers`. ADVISORY ONLY — never changes the verdict/gate; skip-when-absent;
+  no network by default. Validate with `reviewer.score_agreement` (precision/recall vs the
+  synthetic answer key) before trusting it.
+- **Tuning loop** (`loop.py`, `quality-lab loop`, EXPERIMENTAL): scores candidates with the
+  gate-participating detectors (experimental detectors excluded), ranks them, and writes
+  PROPOSAL-ONLY label updates to `corpus/LABEL_PROPOSALS.json` — never `MANIFEST.json`,
+  never auto-promotes. `goodhart_guard` refuses a candidate that games one detector while
+  regressing another (normalized Pareto + held-out slice + NEEDS-EAR).
+- **Agent compare report** (`compare.py`, `quality-lab compare before.wav after.wav`): the
+  agent-facing **measure → compare → judge** surface. Level-matches, runs one curated **axis**
+  (`--profile`), and emits a typed evidence envelope + an action-oriented verdict
+  (`regression_suspected` / `material_change_detected` / `no_material_change_detected` /
+  `inconclusive` / `invalid`). Five axes today, all global/alignment-free — a new axis is one
+  `_AXES` registry entry in `compare.py`, the shared `_measure`/`_verdict` machinery does the rest:
+
+  | `--profile` | axis | measures | bad direction (`bad_sign`) |
+  |-------------|------|----------|----------------------------|
+  | `tonal-balance` | `tonal_balance` | LTAS spectral-centroid shift | duller (−1) |
+  | `added-hf` | `added_hf` | band-relative ≥8 kHz fraction ratio (dB) | added fizz (+1) |
+  | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | rougher/noisier (−1) |
+  | `graininess` | `graininess` | relative spectral-flux increase | grainier (+1) |
+  | `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | narrower/collapsed (−1) |
+
+  `noise-roughness` (HNR, pitch range 40–1000 Hz so bass fundamentals count) and `graininess`
+  (relative `mean_spectral_flux` increase) are meaningful on tonal/sustained material — a
+  caller-declared contract (the caller picks the profile), carried as a standing summary caveat +
+  both per-signal scalars in the payload, NOT an automatic tonal/percussive classifier in the
+  honesty path (which would just be a tunable threshold on the same statistic). Only mathematically
+  degenerate inputs go `not_applicable` (a flux reference below an epsilon floor — the div-by-zero
+  edge). **`stereo-width`** is the one axis fed the ORIGINAL 2-channel signal (via
+  `audio_io.load_wav_multichannel`, the `_Axis.needs_stereo` flag, and the `_measure_stereo` path)
+  rather than the mono downmix; mono input on either side is `not_applicable`, its metric is
+  level-invariant (no level-match), and a candidate whose correlation goes negative is flagged out
+  of phase (mono-incompatible) in the summary. That takes compare to **5 of the lab's 7 detectors**
+  reachable from the agent-facing surface (up from 2). `compare.MONO_PROFILES` /
+  `compare.STEREO_PROFILES` split which axes need 2-channel input — the regression net defaults to
+  the mono set so a mono comparison doesn't emit a spurious not_applicable stereo-width row.
+
+  The `added-hf` axis measures the **ratio of the ≥8 kHz energy fraction** (`10·log10(frac_cand /
+  frac_ref)`, default ±3 dB), NOT the absolute fraction *delta* — the absolute delta is
+  signal-dependent and effectively blind on a bass-heavy source (an amp render's HF fraction is
+  ~1e-4, so even a clearly harsh addition barely moves it; only the null-residual corroboration
+  caught it before). The ratio is invariant to a broadband gain / the level-match, so it flags a
+  real harshness change on a dark source that the absolute delta missed. Both band fractions are
+  floor-clamped, so a zero-HF reference (fizz on a dark source) or candidate (brickwall low-pass)
+  gives a large *finite* dB delta, never `inf` → a false `invalid`. It flags HF *loss* as material
+  too (a negative dB delta) — only *added* fizz is the bad direction. A large EQ move outside the
+  band (e.g. a big LF shelf) still leaves some residual sensitivity — far less than the absolute
+  metric, not zero. The threshold is a dB magnitude with its own per-axis range, so the shipped
+  CLI / MCP pass any positive threshold through to the Python registry (the single source of truth
+  for the valid range) rather than a hardcoded fraction bound.
+
+  **Intent-safe:** `regression_suspected` needs `--reference-role golden` AND a change in the
+  axis's bad direction (a duller candidate can't trip the `added-hf` axis; added fizz can't trip
+  it on a `peer` compare); otherwise the change is the neutral `material_change_detected`.
+  **Advisory:** exits non-zero only on `invalid` (couldn't measure), never for a judgment — the
+  gate primitive stays `pulp audio validate compare`. Each axis has its own materiality default
+  (`--threshold` overrides). Report shape (`quality_lab.compare.v1`) is owned by `schema.py`;
+  every envelope carries `status`/`applicable`/`materiality`/`provenance`. Use this when an agent
+  must weigh in on a DSP change with cited evidence rather than a bare pass/fail.
+
+  **Corroboration + raw comparators (`report["advisory"]`, off-gate).** When the primary
+  measurement succeeds, the report also carries an `advisory` namespace: a deterministic
+  `null_residual` raw comparator (level-matched sample-domain residual RMS relative to the
+  reference, `db_rel_reference`; lower = more identical) and a `corroboration` block. Corroboration
+  is a **materiality cross-check — NOT a trust score**: it reports only whether that independent,
+  algorithm-agnostic residual *also* registers a material change (`corroborated` /
+  `not_corroborated`), under the same level-matched global contract. Both are `maturity:
+  experimental`, `participates_in_verdict: false` — they NEVER move the verdict. The valuable
+  signal is disagreement: `not_corroborated` with `axis_exceeds:false, raw_material:true` means a
+  real sample-domain difference this axis can't see (e.g. a pure delay — try another profile);
+  `axis_exceeds:true, raw_material:false` means a marginal/phase-only change to treat with more
+  caution. **That disagreement is now PROMOTED to the headline** (it used to sit buried in the
+  advisory): a top-level `report["headline_flags"]` (always present, empty when there's nothing to
+  flag) carries a structured `{flag, detail, expected_for}` — `uncaptured_material_difference` or
+  `axis_change_without_residual` — and a matching sentence is appended to `summary`. The flag is
+  STRUCTURED, not prose, precisely so the known false-alarm class is machine-suppressible: every
+  time/pitch-variant A/B (chorus, phaser, bendr, any modulated effect) legitimately reads
+  `not_corroborated` forever because the phase-sensitive residual always disagrees with a tonal
+  axis, so `uncaptured_material_difference` carries `expected_for:["time_variant_processing"]` — a
+  caller doing time-variant work filters on that rather than treating the flag as noise. It still
+  NEVER moves the verdict. Length is handled honestly: the candidate is level-matched over the **common region**
+  and the shorter signal **zero-padded** to the longer length, so a dropped/added tail *with
+  content* raises the residual on its own (reads material) while trailing *silence* contributes
+  ~0 (stays immaterial) — a truncated render can never masquerade as a near-identity match, and
+  the sample counts are reported in the comparator's `detail`. The residual is **phase/delay-sensitive and alignment-free by contract**, so it
+  corroborates *materiality*, never audibility. Cite it — never treat agreement as a confidence
+  score (the plan's explicit non-goal: agreement ≠ trust). Deliberately NOT built: the GPL aubio /
+  AGPL Essentia feature-extractor menu — feature extractors are never verdicts, and an env-path
+  license fence is disproportionate surface for the value; the pure-numpy residual carries the
+  corroboration story license-free.
+
+  **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
+  mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is
+  invisible. When a file was multichannel the report says so on the mono axes:
+  `provenance.ref_channels`/`cand_channels`, a `downmix` note on the measurement envelope, and a
+  one-line summary clause — a stereo-widener whose mid is unchanged reads `no_material_change` on
+  `tonal-balance` but the report never hides that imaging was discarded, and pointing the same pair
+  at `--profile stereo-width` catches the change directly (the downmix note is correctly suppressed
+  there, since that axis DID read the stereo image). The **`added-hf`** axis reports
+  `not_applicable` (→ `inconclusive`) at low sample rates where the ≥8 kHz band collapses to a
+  degenerate handful of LTAS bins (e.g. sr = 16 kHz is the single Nyquist bin) instead of a
+  confident "no change" over nothing. A **DC offset** concentrates energy in LTAS bin 0 and drags
+  the centroid down — reading as false tonal "dulling" — so the advisory carries a `dc_offset`
+  raw comparator (per-signal means + `present` flag) and, when present, a summary sentence telling
+  you to high-pass before comparing rather than chase phantom dullness. All three are
+  presentation/advisory only — like corroboration, they never move the verdict.
+- **Shipped surfaces (same measurement, three entry points):** the Python `quality-lab compare`
+  is the dev-loop surface; **`pulp audio compare <ref> <cand> [--profile …] [--reference-role …]
+  [--json …]`** is the shipped CLI verb (thin delegator — `tools/cli/cmd_audio_compare.cpp` locates
+  the opt-in managed tool and forwards, so no DSP links into the CLI); **`pulp_audio_compare`** is
+  the MCP tool mirroring it (returns the report JSON). All three run the identical axis logic. The
+  `/audio-compare` slash command wraps the CLI. Install the tool once: `pulp tool install
+  audio-quality-lab`.
+- **Golden-render regression net (`quality_lab.regression_net`, `quality-lab regression-net
+  --manifest net.json`).** The daily-driver loop: keep a golden render per plugin/preset, `pulp
+  audio render --plugin …` the candidate, and `compare` across every wired axis, emitting a table
+  (plugin | profile | verdict | corroboration | flags). **Fail policy is the contract: the fail
+  signal keys off axis verdicts only — exit 1 iff an axis reports `regression_suspected`; a pair
+  that couldn't be measured (missing/corrupt render → `invalid`, or a bad manifest) is a separate
+  ERROR (exit 2), never greenlit as clean; exit 0 = all measured, none regressed. The corroboration
+  column is informational and never affects the exit code** — the modulated family
+  (chorus/phaser/flanger/tremolo/ring-mod) is time-variant
+  so it reads `not_corroborated` forever (the `expected_for:["time_variant_processing"]` flag). This
+  is advisory reporting attached to a change; gating proper stays `pulp audio validate compare`. The
+  module is the reusable REFERENCE — a plugin suite (pulp-classic-effects, bendr, GPU NAM) wires its
+  own renders into `run_net` and commits a portable manifest (paths resolve relative to it). Read
+  the change class, not the backend: timbral + modulated changes are valid through the net; bendr
+  *fixed-ratio* A/Bs are valid, but bendr ratio changes / tempo-sampler offsets are time-misaligned
+  (the residual false-alarms) → use the reference-free engine path instead. See the guide's
+  "Golden-render regression net" section.
+- **Live plugin before/after (measure a real plugin, then judge the change).** `compare` needs two
+  WAVs; capture them from a live/hosted plugin with the existing steady-state tap, then judge:
+  ```bash
+  # capture the KNOWN-GOOD baseline (announce audio + cap duration per the local-dev etiquette)
+  pulp run --plugin before.clap --audio-capture-rolling before.wav --headless   # tear down promptly
+  # …apply the DSP change, rebuild…
+  pulp run --plugin after.clap  --audio-capture-rolling after.wav  --headless
+  pulp audio compare before.wav after.wav --reference-role golden               # base = golden
+  ```
+  Use `--audio-capture-rolling` (last-N steady-state window — the region `compare` wants), NOT
+  `--audio-capture-wav` (earliest int16 window). `--audio-capture-rolling` opens the live audio
+  device: announce before launching, cap the wall-clock, and tear down (see the local-dev audio
+  etiquette in CLAUDE.md). For a fully offline capture of an explicit bundle, `pulp audio render
+  --plugin <bundle> --out cand.wav …` writes a WAV without a live device — feed that to `compare`
+  the same way. This is the "measure a plugin with the scope/inspector and compare findings" path.
 - Guide: `docs/guides/audio-quality-lab.md`; module map + deferred-detector status:
   `tools/audio/quality-lab/README.md`.
+
+### Compare/measure design rationale & non-goals (why we built it this way / what we skipped)
+
+Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not workflow history):
+
+- **A vertical agent report before a shared measurement record.** The harness + lab + inspector
+  already measure; the gap was orchestration + a *defended verdict*. A universal `{ref,cand,delta}`
+  scalar is too lossy to defend a judgment, so measurements are typed *evidence envelopes* and
+  curves/THD stay first-class. (Two independent adversarial reviews converged on this.)
+- **Cross-tool "agreement = trust" is NOT a signal** and is deliberately absent — different
+  algorithms disagree for legitimate reasons; treating agreement as trust manufactures
+  overconfidence. If ever added, it reads as "corroborated under a comparable-axis contract."
+- **Doctor `--response`/`--thd` are NOT valid on arbitrary before/after WAVs** — `--response` is a
+  peak-normalized self-spectrum (not a transfer response); THD is gate-grade only for a steady
+  bin-coherent sine. They need a controlled stimulus, so they're excluded from `compare` and join
+  later behind stimulus-supplying profiles.
+- **Alignment is `not_required` for both current axes** — global LTAS metrics (centroid shift,
+  HF fraction) are alignment-free; the envelope records the *policy*, we don't build general
+  alignment for them. A future transients/timing axis will need a real alignment policy first.
+- **Axes are a per-profile registry, added one entry at a time** — each axis declares its
+  `axis`/`tool`/`bad_sign`/`default_threshold`/`kernel`/`summarize`; the shared `_measure` does
+  applicability + level-match + materiality and `_verdict` does the intent-safe mapping. `bad_sign`
+  is the sign of the delta that is a regression against a golden reference (−1 = a drop is bad,
+  +1 = an increase is bad). Only axes on the *same contract* (global, delta-in-(0,1), self-
+  applicability) belong here — stimulus/alignment-dependent measures do NOT.
+- **`regression_suspected` requires `--reference-role golden`** — "worse" assumes the reference is
+  the known-good baseline; without that, a change is neutral. It ALSO requires the change to be in
+  the axis's bad direction (`bad_sign`), so a legitimately-brighter or HF-reduced candidate reads
+  as `material_change_detected`, not a false regression.
+- **Axis thresholds are per-axis and unit-bound to (0, 1)** — every current axis's delta is a
+  dimensionless ratio in (0, 1), so the threshold guard is `0 < t < 1`. A dB-unit axis (e.g. HNR
+  drop) is deliberately deferred until the threshold validation is made per-axis; don't shove a
+  dB metric onto the (0,1) contract.
+- **Speech/perceptual & feature-extractor scope is bounded** — PESQ/POLQA/DNSMOS/NISQA are speech/
+  telephony (out of scope for full-reference music); aubio/librosa/Essentia are feature extractors,
+  not MOS predictors (advisory raw-comparators behind profiles, never verdicts); scalar-only where
+  the scalar is the calibrated deliverable (PEAQ/AQUA-Tk ODG). GPL/AGPL tools stay behind the
+  env-path license fence.
+- **`audio_io.load_wav` mono-downmixes** — fine for tonal balance; a future stereo-image axis must
+  NOT use that loader.

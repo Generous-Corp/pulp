@@ -155,7 +155,7 @@ TEST_CASE("lock_token_in_designmd rewrites a color token in place",
 }
 
 TEST_CASE("lock_token_in_designmd preserves single-quoted scalar style",
-          "[view][token-lock][coverage]") {
+          "[view][token-lock]") {
     const std::string md =
         "---\n"
         "colors:\n"
@@ -171,7 +171,7 @@ TEST_CASE("lock_token_in_designmd preserves single-quoted scalar style",
 }
 
 TEST_CASE("lock_token_in_designmd escapes single-quoted scalar apostrophes",
-          "[view][token-lock][coverage]") {
+          "[view][token-lock]") {
     const std::string md =
         "---\n"
         "colors:\n"
