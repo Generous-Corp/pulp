@@ -391,6 +391,118 @@ def attack_rise(seg: np.ndarray, sr: int) -> float:
     return (0.8 * amp) / rise_samples
 
 
+# ── Resampling (varispeed alignment) ─────────────────────────────────────
+
+def _kaiser_sinc_resample(y: np.ndarray, target_len: int, zeros: int, beta: float) -> np.ndarray:
+    """Windowed-sinc (Kaiser) arbitrary-ratio resampler — the shared core of
+    :func:`resample_to_length` / :func:`resample_by_ratio`. See those for the contract."""
+    y = np.asarray(y, dtype=np.float64)
+    if y.ndim != 1:
+        raise ValueError("resampling expects a 1-D signal")
+    n = y.size
+    m = int(target_len)
+    if m < 0:
+        raise ValueError(f"target_len must be non-negative, got {target_len}")
+    if m == 0 or n == 0:
+        return np.zeros(m, dtype=np.float64)
+    if m == n:
+        return y.copy()                      # identity ratio — no filtering, exact passthrough
+    if n == 1:
+        return np.full(m, y[0], dtype=np.float64)
+    if m == 1:
+        # A single output sample from a longer signal — the endpoint map (÷ m-1) is undefined here;
+        # the bandlimited-to-one-sample value is the DC (mean), so no ZeroDivisionError on degenerate
+        # (e.g. 1-sample-reference) input. The downstream length gate then handles it as not_applicable.
+        return np.array([float(np.mean(y))], dtype=np.float64)
+
+    # Endpoint-anchored mapping: output sample j reads input coordinate t_j = j*(n-1)/(m-1), so the
+    # first/last samples pin exactly. This makes a forward-then-inverse round trip sample-aligned
+    # (the two linear maps compose to the identity) — critical for the phase-sensitive null-residual
+    # to read identity on a transparent varispeed round trip.
+    scale = m / n
+    cutoff = min(1.0, scale)                 # anti-alias cutoff (input-Nyquist units): lowpass only
+    #                                          when DOWN-sampling (scale < 1); pass-through when up.
+    step = (n - 1) / (m - 1)
+    t = np.arange(m, dtype=np.float64) * step
+    base = np.floor(t).astype(np.int64)
+    frac = t - base                          # fractional offset in [0, 1) per output sample
+    half_width = zeros / cutoff              # kernel half-support in INPUT samples (widens as cutoff
+    #                                          shrinks, so the lobe count `zeros` is preserved)
+    k_max = int(np.ceil(half_width))
+    i0_beta = np.i0(beta)
+    out = np.zeros(m, dtype=np.float64)
+    wsum = np.zeros(m, dtype=np.float64)     # per-output weight sum → normalized for exact DC gain
+    #                                          and clean edge roll-off (no boundary darkening).
+    for k in range(-k_max, k_max + 1):
+        arg = k - frac                       # kernel argument = (base + k) - t, in input samples
+        idx = base + k
+        within = np.abs(arg) <= half_width
+        w = np.zeros(m, dtype=np.float64)
+        a = arg[within]
+        # Kaiser-windowed sinc at the anti-alias cutoff. sinc bandlimits; the Kaiser window bounds
+        # the support with a deep, tunable stopband (beta) so no imaging/aliasing leaks into the band
+        # the compare axes read.
+        kaiser = np.i0(beta * np.sqrt(np.maximum(0.0, 1.0 - (a / half_width) ** 2))) / i0_beta
+        w[within] = cutoff * np.sinc(cutoff * a) * kaiser
+        valid = (idx >= 0) & (idx < n)       # taps off the signal ends contribute nothing …
+        out += np.where(valid, y[np.clip(idx, 0, n - 1)] * w, 0.0)
+        wsum += np.where(valid, w, 0.0)      # … and are excluded from the normalizer, so the edge
+    #                                          filter renormalizes over only its in-range taps.
+    nz = wsum != 0.0
+    out[nz] /= wsum[nz]
+    return out
+
+
+def resample_to_length(y: np.ndarray, target_len: int, *, zeros: int = 32, beta: float = 13.0) -> np.ndarray:
+    """Resample a 1-D signal to ``target_len`` samples with a Kaiser-windowed-sinc kernel.
+
+    High-quality bandlimited resampling in pure numpy (no scipy). For each output sample the value
+    is a windowed-sinc interpolation over the ``2*zeros(/cutoff)+1`` nearest input samples; when
+    DOWN-sampling (``target_len < len(y)``) the sinc cutoff drops to the new Nyquist so no aliasing
+    folds back into the band, and when UP-sampling the kernel is a plain bandlimiting interpolator
+    (cutoff at the input Nyquist, so no imaging above it). Per-output weight normalization gives
+    exact DC gain and clean edge roll-off (no boundary darkening).
+
+    This is the varispeed-alignment primitive (spec §3b / §4.1): a varispeed candidate is *exactly*
+    a resample of the reference, so resampling it back to the reference length undoes the speed
+    change and lets the entire alignment-free compare pipeline — including the phase-sensitive
+    sample-domain null-residual — measure it unchanged. The round trip is transparent to the compare
+    axes: resampling a signal by a ratio and back reads ``no_material_change`` on every axis, and a
+    lossless (up-sample-first) round trip returns to within numerical noise (residual < -100 dB).
+
+    Quality is high enough not to itself trip an axis: a windowed-sinc round trip does NOT add HF
+    fizz, roughness, or graininess (a naive linear interpolation would, via imaging/roll-off). The
+    one honest limit is physical, not a resampler defect: a DOWN-sample to below the source length
+    (a speed-up varispeed, ratio < 1) bandlimits to the new lower Nyquist, so any source energy above
+    it is unrecoverable — a signal with substantial near-Nyquist energy reads as duller after such a
+    round trip. That is the correct behavior of a speed-up (nothing generates the lost top octave),
+    matching an ideal brickwall to within ~1%.
+
+    ``zeros`` is the sinc lobe count per side (more = sharper transition, slower); ``beta`` is the
+    Kaiser shape (higher = deeper stopband, wider transition). Defaults (32, 13.0) sit well below the
+    measurement floor. Cost is ``O(target_len * zeros / cutoff)`` — ~0.25 s per direction on a
+    2 s / 48 kHz render. Endpoints are pinned, so a forward+inverse pair is sample-aligned. Raises
+    ValueError on non-1-D input or a negative length."""
+    return _kaiser_sinc_resample(y, target_len, zeros, beta)
+
+
+def resample_by_ratio(y: np.ndarray, ratio: float, *, zeros: int = 32, beta: float = 13.0) -> np.ndarray:
+    """Resample a 1-D signal by a length ``ratio`` — output length ``round(len(y) * ratio)``.
+
+    Convenience wrapper over :func:`resample_to_length` in the varispeed vocabulary of spec §4.1: a
+    ``varispeed:R`` candidate is ``resample_by_ratio(reference, R)`` (``R > 1`` slows/lengthens and
+    lowers pitch; ``R < 1`` speeds up/shortens and raises pitch), and resampling it back —
+    ``resample_by_ratio(candidate, 1 / R)`` or, for an exact length match against the reference,
+    ``resample_to_length(candidate, len(reference))`` — returns it to the reference time base. The
+    endpoint-anchored mapping makes ``round(len*R)`` then ``round(.../R)`` recover the original length
+    for the ratios the varispeed lane uses. Raises ValueError on a non-positive ratio or non-1-D
+    input."""
+    if not ratio > 0.0:
+        raise ValueError(f"ratio must be positive, got {ratio}")
+    y = np.asarray(y, dtype=np.float64)
+    return _kaiser_sinc_resample(y, int(round(y.size * ratio)), zeros, beta)
+
+
 def onset_attack_deficit(
     reference: np.ndarray, candidate: np.ndarray, sr: int, ref_t: float, cand_t: float
 ) -> float | None:

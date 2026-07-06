@@ -5,10 +5,13 @@
 
 #include <pulp/design/design_adherence.hpp>
 #include <pulp/design/design_gallery.hpp>
+#include <pulp/design/design_ledger.hpp>
 #include <pulp/design/design_manifest.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_tokens.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <cctype>
 #include <fstream>
@@ -27,11 +30,32 @@ std::string read_text_file(const fs::path& p) {
     return ss.str();
 }
 
+// Atomic write: a full write to a sibling temp file, verified, then a rename
+// over the destination — so a crash or full disk mid-write leaves the previous
+// file intact rather than truncated. Matters most for the ledger sidecar, whose
+// recorded history must survive an interrupted record.
 bool write_text_file(const fs::path& p, const std::string& content) {
-    std::ofstream f(p, std::ios::binary);
-    if (!f.is_open()) return false;
-    f << content;
-    return f.good();
+    fs::path tmp = p;
+    tmp += ".pulp-tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f.is_open()) return false;
+        f << content;
+        f.flush();
+        if (!f.good()) {
+            f.close();
+            std::error_code ec;
+            fs::remove(tmp, ec);
+            return false;
+        }
+    }
+    std::error_code ec;
+    fs::rename(tmp, p, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    return true;
 }
 
 // Build the design manifest from the standard source options: an explicit
@@ -333,6 +357,208 @@ int run_lint_adherence(const std::vector<std::string>& rest) {
     return 0;
 }
 
+void print_record_usage() {
+    std::cout <<
+        "Usage: pulp design record [--ledger <file>] <operation>\n"
+        "\n"
+        "Maintain the project design ledger (default: .pulp-design-meta.json) — the\n"
+        "CLI-owned record of emitted design assets, their versions, provenance, and\n"
+        "review status. Only this command writes the ledger; skills read it on resume.\n"
+        "\n"
+        "Operations:\n"
+        "  --name <n> --asset <path>   Record (or update) a named asset revision.\n"
+        "      --source <s>            Provenance (fig, figma-plugin, claude, …)\n"
+        "      --viewport <WxH>        Design viewport (e.g. 340x280)\n"
+        "      --system <name>         Bound design system (repeatable)\n"
+        "      --inherit-from <ver>    Parent version this revision derives from\n"
+        "      --version <ver>         Target an explicit version (else auto v1, v2, …)\n"
+        "      --status <s>            needs-review (default) | approved | changes-requested\n"
+        "  --remove <name[@version]>   Drop an asset (all versions, or one revision).\n"
+        "  --reconcile                 Drop entries whose file no longer exists on disk.\n"
+        "  --list [--json]             Print the ledger (human table or JSON) and exit.\n";
+}
+
+// `pulp design record` — maintain the project design ledger. All file IO lives
+// here; the pure ledger operations live in core/view/src/design_ledger.cpp.
+int run_record(const std::vector<std::string>& rest) {
+    fs::path ledger_path = ".pulp-design-meta.json";
+    std::string name, asset, source, viewport, inherit_from, version, status_str;
+    std::vector<std::string> systems;
+    std::string remove_selector;
+    bool do_reconcile = false, do_list = false, as_json = false;
+    bool have_remove = false;
+
+    auto need_value = [&](const std::string& flag, size_t& i) -> const std::string* {
+        if (i + 1 >= rest.size()) {
+            std::cerr << "pulp design record: " << flag << " requires a value\n";
+            return nullptr;
+        }
+        return &rest[++i];
+    };
+
+    for (size_t i = 0; i < rest.size(); ++i) {
+        const std::string& a = rest[i];
+        if (a == "-h" || a == "--help") { print_record_usage(); return 0; }
+        else if (a == "--reconcile") { do_reconcile = true; }
+        else if (a == "--list") { do_list = true; }
+        else if (a == "--json") { as_json = true; }
+        else {
+            const std::string* v = need_value(a, i);
+            if (!v) return 2;
+            if (a == "--ledger") ledger_path = *v;
+            else if (a == "--name") name = *v;
+            else if (a == "--asset") asset = *v;
+            else if (a == "--source") source = *v;
+            else if (a == "--viewport") viewport = *v;
+            else if (a == "--system") systems.push_back(*v);
+            else if (a == "--inherit-from") inherit_from = *v;
+            else if (a == "--version") version = *v;
+            else if (a == "--status") status_str = *v;
+            else if (a == "--remove") { remove_selector = *v; have_remove = true; }
+            else {
+                std::cerr << "pulp design record: unknown argument '" << a << "'\n";
+                return 2;
+            }
+        }
+    }
+
+    // Exactly one operation.
+    const int ops = (!name.empty() || !asset.empty()) + have_remove + (do_reconcile ? 1 : 0)
+                    + (do_list ? 1 : 0);
+    if (ops == 0) {
+        std::cerr << "pulp design record: no operation (see --help)\n";
+        return 2;
+    }
+    if (ops > 1) {
+        std::cerr << "pulp design record: choose one of record / --remove / --reconcile / --list\n";
+        return 2;
+    }
+
+    // Load the current ledger. Absent or blank = empty (a first record
+    // bootstraps cleanly). But a present-but-unparseable ledger is corrupt:
+    // refuse to touch it rather than silently treat it as empty and overwrite
+    // the recorded history on the next write.
+    pulp::design::DesignLedger ledger;
+    if (fs::exists(ledger_path)) {
+        const std::string raw = read_text_file(ledger_path);
+        const bool blank = raw.find_first_not_of(" \t\r\n") == std::string::npos;
+        if (!blank) {
+            bool valid = false;
+            try {
+                auto probe = choc::json::parse(raw);
+                valid = probe.isObject();
+            } catch (const std::exception&) {
+                valid = false;
+            }
+            if (!valid) {
+                std::cerr << "Error: ledger " << ledger_path.string()
+                          << " is not valid JSON; refusing to touch it. "
+                             "Fix or delete it first.\n";
+                return 1;
+            }
+        }
+        ledger = pulp::design::parse_ledger(raw);
+    }
+
+    if (do_list) {
+        if (as_json) {
+            std::cout << pulp::design::ledger_to_json(ledger) << "\n";
+        } else if (ledger.assets.empty()) {
+            std::cout << "(empty ledger: " << ledger_path.string() << ")\n";
+        } else {
+            for (const auto& x : ledger.assets) {
+                std::cout << x.name << "@" << x.version << "  [" << pulp::design::review_status_name(x.status)
+                          << "]  " << x.path;
+                if (!x.source.empty()) std::cout << "  src=" << x.source;
+                if (!x.inherit_from.empty()) std::cout << "  <-" << x.inherit_from;
+                std::cout << "\n";
+            }
+        }
+        return 0;
+    }
+
+    if (do_reconcile) {
+        // Asset paths are recorded relative to the project (the ledger's
+        // directory), not the process cwd — resolve them against the ledger dir
+        // so `--reconcile` from any cwd does not wrongly delete valid entries.
+        const fs::path ledger_dir = ledger_path.has_parent_path() ? ledger_path.parent_path()
+                                                                  : fs::path(".");
+        auto removed = pulp::design::reconcile(ledger, [&](const std::string& p) {
+            fs::path fp(p);
+            if (fp.is_relative()) fp = ledger_dir / fp;
+            std::error_code ec;
+            return fs::exists(fp, ec);
+        });
+        if (!write_text_file(ledger_path, pulp::design::ledger_to_json(ledger))) {
+            std::cerr << "Error: cannot write " << ledger_path.string() << "\n";
+            return 1;
+        }
+        std::cout << "Reconciled: dropped " << removed.size() << " missing asset(s).\n";
+        for (const auto& s : removed) std::cout << "  - " << s << "\n";
+        return 0;
+    }
+
+    if (have_remove) {
+        auto removed = pulp::design::remove_asset(ledger, remove_selector);
+        if (removed.empty()) {
+            std::cerr << "pulp design record: no asset matched '" << remove_selector << "'\n";
+            return 1;
+        }
+        if (!write_text_file(ledger_path, pulp::design::ledger_to_json(ledger))) {
+            std::cerr << "Error: cannot write " << ledger_path.string() << "\n";
+            return 1;
+        }
+        std::cout << "Removed " << removed.size() << " asset(s).\n";
+        for (const auto& s : removed) std::cout << "  - " << s << "\n";
+        return 0;
+    }
+
+    // Record operation.
+    if (name.empty()) {
+        std::cerr << "pulp design record: --name is required to record\n";
+        return 2;
+    }
+    if (!status_str.empty() && !pulp::design::review_status_from_name(status_str)) {
+        std::cerr << "pulp design record: invalid --status '" << status_str
+                  << "' (needs-review | approved | changes-requested)\n";
+        return 2;
+    }
+
+    // When --version targets an EXISTING revision, this is an update: start from
+    // the stored entry and overwrite only the fields the caller actually passed,
+    // so a status-only change (e.g. approve v1) never wipes provenance. A fresh
+    // revision (no --version, or a version not yet present) requires --asset.
+    const pulp::design::LedgerAsset* existing = nullptr;
+    if (!version.empty()) {
+        for (const auto& a : ledger.assets)
+            if (a.name == name && a.version == version) { existing = &a; break; }
+    }
+    if (!existing && asset.empty()) {
+        std::cerr << "pulp design record: --asset is required for a new asset revision\n";
+        return 2;
+    }
+
+    pulp::design::LedgerAsset incoming = existing ? *existing : pulp::design::LedgerAsset{};
+    incoming.name = name;
+    incoming.version = version;
+    if (!asset.empty()) incoming.path = asset;
+    if (!inherit_from.empty()) incoming.inherit_from = inherit_from;
+    if (!source.empty()) incoming.source = source;
+    if (!viewport.empty()) incoming.viewport = viewport;
+    if (!systems.empty()) incoming.design_systems = systems;
+    if (!status_str.empty()) incoming.status = *pulp::design::review_status_from_name(status_str);
+
+    const auto& stored = pulp::design::upsert_asset(ledger, incoming);
+    const auto stored_status = stored.status;
+    const std::string stored_slug = stored.name + "@" + stored.version;
+    if (!write_text_file(ledger_path, pulp::design::ledger_to_json(ledger))) {
+        std::cerr << "Error: cannot write " << ledger_path.string() << "\n";
+        return 1;
+    }
+    std::cout << "Recorded " << stored_slug << " [" << pulp::design::review_status_name(stored_status)
+              << "] -> " << ledger_path.string() << "\n";
+    return 0;
+}
 void print_gallery_usage() {
     std::cout <<
         "Usage: pulp design gallery [--root <dir>] [--out <dir>] [options]\n"
@@ -551,6 +777,9 @@ int cmd_design(const std::vector<std::string>& args) {
         }
         if (args[0] == "lint-adherence") {
             return run_lint_adherence(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "record") {
+            return run_record(std::vector<std::string>(args.begin() + 1, args.end()));
         }
         if (args[0] == "gallery") {
             return run_gallery(std::vector<std::string>(args.begin() + 1, args.end()));

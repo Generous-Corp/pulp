@@ -301,10 +301,13 @@ def main(argv: list[str] | None = None) -> int:
                       dest="reference_role",
                       help="golden = reference is known-good (enables regression_suspected); "
                            "peer = neutral material_change_detected only")
-    cmp_.add_argument("--align", choices=["none", "latency"], default="none",
+    cmp_.add_argument("--align", default="none",
                       help="time-align before measuring: none (default) or latency (trim a constant "
                            "delay/offset so a pure shift isn't read as a material change; refuses if "
-                           "the difference isn't a reliable pure delay)")
+                           "the difference isn't a reliable pure delay), or varispeed:R (undo a declared "
+                           "tape-style speed change by resampling the candidate back to the reference "
+                           "time base; refuses if the declared ratio doesn't match the audio). Validated "
+                           "by alignment.parse — an unknown mode errors")
     cmp_.add_argument("--threshold", type=float, default=None,
                       help="materiality threshold override (defaults to the axis's own default)")
     cmp_.add_argument("--json", default="", help="write the full report JSON to this path")

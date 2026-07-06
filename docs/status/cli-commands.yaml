@@ -814,6 +814,48 @@ commands:
           - name: --strict
             kind: flag
             description: Exit non-zero on any finding, not just error-severity ones.
+      - name: record
+        summary: Maintain the project design ledger (default .pulp-design-meta.json) — the CLI-owned record of emitted design assets, their versions, provenance, bound design systems, and review status. Only this command writes it; skills read it on resume. One operation per invocation.
+        args:
+          - name: --ledger
+            kind: option
+            description: "Ledger file to read/write (default: .pulp-design-meta.json)."
+          - name: --name
+            kind: option
+            description: Logical asset name to record (with --asset).
+          - name: --asset
+            kind: option
+            description: Emitted artifact path for the recorded asset (with --name).
+          - name: --source
+            kind: option
+            description: Provenance of the asset (fig, figma-plugin, claude, …).
+          - name: --viewport
+            kind: option
+            description: Design viewport for the asset (e.g. 340x280).
+          - name: --system
+            kind: option
+            description: Bound design system name (repeatable).
+          - name: --inherit-from
+            kind: option
+            description: Parent version this revision derives from.
+          - name: --version
+            kind: option
+            description: Target an explicit version to replace (else the next v1, v2, … is assigned).
+          - name: --status
+            kind: option
+            description: "Review status: needs-review (default), approved, or changes-requested."
+          - name: --remove
+            kind: option
+            description: Drop an asset by name (all versions) or name@version (one revision).
+          - name: --reconcile
+            kind: flag
+            description: Drop ledger entries whose file no longer exists on disk.
+          - name: --list
+            kind: flag
+            description: Print the ledger (human table, or JSON with --json) and exit.
+          - name: --json
+            kind: flag
+            description: With --list, print the ledger as JSON.
       - name: gallery
         summary: Render every @dsCard-tagged source file under a root into one review artifact — a grouped HTML grid plus a JSON manifest. Content-hash cached so unchanged cards are not re-rendered.
         args:
@@ -1811,7 +1853,7 @@ commands:
       - name: validate assert
         summary: Re-check a stored assertions.json (or an audio-run dir containing one); exits nonzero on any failing assertion
       - name: compare
-        summary: "Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge). Delegates to the opt-in Audio Quality Lab tool (never links DSP into the CLI); level-matches, runs one --profile axis (tonal-balance | added-hf | noise-roughness | graininess | stereo-width | transient-integrity), and prints a typed evidence envelope + verdict (regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Optional --align latency trims a constant delay/offset before measuring (refuses if the difference is not a reliable pure delay). Exits nonzero ONLY when it could not measure (invalid), never for a judgment. Distinct from `validate compare`, which is the deterministic pass/fail gate. Prints an install hint + exit 1 if the tool is absent."
+        summary: "Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge). Delegates to the opt-in Audio Quality Lab tool (never links DSP into the CLI); level-matches, runs one --profile axis (tonal-balance | added-hf | noise-roughness | graininess | stereo-width | transient-integrity), and prints a typed evidence envelope + verdict (regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Optional --align latency trims a constant delay/offset before measuring, or --align varispeed:R undoes a declared tape-style speed change by resampling the candidate back to the reference time base (both refuse if the audio doesn't support the request). Exits nonzero ONLY when it could not measure (invalid), never for a judgment. Distinct from `validate compare`, which is the deterministic pass/fail gate. Prints an install hint + exit 1 if the tool is absent."
         args:
           - name: --profile
             kind: option
