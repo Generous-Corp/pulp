@@ -890,6 +890,19 @@ commands:
           - name: --json
             kind: flag
             description: Print the parsed contract JSON instead of a human summary.
+      - name: variants
+        summary: Collapse a component set's Prop=Value variant names into one typed component contract — each property with its value enum and a chosen default — feeding the design manifest and adherence lint. Flags malformed, inconsistent, or single-variant sets.
+        args:
+          - name: variants-file
+            kind: positional
+            required: true
+            description: A text file with one variant name (Prop=Value, ...) per line; blank lines and '#' comments are ignored.
+          - name: --component
+            kind: option
+            description: The component-set name (required).
+          - name: --json
+            kind: flag
+            description: Print the contract JSON instead of a human summary.
     docs: reference/cli.md#design
 
   - name: design-debug
