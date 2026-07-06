@@ -83,6 +83,25 @@ TEST_CASE("pulp ship swap-pack signs a bundle with inferred capabilities", "[cli
     fs::remove(key);
 }
 
+TEST_CASE("pulp ship swap-pack --backup-github refuses the core Pulp repo",
+          "[cli][ship][swap-pack]") {
+    const fs::path bundle = make_bundle();
+    const fs::path key = bundle.parent_path() / (bundle.filename().string() + "-bk.key");
+    fs::remove(key);
+    int code = 0;
+    const std::string out = run_capture(
+        std::string("'") + kCliBin + "' ship swap-pack --bundle '" + bundle.string() +
+        "' --plugin-id com.pulp.clitest --sign-key '" + key.string() +
+        "' --backup-github --repo danielraffel/pulp --yes",
+        code);
+    // The pack signs, but publishing the key to the core repo is refused (no gh call).
+    REQUIRE(code != 0);
+    REQUIRE(out.find("refusing to back up") != std::string::npos);
+    REQUIRE(fs::exists(bundle / "swap-pack.manifest.json"));  // signing itself succeeded
+    fs::remove_all(bundle);
+    fs::remove(key);
+}
+
 TEST_CASE("pulp ship swap-pack refuses to sign without confirmation", "[cli][ship][swap-pack]") {
     const fs::path bundle = make_bundle();
     const fs::path key = bundle.parent_path() / (bundle.filename().string() + "-noyes.key");

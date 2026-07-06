@@ -110,6 +110,12 @@ commands:
           - name: --yes
             required: false
             description: Skip the interactive signing confirmation (for CI)
+          - name: --backup-github
+            required: false
+            description: Publish the signing key as a GitHub Actions secret in the plugin repo (refuses the core Pulp repo)
+          - name: --repo
+            required: false
+            description: owner/name for --backup-github (defaults to the bundle's git origin)
       - name: sign
         summary: Code-sign plugin bundles (macOS/Windows) or Android APK/AAB
         args:

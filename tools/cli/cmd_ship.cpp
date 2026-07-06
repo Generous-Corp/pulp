@@ -106,6 +106,8 @@ static int print_ship_help() {
     std::cout << "  swap-pack  Sign a hot-reload UX bundle into a swap pack\n";
     std::cout << "             --bundle <dir> --plugin-id <id> [--pack-version N] [--channel c]\n";
     std::cout << "             [--sign-key <file>] [--out <manifest.json>] [--yes]\n";
+    std::cout << "             [--backup-github [--repo owner/name]]  (publish the signing\n";
+    std::cout << "              key as a GitHub secret in the PLUGIN repo — never core Pulp)\n";
     std::cout << "             (capabilities are inferred from the bundle's JS; the key is\n";
     std::cout << "              reused from the macOS keychain or the --sign-key file)\n";
     return 0;
@@ -1752,9 +1754,10 @@ int cmd_ship(const std::vector<std::string>& args) {
     // ── swap-pack: sign a hot-reload UX bundle ────────────────────────────────
     if (sub == "swap-pack") {
         namespace reload = pulp::format::reload;
-        std::string bundle, plugin_id, channel, out, sign_key;
+        std::string bundle, plugin_id, channel, out, sign_key, repo;
         std::uint64_t pack_version = 1;
         bool yes = false;
+        bool backup_github = false;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--bundle") {
                 if (!take_ship_value(args, i, sub, args[i], bundle)) return 2;
@@ -1766,6 +1769,10 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], out)) return 2;
             } else if (args[i] == "--sign-key") {
                 if (!take_ship_value(args, i, sub, args[i], sign_key)) return 2;
+            } else if (args[i] == "--repo") {
+                if (!take_ship_value(args, i, sub, args[i], repo)) return 2;
+            } else if (args[i] == "--backup-github") {
+                backup_github = true;
             } else if (args[i] == "--pack-version") {
                 std::string v;
                 if (!take_ship_value(args, i, sub, args[i], v)) return 2;
@@ -1838,6 +1845,61 @@ int cmd_ship(const std::vector<std::string>& args) {
         }
         ofs << reload::serialize_swap_pack_manifest(built.manifest);
         std::cout << "Signed swap pack written → " << out_path.string() << "\n";
+
+        if (backup_github) {
+            std::string target = repo;
+            if (target.empty()) {
+                // Default to the bundle's own git origin.
+                std::string cmd = "git -C '" + bundle + "' remote get-url origin 2>/dev/null";
+                if (FILE* p = popen(cmd.c_str(), "r")) {
+                    char buf[512];
+                    while (fgets(buf, sizeof(buf), p)) target += buf;
+                    pclose(p);
+                }
+                while (!target.empty() && (target.back() == '\n' || target.back() == '\r'))
+                    target.pop_back();
+            }
+            const std::string norm = reload::normalize_github_repo(target);
+            if (!reload::github_backup_repo_allowed(target)) {
+                std::cerr << "pulp ship swap-pack: refusing to back up the signing key to '"
+                          << target << "'. A key may only be published to a plugin's OWN "
+                          << "repository (never the core Pulp repo). Pass --repo owner/name.\n";
+                return 2;
+            }
+            if (!yes) {
+                std::cout << "Publish this plugin's signing key as a GitHub secret in " << norm
+                          << "? Anyone with write access there can sign as you. [y/N] " << std::flush;
+                std::string line;
+                std::getline(std::cin, line);
+                if (line != "y" && line != "Y" && line != "yes") {
+                    std::cerr << "backup aborted (no confirmation)\n";
+                    return 1;
+                }
+            }
+            const std::string secret =
+                reload::reload_github_secret_name(reload::KeyRole::Signing, plugin_id, 1);
+            const std::string blob = reload::serialize_key_blob(key);
+            // Pipe the key via a 0600 temp file — never on the argv (it is a secret).
+            fs::path tmp = fs::temp_directory_path() / (secret + ".secret");
+            {
+                std::ofstream t(tmp, std::ios::binary | std::ios::trunc);
+                t << blob;
+            }
+            std::error_code pec;
+            fs::permissions(tmp, fs::perms::owner_read | fs::perms::owner_write,
+                            fs::perm_options::replace, pec);
+            std::string gh = "gh secret set '" + secret + "' --repo '" + norm + "' < '" +
+                             tmp.string() + "'";
+            int rc = run(gh);
+            fs::remove(tmp, pec);
+            if (rc != 0) {
+                std::cerr << "pulp ship swap-pack: `gh secret set` failed — is the GitHub CLI "
+                             "installed and authenticated (`gh auth status`)?\n";
+                return 1;
+            }
+            std::cout << "Signing key backed up as GitHub secret " << secret << " in " << norm
+                      << "\n";
+        }
         return 0;
     }
 
