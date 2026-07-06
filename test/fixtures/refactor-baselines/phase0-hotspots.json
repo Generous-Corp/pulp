@@ -53,7 +53,7 @@
     "manifest": "test/fixtures/scene3d/renderer3d-goldens.json",
     "validator": "tools/scene3d/validate_renderer_golden_manifest.py",
     "cpp_test": "test/test_renderer3d_shared.hpp",
-    "ctest_manifest": "test/CMakeLists.txt",
+    "ctest_manifest": "test/cmake/scene3d_boundary_golden_tests.cmake",
     "required_ctests": [
       "scene3d-renderer-golden-manifest",
       "scene3d-renderer-golden-manifest-malformed",

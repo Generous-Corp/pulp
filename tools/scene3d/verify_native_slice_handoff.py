@@ -115,13 +115,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Verify the native glTF/bake first-slice handoff surface.")
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--ctest-file", type=Path, required=True)
+    parser.add_argument("--ctest-file", type=Path, action="append", required=True)
     parser.add_argument("--doc-file", type=Path, required=True)
     parser.add_argument("--plan-file", type=Path, required=True)
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
-    ctest_text = read_text(args.ctest_file)
+    ctest_text = "\n".join(read_text(path) for path in args.ctest_file)
     doc_text = read_text(args.doc_file)
     plan_text = read_text(args.plan_file)
     errors = []
