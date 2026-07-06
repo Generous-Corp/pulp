@@ -9,6 +9,12 @@ native `WidgetBridge` registrars.
 
 **Status**: experimental
 
+**Capabilities**: effectful bridge groups (shell exec, clipboard, filesystem/asset
+loading, storage, AI, runtime-import) are *capability-gated* when a UI is hot-reloaded
+under the trust model — an ungranted group's functions are simply absent, and `exec`
+is compiled out of shipping builds. Pure-UI groups (widgets, layout, canvas, style,
+GPU) are always available. See [reload-trust.md](../guides/reload-trust.md).
+
 ## Widget Creation
 
 ### Basic Controls
