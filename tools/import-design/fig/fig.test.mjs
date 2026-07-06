@@ -162,6 +162,21 @@ test('generator output is deterministic (committed fixture is fresh)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'fig-gen-'));
   const regen = join(dir, 'synthetic.fig');
   execFileSync('node', [GENERATOR, regen]);
-  assert.deepEqual(readFileSync(regen), readFileSync(FIXTURE),
-    'committed fixture is out of date — re-run make_synthetic_fig.mjs');
+  // Compare DECODED content, not raw file bytes. The inner fig-kiwi chunks are
+  // DEFLATE-compressed, and zlib's exact byte output varies by version across
+  // hosts (a runner on a newer Node emits a few more/fewer bytes for the same
+  // input), so a raw byte-compare tests zlib rather than the generator and goes
+  // red on any host whose zlib differs from the one that committed the fixture.
+  // The decompressed schema + message + rasters are what the generator actually
+  // authors; they are byte-identical across environments, so comparing them
+  // keeps the "fixture reflects the current generator" invariant while staying
+  // portable across CI hosts.
+  const a = unpackFig(readFileSync(regen));
+  const b = unpackFig(readFileSync(FIXTURE));
+  const stale = 'committed fixture is out of date — re-run make_synthetic_fig.mjs';
+  assert.deepEqual(a.schemaBytes, b.schemaBytes, stale);
+  assert.deepEqual(a.messageBytes, b.messageBytes, stale);
+  assert.deepEqual([...a.images.keys()].sort(), [...b.images.keys()].sort(), stale);
+  for (const key of a.images.keys())
+    assert.deepEqual(a.images.get(key), b.images.get(key), `${stale} (image ${key})`);
 });
