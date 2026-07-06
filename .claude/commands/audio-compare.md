@@ -39,12 +39,13 @@ pulp audio compare $ARGUMENTS --profile tonal-balance --json /tmp/compare.json
   *expected unchanged*. This is the ONLY mode that can return `regression_suspected`.
 - **default `--reference-role peer`** — a neutral A/B; a changed candidate reads as
   `material_change_detected`, never "regression" (we don't assume which side is right).
-- **`--profile`** — the measurement axis. Five today, all global/alignment-free:
+- **`--profile`** — the measurement axis. Six today:
   - `tonal-balance` — LTAS spectral-centroid shift; bad direction **duller**.
   - `added-hf` — band-relative ≥8 kHz fraction ratio (dB); bad direction **added HF fizz**.
   - `noise-roughness` — harmonic-to-noise ratio drop (dB); bad direction **rougher/noisier** (tonal material).
   - `graininess` — relative spectral-flux increase; bad direction **grainier** (tonal material).
   - `stereo-width` — RMS(side)/RMS(mid) width + interchannel correlation; bad direction **narrower/collapsed**, and an out-of-phase candidate is flagged (needs 2-channel input; mono → `not_applicable`).
+  - `transient-integrity` — per-onset attack-smear deficit (onset-aligned); bad direction **softer/smeared attacks**. Needs onset-bearing (percussive) material (too few onsets → `not_applicable`); one-directional (a sharper candidate reads no change).
   - `regression_suspected` also requires the change to be in that axis's bad direction — a
     brighter candidate on `tonal-balance`, or an HF-reduced one on `added-hf`, stays a neutral
     `material_change_detected`. New axes auto-appear in `--profile`; time-warp axes are deferred.

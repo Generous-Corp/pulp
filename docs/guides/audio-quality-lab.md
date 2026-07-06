@@ -52,8 +52,7 @@ python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --
 `compare` is the agent-facing **measure → compare → judge** surface: it level-matches, runs one
 curated **axis** (selected by `--profile`), and returns a typed evidence envelope plus an
 action-oriented verdict (`regression_suspected` / `material_change_detected` /
-`no_material_change_detected` / `inconclusive` / `invalid`). Five axes today, all global and
-alignment-free:
+`no_material_change_detected` / `inconclusive` / `invalid`). Six axes today:
 
 | `--profile` | axis | measures | bad direction (regression vs a golden reference) |
 |-------------|------|----------|--------------------------------------------------|
@@ -62,6 +61,7 @@ alignment-free:
 | `noise-roughness` | `noise_roughness` | harmonic-to-noise ratio drop (dB) | **rougher / noisier** |
 | `graininess` | `graininess` | relative spectral-flux increase | **grainier** |
 | `stereo-width` | `stereo_width` | RMS(side)/RMS(mid) width + interchannel correlation | **narrower / collapsed** |
+| `transient-integrity` | `transient_integrity` | per-onset attack-smear deficit (onset-aligned) | **softer / smeared attacks** |
 
 `noise-roughness` and `graininess` are meaningful on tonal/sustained material — that is a
 caller-declared contract (you pick the profile), surfaced as a standing caveat in the summary
@@ -69,6 +69,15 @@ rather than an automatic tonal/percussive classifier. `stereo-width` is the one 
 **original 2-channel** signal (every other axis mean-downmixes to mono); mono input on either side
 is `not_applicable`, and a candidate whose interchannel correlation goes negative is flagged as out
 of phase (mono-incompatible) in the summary.
+
+`transient-integrity` is the phase-vocoder / dynamics artifact axis — "did my DSP soften/smear the
+attacks?" (invisible to peak/RMS). It detects onsets on both renders, matches and locks each attack,
+and compares the high-band attack rise (the *same* primitive the `transient_sharpness` detector
+uses). It is **one-directional by design**: a softening is the regression; a *sharper* candidate is
+not a transient regression and reads no change. It needs **onset-bearing (percussive) material** —
+fewer than 3 matched onsets is `not_applicable` (it never guesses on a sustained tone). It
+self-aligns per onset, so `--align` is a no-op for it and the global sample-domain corroboration is
+suppressed (a different, non-onset-aligned domain).
 
 Each axis carries its own materiality default (`--threshold` overrides). Adding an axis is one
 registry entry (`_AXES` in `compare.py`) — the shared machinery does the level-matching,
@@ -130,6 +139,7 @@ identically, CPU or GPU):
 | tempo-sampler / delay **constant offsets** | ✅ with `--align latency` | trims the constant lag first so the residual doesn't false-alarm on the shift (see below); refuses if it isn't a reliable pure delay |
 | bendr ratio changes (time-STRETCH, non-constant lag) | ⚠ engine path, not this net | a stretch is a time-warp, not a constant offset — needs the deferred warp alignment (Tier 3); use the reference-free engine path for now |
 | Stereo width / imaging (widener / panner / M-S / collapse) | ✅ via `stereo-width` (opt-in) | add `"stereo-width"` to the manifest's `profiles`; it reads the 2-channel signal and flags a collapse or an out-of-phase candidate. The mono default profiles skip it |
+| Attack smear / transient softening (dynamics, phase-vocoder, transient designer) | ✅ via `transient-integrity` (opt-in) | add `"transient-integrity"`; onset-aligned per-attack. Percussive/onset material only — skipped by the mono default (it would be `not_applicable` on sustained material) |
 
 ### Time-alignment before measuring (`--align latency`)
 

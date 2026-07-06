@@ -34,7 +34,7 @@ void print_compare_usage() {
         "Usage:\n"
         "  pulp audio compare <reference.wav> <candidate.wav> [options]\n\n"
         "Options:\n"
-        "  --profile <tonal-balance|added-hf|noise-roughness|graininess|stereo-width>   measurement axis (default: tonal-balance)\n"
+        "  --profile <tonal-balance|added-hf|noise-roughness|graininess|stereo-width|transient-integrity>   measurement axis (default: tonal-balance)\n"
         "  --reference-role <peer|golden>       golden enables regression_suspected (default: peer)\n"
         "  --align <none|latency>               time-align first: latency trims a constant delay/offset\n"
         "                                       (refuses if it isn't a reliable pure delay) (default: none)\n"
