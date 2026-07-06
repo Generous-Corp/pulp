@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -202,6 +203,163 @@ std::string apply_agent_build_qos(const std::string& command, const std::string&
     (void)qos;
 #endif
     return command;
+}
+
+static std::string tartci_watchdog_mode() {
+    auto mode = env_value("PULP_TARTCI_WATCHDOG");
+    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (mode.empty()) return "kill";
+    if (mode == "0" || mode == "false" || mode == "off" || mode == "no") return {};
+    if (mode == "monitor") return "monitor";
+    if (mode == "kill") return "kill";
+    return "kill";
+}
+
+static std::string tartci_watchdog_python_command() {
+    auto python = env_value("PULP_TARTCI_WATCHDOG_PYTHON");
+    if (python.empty()) python = "python3";
+
+    if (python.find('/') == std::string::npos) {
+        return find_executable_in_path(python).empty() ? std::string{} : python;
+    }
+    return fs::exists(python) ? python : std::string{};
+}
+
+std::string apply_agent_build_watchdog(const std::string& command,
+                                       int jobs,
+                                       bool lease_active) {
+#ifdef _WIN32
+    (void)jobs;
+    (void)lease_active;
+    return command;
+#else
+    if (!lease_active || jobs <= 0) return command;
+    const auto mode = tartci_watchdog_mode();
+    if (mode.empty()) return command;
+    const auto python = tartci_watchdog_python_command();
+    if (python.empty()) return command;
+
+    static const char* watchdog_py = R"PY(
+import os
+import signal
+import subprocess
+import sys
+import time
+
+cmd = sys.argv[1]
+jobs = max(1, int(sys.argv[2]))
+mode = sys.argv[3]
+
+def env_float(name, default):
+    try:
+        value = float(os.environ.get(name, ""))
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+def env_int(name, default):
+    try:
+        value = int(os.environ.get(name, ""))
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+interval = env_float("PULP_TARTCI_WATCHDOG_INTERVAL_SECS", 5.0)
+samples = env_int("PULP_TARTCI_WATCHDOG_SAMPLES", 6)
+term_grace = env_float("PULP_TARTCI_WATCHDOG_TERM_GRACE_SECS", 10.0)
+cpu_per_job = env_float("PULP_TARTCI_WATCHDOG_CPU_PER_JOB", 125.0)
+limit = jobs * cpu_per_job
+
+def note(message):
+    print(f"pulp tartci watchdog: {message}", file=sys.stderr, flush=True)
+
+def group_cpu(pgid):
+    proc = subprocess.run(
+        ["ps", "-o", "pcpu=", "-g", str(pgid)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return 0.0
+    total = 0.0
+    for line in proc.stdout.splitlines():
+        try:
+            total += float(line.strip())
+        except ValueError:
+            pass
+    return total
+
+child = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
+pgid = os.getpgid(child.pid)
+over_samples = 0
+killed = False
+
+def stop_group(sig):
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        pass
+
+def relay_stop_signal(signum, _frame):
+    note(f"received signal {signum}; terminating process-group={pgid}")
+    stop_group(signal.SIGTERM)
+    deadline = time.monotonic() + term_grace
+    while child.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.2)
+    if child.poll() is None:
+        stop_group(signal.SIGKILL)
+    child.wait()
+    sys.exit(128 + signum)
+
+signal.signal(signal.SIGINT, relay_stop_signal)
+signal.signal(signal.SIGTERM, relay_stop_signal)
+
+try:
+    while child.poll() is None:
+        time.sleep(interval)
+        if child.poll() is not None:
+            break
+        cpu = group_cpu(pgid)
+        if cpu > limit:
+            over_samples += 1
+            note(
+                f"process-group={pgid} cpu={cpu:.1f}% "
+                f"limit={limit:.1f}% sample={over_samples}/{samples} mode={mode}"
+            )
+        else:
+            over_samples = 0
+
+        if mode == "kill" and over_samples >= samples:
+            killed = True
+            note(f"terminating process-group={pgid} after sustained CPU over lease")
+            stop_group(signal.SIGTERM)
+            deadline = time.monotonic() + term_grace
+            while child.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.2)
+            if child.poll() is None:
+                note(f"killing process-group={pgid} after TERM grace")
+                stop_group(signal.SIGKILL)
+            break
+finally:
+    if child.poll() is None:
+        stop_group(signal.SIGTERM)
+
+rc = child.wait()
+if killed:
+    sys.exit(124)
+if rc < 0:
+    sys.exit(128 + abs(rc))
+sys.exit(rc)
+)PY";
+
+    return shell_quote(python) + " -c " + shell_quote(std::string(watchdog_py)) + " "
+         + shell_quote(command) + " "
+         + std::to_string(jobs) + " "
+         + shell_quote(mode);
+#endif
 }
 
 ScopedBuildParallelEnv::ScopedBuildParallelEnv(int jobs, bool lease_already_held) {

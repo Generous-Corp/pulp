@@ -27,6 +27,9 @@ CmakeParallelPlan cap_cmake_build_parallel_args(const std::vector<std::string>& 
                                                 int max_jobs);
 std::string tartci_agent_lease_id(const TartciAgentLeaseRequest& req);
 std::string apply_agent_build_qos(const std::string& command, const std::string& qos);
+std::string apply_agent_build_watchdog(const std::string& command,
+                                       int jobs,
+                                       bool lease_active);
 
 class ScopedBuildParallelEnv {
 public:

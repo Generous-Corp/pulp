@@ -112,6 +112,17 @@ Use the upstream docs for details:
 - [mac-ci-host-setup.md](mac-ci-host-setup.md) is the Pulp-specific host setup
   guide for joining the macOS VM pool.
 
+When `pulp build`, `pulp dev`, or `pulp loop` run on a tartci-governed host,
+the CLI asks tartci for a host-core lease and caps CMake parallelism to the
+leased job count. Lease-backed builds also run through a POSIX process-group
+watchdog by default. The watchdog terminates a build that stays over its CPU
+budget long enough to threaten the shared host; set
+`PULP_TARTCI_WATCHDOG=monitor` to log over-budget samples without killing,
+or `PULP_TARTCI_WATCHDOG=0` to disable the wrapper. Operators can tune
+`PULP_TARTCI_WATCHDOG_INTERVAL_SECS`, `PULP_TARTCI_WATCHDOG_SAMPLES`,
+`PULP_TARTCI_WATCHDOG_TERM_GRACE_SECS`, `PULP_TARTCI_WATCHDOG_CPU_PER_JOB`,
+and `PULP_TARTCI_WATCHDOG_PYTHON` per host.
+
 ### Shipping a PR: `shipyard pr`
 
 `shipyard pr` is the single "ship this" orchestrator. Agents and humans should

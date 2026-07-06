@@ -318,7 +318,11 @@ int cmd_loop(const std::vector<std::string>& args) {
     // Initial build
     std::string build_cmd = "cmake --build " + build_dir.string();
     for (auto& arg : capped_build.args) build_cmd += " " + arg;
-    int rc = run_with_spinner(apply_agent_build_qos(build_cmd, lease.qos()), "Building");
+    int rc = run_with_spinner(
+        apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
+                                   lease.jobs(),
+                                   lease.active()),
+        "Building");
     if (rc != 0) {
         std::cerr << "Initial build failed. Watch loop will retry on changes.\n";
     }
@@ -334,5 +338,6 @@ int cmd_loop(const std::vector<std::string>& args) {
     opts.launch_args = launch_args;
     opts.build_jobs = capped_build.jobs;
     opts.build_qos = lease.qos();
+    opts.build_watchdog = lease.active();
     return watch_loop(opts);
 }

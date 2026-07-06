@@ -986,7 +986,6 @@ int watch_loop(const WatchOptions& opts) {
     const auto build_qos = !opts.build_qos.empty() ? opts.build_qos : loop_lease.qos();
     ScopedBuildParallelEnv build_env(build_jobs, loop_lease.active());
     auto capped_build = cap_cmake_build_parallel_args(opts.build_args, build_jobs);
-
     std::string mode_label;
     if (!opts.launch_target.empty()) mode_label += " + launch";
     if (opts.run_tests) mode_label += " + test";
@@ -1058,7 +1057,9 @@ int watch_loop(const WatchOptions& opts) {
         // Build
         std::string build_cmd = "cmake --build " + opts.build_dir.string();
         for (auto& arg : capped_build.args) build_cmd += " " + arg;
-        int rc = run_with_spinner(apply_agent_build_qos(build_cmd, build_qos), "Rebuilding");
+        int rc = run_with_spinner(apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, build_qos),
+                                                             build_jobs, opts.build_watchdog || loop_lease.active()),
+                                  "Rebuilding");
 
         if (rc != 0) {
             std::cout << color::red() << "Build failed." << color::reset()
