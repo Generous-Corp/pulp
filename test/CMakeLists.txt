@@ -2269,6 +2269,9 @@ pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
 # Structured non-param state channel (sequencer/mod-matrix transport)
 pulp_add_test_suite(pulp-test-sequencer-state-channel LIBRARIES pulp::state)
 
+# StepGridView — the UI consumer of the sequencer state channel
+pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
+
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-audio-inspector-demo-processor SOURCES test_audio_inspector_demo_processor.cpp LIBRARIES pulp::format pulp::audio pulp::midi)
