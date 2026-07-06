@@ -3,7 +3,9 @@
 #include "cli_common.hpp"
 #include "design_binding.hpp"
 
+#include <pulp/design/design_manifest.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_tokens.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -17,6 +19,13 @@ std::string read_text_file(const fs::path& p) {
     std::stringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+bool write_text_file(const fs::path& p, const std::string& content) {
+    std::ofstream f(p, std::ios::binary);
+    if (!f.is_open()) return false;
+    f << content;
+    return f.good();
 }
 
 // `pulp design lint <DESIGN.md>` — runs the seven Google design.md
@@ -80,6 +89,125 @@ int run_diff(const std::vector<std::string>& rest) {
     return diff.regression ? 1 : 0;
 }
 
+void print_compile_usage() {
+    std::cout <<
+        "Usage: pulp design compile [options]\n"
+        "\n"
+        "Compile the design contract (token allowlist + component contracts) into\n"
+        "a machine-readable manifest and an LLM binding prompt. The default source\n"
+        "is the built-in Ink & Signal system.\n"
+        "\n"
+        "Options:\n"
+        "  --design-md <file>  Compile a project's DESIGN.md tokens instead\n"
+        "  --theme <file.json> Compile a saved Theme JSON instead\n"
+        "  --dark              Use the dark appearance (default: light)\n"
+        "  -o, --out-dir <dir> Output directory (default: current directory)\n"
+        "  --json              Emit only design-manifest.json\n"
+        "  --prompt            Emit only design-binding-prompt.md\n"
+        "  --stdout            Print to stdout instead of writing files\n"
+        "  -h, --help          Show this help\n"
+        "\n"
+        "Outputs (in --out-dir): design-manifest.json, design-binding-prompt.md\n";
+}
+
+// `pulp design compile` — compile the design contract into
+// design-manifest.json + design-binding-prompt.md. Deterministic; the manifest
+// is the token/component allowlist the importer and adherence check share.
+int run_compile(const std::vector<std::string>& rest) {
+    fs::path out_dir = fs::current_path();
+    fs::path design_md;
+    fs::path theme_json;
+    bool dark = false;
+    bool to_stdout = false;
+    bool only_json = false;
+    bool only_prompt = false;
+
+    for (size_t i = 0; i < rest.size(); ++i) {
+        const std::string& a = rest[i];
+        auto value_for = [&](const char* flag) -> std::string {
+            if (i + 1 >= rest.size() || rest[i + 1].empty() || rest[i + 1][0] == '-') {
+                std::cerr << "pulp design compile: " << flag << " requires a value\n";
+                return {};
+            }
+            return rest[++i];
+        };
+        if (a == "-h" || a == "--help") { print_compile_usage(); return 0; }
+        else if (a == "--dark") { dark = true; }
+        else if (a == "--stdout") { to_stdout = true; }
+        else if (a == "--json") { only_json = true; }
+        else if (a == "--prompt") { only_prompt = true; }
+        else if (a == "-o" || a == "--out-dir") {
+            auto v = value_for("--out-dir"); if (v.empty()) return 2; out_dir = fs::absolute(v);
+        } else if (a == "--design-md") {
+            auto v = value_for("--design-md"); if (v.empty()) return 2; design_md = fs::absolute(v);
+        } else if (a == "--theme") {
+            auto v = value_for("--theme"); if (v.empty()) return 2; theme_json = fs::absolute(v);
+        } else {
+            std::cerr << "pulp design compile: unknown argument '" << a << "'\n";
+            return 2;
+        }
+    }
+    if (!design_md.empty() && !theme_json.empty()) {
+        std::cerr << "pulp design compile: --design-md and --theme are mutually exclusive\n";
+        return 2;
+    }
+    if (only_json && only_prompt) {
+        std::cerr << "pulp design compile: --json and --prompt are mutually exclusive\n";
+        return 2;
+    }
+    enum class Emit { both, json, prompt };
+    const Emit emit = only_json ? Emit::json : only_prompt ? Emit::prompt : Emit::both;
+
+    const std::string appearance = dark ? "dark" : "light";
+    pulp::design::DesignManifest manifest;
+    if (!design_md.empty()) {
+        auto text = read_text_file(design_md);
+        if (text.empty()) { std::cerr << "Error: cannot read " << design_md << "\n"; return 1; }
+        auto parsed = pulp::view::parse_designmd(text);
+        auto theme = pulp::view::ir_tokens_to_theme(parsed.ir.tokens);
+        if (theme.colors.empty() && theme.dimensions.empty() && theme.strings.empty()) {
+            std::cerr << "Error: no tokens parsed from " << design_md << "\n";
+            return 1;
+        }
+        manifest = pulp::design::compile_design_manifest(
+            theme, pulp::design::catalog(), design_md.filename().string(), appearance);
+    } else if (!theme_json.empty()) {
+        auto theme = pulp::view::Theme::load_from_file(theme_json.string());
+        if (theme.colors.empty() && theme.dimensions.empty() && theme.strings.empty()) {
+            std::cerr << "Error: no tokens read from " << theme_json << "\n";
+            return 1;
+        }
+        manifest = pulp::design::compile_design_manifest(
+            theme, pulp::design::catalog(), theme_json.filename().string(), appearance);
+    } else {
+        manifest = pulp::design::compile_ink_signal_manifest(dark);
+    }
+
+    const std::string json = pulp::design::manifest_to_json(manifest);
+    const std::string prompt = pulp::design::emit_binding_prompt(manifest);
+
+    if (to_stdout) {
+        if (emit != Emit::prompt) std::cout << json << "\n";
+        if (emit != Emit::json) std::cout << prompt;
+        return 0;
+    }
+
+    std::error_code ec;
+    fs::create_directories(out_dir, ec);
+    if (emit != Emit::prompt) {
+        auto p = out_dir / "design-manifest.json";
+        if (!write_text_file(p, json)) { std::cerr << "Error: cannot write " << p << "\n"; return 1; }
+        std::cout << "Wrote " << p.string() << " (" << manifest.tokens.size()
+                  << " tokens, " << manifest.components.size() << " components)\n";
+    }
+    if (emit != Emit::json) {
+        auto p = out_dir / "design-binding-prompt.md";
+        if (!write_text_file(p, prompt)) { std::cerr << "Error: cannot write " << p << "\n"; return 1; }
+        std::cout << "Wrote " << p.string() << "\n";
+    }
+    return 0;
+}
+
 } // namespace
 
 int cmd_design(const std::vector<std::string>& args) {
@@ -92,6 +220,9 @@ int cmd_design(const std::vector<std::string>& args) {
         }
         if (args[0] == "diff") {
             return run_diff(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "compile") {
+            return run_compile(std::vector<std::string>(args.begin() + 1, args.end()));
         }
     }
 
