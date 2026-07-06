@@ -1033,6 +1033,9 @@ commands:
       - name: --screenshot-backend
         kind: option
         description: "--validate render backend: skia (default; composites file-backed images) or coregraphics (draws image filename placeholders — not faithful for asset-rich designs)"
+      - name: --fidelity-report
+        kind: option
+        description: "Write the run's import-fidelity findings as a JSON ledger (named taxonomy + per-kind counts + per-finding severity). Emitted regardless of --strict-fidelity, so an import's fidelity is a durable, diffable artifact for review or a CI gate."
       - name: --reference
         kind: option
         description: Compare render against reference screenshot PNG

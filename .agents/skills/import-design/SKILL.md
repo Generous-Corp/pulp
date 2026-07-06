@@ -140,6 +140,34 @@ The module is `core/view/src/design_manifest.cpp`
 `emit_binding_prompt`), gated behind `PULP_ENABLE_DESIGN_IMPORT` alongside the
 rest of the authoring cluster.
 
+### Fidelity ledger (`--fidelity-report`) — a diffable record of import warnings
+
+The import-time fidelity self-check (`design_fidelity.hpp`: skew, dropped-vector,
+widget-size, …) always warns on stderr, and `--strict-fidelity` turns the hard
+findings into exit 4. Those warnings are transient — they scroll past and are
+lost. Pass `--fidelity-report <file>` to also persist the run's findings as a
+**named, machine-readable ledger** so an import's fidelity is a durable artifact
+you can diff across revisions or gate in CI:
+
+```bash
+pulp import-design --from fig --file synth.fig --frame 0:2 \
+  --output ui.js --fidelity-report build/fidelity.json
+```
+
+The ledger (`core/view/src/design_fidelity_ledger.cpp`,
+`pulp::view::fidelity_ledger_json`) carries:
+- a **`summary`** — `total`, `warnings` (the hard findings that gate
+  `--strict-fidelity`), `informational`, and a `by_kind` count map;
+- the **`findings`** — each with `kind`, `severity` (`warning` for a hard
+  finding, `info` for an advisory one), `node_id`, `node_name`, `detail`;
+- the **`taxonomy`** — every fidelity kind the checks can emit, each with a
+  stable slug, default severity, and one-line summary, so a consumer can render
+  a kind it does not itself know about.
+
+It is emitted regardless of `--strict-fidelity`: warnings are data, not
+failures. The taxonomy in `fidelity_taxonomy()` must stay in step with the kinds
+`design_fidelity.hpp` emits — add a kind to one, add it to the other.
+
 **THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
 cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
 SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
