@@ -1207,8 +1207,8 @@ add_library(pulp-reload-logic-compat MODULE fixtures/reload_logic_compatible.cpp
 add_library(pulp-reload-logic-incompat MODULE fixtures/reload_logic_incompatible.cpp)
 add_library(pulp-reload-logic-throwing MODULE fixtures/reload_logic_throwing.cpp)
 add_library(pulp-reload-logic-nan MODULE fixtures/reload_logic_nan.cpp)
-# C1 (verify-before-load): a fixture whose static constructor writes a marker file
-# at load time, so the test can prove a rejected pack is NEVER dlopen'd.
+# Verify-before-load: a fixture whose static constructor writes a marker file at
+# load time, so the test can prove a rejected pack is NEVER dlopen'd.
 add_library(pulp-reload-logic-ctor-marker MODULE fixtures/reload_logic_ctor_marker.cpp)
 foreach(_pulp_reload_logic pulp-reload-logic-compat pulp-reload-logic-incompat
                            pulp-reload-logic-throwing pulp-reload-logic-nan

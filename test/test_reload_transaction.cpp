@@ -13,14 +13,21 @@
 #include <pulp/format/reload/reload_transaction.hpp>
 #include <pulp/format/reload/reload_swap_units.hpp>
 #include <pulp/format/reload/live_swap_transaction.hpp>
+#include <pulp/format/reload/swap_pack.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace pulp;
@@ -299,6 +306,211 @@ TEST_CASE("hot-reload rejects a candidate that fails the behavioral probe (NaN)"
     REQUIRE(render_one(slot) == 0.5f);                 // live DSP untouched (no swap)
 }
 #endif
+
+#ifdef RELOAD_LOGIC_CTOR_MARKER
+// Verify-before-load: the trust gate MUST run on the raw pack bytes BEFORE any
+// dlopen, because dlopen executes a native image's static constructors the
+// instant it maps the image — so a signature/integrity check placed after the
+// load is worthless for native code. These tests prove ordering with a fixture
+// whose static constructor writes a marker file at load time: if a rejected pack
+// is never loaded, the marker is never created.
+namespace {
+
+void set_env(const char* key, const std::string& value) {
+#if defined(_WIN32)
+    _putenv_s(key, value.c_str());
+#else
+    ::setenv(key, value.c_str(), 1);
+#endif
+}
+
+// Process-unique suffix so temp pack roots and marker paths never collide across
+// test cases (each stage_pack copies the fixture to a distinct path → a distinct
+// dlopen mapping, so the load-time ctor fires on first load of each copy).
+std::string unique_suffix() {
+    static int counter = 0;
+    return std::to_string(++counter);
+}
+
+std::string file_sha256(const std::filesystem::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
+                                    std::istreambuf_iterator<char>());
+    return runtime::sha256_hex(bytes.data(), bytes.size());
+}
+
+// Build a SwapPackTrust that points at the (real, loadable) ctor-marker library,
+// laid out under a temp pack root as a single file. @p tamper_hash injects a bad
+// declared hash (integrity failure); otherwise the true hash is used. The
+// manifest is signed with @p signer AFTER the hash is set, so the signature is
+// always internally consistent — an integrity failure is then a genuine
+// file-vs-manifest mismatch, not a broken signature.
+struct StagedPack {
+    std::filesystem::path root;
+    std::filesystem::path lib;   // full path to the staged library (the load target)
+    SwapPackTrust trust;
+};
+
+StagedPack stage_pack(const std::string& tag, const runtime::Ed25519KeyPair& signer,
+                      const std::vector<std::uint8_t>& trusted_key, bool tamper_hash) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / ("pulp-c1-" + tag + "-" + unique_suffix());
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const std::string leaf = "logic.mod";
+    const fs::path lib = root / leaf;
+    fs::copy_file(RELOAD_LOGIC_CTOR_MARKER, lib, fs::copy_options::overwrite_existing);
+
+    SwapPackManifest m;
+    m.id = "c1-pack";
+    m.plugin_id = "com.pulp.reload.gain";
+    // Declare the real hash, or (tamper) a hash that does not match the file bytes.
+    const std::string declared =
+        tamper_hash ? runtime::sha256_hex(std::string_view("not-the-real-bytes"))
+                    : file_sha256(lib);
+    m.files = {{leaf, declared, SwapPackKind::DspGraph}};
+
+    // Sign the FINAL manifest so signature verification passes; integrity is the
+    // axis under test in the tampered case.
+    m.signer_public_key = signer.public_key;
+    const auto msg = swap_pack_signed_message(m);
+    auto sig = runtime::ed25519_sign(signer.private_key.data(), signer.private_key.size(),
+                                     msg.data(), msg.size());
+    REQUIRE(sig.has_value());
+    m.signature = *sig;
+
+    return StagedPack{root, lib, SwapPackTrust{root, std::move(m), trusted_key}};
+}
+
+}  // namespace
+
+TEST_CASE("verify-before-load: a trusted signed pack loads (ctor runs) and gates normally",
+          "[reload][transaction][trust][c1]") {
+    auto kp = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    auto pack = stage_pack("trusted", *kp, kp->public_key, /*tamper_hash=*/false);
+
+    // Marker path that does not yet exist; the fixture's load-time ctor creates it.
+    const auto marker = std::filesystem::temp_directory_path() /
+                        ("pulp-c1-marker-ok-" + unique_suffix());
+    std::filesystem::remove(marker);
+    set_env("PULP_RELOAD_CTOR_MARKER", marker.string());
+    REQUIRE_FALSE(std::filesystem::exists(marker));
+
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(pack.lib.string(), host, &pack.trust);
+
+    // Trust passed → the image was loaded and gated. The load-time ctor ran, so
+    // the marker now exists (this is the FIRST load of this fixture in-process).
+    REQUIRE(std::holds_alternative<GatedImage>(gated));
+    REQUIRE(std::filesystem::exists(marker));
+
+    std::filesystem::remove(marker);
+    std::filesystem::remove_all(pack.root);
+}
+
+TEST_CASE("verify-before-load: an ill-signed pack is rejected BEFORE any load (ctor never runs)",
+          "[reload][transaction][trust][c1]") {
+    auto kp = runtime::ed25519_keypair_generate();
+    auto attacker = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    REQUIRE(attacker.has_value());
+    // Signed by the attacker's key, but the host trusts kp → UntrustedSigner.
+    auto pack = stage_pack("badsig", *attacker, kp->public_key, /*tamper_hash=*/false);
+
+    const auto marker = std::filesystem::temp_directory_path() /
+                        ("pulp-c1-marker-badsig-" + unique_suffix());
+    std::filesystem::remove(marker);
+    set_env("PULP_RELOAD_CTOR_MARKER", marker.string());
+
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(pack.lib.string(), host, &pack.trust);
+
+    REQUIRE(std::holds_alternative<ReloadOutcome>(gated));
+    REQUIRE(std::get<ReloadOutcome>(gated).status == ReloadOutcome::Status::RejectedSignature);
+    // THE proof: the library's static constructor never ran, so it was never
+    // dlopen'd — verification strictly preceded load.
+    REQUIRE_FALSE(std::filesystem::exists(marker));
+
+    std::filesystem::remove_all(pack.root);
+}
+
+TEST_CASE("verify-before-load: a tampered pack file is rejected BEFORE any load (ctor never runs)",
+          "[reload][transaction][trust][c1]") {
+    auto kp = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    // Validly signed manifest, but the declared file hash does not match the bytes.
+    auto pack = stage_pack("tamper", *kp, kp->public_key, /*tamper_hash=*/true);
+
+    const auto marker = std::filesystem::temp_directory_path() /
+                        ("pulp-c1-marker-tamper-" + unique_suffix());
+    std::filesystem::remove(marker);
+    set_env("PULP_RELOAD_CTOR_MARKER", marker.string());
+
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(pack.lib.string(), host, &pack.trust);
+
+    REQUIRE(std::holds_alternative<ReloadOutcome>(gated));
+    REQUIRE(std::get<ReloadOutcome>(gated).status == ReloadOutcome::Status::RejectedIntegrity);
+    REQUIRE_FALSE(std::filesystem::exists(marker));  // never loaded
+
+    std::filesystem::remove_all(pack.root);
+}
+
+TEST_CASE("verify-before-load: loading a file outside the verified pack is rejected (not a member)",
+          "[reload][transaction][trust][c1]") {
+    auto kp = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    auto pack = stage_pack("member", *kp, kp->public_key, /*tamper_hash=*/false);
+
+    // The pack verifies, but we ask to load a DIFFERENT library that the signed
+    // manifest never covered — must be refused, or trust could be laundered onto
+    // an arbitrary sibling path.
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(RELOAD_LOGIC_COMPATIBLE, host, &pack.trust);
+
+    REQUIRE(std::holds_alternative<ReloadOutcome>(gated));
+    REQUIRE(std::get<ReloadOutcome>(gated).status == ReloadOutcome::Status::RejectedIntegrity);
+
+    std::filesystem::remove_all(pack.root);
+}
+
+TEST_CASE("verify-before-load: opting into trust with an unsigned pack fails closed",
+          "[reload][transaction][trust][c1]") {
+    // A pack with no signer/signature must NOT be accepted just because trust was
+    // requested — verification is fail-closed on the signature axis.
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() /
+                          ("pulp-c1-unsigned-" + unique_suffix());
+    fs::create_directories(root);
+    const fs::path lib = root / "logic.mod";
+    fs::copy_file(RELOAD_LOGIC_CTOR_MARKER, lib, fs::copy_options::overwrite_existing);
+
+    SwapPackManifest m;
+    m.id = "c1-unsigned";
+    m.plugin_id = "com.pulp.reload.gain";
+    m.files = {{"logic.mod", file_sha256(lib), SwapPackKind::DspGraph}};
+    // No signer_public_key / signature set → unsigned.
+
+    auto kp = runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    SwapPackTrust trust{root, std::move(m), kp->public_key};
+
+    const auto marker = fs::temp_directory_path() /
+                        ("pulp-c1-marker-unsigned-" + unique_suffix());
+    fs::remove(marker);
+    set_env("PULP_RELOAD_CTOR_MARKER", marker.string());
+
+    const BuildFingerprint host = current_build_fingerprint();
+    auto gated = gate_logic_image(lib.string(), host, &trust);
+
+    REQUIRE(std::holds_alternative<ReloadOutcome>(gated));
+    REQUIRE(std::get<ReloadOutcome>(gated).status == ReloadOutcome::Status::RejectedSignature);
+    REQUIRE_FALSE(fs::exists(marker));  // never loaded
+
+    fs::remove_all(root);
+}
+#endif  // RELOAD_LOGIC_CTOR_MARKER
 
 #if defined(RELOAD_LOGIC_COMPATIBLE) && defined(RELOAD_LOGIC_INCOMPATIBLE)
 // item 1.8b/2.5b: the real DSP SwapUnit adapter drives a reload through the

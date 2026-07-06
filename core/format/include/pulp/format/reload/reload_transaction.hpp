@@ -29,14 +29,19 @@
 #include <pulp/format/reload/processor_hotswap_slot.hpp>
 #include <pulp/format/reload/reload_abi.hpp>
 #include <pulp/format/reload/reload_library.hpp>
+#include <pulp/format/reload/swap_pack.hpp>
 #include <pulp/state/store.hpp>
 
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -57,6 +62,12 @@ struct ReloadMetrics {
 struct ReloadOutcome {
     enum class Status {
         Swapped,               ///< Success: the new processor is live.
+        RejectedSignature,     ///< Swap-pack Ed25519 signature/signer verification failed,
+                               ///< rejected before the image is loaded.
+        RejectedIntegrity,     ///< Swap-pack per-file SHA-256 failed, or the load target was
+                               ///< not a verified member of the pack; rejected before load.
+        RejectedRevoked,       ///< Swap-pack signer/artifact is on the signed revocation list;
+                               ///< rejected before load.
         RejectedLoadFailed,    ///< dlopen / LoadLibrary failed.
         RejectedAbiVersion,    ///< Built against a different reload-ABI version.
         RejectedNoEntryPoints, ///< Missing a required symbol, or create returned null.
@@ -82,6 +93,84 @@ struct GatedImage {
     ReloadCreateFn create = nullptr;
 };
 
+/// Trust material for verifying a swap-pack-delivered logic image BEFORE it is
+/// loaded. A swap pack is a signed manifest (Ed25519, pinned key) plus its files,
+/// laid out under @p pack_root. When this is supplied to gate_logic_image(), the
+/// pack's signature + per-file SHA-256 integrity are verified on the RAW bytes on
+/// disk BEFORE any dlopen/LoadLibrary — because loading a native image runs its
+/// static constructors immediately, so a signature/integrity check placed after
+/// the load can never stop a malicious image's constructors from executing.
+/// Absent (the default), gate_logic_image loads directly: the unsigned local-dev
+/// path, unchanged. If you opt IN to trust, the pack MUST be signed by the pinned
+/// key or verification fails closed.
+struct SwapPackTrust {
+    std::filesystem::path pack_root;               ///< dir the manifest paths are relative to.
+    SwapPackManifest manifest;                     ///< parsed manifest (incl. signer + signature).
+    std::vector<std::uint8_t> trusted_public_key;  ///< the pinned Ed25519 key the signer must be.
+};
+
+/// Verify @p trust on the RAW bytes on disk and confirm @p library_path is a
+/// member of the verified pack — the strict pre-dlopen trust phase. Returns
+/// std::nullopt when the pack is trustworthy AND @p library_path is one of its
+/// verified files (safe to load those exact bytes); otherwise a fail-closed
+/// ReloadOutcome. Ordering mirrors swap_pack::verify_swap_pack — authenticate the
+/// signature first (it binds every file hash), THEN re-hash the files, THEN the
+/// revocation hook, THEN the loaded-file membership check. No dlopen happens here
+/// or anywhere upstream of a passing result.
+inline std::optional<ReloadOutcome>
+verify_pack_before_load(const SwapPackTrust& trust, const std::string& library_path) {
+    // 1. Signature (authenticate the manifest) + 2. per-file integrity (the files
+    //    match the SIGNED hashes). verify_swap_pack is the sanctioned entry point
+    //    for both, in that order. Map its taxonomy onto the reload taxonomy.
+    const auto v = verify_swap_pack(trust.pack_root, trust.manifest, trust.trusted_public_key);
+    if (!v.ok()) {
+        const bool sig = v.status == SwapPackVerify::UntrustedSigner ||
+                         v.status == SwapPackVerify::BadSignature;
+        return ReloadOutcome{
+            sig ? ReloadOutcome::Status::RejectedSignature
+                : ReloadOutcome::Status::RejectedIntegrity,
+            (sig ? "swap-pack signature rejected: " : "swap-pack integrity rejected: ") +
+                v.detail};
+    }
+
+    // Hook for the signed-revocation-list check: once the pack is authenticated,
+    // reject a signer or artifact that has since been revoked (a leaked signing
+    // key must be killable without re-shipping every consumer). The revocation
+    // list reader (reload/revocation.hpp) is not present yet, so this is a
+    // deliberate not-revoked stub structured so wiring it is a one-liner here:
+    //        if (auto rev = revocation::check_revoked(trust.manifest, srl); rev.revoked)
+    //            return ReloadOutcome{ReloadOutcome::Status::RejectedRevoked, rev.detail};
+    // The stub is fail-OPEN on revocation ONLY: the signature and integrity gates
+    // above are already fail-closed, so a not-revoked default can never admit an
+    // unsigned or tampered pack — it only defers killing an already-trusted one.
+    // Signed policy fields (pack version, allowed kind) will be checked at this
+    // same point once they are bound inside the signed manifest.
+    const bool revoked = false;  // stub: revocation list reader not present yet.
+    if (revoked) {
+        return ReloadOutcome{ReloadOutcome::Status::RejectedRevoked,
+                             "swap-pack signer/artifact is revoked"};
+    }
+
+    // 3. Bind verification to the load: the exact file we are about to dlopen must
+    //    be one of the files we JUST hashed. Otherwise a caller could verify a pack
+    //    yet load an arbitrary sibling path that was never in the signed set. Using
+    //    std::filesystem::equivalent (same file on disk, not string equality) also
+    //    defeats a symlink/relative-path detour to an unverified target.
+    bool member = false;
+    for (const auto& f : trust.manifest.files) {
+        std::error_code ec;
+        if (std::filesystem::equivalent(trust.pack_root / f.path, library_path, ec) && !ec) {
+            member = true;
+            break;
+        }
+    }
+    if (!member) {
+        return ReloadOutcome{ReloadOutcome::Status::RejectedIntegrity,
+                             "load target is not a verified member of the swap pack"};
+    }
+    return std::nullopt;  // trustworthy — safe to load these exact bytes.
+}
+
 /// Load @p library_path and run the pre-construction gates — reload-ABI version,
 /// then build fingerprint — and resolve the create symbol. The SINGLE source of
 /// truth for that gate ordering, shared by reload_processor_from_library() and
@@ -89,13 +178,31 @@ struct GatedImage {
 /// "compatible" means. Returns the GatedImage on success (caller retains lib +
 /// calls create), or a fail-closed ReloadOutcome on rejection (the image backed
 /// no C++ object, so it is set CloseOnDestroy and unloaded rather than leaked).
+///
+/// When @p trust is non-null the swap-pack signature + integrity (+ revocation
+/// hook) are verified on the RAW bytes BEFORE the dlopen — dlopen runs a native
+/// image's static constructors, so trust MUST precede load. When null (the
+/// unsigned local-dev default) the image is loaded directly, unchanged.
 inline std::variant<GatedImage, ReloadOutcome>
-gate_logic_image(const std::string& library_path, const BuildFingerprint& host_fingerprint) {
+gate_logic_image(const std::string& library_path, const BuildFingerprint& host_fingerprint,
+                 const SwapPackTrust* trust = nullptr) {
     auto reject_quiescible = [](ReloadLibrary& lib, ReloadOutcome::Status status,
                                 std::string detail, std::vector<std::string> issues = {}) {
         lib.set_leak_policy(LeakPolicy::CloseOnDestroy);
         return ReloadOutcome{status, std::move(detail), std::move(issues)};
     };
+
+    // 0. Trust gate — verify signed-pack bytes + integrity (+ revocation) on the
+    //    RAW file BEFORE any dlopen. dlopen/LoadLibrary executes a native image's
+    //    static constructors immediately, so any signature/revocation check placed
+    //    AFTER the load is worthless for native code — the attacker's constructor
+    //    already ran. This phase touches only the bytes on disk (no code from the
+    //    image is mapped or executed) and fails closed. Skipped when trust is null.
+    if (trust != nullptr) {
+        if (auto rejected = verify_pack_before_load(*trust, library_path)) {
+            return std::move(*rejected);
+        }
+    }
 
     // 1. Load the image. A failed load has no handle to retain or close.
     ReloadLibrary lib(library_path);
@@ -146,6 +253,9 @@ gate_logic_image(const std::string& library_path, const BuildFingerprint& host_f
 ///                          appended here and kept alive for the process
 ///                          lifetime; images rejected before any construction
 ///                          are unloaded immediately.
+/// @param trust             optional swap-pack trust material; when non-null the
+///                          signed pack is verified on the RAW bytes BEFORE the
+///                          dlopen. Null = unsigned local-dev load, unchanged.
 /// @returns an outcome; only Status::Swapped means the slot changed.
 inline ReloadOutcome reload_processor_from_library(
     ProcessorHotSwapSlot& slot,
@@ -153,7 +263,8 @@ inline ReloadOutcome reload_processor_from_library(
     const BuildFingerprint& host_fingerprint,
     state::StateStore& live_store,
     const PrepareContext& prepare_ctx,
-    std::vector<ReloadLibrary>& retained_images) {
+    std::vector<ReloadLibrary>& retained_images,
+    const SwapPackTrust* trust = nullptr) {
 
     // Phase timing (item 1.2). steady_clock; this whole function is control-thread
     // (off the audio path), so timing here is never an RT concern.
@@ -163,9 +274,10 @@ inline ReloadOutcome reload_processor_from_library(
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
 
-    // 1-4. Load + gate (ABI version, fingerprint) + resolve the factory — the
-    //       shared, fail-closed gate sequence (see gate_logic_image).
-    auto gated = gate_logic_image(library_path, host_fingerprint);
+    // Trust (if a signed pack is supplied) + load + gate (ABI version,
+    // fingerprint) + resolve the factory — the shared, fail-closed gate sequence
+    // (see gate_logic_image). Trust verification precedes dlopen.
+    auto gated = gate_logic_image(library_path, host_fingerprint, trust);
     const auto t_gate = clock::now();
     if (auto* rejected = std::get_if<ReloadOutcome>(&gated)) {
         rejected->metrics.load_gate_ms = ms(t0, t_gate);
