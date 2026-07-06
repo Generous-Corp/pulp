@@ -106,6 +106,18 @@ silently dropped. External-library instances and cross-file variables that a
 local file can't resolve surface the same way — treat them as data, not failures,
 and fill in the critical ones by hand.
 
+**Gotcha — the `.fig` fixture-determinism test compares decoded content, not raw
+bytes.** `fig.test.mjs`'s "generator output is deterministic" test regenerates
+`synthetic.fig` and compares it to the committed fixture. It must compare the
+*decompressed* schema + message + rasters (`unpackFig(...)`), never the raw file
+bytes: the inner fig-kiwi chunks are DEFLATE-compressed, and zlib's exact output
+varies by Node/zlib version, so a raw byte-compare tests zlib rather than the
+generator and goes red on any CI host whose zlib differs from the one that
+committed the fixture (this is exactly what reddened a VM runner while the same
+commit stayed green on bare-metal). If you touch `make_synthetic_fig.mjs`,
+regenerate the fixture from the canonical toolchain, but keep the comparison at
+the decoded layer.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the
@@ -139,6 +151,34 @@ The module is `core/view/src/design_manifest.cpp`
 (`pulp::design::compile_design_manifest` / `manifest_to_json` /
 `emit_binding_prompt`), gated behind `PULP_ENABLE_DESIGN_IMPORT` alongside the
 rest of the authoring cluster.
+
+### Fidelity ledger (`--fidelity-report`) — a diffable record of import warnings
+
+The import-time fidelity self-check (`design_fidelity.hpp`: skew, dropped-vector,
+widget-size, …) always warns on stderr, and `--strict-fidelity` turns the hard
+findings into exit 4. Those warnings are transient — they scroll past and are
+lost. Pass `--fidelity-report <file>` to also persist the run's findings as a
+**named, machine-readable ledger** so an import's fidelity is a durable artifact
+you can diff across revisions or gate in CI:
+
+```bash
+pulp import-design --from fig --file synth.fig --frame 0:2 \
+  --output ui.js --fidelity-report build/fidelity.json
+```
+
+The ledger (`core/view/src/design_fidelity_ledger.cpp`,
+`pulp::view::fidelity_ledger_json`) carries:
+- a **`summary`** — `total`, `warnings` (the hard findings that gate
+  `--strict-fidelity`), `informational`, and a `by_kind` count map;
+- the **`findings`** — each with `kind`, `severity` (`warning` for a hard
+  finding, `info` for an advisory one), `node_id`, `node_name`, `detail`;
+- the **`taxonomy`** — every fidelity kind the checks can emit, each with a
+  stable slug, default severity, and one-line summary, so a consumer can render
+  a kind it does not itself know about.
+
+It is emitted regardless of `--strict-fidelity`: warnings are data, not
+failures. The taxonomy in `fidelity_taxonomy()` must stay in step with the kinds
+`design_fidelity.hpp` emits — add a kind to one, add it to the other.
 
 ### Adherence lint (`pulp design lint-adherence`) — the mechanical backstop
 

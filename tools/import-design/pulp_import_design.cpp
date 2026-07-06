@@ -1,5 +1,6 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
+#include <pulp/view/design_fidelity_ledger.hpp>
 #include <pulp/view/recognition_resolver.hpp>
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
@@ -938,6 +939,8 @@ static void print_usage() {
     std::cout << "  --meter-style {skin|skinned|default|plain}\n";
     std::cout << "  --strict-fidelity Fail (exit 4) if the import-time fidelity self-check\n";
     std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
+    std::cout << "  --fidelity-report <file>  Write the run's fidelity findings as a JSON ledger\n";
+    std::cout << "                    (named taxonomy + per-kind counts) — a diffable contract\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
     std::cout << "  --diff <png>      Save visual diff image\n";
     std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
@@ -1712,6 +1715,7 @@ int main(int argc, char* argv[]) {
     bool validate = false;           // --validate: render + compare after import
     bool strict_fidelity = false;    // --strict-fidelity: fail on a fidelity self-check finding
     bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
+    std::string fidelity_report_path; // --fidelity-report <file>: write the JSON fidelity ledger
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
     // figma-plugin lane only: native knobs default on; @sprite/@silver node
@@ -1799,6 +1803,8 @@ int main(int argc, char* argv[]) {
             validate = true;
         } else if (std::strcmp(argv[i], "--strict-fidelity") == 0) {
             strict_fidelity = true;
+        } else if (std::strcmp(argv[i], "--fidelity-report") == 0 && i + 1 < argc) {
+            fidelity_report_path = argv[++i];
         } else if (std::strcmp(argv[i], "--reference") == 0 && i + 1 < argc) {
             reference_image = argv[++i];
             validate = true;
@@ -3141,6 +3147,23 @@ int main(int argc, char* argv[]) {
         std::cerr << "fidelity: " << hard_findings
                   << " issue(s); failing due to --strict-fidelity\n";
         fidelity_failed = true;
+    }
+
+    // --fidelity-report: persist the run's findings as a machine-readable ledger
+    // (a durable, diffable fidelity contract). An explicitly-requested diagnostic
+    // artifact, so it is written regardless of --strict-fidelity or --dry-run —
+    // matching the --import-report convention above; --dry-run only suppresses the
+    // primary generated code + token files.
+    if (!fidelity_report_path.empty()) {
+        pulp::view::FidelityLedgerMeta meta;
+        meta.source = design_source_name(*source);
+        meta.output = output_file;
+        if (!write_file(fidelity_report_path,
+                        pulp::view::fidelity_ledger_json(fidelity_issues, meta))) {
+            std::cerr << "Error: cannot write fidelity report to " << fidelity_report_path << "\n";
+            return 1;
+        }
+        std::cerr << "fidelity: wrote ledger to " << fidelity_report_path << "\n";
     }
 
     if (dry_run) {
