@@ -33,6 +33,13 @@ namespace pulp::view {
 /// capture — consumable by Pulp's `var(--x)` runtime and by web tooling.
 std::string export_css_variables(const Theme& theme);
 
+/// The CSS custom-property id a token binds through: `--` + the token name with
+/// its trailing `.dark` mode suffix stripped and every `.` mapped to `-` (e.g.
+/// `color.bg` → `--color-bg`, `color.bg.dark` → `--color-bg`). This is the single
+/// owner of the token → `var(--x)` mapping; export_css_variables and the
+/// adherence lint both call it so they can never disagree about a token's id.
+std::string token_css_var(const std::string& token_name);
+
 /// Convert IR tokens to a Pulp Theme.
 Theme ir_tokens_to_theme(const IRTokens& tokens);
 

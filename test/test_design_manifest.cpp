@@ -125,6 +125,45 @@ TEST_CASE("Manifest JSON is well-formed and round-trips the counts", "[design-ma
     REQUIRE(json.find(std::string(kManifestVersion)) != std::string::npos);
 }
 
+TEST_CASE("Manifest round-trips through JSON", "[design-manifest]") {
+    auto original = compile_ink_signal_manifest();
+    auto reparsed = manifest_from_json(manifest_to_json(original));
+
+    REQUIRE(reparsed.manifest_version == original.manifest_version);
+    REQUIRE(reparsed.source == original.source);
+    REQUIRE(reparsed.appearance == original.appearance);
+    REQUIRE(reparsed.theme_schema_version == original.theme_schema_version);
+    REQUIRE(reparsed.tokens.size() == original.tokens.size());
+    REQUIRE(reparsed.components.size() == original.components.size());
+    // Serializing the reparsed manifest reproduces the original bytes.
+    REQUIRE(manifest_to_json(reparsed) == manifest_to_json(original));
+}
+
+TEST_CASE("manifest_from_json on malformed input yields an empty contract, no throw",
+          "[design-manifest]") {
+    REQUIRE_NOTHROW(manifest_from_json("not json{{{"));
+    REQUIRE(manifest_from_json("not json{{{").tokens.empty());
+    REQUIRE(manifest_from_json("[]").components.empty());  // valid JSON, wrong shape
+}
+
+TEST_CASE("manifest_from_json degrades gracefully on partial tokens", "[design-manifest]") {
+    // A token with no "name" is dropped; a valid one is kept even if a sibling
+    // is malformed. A non-string value degrades to empty, never throws.
+    const std::string json = R"({
+      "tokens": [
+        {"kind": "color", "value": "#fff"},
+        {"name": "ok", "kind": "color", "value": "#000000"},
+        {"name": "novalue", "kind": "dimension"}
+      ]
+    })";
+    auto m = manifest_from_json(json);
+    REQUIRE(m.tokens.size() == 2);  // the nameless token is dropped
+    const auto* ok = find_token(m, "ok");
+    REQUIRE(ok != nullptr);
+    REQUIRE(ok->value == "#000000");
+    REQUIRE(find_token(m, "novalue")->value.empty());
+}
+
 TEST_CASE("Binding prompt states the contract and lists tokens + components",
           "[design-manifest]") {
     auto m = compile_ink_signal_manifest();
