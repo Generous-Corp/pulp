@@ -28,6 +28,14 @@
 #include <cstdio>
 #include <optional>
 
+// MSVC spells the POSIX pipe helpers with a leading underscore. cmd_ship.cpp
+// uses popen/pclose to shell out (notarytool, makensis); map them so the CLI
+// compiles on Windows. Sibling CLI translation units carry the same guard.
+#ifdef _WIN32
+#  define popen _popen
+#  define pclose _pclose
+#endif
+
 // ── Config fallback helper ──────────────────────────────────────────────────
 // Resolve a ship config value: CLI flag → env var → global config.toml
 
