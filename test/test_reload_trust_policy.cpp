@@ -5,6 +5,8 @@
 
 #include <pulp/format/reload/reload_trust_policy.hpp>
 
+#include "reload_test_support.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -13,13 +15,7 @@ using namespace pulp::format::reload;
 namespace fs = std::filesystem;
 
 namespace {
-int counter = 0;
-fs::path make_dir() {
-    fs::path d = fs::temp_directory_path() / ("pulp-trustpol-" + std::to_string(++counter));
-    fs::remove_all(d);
-    fs::create_directories(d);
-    return d;
-}
+fs::path make_dir() { return pulp::test::unique_tmp_dir("pulp-trustpol-"); }
 void write(const fs::path& p, std::string_view s) {
     std::ofstream(p, std::ios::binary).write(s.data(), static_cast<std::streamsize>(s.size()));
 }

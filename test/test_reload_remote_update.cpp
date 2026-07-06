@@ -5,6 +5,8 @@
 
 #include <pulp/format/reload/remote_update.hpp>
 
+#include "reload_test_support.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -15,7 +17,6 @@ using pulp::view::ReloadCapability;
 namespace fs = std::filesystem;
 
 namespace {
-int counter = 0;
 std::string hash_of(std::string_view s) { return pulp::runtime::sha256_hex(s); }
 
 struct Staged {
@@ -29,9 +30,7 @@ Staged stage(std::uint64_t ver, std::vector<std::string> caps,
              SwapPackKind kind = SwapPackKind::UiScript) {
     auto kp = pulp::runtime::ed25519_keypair_generate();
     REQUIRE(kp.has_value());
-    fs::path root = fs::temp_directory_path() / ("pulp-remote-" + std::to_string(++counter));
-    fs::remove_all(root);
-    fs::create_directories(root);
+    fs::path root = pulp::test::unique_tmp_dir("pulp-remote-");
     const std::string bytes = "export const ui = 1;";
     std::ofstream(root / "ui.js", std::ios::binary).write(bytes.data(),
                                                           static_cast<std::streamsize>(bytes.size()));

@@ -28,12 +28,12 @@ namespace pulp::view::reload_exports {
     auto* root = new View();
     root->set_bounds({0, 0, 1, 1});
     (void)root->flex();
-    root->set_background_color(canvas::Color::rgba8(0, 0, 0, 255));
+    root->set_background_color(canvas::Color::rgba8(0, 0, 0, 255));  // token-lint:allow symbol-retention filler, not paint (never called)
 
     auto label = std::make_unique<Label>("x");
     label->set_text("y");
     label->set_font_size(12.0f);
-    label->set_text_color(canvas::Color::rgba8(255, 255, 255, 255));
+    label->set_text_color(canvas::Color::rgba8(255, 255, 255, 255));  // token-lint:allow symbol-retention filler, not paint (never called)
     label->set_text_align(LabelAlign::center);
     root->add_child(std::move(label));
 

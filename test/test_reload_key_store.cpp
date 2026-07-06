@@ -6,6 +6,8 @@
 #include <pulp/format/reload/key_store.hpp>
 #include <pulp/format/reload/swap_pack.hpp>
 
+#include "reload_test_support.hpp"
+
 #include <filesystem>
 #include <string>
 
@@ -13,10 +15,7 @@ using namespace pulp::format::reload;
 namespace fs = std::filesystem;
 
 namespace {
-int counter = 0;
-fs::path tmp_key() {
-    return fs::temp_directory_path() / ("pulp-key-" + std::to_string(++counter) + ".txt");
-}
+fs::path tmp_key() { return pulp::test::unique_tmp_file("pulp-key-", ".txt"); }
 }  // namespace
 
 TEST_CASE("key blob round-trips; a bad magic line fails closed", "[reload][key-store]") {

@@ -215,14 +215,14 @@ TEST_CASE("pulp loop --ar-swap-from prints compatibility diagnostic",
     REQUIRE_FALSE(r1.timed_out);
     REQUIRE(r1.exit_code == 0);
     REQUIRE(r1.stdout_output.find("--ar-swap-from=feat/fix-x") != std::string::npos);
-    REQUIRE(r1.stdout_output.find("recognized but not implemented") != std::string::npos);
+    REQUIRE(r1.stdout_output.find("superseded by the live reload lane") != std::string::npos);
 
     // Equals form
     auto r2 = run_pulp({"loop", "--ar-swap-from=feat/fix-y", "--no-watch"});
     REQUIRE_FALSE(r2.timed_out);
     REQUIRE(r2.exit_code == 0);
     REQUIRE(r2.stdout_output.find("--ar-swap-from=feat/fix-y") != std::string::npos);
-    REQUIRE(r2.stdout_output.find("recognized but not implemented") != std::string::npos);
+    REQUIRE(r2.stdout_output.find("superseded by the live reload lane") != std::string::npos);
 
     pulp_unsetenv("PULP_HOME");
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
