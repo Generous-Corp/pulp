@@ -1,6 +1,7 @@
 // design_variants.cpp — variant sets -> typed parameterized component contract.
 
 #include <pulp/design/design_variants.hpp>
+#include <pulp/design/design_text_util.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -13,18 +14,8 @@ namespace pulp::design {
 
 namespace {
 
-std::string_view trim(std::string_view s) {
-    auto issp = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
-    while (!s.empty() && issp(s.front())) s.remove_prefix(1);
-    while (!s.empty() && issp(s.back())) s.remove_suffix(1);
-    return s;
-}
-
-std::string to_lower(std::string_view s) {
-    std::string out(s);
-    for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return out;
-}
+using text::to_lower;
+using text::trim;
 
 // Is this enum boolean-shaped, and if so what is its falsey value? Returns the
 // falsey value ("Off"/"False"/"No") or "" when the enum is not boolean-shaped.
