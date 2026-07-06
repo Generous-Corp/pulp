@@ -32,8 +32,8 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6410,
-      "note": "shared test registration hotspot (registers the fig decoder unit + CLI tests); exact ceiling tracks current registered CMake test manifest"
+      "max_loc": 38,
+      "note": "test manifest owner include hub after the per-area split; new registrations belong in focused test/cmake/*_tests.cmake manifests"
     },
     {
       "path": "test/test_design_import_codegen.cpp",

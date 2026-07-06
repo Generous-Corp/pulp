@@ -615,6 +615,27 @@ REQUIRE(editor.text() == "hello");
 
 Use `simulate_click()`, `simulate_drag()`, and direct `on_text_input()`/`on_key_event()` calls to test widget interaction without a window. Use screenshot rendering (`render_to_file()`) to verify visual output in CI.
 
+### Test Manifest Layout
+
+`test/CMakeLists.txt` is only shared setup plus ordered owner includes. Do not add
+new `add_test`, `add_executable`, or `pulp_add_test_suite` blocks there.
+Place new test registrations in the matching `test/cmake/*_tests.cmake`
+manifest, keeping ownership aligned with the subsystem being tested. If no
+current manifest fits, create a focused new one under `test/cmake/` and include
+it from `test/CMakeLists.txt` in dependency order.
+
+Focused owner hubs such as `design_import_tests.cmake`, `scene3d_tests.cmake`,
+and `render_gpu_tests.cmake` may include smaller manifests for their own
+subsystem. Do not hide sibling manifests inside an unrelated owner just to keep
+the top-level file short; make the owner relationship visible at the top level
+or in the matching owner hub.
+
+The top-level manifest is tracked by `hotspot_size_guard.json` as a tiny include
+hub. Growing it back into a registration file is a regression. Before opening a
+PR that changes test manifests, run `docs_noise_lint.py`, `hotspot_size_guard.py`,
+and a clean CMake configure/target-list comparison so CI is not the first place
+that discovers ordering drift.
+
 ### Docs Maintenance Rule
 
 When you modify files in `core/`, `examples/`, or `tools/cli/`:
