@@ -111,6 +111,26 @@ specific to that setup (App-dispatched workflows; local runners) — skip them. 
 tool-agnostic rule still holds: distinguish the *required* checks from *advisory*
 lanes, and verify a runner is actually busy before blaming capacity.
 
+**Caveat to step 3 — idle Studios do NOT prove the required gate is unblocked.**
+The required `macos` check is gated by a routing preamble (`classify` →
+`resolve-provider`) AND is *itself* an alias job that reports the leg's outcome —
+all three default to `runs-on: ubuntu-latest`. So when GitHub's shared ubuntu
+pool saturates (repo-wide `actions/runs?status=queued` in the hundreds during a
+PR burst), the preamble can't get a slot, the macOS leg is never dispatched, and
+the required gate sits `pending` *with the Studios idle*. Tell this apart from a
+real failure and from a wedged runner: `queued` preamble + `online`/`busy=false`
+Studios + high repo-wide queued count = **GitHub-hosted starvation**, not a code
+or hardware problem. Immediate unblock is admin-merge after local validation
+(`ghapp pr merge <n> --merge --admin`, `--merge` not `--squash` to preserve the
+bump marker); merging also drains that PR's ~11-workflow fan-out from the queue.
+The structural fix is the `PULP_PREAMBLE_RUNS_ON_JSON` repo var: set it to a
+self-hosted Linux selector (e.g. `["self-hosted","Linux","ARM64",
+"pulp-build-linux"]`) to move those three jobs off the saturated pool — but only
+once that pool is confirmed always-on, or the gate just starves elsewhere. It
+defaults to `ubuntu-latest` (no-op) until set. A tartci launchd detector watches
+for this triad; full design in
+`planning/2026-07-06-ci-queue-saturation-watchdog.md`.
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
