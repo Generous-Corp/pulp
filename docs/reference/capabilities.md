@@ -323,6 +323,23 @@ Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
 
 ---
 
+## GPU Audio
+
+Offload heavy DSP to the GPU from a real-time `process()` block via a
+fixed-latency, lock-free bridge. Gated on the GPU render stack (`pulp::render`);
+a non-GPU build does not compile the subsystem.
+
+| Capability | Status | Module | Docs |
+|---|---|---|---|
+| GPU audio transport (fixed-latency RT↔GPU bridge) | experimental | [gpu_audio](modules.md#gpu_audio) | [GPU Audio SDK](guides/gpu-audio-sdk.md) |
+| GPU convolution (`GpuConvolver`) | experimental | [gpu_audio](modules.md#gpu_audio) | [SuperConvolver example](examples/super-convolver.md) |
+| GPU spectral toolkit (STFT / freeze / morph) | experimental | [gpu_audio](modules.md#gpu_audio) | [Spectral Lab example](examples/spectral-lab.md) |
+| GPU WaveNet neural-inference primitive | experimental | [render](modules.md#render) | [GPU NAM example](examples/gpu-nam.md) |
+
+Key headers: `pulp/gpu_audio/gpu_audio_transport.hpp`, `pulp/gpu_audio/gpu_convolver.hpp`, `pulp/render/gpu_compute.hpp`
+
+---
+
 ## Canvas / 2D Drawing
 
 | Capability | Status | Module | Docs |
