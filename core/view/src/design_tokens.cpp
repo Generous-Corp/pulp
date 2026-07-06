@@ -85,6 +85,18 @@ static std::optional<float> parse_design_number(std::string value) {
     return parsed;
 }
 
+std::string token_css_var(const std::string& token_name) {
+    static const std::string dark_suffix = ".dark";
+    const bool dark = token_name.size() > dark_suffix.size() &&
+                      token_name.compare(token_name.size() - dark_suffix.size(),
+                                         dark_suffix.size(), dark_suffix) == 0;
+    std::string base = dark ? token_name.substr(0, token_name.size() - dark_suffix.size())
+                            : token_name;
+    std::string out = "--";
+    for (char c : base) out += (c == '.') ? '-' : c;
+    return out;
+}
+
 std::string export_css_variables(const Theme& theme) {
     // Dark-mode tokens carry the ".dark" multi-mode suffix (Figma plugin +
     // DESIGN.md body parser). Partition base vs dark; base → :root, dark
@@ -95,13 +107,7 @@ std::string export_css_variables(const Theme& theme) {
         return n.size() > dark_suffix.size()
             && n.compare(n.size() - dark_suffix.size(), dark_suffix.size(), dark_suffix) == 0;
     };
-    auto css_var = [&](const std::string& name) {
-        // Strip the .dark suffix, then map "." → "-" for the custom-property id.
-        std::string base = is_dark(name) ? name.substr(0, name.size() - dark_suffix.size()) : name;
-        std::string out = "--";
-        for (char c : base) out += (c == '.') ? '-' : c;
-        return out;
-    };
+    auto css_var = [&](const std::string& name) { return token_css_var(name); };
     auto hex = [](const Color& c) {
         char buf[10];
         if (c.a8() == 255)

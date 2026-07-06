@@ -125,6 +125,63 @@ std::string manifest_to_json(const DesignManifest& manifest) {
     return choc::json::toString(root, /*pretty=*/true);
 }
 
+namespace {
+
+std::string member_string(const choc::value::ValueView& obj, const char* key) {
+    if (!obj.isObject() || !obj.hasObjectMember(key)) return {};
+    auto v = obj[key];
+    return v.isString() ? std::string(v.getString()) : std::string{};
+}
+
+}  // namespace
+
+DesignManifest manifest_from_json(const std::string& json) {
+    DesignManifest m;
+    choc::value::Value root;
+    try {
+        root = choc::json::parse(json);
+    } catch (...) {
+        return m;  // malformed input → empty contract, never throw
+    }
+    if (!root.isObject()) return m;
+
+    m.manifest_version = member_string(root, "manifest_version");
+    m.source = member_string(root, "source");
+    m.appearance = member_string(root, "appearance");
+    if (root.hasObjectMember("theme_schema_version"))
+        m.theme_schema_version = root["theme_schema_version"].getWithDefault<int>(0);
+
+    if (root.hasObjectMember("tokens") && root["tokens"].isArray()) {
+        auto tokens = root["tokens"];
+        for (uint32_t i = 0; i < tokens.size(); ++i) {
+            auto t = tokens[i];
+            ManifestToken tok{member_string(t, "name"), member_string(t, "kind"),
+                              member_string(t, "value")};
+            if (!tok.name.empty()) m.tokens.push_back(std::move(tok));
+        }
+    }
+    if (root.hasObjectMember("components") && root["components"].isArray()) {
+        auto components = root["components"];
+        for (uint32_t i = 0; i < components.size(); ++i) {
+            auto c = components[i];
+            ManifestComponent comp;
+            comp.name = member_string(c, "name");
+            comp.category = member_string(c, "category");
+            comp.native_class = member_string(c, "native_class");
+            comp.header = member_string(c, "header");
+            comp.figma_component = member_string(c, "figma_component");
+            comp.usage = member_string(c, "usage");
+            if (c.isObject() && c.hasObjectMember("reskin_tokens") && c["reskin_tokens"].isArray()) {
+                auto rt = c["reskin_tokens"];
+                for (uint32_t j = 0; j < rt.size(); ++j)
+                    if (rt[j].isString()) comp.reskin_tokens.push_back(std::string(rt[j].getString()));
+            }
+            if (!comp.name.empty()) m.components.push_back(std::move(comp));
+        }
+    }
+    return m;
+}
+
 std::string emit_binding_prompt(const DesignManifest& manifest) {
     std::string out;
     out.reserve(4096);
