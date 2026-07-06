@@ -152,6 +152,38 @@ TEST_CASE("swap-pack manifest parses the policy fields", "[reload][swap-pack][po
     REQUIRE(legacy->declared_capabilities.empty());
 }
 
+TEST_CASE("swap-pack manifest serialize → parse round-trips every field",
+          "[reload][swap-pack][policy]") {
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    SwapPackManifest m;
+    m.id = "p1"; m.plugin_id = "com.pulp.demo";
+    m.pack_version = 7;
+    m.pack_type = SwapPackKind::UiScript;
+    m.update_channel = "beta";
+    m.min_host_version = 9;
+    m.declared_capabilities = {"filesystem", "storage"};
+    m.files = {{"ui.js", hash_of("UI"), SwapPackKind::UiScript},
+               {"theme.json", hash_of("T"), SwapPackKind::UiScript}};
+    sign_manifest(m, *kp);
+
+    std::string err;
+    auto back = parse_swap_pack_manifest(serialize_swap_pack_manifest(m), err);
+    REQUIRE(back.has_value());
+    REQUIRE(back->id == m.id);
+    REQUIRE(back->plugin_id == m.plugin_id);
+    REQUIRE(back->pack_version == m.pack_version);
+    REQUIRE(back->pack_type == m.pack_type);
+    REQUIRE(back->update_channel == m.update_channel);
+    REQUIRE(back->min_host_version == m.min_host_version);
+    REQUIRE(back->declared_capabilities == m.declared_capabilities);
+    REQUIRE(back->files.size() == m.files.size());
+    REQUIRE(back->files[0].path == "ui.js");
+    // Crucially: the parsed manifest still verifies under the same key (the signed
+    // message survived the JSON round-trip byte-for-byte).
+    REQUIRE(verify_swap_pack_signature(*back, kp->public_key).ok());
+}
+
 TEST_CASE("swap-pack signature: policy fields are bound (tampering any of them fails)",
           "[reload][swap-pack][policy]") {
     auto kp = pulp::runtime::ed25519_keypair_generate();

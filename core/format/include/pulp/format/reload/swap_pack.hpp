@@ -305,4 +305,71 @@ inline SwapPackVerifyResult verify_swap_pack(
     return verify_swap_pack_integrity(root, manifest);
 }
 
+/// Lowercase-hex encode bytes (for signer/signature fields on the way out).
+inline std::string swap_pack_hex_encode(const std::vector<std::uint8_t>& bytes) {
+    static const char* d = "0123456789abcdef";
+    std::string out;
+    out.reserve(bytes.size() * 2);
+    for (auto b : bytes) { out.push_back(d[b >> 4]); out.push_back(d[b & 0xF]); }
+    return out;
+}
+
+/// Minimal JSON string escaper for the fields the manifest emits.
+inline std::string swap_pack_json_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    static const char* d = "0123456789abcdef";
+                    out += "\\u00";
+                    out.push_back(d[(c >> 4) & 0xF]);
+                    out.push_back(d[c & 0xF]);
+                } else {
+                    out.push_back(c);
+                }
+        }
+    }
+    return out;
+}
+
+/// Serialize a manifest to JSON that parse_swap_pack_manifest reads back verbatim
+/// (round-trips). Policy fields + signer/signature included; the field order mirrors
+/// the struct for readability (parse is order-independent).
+inline std::string serialize_swap_pack_manifest(const SwapPackManifest& m) {
+    auto q = [](std::string_view s) { return "\"" + swap_pack_json_escape(s) + "\""; };
+    std::string j = "{\n";
+    j += "  \"id\": " + q(m.id) + ",\n";
+    j += "  \"plugin_id\": " + q(m.plugin_id) + ",\n";
+    j += "  \"format_version\": " + std::to_string(m.format_version) + ",\n";
+    j += "  \"pack_version\": " + std::to_string(m.pack_version) + ",\n";
+    j += "  \"pack_type\": " + q(swap_pack_kind_to_string(m.pack_type)) + ",\n";
+    j += "  \"update_channel\": " + q(m.update_channel) + ",\n";
+    j += "  \"min_host_version\": " + std::to_string(m.min_host_version) + ",\n";
+    j += "  \"capabilities\": [";
+    for (std::size_t i = 0; i < m.declared_capabilities.size(); ++i)
+        j += (i ? ", " : "") + q(m.declared_capabilities[i]);
+    j += "],\n";
+    j += "  \"files\": [\n";
+    for (std::size_t i = 0; i < m.files.size(); ++i) {
+        const auto& f = m.files[i];
+        j += "    {\"path\": " + q(f.path) + ", \"sha256\": " + q(f.sha256_hex) +
+             ", \"kind\": " + q(swap_pack_kind_to_string(f.kind)) + "}";
+        j += (i + 1 < m.files.size()) ? ",\n" : "\n";
+    }
+    j += "  ]";
+    if (!m.signer_public_key.empty())
+        j += ",\n  \"signer\": " + q(swap_pack_hex_encode(m.signer_public_key));
+    if (!m.signature.empty())
+        j += ",\n  \"signature\": " + q(swap_pack_hex_encode(m.signature));
+    j += "\n}\n";
+    return j;
+}
+
 }  // namespace pulp::format::reload
