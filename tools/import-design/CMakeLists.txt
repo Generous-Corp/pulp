@@ -6,6 +6,7 @@
 add_executable(pulp-import-design
     pulp_import_design.cpp
     import_detect.cpp
+    fig_lane.cpp
     # miniz lets the CLI auto-unpack .pulp.zip exports from the Figma
     # plugin. Compiled here rather than pulled from
     # pulp::runtime because that target's miniz include dirs are PRIVATE
@@ -17,6 +18,10 @@ add_executable(pulp-import-design
 target_include_directories(pulp-import-design PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
+# Lets the CLI locate the offline .fig decoder (a Node subtool) in a dev build.
+# Installed builds fall back to $PULP_FIG_DECODE or an upward tools/ search.
+target_compile_definitions(pulp-import-design PRIVATE
+    PULP_IMPORT_DESIGN_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(pulp-import-design PRIVATE pulp::view pulp::state pulp::platform)
 
 add_executable(pulp-design-import-bench
