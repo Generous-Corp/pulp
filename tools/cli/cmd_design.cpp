@@ -4,15 +4,20 @@
 #include "design_binding.hpp"
 
 #include <pulp/design/design_adherence.hpp>
+#include <pulp/design/design_variants.hpp>
 #include <pulp/design/design_gallery.hpp>
+#include <pulp/design/design_handoff.hpp>
 #include <pulp/design/design_ledger.hpp>
 #include <pulp/design/design_manifest.hpp>
+#include <pulp/design/design_tweaks.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_tokens.hpp>
 
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_UTF8.h>
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -447,7 +452,11 @@ int run_record(const std::vector<std::string>& rest) {
             try {
                 auto probe = choc::json::parse(raw);
                 valid = probe.isObject();
-            } catch (const std::exception&) {
+            } catch (...) {
+                // Catch-all, not catch(std::exception&): this CLI co-links Yoga
+                // (-fno-rtti), which shadows std::exception's typeinfo so choc's
+                // ParseError slips a typed catch. A bare catch keeps the corrupt-
+                // ledger guard total instead of letting a parse throw escape.
                 valid = false;
             }
             if (!valid) {
@@ -759,6 +768,401 @@ int run_gallery(const std::vector<std::string>& rest) {
     return failed > 0 ? 1 : 0;
 }
 
+void print_handoff_usage() {
+    std::cout <<
+        "Usage: pulp design handoff <project-dir|README.md> [--json]\n"
+        "\n"
+        "  Parse a design-tool project's handoff contract into machine-stated\n"
+        "  intent: the explicit hi-fi vs lo-fi fidelity declaration, bound design\n"
+        "  systems, per-screen exact-value specs, the token table, and interaction\n"
+        "  notes. Given a directory, reads its handoff README and folds in the\n"
+        "  `_ds/<slug>/` design-system directories.\n"
+        "\n"
+        "  --json              Print the contract JSON instead of a summary.\n";
+}
+
+// The handoff README at a project root, trying the common names in order.
+fs::path find_handoff_readme(const fs::path& dir) {
+    for (const char* name : {"HANDOFF.md", "handoff.md", "README.md", "readme.md"}) {
+        std::error_code ec;
+        fs::path p = dir / name;
+        if (fs::is_regular_file(p, ec)) return p;
+    }
+    return {};
+}
+
+// The `_ds/<slug>/` design-system directory names under a project root.
+std::vector<std::string> design_system_slugs(const fs::path& dir) {
+    std::vector<std::string> slugs;
+    std::error_code ec;
+    fs::path ds = dir / "_ds";
+    if (!fs::is_directory(ds, ec)) return slugs;
+    for (auto it = fs::directory_iterator(ds, ec); !ec && it != fs::directory_iterator();
+         it.increment(ec)) {
+        std::error_code sec;
+        if (it->is_directory(sec) && !sec)  // per-entry error skips that entry, not the walk
+            slugs.push_back(it->path().filename().string());
+    }
+    std::sort(slugs.begin(), slugs.end());
+    return slugs;
+}
+
+int run_handoff(const std::vector<std::string>& rest) {
+    fs::path input;
+    bool json_out = false;
+    for (const auto& a : rest) {
+        if (a == "--help" || a == "-h") { print_handoff_usage(); return 0; }
+        else if (a == "--json") json_out = true;
+        else if (!a.empty() && a[0] == '-') {
+            std::cerr << "pulp design handoff: unknown option '" << a << "'\n";
+            return 2;
+        } else if (input.empty()) {
+            input = a;
+        } else {
+            std::cerr << "pulp design handoff: unexpected extra argument '" << a << "'\n";
+            return 2;
+        }
+    }
+    if (input.empty()) { print_handoff_usage(); return 2; }
+
+    std::error_code ec;
+    fs::path readme = input;
+    std::vector<std::string> slugs;
+    if (fs::is_directory(input, ec)) {
+        readme = find_handoff_readme(input);
+        if (readme.empty()) {
+            std::cerr << "Error: no handoff README (HANDOFF.md / README.md) in " << input << "\n";
+            return 1;
+        }
+        slugs = design_system_slugs(input);
+    } else if (!fs::is_regular_file(input, ec)) {
+        std::cerr << "Error: " << input << " is not a file or directory\n";
+        return 1;
+    }
+
+    auto text = read_text_file(readme);
+    if (text.empty()) { std::cerr << "Error: cannot read " << readme << "\n"; return 1; }
+
+    auto contract = pulp::design::parse_handoff_readme(text, readme.generic_string());
+    pulp::design::merge_design_systems(contract, slugs);
+
+    if (json_out) {
+        std::cout << pulp::design::handoff_contract_json(contract) << "\n";
+        return 0;
+    }
+
+    std::cout << "Handoff: " << readme.filename().string() << "\n";
+    std::cout << "  fidelity: " << pulp::design::fidelity_intent_name(contract.fidelity) << "\n";
+    std::cout << "  design systems: ";
+    if (contract.design_systems.empty()) std::cout << "(none declared)";
+    for (size_t i = 0; i < contract.design_systems.size(); ++i)
+        std::cout << (i ? ", " : "") << contract.design_systems[i];
+    std::cout << "\n  screens: " << contract.screens.size()
+              << ", tokens: " << contract.tokens.size()
+              << ", interactions: " << contract.interactions.size() << "\n";
+    if (contract.fidelity == pulp::design::FidelityIntent::unspecified)
+        std::cout << "  note: no fidelity declared — confirm hi-fi vs lo-fi before importing.\n";
+    return 0;
+}
+
+void print_variants_usage() {
+    std::cout <<
+        "Usage: pulp design variants --component <name> <variants-file> [--json]\n"
+        "\n"
+        "  Collapse a component set's `Prop=Value` variant names into one typed\n"
+        "  component contract: each property with its value enum and a chosen\n"
+        "  default. Feeds the design manifest (pulp design compile) and the\n"
+        "  adherence lint. <variants-file> is one variant name per line; blank\n"
+        "  lines and lines starting with '#' are ignored.\n"
+        "\n"
+        "  --component <name>  Component-set name (required).\n"
+        "  --json              Print the contract JSON instead of a summary.\n";
+}
+
+int run_variants(const std::vector<std::string>& rest) {
+    std::string component;
+    fs::path variants_file;
+    bool json_out = false;
+    for (size_t i = 0; i < rest.size(); ++i) {
+        const std::string& a = rest[i];
+        auto next = [&](const char* flag) -> std::string {
+            if (i + 1 >= rest.size()) {
+                std::cerr << "pulp design variants: " << flag << " requires a value\n";
+                return {};
+            }
+            return rest[++i];
+        };
+        if (a == "--help" || a == "-h") { print_variants_usage(); return 0; }
+        else if (a == "--component") component = next("--component");
+        else if (a == "--json") json_out = true;
+        else if (!a.empty() && a[0] == '-') {
+            std::cerr << "pulp design variants: unknown option '" << a << "'\n";
+            return 2;
+        } else if (variants_file.empty()) {
+            variants_file = a;
+        } else {
+            std::cerr << "pulp design variants: unexpected extra argument '" << a << "'\n";
+            return 2;
+        }
+    }
+    if (component.empty()) {
+        std::cerr << "pulp design variants: --component <name> is required\n";
+        return 2;
+    }
+    if (variants_file.empty()) { print_variants_usage(); return 2; }
+    std::error_code ec;
+    if (!fs::is_regular_file(variants_file, ec)) {
+        std::cerr << "Error: cannot read variants file " << variants_file << "\n";
+        return 1;
+    }
+
+    std::vector<std::string> names;
+    {
+        std::ifstream f(variants_file);
+        if (!f) {
+            std::cerr << "Error: cannot open variants file " << variants_file << "\n";
+            return 1;
+        }
+        std::string line;
+        while (std::getline(f, line)) {
+            // Trim trailing CR (CRLF files) and skip blanks / comments.
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+                line.pop_back();
+            size_t b = line.find_first_not_of(" \t");
+            if (b == std::string::npos || line[b] == '#') continue;
+            names.push_back(line.substr(b));
+        }
+    }
+    if (names.empty()) {
+        std::cerr << "Error: no variant names in " << variants_file << "\n";
+        return 1;
+    }
+
+    auto contract = pulp::design::build_component_contract(component, names);
+    if (json_out) {
+        std::cout << pulp::design::component_contract_json(contract) << "\n";
+        return 0;
+    }
+    std::cout << "Component: " << contract.component << " (" << contract.variant_count
+              << " variants)\n";
+    for (const auto& p : contract.props) {
+        std::cout << "  " << p.name << " = { ";
+        for (size_t i = 0; i < p.values.size(); ++i)
+            std::cout << (i ? ", " : "") << p.values[i]
+                      << (p.values[i] == p.default_value ? "*" : "");
+        std::cout << " }\n";
+    }
+    if (!contract.issues.empty()) {
+        std::cout << "  issues:\n";
+        for (const auto& is : contract.issues)
+            std::cout << "    [" << is.kind << "] " << is.detail << "\n";
+    }
+    return 0;
+}
+
+void print_tweak_usage() {
+    std::cout <<
+        "Usage: pulp design tweak <file> [--set key=value ...] [options]\n"
+        "\n"
+        "  Read or update the EDITMODE parameter block an imported design\n"
+        "  carries. The block is the artifact's own parameter store:\n"
+        "      /*EDITMODE-BEGIN*/{\"accent\":\"#33aaff\",\"radius\":8}/*EDITMODE-END*/\n"
+        "  With no --set, the current parameters are listed. Each --set updates\n"
+        "  one key in place (or appends it), rewriting only the bytes between the\n"
+        "  markers so the change survives a reload and shows in the diff.\n"
+        "\n"
+        "  <file>              The artifact to read/rewrite (e.g. ui.js).\n"
+        "  --set key=value     Set one parameter. `value` is a JSON number / true\n"
+        "                      / false / null literal (8, true); anything else is\n"
+        "                      stored as a JSON string (#33aaff, Hello). Repeatable.\n"
+        "  --out <path>        Write the rewritten artifact here (default: in place).\n"
+        "  --json              Print the parameters as a JSON object and exit.\n";
+}
+
+// Is `s` exactly a JSON number literal (no leading/trailing junk)? A strict
+// grammar check, so a value like `1],x:[2` is NOT a number and gets quoted as a
+// string rather than smuggling structure into the block.
+bool is_json_number(const std::string& s) {
+    size_t i = 0, n = s.size();
+    if (n == 0) return false;
+    if (s[i] == '-') ++i;
+    if (i >= n) return false;
+    if (s[i] == '0') {
+        ++i;  // a leading zero may not be followed by more digits
+    } else if (std::isdigit(static_cast<unsigned char>(s[i]))) {
+        while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    } else {
+        return false;
+    }
+    if (i < n && s[i] == '.') {  // fraction
+        ++i;
+        if (i >= n || !std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+        while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    }
+    if (i < n && (s[i] == 'e' || s[i] == 'E')) {  // exponent
+        ++i;
+        if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
+        if (i >= n || !std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+        while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    }
+    return i == n;
+}
+
+// Coerce a CLI-supplied value into JSON text. A JSON number / true / false /
+// null literal passes through verbatim; everything else is quoted as a JSON
+// string, so `--set radius=8` stores a number while `--set accent=#33aaff` and
+// `--set label=Hello` store strings. Values are never parsed as arrays/objects,
+// which keeps a crafted value from smuggling extra JSON into the block. Returns
+// nullopt for non-UTF-8 input: choc's JSON writer over-reads on a truncated
+// multibyte sequence (its bounds assert is compiled out in Release).
+std::optional<std::string> cli_value_to_json(const std::string& raw) {
+    if (choc::text::findInvalidUTF8Data(raw.data(), raw.size()) != nullptr) return std::nullopt;
+    if (raw == "true" || raw == "false" || raw == "null") return raw;
+    if (is_json_number(raw)) return raw;
+    return choc::json::toString(choc::value::createString(raw));
+}
+
+int run_tweak(const std::vector<std::string>& rest) {
+    fs::path file, out;
+    bool json_out = false;
+    bool arg_error = false;
+    std::vector<std::pair<std::string, std::string>> sets;  // key -> json value
+    for (size_t i = 0; i < rest.size(); ++i) {
+        const std::string& a = rest[i];
+        auto next = [&](const char* flag) -> std::string {
+            if (i + 1 >= rest.size()) {
+                std::cerr << "pulp design tweak: " << flag << " requires a value\n";
+                arg_error = true;
+                return {};
+            }
+            return rest[++i];
+        };
+        if (a == "--help" || a == "-h") { print_tweak_usage(); return 0; }
+        else if (a == "--json") json_out = true;
+        else if (a == "--out") { out = next("--out"); if (arg_error) return 2; }
+        else if (a == "--set") {
+            std::string kv = next("--set");
+            if (arg_error) return 2;
+            auto eq = kv.find('=');
+            if (eq == std::string::npos || eq == 0) {
+                std::cerr << "pulp design tweak: --set expects key=value, got '" << kv << "'\n";
+                return 2;
+            }
+            std::string key = kv.substr(0, eq);
+            if (choc::text::findInvalidUTF8Data(key.data(), key.size()) != nullptr) {
+                std::cerr << "pulp design tweak: --set key is not valid UTF-8\n";
+                return 2;
+            }
+            auto val = cli_value_to_json(kv.substr(eq + 1));
+            if (!val) {
+                std::cerr << "pulp design tweak: --set value for '" << key
+                          << "' is not valid UTF-8\n";
+                return 2;
+            }
+            sets.emplace_back(std::move(key), *val);
+        } else if (!a.empty() && a[0] == '-') {
+            std::cerr << "pulp design tweak: unknown option '" << a << "'\n";
+            return 2;
+        } else if (file.empty()) {
+            file = a;
+        } else {
+            std::cerr << "pulp design tweak: unexpected extra argument '" << a << "'\n";
+            return 2;
+        }
+    }
+    if (file.empty()) { print_tweak_usage(); return 2; }
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec)) {
+        std::cerr << "Error: cannot read " << file << "\n";
+        return 1;
+    }
+
+    std::string text;
+    {
+        std::ifstream f(file, std::ios::binary);
+        if (!f) {
+            std::cerr << "Error: cannot open " << file << "\n";
+            return 1;
+        }
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        text = ss.str();
+    }
+
+    auto params = pulp::design::read_edit_block(text);
+    if (!params) {
+        std::cerr << "Error: no well-formed EDITMODE block in " << file << "\n";
+        return 1;
+    }
+
+    if (sets.empty()) {
+        if (json_out) {
+            auto payload = pulp::design::edit_block_payload(*params);
+            if (!payload) {
+                std::cerr << "Error: the block holds a value that is not valid JSON\n";
+                return 1;
+            }
+            std::cout << *payload << "\n";
+        } else {
+            std::cout << "Parameters in " << file.filename().string() << ":\n";
+            for (const auto& p : *params)
+                std::cout << "  " << p.key << " = " << p.json_value << "\n";
+        }
+        return 0;
+    }
+
+    // Apply the sets in order, then rewrite once.
+    for (const auto& [key, val] : sets) {
+        bool found = false;
+        for (auto& p : *params) {
+            if (p.key == key) { p.json_value = val; found = true; break; }
+        }
+        if (!found) params->push_back({key, val});
+    }
+    auto rewritten = pulp::design::rewrite_edit_block(text, *params);
+    if (!rewritten) {
+        std::cerr << "Error: could not rewrite the EDITMODE block in " << file << "\n";
+        return 1;
+    }
+    if (!rewritten->outside_bytes_intact) {
+        // A rewrite must never disturb bytes outside the block; refuse to write.
+        std::cerr << "Error: refusing to write — bytes outside the block changed\n";
+        return 1;
+    }
+    fs::path dest = out.empty() ? file : out;
+    // Write atomically: a full write to a sibling temp file, verified, then a
+    // rename over the destination — so a crash or a full disk mid-write leaves
+    // the original artifact intact rather than truncated.
+    fs::path tmp = dest;
+    tmp += ".pulp-tweak.tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) {
+            std::cerr << "Error: cannot write " << dest << "\n";
+            return 1;
+        }
+        f << rewritten->text;
+        f.flush();
+        if (!f.good()) {
+            std::cerr << "Error: failed writing " << dest << "\n";
+            f.close();
+            std::error_code rm;
+            fs::remove(tmp, rm);
+            return 1;
+        }
+    }
+    std::error_code rn;
+    fs::rename(tmp, dest, rn);
+    if (rn) {
+        std::cerr << "Error: cannot replace " << dest << ": " << rn.message() << "\n";
+        std::error_code rm;
+        fs::remove(tmp, rm);
+        return 1;
+    }
+    std::cout << "Updated " << sets.size() << " parameter(s) -> " << dest.string() << "\n";
+    return 0;
+}
+
 } // namespace
 
 int cmd_design(const std::vector<std::string>& args) {
@@ -783,6 +1187,15 @@ int cmd_design(const std::vector<std::string>& args) {
         }
         if (args[0] == "gallery") {
             return run_gallery(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "tweak") {
+            return run_tweak(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "handoff") {
+            return run_handoff(std::vector<std::string>(args.begin() + 1, args.end()));
+        }
+        if (args[0] == "variants") {
+            return run_variants(std::vector<std::string>(args.begin() + 1, args.end()));
         }
     }
 

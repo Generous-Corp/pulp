@@ -880,6 +880,41 @@ commands:
           - name: --json
             kind: flag
             description: Print the manifest JSON to stdout and skip rendering.
+      - name: handoff
+        summary: Parse a design-tool project's handoff contract into machine-stated intent — the explicit hi-fi vs lo-fi fidelity declaration, bound design systems, per-screen exact-value specs, the token table, and interaction notes. Given a directory, reads its handoff README and folds in the _ds/<slug>/ design-system directories.
+        args:
+          - name: path
+            kind: positional
+            required: true
+            description: A project directory or a handoff README (Markdown) file.
+          - name: --json
+            kind: flag
+            description: Print the parsed contract JSON instead of a human summary.
+      - name: variants
+        summary: Collapse a component set's Prop=Value variant names into one typed component contract — each property with its value enum and a chosen default — feeding the design manifest and adherence lint. Flags malformed, inconsistent, or single-variant sets.
+        args:
+          - name: variants-file
+            kind: positional
+            required: true
+            description: A text file with one variant name (Prop=Value, ...) per line; blank lines and '#' comments are ignored.
+          - name: --component
+            kind: option
+            description: The component-set name (required).
+          - name: --json
+            kind: flag
+            description: Print the contract JSON instead of a human summary.
+      - name: tweak
+        summary: Read or update the EDITMODE parameter block an imported design carries (/*EDITMODE-BEGIN*/{...}/*EDITMODE-END*/). With no --set, lists the parameters; each --set rewrites only the bytes between the markers so an edit survives reload and shows in the diff.
+        args:
+          - name: --set
+            kind: option
+            description: Set one parameter as key=value (repeatable). value is a JSON number/true/false/null literal; anything else is stored as a JSON string.
+          - name: --out
+            kind: option
+            description: Write the rewritten artifact to this path (default is rewriting the file in place).
+          - name: --json
+            kind: flag
+            description: Print the parameters as a JSON object and exit.
     docs: reference/cli.md#design
 
   - name: design-debug
