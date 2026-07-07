@@ -74,6 +74,9 @@ endforeach()
 # SDK symbols too.
 if(PULP_BUILD_TESTS OR PULP_HAS_SKIA)
     add_executable(hot-reload-morph-capture capture_morph.cpp)
+    set_target_properties(hot-reload-morph-capture PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON)
     target_link_libraries(hot-reload-morph-capture PRIVATE pulp::view pulp::format)
     target_include_directories(hot-reload-morph-capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     if(NOT WIN32)

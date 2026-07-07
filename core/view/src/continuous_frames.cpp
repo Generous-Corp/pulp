@@ -9,6 +9,7 @@ namespace pulp::view {
 bool needs_continuous_frames(const View* view) {
     if (!view) return false;
     if (view->wants_continuous_repaint()) return true;
+    if (view->has_time_driven_gestures()) return true;
 
     if (auto* k = dynamic_cast<const Knob*>(view)) {
         if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())

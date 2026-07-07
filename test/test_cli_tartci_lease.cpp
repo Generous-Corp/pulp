@@ -415,3 +415,77 @@ TEST_CASE("build acquisition degrades to a bounded cap when host-profile fails")
     fs::remove_all(root);
 }
 #endif
+
+TEST_CASE("governance tier defaults to Tier 0 when no tartci store is present") {
+    // Leases explicitly off (or no reachable host store) → always the built-in
+    // bounded local builds. Orchard must be absent so Tier 2 does not preempt.
+    ScopedEnvVar no_orchard("TARTCI_ORCHARD_URL", std::nullopt);
+    ScopedEnvVar leases_off("PULP_TARTCI_LEASES", std::string{"0"});
+    ScopedEnvVar no_bin("PULP_TARTCI_BIN", std::nullopt);
+
+    const auto g = detect_build_governance();
+    REQUIRE(g.tier == 0);
+    REQUIRE(g.detail == "bounded local builds");
+}
+
+TEST_CASE("governance tier is Tier 0 when tartci bin points at a missing path") {
+    // A PULP_TARTCI_BIN that does not resolve must degrade, never throw: the
+    // host-profile exec fails and we fall back to Tier 0.
+    ScopedEnvVar no_orchard("TARTCI_ORCHARD_URL", std::nullopt);
+    ScopedEnvVar leases_on("PULP_TARTCI_LEASES", std::string{"1"});
+    ScopedEnvVar bad_bin("PULP_TARTCI_BIN",
+                         std::string{"/nonexistent/pulp-tartci-for-governance-test"});
+
+    const auto g = detect_build_governance();
+    REQUIRE(g.tier == 0);
+    REQUIRE(g.detail == "bounded local builds");
+}
+
+TEST_CASE("governance tier is Tier 2 when an orchard fleet is configured") {
+    ScopedEnvVar orchard("TARTCI_ORCHARD_URL", std::string{"https://orchard.example:8443"});
+    // Orchard preempts Tier 1 detection even if leases are enabled.
+    ScopedEnvVar leases_on("PULP_TARTCI_LEASES", std::string{"1"});
+    ScopedEnvVar no_bin("PULP_TARTCI_BIN", std::nullopt);
+
+    const auto g = detect_build_governance();
+    REQUIRE(g.tier == 2);
+    REQUIRE(g.detail == "orchard fleet");
+}
+
+#ifndef _WIN32
+TEST_CASE("governance tier is Tier 1 when a tartci host-profile succeeds") {
+    auto root = fs::temp_directory_path()
+        / ("pulp-tartci-gov-"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    const auto script = root / "tartci";
+    {
+        std::ofstream out(script);
+        out << "#!/usr/bin/env bash\n"
+               "if [ \"${1:-}\" = \"host-profile\" ]; then\n"
+               "  printf 'PULP_BUILD_JOBS=12\\n'\n"
+               "  printf 'PULP_BUILD_MEM_BUDGET_MB=81920\\n'\n"
+               "  exit 0\n"
+               "fi\n"
+               "echo \"unexpected command: ${1:-}\" >&2\n"
+               "exit 2\n";
+    }
+    fs::permissions(script,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                    fs::perm_options::replace);
+
+    ScopedEnvVar no_orchard("TARTCI_ORCHARD_URL", std::nullopt);
+    ScopedEnvVar leases_on("PULP_TARTCI_LEASES", std::string{"1"});
+    ScopedEnvVar fake_bin("PULP_TARTCI_BIN", script.string());
+
+    const auto g = detect_build_governance();
+    REQUIRE(g.tier == 1);
+    REQUIRE(g.jobs == 12);
+    REQUIRE(g.mem_budget_mb == 81920);
+    REQUIRE(g.detail.find("tartci host lease") != std::string::npos);
+    REQUIRE(g.detail.find("12 jobs") != std::string::npos);
+    REQUIRE(g.detail.find("80 GB budget") != std::string::npos);
+
+    fs::remove_all(root);
+}
+#endif

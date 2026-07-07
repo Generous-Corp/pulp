@@ -8,6 +8,7 @@
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/view/drag_drop.hpp>
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #include <algorithm>
 #include <atomic>
 #include <string>
@@ -181,6 +182,7 @@
 @interface PulpPluginUIView : UIView {
     std::unordered_map<void*, int> _touchIdMap;
     int _nextTouchId;
+    CADisplayLink* _gestureDisplayLink;
 }
 @property (nonatomic, assign) pulp::view::View* rootView;
 @end
@@ -194,8 +196,15 @@
         self.multipleTouchEnabled = YES;
         self.contentMode = UIViewContentModeRedraw;
         _nextTouchId = 0;
+        _gestureDisplayLink = nil;
     }
     return self;
+}
+
+- (void)dealloc {
+    [_gestureDisplayLink invalidate];
+    _gestureDisplayLink = nil;
+    [super dealloc];
 }
 
 - (int)stableIdForTouch:(UITouch*)touch {
@@ -268,12 +277,46 @@
     CGContextRestoreGState(ctx);
 }
 
+- (void)syncGestureDisplayLink {
+    const bool wants_frames =
+        self.rootView && self.rootView->has_time_driven_gestures();
+    if (wants_frames) {
+        if (_gestureDisplayLink) return;
+        _gestureDisplayLink = [CADisplayLink displayLinkWithTarget:self
+                                                           selector:@selector(gestureDisplayLinkTick:)];
+        [_gestureDisplayLink addToRunLoop:[NSRunLoop mainRunLoop]
+                                   forMode:NSRunLoopCommonModes];
+        return;
+    }
+    if (_gestureDisplayLink) {
+        [_gestureDisplayLink invalidate];
+        _gestureDisplayLink = nil;
+    }
+}
+
+- (void)gestureDisplayLinkTick:(CADisplayLink*)link {
+    (void)link;
+    if (!self.rootView) {
+        [self syncGestureDisplayLink];
+        return;
+    }
+    self.rootView->advance_gesture_recognizers();
+    [self setNeedsDisplay];
+    [self syncGestureDisplayLink];
+}
+
 // ── Touch handling → MouseEvent with stable pointer identity ────────────────
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (!self.rootView) return;
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:YES];
+        me.phase = pulp::view::MousePhase::press;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_down(me.position);
     }
 }
@@ -282,6 +325,12 @@
     if (!self.rootView) return;
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:YES];
+        me.phase = pulp::view::MousePhase::drag;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_drag(me.position);
     }
 }
@@ -290,6 +339,13 @@
     if (!self.rootView) return;
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:NO];
+        me.phase = pulp::view::MousePhase::release;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self removeTouchId:touch];
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_up(me.position);
         [self removeTouchId:touch];
     }
@@ -300,6 +356,13 @@
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:NO];
         me.is_cancelled = true;
+        me.phase = pulp::view::MousePhase::release;
+        if (self.rootView->dispatch_gesture_pointer_event(me)) {
+            [self removeTouchId:touch];
+            [self syncGestureDisplayLink];
+            [self setNeedsDisplay];
+            continue;
+        }
         self.rootView->on_mouse_cancel(me.position);
         [self removeTouchId:touch];
     }
@@ -710,6 +773,8 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
         const int pid = [self stableIdForTouch:touch];
         auto me = ios_mouse_event_from_touch(self, touch, pid, /*is_down=*/true,
                                              self.pointTransform);
+        me.phase = pulp::view::MousePhase::press;
+        if (root->dispatch_gesture_pointer_event(me)) continue;
         pulp::view::View* target = root->hit_test(me.window_position);
         if (!target) continue;
         _dragTargets[pid] = target;
@@ -742,12 +807,14 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
     for (UITouch* touch in touches) {
       try {
         const int pid = [self stableIdForTouch:touch];
+        auto me = ios_mouse_event_from_touch(self, touch, pid, /*is_down=*/true,
+                                             self.pointTransform);
+        me.phase = pulp::view::MousePhase::drag;
+        if (root->dispatch_gesture_pointer_event(me)) continue;
         auto it = _dragTargets.find(pid);
         if (it == _dragTargets.end()) continue;
         pulp::view::View* target = it->second;
         if (!ios_view_in_tree(target, root)) { _dragTargets.erase(it); continue; }
-        auto me = ios_mouse_event_from_touch(self, touch, pid, /*is_down=*/true,
-                                             self.pointTransform);
         me.position = ios_root_to_local(me.window_position, target);
         target->on_mouse_drag(me.position);  // legacy single-pointer native path
         // Identity-preserving pointermove (real pointerId + pointerType:'touch')
@@ -785,10 +852,22 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
         const int pid = [self stableIdForTouch:touch];
         auto it = _dragTargets.find(pid);
         pulp::view::View* target = (it != _dragTargets.end()) ? it->second : nullptr;
+        if (root) {
+            auto gesture_me = ios_mouse_event_from_touch(self, touch, pid, /*is_down=*/false,
+                                                        self.pointTransform);
+            gesture_me.is_cancelled = cancelled;
+            gesture_me.phase = pulp::view::MousePhase::release;
+            if (root->dispatch_gesture_pointer_event(gesture_me)) {
+                if (it != _dragTargets.end()) _dragTargets.erase(it);
+                [self removeTouchId:touch];
+                continue;
+            }
+        }
         if (root && target && ios_view_in_tree(target, root)) {
             auto me = ios_mouse_event_from_touch(self, touch, pid, /*is_down=*/false,
                                                  self.pointTransform);
             me.is_cancelled = cancelled;
+            me.phase = pulp::view::MousePhase::release;
             me.position = ios_root_to_local(me.window_position, target);
             // Distinct native cancel path so widgets can roll back in-progress
             // gestures instead of treating a cancel as a commit.
@@ -950,10 +1029,15 @@ public:
         if (idle_callback_) idle_callback_();
 
         const bool tick_subscribers = frame_clock_.has_active_subscribers();
-        const bool animate = tree_has_active_css_animation(&root_);
-        if (tick_subscribers || animate) {
-            frame_clock_.tick(1.0f / 60.0f);
-            root_.tick_animations(1.0f / 60.0f);
+        const bool animate_css = tree_has_active_css_animation(&root_);
+        const bool gesture_work = root_.has_time_driven_gestures();
+        if (tick_subscribers || animate_css || gesture_work) {
+            if (tick_subscribers)
+                frame_clock_.tick(1.0f / 60.0f);
+            if (animate_css)
+                root_.tick_animations(1.0f / 60.0f);
+            if (gesture_work)
+                root_.advance_gesture_recognizers();
             needs_repaint_.store(true, std::memory_order_relaxed);
         }
         if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {

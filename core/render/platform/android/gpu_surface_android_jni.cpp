@@ -4,11 +4,12 @@
 // Owns the Kotlin-facing `Java_com_pulp_render_*` symbol surface for the GPU
 // host. Simple setters and touch down/move/up events forward directly to the
 // `android_*` entry points declared in gpu_surface_android_internal.hpp;
-// nativeOnTouchCancel clears capture state directly. Surface creation,
-// destruction, and file drops also manage JNI references, drag backend state,
-// and Java-array marshalling at this boundary. Lifecycle exports bridge C++
-// exceptions to Java; nativeOnDrop logs instead of throwing, and trivial
-// setters/touch forwarders rely on their callees to stay non-throwing.
+// nativeOnTouchCancel routes through android_touch_cancel so recognizers see
+// a cancelled release before capture clears. Surface creation, destruction,
+// and file drops also manage JNI references, drag backend state, and Java-array
+// marshalling at this boundary. Lifecycle exports bridge C++ exceptions to
+// Java; nativeOnDrop logs instead of throwing, and trivial setters/touch
+// forwarders rely on their callees to stay non-throwing.
 
 #if defined(__ANDROID__)
 
@@ -187,8 +188,9 @@ Java_com_pulp_render_PulpSurfaceView_nativeOnTouchUp(
 }
 
 JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnTouchCancel(JNIEnv*, jobject) {
-    pulp::render::g_captured_view = nullptr;
+Java_com_pulp_render_PulpSurfaceView_nativeOnTouchCancel(
+    JNIEnv*, jobject, jint pointerId, jfloat x, jfloat y) {
+    pulp::render::android_touch_cancel(pointerId, x, y);
 }
 
 // Native file drop — Kotlin's OnDragListener resolved the drag's ClipData

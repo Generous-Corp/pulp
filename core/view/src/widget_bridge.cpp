@@ -592,7 +592,7 @@ View* WidgetBridge::widget(const std::string& id) {
         if (it->second != nullptr && subtree_contains_view(root_, it->second)) {
             return it->second;
         }
-        widgets_.erase(it);
+        widgets_.erase(it); forget_widget_registrations(id);
     }
 
     if (auto* live = find_view_by_id(root_, id)) {
@@ -702,7 +702,7 @@ void WidgetBridge::clear() {
         auto removed = root_.remove_child(child);
         forget_widget_subtree(removed.get());
     }
-    widgets_.clear();
+    widgets_.clear(); pointer_registered_.clear(); wheel_registered_.clear(); gesture_recognizer_registered_.clear();
 }
 
 void WidgetBridge::snapshot_values(std::unordered_map<std::string, float>& out) const {

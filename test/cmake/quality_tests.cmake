@@ -42,6 +42,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME pr-check-triage-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_check_triage.py")
 
+    # Version-at-land (T1.1): single-writer version assignment from Version-Bump
+    # intent trailers. Pure aggregate_intent / plan_assignments logic (the bot
+    # is dry-run only at this stage).
+    add_test(NAME version-at-land-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_version_at_land.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest

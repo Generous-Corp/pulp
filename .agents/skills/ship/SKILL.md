@@ -797,24 +797,23 @@ standalone artifacts do not ship the dev audio-probe surface. Keep
 and `tools/scripts/release-cli-local.sh` in sync when changing release
 configure flags.
 
-### Shipyard pin drift between local tooling and release workflows
+### Shipyard pin drift between local tooling and tag sync
 
 Pulp's release automation depends on the pinned Shipyard CLI in two places:
 
 - `tools/shipyard.toml` is the source-of-truth pin for local installs and
   `shipyard pr`.
-- `.github/workflows/release-cli.yml` and `.github/workflows/post-tag-sync.yml`
-  carry a `SHIPYARD_VERSION` env used by the release-side workflows.
+- `.github/workflows/post-tag-sync.yml` carries a `SHIPYARD_VERSION` env for
+  tag-time changelog regeneration.
 
-If you bump the Shipyard pin, update both workflows in the same PR and keep the
-existing string format in each file (`v0.56.2` in `tools/shipyard.toml`,
-`0.56.2` in the workflow envs — the `v` prefix is intentional only on the
-toml). Otherwise local shipping and tag-time release jobs quietly diverge
-onto different Shipyard versions, which is how release-only behavior
-changes get missed. Shipyard v0.55.0+ also ships `shipyard update`; use
-`shipyard update --check --json` to report local drift and
-`shipyard update --to v0.56.2` (or newer) before cutting or debugging release
-jobs.
+If you bump the Shipyard pin, update `post-tag-sync.yml` in the same PR and keep
+the existing string format in each file (`v0.56.2` in `tools/shipyard.toml`,
+`0.56.2` in the workflow env — the `v` prefix is intentional only on the toml).
+Otherwise local shipping and tag-time changelog regeneration quietly diverge
+onto different Shipyard versions, which is how release-only behavior changes get
+missed. Shipyard v0.55.0+ also ships `shipyard update`; use `shipyard update
+--check --json` to report local drift and `shipyard update --to v0.56.2` (or
+newer) before cutting or debugging release jobs.
 
 ### VST3 SDK tag drift in `sign-and-release.yml`
 
@@ -1004,6 +1003,12 @@ DRAFT and `release-publish.yml` publishes it once BOTH succeed. So a release onl
 appears once the macOS sign/notarize leg is green too; a red sign-and-release leg
 leaves the release a draft. See the `ci` skill's coordinator note for the full
 mechanism and debugging steps.
+
+`release-cli.yml` also owns the Release body: it prepends grouped Highlights
+from `tools/scripts/compose_release_notes.py` to GitHub's generated "What's
+Changed" / "Full Changelog" block, then appends the Install section. Do not route
+that user-facing body through the deleted in-tree changelog generator; Shipyard's
+`shipyard changelog regenerate` path is only for `CHANGELOG.md`.
 
 ## One installer for a plugin: standalone + plugins + diagnostics (don't ship them separately)
 

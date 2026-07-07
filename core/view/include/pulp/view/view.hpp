@@ -20,7 +20,7 @@ class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
 class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param accessor
 class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
-
+class GestureArbiter; class GestureRecognizer;
 class FrameClock;
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
 
@@ -29,11 +29,6 @@ struct FileDragRequest;  // pulp/view/drag_drop.hpp
 class View {
 public:
     View();
-    // Defined out-of-line in view.cpp to slim the preprocessed-byte size of
-    // <pulp/view/view.hpp>. Stays virtual + public: the vtable slot, calling
-    // convention, and SDK contract are unchanged. Body reaches the
-    // active_overlay_ / focused_input_ statics so destruction clears any global
-    // slot held by this View.
     virtual ~View();
 
     View(const View&) = delete;
@@ -231,7 +226,11 @@ public:
     virtual void on_gesture_event(const GestureEvent& event) {
         if (on_gesture_cb) on_gesture_cb(event);
     }
-
+    GestureRecognizer& add_gesture_recognizer(std::unique_ptr<GestureRecognizer> recognizer);
+    void clear_gesture_recognizers(); size_t gesture_recognizer_count() const { return gesture_recognizers_.size(); }
+    GestureRecognizer* gesture_recognizer_at(size_t index); const GestureRecognizer* gesture_recognizer_at(size_t index) const;
+    bool dispatch_gesture_pointer_event(const MouseEvent& root_event, double timestamp_seconds = -1.0);
+    void advance_gesture_recognizers(double timestamp_seconds = -1.0); bool has_time_driven_gestures() const;
     // ── Pointer capture (W3C setPointerCapture) ─────────────────────────
 
     /// Capture pointer events for this view — all events for pointer_id
@@ -1726,6 +1725,7 @@ private:
 
     // Pointer capture: pointer_id → this view receives all events for that pointer
     std::vector<int> captured_pointers_;
+    std::vector<std::unique_ptr<GestureRecognizer>> gesture_recognizers_; std::unique_ptr<GestureArbiter> gesture_arbiter_;
 
     // CSS-style typography inheritance. Unset by default; only
     // populated when the bridge / app calls a set_inheritable_* setter.

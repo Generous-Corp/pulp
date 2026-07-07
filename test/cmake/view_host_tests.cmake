@@ -57,6 +57,9 @@ pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
 # ViewSize::aspect_ratio field
 pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
 
+# Declarative gesture recognizers and arbiter state.
+pulp_add_test_suite(pulp-test-gesture-recognizer LIBRARIES pulp::view)
+
 # WindowHost::set_design_viewport pure-math
 # coverage. Locks down the scale + letterbox transform that the mac
 # GPU host (and any other future platform host) uses to fit
@@ -72,6 +75,11 @@ pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 # bounding-box union, and the full-repaint escalations (no-arg, transform,
 # empty rect, sticky-full).
 pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
+
+# Host-side consumption of the accumulated dirty region: WindowHost::paint_root
+# clips the canvas to pending_dirty_bounds() for a bounded frame and paints
+# unclipped for a full one, clearing the pending region after each paint.
+pulp_add_test_suite(pulp-test-dirty-region-consumption LIBRARIES pulp::view)
 
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the

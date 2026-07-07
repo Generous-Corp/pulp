@@ -938,6 +938,13 @@ build entirely, use `PULP_SKIP_DIFF_COVER=1`, which exits before any
 configure/build while skill-sync / version-bump / compat gates still run. Reach
 for `PULP_SKIP_PREPUSH=1` only when those other gates must be skipped too.
 
+**Looks-hung vs actually-failed — two different symptoms.** A push that *looks*
+hung right after this gate is the diff-cover build compiling, not the network —
+wait for it. A push that genuinely *fails* with `Connection closed by remote
+host` (or a similar abrupt drop) is a transient network blip, not a gate
+rejection — just retry the push, or use `PULP_SKIP_DIFF_COVER=1` if the
+diff-cover gate has already passed once and only the transport flaked.
+
 The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
@@ -1329,3 +1336,34 @@ with auto-cleaning the warm `build-<key>` dirs on churn (see the
 GitHub-hosted today). Until that lands, they stay on `macos-15`.
 
 See `docs/guides/local-ci.md` for setup.
+
+#### Build resource governance (tiers)
+
+Two shared Macs melted in July 2026 — one CPU-bound (2026-07-06), one
+memory-bound/OOM (2026-07-07) — from validation builds racing agent builds
+with no shared budget. The fix is a per-host build-resource **governor**, now
+live on m3/m5/m1, layered in tiers:
+
+- **Tier 0 — always, zero config (every user).** The `pulp` CLI bounds build
+  parallelism to `min(cores, RAM_budget / 1.5 GiB)` on every path it emits, so a
+  build can never fan out unbounded on a shared machine (the "Builds are always
+  bounded" contract note above is the authoritative statement — this is the same
+  bound). `PULP_BUILD_MEM_BUDGET_MB` (fed from `tartci host-profile`) overrides
+  the RAM axis.
+- **Tier 1 — tartci per-host weighted lease governor.** On a host running a
+  tartci lease store, builds and VMs acquire a core+memory lease *before*
+  starting. Admission is `min(core-budget, memory-budget)`: a build that would
+  exhaust RAM is refused even when CPU is free. Shipyard's `local` mac backend —
+  which does NOT go through the `pulp` CLI — is routed through
+  `tools/ci/governed-build.sh`, which acquires a lease, bounds `-j`, and releases
+  on exit (falling back to the Tier-0 bound, never failing the build, when tartci
+  is absent or the lease is denied).
+- **Tier 2 — Orchard fleet VM placement (shadow phase).** Presence of a
+  configured fleet endpoint (`TARTCI_ORCHARD_URL`); wired but placing nothing yet.
+
+Every build path is bounded — the CLI (Tier 0), the shipyard-local wrapper, and
+the VM runners (Tier 1 leases). `pulp status` prints a `Build governance: Tier N
+(…)` line reporting which layer bounds the current host. A bare
+`--parallel`/`-j` anywhere in the repo is rejected by
+`tools/scripts/build_parallelism_guard.py`. Host-side tartci details (lease
+store, memory axis, role profiles) live in `docs/guides/local-ci.md`.

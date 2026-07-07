@@ -112,6 +112,32 @@ static bool wait_for_async_result(WidgetBridge& bridge, const std::function<bool
     return done();
 }
 
+static MouseEvent bridge_gesture_pointer_event(Point p,
+                                               MousePhase phase,
+                                               double* timestamp,
+                                               double advance = 0.05,
+                                               int pointer_id = 0) {
+    *timestamp += advance;
+    MouseEvent event;
+    event.position = p;
+    event.window_position = p;
+    event.button = MouseButton::left;
+    event.is_down = phase != MousePhase::release;
+    event.phase = phase;
+    event.pointer_id = pointer_id;
+    return event;
+}
+
+static MouseEvent bridge_gesture_touch_event(Point p,
+                                             MousePhase phase,
+                                             int pointer_id,
+                                             double* timestamp,
+                                             double advance = 0.05) {
+    auto event = bridge_gesture_pointer_event(p, phase, timestamp, advance, pointer_id);
+    event.pointer_type = PointerType::touch;
+    return event;
+}
+
 #if PULP_TEST_HAS_GPU_SURFACE
 class TestGpuSurface final : public pulp::render::GpuSurface {
 public:
@@ -1615,6 +1641,302 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
 
     bridge.forward_key_event(65, 18, true);
     REQUIRE(engine.evaluate("shortcut_count").getWithDefault<int>(0) == 1);
+}
+
+TEST_CASE("WidgetBridge native gesture recognizers dispatch real pointer positions",
+          "[view][bridge][events]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var tap_client_x = -1;
+        var tap_offset_x = -1;
+        var tap_count = 0;
+        var long_client_x = -1;
+        var long_offset_x = -1;
+
+        createLabel('surface', 'Surface', '');
+        on('surface', 'tap', function(e) {
+            tap_client_x = e.clientX;
+            tap_offset_x = e.offsetX;
+            tap_count = e.tapCount;
+        });
+        on('surface', 'longpress', function(e) {
+            long_client_x = e.clientX;
+            long_offset_x = e.offsetX;
+        });
+        registerTapGesture('surface');
+        registerLongPressGesture('surface');
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    surface->set_bounds({10, 20, 100, 80});
+
+    MouseEvent down{};
+    down.phase = MousePhase::press;
+    down.is_down = true;
+    down.button = MouseButton::left;
+    down.position = {42.0f, 64.0f};
+    down.window_position = down.position;
+    REQUIRE(root.dispatch_gesture_pointer_event(down, 0.10));
+
+    MouseEvent up = down;
+    up.phase = MousePhase::release;
+    up.is_down = false;
+    REQUIRE(root.dispatch_gesture_pointer_event(up, 0.15));
+
+    REQUIRE_THAT(engine.evaluate("tap_client_x").getWithDefault<double>(0.0),
+                 WithinAbs(42.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("tap_offset_x").getWithDefault<double>(0.0),
+                 WithinAbs(32.0, 0.001));
+    REQUIRE(engine.evaluate("tap_count").getWithDefault<int>(0) == 1);
+
+    down.pointer_id = 7;
+    down.position = {55.0f, 70.0f};
+    down.window_position = down.position;
+    REQUIRE(root.dispatch_gesture_pointer_event(down, 1.00));
+    root.advance_gesture_recognizers(1.60);
+
+    REQUIRE_THAT(engine.evaluate("long_client_x").getWithDefault<double>(0.0),
+                 WithinAbs(55.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("long_offset_x").getWithDefault<double>(0.0),
+                 WithinAbs(45.0, 0.001));
+}
+
+TEST_CASE("WidgetBridge native recognizer registrations dispatch gesture-specific JS payloads",
+          "[view][bridge][events]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var double_tap_count = -1;
+        var pan_log = [];
+        var swipe_velocity_x = 0;
+        var fling_velocity_x = 0;
+        var pinch_types = [];
+        var pinch_scale = -1;
+        var pinch_delta_scale = -1;
+        var pinch_start_client_x = -1;
+        var rotate_types = [];
+        var rotate_rotation = 0;
+        var rotate_delta_rotation = 0;
+        var rotate_start_offset_x = -1;
+
+        createLabel('double_surface', 'Double', '');
+        createLabel('pan_surface', 'Pan', '');
+        createLabel('swipe_surface', 'Swipe', '');
+        createLabel('fling_surface', 'Fling', '');
+        createLabel('multi_surface', 'Multi', '');
+
+        on('double_surface', 'doubletap', function(e) {
+            double_tap_count = e.tapCount;
+        });
+        on('pan_surface', 'panstart', function(e) {
+            pan_log.push('start:' + Math.round(e.translationX));
+        });
+        on('pan_surface', 'panchange', function(e) {
+            pan_log.push('change:' + Math.round(e.translationX));
+        });
+        on('pan_surface', 'panend', function(e) {
+            pan_log.push('end:' + Math.round(e.translationX));
+        });
+        on('swipe_surface', 'swipe', function(e) {
+            swipe_velocity_x = e.velocityX;
+        });
+        on('fling_surface', 'fling', function(e) {
+            fling_velocity_x = e.velocityX;
+        });
+        on('multi_surface', 'pinchstart', function(e) {
+            pinch_types.push('start');
+            pinch_scale = e.scale;
+            pinch_delta_scale = e.deltaScale;
+            pinch_start_client_x = e.clientX;
+        });
+        on('multi_surface', 'pinchchange', function(e) {
+            pinch_types.push('change');
+            pinch_scale = e.scale;
+            pinch_delta_scale = e.deltaScale;
+        });
+        on('multi_surface', 'pinchend', function() {
+            pinch_types.push('end');
+        });
+        on('multi_surface', 'rotatestart', function(e) {
+            rotate_types.push('start');
+            rotate_rotation = e.rotation;
+            rotate_delta_rotation = e.deltaRotation;
+            rotate_start_offset_x = e.offsetX;
+        });
+        on('multi_surface', 'rotatechange', function(e) {
+            rotate_types.push('change');
+            rotate_rotation = e.rotation;
+            rotate_delta_rotation = e.deltaRotation;
+        });
+        on('multi_surface', 'rotateend', function() {
+            rotate_types.push('end');
+        });
+
+        registerDoubleTapGesture('double_surface');
+        registerPanGesture('pan_surface');
+        registerSwipeGesture('swipe_surface');
+        registerFlingGesture('fling_surface');
+        registerPinchGesture('multi_surface');
+        registerRotateGesture('multi_surface');
+    )");
+
+    auto* double_surface = bridge.widget("double_surface");
+    auto* pan_surface = bridge.widget("pan_surface");
+    auto* swipe_surface = bridge.widget("swipe_surface");
+    auto* fling_surface = bridge.widget("fling_surface");
+    auto* multi_surface = bridge.widget("multi_surface");
+    REQUIRE(double_surface != nullptr);
+    REQUIRE(pan_surface != nullptr);
+    REQUIRE(swipe_surface != nullptr);
+    REQUIRE(fling_surface != nullptr);
+    REQUIRE(multi_surface != nullptr);
+
+    double_surface->set_bounds({10, 10, 60, 50});
+    pan_surface->set_bounds({90, 10, 70, 60});
+    swipe_surface->set_bounds({170, 10, 90, 60});
+    fling_surface->set_bounds({10, 90, 90, 60});
+    multi_surface->set_bounds({150, 100, 140, 110});
+
+    REQUIRE(double_surface->gesture_recognizer_count() == 1);
+    REQUIRE(pan_surface->gesture_recognizer_count() == 1);
+    REQUIRE(swipe_surface->gesture_recognizer_count() == 1);
+    REQUIRE(fling_surface->gesture_recognizer_count() == 1);
+    REQUIRE(multi_surface->gesture_recognizer_count() == 2);
+
+    double t = 0.0;
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({30, 30}, MousePhase::press, &t, 0.05, 11), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({30, 30}, MousePhase::release, &t, 0.05, 11), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({30, 30}, MousePhase::press, &t, 0.10, 11), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({30, 30}, MousePhase::release, &t, 0.05, 11), t));
+    REQUIRE(engine.evaluate("double_tap_count").getWithDefault<int>(0) == 2);
+
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({100, 30}, MousePhase::press, &t, 0.20, 12), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({120, 35}, MousePhase::drag, &t, 0.05, 12), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({138, 44}, MousePhase::drag, &t, 0.05, 12), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({138, 44}, MousePhase::release, &t, 0.05, 12), t));
+    REQUIRE(engine.evaluate("pan_log.join('|')").toString() == "start:20|change:38|end:38");
+
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({185, 35}, MousePhase::press, &t, 0.20, 13), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({225, 35}, MousePhase::drag, &t, 0.05, 13), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({250, 35}, MousePhase::release, &t, 0.05, 13), t));
+    REQUIRE(engine.evaluate("swipe_velocity_x").getWithDefault<double>(0.0) > 300.0);
+
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({25, 115}, MousePhase::press, &t, 0.20, 14), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({80, 115}, MousePhase::drag, &t, 0.05, 14), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_pointer_event({130, 115}, MousePhase::release, &t, 0.05, 14), t));
+    REQUIRE(engine.evaluate("fling_velocity_x").getWithDefault<double>(0.0) > 800.0);
+
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_touch_event({180, 150}, MousePhase::press, 31, &t, 0.20), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_touch_event({240, 150}, MousePhase::press, 32, &t, 0.05), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_touch_event({180, 120}, MousePhase::drag, 31, &t, 0.05), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_touch_event({250, 170}, MousePhase::drag, 32, &t, 0.05), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_touch_event({180, 120}, MousePhase::release, 31, &t, 0.05), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        bridge_gesture_touch_event({250, 170}, MousePhase::release, 32, &t, 0.05), t));
+
+    REQUIRE(engine.evaluate("pinch_types.join('|')").toString() == "start|change|end");
+    REQUIRE(engine.evaluate("rotate_types.join('|')").toString() == "start|change|end");
+    REQUIRE(engine.evaluate("pinch_scale").getWithDefault<double>(0.0) > 1.20);
+    REQUIRE(engine.evaluate("pinch_delta_scale").getWithDefault<double>(0.0) > 0.0);
+    REQUIRE_THAT(engine.evaluate("pinch_start_client_x").getWithDefault<double>(0.0),
+                 WithinAbs(210.0, 0.001));
+    const auto rotation = engine.evaluate("rotate_rotation").getWithDefault<double>(0.0);
+    REQUIRE((rotation > 0.10 || rotation < -0.10));
+    REQUIRE(engine.evaluate("rotate_delta_rotation").getWithDefault<double>(0.0) != 0.0);
+    REQUIRE_THAT(engine.evaluate("rotate_start_offset_x").getWithDefault<double>(0.0),
+                 WithinAbs(60.0, 0.001));
+}
+
+TEST_CASE("WidgetBridge remounts native event registrations for reused widget ids",
+          "[view][bridge][events][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var pointer_downs = 0;
+        var wheel_events = 0;
+        var taps = 0;
+        function installSurfaceCallbacks() {
+            on('surface', 'pointerdown', function() { pointer_downs += 1; });
+            on('surface', 'wheel', function() { wheel_events += 1; });
+            on('surface', 'tap', function() { taps += 1; });
+        }
+
+        createLabel('surface', 'Surface', '');
+        installSurfaceCallbacks();
+        registerPointer('surface');
+        registerWheel('surface');
+        registerTapGesture('surface');
+
+        removeWidget('surface');
+
+        createLabel('surface', 'Surface again', '');
+        installSurfaceCallbacks();
+        registerPointer('surface');
+        registerWheel('surface');
+        registerTapGesture('surface');
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    surface->set_bounds({10, 20, 100, 80});
+    REQUIRE(surface->gesture_recognizer_count() == 1);
+
+    MouseEvent down{};
+    down.phase = MousePhase::press;
+    down.is_down = true;
+    down.button = MouseButton::left;
+    down.position = {42.0f, 64.0f};
+    down.window_position = down.position;
+    surface->on_mouse_event(down);
+    REQUIRE(engine.evaluate("pointer_downs").getWithDefault<int>(0) == 1);
+
+    MouseEvent wheel{};
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = -3.0f;
+    wheel.position = {42.0f, 64.0f};
+    wheel.window_position = wheel.position;
+    surface->on_mouse_event(wheel);
+    REQUIRE(engine.evaluate("wheel_events").getWithDefault<int>(0) == 1);
+
+    REQUIRE(root.dispatch_gesture_pointer_event(down, 0.10));
+    MouseEvent up = down;
+    up.phase = MousePhase::release;
+    up.is_down = false;
+    REQUIRE(root.dispatch_gesture_pointer_event(up, 0.15));
+    REQUIRE(engine.evaluate("taps").getWithDefault<int>(0) == 1);
 }
 
 TEST_CASE("WidgetBridge style and layout setters update native view state",

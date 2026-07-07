@@ -63,6 +63,23 @@ uint16_t modifiers_from_ns_flags(NSEventModifierFlags flags) {
     return m;
 }
 
+bool dispatch_mac_gesture_pointer_event(pulp::view::View* root,
+                                        pulp::view::Point pt,
+                                        NSEvent* event,
+                                        pulp::view::MousePhase phase,
+                                        bool is_down) {
+    if (!root) return false;
+    pulp::view::MouseEvent gesture_event;
+    gesture_event.position = pt;
+    gesture_event.window_position = pt;
+    gesture_event.button = pulp::view::MouseButton::left;
+    gesture_event.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+    gesture_event.is_down = is_down;
+    gesture_event.phase = phase;
+    gesture_event.click_count = static_cast<int>(event.clickCount);
+    return root->dispatch_gesture_pointer_event(gesture_event);
+}
+
 pulp::view::Point to_local(pulp::view::Point pos, pulp::view::View* target, pulp::view::View* root) {
     // pulp-internal #69 — convert window-space `pos` into `target`'s
     // local-pre-scale coordinates, accounting for any ancestor's

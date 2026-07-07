@@ -1,0 +1,68 @@
+name: Version-at-Land (single-writer, dry-run)
+
+# Single-writer version assignment on main (T1.1 — see
+# planning/2026-07-07-parallel-merge-land-coordination.md).
+#
+# STAGE 1 (this file): DRY-RUN. On every push to main, drain the range since the
+# last `Version-Bump-Applied` marker, compute what version each surface WOULD be
+# assigned from the `Version-Bump:` intent trailers, and log it. It writes
+# nothing and commits nothing — it changes NOTHING about releases, so it is safe
+# to land while PRs still hand-bump. Its purpose is to prove the assignment is
+# correct against the real (still hand-written) bumps before we flip to --apply.
+#
+# The concurrency group serialises runs (cancel-in-progress: false) so that when
+# it flips to writing, two near-simultaneous merges drain in order rather than
+# racing. Per Codex review: a GitHub concurrency group is a serialiser, not a
+# durable FIFO — the apply-stage bot must still recompute from fresh origin/main
+# and push with --ff-only + retry. That hardening lands with the --apply flip,
+# not here.
+
+on:
+  push:
+    branches: [main]
+    # Only when a version-relevant surface could have moved. Kept broad on
+    # purpose in dry-run; narrowed with the config's trigger_paths at flip time.
+    paths:
+      - 'core/**'
+      - 'tools/**'
+      - '.claude-plugin/**'
+      - '.agents/skills/**'
+      - '.claude/commands/**'
+      - 'hooks/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: version-at-land
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  drain-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need history to find the last applied marker
+
+      - name: Compute drain base (last Version-Bump-Applied marker)
+        id: base
+        run: |
+          # The last commit the bot already processed. If none exists yet
+          # (before the first apply), fall back to the previous commit so the
+          # dry-run has a non-empty, bounded range to report on.
+          marker=$(git log --grep='Version-Bump-Applied' -1 --format=%H || true)
+          if [ -z "$marker" ]; then
+            marker=$(git rev-parse HEAD~1)
+            echo "no applied-marker yet; using HEAD~1 as the dry-run base" >&2
+          fi
+          echo "ref=$marker" >> "$GITHUB_OUTPUT"
+
+      - name: Dry-run version assignment
+        run: |
+          python3 tools/scripts/version_at_land.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --head HEAD \
+              --mode dry-run
+          echo "::notice::version-at-land dry-run complete (no files written)."

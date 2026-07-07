@@ -5,9 +5,9 @@
 // header declares the render entry points that the JNI bridge calls after any
 // Java-boundary work it owns, such as GlobalRef management, ANativeWindow
 // conversion, drag-backend registration, and drop-path marshalling.
-// nativeOnTouchCancel clears the shared touch-capture pointer directly; that
-// pointer (g_captured_view) is the only cross-TU state exposed here. All paint
-// and lifecycle state stays private to gpu_surface_android.cpp.
+// nativeOnTouchCancel routes through android_touch_cancel() before clearing
+// shared legacy capture state. All paint and lifecycle state stays private to
+// gpu_surface_android.cpp.
 //
 // PRIVATE: lives under core/render/platform/android/, not the public
 // include tree. Not part of the installed SDK surface — do not reference
@@ -48,6 +48,7 @@ void android_surface_destroyed();
 void android_touch_down(int pointer_id, float px_x, float px_y, float pressure);
 void android_touch_move(int pointer_id, float px_x, float px_y, float pressure);
 void android_touch_up(int pointer_id, float px_x, float px_y);
+void android_touch_cancel(int pointer_id, float px_x, float px_y);
 
 // Native file drop into the View hierarchy. `paths` are absolute filesystem
 // paths the Kotlin layer resolved from the drag's ClipData content URIs
@@ -56,9 +57,8 @@ void android_touch_up(int pointer_id, float px_x, float px_y);
 // dispatch core (dispatch_drop) — the same path the mac/win/linux/iOS hosts use.
 void android_on_drop(const std::vector<std::string>& paths, float px_x, float px_y);
 
-// Shared touch-capture pointer. Defined in gpu_surface_android.cpp; cleared
-// directly by the nativeOnTouchCancel JNI export. Non-owning — valid only
-// while g_root_view exists.
+// Shared touch-capture pointer. Defined in gpu_surface_android.cpp. Non-owning
+// — valid only while g_root_view exists.
 extern pulp::view::View* g_captured_view;
 
 }  // namespace pulp::render

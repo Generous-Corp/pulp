@@ -53,6 +53,14 @@ claimOverlay	events	function	core/view/src/widget_bridge/event_api.cpp
 releaseOverlay	events	function	core/view/src/widget_bridge/event_api.cpp
 registerPointer	events	function	core/view/src/widget_bridge/event_api.cpp
 registerGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerTapGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerDoubleTapGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerLongPressGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerPanGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerSwipeGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerFlingGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerPinchGesture	events	function	core/view/src/widget_bridge/event_api.cpp
+registerRotateGesture	events	function	core/view/src/widget_bridge/event_api.cpp
 nativeSetPointerCapture	events	function	core/view/src/widget_bridge/event_api.cpp
 nativeReleasePointerCapture	events	function	core/view/src/widget_bridge/event_api.cpp
 enableInspectClick	events	function	core/view/src/widget_bridge/event_api.cpp

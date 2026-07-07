@@ -122,7 +122,14 @@ interface PointerLikeData {
     altKey?: boolean;
     metaKey?: boolean;
     scale?: number;
+    deltaScale?: number;
     rotation?: number;
+    deltaRotation?: number;
+    translationX?: number;
+    translationY?: number;
+    velocityX?: number;
+    velocityY?: number;
+    tapCount?: number;
     // Wheel event fields — bridge sends {deltaX, deltaY, clientX, clientY}
     // for `wheel` since the dispatch object-form change.
     deltaX?: number;
@@ -160,7 +167,14 @@ export interface SyntheticEvent {
     metaKey: boolean;
     // Gesture (ignored unless gesture event)
     scale: number;
+    deltaScale: number;
     rotation: number;
+    deltaRotation: number;
+    translationX: number;
+    translationY: number;
+    velocityX: number;
+    velocityY: number;
+    tapCount: number;
     // Wheel event — bridge sends {deltaX, deltaY, clientX, clientY}
     // as an object. Without these fields React JSX wheel handlers such
     // as `e.deltaY > 0 ? zoomOut() : zoomIn()` read NaN.
@@ -213,7 +227,9 @@ export function makeSyntheticEvent(
         clientX: 0, clientY: 0, offsetX: 0, offsetY: 0, button: 0,
         pointerId: 0, pointerType: 'mouse', isPrimary: true, pressure: 0.5,
         ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
-        scale: 1, rotation: 0,
+        scale: 1, deltaScale: 0, rotation: 0, deltaRotation: 0,
+        translationX: 0, translationY: 0, velocityX: 0, velocityY: 0,
+        tapCount: 0,
         deltaX: 0, deltaY: 0, deltaZ: 0, deltaMode: 0,
         key: '', keyCode: 0,
     };
@@ -244,7 +260,14 @@ export function makeSyntheticEvent(
         if (typeof d.altKey === 'boolean') evt.altKey = d.altKey;
         if (typeof d.metaKey === 'boolean') evt.metaKey = d.metaKey;
         if (typeof d.scale === 'number') evt.scale = d.scale;
+        if (typeof d.deltaScale === 'number') evt.deltaScale = d.deltaScale;
         if (typeof d.rotation === 'number') evt.rotation = d.rotation;
+        if (typeof d.deltaRotation === 'number') evt.deltaRotation = d.deltaRotation;
+        if (typeof d.translationX === 'number') evt.translationX = d.translationX;
+        if (typeof d.translationY === 'number') evt.translationY = d.translationY;
+        if (typeof d.velocityX === 'number') evt.velocityX = d.velocityX;
+        if (typeof d.velocityY === 'number') evt.velocityY = d.velocityY;
+        if (typeof d.tapCount === 'number') evt.tapCount = d.tapCount;
         if (typeof d.key === 'string') evt.key = d.key;
         if (typeof d.keyCode === 'number') evt.keyCode = d.keyCode;
     }

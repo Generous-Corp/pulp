@@ -198,6 +198,91 @@ int resolve_local_build_jobs() {
     return env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
 }
 
+namespace {
+
+// Parse a plain non-negative integer (a shell-assignment value that is a byte /
+// MB count, not a job count) without the job-ceiling clamp parse_positive_int
+// applies. Returns 0 for anything unparseable.
+long long parse_nonneg_ll(const std::string& text) {
+    if (text.empty()) return 0;
+    char* end = nullptr;
+    const long long value = std::strtoll(text.c_str(), &end, 10);
+    if (end != text.c_str() + text.size() || value < 0) return 0;
+    return value;
+}
+
+// Compose the parenthetical detail for a Tier-1 host lease, folding in the
+// advertised job/RAM budget when the profile carries one.
+std::string tier1_detail(int jobs, long long mem_budget_mb) {
+    std::string detail = "tartci host lease";
+    std::vector<std::string> parts;
+    if (jobs > 0) {
+        parts.push_back(std::to_string(jobs) + (jobs == 1 ? " job" : " jobs"));
+    }
+    if (mem_budget_mb > 0) {
+        // Prefer whole-GB when the budget divides evenly; a fleet host budget is
+        // almost always set in GB multiples (e.g. 81920 MB → "80 GB").
+        if (mem_budget_mb % 1024 == 0) {
+            parts.push_back(std::to_string(mem_budget_mb / 1024) + " GB budget");
+        } else {
+            parts.push_back(std::to_string(mem_budget_mb) + " MB budget");
+        }
+    }
+    if (!parts.empty()) {
+        detail += " \xC2\xB7 ";  // " · " (U+00B7)
+        for (size_t i = 0; i < parts.size(); ++i) {
+            if (i) detail += ", ";
+            detail += parts[i];
+        }
+    }
+    return detail;
+}
+
+}  // namespace
+
+BuildGovernance detect_build_governance() {
+    BuildGovernance g;
+
+    // Tier 2 — fleet: an Orchard endpoint is configured. Detection is presence-
+    // only (per the tiered model, Orchard itself is wired separately); a non-empty
+    // TARTCI_ORCHARD_URL is the signal.
+    if (!env_value("TARTCI_ORCHARD_URL").empty()) {
+        g.tier = 2;
+        g.detail = "orchard fleet";
+        return g;
+    }
+
+    // Tier 1 — a tartci host-lease store is present and answers `host-profile`.
+    // Respect the same PULP_TARTCI_LEASES=0 opt-out the acquire path honors: with
+    // leases turned off there is no host store to govern against, so this host is
+    // Tier 0 regardless of a tartci on PATH.
+    if (!env_false("PULP_TARTCI_LEASES")) {
+        auto tartci = env_value("PULP_TARTCI_BIN");
+        if (tartci.empty()) {
+            tartci = find_executable_in_path("tartci");
+        }
+        if (!tartci.empty()) {
+            // popen-based; a nonexistent bin or a tartci without the subcommand
+            // simply exits non-zero and degrades to Tier 0 — never throws.
+            auto profile = capture_command(shell_quote(tartci) + " host-profile");
+            if (profile.exit_code == 0) {
+                g.tier = 1;
+                g.jobs = parse_shell_assignment_int(profile.output, "PULP_BUILD_JOBS");
+                g.mem_budget_mb =
+                    parse_nonneg_ll(parse_shell_assignment(profile.output,
+                                                           "PULP_BUILD_MEM_BUDGET_MB"));
+                g.detail = tier1_detail(g.jobs, g.mem_budget_mb);
+                return g;
+            }
+        }
+    }
+
+    // Tier 0 — always available: the CLI's built-in bounded local builds.
+    g.tier = 0;
+    g.detail = "bounded local builds";
+    return g;
+}
+
 CmakeParallelPlan cap_cmake_build_parallel_args(const std::vector<std::string>& args,
                                                 int max_jobs) {
     CmakeParallelPlan plan;

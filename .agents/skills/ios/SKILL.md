@@ -261,8 +261,13 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 ### Input
 
 - **Touch events** — UIKit's `touchesBegan/Moved/Ended/Cancelled` route through
-  `window_host_ios.mm`. The handlers call `View::on_mouse_{down,up,drag}(Point)` —
-  pass `me.position`, not the full `MouseEvent` (the View API is `Point`-based).
+  `window_host_ios.mm`. The handlers build a root-space `MouseEvent` with a
+  stable pointer id, `PointerType::touch` or `PointerType::pen`, and an explicit
+  `MousePhase`, then call `View::dispatch_gesture_pointer_event(...)` before the
+  legacy widget path. If the arbiter consumes the event, do not also dispatch
+  `View::on_mouse_{down,up,drag}(Point)` or JS pointer fallback events. For
+  `touchesCancelled`, set `is_cancelled = true` and use the release phase so
+  recognizers cancel/fail consistently.
 - **Apple Pencil** — `UITouch.type == UITouchTypePencil` sets
   `MouseEvent::pointer_type = PointerType::pen` plus altitude/azimuth.
 - **Multi-touch** — each `UITouch*` gets a stable `pointer_id` via
@@ -597,6 +602,12 @@ caller passes only strings. `pulp_add_ios_auv3()` and
 `CMAKE_OSX_DEPLOYMENT_TARGET` when present, otherwise pin to `16.3`.
 Don't lower either floor below 16.3 unless `std::format` is removed
 from `core/runtime/log.hpp` first.
+
+The same SDK availability constraint can surface through direct
+`std::from_chars` use for floating-point parsing in view code. Prefer integer or
+manual decimal parsing for small numeric-token paths that must build for the
+current iOS deployment floor; only use floating `from_chars` when the active SDK
+and deployment target both prove it is available.
 
 ### iOS link line: don't link `CoreAudioTypes` standalone
 

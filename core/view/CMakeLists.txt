@@ -407,6 +407,7 @@ target_sources(pulp-view-core PRIVATE
     src/motion_preferences.cpp
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
+    src/gesture.cpp
     src/view.cpp
     src/continuous_frames.cpp
     src/host_param_surface.cpp

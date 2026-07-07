@@ -567,7 +567,21 @@ static view::Point to_local(view::View* target, float dp_x, float dp_y) {
 
 ### MouseEvent Dispatch — Both Rich and Legacy
 
-Some widgets (like Fader) use `on_mouse_event(MouseEvent)` to track drag state. Others use the simple `on_mouse_down(Point)`. Always dispatch both:
+Android touch dispatch gives the root gesture arbiter first refusal. Build a
+root-space `MouseEvent` in dp units, with the stable pointer id,
+`PointerType::touch`, explicit `MousePhase` (`press` / `drag` / `release`), and
+tap `click_count`, then call `View::dispatch_gesture_pointer_event(...)`. If it
+returns true, stop there: the recognizer has claimed the stream, and also
+dispatching legacy widget events will double-handle the same touch.
+
+For `ACTION_CANCEL`, loop over every active pointer and send a release-phase
+root-space `MouseEvent` with `is_cancelled = true` through
+`dispatch_gesture_pointer_event(...)` before clearing legacy capture state. Just
+clearing the Android-side captured view leaves recognizers active forever.
+
+When the arbiter does not consume the stream, fall back to widget dispatch. Some
+widgets (like Fader) use `on_mouse_event(MouseEvent)` to track drag state.
+Others use the simple `on_mouse_down(Point)`. Always dispatch both:
 
 ```cpp
 view::MouseEvent ev;

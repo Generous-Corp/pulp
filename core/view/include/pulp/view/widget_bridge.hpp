@@ -282,6 +282,7 @@ private:
     // hook exactly once.
     std::unordered_set<std::string> pointer_registered_;
     std::unordered_set<std::string> wheel_registered_;
+    std::unordered_set<std::string> gesture_recognizer_registered_;
 
     // Registered keyboard shortcuts from JS
     struct ShortcutBinding {
@@ -402,6 +403,9 @@ private:
 
     // Install on_change/on_toggle callbacks that dispatch to JS
     void wire_callbacks(const std::string& id, View* w);
+
+    // Remove native event registration guards so recycled ids wire fresh views.
+    void forget_widget_registrations(const std::string& id);
 
     // Single source-of-truth table that maps a lowercase widget tag
     // (`knob`/`fader`/`toggle`/`combo`/`checkbox`/`spectrum`/`waveform`/
