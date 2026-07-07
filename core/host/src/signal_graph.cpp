@@ -1607,13 +1607,23 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
         }
     }
 
-    // Prepare each plugin slot first (pre-compile step).
+    // Prepare each plugin slot first (pre-compile step). Immediately capture
+    // each slot's metadata (params/latency/transport) into prepared_plugin_meta_
+    // so compile_() and the executor-routing build read the cache instead of
+    // calling live PluginSlot metadata methods — the contract the no-silence
+    // swap (2.2b) relies on (H2). Safe to read here: null-first prepare, mutation
+    // lock held, no concurrent process() on these instances.
+    prepared_plugin_meta_.clear();
     for (auto& n : nodes_) {
         if (n.plugin) {
             if (!n.plugin->prepare(sample_rate, max_block_size)) {
                 runtime::log_error("SignalGraph: failed to prepare plugin '{}'", n.name);
                 return false;
             }
+            prepared_plugin_meta_[n.id] = PreparedPluginMetadata{
+                n.plugin->parameters(),
+                std::max(0, n.plugin->latency_samples()),
+                n.plugin->wants_transport()};
         }
     }
 

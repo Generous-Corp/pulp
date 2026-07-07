@@ -965,6 +965,22 @@ private:
     NodeId next_id_ = 1;
     GraphLimits limits_;
 
+    // 2.2b prerequisite (planning/2026-07-07-signalgraph-swap-and-bake-implementation-plan.md,
+    // H2): plugin metadata captured ONCE at prepare() time so compile_() and the
+    // executor-routing build never call live PluginSlot metadata methods
+    // (parameters()/latency_samples()/wants_transport()). Those reach into the
+    // live plugin object (e.g. VST3 getLatencySamples()) and are unsafe to call
+    // concurrent with process() — which a swap-time recompile (prepare_swap, 2.2b)
+    // would do. Captured after n.plugin->prepare() succeeds (null-first prepare,
+    // graph_mutation_mutex_ held, no concurrent process on these instances).
+    // NodeId-keyed; cleared + rebuilt on every prepare().
+    struct PreparedPluginMetadata {
+        std::vector<HostParamInfo> parameters;
+        int latency_samples = 0;
+        bool wants_transport = false;
+    };
+    std::unordered_map<NodeId, PreparedPluginMetadata> prepared_plugin_meta_;
+
     // Audio-thread snapshot, published by prepare() / mutators. The audio
     // thread reads live_raw_ only; live_ and retired_snapshots_ keep pointed-to
     // storage alive from the control thread until active process readers drain.
