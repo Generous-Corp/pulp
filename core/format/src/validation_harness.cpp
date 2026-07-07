@@ -191,6 +191,42 @@ std::vector<float> ValidationHarness::process_buffer(
     return result;
 }
 
+std::vector<double> ValidationHarness::process_buffer_f64(
+    const std::vector<double>& interleaved_input,
+    int num_channels, int num_samples)
+{
+    if (!prepared_) prepare();
+
+    auto nch = static_cast<std::size_t>(num_channels);
+    auto nsamp = static_cast<std::size_t>(num_samples);
+
+    audio::Buffer<double> in(nch, nsamp);
+    audio::Buffer<double> out(nch, nsamp);
+
+    for (std::size_t ch = 0; ch < nch; ++ch)
+        for (std::size_t i = 0; i < nsamp; ++i)
+            in.channel(ch)[i] = interleaved_input[i * nch + ch];
+
+    auto in_view = std::as_const(in).view();
+    auto out_view = out.view();
+
+    midi::MidiBuffer midi_out;
+    if (!pending_midi_in_.empty()) {
+        pending_midi_in_.sort();
+        host_.process_f64(out_view, in_view, pending_midi_in_, midi_out);
+        pending_midi_in_.clear();
+    } else {
+        host_.process_f64(out_view, in_view);
+    }
+
+    std::vector<double> result(nch * nsamp);
+    for (std::size_t ch = 0; ch < nch; ++ch)
+        for (std::size_t i = 0; i < nsamp; ++i)
+            result[i * nch + ch] = out.channel(ch)[i];
+
+    return result;
+}
+
 std::vector<uint8_t> ValidationHarness::save_state() const {
     return host_.save_state();
 }

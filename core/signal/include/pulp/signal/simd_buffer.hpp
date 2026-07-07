@@ -29,30 +29,32 @@ static constexpr size_t kSimdAlignment = 64;
 /// allocate or free memory, except resize(size()) which is a no-op. clear(),
 /// copy_from(), element access, iteration, and same-size resize are
 /// allocation-free after storage has been allocated.
-class AlignedBuffer {
+template <typename SampleType = float>
+class AlignedBufferT {
 public:
-    AlignedBuffer() = default;
+    AlignedBufferT() = default;
 
-    explicit AlignedBuffer(size_t num_samples)
+    explicit AlignedBufferT(size_t num_samples)
         : size_(num_samples) {
         if (num_samples > 0) {
             // Round up to alignment boundary
-            size_t bytes = num_samples * sizeof(float);
-            data_ = static_cast<float*>(pulp_aligned_alloc(kSimdAlignment, align_up(bytes)));
+            size_t bytes = num_samples * sizeof(SampleType);
+            data_ = static_cast<SampleType*>(
+                pulp_aligned_alloc(kSimdAlignment, align_up(bytes)));
             std::memset(data_, 0, align_up(bytes));
         }
     }
 
-    ~AlignedBuffer() { pulp_aligned_free(data_); }
+    ~AlignedBufferT() { pulp_aligned_free(data_); }
 
     // Move only
-    AlignedBuffer(AlignedBuffer&& other) noexcept
+    AlignedBufferT(AlignedBufferT&& other) noexcept
         : data_(other.data_), size_(other.size_) {
         other.data_ = nullptr;
         other.size_ = 0;
     }
 
-    AlignedBuffer& operator=(AlignedBuffer&& other) noexcept {
+    AlignedBufferT& operator=(AlignedBufferT&& other) noexcept {
         if (this != &other) {
             pulp_aligned_free(data_);
             data_ = other.data_;
@@ -63,26 +65,26 @@ public:
         return *this;
     }
 
-    AlignedBuffer(const AlignedBuffer&) = delete;
-    AlignedBuffer& operator=(const AlignedBuffer&) = delete;
+    AlignedBufferT(const AlignedBufferT&) = delete;
+    AlignedBufferT& operator=(const AlignedBufferT&) = delete;
 
-    float* data() { return data_; }
-    const float* data() const { return data_; }
+    SampleType* data() { return data_; }
+    const SampleType* data() const { return data_; }
     size_t size() const { return size_; }
     bool empty() const { return size_ == 0; }
 
-    float& operator[](size_t i) { return data_[i]; }
-    const float& operator[](size_t i) const { return data_[i]; }
+    SampleType& operator[](size_t i) { return data_[i]; }
+    const SampleType& operator[](size_t i) const { return data_[i]; }
 
-    float* begin() { return data_; }
-    float* end() { return data_ + size_; }
-    const float* begin() const { return data_; }
-    const float* end() const { return data_ + size_; }
+    SampleType* begin() { return data_; }
+    SampleType* end() { return data_ + size_; }
+    const SampleType* begin() const { return data_; }
+    const SampleType* end() const { return data_ + size_; }
 
     /// Clear buffer to zero
     void clear() {
         if (data_)
-            std::memset(data_, 0, size_ * sizeof(float));
+            std::memset(data_, 0, size_ * sizeof(SampleType));
     }
 
     /// Resize (reallocates, does not preserve data)
@@ -92,16 +94,17 @@ public:
         data_ = nullptr;
         size_ = new_size;
         if (new_size > 0) {
-            size_t bytes = new_size * sizeof(float);
-            data_ = static_cast<float*>(pulp_aligned_alloc(kSimdAlignment, align_up(bytes)));
+            size_t bytes = new_size * sizeof(SampleType);
+            data_ = static_cast<SampleType*>(
+                pulp_aligned_alloc(kSimdAlignment, align_up(bytes)));
             std::memset(data_, 0, align_up(bytes));
         }
     }
 
     /// Copy from raw pointer
-    void copy_from(const float* src, size_t count) {
+    void copy_from(const SampleType* src, size_t count) {
         count = std::min(count, size_);
-        std::memcpy(data_, src, count * sizeof(float));
+        std::memcpy(data_, src, count * sizeof(SampleType));
     }
 
 private:
@@ -109,8 +112,11 @@ private:
         return (bytes + kSimdAlignment - 1) & ~(kSimdAlignment - 1);
     }
 
-    float* data_ = nullptr;
+    SampleType* data_ = nullptr;
     size_t size_ = 0;
 };
+
+using AlignedBuffer = AlignedBufferT<float>;
+using AlignedBuffer64 = AlignedBufferT<double>;
 
 }  // namespace pulp::signal

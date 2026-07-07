@@ -20,6 +20,7 @@
 
 using pulp::signal::OfflineFormantMode;
 using pulp::signal::OfflineStretch;
+using pulp::signal::OfflineStretch64;
 using pulp::signal::OfflineStretchOptions;
 using pulp::signal::offline_stretch_output_frames;
 
@@ -67,6 +68,25 @@ TEST_CASE("R=1 pitch=0 is a perfect null (mono and stereo)", "[offline-stretch]"
         REQUIRE(ol[static_cast<size_t>(i)] == l[static_cast<size_t>(i)]);
         REQUIRE(orr[static_cast<size_t>(i)] == r[static_cast<size_t>(i)]);
     }
+}
+
+TEST_CASE("OfflineStretch64 preserves double identity renders", "[offline-stretch][f64]") {
+    OfflineStretch64 s;
+    s.prepare(48000.0, 1);
+
+    const long n = 512;
+    std::vector<double> input(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i)
+        input[static_cast<size_t>(i)] = std::sin(0.01 * static_cast<double>(i));
+    const double* in[1] = {input.data()};
+    std::vector<double> output(static_cast<size_t>(n));
+    double* out[1] = {output.data()};
+
+    OfflineStretchOptions opts;
+    std::string err;
+    REQUIRE(s.process(in, n, out, n, opts, &err));
+    for (long i = 0; i < n; ++i)
+        REQUIRE(output[static_cast<size_t>(i)] == input[static_cast<size_t>(i)]);
 }
 
 TEST_CASE("process writes exactly the contracted output length", "[offline-stretch]") {

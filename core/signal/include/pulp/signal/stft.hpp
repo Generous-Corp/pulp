@@ -24,11 +24,15 @@ struct StftConfig {
 };
 
 /// A single completed STFT frame: magnitude (linear or dB) and phase.
-struct StftFrame {
-    std::vector<float> magnitude;   // num_bins values (fft_size/2 + 1)
-    std::vector<float> phase;       // num_bins values
+template <typename SampleType = float>
+struct StftFrameT {
+    std::vector<SampleType> magnitude; // num_bins values (fft_size/2 + 1)
+    std::vector<SampleType> phase;     // num_bins values
     int num_bins = 0;
 };
+
+using StftFrame = StftFrameT<float>;
+using StftFrame64 = StftFrameT<double>;
 
 /// Audio-thread-safe STFT processor.
 ///
@@ -44,11 +48,12 @@ struct StftFrame {
 ///
 /// The STFT itself is NOT thread-safe for concurrent push/read. Thread
 /// safety is provided by VisualizationBridge wrapping it with TripleBuffer.
-class Stft {
+template <typename SampleType = float>
+class StftT {
 public:
-    Stft() = default;
+    StftT() = default;
 
-    explicit Stft(const StftConfig& config) { configure(config); }
+    explicit StftT(const StftConfig& config) { configure(config); }
 
     /// RT contract: configure() allocates FFT/window/ring/frame storage and is
     /// not audio-thread safe. After configure(), push_samples(), latest_frame(),
@@ -59,29 +64,30 @@ public:
         assert((config.fft_size & (config.fft_size - 1)) == 0); // power of 2
 
         config_ = config;
-        fft_ = Fft(config.fft_size);
-        window_ = WindowFunction::generate(config.fft_size, config.window, config.window_param);
+        fft_ = FftT<SampleType>(config.fft_size);
+        window_ = WindowFunction::generate<SampleType>(
+            config.fft_size, config.window, static_cast<SampleType>(config.window_param));
         num_bins_ = config.fft_size / 2 + 1;
 
         // Ring buffer for sample accumulation
-        ring_.resize(config.fft_size, 0.0f);
+        ring_.resize(config.fft_size, SampleType{0.0f});
         ring_pos_ = 0;
         hop_counter_ = 0;
         samples_fed_ = 0;
 
         // Working buffers
-        windowed_.resize(config.fft_size, 0.0f);
+        windowed_.resize(config.fft_size, SampleType{0.0f});
         freq_.resize(config.fft_size);
 
-        frame_.magnitude.resize(num_bins_, 0.0f);
-        frame_.phase.resize(num_bins_, 0.0f);
+        frame_.magnitude.resize(num_bins_, SampleType{0.0f});
+        frame_.phase.resize(num_bins_, SampleType{0.0f});
         frame_.num_bins = num_bins_;
         frame_ready_ = false;
     }
 
     /// Feed audio samples. Call from the audio thread.
     /// Returns true if a new frame was computed during this call.
-    bool push_samples(const float* samples, int count) {
+    bool push_samples(const SampleType* samples, int count) {
         bool computed = false;
         for (int i = 0; i < count; ++i) {
             ring_[ring_pos_] = samples[i];
@@ -99,7 +105,7 @@ public:
     }
 
     /// Access the latest computed frame.
-    const StftFrame& latest_frame() const { return frame_; }
+    const StftFrameT<SampleType>& latest_frame() const { return frame_; }
 
     /// Whether at least one frame has been computed.
     bool frame_ready() const { return frame_ready_; }
@@ -114,28 +120,33 @@ public:
     int hop_size() const { return config_.hop_size; }
 
     /// Convert linear magnitudes to dB in-place.
-    static void to_db(float* magnitudes, int count, float floor_db = -120.0f) {
-        float floor_linear = std::pow(10.0f, floor_db / 20.0f);
+    static void to_db(SampleType* magnitudes,
+                      int count,
+                      SampleType floor_db = SampleType{-120.0f}) {
+        SampleType floor_linear =
+            std::pow(SampleType{10.0f}, floor_db / SampleType{20.0f});
         for (int i = 0; i < count; ++i) {
-            magnitudes[i] = 20.0f * std::log10(std::max(magnitudes[i], floor_linear));
+            magnitudes[i] = SampleType{20.0f} *
+                std::log10(std::max(magnitudes[i], floor_linear));
         }
     }
 
     /// Get the latest frame magnitudes in dB. Not RT-safe; returns a vector.
-    std::vector<float> latest_magnitude_db(float floor_db = -120.0f) const {
+    std::vector<SampleType> latest_magnitude_db(
+        SampleType floor_db = SampleType{-120.0f}) const {
         auto db = frame_.magnitude;
         to_db(db.data(), static_cast<int>(db.size()), floor_db);
         return db;
     }
 
     void reset() {
-        std::fill(ring_.begin(), ring_.end(), 0.0f);
+        std::fill(ring_.begin(), ring_.end(), SampleType{0.0f});
         ring_pos_ = 0;
         hop_counter_ = 0;
         samples_fed_ = 0;
         frame_ready_ = false;
-        std::fill(frame_.magnitude.begin(), frame_.magnitude.end(), 0.0f);
-        std::fill(frame_.phase.begin(), frame_.phase.end(), 0.0f);
+        std::fill(frame_.magnitude.begin(), frame_.magnitude.end(), SampleType{0.0f});
+        std::fill(frame_.phase.begin(), frame_.phase.end(), SampleType{0.0f});
     }
 
 private:
@@ -162,23 +173,26 @@ private:
     }
 
     StftConfig config_;
-    Fft fft_{1024};
-    std::vector<float> window_;
+    FftT<SampleType> fft_{1024};
+    std::vector<SampleType> window_;
     int num_bins_ = 0;
 
     // Ring buffer for sample accumulation
-    std::vector<float> ring_;
+    std::vector<SampleType> ring_;
     int ring_pos_ = 0;
     int hop_counter_ = 0;
     int samples_fed_ = 0;
 
     // Working buffers (reused to avoid allocation)
-    std::vector<float> windowed_;
-    std::vector<std::complex<float>> freq_;
+    std::vector<SampleType> windowed_;
+    std::vector<std::complex<SampleType>> freq_;
 
     // Latest computed frame
-    StftFrame frame_;
+    StftFrameT<SampleType> frame_;
     bool frame_ready_ = false;
 };
+
+using Stft = StftT<float>;
+using Stft64 = StftT<double>;
 
 } // namespace pulp::signal

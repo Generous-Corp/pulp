@@ -67,6 +67,13 @@ auto m = pulp::audio::analysis::analyze(out_view, 48000.0);
 REQUIRE(pulp::audio::analysis::assert_not_silent(m).passed);   // the gate that matters
 ```
 
+For double-precision callback bugs, `HeadlessHost` has matching
+`process_f64(...)` overloads and `ValidationHarness::process_buffer_f64(...)`.
+Non-f64 processors still run through the default f64-to-f32 compatibility
+fallback, so a headless f64 scene proves host-boundary behavior; it does not
+prove the plugin has native double-precision DSP unless the descriptor opts into
+`supports_f64_audio` and the processor overrides `process_f64`.
+
 **Always use `pulp/audio/analysis` — never hand-roll `rms_db`.** `analyze()` →
 `BufferMetrics`; assert with `assert_not_silent`, `assert_no_nan_inf`,
 `assert_rms_between`, `assert_frequency_near`, `assert_null_near`,

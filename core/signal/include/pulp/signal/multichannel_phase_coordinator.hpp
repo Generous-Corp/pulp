@@ -31,9 +31,10 @@ namespace pulp::signal {
 /// RT contract: `prepare()` allocates internal phase/magnitude storage and must
 /// run off the audio thread. After preparation, `reset()`, queries, and
 /// `process_group()` allocate no memory for the prepared bin/channel counts.
-class MultichannelPhaseCoordinator {
+template <typename SampleType = float>
+class MultichannelPhaseCoordinatorT {
 public:
-    MultichannelPhaseCoordinator() = default;
+    MultichannelPhaseCoordinatorT() = default;
 
     void prepare(int fft_size, int channels) {
         assert(fft_size >= 256 && (fft_size & (fft_size - 1)) == 0);
@@ -43,7 +44,7 @@ public:
         num_bins_ = fft_size / 2 + 1;
         prev_phase_.assign(static_cast<size_t>(num_bins_), 0.0);
         synth_phase_.assign(static_cast<size_t>(num_bins_), 0.0);
-        ref_mag_.assign(static_cast<size_t>(num_bins_), 0.0f);
+        ref_mag_.assign(static_cast<size_t>(num_bins_), SampleType{0});
         ref_phase_.assign(static_cast<size_t>(num_bins_), 0.0);
         peaks_.assign(static_cast<size_t>(num_bins_), 0);
         reset();
@@ -57,7 +58,7 @@ public:
 
     /// Sum of reference magnitudes from the last processed frame — cheap
     /// energy proxy callers (transient detectors) can reuse.
-    const float* reference_magnitudes() const { return ref_mag_.data(); }
+    const SampleType* reference_magnitudes() const { return ref_mag_.data(); }
     int num_bins() const { return num_bins_; }
 
     /// Propagate phases for one frame group and rotate every channel's
@@ -66,20 +67,20 @@ public:
     /// synthesis phases toward the analysis phases (1 = full transient
     /// reset). At unity hop ratio with reset 0 the rotation vanishes to
     /// double-precision rounding error, preserving transparency.
-    void process_group(std::complex<float>* const* frames, int num_bins,
-                       int analysis_hop, int synthesis_hop, float reset_amount = 0.0f) {
+    void process_group(std::complex<SampleType>* const* frames, int num_bins,
+                       int analysis_hop, int synthesis_hop, SampleType reset_amount = SampleType{0}) {
         assert(num_bins == num_bins_);
         assert(analysis_hop > 0 && synthesis_hop > 0);
 
         // Energy-weighted reference: the complex channel sum.
         for (int k = 0; k < num_bins_; ++k) {
-            std::complex<float> sum(0.0f, 0.0f);
+            std::complex<SampleType> sum(SampleType{0}, SampleType{0});
             for (int ch = 0; ch < channels_; ++ch) sum += frames[ch][k];
             ref_mag_[static_cast<size_t>(k)] = std::abs(sum);
             ref_phase_[static_cast<size_t>(k)] = static_cast<double>(std::arg(sum));
         }
 
-        if (first_frame_ || reset_amount >= 1.0f) {
+        if (first_frame_ || reset_amount >= SampleType{1}) {
             std::copy(ref_phase_.begin(), ref_phase_.end(), synth_phase_.begin());
             std::copy(ref_phase_.begin(), ref_phase_.end(), prev_phase_.begin());
             first_frame_ = false;
@@ -90,7 +91,7 @@ public:
         // neighbors each side, per Laroche-Dolson region locking).
         num_peaks_ = 0;
         for (int k = 2; k <= num_bins_ - 3; ++k) {
-            const float m = ref_mag_[static_cast<size_t>(k)];
+            const SampleType m = ref_mag_[static_cast<size_t>(k)];
             if (m > ref_mag_[static_cast<size_t>(k - 1)] && m > ref_mag_[static_cast<size_t>(k - 2)]
                 && m > ref_mag_[static_cast<size_t>(k + 1)] && m > ref_mag_[static_cast<size_t>(k + 2)])
                 peaks_[static_cast<size_t>(num_peaks_++)] = k;
@@ -129,14 +130,14 @@ public:
             // during a partial reset would manufacture a spurious rotation.
             double rotation = princarg(synth_phase_[static_cast<size_t>(k)]
                                        - ref_phase_[static_cast<size_t>(k)]);
-            if (reset_amount > 0.0f)
+            if (reset_amount > SampleType{0})
                 rotation *= 1.0 - static_cast<double>(reset_amount);
             synth_phase_[static_cast<size_t>(k)] =
                 ref_phase_[static_cast<size_t>(k)] + rotation;
 
-            const float rot = static_cast<float>(rotation);
-            if (rot != 0.0f) {
-                const std::complex<float> r(std::cos(rot), std::sin(rot));
+            const SampleType rot = static_cast<SampleType>(rotation);
+            if (rot != SampleType{0}) {
+                const std::complex<SampleType> r(std::cos(rot), std::sin(rot));
                 for (int ch = 0; ch < channels_; ++ch)
                     frames[ch][k] *= r;
             }
@@ -159,10 +160,13 @@ private:
 
     std::vector<double> prev_phase_;
     std::vector<double> synth_phase_;
-    std::vector<float> ref_mag_;
+    std::vector<SampleType> ref_mag_;
     std::vector<double> ref_phase_;
     std::vector<int> peaks_;
     int num_peaks_ = 0;
 };
+
+using MultichannelPhaseCoordinator = MultichannelPhaseCoordinatorT<float>;
+using MultichannelPhaseCoordinator64 = MultichannelPhaseCoordinatorT<double>;
 
 } // namespace pulp::signal

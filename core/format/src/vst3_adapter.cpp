@@ -78,6 +78,33 @@ inline bool is_declared_note_expr_type(NoteExpressionTypeID id) {
     return false;
 }
 
+inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
+                                  int channels,
+                                  int frames) {
+    const auto channel_count = channels > 0 ? static_cast<std::size_t>(channels) : 0u;
+    const auto frame_count = frames > 0 ? static_cast<std::size_t>(frames) : 0u;
+    scratch.resize(channel_count);
+    for (auto& channel : scratch)
+        channel.assign(frame_count, 0.0f);
+}
+
+inline void copy_f64_to_f32(const double* src, float* dst, int32 count) {
+    if (!src || !dst || count <= 0) return;
+    for (int32 i = 0; i < count; ++i)
+        dst[i] = static_cast<float>(src[i]);
+}
+
+inline void copy_f32_to_f64(const float* src, double* dst, int32 count) {
+    if (!src || !dst || count <= 0) return;
+    for (int32 i = 0; i < count; ++i)
+        dst[i] = static_cast<double>(src[i]);
+}
+
+inline void zero_f64(double* dst, int32 count) {
+    if (!dst || count <= 0) return;
+    std::fill_n(dst, count, 0.0);
+}
+
 }  // namespace
 
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
@@ -647,6 +674,12 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     return kResultTrue;
 }
 
+tresult PLUGIN_API PulpVst3Processor::canProcessSampleSize(int32 symbolicSampleSize) {
+    if (symbolicSampleSize == kSample32 || symbolicSampleSize == kSample64)
+        return kResultTrue;
+    return kResultFalse;
+}
+
 tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     if (!processor_) return kInternalError;
 
@@ -662,6 +695,9 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     ctx.output_channels = out_ch;
 
     processor_->prepare(ctx);
+    processor_->prepare_f64_fallback_scratch(ctx);
+    native_f64_enabled_ = desc.effective_capabilities().supports_f64_audio;
+    selected_sample_size_ = setup.symbolicSampleSize == kSample64 ? kSample64 : kSample32;
 
     // Cache what the processor's buffers are prepared for; the silence
     // accommodation clamps process() views to these counts.
@@ -676,6 +712,15 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // Pre-allocate buffer pointer arrays for real-time safety
     input_ptrs_.resize(ctx.input_channels);
     output_ptrs_.resize(ctx.output_channels);
+    input64_ptrs_.resize(ctx.input_channels);
+    output64_ptrs_.resize(ctx.output_channels);
+    sidechain64_ptrs_.resize(
+        desc.input_buses.size() > 1 ? desc.input_buses[1].default_channels : 0);
+    resize_sample_scratch(f64_input_scratch_, ctx.input_channels, ctx.max_buffer_size);
+    resize_sample_scratch(f64_output_scratch_, ctx.output_channels, ctx.max_buffer_size);
+    resize_sample_scratch(f64_sidechain_scratch_,
+                          desc.input_buses.size() > 1 ? desc.input_buses[1].default_channels : 0,
+                          ctx.max_buffer_size);
 
     // Pre-size per-bus channel-pointer storage for the secondary (aux) output
     // buses the descriptor declares (everything past the main bus at index 0).
@@ -690,6 +735,7 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     const std::size_t aux_bus_count =
         declared_output_buses > 0 ? declared_output_buses - 1 : 0;
     aux_output_ptrs_.assign(aux_bus_count, {});
+    aux_output64_ptrs_.assign(aux_bus_count, {});
     declared_aux_channels_.assign(aux_bus_count, 0);
     for (std::size_t b = 1; b < declared_output_buses; ++b) {
         const int declared = desc.output_buses[b].default_channels;
@@ -703,6 +749,17 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
         const int storage = (std::max)(declared, accepted);
         aux_output_ptrs_[b - 1].assign(
             storage > 0 ? static_cast<std::size_t>(storage) : 0, nullptr);
+        aux_output64_ptrs_[b - 1].assign(
+            storage > 0 ? static_cast<std::size_t>(storage) : 0, nullptr);
+    }
+    f64_aux_output_scratch_.assign(aux_bus_count, {});
+    for (std::size_t b = 0; b < aux_bus_count; ++b) {
+        f64_aux_output_scratch_[b].resize(aux_output_ptrs_[b].size());
+        for (auto& channel : f64_aux_output_scratch_[b]) {
+            channel.assign(
+                ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 0u,
+                0.0f);
+        }
     }
 
     // Pre-allocate the per-block MIDI buffers and switch them to
@@ -872,6 +929,11 @@ uint32 PLUGIN_API PulpVst3Processor::getTailSamples() {
 
 tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (!processor_) return kInternalError;
+    const bool host_f64 = data.symbolicSampleSize == kSample64 ||
+                          (data.symbolicSampleSize != kSample32 &&
+                           selected_sample_size_ == kSample64);
+    const bool native_f64 = host_f64 && native_f64_enabled_;
+    const bool boundary_f64 = host_f64 && !native_f64;
 
     // Flush denormals to zero for the whole audio-callback body so quiet tails
     // in recursive filter/reverb/feedback state can't stall the host's audio
@@ -1026,9 +1088,32 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 
     if (data.numInputs > 0 && data.inputs[0].numChannels > 0) {
         in_channels = data.inputs[0].numChannels;
+        if (host_f64) {
+            in_channels = (std::min)(
+                in_channels, static_cast<int>(f64_input_scratch_.size()));
+        }
         input_ptrs_.resize(in_channels);
+        input64_ptrs_.resize(in_channels);
         for (int ch = 0; ch < in_channels; ++ch) {
-            input_ptrs_[ch] = data.inputs[0].channelBuffers32[ch];
+            if (native_f64) {
+                input64_ptrs_[ch] = data.inputs[0].channelBuffers64
+                    ? data.inputs[0].channelBuffers64[ch]
+                    : nullptr;
+                input_ptrs_[ch] = nullptr;
+            } else if (boundary_f64) {
+                auto* dst = f64_input_scratch_[static_cast<std::size_t>(ch)].data();
+                const double* src = data.inputs[0].channelBuffers64
+                    ? data.inputs[0].channelBuffers64[ch]
+                    : nullptr;
+                input64_ptrs_[ch] = src;
+                copy_f64_to_f32(src, dst, num_samples);
+                input_ptrs_[ch] = src ? dst : nullptr;
+            } else {
+                input64_ptrs_[ch] = nullptr;
+                input_ptrs_[ch] = data.inputs[0].channelBuffers32
+                    ? data.inputs[0].channelBuffers32[ch]
+                    : nullptr;
+            }
         }
     }
     // A VST3 bus can report numChannels > 0 while inactive — in that
@@ -1039,27 +1124,83 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // back to nullptr otherwise.
     if (data.numInputs > 1 &&
         data.inputs[1].numChannels > 0 &&
-        data.inputs[1].channelBuffers32 &&
-        data.inputs[1].channelBuffers32[0]) {
+        ((host_f64 && data.inputs[1].channelBuffers64 &&
+          data.inputs[1].channelBuffers64[0]) ||
+         (!host_f64 && data.inputs[1].channelBuffers32 &&
+          data.inputs[1].channelBuffers32[0]))) {
         sc_channels = data.inputs[1].numChannels;
+        if (host_f64) {
+            sc_channels = (std::min)(
+                sc_channels, static_cast<int>(f64_sidechain_scratch_.size()));
+        }
         sidechain_ptrs_.resize(sc_channels);
+        sidechain64_ptrs_.resize(sc_channels);
         for (int ch = 0; ch < sc_channels; ++ch) {
-            sidechain_ptrs_[ch] = data.inputs[1].channelBuffers32[ch];
+            if (native_f64) {
+                sidechain64_ptrs_[ch] = data.inputs[1].channelBuffers64
+                    ? data.inputs[1].channelBuffers64[ch]
+                    : nullptr;
+                sidechain_ptrs_[ch] = nullptr;
+            } else if (boundary_f64) {
+                auto* dst = f64_sidechain_scratch_[static_cast<std::size_t>(ch)].data();
+                const double* src = data.inputs[1].channelBuffers64
+                    ? data.inputs[1].channelBuffers64[ch]
+                    : nullptr;
+                sidechain64_ptrs_[ch] = src;
+                copy_f64_to_f32(src, dst, num_samples);
+                sidechain_ptrs_[ch] = src ? dst : nullptr;
+            } else {
+                sidechain64_ptrs_[ch] = nullptr;
+                sidechain_ptrs_[ch] = data.inputs[1].channelBuffers32[ch];
+            }
         }
     }
 
     if (data.numOutputs > 0 && data.outputs[0].numChannels > 0) {
         out_channels = data.outputs[0].numChannels;
+        if (host_f64) {
+            out_channels = (std::min)(
+                out_channels, static_cast<int>(f64_output_scratch_.size()));
+        }
         output_ptrs_.resize(out_channels);
+        output64_ptrs_.resize(out_channels);
         for (int ch = 0; ch < out_channels; ++ch) {
-            output_ptrs_[ch] = data.outputs[0].channelBuffers32[ch];
+            if (native_f64) {
+                output64_ptrs_[ch] = data.outputs[0].channelBuffers64 &&
+                                     data.outputs[0].channelBuffers64[ch]
+                    ? data.outputs[0].channelBuffers64[ch]
+                    : nullptr;
+                output_ptrs_[ch] = nullptr;
+            } else if (boundary_f64) {
+                output64_ptrs_[ch] = data.outputs[0].channelBuffers64 &&
+                                     data.outputs[0].channelBuffers64[ch]
+                    ? data.outputs[0].channelBuffers64[ch]
+                    : nullptr;
+                auto& scratch = f64_output_scratch_[static_cast<std::size_t>(ch)];
+                std::fill(scratch.begin(), scratch.end(), 0.0f);
+                output_ptrs_[ch] = data.outputs[0].channelBuffers64 &&
+                                   data.outputs[0].channelBuffers64[ch]
+                    ? scratch.data()
+                    : nullptr;
+            } else {
+                output64_ptrs_[ch] = nullptr;
+                output_ptrs_[ch] = data.outputs[0].channelBuffers32
+                    ? data.outputs[0].channelBuffers32[ch]
+                    : nullptr;
+            }
         }
         // When the render was clamped above, the processor only writes the
         // first num_samples frames; zero the un-processable tail on every main
         // output channel so the host reads silence past the prepared max.
         if (original_num_samples > num_samples) {
             for (int ch = 0; ch < out_channels; ++ch) {
-                if (output_ptrs_[ch] != nullptr) {
+                if (host_f64) {
+                    if (data.outputs[0].channelBuffers64 &&
+                        data.outputs[0].channelBuffers64[ch]) {
+                        zero_f64(data.outputs[0].channelBuffers64[ch] + num_samples,
+                                 original_num_samples - num_samples);
+                    }
+                } else if (output_ptrs_[ch] != nullptr) {
                     std::memset(output_ptrs_[ch] + num_samples, 0,
                                 sizeof(float) * (original_num_samples - num_samples));
                 }
@@ -1078,7 +1219,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     for (int32 b = 1; b < data.numOutputs; ++b) {
         auto& bus = data.outputs[b];
         for (int32 ch = 0; ch < bus.numChannels; ++ch) {
-            if (bus.channelBuffers32 && bus.channelBuffers32[ch]) {
+            if (host_f64 && bus.channelBuffers64 && bus.channelBuffers64[ch]) {
+                zero_f64(bus.channelBuffers64[ch], original_num_samples);
+            } else if (!host_f64 && bus.channelBuffers32 && bus.channelBuffers32[ch]) {
                 std::memset(bus.channelBuffers32[ch], 0,
                             sizeof(float) * original_num_samples);
             }
@@ -1095,7 +1238,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     int proc_out = out_channels;
     if (silence_unsupported_active_) {
         for (int ch = 0; ch < out_channels; ++ch) {
-            if (output_ptrs_[ch] != nullptr) {
+            if (host_f64 && output64_ptrs_[ch] != nullptr) {
+                zero_f64(output64_ptrs_[ch], num_samples);
+            } else if (!host_f64 && output_ptrs_[ch] != nullptr) {
                 std::memset(output_ptrs_[ch], 0, sizeof(float) * num_samples);
             }
         }
@@ -1146,10 +1291,37 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             (std::min)(static_cast<int>(bus.numChannels),
                        static_cast<int>(ptrs.size()));
         bool active = bus.channelBuffers32 != nullptr;
+        if (host_f64) active = bus.channelBuffers64 != nullptr;
         if (active) {
             for (int ch = 0; ch < aux_channels; ++ch) {
-                ptrs[static_cast<std::size_t>(ch)] = bus.channelBuffers32[ch];
-                if (!ptrs[static_cast<std::size_t>(ch)]) {
+                if (native_f64) {
+                    auto& ptrs64 = aux_output64_ptrs_[b - 1];
+                    ptrs64[static_cast<std::size_t>(ch)] =
+                        bus.channelBuffers64 && bus.channelBuffers64[ch]
+                            ? bus.channelBuffers64[ch]
+                            : nullptr;
+                    ptrs[static_cast<std::size_t>(ch)] = nullptr;
+                } else if (boundary_f64) {
+                    auto& ptrs64 = aux_output64_ptrs_[b - 1];
+                    ptrs64[static_cast<std::size_t>(ch)] =
+                        bus.channelBuffers64 && bus.channelBuffers64[ch]
+                            ? bus.channelBuffers64[ch]
+                            : nullptr;
+                    auto& scratch =
+                        f64_aux_output_scratch_[b - 1][static_cast<std::size_t>(ch)];
+                    std::fill(scratch.begin(), scratch.end(), 0.0f);
+                    ptrs[static_cast<std::size_t>(ch)] =
+                        bus.channelBuffers64 && bus.channelBuffers64[ch]
+                            ? scratch.data()
+                            : nullptr;
+                } else {
+                    aux_output64_ptrs_[b - 1][static_cast<std::size_t>(ch)] = nullptr;
+                    ptrs[static_cast<std::size_t>(ch)] = bus.channelBuffers32[ch];
+                }
+                const bool channel_valid = native_f64
+                    ? aux_output64_ptrs_[b - 1][static_cast<std::size_t>(ch)] != nullptr
+                    : ptrs[static_cast<std::size_t>(ch)] != nullptr;
+                if (!channel_valid) {
                     // A null per-channel pointer demotes the whole bus to
                     // inactive so the Processor sees an empty bus rather than a
                     // half-valid BufferView.
@@ -1175,6 +1347,61 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         .outputs = ProcessBusBufferSet<float>(
             std::span(output_buses.data(), routed_output_buses)),
     };
+    audio::BufferView<const double> input64_view(
+        input64_ptrs_.data(), proc_in, num_samples);
+    audio::BufferView<double> output64_view(
+        output64_ptrs_.data(), proc_out, num_samples);
+    audio::BufferView<const double> sidechain64_view(
+        sidechain64_ptrs_.data(), sc_channels, num_samples);
+    std::array<ProcessBusBufferView<const double>, 2> input64_buses{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     proc_in, false, data.numInputs > 0},
+            .buffer = input64_view,
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
+                     sc_channels, true, sc_channels > 0},
+            .buffer = sidechain64_view,
+        },
+    }};
+    std::array<ProcessBusBufferView<double>, kMaxOutputBuses> output64_buses{};
+    output64_buses[0] = {
+        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                 proc_out, false, data.numOutputs > 0},
+        .buffer = output64_view,
+    };
+    for (std::size_t b = 1; b < routed_output_buses; ++b) {
+        if (b >= static_cast<std::size_t>(data.numOutputs)) break;
+        auto& bus = data.outputs[b];
+        auto& ptrs = aux_output64_ptrs_[b - 1];
+        int aux_channels =
+            (std::min)(static_cast<int>(bus.numChannels),
+                       static_cast<int>(ptrs.size()));
+        bool active = host_f64 && bus.channelBuffers64 != nullptr;
+        if (active) {
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                ptrs[static_cast<std::size_t>(ch)] =
+                    bus.channelBuffers64[ch];
+                if (!ptrs[static_cast<std::size_t>(ch)]) {
+                    active = false;
+                    break;
+                }
+            }
+        }
+        if (!active) aux_channels = 0;
+        output64_buses[b] = {
+            .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
+                     declared_aux_channels_[b - 1], true, active},
+            .buffer = audio::BufferView<double>(ptrs.data(), aux_channels,
+                                                num_samples),
+        };
+    }
+    ProcessBuffers64 process_buffers64{
+        .inputs = ProcessBusBufferSet<const double>(input64_buses),
+        .outputs = ProcessBusBufferSet<double>(
+            std::span(output64_buses.data(), routed_output_buses)),
+    };
 
     // VST3 `processBlockBypassed` behaviour. When the current bypass
     // value is >= 0.5, the adapter does the pass-through itself instead
@@ -1195,6 +1422,33 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             // A VST3 bus can report numChannels > 0 while individual
             // channelBuffers32[ch] entries are null; null-check before
             // writing. This guard mirrors the silence-accommodation path.
+            if (host_f64) {
+                auto* out64 = data.numOutputs > 0 && data.outputs[0].channelBuffers64
+                    ? data.outputs[0].channelBuffers64[ch]
+                    : nullptr;
+                if (out64 == nullptr) continue;
+                auto* in64 = data.numInputs > 0 &&
+                                      ch < data.inputs[0].numChannels &&
+                                      data.inputs[0].channelBuffers64
+                    ? data.inputs[0].channelBuffers64[ch]
+                    : nullptr;
+                if (in64 != nullptr) {
+                    if (delayed) {
+                        auto& line = bypass_dry_delay_[ch];
+                        for (int n = 0; n < original_num_samples; ++n) {
+                            out64[n] = static_cast<double>(
+                                line.process(static_cast<float>(in64[n]),
+                                             bypass_delay_samples_));
+                        }
+                    } else {
+                        std::memcpy(out64, in64,
+                                    sizeof(double) * static_cast<std::size_t>(original_num_samples));
+                    }
+                } else {
+                    zero_f64(out64, original_num_samples);
+                }
+                continue;
+            }
             if (output_ptrs_[ch] == nullptr) continue;
             // Bypass is pure host-buffer passthrough (no processor scratch),
             // so it safely handles the full original block rather than the
@@ -1494,7 +1748,36 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // plugin that allocates on the audio thread.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        processor_->process(process_buffers, midi_in_, midi_out_, ctx);
+        if (native_f64) {
+            processor_->process_f64(process_buffers64, midi_in_, midi_out_, ctx);
+        } else {
+            processor_->process(process_buffers, midi_in_, midi_out_, ctx);
+        }
+    }
+
+    if (boundary_f64) {
+        if (data.numOutputs > 0 && data.outputs[0].channelBuffers64) {
+            for (int ch = 0; ch < out_channels; ++ch) {
+                copy_f32_to_f64(
+                    output_ptrs_[ch],
+                    data.outputs[0].channelBuffers64[ch],
+                    num_samples);
+            }
+        }
+        for (std::size_t b = 1; b < routed_output_buses; ++b) {
+            if (b >= static_cast<std::size_t>(data.numOutputs)) break;
+            auto& bus = data.outputs[b];
+            if (!bus.channelBuffers64) continue;
+            auto& ptrs = aux_output_ptrs_[b - 1];
+            const int aux_channels =
+                (std::min)(static_cast<int>(bus.numChannels),
+                           static_cast<int>(ptrs.size()));
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                copy_f32_to_f64(ptrs[static_cast<std::size_t>(ch)],
+                                bus.channelBuffers64[ch],
+                                num_samples);
+            }
+        }
     }
 
     // Return trigger / momentary params (panic, reset, tap) to their default

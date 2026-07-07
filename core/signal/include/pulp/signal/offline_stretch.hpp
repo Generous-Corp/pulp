@@ -133,7 +133,8 @@ inline long offline_stretch_output_frames(long in_frames, double time_ratio) noe
 /// Offline stretcher. One instance per concurrent render; not thread-safe for
 /// concurrent calls on the SAME instance, but distinct instances are
 /// independent (the sampler renders slices on multiple background threads).
-class OfflineStretch {
+template <typename SampleType = float>
+class OfflineStretchT {
 public:
     /// Size internal state for `channels` at `sample_rate`. Must be called
     /// before process(). Allocation happens here, not in process(). `sizing`
@@ -213,14 +214,14 @@ public:
     /// win, or the long window smears every hit. `lo_band` is the energy fraction
     /// below 200 Hz; `crest` is peak/mean of a short-window energy envelope.
     struct Window { int fft_size; int analysis_hop; };
-    static Window recommend_window(const float* const* in, long frames,
+    static Window recommend_window(const SampleType* const* in, long frames,
                                    int channels, double sample_rate) {
         if (in == nullptr || frames <= 0 || channels < 1 || !(sample_rate > 0.0))
             return {0, 0};
         // Mono mix.
         std::vector<double> x(static_cast<size_t>(frames), 0.0);
         for (int c = 0; c < channels; ++c) {
-            const float* s = in[c];
+            const SampleType* s = in[c];
             if (!s) continue;
             for (long i = 0; i < frames; ++i) x[static_cast<size_t>(i)] += s[i];
         }
@@ -267,12 +268,12 @@ public:
 
     /// Render the whole input into the caller-allocated output. `out_frames`
     /// MUST equal offline_stretch_output_frames(in_frames, opts.time_ratio).
-    /// Deinterleaved float32; `in`/`out` are arrays of `channels()` pointers.
+    /// Deinterleaved samples; `in`/`out` are arrays of `channels()` pointers.
     /// Returns false (with *err set, if provided) on a contract violation.
     /// process()/prepare() allocate scratch and may still throw std::bad_alloc
     /// for very long inputs or extreme ratios.
-    bool process(const float* const* in, long in_frames,
-                 float* const* out, long out_frames,
+    bool process(const SampleType* const* in, long in_frames,
+                 SampleType* const* out, long out_frames,
                  const OfflineStretchOptions& opts,
                  std::string* err = nullptr) {
         if (!prepared_)            return fail(err, "OfflineStretch::process called before prepare()");
@@ -357,9 +358,9 @@ public:
             // phase-vocoder pass + one interpolation, not two cascaded PV passes.
             const double eff = opts.time_ratio * P;
             const long inter_len = offline_stretch_output_frames(in_frames, eff);
-            std::vector<std::vector<float>> inter(static_cast<size_t>(ch),
-                                                  std::vector<float>(static_cast<size_t>(inter_len)));
-            std::vector<float*> ip(static_cast<size_t>(ch));
+            std::vector<std::vector<SampleType>> inter(static_cast<size_t>(ch),
+                                                       std::vector<SampleType>(static_cast<size_t>(inter_len)));
+            std::vector<SampleType*> ip(static_cast<size_t>(ch));
             for (int c = 0; c < ch; ++c) ip[c] = inter[static_cast<size_t>(c)].data();
             if (!tempo_stretch(in, in_frames, ip.data(), inter_len, eff)) return fail(err, "stretch failed");
             for (int c = 0; c < ch; ++c)
@@ -375,14 +376,14 @@ public:
         // honest cost of keeping formants fixed while both R and S change with
         // the current per-mode engine API (a true single-pass R+P needs the
         // engine-internal combination).
-        std::vector<std::vector<float>> inter(static_cast<size_t>(ch),
-                                              std::vector<float>(static_cast<size_t>(in_frames)));
-        std::vector<float*> pp(static_cast<size_t>(ch));
+        std::vector<std::vector<SampleType>> inter(static_cast<size_t>(ch),
+                                                   std::vector<SampleType>(static_cast<size_t>(in_frames)));
+        std::vector<SampleType*> pp(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) pp[c] = inter[static_cast<size_t>(c)].data();
         if (!pitch_shift(in, in_frames, pp.data(), in_frames,
                          opts.pitch_semitones, opts.formant_mode, opts.formant_semitones))
             return fail(err, "pitch stage failed");
-        std::vector<const float*> cp(static_cast<size_t>(ch));
+        std::vector<const SampleType*> cp(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) cp[c] = inter[static_cast<size_t>(c)].data();
         if (!tempo_stretch(cp.data(), in_frames, out, out_frames, opts.time_ratio)) return false;
         match_spectral_rms(in, in_frames, out, out_frames);
@@ -407,14 +408,14 @@ private:
     // |out| <= kCeiling for every downstream consumer (the engine output is clean
     // even without a host limiter). Near-identity on coherent/tonal material; the
     // ratio==1 identity path never reaches here.
-    float peak_abs(const float* const* b, long n) const noexcept {
-        float peak = 0.0f;
+    SampleType peak_abs(const SampleType* const* b, long n) const noexcept {
+        SampleType peak = SampleType{0};
         for (int c = 0; c < channels_; ++c)
             for (long i = 0; i < n; ++i) peak = std::max(peak, std::fabs(b[c][i]));
         return peak;
     }
-    void match_spectral_rms(const float* const* in, long in_frames,
-                            float* const* out, long out_frames) const noexcept {
+    void match_spectral_rms(const SampleType* const* in, long in_frames,
+                            SampleType* const* out, long out_frames) const noexcept {
         // Guard the make-up window past the onset-head graft as well as the edges.
         // restore_onset_head (tempo path) replaces up to ~fft/2 leading samples; for
         // SHORT outputs that graft reaches past n/8 into the interior window and skews
@@ -424,7 +425,7 @@ private:
         const long fft = engine_.fft_size() > 0 ? engine_.fft_size() : 4096;
         const long head_guard = std::max<long>(
             static_cast<long>(std::llround(kHeadMs * sample_rate_)), fft / 2);
-        auto interior_rms = [this, head_guard](const float* const* b, long n) {
+        auto interior_rms = [this, head_guard](const SampleType* const* b, long n) {
             const long lo = std::min<long>(std::max<long>(n / 8, head_guard), 4096), hi = n - lo;
             if (hi <= lo) return 0.0;
             double s = 0.0; long cnt = 0;
@@ -440,7 +441,7 @@ private:
         if (ri > 1e-9 && ro > 1e-9) {
             const double g = ri / ro;
             if (g > 1.0 + 1e-4) {
-                const float gf = static_cast<float>(g);
+                const SampleType gf = static_cast<SampleType>(g);
                 for (int c = 0; c < channels_; ++c)
                     for (long i = 0; i < out_frames; ++i) out[c][i] *= gf;
             }
@@ -457,22 +458,22 @@ private:
     }
 
     // Transparent below +/-kKnee, smooth tanh shoulder to a hard +/-kCeiling ceiling.
-    static constexpr float kKnee = 0.9f;
-    static constexpr float kCeiling = 0.999f;
-    static float soft_clip(float x) noexcept {
-        const float a = std::fabs(x);
+    static constexpr SampleType kKnee = static_cast<SampleType>(0.9);
+    static constexpr SampleType kCeiling = static_cast<SampleType>(0.999);
+    static SampleType soft_clip(SampleType x) noexcept {
+        const SampleType a = std::fabs(x);
         if (a <= kKnee) return x;
-        const float s = x < 0.0f ? -1.0f : 1.0f;
+        const SampleType s = x < SampleType{0} ? SampleType{-1} : SampleType{1};
         return s * (kKnee + (kCeiling - kKnee) * std::tanh((a - kKnee) / (kCeiling - kKnee)));
     }
 
     // 6-point Blackman-Harris windowed-sinc read of `x` at fractional position
     // `pos`; out-of-range taps read as silence (edge zero-pad). Exact identity
     // when pos is integral.
-    static float sample_sinc6(const float* x, long n, double pos) {
+    static SampleType sample_sinc6(const SampleType* x, long n, double pos) {
         const long i0 = static_cast<long>(std::floor(pos));
-        const float frac = static_cast<float>(pos - static_cast<double>(i0));
-        auto at = [&](long k) -> float { return (k >= 0 && k < n) ? x[k] : 0.0f; };
+        const SampleType frac = static_cast<SampleType>(pos - static_cast<double>(i0));
+        auto at = [&](long k) -> SampleType { return (k >= 0 && k < n) ? x[k] : SampleType{0}; };
         return Interpolator::sinc6(frac, at(i0 - 2), at(i0 - 1), at(i0),
                                    at(i0 + 1), at(i0 + 2), at(i0 + 3));
     }
@@ -482,8 +483,8 @@ private:
     // phase-vocoder artifacts), then a speed-scaled head EQ colours it like a tape
     // machine at that speed. Slowing down (ratio>1) loses highs and gains low-mid
     // warmth; speeding up (ratio<1) brightens and thins. Exact identity at ratio 1.
-    bool varispeed_render(const float* const* in, long in_frames,
-                          float* const* out, long out_frames, double ratio) {
+    bool varispeed_render(const SampleType* const* in, long in_frames,
+                          SampleType* const* out, long out_frames, double ratio) {
         for (int c = 0; c < channels_; ++c)
             for (long i = 0; i < out_frames; ++i)
                 out[c][i] = sample_sinc6(in[c], in_frames,
@@ -500,9 +501,9 @@ private:
             constexpr double kPi = 3.14159265358979323846;
             for (int c = 0; c < channels_; ++c) {
                 for (long i = 0; i < fi; ++i)
-                    out[c][i] *= static_cast<float>(0.5 - 0.5 * std::cos(kPi * i / fi));
+                    out[c][i] *= static_cast<SampleType>(0.5 - 0.5 * std::cos(kPi * i / fi));
                 for (long i = 0; i < fo; ++i)
-                    out[c][out_frames-1-i] *= static_cast<float>(0.5 - 0.5 * std::cos(kPi * i / fo));
+                    out[c][out_frames-1-i] *= static_cast<SampleType>(0.5 - 0.5 * std::cos(kPi * i / fo));
             }
         }
         return true;
@@ -512,7 +513,7 @@ private:
     // shelf (dulling), both scaled by log2(ratio) so the colour tracks the speed.
     // At ratio 1 every gain is 0 dB → exact bypass (varispeed stays a clean
     // identity at unity). Two cascaded RBJ biquads per channel, double state.
-    void apply_head_eq(float* const* out, long n, double ratio) {
+    void apply_head_eq(SampleType* const* out, long n, double ratio) {
         if (ratio == 1.0 || n <= 0) return; // unity = transparent
         const double oct = std::log2(ratio);            // +1 per octave slower
         const double sr = sample_rate_ > 0 ? sample_rate_ : 48000.0;
@@ -527,7 +528,7 @@ private:
                 double s = static_cast<double>(out[c][i]);
                 s = bump.process(s);
                 s = shelf.process(s);
-                out[c][i] = static_cast<float>(s);
+                out[c][i] = static_cast<SampleType>(s);
             }
         }
     }
@@ -581,19 +582,19 @@ private:
         engine_.reset();
         engine_.set_time_ratio(r);
 
-        std::vector<std::vector<float>> in(static_cast<size_t>(ch),
-                                           std::vector<float>(static_cast<size_t>(N), 0.0f));
-        std::vector<std::vector<float>> sil(static_cast<size_t>(ch),
-                                            std::vector<float>(static_cast<size_t>(blk), 0.0f));
-        std::vector<std::vector<float>> ob(static_cast<size_t>(ch),
-                                           std::vector<float>(static_cast<size_t>(blk)));
-        for (int c = 0; c < ch; ++c) in[static_cast<size_t>(c)][static_cast<size_t>(P)] = 1.0f;
-        std::vector<const float*> ip(static_cast<size_t>(ch));
-        std::vector<const float*> sp(static_cast<size_t>(ch));
-        std::vector<float*> op(static_cast<size_t>(ch));
+        std::vector<std::vector<SampleType>> in(static_cast<size_t>(ch),
+                                                std::vector<SampleType>(static_cast<size_t>(N), SampleType{0}));
+        std::vector<std::vector<SampleType>> sil(static_cast<size_t>(ch),
+                                                 std::vector<SampleType>(static_cast<size_t>(blk), SampleType{0}));
+        std::vector<std::vector<SampleType>> ob(static_cast<size_t>(ch),
+                                                std::vector<SampleType>(static_cast<size_t>(blk)));
+        for (int c = 0; c < ch; ++c) in[static_cast<size_t>(c)][static_cast<size_t>(P)] = SampleType{1};
+        std::vector<const SampleType*> ip(static_cast<size_t>(ch));
+        std::vector<const SampleType*> sp(static_cast<size_t>(ch));
+        std::vector<SampleType*> op(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) { sp[c] = sil[c].data(); op[c] = ob[c].data(); }
 
-        std::vector<float> acc; // channel 0 only
+        std::vector<SampleType> acc; // channel 0 only
         auto drain = [&]() {
             while (engine_.available_stretched() > 0) {
                 const int t = std::min(engine_.available_stretched(), blk);
@@ -608,11 +609,12 @@ private:
         }
         for (int k = 0; k < 8; ++k) { engine_.feed(sp.data(), blk); drain(); }
 
-        long pk = 0; float mx = 0.0f;
+        long pk = 0;
+        SampleType mx = SampleType{0};
         for (long i = 0; i < static_cast<long>(acc.size()); ++i)
             if (std::fabs(acc[static_cast<size_t>(i)]) > mx) { mx = std::fabs(acc[static_cast<size_t>(i)]); pk = i; }
         engine_.reset();
-        if (mx <= 0.0f) return 0.0; // degenerate; no anchor shift
+        if (mx <= SampleType{0}) return 0.0; // degenerate; no anchor shift
         return (static_cast<double>(P) * r - static_cast<double>(pk)) / (static_cast<double>(r) - 1.0);
     }
 
@@ -621,15 +623,15 @@ private:
     // shows this instantly on a tempo change and swaps in the full-quality
     // render when ready. 50%-overlap Hann is COLA (interior sums to 1), so no
     // renormalization; exact out_frames by construction; pitch preserved.
-    void ola_tempo(const float* const* in, long in_frames,
-                   float* const* out, long out_frames, double ratio) {
+    void ola_tempo(const SampleType* const* in, long in_frames,
+                   SampleType* const* out, long out_frames, double ratio) {
         const int ch = channels_;
         constexpr int W = 1024;
         constexpr int Hs = W / 2;
-        constexpr float kTwoPi = 6.28318530717958647692f;
+        constexpr double kTwoPi = 6.28318530717958647692;
         const double Ha = static_cast<double>(Hs) / ratio;
         for (int c = 0; c < ch; ++c)
-            std::fill(out[c], out[c] + out_frames, 0.0f);
+            std::fill(out[c], out[c] + out_frames, SampleType{0});
         for (long k = 0;; ++k) {
             const long sp = k * Hs;
             if (sp >= out_frames) break;
@@ -639,8 +641,9 @@ private:
                 if (so >= out_frames) break;
                 const long ii = ap + j;
                 if (ii < 0 || ii >= in_frames) continue;
-                const float wnd = 0.5f * (1.0f - std::cos(kTwoPi * static_cast<float>(j)
-                                                          / static_cast<float>(W)));
+                const SampleType wnd = static_cast<SampleType>(
+                    0.5 * (1.0 - std::cos(kTwoPi * static_cast<double>(j)
+                                          / static_cast<double>(W))));
                 for (int c = 0; c < ch; ++c) out[c][so] += in[c][ii] * wnd;
             }
         }
@@ -653,8 +656,8 @@ private:
     // exact length, no boundary click). Offline: allocates scratch per call. The
     // residual sub-hop coverage error vs a true distributed-hop scheduler is a
     // documented limitation of the realtime-core route.
-    bool tempo_stretch(const float* const* in, long in_frames,
-                       float* const* out, long out_frames, double ratio) {
+    bool tempo_stretch(const SampleType* const* in, long in_frames,
+                       SampleType* const* out, long out_frames, double ratio) {
         const int ch = channels_;
         const int blk = kBlock;
         const int fft = engine_.fft_size();
@@ -669,14 +672,14 @@ private:
         const long lead = static_cast<long>(std::llround(
             (static_cast<double>(pad) - latency_anchor_) * ratio + latency_anchor_));
 
-        std::vector<std::vector<float>> accum(static_cast<size_t>(ch));
-        std::vector<std::vector<float>> outblk(static_cast<size_t>(ch),
-                                               std::vector<float>(static_cast<size_t>(blk)));
-        std::vector<std::vector<float>> silblk(static_cast<size_t>(ch),
-                                               std::vector<float>(static_cast<size_t>(blk), 0.0f));
-        std::vector<const float*> inp(static_cast<size_t>(ch));
-        std::vector<const float*> silp(static_cast<size_t>(ch));
-        std::vector<float*> outp(static_cast<size_t>(ch));
+        std::vector<std::vector<SampleType>> accum(static_cast<size_t>(ch));
+        std::vector<std::vector<SampleType>> outblk(static_cast<size_t>(ch),
+                                                    std::vector<SampleType>(static_cast<size_t>(blk)));
+        std::vector<std::vector<SampleType>> silblk(static_cast<size_t>(ch),
+                                                    std::vector<SampleType>(static_cast<size_t>(blk), SampleType{0}));
+        std::vector<const SampleType*> inp(static_cast<size_t>(ch));
+        std::vector<const SampleType*> silp(static_cast<size_t>(ch));
+        std::vector<SampleType*> outp(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) { silp[c] = silblk[c].data(); outp[c] = outblk[c].data(); }
 
         auto drain = [&]() {
@@ -690,7 +693,7 @@ private:
                         outblk[static_cast<size_t>(c)].begin() + take);
             }
         };
-        auto feed = [&](const float* const* src, int n) { engine_.feed(src, n); drain(); };
+        auto feed = [&](const SampleType* const* src, int n) { engine_.feed(src, n); drain(); };
 
         for (long p = 0; p < pad; p += blk)
             feed(silp.data(), static_cast<int>(std::min<long>(blk, pad - p)));
@@ -708,7 +711,7 @@ private:
                 const long idx = lead + i;
                 out[c][i] = (idx >= 0 && idx < static_cast<long>(accum[static_cast<size_t>(c)].size()))
                                 ? accum[static_cast<size_t>(c)][static_cast<size_t>(idx)]
-                                : 0.0f;
+                                : SampleType{0};
             }
         return true;
     }
@@ -716,7 +719,7 @@ private:
     // Self-contained spectral-flux onset detector over the channel-summed signal.
     // Signal-layer safe (core/signal must NOT depend on core/audio's OnsetDetector).
     // Returns input sample indices of detected transient attacks, ascending.
-    std::vector<long> detect_onsets(const float* const* in, long n) const {
+    std::vector<long> detect_onsets(const SampleType* const* in, long n) const {
         std::vector<long> onsets;
         if (n < kOnsetWin) return onsets;
         const long hop = kOnsetHop;
@@ -724,7 +727,10 @@ private:
             double e = 0.0;
             const long end = std::min<long>(s + kOnsetWin, n);
             for (long i = s; i < end; ++i)
-                for (int c = 0; c < channels_; ++c) { const float v = in[c][i]; e += static_cast<double>(v) * v; }
+                for (int c = 0; c < channels_; ++c) {
+                    const SampleType v = in[c][i];
+                    e += static_cast<double>(v) * static_cast<double>(v);
+                }
             return e;
         };
         std::vector<double> flux;
@@ -752,7 +758,7 @@ private:
     }
 
     // Channel-summed |x| at a single sample (transient-peak locator helper).
-    double abs_sum(const float* const* x, long i, long n) const {
+    double abs_sum(const SampleType* const* x, long i, long n) const {
         if (i < 0 || i >= n) return 0.0;
         double a = 0.0;
         for (int c = 0; c < channels_; ++c) a += std::abs(static_cast<double>(x[c][i]));
@@ -770,7 +776,7 @@ private:
     // so the stretched sustain (and exact out_frames length) is intact.
     // RBJ 2nd-order high-pass (one channel) into dst — same biquad family as the
     // recommend_window low-band probe, complementary coefficients.
-    static void rbj_highpass(const float* src, float* dst, long n, double sr, double f0) {
+    static void rbj_highpass(const SampleType* src, SampleType* dst, long n, double sr, double f0) {
         const double q = 0.7071;
         const double w0 = 2.0 * 3.14159265358979323846 * f0 / sr;
         const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
@@ -783,7 +789,7 @@ private:
             const double out_s = nb0 * in_s + z1;
             z1 = nb1 * in_s - na1 * out_s + z2;
             z2 = nb2 * in_s - na2 * out_s;
-            dst[static_cast<size_t>(i)] = static_cast<float>(out_s);
+            dst[static_cast<size_t>(i)] = static_cast<SampleType>(out_s);
         }
     }
 
@@ -801,8 +807,8 @@ private:
     // real fade-in) or the PV did not actually lose the attack. Runs BEFORE
     // match_spectral_rms (whose interior-RMS window excludes the head, and whose
     // soft-clip still bounds any grafted peak).
-    void restore_onset_head(const float* const* in, long in_frames,
-                            float* const* out, long out_frames) const noexcept {
+    void restore_onset_head(const SampleType* const* in, long in_frames,
+                            SampleType* const* out, long out_frames) const noexcept {
         // The PV ramp the graft has to cover is ~fft/2 samples, which is only ~10 ms
         // at the percussive window (1024) but grows with the window — ~42 ms at the
         // 4096 default, ~85 ms at 8192 for sustained/tonal material. A fixed 10 ms
@@ -817,7 +823,8 @@ private:
         const long head_span = std::max<long>(static_cast<long>(std::llround(kHeadMs * sample_rate_)), ramp);
         const long head = std::min<long>({out_frames, in_frames, head_span});
         if (head < 2) return;
-        float in_peak = 0.0f, out_peak = 0.0f;
+        SampleType in_peak = SampleType{0};
+        SampleType out_peak = SampleType{0};
         for (int c = 0; c < channels_; ++c)
             for (long i = 0; i < head; ++i) {
                 in_peak = std::max(in_peak, std::fabs(in[c][static_cast<size_t>(i)]));
@@ -828,15 +835,16 @@ private:
         constexpr double kHalfPi = 1.5707963267948966;
         for (long i = 0; i < head; ++i) {
             const double cw = std::cos(kHalfPi * static_cast<double>(i) / static_cast<double>(head));
-            const float w = static_cast<float>(cw * cw);  // equal-power: 1 at 0 -> 0 at head
+            const SampleType w = static_cast<SampleType>(cw * cw);
             for (int c = 0; c < channels_; ++c)
                 out[c][static_cast<size_t>(i)] =
-                    w * in[c][static_cast<size_t>(i)] + (1.0f - w) * out[c][static_cast<size_t>(i)];
+                    w * in[c][static_cast<size_t>(i)]
+                    + (SampleType{1} - w) * out[c][static_cast<size_t>(i)];
         }
     }
 
-    void relocate_transients(const float* const* in, long in_frames,
-                             float* const* out, long out_frames, double ratio) const {
+    void relocate_transients(const SampleType* const* in, long in_frames,
+                             SampleType* const* out, long out_frames, double ratio) const {
         if (in_frames <= 0 || out_frames <= 0) return;
         const long W = kReloAttack;        // grafted half-window each side of the peak
         const long xf = std::min<long>(kReloXfade, W);
@@ -850,8 +858,8 @@ private:
         // stretch. High-passing both sides and swapping only the high band leaves
         // the kick body entirely to the continuous PV low end (no seam there) while
         // still restoring the attack's high-frequency punch.
-        std::vector<std::vector<float>> hp_in(static_cast<size_t>(channels_));
-        std::vector<std::vector<float>> hp_out(static_cast<size_t>(channels_));
+        std::vector<std::vector<SampleType>> hp_in(static_cast<size_t>(channels_));
+        std::vector<std::vector<SampleType>> hp_out(static_cast<size_t>(channels_));
         for (int c = 0; c < channels_; ++c) {
             hp_in[static_cast<size_t>(c)].resize(static_cast<size_t>(in_frames));
             hp_out[static_cast<size_t>(c)].resize(static_cast<size_t>(out_frames));
@@ -887,8 +895,9 @@ private:
                 const long si = ip + k, di = op + k;
                 if (si < 0 || si >= in_frames || di < 0 || di >= out_frames) continue;
                 const long ak = std::llabs(k);
-                float w = 1.0f;                                  // weight for the ORIGINAL high band
-                if (ak > W - xf) w = static_cast<float>(W - ak) / static_cast<float>(xf);
+                SampleType w = SampleType{1};                    // weight for the ORIGINAL high band
+                if (ak > W - xf)
+                    w = static_cast<SampleType>(W - ak) / static_cast<SampleType>(xf);
                 // Swap the high band only: out += w*(hp_in - hp_out) makes the center
                 // (w=1) carry the PV low band + the original high band, with the seam
                 // crossfade acting only on the high band (short periods -> clean).
@@ -904,8 +913,8 @@ private:
     // immediately (no 30 ms pitch ramp at the start). process() is equal-length
     // with a fixed leading latency, so feed input + latency silence and trim the
     // leading latency to recover exactly out_frames (== in_frames) aligned samples.
-    bool pitch_shift(const float* const* in, long in_frames,
-                     float* const* out, long out_frames,
+    bool pitch_shift(const SampleType* const* in, long in_frames,
+                     SampleType* const* out, long out_frames,
                      double semitones, OfflineFormantMode fmode, double fsemis) {
         const int ch = channels_;
         const int blk = kBlock;
@@ -924,17 +933,17 @@ private:
         pitch_engine_.reset(); // latches the pitch/formant smoothers to the targets above
 
         const long lat = pitch_engine_.latency_samples();
-        std::vector<std::vector<float>> accum(static_cast<size_t>(ch));
-        std::vector<std::vector<float>> ob(static_cast<size_t>(ch),
-                                           std::vector<float>(static_cast<size_t>(blk)));
-        std::vector<std::vector<float>> sil(static_cast<size_t>(ch),
-                                            std::vector<float>(static_cast<size_t>(blk), 0.0f));
-        std::vector<const float*> ip(static_cast<size_t>(ch));
-        std::vector<const float*> sp(static_cast<size_t>(ch));
-        std::vector<float*> op(static_cast<size_t>(ch));
+        std::vector<std::vector<SampleType>> accum(static_cast<size_t>(ch));
+        std::vector<std::vector<SampleType>> ob(static_cast<size_t>(ch),
+                                                std::vector<SampleType>(static_cast<size_t>(blk)));
+        std::vector<std::vector<SampleType>> sil(static_cast<size_t>(ch),
+                                                 std::vector<SampleType>(static_cast<size_t>(blk), SampleType{0}));
+        std::vector<const SampleType*> ip(static_cast<size_t>(ch));
+        std::vector<const SampleType*> sp(static_cast<size_t>(ch));
+        std::vector<SampleType*> op(static_cast<size_t>(ch));
         for (int c = 0; c < ch; ++c) { sp[c] = sil[c].data(); op[c] = ob[c].data(); }
 
-        auto pump = [&](const float* const* src, int nn) {
+        auto pump = [&](const SampleType* const* src, int nn) {
             pitch_engine_.process(src, op.data(), nn);
             for (int c = 0; c < ch; ++c)
                 accum[static_cast<size_t>(c)].insert(
@@ -954,7 +963,7 @@ private:
                 const long idx = lat + i;
                 out[c][i] = (idx >= 0 && idx < static_cast<long>(accum[static_cast<size_t>(c)].size()))
                                 ? accum[static_cast<size_t>(c)][static_cast<size_t>(idx)]
-                                : 0.0f;
+                                : SampleType{0};
             }
         return true;
     }
@@ -976,11 +985,11 @@ private:
     static constexpr long kReloBack = 768;           // input-peak search look-back (onset lags the peak)
     static constexpr long kReloSearch = 1536;        // +/- ~32 ms output-peak search
     static constexpr double kHeadMs = 0.010;         // onset-head graft span (~10 ms)
-    static constexpr float kHeadEps = 1e-3f;         // input head silent -> no soft-start
-    static constexpr float kHeadRatio = 1.1f;        // PV must have lost the attack to fire
+    static constexpr SampleType kHeadEps = static_cast<SampleType>(1e-3); // input head silent -> no soft-start
+    static constexpr SampleType kHeadRatio = static_cast<SampleType>(1.1); // PV must have lost the attack to fire
     static constexpr double kReloHpHz = 300.0;       // graft only the high band above this (low end stays on the clean PV)
-    RealtimePitchTimeProcessor engine_;
-    RealtimePitchTimeProcessor pitch_engine_;
+    RealtimePitchTimeProcessorT<SampleType> engine_;
+    RealtimePitchTimeProcessorT<SampleType> pitch_engine_;
     double latency_anchor_ = 0.0;
     double sample_rate_ = 0.0;
     int channels_ = 1;
@@ -989,5 +998,8 @@ private:
     int fft_size_ = 0;
     bool prepared_ = false;
 };
+
+using OfflineStretch = OfflineStretchT<float>;
+using OfflineStretch64 = OfflineStretchT<double>;
 
 } // namespace pulp::signal

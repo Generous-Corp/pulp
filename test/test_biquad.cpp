@@ -99,6 +99,54 @@ TEST_CASE("Biquad impulse responses stay pinned for representative filters",
     }
 }
 
+TEST_CASE("Biquad64 lowpass impulse response is pinned",
+          "[signal][biquad][f64]") {
+    Biquad64 filter;
+    filter.set_coefficients(Biquad64::Type::lowpass, 600.0, 0.707, 48000.0);
+
+    std::array<double, 6> impulse{{1.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
+    filter.process(impulse.data(), static_cast<int>(impulse.size()));
+
+    const std::array<double, 6> expected{{
+        0.0014603047124823571,
+        0.0056791514333672331,
+        0.010881557210226506,
+        0.015473416853959747,
+        0.019492101554219175,
+        0.022974401307966137,
+    }};
+
+    for (std::size_t i = 0; i < impulse.size(); ++i) {
+        REQUIRE(std::isfinite(impulse[i]));
+        REQUIRE_THAT(impulse[i], WithinAbs(expected[i], 1e-14));
+    }
+}
+
+TEST_CASE("Biquad64 sample and block processing paths match",
+          "[signal][biquad][f64]") {
+    Biquad64 sample_filter;
+    Biquad64 block_filter;
+    sample_filter.set_coefficients(Biquad64::Type::peaking, 1200.0, 0.75, 48000.0, 6.0);
+    block_filter.set_coefficients(Biquad64::Type::peaking, 1200.0, 0.75, 48000.0, 6.0);
+
+    const std::array<double, 12> input{{
+        0.75, -0.5, 0.25, 0.0, 1.0, -1.0,
+        0.125, -0.25, 0.5, -0.125, 0.0, 0.375,
+    }};
+
+    auto sample_output = input;
+    for (double& sample : sample_output)
+        sample = sample_filter.process(sample);
+
+    auto block_output = input;
+    block_filter.process(block_output.data(), static_cast<int>(block_output.size()));
+
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        REQUIRE(std::isfinite(block_output[i]));
+        REQUIRE_THAT(block_output[i], WithinAbs(sample_output[i], 1e-14));
+    }
+}
+
 TEST_CASE("Biquad extreme valid controls still produce finite sample output",
           "[signal][biquad]") {
     const std::array<BiquadCase, 8> cases{{

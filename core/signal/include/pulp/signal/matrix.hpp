@@ -13,21 +13,21 @@ namespace pulp::signal {
 ///
 /// RT contract: fixed-size matrix construction, element access, arithmetic,
 /// transpose, determinants, transforms, and comparison allocate no memory.
-template<int N>
+template<int N, typename SampleType = float>
 struct Matrix {
-    std::array<float, N * N> data{};
+    std::array<SampleType, N * N> data{};
 
-    float& at(int row, int col) { return data[row * N + col]; }
-    float at(int row, int col) const { return data[row * N + col]; }
+    SampleType& at(int row, int col) { return data[row * N + col]; }
+    SampleType at(int row, int col) const { return data[row * N + col]; }
 
-    float& operator()(int row, int col) { return at(row, col); }
-    float operator()(int row, int col) const { return at(row, col); }
+    SampleType& operator()(int row, int col) { return at(row, col); }
+    SampleType operator()(int row, int col) const { return at(row, col); }
 
     /// Identity matrix
     static Matrix identity() {
         Matrix m{};
         for (int i = 0; i < N; ++i)
-            m.at(i, i) = 1.0f;
+            m.at(i, i) = SampleType{1.0f};
         return m;
     }
 
@@ -45,7 +45,7 @@ struct Matrix {
     }
 
     /// Scalar multiply
-    Matrix operator*(float scalar) const {
+    Matrix operator*(SampleType scalar) const {
         Matrix result{};
         for (int i = 0; i < N * N; ++i)
             result.data[i] = data[i] * scalar;
@@ -75,14 +75,19 @@ struct Matrix {
 using Matrix2 = Matrix<2>;
 using Matrix3 = Matrix<3>;
 using Matrix4 = Matrix<4>;
+using Matrix2d = Matrix<2, double>;
+using Matrix3d = Matrix<3, double>;
+using Matrix4d = Matrix<4, double>;
 
 /// Determinant of a 2x2 matrix
-inline float determinant(const Matrix2& m) {
+template <typename SampleType>
+inline SampleType determinant(const Matrix<2, SampleType>& m) {
     return m(0, 0) * m(1, 1) - m(0, 1) * m(1, 0);
 }
 
 /// Determinant of a 3x3 matrix
-inline float determinant(const Matrix3& m) {
+template <typename SampleType>
+inline SampleType determinant(const Matrix<3, SampleType>& m) {
     return m(0, 0) * (m(1, 1) * m(2, 2) - m(1, 2) * m(2, 1))
          - m(0, 1) * (m(1, 0) * m(2, 2) - m(1, 2) * m(2, 0))
          + m(0, 2) * (m(1, 0) * m(2, 1) - m(1, 1) * m(2, 0));

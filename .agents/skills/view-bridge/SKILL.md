@@ -27,7 +27,10 @@ times to be worth remembering.
 part of the node ABI surface. When adding a new view lifecycle hook, append
 the virtual at the tail of `Processor`; never insert, remove, reorder, or
 re-signature existing virtuals. `tools/scripts/node_abi_gate.py --mode=report`
-is the fast check before pushing.
+is the fast check before pushing. The same rule applies to non-view Processor
+virtuals: additive callbacks such as `process_f64(...)` belong after the
+existing f32 process surface, and descriptor fields added for new capabilities
+should be appended when positional aggregate initializer compatibility matters.
 
 ## Lifecycle protocol — adapter author side
 

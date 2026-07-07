@@ -22,10 +22,10 @@ namespace pulp::signal {
 /// gain.set_gain_db(-3.0f);
 /// float out = chain.process(in);
 /// @endcode
-template<typename... Processors>
-class ProcessorChain {
+template<typename SampleType, typename... Processors>
+class ProcessorChainT {
 public:
-    ProcessorChain() = default;
+    ProcessorChainT() = default;
 
     /// Access a processor by index.
     template<std::size_t Index>
@@ -35,12 +35,12 @@ public:
     const auto& get() const { return std::get<Index>(processors_); }
 
     /// Process a single sample through the entire chain.
-    float process(float input) {
+    SampleType process(SampleType input) {
         return process_impl(input, std::index_sequence_for<Processors...>{});
     }
 
     /// Process a buffer in-place through the entire chain.
-    void process(float* data, int num_samples) {
+    void process(SampleType* data, int num_samples) {
         for (int i = 0; i < num_samples; ++i) {
             data[i] = process(data[i]);
         }
@@ -58,8 +58,8 @@ private:
     std::tuple<Processors...> processors_;
 
     template<std::size_t... Is>
-    float process_impl(float input, std::index_sequence<Is...>) {
-        float value = input;
+    SampleType process_impl(SampleType input, std::index_sequence<Is...>) {
+        SampleType value = input;
         ((value = std::get<Is>(processors_).process(value)), ...);
         return value;
     }
@@ -76,5 +76,11 @@ private:
         (reset_one<Is>(), ...);
     }
 };
+
+template<typename... Processors>
+using ProcessorChain = ProcessorChainT<float, Processors...>;
+
+template<typename... Processors>
+using ProcessorChain64 = ProcessorChainT<double, Processors...>;
 
 } // namespace pulp::signal

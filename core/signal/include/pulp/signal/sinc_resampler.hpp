@@ -31,7 +31,8 @@
 
 namespace pulp::signal {
 
-class SincResampler {
+template <typename SampleType = float>
+class SincResamplerT {
 public:
     /// Build the kernel. `half_width` taps each side (quality vs cost; 16 is
     /// a good default), `phases` sub-sample resolution (table rows; 512 is
@@ -43,7 +44,7 @@ public:
         const int taps = 2 * half_;
         // table_[phase][tap]; phase in [0, phases_] inclusive (the extra row
         // lets read() linearly interpolate up to phase == phases_).
-        table_.assign(static_cast<size_t>(phases_ + 1) * taps, 0.0f);
+        table_.assign(static_cast<size_t>(phases_ + 1) * taps, SampleType{0.0f});
         const double i0_beta = bessel_i0(beta);
         for (int ph = 0; ph <= phases_; ++ph) {
             const double frac = static_cast<double>(ph) / phases_;
@@ -60,7 +61,7 @@ public:
                         ? bessel_i0(beta * std::sqrt(1.0 - wn * wn)) / i0_beta
                         : 0.0;
                 table_[static_cast<size_t>(ph) * taps + t] =
-                    static_cast<float>(s * w);
+                    static_cast<SampleType>(s * w);
             }
         }
     }
@@ -74,14 +75,14 @@ public:
     /// where the read point is at i0+frac. Lets a caller with its own buffer
     /// layout (e.g. a power-of-two ring) gather the neighbourhood itself and
     /// reuse the kernel. RT-safe.
-    float apply(const float* samples, double frac) const {
+    SampleType apply(const SampleType* samples, double frac) const {
         const int taps = 2 * half_;
         const double ph = frac * phases_;
         const int p0 = static_cast<int>(ph);
-        const float a = static_cast<float>(ph - p0);
-        const float* row0 = table_.data() + static_cast<size_t>(p0) * taps;
-        const float* row1 = table_.data() + static_cast<size_t>(p0 + 1) * taps;
-        float acc = 0.0f;
+        const SampleType a = static_cast<SampleType>(ph - p0);
+        const SampleType* row0 = table_.data() + static_cast<size_t>(p0) * taps;
+        const SampleType* row1 = table_.data() + static_cast<size_t>(p0 + 1) * taps;
+        SampleType acc = SampleType{0.0f};
         for (int t = 0; t < taps; ++t)
             acc += (row0[t] + a * (row1[t] - row0[t])) * samples[t];
         return acc;
@@ -91,22 +92,22 @@ public:
     /// guarantees the kernel support `[floor(pos)-half+1, floor(pos)+half]`
     /// lies within `[0, len)`; out-of-range taps are clamped to the edge so
     /// boundary reads degrade gracefully rather than read out of bounds.
-    float read(const float* src, int len, double pos) const {
+    SampleType read(const SampleType* src, int len, double pos) const {
         const int taps = 2 * half_;
         const long i0 = static_cast<long>(std::floor(pos));
         const double frac = pos - static_cast<double>(i0);
         // Phase table lookup with linear interpolation between rows.
         const double ph = frac * phases_;
         const int p0 = static_cast<int>(ph);
-        const float a = static_cast<float>(ph - p0);
-        const float* row0 = table_.data() + static_cast<size_t>(p0) * taps;
-        const float* row1 = table_.data() + static_cast<size_t>(p0 + 1) * taps;
-        float acc = 0.0f;
+        const SampleType a = static_cast<SampleType>(ph - p0);
+        const SampleType* row0 = table_.data() + static_cast<size_t>(p0) * taps;
+        const SampleType* row1 = table_.data() + static_cast<size_t>(p0 + 1) * taps;
+        SampleType acc = SampleType{0.0f};
         for (int t = 0; t < taps; ++t) {
             long idx = i0 + t - half_ + 1;
             if (idx < 0) idx = 0;
             else if (idx >= len) idx = len - 1;
-            const float k = row0[t] + a * (row1[t] - row0[t]);
+            const SampleType k = row0[t] + a * (row1[t] - row0[t]);
             acc += k * src[idx];
         }
         return acc;
@@ -132,7 +133,10 @@ private:
 
     int half_ = 0;
     int phases_ = 0;
-    std::vector<float> table_;
+    std::vector<SampleType> table_;
 };
+
+using SincResampler = SincResamplerT<float>;
+using SincResampler64 = SincResamplerT<double>;
 
 } // namespace pulp::signal

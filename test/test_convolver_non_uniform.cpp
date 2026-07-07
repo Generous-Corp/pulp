@@ -109,6 +109,25 @@ TEST_CASE("NonUniformPartitionedConvolver impulse-in returns IR samples",
     }
 }
 
+TEST_CASE("NonUniformPartitionedConvolver64 impulse-in returns double IR samples",
+          "[signal][convolver][non-uniform][f64]") {
+    constexpr std::size_t kBlock = 16;
+    const std::vector<double> ir = {1.0, 0.5, -0.25, 0.125};
+
+    NonUniformPartitionedConvolver64 conv;
+    conv.load_ir(ir.data(), ir.size(), kBlock, /*K=*/4);
+    REQUIRE(conv.is_loaded());
+    REQUIRE(conv.tail_block() == 0);
+
+    std::vector<double> in(kBlock, 0.0);
+    std::vector<double> out(kBlock, 0.0);
+    in[0] = 1.0;
+    conv.process(in.data(), out.data(), kBlock);
+
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        REQUIRE_THAT(out[i], WithinAbs(ir[i], 1e-12));
+}
+
 TEST_CASE("NonUniformPartitionedConvolver matches direct convolution on noise",
           "[signal][convolver][non-uniform]") {
     constexpr std::size_t kBlock = 64;

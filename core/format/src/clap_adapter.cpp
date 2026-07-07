@@ -23,6 +23,29 @@ namespace {
 constexpr std::size_t kRealtimeMidiEventCapacity = state::ParameterEventQueue::kCapacity;
 constexpr std::size_t kRealtimeMidiSysexCapacity = 128;
 constexpr std::size_t kRealtimeMidiSysexPayloadCapacity = 4096;
+
+void resize_f64_boundary_scratch(
+    std::array<std::vector<float>, kMaxChannels>& scratch,
+    std::size_t frames) {
+    for (auto& channel : scratch) channel.assign(frames, 0.0f);
+}
+
+void copy_f64_to_f32(const double* src, float* dst, uint32_t count) {
+    if (!src || !dst) return;
+    for (uint32_t i = 0; i < count; ++i)
+        dst[i] = static_cast<float>(src[i]);
+}
+
+void copy_f32_to_f64(const float* src, double* dst, uint32_t count) {
+    if (!src || !dst) return;
+    for (uint32_t i = 0; i < count; ++i)
+        dst[i] = static_cast<double>(src[i]);
+}
+
+void zero_f64(double* dst, uint32_t count) {
+    if (!dst) return;
+    std::fill_n(dst, count, 0.0);
+}
 }
 
 static PulpClapPlugin* get_self(const clap_plugin_t* plugin) {
@@ -154,6 +177,16 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     ctx.input_channels = desc.default_input_channels();
     ctx.output_channels = desc.default_output_channels();
     self->processor->prepare(ctx);
+    self->processor->prepare_f64_fallback_scratch(ctx);
+    self->native_f64_enabled = desc.effective_capabilities().supports_f64_audio;
+
+    const auto scratch_frames = static_cast<std::size_t>(max_frames);
+    resize_f64_boundary_scratch(self->f64_input_scratch, scratch_frames);
+    resize_f64_boundary_scratch(self->f64_output_scratch, scratch_frames);
+    resize_f64_boundary_scratch(self->f64_sidechain_scratch, scratch_frames);
+    for (auto& bus : self->f64_aux_output_scratch) {
+        resize_f64_boundary_scratch(bus, scratch_frames);
+    }
 
     // Cache the descriptor-declared channel count of each secondary (aux)
     // output bus so clap_process() can report a bus's declared layout without
@@ -320,22 +353,47 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // currently ignored — the Processor API exposes a single sidechain slot.
     int in_channels = 0, out_channels = 0;
     int sc_channels = 0;
+    bool main_input_f64 = false;
+    bool main_output_f64 = false;
+    bool sidechain_f64 = false;
+    std::array<bool, kMaxOutputBuses - 1> aux_output_f64{};
 
     if (process->audio_inputs_count > 0) {
         auto& bus = process->audio_inputs[0];
+        main_input_f64 = bus.data64 != nullptr;
         in_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
-        for (int ch = 0; ch < in_channels; ++ch)
-            self->input_ptrs[ch] = bus.data32[ch];
+        for (int ch = 0; ch < in_channels; ++ch) {
+            if (main_input_f64) {
+                const double* src = bus.data64[ch];
+                self->input64_ptrs[ch] = src;
+                auto* dst = self->f64_input_scratch[static_cast<std::size_t>(ch)].data();
+                copy_f64_to_f32(src, dst, num_samples);
+                self->input_ptrs[ch] = src ? dst : nullptr;
+            } else {
+                self->input64_ptrs[ch] = nullptr;
+                self->input_ptrs[ch] = bus.data32 ? bus.data32[ch] : nullptr;
+            }
+        }
     }
     if (process->audio_inputs_count > 1) {
         auto& sc_bus = process->audio_inputs[1];
         // Guard against a host that reports a sidechain bus but hands us a null
-        // data32 pointer (bus deactivated). Mirrors the defensive guard the
-        // VST3 adapter already has.
-        if (sc_bus.data32) {
+        // data pointer (bus deactivated). Mirrors the defensive guard the VST3
+        // adapter already has.
+        sidechain_f64 = sc_bus.data64 != nullptr;
+        if ((sidechain_f64 && sc_bus.data64) || (!sidechain_f64 && sc_bus.data32)) {
             sc_channels = (std::min)(static_cast<int>(sc_bus.channel_count), kMaxChannels);
             for (int ch = 0; ch < sc_channels; ++ch) {
-                self->sidechain_ptrs[ch] = sc_bus.data32[ch];
+                if (sidechain_f64) {
+                    const double* src = sc_bus.data64[ch];
+                    self->sidechain64_ptrs[ch] = src;
+                    auto* dst = self->f64_sidechain_scratch[static_cast<std::size_t>(ch)].data();
+                    copy_f64_to_f32(src, dst, num_samples);
+                    self->sidechain_ptrs[ch] = src ? dst : nullptr;
+                } else {
+                    self->sidechain64_ptrs[ch] = nullptr;
+                    self->sidechain_ptrs[ch] = sc_bus.data32[ch];
+                }
                 if (!self->sidechain_ptrs[ch]) {
                     // Any null per-channel pointer demotes the whole bus
                     // to "not supplied" so Processor::set_sidechain sees
@@ -349,15 +407,33 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
 
     if (process->audio_outputs_count > 0) {
         auto& bus = process->audio_outputs[0];
+        main_output_f64 = bus.data64 != nullptr;
         out_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
-        for (int ch = 0; ch < out_channels; ++ch)
-            self->output_ptrs[ch] = bus.data32[ch];
+        for (int ch = 0; ch < out_channels; ++ch) {
+            if (main_output_f64) {
+                self->output64_ptrs[ch] =
+                    bus.data64 && bus.data64[ch] ? bus.data64[ch] : nullptr;
+                auto& scratch = self->f64_output_scratch[static_cast<std::size_t>(ch)];
+                std::fill(scratch.begin(), scratch.end(), 0.0f);
+                self->output_ptrs[ch] = bus.data64 && bus.data64[ch]
+                    ? scratch.data()
+                    : nullptr;
+            } else {
+                self->output64_ptrs[ch] = nullptr;
+                self->output_ptrs[ch] = bus.data32 ? bus.data32[ch] : nullptr;
+            }
+        }
         // When the render was clamped above, the processor only writes the
         // first num_samples frames; zero the un-processable tail on every main
         // output channel so the host reads silence past the prepared max.
         if (original_num_samples > num_samples) {
             for (int ch = 0; ch < out_channels; ++ch) {
-                if (self->output_ptrs[ch]) {
+                if (main_output_f64) {
+                    if (bus.data64 && bus.data64[ch]) {
+                        zero_f64(bus.data64[ch] + num_samples,
+                                 original_num_samples - num_samples);
+                    }
+                } else if (self->output_ptrs[ch]) {
                     std::memset(self->output_ptrs[ch] + num_samples, 0,
                                 sizeof(float) * (original_num_samples - num_samples));
                 }
@@ -381,11 +457,19 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     for (uint32_t b = 1; b < process->audio_outputs_count; ++b) {
         auto& bus = process->audio_outputs[b];
         // An inactive/deactivated bus can report channel_count > 0 while
-        // data32 == nullptr. Guard the bus pointer before indexing it so the
+        // data32/data64 == nullptr. Guard the bus pointer before indexing it so the
         // pre-zero loop never dereferences null on the audio thread.
-        if (!bus.data32) continue;
+        const bool bus_f64 = bus.data64 != nullptr;
+        if ((b - 1) < aux_output_f64.size()) {
+            aux_output_f64[b - 1] = bus_f64;
+        }
+        if ((bus_f64 && !bus.data64) || (!bus_f64 && !bus.data32)) continue;
         for (uint32_t ch = 0; ch < bus.channel_count; ++ch) {
-            if (bus.data32[ch]) {
+            if (bus_f64) {
+                if (bus.data64[ch]) {
+                    zero_f64(bus.data64[ch], original_num_samples);
+                }
+            } else if (bus.data32[ch]) {
                 std::memset(bus.data32[ch], 0, sizeof(float) * original_num_samples);
             }
         }
@@ -425,10 +509,21 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         // Row b-1 backs host output bus b (the main bus at index 0 uses
         // output_ptrs, not this storage).
         float** ptrs = self->aux_output_ptrs[b - 1];
-        bool active = bus.data32 != nullptr;
+        const bool bus_f64 = aux_output_f64[b - 1];
+        bool active = bus_f64 ? bus.data64 != nullptr : bus.data32 != nullptr;
         if (active) {
             for (int ch = 0; ch < aux_channels; ++ch) {
-                ptrs[ch] = bus.data32[ch];
+                if (bus_f64) {
+                    self->aux_output64_ptrs[b - 1][ch] =
+                        bus.data64 && bus.data64[ch] ? bus.data64[ch] : nullptr;
+                    auto& scratch =
+                        self->f64_aux_output_scratch[b - 1][static_cast<std::size_t>(ch)];
+                    std::fill(scratch.begin(), scratch.end(), 0.0f);
+                    ptrs[ch] = bus.data64[ch] ? scratch.data() : nullptr;
+                } else {
+                    self->aux_output64_ptrs[b - 1][ch] = nullptr;
+                    ptrs[ch] = bus.data32[ch];
+                }
                 if (!ptrs[ch]) {
                     // A null per-channel pointer demotes the whole bus to
                     // inactive so the Processor sees an empty bus rather than a
@@ -454,6 +549,75 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         .outputs = ProcessBusBufferSet<float>(
             std::span(output_buses.data(), routed_output_buses)),
     };
+    bool has_host_f64 = main_input_f64 || main_output_f64 || sidechain_f64;
+    bool all_active_routed_buses_are_f64 = true;
+    if (process->audio_inputs_count > 0 && in_channels > 0 && !main_input_f64) {
+        all_active_routed_buses_are_f64 = false;
+    }
+    if (process->audio_outputs_count > 0 && out_channels > 0 && !main_output_f64) {
+        all_active_routed_buses_are_f64 = false;
+    }
+    if (sc_channels > 0 && !sidechain_f64) {
+        all_active_routed_buses_are_f64 = false;
+    }
+
+    audio::BufferView<const double> input64_view(
+        self->input64_ptrs, in_channels, num_samples);
+    audio::BufferView<double> output64_view(
+        self->output64_ptrs, out_channels, num_samples);
+    audio::BufferView<const double> sidechain64_view(
+        self->sidechain64_ptrs, sc_channels, num_samples);
+    std::array<ProcessBusBufferView<const double>, 2> input64_buses{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     in_channels, false, process->audio_inputs_count > 0},
+            .buffer = input64_view,
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
+                     sc_channels, true, sc_channels > 0},
+            .buffer = sidechain64_view,
+        },
+    }};
+    std::array<ProcessBusBufferView<double>, kMaxOutputBuses> output64_buses{};
+    output64_buses[0] = {
+        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                 out_channels, false, process->audio_outputs_count > 0},
+        .buffer = output64_view,
+    };
+    for (uint32_t b = 1; b < routed_output_buses; ++b) {
+        auto& bus = process->audio_outputs[b];
+        int aux_channels =
+            (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
+        double** ptrs = self->aux_output64_ptrs[b - 1];
+        bool active = aux_output_f64[b - 1] && bus.data64 != nullptr;
+        if (active) {
+            has_host_f64 = true;
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                ptrs[ch] = bus.data64[ch];
+                if (!ptrs[ch]) {
+                    active = false;
+                    break;
+                }
+            }
+        }
+        if (output_buses[b].active() && !aux_output_f64[b - 1]) {
+            all_active_routed_buses_are_f64 = false;
+        }
+        if (!active) aux_channels = 0;
+        output64_buses[b] = {
+            .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
+                     self->declared_aux_channels[b - 1], true, active},
+            .buffer = audio::BufferView<double>(ptrs, aux_channels, num_samples),
+        };
+    }
+    ProcessBuffers64 process_buffers64{
+        .inputs = ProcessBusBufferSet<const double>(input64_buses),
+        .outputs = ProcessBusBufferSet<double>(
+            std::span(output64_buses.data(), routed_output_buses)),
+    };
+    const bool native_f64 =
+        self->native_f64_enabled && has_host_f64 && all_active_routed_buses_are_f64;
 
     // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
     // capacity survives warmup and the steady-state process path stays RT-safe.
@@ -798,8 +962,60 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         const bool delayed = self->bypass_delay_samples > 0 &&
             out_channels <= static_cast<int>(self->bypass_dry_delay.size());
         for (int ch = 0; ch < out_channels; ++ch) {
-            if (self->output_ptrs[ch] == nullptr) continue;
-            if (ch < in_channels && self->input_ptrs[ch] != nullptr) {
+            const bool has_input_channel =
+                process->audio_inputs_count > 0 &&
+                ch < in_channels &&
+                ch < static_cast<int>(process->audio_inputs[0].channel_count);
+            const double* in64 =
+                has_input_channel && process->audio_inputs[0].data64
+                    ? process->audio_inputs[0].data64[ch]
+                    : nullptr;
+            const float* in32 =
+                has_input_channel && process->audio_inputs[0].data32
+                    ? process->audio_inputs[0].data32[ch]
+                    : nullptr;
+
+            if (main_output_f64) {
+                auto* out64 = process->audio_outputs_count > 0 &&
+                                      process->audio_outputs[0].data64
+                                  ? process->audio_outputs[0].data64[ch]
+                                  : nullptr;
+                if (out64 == nullptr) continue;
+                if (in64 != nullptr) {
+                    if (delayed) {
+                        auto& line = self->bypass_dry_delay[ch];
+                        for (uint32_t n = 0; n < original_num_samples; ++n) {
+                            out64[n] = static_cast<double>(line.process(
+                                static_cast<float>(in64[n]),
+                                static_cast<float>(self->bypass_delay_samples)));
+                        }
+                    } else {
+                        std::memcpy(out64, in64,
+                                    sizeof(double) * original_num_samples);
+                    }
+                } else if (in32 != nullptr) {
+                    if (delayed) {
+                        auto& line = self->bypass_dry_delay[ch];
+                        for (uint32_t n = 0; n < original_num_samples; ++n) {
+                            out64[n] = static_cast<double>(line.process(
+                                in32[n],
+                                static_cast<float>(self->bypass_delay_samples)));
+                        }
+                    } else {
+                        copy_f32_to_f64(in32, out64, original_num_samples);
+                    }
+                } else {
+                    zero_f64(out64, original_num_samples);
+                }
+                continue;
+            }
+
+            auto* out32 = process->audio_outputs_count > 0 &&
+                                  process->audio_outputs[0].data32
+                              ? process->audio_outputs[0].data32[ch]
+                              : nullptr;
+            if (out32 == nullptr) continue;
+            if (in32 != nullptr || in64 != nullptr) {
                 if (delayed) {
                     // The plugin path is host-compensated by its reported
                     // latency, so the bypassed dry signal must be delayed by
@@ -811,25 +1027,49 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     // in exchange for a zero-cost non-bypassed path. Steady
                     // state emits input[n - latency].
                     auto& line = self->bypass_dry_delay[ch];
-                    const float* in = self->input_ptrs[ch];
-                    float* out = self->output_ptrs[ch];
                     for (uint32_t n = 0; n < original_num_samples; ++n) {
-                        out[n] = line.process(
-                            in[n],
+                        const float sample = in32 ? in32[n] : static_cast<float>(in64[n]);
+                        out32[n] = line.process(
+                            sample,
                             static_cast<float>(self->bypass_delay_samples));
                     }
-                } else {
-                    std::memcpy(self->output_ptrs[ch], self->input_ptrs[ch],
+                } else if (in32 != nullptr) {
+                    std::memcpy(out32, in32,
                                 sizeof(float) * original_num_samples);
+                } else {
+                    copy_f64_to_f32(in64, out32, original_num_samples);
                 }
             } else {
-                std::memset(self->output_ptrs[ch], 0, sizeof(float) * original_num_samples);
+                std::memset(out32, 0, sizeof(float) * original_num_samples);
             }
         }
         self->processor->set_sidechain(nullptr);
     } else {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        self->processor->process(process_buffers, midi_in, midi_out, ctx);
+        if (native_f64) {
+            self->processor->process_f64(process_buffers64, midi_in, midi_out, ctx);
+        } else {
+            self->processor->process(process_buffers, midi_in, midi_out, ctx);
+        }
+        if (!native_f64 && main_output_f64 && process->audio_outputs_count > 0 &&
+            process->audio_outputs[0].data64) {
+            auto& bus = process->audio_outputs[0];
+            for (int ch = 0; ch < out_channels; ++ch) {
+                copy_f32_to_f64(self->output_ptrs[ch], bus.data64[ch], num_samples);
+            }
+        }
+        for (uint32_t b = 1; b < routed_output_buses; ++b) {
+            if (native_f64 || !aux_output_f64[b - 1]) continue;
+            auto& bus = process->audio_outputs[b];
+            if (!bus.data64) continue;
+            int aux_channels =
+                (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                copy_f32_to_f64(self->aux_output_ptrs[b - 1][ch],
+                                bus.data64[ch],
+                                num_samples);
+            }
+        }
     }
 
     // Return trigger / momentary params (panic, reset, tap) to their default

@@ -58,9 +58,10 @@ namespace pulp::signal {
 /// storage and are not audio-thread safe. process(), reset(), latency(), and
 /// accessors are allocation-free after a valid IR is loaded and callers pass
 /// exactly block_size() samples.
-class NonUniformPartitionedConvolver {
+template <typename SampleType = float>
+class NonUniformPartitionedConvolverT {
 public:
-    NonUniformPartitionedConvolver() = default;
+    NonUniformPartitionedConvolverT() = default;
 
     /// Reasonable default tail multiplier (K). The head stage covers
     /// the first K small-block partitions of the IR so that the tail
@@ -87,7 +88,7 @@ public:
     /// @param tail_multiplier K factor for the tail-stage block size
     ///                        (default 4; rounded up to power of 2;
     ///                        K=1 degenerates to uniform partitioning).
-    void load_ir(const float* ir, std::size_t ir_length,
+    void load_ir(const SampleType* ir, std::size_t ir_length,
                  std::size_t block_size,
                  std::size_t tail_multiplier = kDefaultTailMultiplier) {
         reset_state();
@@ -119,8 +120,8 @@ public:
             tail_.load_ir(tail_ir_slice_.data(), tail_len, tail_block);
             tail_block_ = tail_block;
             // Input/output ring buffers for the tail stage.
-            tail_input_buf_.assign(tail_block_, 0.0f);
-            tail_output_buf_.assign(tail_block_, 0.0f);
+            tail_input_buf_.assign(tail_block_, SampleType{0.0f});
+            tail_output_buf_.assign(tail_block_, SampleType{0.0f});
             tail_fill_ = 0;
             tail_stream_pos_ = tail_block_;  // nothing to stream yet
         }
@@ -140,7 +141,9 @@ public:
     ///   The K-block buffering delay coincides with the K·B IR-tap
     ///   offset of the tail slice, so the sum is sample-aligned with
     ///   the true linear convolution.
-    void process(const float* input, float* output, std::size_t num_samples) {
+    void process(const SampleType* input,
+                 SampleType* output,
+                 std::size_t num_samples) {
         if (!loaded_ || num_samples != block_size_) {
             // Pass-through fallback (matches PartitionedConvolver).
             std::copy_n(input, num_samples, output);
@@ -178,8 +181,8 @@ public:
     void reset() {
         head_.reset();
         if (tail_block_ > 0) tail_.reset();
-        std::fill(tail_input_buf_.begin(), tail_input_buf_.end(), 0.0f);
-        std::fill(tail_output_buf_.begin(), tail_output_buf_.end(), 0.0f);
+        std::fill(tail_input_buf_.begin(), tail_input_buf_.end(), SampleType{0.0f});
+        std::fill(tail_output_buf_.begin(), tail_output_buf_.end(), SampleType{0.0f});
         tail_fill_ = 0;
         tail_stream_pos_ = tail_block_;
     }
@@ -205,8 +208,8 @@ private:
     }
 
     void reset_state() {
-        head_ = PartitionedConvolver{};
-        tail_ = PartitionedConvolver{};
+        head_ = PartitionedConvolverT<SampleType>{};
+        tail_ = PartitionedConvolverT<SampleType>{};
         tail_ir_slice_.clear();
         tail_input_buf_.clear();
         tail_output_buf_.clear();
@@ -219,11 +222,11 @@ private:
         loaded_ = false;
     }
 
-    PartitionedConvolver head_;
-    PartitionedConvolver tail_;
-    std::vector<float> tail_ir_slice_;
-    std::vector<float> tail_input_buf_;
-    std::vector<float> tail_output_buf_;
+    PartitionedConvolverT<SampleType> head_;
+    PartitionedConvolverT<SampleType> tail_;
+    std::vector<SampleType> tail_ir_slice_;
+    std::vector<SampleType> tail_input_buf_;
+    std::vector<SampleType> tail_output_buf_;
     std::size_t block_size_ = 0;
     std::size_t tail_block_ = 0;
     std::size_t tail_multiplier_ = 0;
@@ -232,5 +235,8 @@ private:
     std::size_t tail_stream_pos_ = 0;  // tail_block_ ⇒ nothing to stream
     bool loaded_ = false;
 };
+
+using NonUniformPartitionedConvolver = NonUniformPartitionedConvolverT<float>;
+using NonUniformPartitionedConvolver64 = NonUniformPartitionedConvolverT<double>;
 
 } // namespace pulp::signal

@@ -158,9 +158,13 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
 
     Gain gain;
     gain.set_gain_linear(0.5f);
+    Gain64 gain64;
+    gain64.set_gain_linear(0.5);
 
     SimpleMixer mixer;
     mixer.set_mix(0.25f);
+    SimpleMixer64 mixer64;
+    mixer64.set_mix(0.25);
 
     Oscillator osc;
     osc.set_sample_rate(48000.0f);
@@ -169,6 +173,8 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
 
     Biquad biquad;
     biquad.set_coefficients(Biquad::Type::lowpass, 1800.0f, 0.707f, 48000.0f);
+    Biquad64 biquad64;
+    biquad64.set_coefficients(Biquad64::Type::lowpass, 1800.0, 0.707, 48000.0);
 
     Svf svf;
     svf.set_sample_rate(48000.0f);
@@ -208,6 +214,10 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
         std::array<float, 64> dry {};
         std::array<float, 64> wet {};
         std::array<float, 64> mixed {};
+        std::array<double, 64> samples64 {};
+        std::array<double, 64> dry64 {};
+        std::array<double, 64> wet64 {};
+        std::array<double, 64> mixed64 {};
         for (std::size_t i = 0; i < samples.size(); ++i) {
             const float input = static_cast<float>(i % 13) * 0.03f - 0.18f;
             float value = bias.process(input);
@@ -228,6 +238,10 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
             samples[i] = ballistics.process((left + right) * (0.5f + smoothed * 0.1f));
             dry[i] = input;
             wet[i] = samples[i];
+            const double input64 = static_cast<double>(input);
+            samples64[i] = biquad64.process(gain64.process(input64));
+            dry64[i] = input64;
+            wet64[i] = samples64[i];
         }
 
         bias.process(samples.data(), static_cast<int>(samples.size()));
@@ -235,6 +249,10 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
         dc_blocker.process(samples.data(), static_cast<int>(samples.size()));
         gain.process(samples.data(), static_cast<int>(samples.size()));
         mixer.process(dry.data(), wet.data(), mixed.data(), static_cast<int>(mixed.size()));
+        gain64.process(samples64.data(), static_cast<int>(samples64.size()));
+        mixer64.process(dry64.data(), wet64.data(), mixed64.data(),
+                        static_cast<int>(mixed64.size()));
+        biquad64.process(samples64.data(), static_cast<int>(samples64.size()));
         svf.process(samples.data(), static_cast<int>(samples.size()));
         phaser.process(samples.data(), static_cast<int>(samples.size()));
         shaper.process(samples.data(), static_cast<int>(samples.size()));

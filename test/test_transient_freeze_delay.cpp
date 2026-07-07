@@ -129,6 +129,24 @@ TEST_CASE("TransientPhasePolicy fires on broadband onsets, not steady tones",
     REQUIRE(post_fires == 0);
 }
 
+TEST_CASE("TransientPhasePolicy64 fires on double broadband onsets",
+          "[signal][transient][f64]") {
+    TransientPhasePolicy64::Config config;
+    config.fft_size = 1024;
+    TransientPhasePolicy64 policy;
+    policy.prepare(config);
+
+    constexpr int bins = 513;
+    std::vector<std::complex<double>> frame(static_cast<size_t>(bins));
+    const std::complex<double>* frames[1] = {frame.data()};
+    for (int f = 0; f < 16; ++f) {
+        for (auto& bin : frame) bin = {0.001, 0.0};
+        (void)policy.analyze(frames, 1, bins);
+    }
+    for (auto& bin : frame) bin = {0.5, 0.0};
+    REQUIRE(policy.analyze(frames, 1, bins) > 0.0);
+}
+
 TEST_CASE("Transient preservation keeps click crest under time stretch",
           "[signal][transient]") {
     auto crest_db = [](const std::vector<float>& x) {
@@ -375,6 +393,28 @@ TEST_CASE("PitchedFeedbackDelay echo spacing matches ms and sync settings",
         if (std::abs(out2[static_cast<size_t>(i)]) > std::abs(out2[static_cast<size_t>(best)]))
             best = i;
     REQUIRE(std::abs(best - (100 + 12000)) <= 1);
+}
+
+TEST_CASE("PitchedFeedbackDelay64 processes double delay lines",
+          "[signal][pitched-delay][f64]") {
+    PitchedFeedbackDelay64 delay;
+    PitchedFeedbackDelay64::Config config;
+    config.max_block = 4096;
+    delay.prepare(kSr, config);
+    delay.set_feedback(0.0f);
+    delay.set_delay_ms(10.0f);
+
+    std::vector<double> in(4096, 0.0), out(4096, 0.0);
+    in[32] = 1.0;
+    const double* ip[1] = {in.data()};
+    double* op[1] = {out.data()};
+    delay.process(ip, op, 4096);
+
+    int best = 0;
+    for (int i = 0; i < 4096; ++i)
+        if (std::abs(out[static_cast<size_t>(i)]) > std::abs(out[static_cast<size_t>(best)]))
+            best = i;
+    REQUIRE(std::abs(best - (32 + 480)) <= 1);
 }
 
 namespace {

@@ -32,6 +32,22 @@ TEST_CASE("NoiseMorpher output magnitude matches the envelope", "[signal][noise-
                      WithinAbs(env[static_cast<size_t>(k)], 1e-4f));
 }
 
+TEST_CASE("NoiseMorpher64 output magnitude matches a double envelope",
+          "[signal][noise-morpher][f64]") {
+    NoiseMorpher64 nm;
+    nm.prepare(kBins, 12345);
+    std::vector<double> env(static_cast<size_t>(kBins));
+    for (int k = 0; k < kBins; ++k)
+        env[static_cast<size_t>(k)] = 0.25 + static_cast<double>(k) * 0.001;
+    nm.push_envelope(env.data());
+
+    std::vector<std::complex<double>> out(static_cast<size_t>(kBins));
+    nm.synthesize(0.0, out.data());
+    for (int k = 0; k < kBins; k += 37)
+        REQUIRE_THAT(std::abs(out[static_cast<size_t>(k)]),
+                     WithinAbs(env[static_cast<size_t>(k)], 1e-10));
+}
+
 TEST_CASE("NoiseMorpher interpolates the envelope across frames", "[signal][noise-morpher]") {
     NoiseMorpher nm;
     nm.prepare(kBins, 999);

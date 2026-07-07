@@ -122,10 +122,19 @@ initialize → setBusArrangements → setupProcessing → setActive(true)
 
 `setupProcessing` calls `processor_->prepare(ctx)` with the host's
 sample rate, max buffer size, and the descriptor's default channel
-counts. `setActive(false)` calls `processor_->release()` so the
+counts, then prepares the default f64 fallback scratch. `setActive(false)` calls
+`processor_->release()` so the
 Processor can free prepare-time resources. Never move `prepare()` out
 of `setupProcessing` — Steinberg guarantees `process()` is only called
 after a successful `setupProcessing` + `setActive(true)` sequence.
+
+VST3 can ask for `kSample64`. If
+`PluginDescriptor::effective_capabilities().supports_f64_audio` is false, keep
+the adapter-boundary conversion path: copy host double buffers to f32 scratch,
+run the existing f32 Processor callback, and copy active outputs back to double.
+Only call `Processor::process_f64(ProcessBuffers64&, ...)` for plugins that
+explicitly opt in; native f64 processors are responsible for doing real double
+DSP, not relying on the compatibility conversion.
 
 ### Parameters
 
