@@ -223,8 +223,8 @@ NSAttributedString* pulp_plugin_attributed_substring(pulp::view::View* root,
         *actual_range = NSMakeRange(static_cast<NSUInteger>(actual_start16),
                                     static_cast<NSUInteger>(actual_end16 - actual_start16));
     }
-    return [[NSAttributedString alloc]
-        initWithString:[NSString stringWithUTF8String:sub.c_str()]];
+    return [[[NSAttributedString alloc]
+        initWithString:[NSString stringWithUTF8String:sub.c_str()]] autorelease];
 }
 
 NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
