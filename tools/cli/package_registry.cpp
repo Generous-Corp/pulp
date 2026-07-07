@@ -236,7 +236,7 @@ bool is_valid_target(const PlatformTarget& t) {
 
 LicenseVerdict check_license(const std::string& spdx_id) {
     static const std::vector<std::string> allowed = {
-        "MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0",
+        "0BSD", "MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0",
         "ISC", "zlib", "BSL-1.0", "Unlicense", "CC0-1.0",
     };
     static const std::vector<std::string> rejected_prefixes = {
@@ -331,6 +331,7 @@ static PackageDescriptor parse_package(const std::string& id, const JsonValue& j
         if (auto v = c->get("targets")) pkg.cmake.targets = v->as_string_array();
         if (auto v = c->get("header_only")) pkg.cmake.header_only = v->as_bool();
         if (auto v = c->get("include_dir")) pkg.cmake.include_dir = v->as_string();
+        if (auto v = c->get("sources")) pkg.cmake.sources = v->as_string_array();
     }
 
     if (auto p = j.get("platforms"); p && p->type == JsonValue::Object) {

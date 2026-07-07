@@ -138,6 +138,32 @@ The token is the cleanup. Forget the token, the listener is gone
 when the owner is gone. Forget JUCE's `removeParameterListener`,
 your callback fires after `this` was destroyed.
 
+### MIDI Learn And Parameter Maps
+
+If your JUCE project has a MIDI-learn layer that maps incoming controller
+messages to `AudioProcessorValueTreeState` parameters, port that to
+`pulp::state::MidiParameterMap`. It is a plugin-owned `(channel, cc) ->
+ParamID` map with an `arm_learn()` mode, so the next incoming CC can bind to the
+target parameter and subsequent CCs write the parameter in the normalized domain.
+
+That covers parameter learn. It is separate from "learn the next MIDI note and
+store it as a setting" workflows, which should use a small note-listener helper
+or project-local state until Pulp grows a generic note/control learn utility.
+
+### Structured ValueTree State
+
+JUCE `ValueTree` maps naturally to Pulp `StateTree`: tree children become
+`StateTree` children, and scalar `var` values map to `PropertyValue` scalars
+(`bool`, integer, `double`, `string`, or null). Be careful with richer `var`
+payloads. JUCE arrays, dynamic objects, binary data, and object-like state
+should not be flattened into accidental strings by an importer.
+
+Today, represent arrays-of-records as child `StateTree` nodes and preserve
+opaque binary/project-specific state as explicit bytes or a project-local
+decoder. A first-class `PropertyValue` Array/Object/Node extension is the right
+Pulp-native target for importing JUCE `var` arrays/objects directly, but that is
+a state-system feature rather than an MTS-ESP dependency.
+
 ## Audio thread: snapshot, don't atomic-load-per-sample
 
 ```cpp

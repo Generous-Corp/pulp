@@ -63,6 +63,8 @@ pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)
 
 pulp_add_test_suite(pulp-test-midi-file LIBRARIES pulp::midi)
 
+pulp_add_test_suite(pulp-test-tuning LIBRARIES pulp::midi)
+
 # State tests
 pulp_add_test_suite(pulp-test-state
     SOURCES test_state.cpp harness/rt_allocation_probe.cpp

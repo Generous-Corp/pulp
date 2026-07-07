@@ -16,12 +16,76 @@
 #include "package_registry.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 
 namespace pulp::cli::pkg {
+namespace {
+
+std::string source_dir_expr(const PackageDescriptor& pkg) {
+    return "${" + pkg.id + "_SOURCE_DIR}";
+}
+
+std::string include_dir_expr(const PackageDescriptor& pkg) {
+    auto path = source_dir_expr(pkg);
+    if (!pkg.cmake.include_dir.empty() && pkg.cmake.include_dir != ".")
+        path += "/" + pkg.cmake.include_dir;
+    return path;
+}
+
+void emit_fetchcontent(std::ostringstream& os,
+                       const PackageDescriptor& pkg,
+                       const std::string& indent) {
+    os << indent << "FetchContent_Declare(" << pkg.id << "\n";
+    os << indent << "  GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
+    os << indent << "  GIT_TAG        " << pkg.fetch.git_tag << "\n";
+    os << indent << "  GIT_SHALLOW    TRUE\n";
+    os << indent << ")\n";
+    os << indent << "FetchContent_MakeAvailable(" << pkg.id << ")\n";
+}
+
+void emit_generated_target(std::ostringstream& os,
+                           const PackageDescriptor& pkg,
+                           const std::string& indent) {
+    if (pkg.cmake.targets.empty())
+        return;
+
+    const auto& target = pkg.cmake.targets[0];
+    if (pkg.cmake.header_only) {
+        os << indent << "add_library(" << target << " INTERFACE)\n";
+        os << indent << "target_include_directories(" << target
+           << " INTERFACE " << include_dir_expr(pkg) << ")\n";
+        return;
+    }
+
+    if (pkg.cmake.sources.empty())
+        return;
+
+    os << indent << "add_library(" << target << " STATIC)\n";
+    os << indent << "target_sources(" << target << " PRIVATE\n";
+    for (const auto& source : pkg.cmake.sources)
+        os << indent << "  " << source_dir_expr(pkg) << "/" << source << "\n";
+    os << indent << ")\n";
+    os << indent << "target_include_directories(" << target
+       << " PUBLIC " << include_dir_expr(pkg) << ")\n";
+    os << indent << "set_target_properties(" << target
+       << " PROPERTIES POSITION_INDEPENDENT_CODE ON)\n";
+    os << indent << "if(CMAKE_DL_LIBS)\n";
+    os << indent << "  target_link_libraries(" << target
+       << " PUBLIC ${CMAKE_DL_LIBS})\n";
+    os << indent << "endif()\n";
+}
+
+std::string feature_macro_name(std::string id) {
+    std::transform(id.begin(), id.end(), id.begin(),
+                   [](unsigned char c) { return c == '-' ? '_' : std::toupper(c); });
+    return id;
+}
+
+}  // namespace
 
 // ── Helpers ──
 
@@ -116,39 +180,29 @@ std::string generate_cmake_block(const PackageDescriptor& pkg,
 
     std::string indent = platform_guard ? "  " : "";
 
-    if (pkg.fetch.method == "header-only") {
-        os << indent << "FetchContent_Declare(" << pkg.id << "\n";
-        os << indent << "  GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
-        os << indent << "  GIT_TAG        " << pkg.fetch.git_tag << "\n";
-        os << indent << "  GIT_SHALLOW    TRUE\n";
-        os << indent << ")\n";
-        os << indent << "FetchContent_MakeAvailable(" << pkg.id << ")\n";
-        if (!pkg.cmake.targets.empty()) {
-            os << indent << "add_library(" << pkg.cmake.targets[0] << " INTERFACE)\n";
-            os << indent << "target_include_directories(" << pkg.cmake.targets[0]
-               << " INTERFACE ${" << pkg.id << "_SOURCE_DIR}";
-            if (!pkg.cmake.include_dir.empty() && pkg.cmake.include_dir != ".")
-                os << "/" << pkg.cmake.include_dir;
-            os << ")\n";
-        }
-    } else {
-        os << indent << "FetchContent_Declare(" << pkg.id << "\n";
-        os << indent << "  GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
-        os << indent << "  GIT_TAG        " << pkg.fetch.git_tag << "\n";
-        os << indent << "  GIT_SHALLOW    TRUE\n";
-        os << indent << ")\n";
-        os << indent << "FetchContent_MakeAvailable(" << pkg.id << ")\n";
-    }
+    emit_fetchcontent(os, pkg, indent);
+    emit_generated_target(os, pkg, indent);
 
     if (platform_guard) {
-        auto upper_id = pkg.id;
-        std::transform(upper_id.begin(), upper_id.end(), upper_id.begin(),
-                       [](unsigned char c) { return c == '-' ? '_' : std::toupper(c); });
         os << "  target_compile_definitions(${PROJECT_NAME} PRIVATE PULP_HAS_"
-           << upper_id << "=1)\n";
+           << feature_macro_name(pkg.id) << "=1)\n";
         os << "endif()\n";
     }
 
+    os << "# ── end " << pkg.id << " ──\n";
+    return os.str();
+}
+
+std::string generate_cmake_block_for_condition(const PackageDescriptor& pkg,
+                                               const std::string& guard_condition) {
+    std::ostringstream os;
+    os << "# ── " << pkg.id << " (" << pkg.version << ") [platform guard] ──\n";
+    os << "if(" << guard_condition << ")\n";
+    emit_fetchcontent(os, pkg, "  ");
+    emit_generated_target(os, pkg, "  ");
+    os << "  target_compile_definitions(${PROJECT_NAME} PRIVATE PULP_HAS_"
+       << feature_macro_name(pkg.id) << "=1)\n";
+    os << "endif()\n";
     os << "# ── end " << pkg.id << " ──\n";
     return os.str();
 }

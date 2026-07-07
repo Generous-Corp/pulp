@@ -420,6 +420,30 @@ target_include_directories(lv2-headers INTERFACE
 set(PULP_HAS_LV2 TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 message(STATUS "Pulp: LV2 SDK available")
 
+# ODDSound MTS-ESP (0BSD) — optional session-wide microtuning client.
+set(PULP_HAS_MTS_ESP FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+set(PULP_MTS_ESP_SOURCE_DIR "" CACHE INTERNAL "MTS-ESP source directory" FORCE)
+if(PULP_ENABLE_MTS_ESP)
+    if(IOS OR ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        message(WARNING
+            "PULP_ENABLE_MTS_ESP=ON but MTS-ESP's client library is a desktop "
+            "runtime integration. Disabling for this target.")
+    else()
+        pulp_register_fetchcontent_source(mts_esp
+            REF f214739b8832e7f297cb9970d0c0efbf783f1462)
+        FetchContent_Declare(
+            mts_esp
+            GIT_REPOSITORY https://github.com/ODDSound/MTS-ESP.git
+            GIT_TAG f214739b8832e7f297cb9970d0c0efbf783f1462
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(mts_esp)
+        set(PULP_MTS_ESP_SOURCE_DIR "${mts_esp_SOURCE_DIR}" CACHE INTERNAL "MTS-ESP source directory" FORCE)
+        set(PULP_HAS_MTS_ESP TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+        message(STATUS "Pulp: MTS-ESP microtuning client enabled")
+    endif()
+endif()
+
 # Facebook Yoga (MIT license) — cross-platform CSS Flexbox/Grid layout engine
 pulp_register_fetchcontent_source(yoga REF v3.2.1)
 FetchContent_Declare(

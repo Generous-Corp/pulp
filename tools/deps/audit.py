@@ -166,6 +166,7 @@ DEFAULT_ALIASES: dict[str, tuple[str, ...]] = {
     "Dawn": ("dawn",),
     "msdfgen": ("msdfgen",),
     "Oboe": ("oboe",),
+    "MTS-ESP": ("mtsesp", "mts_esp"),
     "mkdocs-material": ("material", "mkdocsmaterial"),
     "mkdocs": ("mkdocs",),
     "mkdocs-awesome-pages-plugin": ("awesomepages", "awesomepagesplugin"),
@@ -453,6 +454,14 @@ def upstream_status(dep: dict) -> str:
         if latest and latest != ref:
             return f"{exact}; latest={latest}"
         return exact
+    if kind == "git-commit":
+        ref = dep["upstream"]["ref"].lower()
+        output = run_git_ls_remote(repo)
+        for line in output.splitlines():
+            sha = line.split(maxsplit=1)[0].lower()
+            if sha.startswith(ref) or ref.startswith(sha):
+                return "present"
+        return "missing"
     return "unknown"
 
 

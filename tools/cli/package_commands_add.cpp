@@ -242,33 +242,7 @@ int cmd_add(const std::vector<std::string>& args) {
                     if (i > 0) guard_condition += " OR ";
                     guard_condition += conditions[i];
                 }
-                // Generate block with custom compound guard
-                std::ostringstream os;
-                os << "# ── " << pkg.id << " (" << pkg.version << ") [platform guard] ──\n";
-                os << "if(" << guard_condition << ")\n";
-                os << "  FetchContent_Declare(" << pkg.id << "\n";
-                os << "    GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
-                os << "    GIT_TAG        " << pkg.fetch.git_tag << "\n";
-                os << "    GIT_SHALLOW    TRUE\n";
-                os << "  )\n";
-                os << "  FetchContent_MakeAvailable(" << pkg.id << ")\n";
-                // Header-only packages need INTERFACE target + include dir
-                if (pkg.cmake.header_only && !pkg.cmake.targets.empty()) {
-                    os << "  add_library(" << pkg.cmake.targets[0] << " INTERFACE)\n";
-                    os << "  target_include_directories(" << pkg.cmake.targets[0]
-                       << " INTERFACE ${" << pkg.id << "_SOURCE_DIR}";
-                    if (!pkg.cmake.include_dir.empty() && pkg.cmake.include_dir != ".")
-                        os << "/" << pkg.cmake.include_dir;
-                    os << ")\n";
-                }
-                auto upper_id = pkg.id;
-                std::transform(upper_id.begin(), upper_id.end(), upper_id.begin(),
-                    [](unsigned char c) { return c == '-' ? '_' : std::toupper(c); });
-                os << "  target_compile_definitions(${PROJECT_NAME} PRIVATE PULP_HAS_"
-                   << upper_id << "=1)\n";
-                os << "endif()\n";
-                os << "# ── end " << pkg.id << " ──\n";
-                guard_cmake = os.str();
+                guard_cmake = generate_cmake_block_for_condition(pkg, guard_condition);
             }
         }
 
