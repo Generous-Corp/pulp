@@ -73,6 +73,11 @@ pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 # empty rect, sticky-full).
 pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
 
+# Host-side consumption of the accumulated dirty region: WindowHost::paint_root
+# clips the canvas to pending_dirty_bounds() for a bounded frame and paints
+# unclipped for a full one, clearing the pending region after each paint.
+pulp_add_test_suite(pulp-test-dirty-region-consumption LIBRARIES pulp::view)
+
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the
 # PluginViewHost virtuals + CPU-host inverse mouse mapping (GPU section
