@@ -201,6 +201,47 @@ between the remote HEAD and the target SHA. Typical cycles drop from
 full bundle automatically when the delta would be larger than the full
 pack.
 
+## Host resource governance
+
+Pulp's local Macs are shared: CI validation builds run alongside agent and
+developer builds on the same host. Two of them melted in July 2026 — one
+CPU-bound, one memory-bound/OOM — from unbounded builds oversubscribing the
+machine. A per-host build-resource **governor** now bounds every build path.
+It is tiered:
+
+- **Tier 0 — always, zero config.** The `pulp` CLI bounds build parallelism to
+  `min(cores, RAM_budget / 1.5 GiB)` on every build it emits (`pulp
+  build/dev/loop`, the local-SDK build). No lease store required; override the
+  RAM axis with `PULP_BUILD_MEM_BUDGET_MB`. A bare `--parallel`/`-j` anywhere in
+  the repo is rejected by `tools/scripts/build_parallelism_guard.py`.
+- **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
+  store, builds and VM runners acquire a weighted core+memory lease before
+  starting; admission is `min(core-budget, memory-budget)`, so a build that
+  would exhaust RAM is refused even when CPU is free. Each host derives a role
+  budget from `tartci host-profile`:
+  - **dedicated-builder** — a machine whose job is CI builds (largest core +
+    memory budget).
+  - **dev-overflow** — a shared dev machine that also takes overflow CI, running
+    its VM lane at non-gate priority so it never starves the required `macos`
+    gate.
+  - **light** — a low-resource/travel host with a small budget.
+- **Tier 2 — Orchard fleet VM placement (shadow phase).** Fleet-level placement,
+  wired but placing nothing yet. See the tartci runbook's Orchard section.
+
+The **mac local lane** is the one that historically escaped the CLI: Shipyard's
+`local` backend runs the `.shipyard/config.toml` build string directly on the
+host and does not pass through the `pulp` CLI. That build is now wrapped by
+`tools/ci/governed-build.sh`, which acquires a tartci build lease sized from the
+host profile, exports the granted `-j`, runs the build as a child process, and
+releases the lease on exit. When tartci is absent (a build VM or a plain
+checkout) or the lease is denied (host saturated), it falls back to the Tier-0
+bound — it never fails the build and never piles onto a saturated host.
+
+`pulp status` reports the active tier with a `Build governance: Tier N (…)`
+line. Host-side setup and the deeper lease/role/memory-axis mechanics live in
+the [tartci](https://github.com/danielraffel/tartci) repo (`scripts/leases.py`,
+`scripts/host_profile.py`, `tartci host-profile` / `tartci leases`).
+
 ## Validation Profiles
 
 Shipyard validates from a profile (`shipyard run --pipeline <name>`).
