@@ -32,9 +32,6 @@ else()
     project(PulpSDKSmoke LANGUAGES CXX)
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 option(PULP_SDK_SMOKE_INCLUDE_AUV3
     "Include AUv3 in the SDK smoke (Apple only; exercises macOS container helper)"
     OFF)
@@ -43,6 +40,40 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
     "Formats that must be present in the installed SDK (semicolon-separated)")
 
 find_package(Pulp REQUIRED CONFIG)
+
+foreach(_pulp_alias_target
+        format signal view standalone gpu-audio)
+    if(TARGET "Pulp::${_pulp_alias_target}"
+       AND NOT TARGET "pulp::${_pulp_alias_target}")
+        message(FATAL_ERROR
+            "Pulp SDK smoke: installed SDK exposes Pulp::${_pulp_alias_target} "
+            "but not the matching source-tree-compatible "
+            "pulp::${_pulp_alias_target} alias. Downstream examples and "
+            "templates must be able to switch between add_subdirectory(Pulp) "
+            "and find_package(Pulp) without changing link target names.")
+    endif()
+endforeach()
+unset(_pulp_alias_target)
+
+# C++ baseline export probe.
+#
+# This project intentionally does not set CMAKE_CXX_STANDARD. Pulp public
+# headers use C++20-era language/library constructs, so installed SDK targets
+# must carry that requirement through their INTERFACE_COMPILE_FEATURES. This
+# catches downstream failures where a consumer links only pulp::signal and then
+# compiles Pulp headers with the compiler's pre-C++20 default.
+if(TARGET Pulp::signal)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/signal_cxx20_export_probe.cpp"
+"#include <pulp/signal/fft.hpp>\n"
+"\n"
+"int main() {\n"
+"    pulp::signal::FftT<double> fft;\n"
+"    return fft.size();\n"
+"}\n")
+    add_executable(PulpSDKSmokeSignalCxx20Probe
+        "${CMAKE_CURRENT_BINARY_DIR}/signal_cxx20_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeSignalCxx20Probe PRIVATE Pulp::signal)
+endif()
 
 set(PULP_SDK_SMOKE_FORMATS)
 if(TARGET Pulp::standalone)
