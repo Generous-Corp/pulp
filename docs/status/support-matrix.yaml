@@ -791,11 +791,16 @@ ai_shader_design:
       Knob/Fader/Toggle. Recommended for structured non-color widget look changes
       alongside preset/material overrides.
   lottie_animations:
-    status: partial
+    status: usable
     notes: >
       setWidgetLottie/seekWidgetLottie bridge. Lottie JSON storage and scrub state
-      on Knob/Fader/Toggle. Native Skottie rendering still pending.
-      Skottie headers+libs available for future native GPU rendering.
+      on Knob/Fader/Toggle. Native Skottie rendering works via the opt-in
+      PULP_LOTTIE CMake option: the Skia toolchain bundles skottie + SkJSON +
+      skresources from chrome/m151 onward, so LottieAnimation composites frames
+      onto a SkiaCanvas (pixel-covered by test_canvas.cpp; playback by
+      test_lottie_view.cpp). Opt-in (default OFF) because it retains the skottie
+      module in the binary; a configure-time try-link auto-disables it on any
+      Skia bundle that cannot link skottie.
   web_animations_api:
     status: usable
     notes: >

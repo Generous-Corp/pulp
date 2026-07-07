@@ -532,8 +532,13 @@ you need direct SkSL control. Widget shaders receive the standard widget uniform
 (`resolution`, `value`, `time`, token colors), and `time` is driven from the
 view `FrameClock` when the host is actively rendering.
 
-`setWidgetLottie` currently stores animation state for tool workflows; native
-Skottie rendering is still partial.
+`setWidgetLottie` stores Lottie JSON and scrub state on a widget for tool
+workflows. Native Skottie rendering is available through the `LottieView` widget
+and `LottieAnimation` (canvas), which composite real Bodymovin frames onto a
+Skia canvas — opt-in via the `PULP_LOTTIE` CMake option, which links the skottie
+module bundled in the Skia toolchain (functional from Skia chrome/m151 onward,
+the first bundle to ship SkJSON + skresources; a configure-time try-link
+auto-disables it on older bundles).
 
 ### AI CLI Templates
 

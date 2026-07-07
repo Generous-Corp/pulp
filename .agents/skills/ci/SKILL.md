@@ -1258,6 +1258,14 @@ Branch protection's required `macos` check accepts the latest
 same-named check from either workflow, so `build-macos.yml`'s `macos`
 job supersedes the matrix's `macos` job when fresher.
 
+The macOS lane configures with `-DPULP_LOTTIE=ON` so the opt-in skottie
+render path (LottieAnimation → SkiaCanvas) gets real CI coverage — it is
+the only lane that exercises it, since `PULP_LOTTIE` defaults OFF. This
+cannot break the gate: `core/canvas/CMakeLists.txt` runs a configure-time
+try-link and auto-disables Lottie on any Skia bundle that can't link
+skottie (needs SkJSON + skresources, bundled from Skia chrome/m151 onward).
+It only enlarges the test binaries, never shipped plugins.
+
 ```bash
 # Move a PR's macOS leg to a different runner, without touching Linux/Windows:
 pulp macos retarget --pr <N> --to <local|namespace|github-hosted>
