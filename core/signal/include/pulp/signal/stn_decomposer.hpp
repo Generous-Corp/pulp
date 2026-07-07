@@ -58,13 +58,18 @@ struct StnConfig {
 };
 
 /// Per-frame soft masks. Each spans num_bins and sums to ~1 per bin.
-struct StnMasks {
-    std::vector<float> sines;
-    std::vector<float> transients;
-    std::vector<float> noise;
+template <typename SampleType = float>
+struct StnMasksT {
+    std::vector<SampleType> sines;
+    std::vector<SampleType> transients;
+    std::vector<SampleType> noise;
 };
 
-class StnDecomposer {
+using StnMasks = StnMasksT<float>;
+using StnMasks64 = StnMasksT<double>;
+
+template <typename SampleType = float>
+class StnDecomposerT {
 public:
     /// RT contract: prepare() allocates history, scratch, and mask storage and
     /// is not audio-thread safe. After prepare(), process(), center_magnitude(),
@@ -77,18 +82,18 @@ public:
         config_ = config;
         const auto bins = static_cast<size_t>(config.num_bins);
 
-        history_.assign(static_cast<size_t>(config.time_median) * bins, 0.0f);
+        history_.assign(static_cast<size_t>(config.time_median) * bins, SampleType{0});
         history_pos_ = 0;
         history_filled_ = 0;
 
-        masks_.sines.assign(bins, 0.0f);
-        masks_.transients.assign(bins, 0.0f);
-        masks_.noise.assign(bins, 1.0f);
+        masks_.sines.assign(bins, SampleType{0});
+        masks_.transients.assign(bins, SampleType{0});
+        masks_.noise.assign(bins, SampleType{1});
 
-        harmonic_.assign(bins, 0.0f);
-        percussive_.assign(bins, 0.0f);
-        time_window_.assign(static_cast<size_t>(config.time_median), 0.0f);
-        freq_window_.assign(static_cast<size_t>(config.freq_median), 0.0f);
+        harmonic_.assign(bins, SampleType{0});
+        percussive_.assign(bins, SampleType{0});
+        time_window_.assign(static_cast<size_t>(config.time_median), SampleType{0});
+        freq_window_.assign(static_cast<size_t>(config.freq_median), SampleType{0});
     }
 
     int num_bins() const { return config_.num_bins; }
@@ -100,12 +105,12 @@ public:
     /// inherent (time_median-1)/2-frame latency before a frame's masks are
     /// final; transient material in the newest frame is still detected
     /// (the frequency-median is computed on the newest frame directly).
-    const StnMasks& process(const float* mag) {
+    const StnMasksT<SampleType>& process(const SampleType* mag) {
         const int n = config_.num_bins;
         const int th = config_.time_median, fh = config_.freq_median;
 
         // Store the newest magnitude frame in the ring.
-        float* slot = history_.data() + static_cast<size_t>(history_pos_) * n;
+        SampleType* slot = history_.data() + static_cast<size_t>(history_pos_) * n;
         std::copy(mag, mag + n, slot);
         history_pos_ = (history_pos_ + 1) % th;
         if (history_filled_ < th) ++history_filled_;
@@ -118,7 +123,7 @@ public:
         const int center = config_.causal
             ? (history_pos_ - 1 + th) % th
             : (history_pos_ + th / 2) % th;
-        const float* center_mag = history_.data() + static_cast<size_t>(center) * n;
+        const SampleType* center_mag = history_.data() + static_cast<size_t>(center) * n;
         for (int k = 0; k < n; ++k) {
             int count = 0;
             for (int t = 0; t < history_filled_; ++t)
@@ -138,18 +143,18 @@ public:
         }
 
         // Soft masks from the two estimates (Fitzgerald saturating split).
-        const float beta = config_.beta;
+        const SampleType beta = static_cast<SampleType>(config_.beta);
         for (int k = 0; k < n; ++k) {
-            const float h = harmonic_[static_cast<size_t>(k)];
-            const float pc = percussive_[static_cast<size_t>(k)];
-            const float total = h + pc + 1e-12f;
+            const SampleType h = harmonic_[static_cast<size_t>(k)];
+            const SampleType pc = percussive_[static_cast<size_t>(k)];
+            const SampleType total = h + pc + static_cast<SampleType>(1e-12);
             // Sine confidence rises when the time-median dominates; transient
             // when the freq-median dominates; the residue is noise.
-            const float s_raw = saturate(h, beta * pc);
-            const float t_raw = saturate(pc, beta * h);
-            const float s = s_raw;
-            const float t = t_raw * (1.0f - s);
-            const float nse = std::max(0.0f, 1.0f - s - t);
+            const SampleType s_raw = saturate(h, beta * pc);
+            const SampleType t_raw = saturate(pc, beta * h);
+            const SampleType s = s_raw;
+            const SampleType t = t_raw * (SampleType{1} - s);
+            const SampleType nse = std::max(SampleType{0}, SampleType{1} - s - t);
             (void)total;
             masks_.sines[static_cast<size_t>(k)] = s;
             masks_.transients[static_cast<size_t>(k)] = t;
@@ -160,7 +165,7 @@ public:
 
     /// The center-frame magnitude the current masks apply to (delayed by
     /// (time_median-1)/2 frames vs the newest pushed frame).
-    const float* center_magnitude() const {
+    const SampleType* center_magnitude() const {
         const int th = config_.time_median;
         const int center = config_.causal
             ? (history_pos_ - 1 + th) % th
@@ -173,7 +178,7 @@ public:
     }
 
     void reset() {
-        std::fill(history_.begin(), history_.end(), 0.0f);
+        std::fill(history_.begin(), history_.end(), SampleType{0});
         history_pos_ = 0;
         history_filled_ = 0;
     }
@@ -181,30 +186,35 @@ public:
 private:
     // 1 when a >= b, 0 when a <= b/beta-equivalent, smooth in between —
     // Fitzgerald's sin^2 ramp on the ratio gives a soft Wiener-like mask.
-    static float saturate(float a, float b) {
-        const float denom = a + b + 1e-12f;
-        const float r = a / denom; // 0.5 at the crossover
+    static SampleType saturate(SampleType a, SampleType b) {
+        const SampleType denom = a + b + static_cast<SampleType>(1e-12);
+        const SampleType r = a / denom; // 0.5 at the crossover
         // Map r in [0,1] through a smoothstep centered at 0.5.
-        const float x = std::clamp((r - 0.25f) / 0.5f, 0.0f, 1.0f);
-        return x * x * (3.0f - 2.0f * x);
+        const SampleType x = std::clamp((r - static_cast<SampleType>(0.25))
+                                            / static_cast<SampleType>(0.5),
+                                        SampleType{0}, SampleType{1});
+        return x * x * (static_cast<SampleType>(3) - static_cast<SampleType>(2) * x);
     }
 
-    static float median(float* v, int count) {
+    static SampleType median(SampleType* v, int count) {
         const int mid = count / 2;
         std::nth_element(v, v + mid, v + count);
         return v[mid];
     }
 
     StnConfig config_;
-    std::vector<float> history_;     // time_median * num_bins ring
+    std::vector<SampleType> history_; // time_median * num_bins ring
     int history_pos_ = 0;
     int history_filled_ = 0;
 
-    StnMasks masks_;
-    std::vector<float> harmonic_;
-    std::vector<float> percussive_;
-    std::vector<float> time_window_;
-    std::vector<float> freq_window_;
+    StnMasksT<SampleType> masks_;
+    std::vector<SampleType> harmonic_;
+    std::vector<SampleType> percussive_;
+    std::vector<SampleType> time_window_;
+    std::vector<SampleType> freq_window_;
 };
+
+using StnDecomposer = StnDecomposerT<float>;
+using StnDecomposer64 = StnDecomposerT<double>;
 
 } // namespace pulp::signal

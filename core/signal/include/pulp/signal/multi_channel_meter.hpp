@@ -120,14 +120,15 @@ struct MultiChannelBallistics {
 /// stereo correlation, and clip detection for up to kMaxMeterChannels.
 ///
 /// Call process() from the audio callback. Read results via snapshot().
-class MultiChannelMeter {
+template <typename SampleType = float>
+class MultiChannelMeterT {
 public:
-    void prepare(float sample_rate, int num_channels) {
+    void prepare(double sample_rate, int num_channels) {
         sample_rate_ = sample_rate;
         num_channels_ = std::clamp(num_channels, 0, kMaxMeterChannels);
 
         // LUFS momentary window: 400ms
-        lufs_window_samples_ = static_cast<int>(sample_rate * 0.4f);
+        lufs_window_samples_ = static_cast<int>(sample_rate * 0.4);
 
         // Reset accumulators
         for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
@@ -153,7 +154,7 @@ public:
 
     /// Process a block of interleaved or deinterleaved audio.
     /// channels: array of channel pointers. num_samples: samples per channel.
-    void process(const float* const* channels, int num_channels, int num_samples) {
+    void process(const SampleType* const* channels, int num_channels, int num_samples) {
         num_channels = std::clamp(num_channels, 0, num_channels_);
         if (channels == nullptr || num_samples <= 0) return;
 
@@ -168,28 +169,31 @@ public:
 
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {
-                float s = channels[ch][i];
+                SampleType s = channels[ch][i];
                 // Non-finite samples (NaN/Inf) would poison RMS/LUFS/integrated
                 // accumulators irrecoverably (#2695). Treat them as silence.
-                if (!std::isfinite(s)) s = 0.0f;
-                float abs_s = std::abs(s);
+                if (!std::isfinite(static_cast<double>(s))) s = SampleType{0};
+                const double sd = static_cast<double>(s);
+                double abs_s = std::abs(sd);
 
                 if (abs_s > block_peak_[ch]) block_peak_[ch] = abs_s;
-                if (abs_s >= 1.0f) block_clipped_[ch] = true;
+                if (abs_s >= 1.0) block_clipped_[ch] = true;
 
-                block_sum_sq_[ch] += s * s;
-                lufs_sum_sq_[ch] += s * s;
+                block_sum_sq_[ch] += sd * sd;
+                lufs_sum_sq_[ch] += sd * sd;
             }
 
             // Stereo correlation
             if (num_channels >= 2) {
-                float l = channels[0][i];
-                float r = channels[1][i];
-                if (!std::isfinite(l)) l = 0.0f;
-                if (!std::isfinite(r)) r = 0.0f;
-                correlation_sum_xy_ += static_cast<double>(l) * r;
-                correlation_sum_xx_ += static_cast<double>(l) * l;
-                correlation_sum_yy_ += static_cast<double>(r) * r;
+                SampleType l = channels[0][i];
+                SampleType r = channels[1][i];
+                if (!std::isfinite(static_cast<double>(l))) l = SampleType{0};
+                if (!std::isfinite(static_cast<double>(r))) r = SampleType{0};
+                const double ld = static_cast<double>(l);
+                const double rd = static_cast<double>(r);
+                correlation_sum_xy_ += ld * rd;
+                correlation_sum_xx_ += ld * ld;
+                correlation_sum_yy_ += rd * rd;
                 ++correlation_samples_;
             }
 
@@ -255,9 +259,9 @@ private:
 
         for (int ch = 0; ch < num_channels; ++ch) {
             auto& out = snapshot_.channels[ch];
-            out.peak = block_peak_[ch];
+            out.peak = static_cast<float>(block_peak_[ch]);
             out.rms = block_samples_ > 0
-                ? std::sqrt(block_sum_sq_[ch] / block_samples_)
+                ? static_cast<float>(std::sqrt(block_sum_sq_[ch] / block_samples_))
                 : 0.0f;
             out.clipped = block_clipped_[ch];
 
@@ -316,12 +320,12 @@ private:
         block_samples_ = 0;
     }
 
-    float sample_rate_ = 44100.0f;
+    double sample_rate_ = 44100.0;
     int num_channels_ = 2;
     int lufs_window_samples_ = 17640; // 400ms at 44100
 
     // Block accumulators
-    float block_peak_[kMaxMeterChannels] = {};
+    double block_peak_[kMaxMeterChannels] = {};
     double block_sum_sq_[kMaxMeterChannels] = {};
     bool block_clipped_[kMaxMeterChannels] = {};
     int block_samples_ = 0;
@@ -342,5 +346,8 @@ private:
 
     MultiChannelMeterData snapshot_;
 };
+
+using MultiChannelMeter = MultiChannelMeterT<float>;
+using MultiChannelMeter64 = MultiChannelMeterT<double>;
 
 } // namespace pulp::signal

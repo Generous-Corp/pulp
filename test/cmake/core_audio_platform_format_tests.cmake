@@ -38,7 +38,15 @@ pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 
 # MCP server protocol tests
 add_executable(pulp-test-mcp-server test_mcp_server.cpp)
+# mcp_tools.cpp (included into the test TU) reads the agent-request queue via the
+# choc-only agent_request_queue unit; compile that TU + its include dir in rather
+# than linking all of pulp::inspect (which would drag in the GPU/Skia chain),
+# matching how pulp-mcp itself consumes it.
+target_sources(pulp-test-mcp-server PRIVATE
+    "${CMAKE_SOURCE_DIR}/inspect/src/agent_request_queue.cpp")
 target_link_libraries(pulp-test-mcp-server PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
+target_include_directories(pulp-test-mcp-server PRIVATE
+    "${CMAKE_SOURCE_DIR}/inspect/include")
 target_compile_definitions(pulp-test-mcp-server PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # test_mcp_server.cpp #include's ../tools/mcp/pulp_mcp.cpp directly (via
@@ -54,6 +62,8 @@ catch_discover_tests(pulp-test-mcp-server)
 pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)
 
 pulp_add_test_suite(pulp-test-midi-file LIBRARIES pulp::midi)
+
+pulp_add_test_suite(pulp-test-tuning LIBRARIES pulp::midi)
 
 # State tests
 pulp_add_test_suite(pulp-test-state

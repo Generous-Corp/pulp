@@ -5,3 +5,4 @@
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/rpn_parser.hpp>
 #include <pulp/midi/keyboard_state.hpp>
+#include <pulp/midi/tuning.hpp>

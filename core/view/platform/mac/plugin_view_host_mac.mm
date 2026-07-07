@@ -933,6 +933,11 @@ static void detach_child_view_from_host(NSView* container, void* child_view_hand
     }
 }
 
+// Native-child clip masking reuses the shared mac_geometry helper
+// (clip_child_view_in_host, window_host_mac_geometry.mm) so the coordinate-flip
+// math lives in exactly one place — see window_host_mac_internal.hpp (included
+// above). The two plugin-host overrides below forward to it directly.
+
 // ── MacPluginViewHost ────────────────────────────────────────────────────────
 
 namespace pulp::view {
@@ -1142,6 +1147,16 @@ public:
 
     void detach_native_child_view(NativeViewHandle child_view) override {
         detach_child_view_from_host(view_, child_view);
+    }
+
+    bool set_native_child_view_clip(NativeViewHandle child_view,
+                                    bool has_clip,
+                                    float x,
+                                    float y,
+                                    float width,
+                                    float height) override {
+        return mac_geometry::clip_child_view_in_host(view_, child_view, has_clip,
+                                                     x, y, width, height);
     }
 
     void set_fixed_aspect_ratio(float ratio) override {
@@ -1642,6 +1657,17 @@ public:
 
     void detach_native_child_view(NativeViewHandle child_view) override {
         detach_child_view_from_host(metal_view_, child_view);
+    }
+
+    bool set_native_child_view_clip(NativeViewHandle child_view,
+                                    bool has_clip,
+                                    float x,
+                                    float y,
+                                    float width,
+                                    float height) override {
+        return mac_geometry::clip_child_view_in_host(metal_view_, child_view,
+                                                     has_clip, x, y, width,
+                                                     height);
     }
 
     void set_fixed_aspect_ratio(float ratio) override {

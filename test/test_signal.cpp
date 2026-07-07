@@ -17,6 +17,15 @@ namespace {
 
 constexpr float kPi = std::numbers::pi_v<float>;
 
+struct DoubleGainProbe {
+    double gain = 1.0;
+    double sample_rate = 0.0;
+
+    void set_sample_rate(double sr) { sample_rate = sr; }
+    double process(double x) { return x * gain; }
+    void reset() {}
+};
+
 } // namespace
 
 // ── DelayLine ────────────────────────────────────────────────────────────────
@@ -226,6 +235,228 @@ TEST_CASE("SimpleMixer zero-length buffer processing leaves output untouched",
     mixer.process(dry, wet, output, 0);
 
     REQUIRE_THAT(output[0], WithinAbs(42.0f, 1e-6f));
+}
+
+TEST_CASE("Gain64 and SimpleMixer64 process double buffers",
+          "[signal][gain][mix][f64]") {
+    Gain64 gain;
+    gain.set_gain_linear(0.25);
+    REQUIRE_THAT(gain.gain_linear(), WithinAbs(0.25, 1e-15));
+    REQUIRE_THAT(gain.process(2.0), WithinAbs(0.5, 1e-15));
+
+    std::array<double, 4> values{{1.0, -2.0, 0.5, -0.25}};
+    gain.process(values.data(), static_cast<int>(values.size()));
+    REQUIRE_THAT(values[0], WithinAbs(0.25, 1e-15));
+    REQUIRE_THAT(values[1], WithinAbs(-0.5, 1e-15));
+    REQUIRE_THAT(values[2], WithinAbs(0.125, 1e-15));
+    REQUIRE_THAT(values[3], WithinAbs(-0.0625, 1e-15));
+
+    SimpleMixer64 mixer;
+    mixer.set_mix(0.25);
+    const std::array<double, 3> dry{{1.0, 0.0, -1.0}};
+    const std::array<double, 3> wet{{0.0, 1.0, 1.0}};
+    std::array<double, 3> mixed{};
+    mixer.process(dry.data(), wet.data(), mixed.data(), static_cast<int>(mixed.size()));
+    REQUIRE_THAT(mixed[0], WithinAbs(0.75, 1e-15));
+    REQUIRE_THAT(mixed[1], WithinAbs(0.25, 1e-15));
+    REQUIRE_THAT(mixed[2], WithinAbs(-0.5, 1e-15));
+}
+
+TEST_CASE("Scalar and filter f64 aliases stay in double precision",
+          "[signal][f64]") {
+    Bias64 bias;
+    bias.set_bias(0.125);
+    REQUIRE_THAT(bias.process(0.5), WithinAbs(0.625, 1e-15));
+
+    DelayLine64 delay;
+    delay.prepare(4);
+    delay.push(1.0);
+    delay.push(2.0);
+    delay.push(3.0);
+    REQUIRE_THAT(delay.read(0.5), WithinAbs(2.5, 1e-15));
+
+    Adsr64 adsr;
+    adsr.set_sample_rate(100.0);
+    Adsr64::Params env_params;
+    env_params.attack = 0.01;
+    adsr.set_params(env_params);
+    adsr.note_on();
+    REQUIRE_THAT(adsr.next(), WithinAbs(1.0, 1e-15));
+
+    WaveShaper64 shaper;
+    shaper.set_curve(WaveShaper64::Curve::hard_clip);
+    REQUIRE_THAT(shaper.process(2.0), WithinAbs(1.0, 1e-15));
+
+    BallisticsFilter64 ballistics;
+    ballistics.prepare(48000.0);
+    ballistics.set_attack_ms(0.01);
+    REQUIRE(ballistics.process(0.5) > 0.0);
+
+    TptFilter64 tpt;
+    tpt.prepare(48000.0);
+    tpt.set_cutoff(1200.0);
+    auto tpt_out = tpt.process(0.25);
+    REQUIRE(std::isfinite(tpt_out.lowpass));
+
+    Svf64 svf;
+    svf.set_sample_rate(48000.0);
+    svf.set_frequency(1000.0);
+    REQUIRE(std::isfinite(svf.process(0.25)));
+
+    Phaser64 phaser;
+    phaser.set_sample_rate(48000.0);
+    REQUIRE(std::isfinite(phaser.process(0.1)));
+
+    LinkwitzRiley64 crossover;
+    crossover.set_frequency(1200.0, 48000.0);
+    auto split = crossover.process(0.25);
+    REQUIRE(std::isfinite(split.low));
+    REQUIRE(std::isfinite(split.high));
+
+    FirFilter64 fir;
+    fir.set_coefficients({0.25, 0.5, 0.25});
+    REQUIRE_THAT(fir.process(1.0), WithinAbs(0.25, 1e-15));
+
+    LadderFilter64 ladder;
+    ladder.set_sample_rate(48000.0);
+    ladder.set_frequency(1000.0);
+    REQUIRE(std::isfinite(ladder.process(0.25)));
+
+    Compressor64 compressor;
+    Compressor64::Params comp_params;
+    comp_params.attack_ms = 0.0;
+    comp_params.release_ms = 0.0;
+    compressor.set_params(comp_params);
+    compressor.set_sample_rate(48000.0);
+    REQUIRE(std::isfinite(compressor.process(0.5)));
+
+    Limiter64 limiter;
+    limiter.set_sample_rate(48000.0);
+    REQUIRE(std::isfinite(limiter.process(0.5)));
+
+    NoiseGate64 gate;
+    gate.set_sample_rate(48000.0);
+    REQUIRE(std::isfinite(gate.process(0.5)));
+
+    Panner64 panner;
+    auto stereo = panner.process(0.5);
+    REQUIRE(std::isfinite(stereo.left));
+    REQUIRE(std::isfinite(stereo.right));
+
+    DryWetMixer64 dry_wet;
+    dry_wet.prepare(1, 2);
+    const double dry_data[] = {1.0, 0.5};
+    const double* dry_ptrs[] = {dry_data};
+    double wet_data[] = {0.0, 0.5};
+    double* wet_ptrs[] = {wet_data};
+    dry_wet.set_mix(0.25);
+    dry_wet.push_dry(dry_ptrs, 1, 2);
+    dry_wet.mix_wet(wet_ptrs, 1, 2);
+    REQUIRE_THAT(wet_data[0], WithinAbs(0.75, 1e-15));
+
+    REQUIRE_THAT(Interpolator::linear(0.25, 1.0, 3.0), WithinAbs(1.5, 1e-15));
+    REQUIRE(std::isfinite(Interpolator::hermite(0.25, 0.0, 1.0, 2.0, 3.0)));
+
+    auto hann64 = WindowFunction::generate<double>(4, WindowFunction::Type::hann);
+    REQUIRE(hann64.size() == 4);
+    REQUIRE_THAT(hann64[0], WithinAbs(0.0, 1e-15));
+    REQUIRE_THAT(hann64[1], WithinAbs(0.75, 1e-15));
+
+    SmoothedValue64 smooth(0.0);
+    smooth.set_ramp_time(0.0001, 10000.0);
+    smooth.set_target(1.0);
+    REQUIRE_THAT(smooth.next(), WithinAbs(1.0, 1e-15));
+
+    LogRampedValue64 log_ramp(1.0);
+    log_ramp.set_ramp_time(0.0002, 10000.0);
+    log_ramp.set_target(4.0);
+    REQUIRE(std::isfinite(log_ramp.next()));
+
+    HalfBandUpsampler2x64 upsampler;
+    HalfBandDownsampler2x64 downsampler;
+    double lo = 0.0;
+    double hi = 0.0;
+    upsampler.process(0.25, lo, hi);
+    REQUIRE(std::isfinite(downsampler.process(lo, hi)));
+
+    Oversampler64 oversampler;
+    const double oversampled = oversampler.process(0.25, [](double x) { return x; });
+    REQUIRE(std::isfinite(oversampled));
+
+    SincResampler64 sinc_resampler;
+    sinc_resampler.build(4, 16, 6.0);
+    const std::array<double, 8> sinc_samples{{0.0, 0.25, 0.5, 0.75,
+                                             1.0, 0.75, 0.5, 0.25}};
+    REQUIRE(std::isfinite(sinc_resampler.read(sinc_samples.data(),
+                                              static_cast<int>(sinc_samples.size()),
+                                              3.25)));
+
+    Resampler64 resampler;
+    resampler.prepare(48000.0, 48000.0, 1, 8);
+    const std::array<double, 4> resampler_input{{0.25, 0.5, 0.25, 0.0}};
+    std::array<double, 8> resampler_output{};
+    const double* resampler_in_ptrs[] = {resampler_input.data()};
+    double* resampler_out_ptrs[] = {resampler_output.data()};
+    auto resampler_result = resampler.process_block_detailed(
+        resampler_in_ptrs, resampler_input.size(),
+        resampler_out_ptrs, resampler_output.size());
+    REQUIRE(resampler_result.output_frames > 0);
+    REQUIRE(std::isfinite(resampler_output[0]));
+
+    LookupTable64 table(3, 0.0, 1.0, [](double x) { return x * 2.0; });
+    REQUIRE_THAT(table.process(0.25), WithinAbs(0.5, 1e-15));
+
+    Chorus64 chorus;
+    chorus.prepare(48000.0);
+    chorus.set_mix(0.25);
+    auto chorus_out = chorus.process(0.5);
+    REQUIRE(std::isfinite(chorus_out.left));
+    REQUIRE(std::isfinite(chorus_out.right));
+
+    Reverb64 reverb;
+    reverb.prepare(48000.0);
+    reverb.set_mix(0.25);
+    auto reverb_out = reverb.process(0.5);
+    REQUIRE(std::isfinite(reverb_out.left));
+    REQUIRE(std::isfinite(reverb_out.right));
+
+    AlignedBuffer64 aligned(2);
+    aligned[0] = 1.25;
+    aligned[1] = -0.5;
+    REQUIRE_THAT(aligned[0], WithinAbs(1.25, 1e-15));
+
+    Matrix2d matrix = Matrix2d::identity();
+    matrix(0, 0) = 2.0;
+    REQUIRE_THAT(determinant(matrix), WithinAbs(2.0, 1e-15));
+
+    ProcessorChain64<Gain64, Bias64> chain;
+    chain.get<0>().set_gain_linear(2.0);
+    chain.get<1>().set_bias(-0.25);
+    REQUIRE_THAT(chain.process(0.5), WithinAbs(0.75, 1e-15));
+
+    ProcessorDuplicator64<DoubleGainProbe> duplicator;
+    duplicator.prepare(2, 96000.0);
+    duplicator[0].gain = 2.0;
+    duplicator[1].gain = 0.25;
+    double dup_ch0[] = {0.5};
+    double dup_ch1[] = {0.5};
+    double* dup_channels[] = {dup_ch0, dup_ch1};
+    duplicator.process(dup_channels, 2, 1);
+    REQUIRE_THAT(dup_ch0[0], WithinAbs(1.0, 1e-15));
+    REQUIRE_THAT(dup_ch1[0], WithinAbs(0.125, 1e-15));
+    REQUIRE_THAT(duplicator[0].sample_rate, WithinAbs(96000.0, 1e-15));
+
+    SoftBypass64<Gain64> bypass;
+    bypass.processor().set_gain_linear(2.0);
+    REQUIRE_THAT(bypass.process(0.5), WithinAbs(1.0, 1e-15));
+
+    TransitionMixer64 transition;
+    transition.configure(4, TransitionCurve::Smoothstep);
+    double old_gain = 0.0;
+    double new_gain = 0.0;
+    transition.gains_at(2, old_gain, new_gain);
+    REQUIRE_THAT(old_gain, WithinAbs(0.5, 1e-15));
+    REQUIRE_THAT(new_gain, WithinAbs(0.5, 1e-15));
 }
 
 TEST_CASE("SimpleMixer scalar path clamps endpoint mixes",

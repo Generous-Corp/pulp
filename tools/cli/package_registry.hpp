@@ -48,6 +48,7 @@ struct CMakeInfo {
     std::vector<std::string> targets;
     bool header_only = false;
     std::string include_dir;
+    std::vector<std::string> sources;
 };
 
 struct PlatformSupport {

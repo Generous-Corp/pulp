@@ -46,9 +46,10 @@ struct SpectralEnvelopeShifterConfig {
     float max_gain_db = 60.0f;
 };
 
-class SpectralEnvelopeShifter {
+template <typename SampleType = float>
+class SpectralEnvelopeShifterT {
 public:
-    SpectralEnvelopeShifter() = default;
+    SpectralEnvelopeShifterT() = default;
 
     /// RT contract: prepare() allocates FFT and scratch/envelope storage and is
     /// not audio-thread safe. After prepare(), num_bins(), order(), and
@@ -60,14 +61,14 @@ public:
         if (config_.order <= 0)
             config_.order = config_.fft_size / 16;
         num_bins_ = config_.fft_size / 2 + 1;
-        fft_ = Fft(config_.fft_size);
+        fft_ = FftT<SampleType>(config_.fft_size);
 
-        log_mag_.assign(static_cast<size_t>(num_bins_), 0.0f);
-        envelope_.assign(static_cast<size_t>(num_bins_), 0.0f);
-        smooth_in_.assign(static_cast<size_t>(num_bins_), 0.0f);
+        log_mag_.assign(static_cast<size_t>(num_bins_), SampleType{0});
+        envelope_.assign(static_cast<size_t>(num_bins_), SampleType{0});
+        smooth_in_.assign(static_cast<size_t>(num_bins_), SampleType{0});
         cepstrum_.assign(static_cast<size_t>(config_.fft_size),
-                         std::complex<float>(0.0f, 0.0f));
-        max_gain_ln_ = static_cast<float>(config_.max_gain_db) * 0.1151293f; // dB → ln
+                         std::complex<SampleType>(SampleType{0}, SampleType{0}));
+        max_gain_ln_ = static_cast<SampleType>(config_.max_gain_db * 0.1151293f); // dB → ln
     }
 
     int num_bins() const { return num_bins_; }
@@ -76,11 +77,11 @@ public:
     /// Estimate the group envelope and rescale all channels' bins by
     /// E(k * warp) / E(k). `frames` holds `channels` pointers to
     /// `num_bins()` bins (DC..Nyquist) of the same time index.
-    void process_group(std::complex<float>* const* frames, int channels,
-                       int num_bins, float warp) {
+    void process_group(std::complex<SampleType>* const* frames, int channels,
+                       int num_bins, SampleType warp) {
         assert(num_bins == num_bins_);
         assert(channels >= 1);
-        if (warp == 1.0f)
+        if (warp == SampleType{1})
             return; // exact bypass — neutral by construction
 
         // Group RMS magnitude → log domain, floored 40 dB below the frame
@@ -90,23 +91,25 @@ public:
         // contrast within a bounded iteration budget. Envelope detail
         // more than 40 dB under the frame peak has no audible effect on
         // the correction.
-        float max_power = 0.0f;
+        SampleType max_power = SampleType{0};
         double energy_before = 0.0;
         for (int k = 0; k < num_bins_; ++k) {
-            float power = 0.0f;
+            SampleType power = SampleType{0};
             for (int ch = 0; ch < channels; ++ch) {
-                const float re = frames[ch][k].real();
-                const float im = frames[ch][k].imag();
+                const SampleType re = frames[ch][k].real();
+                const SampleType im = frames[ch][k].imag();
                 power += re * re + im * im;
             }
             energy_before += static_cast<double>(power);
-            log_mag_[static_cast<size_t>(k)] = power / static_cast<float>(channels);
+            log_mag_[static_cast<size_t>(k)] = power / static_cast<SampleType>(channels);
             max_power = std::max(max_power, log_mag_[static_cast<size_t>(k)]);
         }
-        const float floor_power = std::max(max_power * 1e-4f, 1e-24f);
+        const SampleType floor_power = std::max(max_power * static_cast<SampleType>(1e-4),
+                                                static_cast<SampleType>(1e-24));
         for (int k = 0; k < num_bins_; ++k)
             log_mag_[static_cast<size_t>(k)] =
-                0.5f * std::log(std::max(log_mag_[static_cast<size_t>(k)], floor_power));
+                static_cast<SampleType>(0.5) * std::log(
+                    std::max(log_mag_[static_cast<size_t>(k)], floor_power));
 
         // Plain cepstral lifter, then true-envelope refinement: re-smooth
         // the pointwise max of spectrum and current envelope so the
@@ -123,16 +126,16 @@ public:
         // interpolation, clamped at the spectrum edges and by max gain.
         double energy_after = 0.0;
         for (int k = 0; k < num_bins_; ++k) {
-            const float pos = std::min(static_cast<float>(k) * warp,
-                                       static_cast<float>(num_bins_ - 1));
+            const SampleType pos = std::min(static_cast<SampleType>(k) * warp,
+                                            static_cast<SampleType>(num_bins_ - 1));
             const int i0 = static_cast<int>(pos);
             const int i1 = std::min(i0 + 1, num_bins_ - 1);
-            const float frac = pos - static_cast<float>(i0);
-            const float warped = envelope_[static_cast<size_t>(i0)] * (1.0f - frac)
+            const SampleType frac = pos - static_cast<SampleType>(i0);
+            const SampleType warped = envelope_[static_cast<size_t>(i0)] * (SampleType{1} - frac)
                                + envelope_[static_cast<size_t>(i1)] * frac;
-            float gain_ln = warped - envelope_[static_cast<size_t>(k)];
+            SampleType gain_ln = warped - envelope_[static_cast<size_t>(k)];
             gain_ln = std::clamp(gain_ln, -max_gain_ln_, max_gain_ln_);
-            const float gain = std::exp(gain_ln);
+            const SampleType gain = std::exp(gain_ln);
             for (int ch = 0; ch < channels; ++ch) {
                 frames[ch][k] *= gain;
                 energy_after += static_cast<double>(std::norm(frames[ch][k]));
@@ -157,15 +160,15 @@ public:
         // frames untouched.
         constexpr double kEnergyFloor = 1e-9; // below this the frame is silence
         if (energy_after > kEnergyFloor && energy_before > kEnergyFloor) {
-            float norm = static_cast<float>(std::sqrt(energy_before / energy_after));
+            SampleType norm = static_cast<SampleType>(std::sqrt(energy_before / energy_after));
             // Generous bound: a narrow-band tone legitimately needs up to ~+30 dB
             // of correction (its cepstral envelope concentrates the energy), so
             // the guard rail must clear that with margin. It exists only to cap a
             // runaway toward Inf on a numerically-degenerate frame, NOT to limit
             // a real correction — a tight rail under-corrects and re-introduces
             // the quiet-pitch-up bug. +/-48 dB.
-            norm = std::clamp(norm, 1.0f / 256.0f, 256.0f);
-            if (std::isfinite(norm)) {
+            norm = std::clamp(norm, static_cast<SampleType>(1.0 / 256.0), static_cast<SampleType>(256.0));
+            if (std::isfinite(static_cast<double>(norm))) {
                 for (int k = 0; k < num_bins_; ++k)
                     for (int ch = 0; ch < channels; ++ch)
                         frames[ch][k] *= norm;
@@ -177,29 +180,32 @@ private:
     // log-spectrum (num_bins) → liftered log-envelope (num_bins) via the
     // real cepstrum: even-symmetric extension, inverse FFT, rectangular
     // lifter keeping quefrencies |q| <= order, forward FFT.
-    void cepstral_smooth(const float* log_spec, float* env_out) {
+    void cepstral_smooth(const SampleType* log_spec, SampleType* env_out) {
         const int n = config_.fft_size;
         for (int k = 0; k < num_bins_; ++k)
-            cepstrum_[static_cast<size_t>(k)] = {log_spec[k], 0.0f};
+            cepstrum_[static_cast<size_t>(k)] = {log_spec[k], SampleType{0}};
         for (int k = num_bins_; k < n; ++k)
-            cepstrum_[static_cast<size_t>(k)] = {log_spec[n - k], 0.0f};
+            cepstrum_[static_cast<size_t>(k)] = {log_spec[n - k], SampleType{0}};
         fft_.inverse(cepstrum_.data());
         for (int q = config_.order + 1; q < n - config_.order; ++q)
-            cepstrum_[static_cast<size_t>(q)] = {0.0f, 0.0f};
+            cepstrum_[static_cast<size_t>(q)] = {SampleType{0}, SampleType{0}};
         fft_.forward(cepstrum_.data());
         for (int k = 0; k < num_bins_; ++k)
             env_out[k] = cepstrum_[static_cast<size_t>(k)].real();
     }
 
     SpectralEnvelopeShifterConfig config_;
-    Fft fft_{2048};
+    FftT<SampleType> fft_{2048};
     int num_bins_ = 0;
-    float max_gain_ln_ = 6.9f;
+    SampleType max_gain_ln_ = static_cast<SampleType>(6.9);
 
-    std::vector<float> log_mag_;
-    std::vector<float> envelope_;
-    std::vector<float> smooth_in_;
-    std::vector<std::complex<float>> cepstrum_;
+    std::vector<SampleType> log_mag_;
+    std::vector<SampleType> envelope_;
+    std::vector<SampleType> smooth_in_;
+    std::vector<std::complex<SampleType>> cepstrum_;
 };
+
+using SpectralEnvelopeShifter = SpectralEnvelopeShifterT<float>;
+using SpectralEnvelopeShifter64 = SpectralEnvelopeShifterT<double>;
 
 } // namespace pulp::signal

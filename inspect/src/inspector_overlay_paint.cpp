@@ -1022,6 +1022,17 @@ std::string abbreviate_anchor(const std::string& id) {
 
 void InspectorOverlay::paint_tweaks_section(Canvas& canvas, float x, float y,
                                             float w, float h) {
+    // Semantic-knob controls + send-to-agent field occupy the top of this
+    // region; the tweak list below starts beneath them. Mutating y/h (both
+    // by-value) shifts the rest of the function cleanly.
+    float knob_h = paint_knob_controls(canvas, x, y, w, h);
+    if (knob_h > 0.0f) {
+        canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.4f));
+        canvas.stroke_line(x, y + knob_h + 2.0f, x + w, y + knob_h + 2.0f);
+        y += knob_h + 6.0f;
+        h -= knob_h + 6.0f;
+    }
+
     // Repopulated every frame — the mouse handler reads it on the same
     // frame the user clicked (paint runs before input dispatch).
     tweak_rows_.clear();

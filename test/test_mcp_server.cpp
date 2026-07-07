@@ -2599,3 +2599,39 @@ TEST_CASE("parse_pulp_toml_sdk_version rejects ambiguous sdk pins",
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
                 "[tools]\nsdk_version = \"9.9.9\"\n[pulp]\nsdk_version = \"2.3.4\"\n") == "2.3.4");
 }
+
+TEST_CASE("pulp_inspect_pending_requests returns a project's unconsumed queue",
+          "[mcp][tools][agent-queue]") {
+    namespace fs = std::filesystem;
+    auto dir = fs::temp_directory_path() / "pulp_mcp_pending_requests_test";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const std::string project = dir.string();
+    const std::string path = pulp::inspect::queue_path(project);
+    auto args = [&] { return std::string(R"({"project_dir":")") + project + R"("})"; };
+
+    // An absent queue reads as an empty array, never an error.
+    auto empty = handle_request(tool_call("80", "pulp_inspect_pending_requests", args()));
+    require_contains(empty, R"JSON("jsonrpc":"2.0")JSON");
+    require_contains(empty, "[]");
+
+    // Seed one pending + one consumed request; only the pending one comes back.
+    pulp::inspect::AgentRequest a;
+    a.text = "make it airy";
+    a.design = "synth-panel";
+    a.created_at = "2026-07-06T18:00:00Z";
+    REQUIRE(pulp::inspect::enqueue_to_file(path, a).has_value());
+    pulp::inspect::AgentRequest b;
+    b.text = "already handled";
+    auto id_b = pulp::inspect::enqueue_to_file(path, b);
+    REQUIRE(id_b.has_value());
+    REQUIRE(pulp::inspect::ack_in_file(path, *id_b));
+
+    auto resp = handle_request(tool_call("81", "pulp_inspect_pending_requests", args()));
+    require_contains(resp, "make it airy");
+    require_contains(resp, "synth-panel");
+    REQUIRE(resp.find("already handled") == std::string::npos);  // consumed → filtered
+
+    fs::remove_all(dir, ec);
+}

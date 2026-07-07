@@ -114,6 +114,21 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-eyedropper
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    add_executable(pulp-test-inspector-overlay-knobs test_inspector_overlay_knobs.cpp)
+    target_link_libraries(pulp-test-inspector-overlay-knobs PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-overlay-knobs
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-knobs-host-integration test_inspector_knobs_host_integration.cpp)
+    target_link_libraries(pulp-test-inspector-knobs-host-integration PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-knobs-host-integration
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-knob-panel-screenshot test_inspector_knob_panel_screenshot.cpp)
+    target_link_libraries(pulp-test-inspector-knob-panel-screenshot PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-knob-panel-screenshot
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
     # TweakStore + Inspector.applyTweak protocol surface.
     add_executable(pulp-test-tweak-store test_tweak_store.cpp)
     target_link_libraries(pulp-test-tweak-store PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
@@ -126,6 +141,13 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-editor-url test_editor_url.cpp)
     target_link_libraries(pulp-test-editor-url PRIVATE pulp::inspect Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-editor-url
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    # Agent-request queue: pure serialize/parse/append/ack + atomic file I/O.
+    # No overlay / GPU surface, but links pulp::inspect so it shares the guard.
+    add_executable(pulp-test-agent-request-queue test_agent_request_queue.cpp)
+    target_link_libraries(pulp-test-agent-request-queue PRIVATE pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-agent-request-queue
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 endif()
 
@@ -158,6 +180,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-no-gpu-gates
 
 # Widget bridge — runtime-import handlers.
 pulp_add_test_suite(pulp-test-widget-bridge-runtime-import LIBRARIES pulp::view)
+
+# Widget bridge — declarative native→widget param/meter bindings
+# (bindWidgetToParam / bindMeter / unbindWidget + gesture precedence).
+pulp_add_test_suite(pulp-test-widget-bridge-param-binding LIBRARIES pulp::view pulp::state)
 
 # Widget bridge — Canvas2D surface. Covers canvasSetTransform /
 # canvasClip / canvasGlobalCompositeOperation, canvasMeasureText /

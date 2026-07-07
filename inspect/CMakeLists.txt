@@ -10,6 +10,7 @@ target_include_directories(pulp-inspect
 target_sources(pulp-inspect PRIVATE
     src/inspector_overlay.cpp
     src/inspector_overlay_field_edit.cpp
+    src/inspector_overlay_knobs.cpp
     src/inspector_overlay_zoom.cpp
     src/inspector_overlay_pass_viewer.cpp
     src/inspector_overlay_paint.cpp
@@ -20,11 +21,13 @@ target_sources(pulp-inspect PRIVATE
     src/inspector_server.cpp
     src/audio_inspector.cpp
     src/domain_handler.cpp
+    src/domain_runtime.cpp
     src/editor_url.cpp
     src/source_jump.cpp
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
     src/tweak_store.cpp
+    src/agent_request_queue.cpp
 )
 
 target_link_libraries(pulp-inspect PUBLIC pulp::view pulp::render pulp::state pulp::events pulp::audio)

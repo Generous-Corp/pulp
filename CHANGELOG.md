@@ -8,6 +8,61 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05900"></a>
+## [0.590.0] - 2026-07-07
+
+- Add optional MTS-ESP microtuning and structured state values ([#5625](https://github.com/danielraffel/pulp/pull/5625))
+
+<a id="v05890"></a>
+## [0.589.0] - 2026-07-07
+
+- Add double precision audio processing support ([#5578](https://github.com/danielraffel/pulp/pull/5578))
+
+<a id="v05880"></a>
+## [0.588.0] - 2026-07-06
+
+- feat(view): first-class NativeViewHost widget for native child embedding ([#5575](https://github.com/danielraffel/pulp/pull/5575))
+
+<a id="v05870"></a>
+## [0.587.0] - 2026-07-06
+
+- docs(skills): capture Skia symlink-loop / Shipyard tree-drift gotcha durably ([#5599](https://github.com/danielraffel/pulp/pull/5599))
+
+<a id="v05860"></a>
+## [0.586.0] - 2026-07-06
+
+- docs(audio-quality-lab): plain-language experimental framing + define "net" ([#5595](https://github.com/danielraffel/pulp/pull/5595))
+- feat(quality-lab): Tier 3 T3.4 — ratio:auto (uniform-ratio estimation) ([#5593](https://github.com/danielraffel/pulp/pull/5593))
+- build: stop tracking external/skia-build/build symlink (#238 hygiene) ([#5588](https://github.com/danielraffel/pulp/pull/5588))
+
+<a id="v05840"></a>
+## [0.584.0] - 2026-07-06
+
+- feat(quality-lab): Tier 3 T3.3 — pitch:S (duration-preserving pitch shift) ([#5590](https://github.com/danielraffel/pulp/pull/5590))
+- phase/tartci lease governor p3b ([#5569](https://github.com/danielraffel/pulp/pull/5569))
+
+<a id="v05830"></a>
+## [0.583.0] - 2026-07-06
+
+- phase/tartci lease governor p3a ([#5566](https://github.com/danielraffel/pulp/pull/5566))
+- feat(quality-lab): Tier 3 T3.2 — stretch:R (pitch-preserving time-stretch) ([#5546](https://github.com/danielraffel/pulp/pull/5546))
+
+<a id="v05820"></a>
+## [0.582.0] - 2026-07-06
+
+- feat(inspect): scripted-UI runtime inspector / debug console (Valdi R8) ([#5570](https://github.com/danielraffel/pulp/pull/5570))
+
+<a id="v05800"></a>
+## [0.580.0] - 2026-07-06
+
+- feature/adapter platform hardening audit ([#5564](https://github.com/danielraffel/pulp/pull/5564))
+- ci/decouple required gate preamble ([#5576](https://github.com/danielraffel/pulp/pull/5576))
+
+<a id="v05790"></a>
+## [0.579.0] - 2026-07-06
+
+- refactor/design choc text helpers ([#5574](https://github.com/danielraffel/pulp/pull/5574))
+
 <a id="v05782"></a>
 ## [0.578.2] - 2026-07-06
 
@@ -5911,6 +5966,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.590.0]: https://github.com/danielraffel/pulp/releases/tag/v0.590.0
+[0.589.0]: https://github.com/danielraffel/pulp/releases/tag/v0.589.0
+[0.588.0]: https://github.com/danielraffel/pulp/releases/tag/v0.588.0
+[0.587.0]: https://github.com/danielraffel/pulp/releases/tag/v0.587.0
+[0.586.0]: https://github.com/danielraffel/pulp/releases/tag/v0.586.0
+[0.584.0]: https://github.com/danielraffel/pulp/releases/tag/v0.584.0
+[0.583.0]: https://github.com/danielraffel/pulp/releases/tag/v0.583.0
+[0.582.0]: https://github.com/danielraffel/pulp/releases/tag/v0.582.0
+[0.580.0]: https://github.com/danielraffel/pulp/releases/tag/v0.580.0
+[0.579.0]: https://github.com/danielraffel/pulp/releases/tag/v0.579.0
 [0.578.2]: https://github.com/danielraffel/pulp/releases/tag/v0.578.2
 [0.578.0]: https://github.com/danielraffel/pulp/releases/tag/v0.578.0
 [0.577.0]: https://github.com/danielraffel/pulp/releases/tag/v0.577.0

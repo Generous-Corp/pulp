@@ -27,7 +27,8 @@
 
 namespace pulp::signal {
 
-class FreezeLoopSampler {
+template <typename SampleType = float>
+class FreezeLoopSamplerT {
 public:
     /// @param channels    channel count
     /// @param capacity    max samples per channel the record ring holds
@@ -41,8 +42,8 @@ public:
         channels_ = channels;
         capacity_ = std::max(capacity, crossfade + 2);
         crossfade_ = std::max(0, crossfade);
-        ring_.assign(static_cast<size_t>(channels_) * capacity_, 0.0f);
-        loop_.assign(static_cast<size_t>(channels_) * capacity_, 0.0f);
+        ring_.assign(static_cast<size_t>(channels_) * capacity_, SampleType{0});
+        loop_.assign(static_cast<size_t>(channels_) * capacity_, SampleType{0});
         write_pos_ = 0;
         written_ = 0;
         frozen_ = false;
@@ -55,10 +56,10 @@ public:
     int loop_length() const { return loop_len_; }
 
     /// Record `n` frames into the ring (call every block, always).
-    void write(const float* const* in, int n) {
+    void write(const SampleType* const* in, int n) {
         for (int ch = 0; ch < channels_; ++ch) {
-            float* r = ring_.data() + static_cast<size_t>(ch) * capacity_;
-            const float* src = in[ch];
+            SampleType* r = ring_.data() + static_cast<size_t>(ch) * capacity_;
+            const SampleType* src = in[ch];
             int wp = write_pos_;
             for (int i = 0; i < n; ++i) {
                 r[wp] = src[i];
@@ -81,18 +82,24 @@ public:
         const int span = len + xf;
         const int start = (write_pos_ - span + capacity_ * 2) % capacity_;
         for (int ch = 0; ch < channels_; ++ch) {
-            const float* r = ring_.data() + static_cast<size_t>(ch) * capacity_;
-            float* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
+            const SampleType* r = ring_.data() + static_cast<size_t>(ch) * capacity_;
+            SampleType* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
             for (int i = 0; i < len; ++i)
                 lp[i] = r[(start + i) % capacity_];
             // Constant-power crossfade: blend the head with the tail that
             // follows the loop so end -> start is seamless.
             for (int i = 0; i < xf; ++i) {
-                const float t = (xf > 1) ? static_cast<float>(i) / (xf - 1) : 1.0f;
-                const float g_head = std::sin(0.5f * 3.14159265358979f * t);
-                const float g_tail = std::cos(0.5f * 3.14159265358979f * t);
-                const float head = lp[i];
-                const float tail = r[(start + len + i) % capacity_];
+                const SampleType t = (xf > 1)
+                    ? static_cast<SampleType>(i) / static_cast<SampleType>(xf - 1)
+                    : SampleType{1};
+                const SampleType g_head = std::sin(static_cast<SampleType>(0.5)
+                                                   * static_cast<SampleType>(3.14159265358979)
+                                                   * t);
+                const SampleType g_tail = std::cos(static_cast<SampleType>(0.5)
+                                                   * static_cast<SampleType>(3.14159265358979)
+                                                   * t);
+                const SampleType head = lp[i];
+                const SampleType tail = r[(start + len + i) % capacity_];
                 lp[i] = head * g_head + tail * g_tail;
             }
         }
@@ -104,11 +111,11 @@ public:
 
     /// Play the loop into `out` (frozen only). Does nothing if not frozen —
     /// the caller passes the live signal through in that case.
-    void read(float* const* out, int n) {
+    void read(SampleType* const* out, int n) {
         if (!frozen_ || loop_len_ <= 0) return;
         for (int ch = 0; ch < channels_; ++ch) {
-            const float* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
-            float* dst = out[ch];
+            const SampleType* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
+            SampleType* dst = out[ch];
             int p = play_pos_;
             for (int i = 0; i < n; ++i) {
                 dst[i] = lp[p];
@@ -119,23 +126,23 @@ public:
     }
 
     void reset() {
-        std::fill(ring_.begin(), ring_.end(), 0.0f);
+        std::fill(ring_.begin(), ring_.end(), SampleType{0});
         write_pos_ = 0; written_ = 0; frozen_ = false; loop_len_ = 0; play_pos_ = 0;
     }
 
     // ── snapshot / restore (plugin state recall) ──
     /// Serialize the frozen loop: [channels][loop_len][crossfade][play_pos]
-    /// then loop_len * channels floats. Empty when not frozen. Not RT-safe.
-    std::vector<float> snapshot() const {
-        std::vector<float> out;
+    /// then loop_len * channels samples. Empty when not frozen. Not RT-safe.
+    std::vector<SampleType> snapshot() const {
+        std::vector<SampleType> out;
         if (!frozen_ || loop_len_ <= 0) return out;
         out.reserve(static_cast<size_t>(4 + loop_len_ * channels_));
-        out.push_back(static_cast<float>(channels_));
-        out.push_back(static_cast<float>(loop_len_));
-        out.push_back(static_cast<float>(crossfade_));
-        out.push_back(static_cast<float>(play_pos_));
+        out.push_back(static_cast<SampleType>(channels_));
+        out.push_back(static_cast<SampleType>(loop_len_));
+        out.push_back(static_cast<SampleType>(crossfade_));
+        out.push_back(static_cast<SampleType>(play_pos_));
         for (int ch = 0; ch < channels_; ++ch) {
-            const float* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
+            const SampleType* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
             for (int i = 0; i < loop_len_; ++i) out.push_back(lp[i]);
         }
         return out;
@@ -143,7 +150,7 @@ public:
 
     /// Restore a loop produced by snapshot(). Returns false on a malformed
     /// or channel-mismatched blob (leaves the sampler unfrozen). Not RT-safe.
-    bool restore(const std::vector<float>& blob) {
+    bool restore(const std::vector<SampleType>& blob) {
         if (blob.size() < 4) { frozen_ = false; return false; }
         const int ch = static_cast<int>(blob[0]);
         const int len = static_cast<int>(blob[1]);
@@ -154,7 +161,7 @@ public:
         play_pos_ = (len > 0) ? (pp % len) : 0;
         size_t idx = 4;
         for (int c = 0; c < channels_; ++c) {
-            float* lp = loop_.data() + static_cast<size_t>(c) * capacity_;
+            SampleType* lp = loop_.data() + static_cast<size_t>(c) * capacity_;
             for (int i = 0; i < len; ++i) lp[i] = blob[idx++];
         }
         frozen_ = true;
@@ -165,13 +172,16 @@ private:
     int channels_ = 0;
     int capacity_ = 0;
     int crossfade_ = 0;
-    std::vector<float> ring_;   // channels * capacity record ring
-    std::vector<float> loop_;   // channels * capacity baked loop
+    std::vector<SampleType> ring_; // channels * capacity record ring
+    std::vector<SampleType> loop_; // channels * capacity baked loop
     int write_pos_ = 0;
     long long written_ = 0;
     bool frozen_ = false;
     int loop_len_ = 0;
     int play_pos_ = 0;
 };
+
+using FreezeLoopSampler = FreezeLoopSamplerT<float>;
+using FreezeLoopSampler64 = FreezeLoopSamplerT<double>;
 
 } // namespace pulp::signal

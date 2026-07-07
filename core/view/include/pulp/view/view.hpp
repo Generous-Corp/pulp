@@ -205,6 +205,12 @@ public:
     /// Adjust the widget's value by a scroll-wheel delta (`delta_y` positive =
     /// scrolled down). Only called when wants_wheel_value() is true.
     virtual void on_wheel(float delta_y) { (void)delta_y; }
+    /// True while the user is actively manipulating this widget's value with a
+    /// pointer drag (knob turn, fader/slider drag, XY-pad move). Value-carrying
+    /// widgets that track a drag gesture override this. A declarative
+    /// native→widget binding (WidgetBridge::bindWidgetToParam) yields to an
+    /// active gesture so a live param push never fights the user mid-drag.
+    virtual bool is_gesture_active() const { return false; }
     /// Key event with modifiers and up/down state.
     /// Return true if handled (prevents propagation to parent).
     virtual bool on_key_event(const KeyEvent& event) { (void)event; return false; }
@@ -1289,12 +1295,17 @@ public:
 
     /// Back-reference to the WindowHost that owns this view tree.
     /// Set by WindowHost when the root view is attached. Propagated to children.
-    void set_window_host(WindowHost* host);
+    /// Virtual so a widget can react to gaining/losing its host (e.g.
+    /// NativeViewHost attaches/detaches its OS child view). An override MUST call
+    /// the base to preserve the recursive propagation to children.
+    virtual void set_window_host(WindowHost* host);
     WindowHost* window_host() const { return window_host_; }
 
     /// Back-reference to the PluginViewHost that owns this editor tree.
-    /// Set by PluginViewHost when the root view is attached. Propagated to children.
-    void set_plugin_view_host(PluginViewHost* host);
+    /// Set by PluginViewHost when the root view is attached. Propagated to
+    /// children. Virtual for the same reason as set_window_host(); an override
+    /// MUST call the base to keep the propagation.
+    virtual void set_plugin_view_host(PluginViewHost* host);
     PluginViewHost* plugin_view_host() const { return plugin_view_host_; }
 
     /// The runtime host-parameter accessor for this view tree, or nullptr in

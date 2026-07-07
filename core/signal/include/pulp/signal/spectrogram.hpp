@@ -7,6 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace pulp::signal {
@@ -217,7 +218,8 @@ public:
     /// Push a new STFT frame as a column of colors.
     /// magnitudes_db: dB-scaled magnitude array, one per frequency bin.
     /// The caller maps bins to rows; this function maps dB values to colors.
-    void push_column(const float* magnitudes_db, int num_bins,
+    template <typename SampleType = float>
+    void push_column(const SampleType* magnitudes_db, int num_bins,
                      const ColorMapper& mapper,
                      float min_db = -80.0f, float max_db = 0.0f) {
         if (width_ <= 0 || height_ <= 0) return;
@@ -233,7 +235,7 @@ public:
                 : 0;
 
             float magnitude_db = magnitudes_db != nullptr && num_bins > 0
-                ? magnitudes_db[bin]
+                ? static_cast<float>(magnitudes_db[bin])
                 : min_db;
             float normalized = (magnitude_db - min_db) / range;
             pixels_[row * width_ + write_col_] = mapper.map(normalized);
@@ -241,6 +243,12 @@ public:
 
         write_col_ = (write_col_ + 1) % width_;
         ++frames_written_;
+    }
+
+    void push_column(std::nullptr_t magnitudes_db, int num_bins,
+                     const ColorMapper& mapper,
+                     float min_db = -80.0f, float max_db = 0.0f) {
+        push_column<float>(magnitudes_db, num_bins, mapper, min_db, max_db);
     }
 
     /// Access the pixel buffer for rendering.

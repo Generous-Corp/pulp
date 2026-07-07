@@ -27,8 +27,10 @@
 #include <pulp/midi/message_collector.hpp>
 #include <pulp/state/properties_file.hpp>
 
+#include <atomic>
 #include <filesystem>
 #include <string>
+#include <thread>
 
 #ifdef _WIN32
 #include <process.h>
@@ -180,6 +182,54 @@ TEST_CASE("StandaloneApp::ui_midi_collector drains UI MIDI into the next block",
     REQUIRE(drained2 == 1);
     REQUIRE(block2.size() == 1);
     REQUIRE(block2[0].sample_offset == 48);
+}
+
+TEST_CASE("Standalone hardware MIDI queue drains concurrently without loss",
+          "[format][standalone][midi][rt-safety]") {
+    constexpr std::size_t kEvents = 5000;
+    pulp::format::detail::StandaloneMidiInputQueue queue;
+
+    std::atomic<bool> producer_done{false};
+    std::thread producer([&] {
+        for (std::size_t i = 0; i < kEvents;) {
+            auto ev = midi::MidiEvent::note_on(
+                0,
+                static_cast<uint8_t>(i & 0x7F),
+                static_cast<uint8_t>(1 + (i % 126)));
+            ev.sample_offset = i % 128;
+            if (queue.try_push(ev)) {
+                ++i;
+            } else {
+                std::this_thread::yield();
+            }
+        }
+        producer_done.store(true, std::memory_order_release);
+    });
+
+    midi::MidiBuffer block;
+    block.reserve(pulp::format::detail::kStandaloneMidiBufferEventCapacity);
+    block.set_realtime_capacity_limit(true);
+
+    std::size_t observed = 0;
+    std::size_t dropped = 0;
+    bool samples_in_range = true;
+    while (!producer_done.load(std::memory_order_acquire) || !queue.empty()) {
+        block.clear();
+        block.clear_sysex();
+        observed +=
+            pulp::format::detail::drain_standalone_midi_input(queue, block);
+        dropped += block.dropped_event_count();
+        for (const auto& ev : block) {
+            samples_in_range = samples_in_range &&
+                ev.sample_offset >= 0 && ev.sample_offset < 128;
+        }
+        if (block.empty()) std::this_thread::yield();
+    }
+
+    producer.join();
+    REQUIRE(samples_in_range);
+    REQUIRE(observed == kEvents);
+    REQUIRE(dropped == 0);
 }
 
 TEST_CASE("StandaloneApp::save_persisted_config round-trips through ApplicationProperties",

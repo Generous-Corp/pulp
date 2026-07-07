@@ -106,6 +106,10 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'SvgPath':     call('createSvgPath', id, parentId); return;
         case 'SvgRect':     call('createSvgRect', id, parentId); return;
         case 'SvgLine':     call('createSvgLine', id, parentId); return;
+        // Layout box for a platform-native child view (WebView / native text
+        // field / video layer). Materializes empty; a C++ host binds the OS
+        // handle by id. See docs/reference/js-bridge.md.
+        case 'NativeView':  call('createNativeView', id, parentId); return;
         default: {
             // Lowercase HTML/SVG intrinsic aliases let imported raw JSX
             // (<div>, <svg>, <path>, ...) lower directly to bridge widgets,
@@ -190,6 +194,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'meter':    call('createMeter', id, parentId); return;
                 case 'xypad':    call('createXYPad', id, parentId); return;
                 case 'listbox':  call('createListBox', id, parentId); return;
+                case 'native-view': call('createNativeView', id, parentId); return;
                 case 'badge':    call('createBadge', id, asText(props.children) ?? (props.text as string ?? ''), (props.tone as string) ?? 'neutral', parentId); return;
                 case 'stepper':  call('createStepper', id, parentId); return;
                 case 'pan':      call('createPan', id, parentId); return;

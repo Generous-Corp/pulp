@@ -2,6 +2,7 @@
 // Combines build --watch + test + validate + process supervision in one command.
 
 #include "cli_common.hpp"
+#include "tartci_lease.hpp"
 
 #include <iostream>
 
@@ -121,6 +122,22 @@ int cmd_dev(const std::vector<std::string>& args) {
                                            allow_unsupported_sdk)) {
         return 1;
     }
+    if (hot_dsp && launch_target.empty()) {
+        std::cerr << "pulp dev: --hot-dsp requires --run <reloadable-shell target>\n";
+        return 2;
+    }
+
+    auto lease = TartciAgentBuildLease::acquire({
+        project_root,
+        "pulp-dev",
+        true,
+    });
+    if (!lease.ok()) {
+        std::cerr << "pulp dev: " << lease.error() << "\n";
+        return lease.exit_code();
+    }
+    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
+    auto capped_build = cap_cmake_build_parallel_args(build_args, lease.jobs());
 
     // Ensure configured
     if (!fs::exists(build_dir / "CMakeCache.txt")) {
@@ -135,8 +152,12 @@ int cmd_dev(const std::vector<std::string>& args) {
 
     // Initial build
     std::string build_cmd = "cmake --build " + build_dir.string();
-    for (auto& arg : build_args) build_cmd += " " + arg;
-    int rc = run_with_spinner(build_cmd, "Building");
+    for (auto& arg : capped_build.args) build_cmd += " " + arg;
+    int rc = run_with_spinner(
+        apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
+                                   lease.jobs(),
+                                   lease.active()),
+        "Building");
     if (rc != 0) {
         std::cerr << "Initial build failed.\n";
         // Continue anyway — the watch loop will retry
@@ -146,16 +167,15 @@ int cmd_dev(const std::vector<std::string>& args) {
     WatchOptions opts;
     opts.root = project_root;
     opts.build_dir = build_dir;
-    opts.build_args = build_args;
+    opts.build_args = capped_build.args;
     opts.run_tests = run_tests;
     opts.test_filter = test_filter;
     opts.run_validate = run_validate;
     opts.launch_target = launch_target;
     opts.launch_args = launch_args;
     opts.hot_dsp = hot_dsp;
-    if (hot_dsp && launch_target.empty()) {
-        std::cerr << "pulp dev: --hot-dsp requires --run <reloadable-shell target>\n";
-        return 2;
-    }
+    opts.build_jobs = capped_build.jobs;
+    opts.build_qos = lease.qos();
+    opts.build_watchdog = lease.active();
     return watch_loop(opts);
 }

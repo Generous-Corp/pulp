@@ -31,11 +31,11 @@
 
 namespace pulp::signal {
 
-template <typename Processor>
-class SoftBypass {
+template <typename Processor, typename SampleType = float>
+class SoftBypassT {
 public:
-    SoftBypass() = default;
-    explicit SoftBypass(Processor processor) : processor_(std::move(processor)) {}
+    SoftBypassT() = default;
+    explicit SoftBypassT(Processor processor) : processor_(std::move(processor)) {}
 
     /// Access the wrapped processor. SoftBypass forwards reset() but NOT
     /// prepare()/sample-rate setup — a wrapped processor that needs preparation
@@ -45,34 +45,35 @@ public:
 
     /// Crossfade length in samples for a bypass toggle (clamped to >= 1).
     void set_fade_samples(int samples) noexcept {
-        fade_step_ = 1.0f / static_cast<float>(samples < 1 ? 1 : samples);
+        fade_step_ = SampleType{1.0f} /
+                     static_cast<SampleType>(samples < 1 ? 1 : samples);
     }
 
     /// Request bypassed (true) or active (false). The change crossfades in.
     void set_bypassed(bool bypassed) noexcept {
-        target_wet_ = bypassed ? 0.0f : 1.0f;
+        target_wet_ = bypassed ? SampleType{0.0f} : SampleType{1.0f};
     }
     /// True once fully (or heading) bypassed.
-    bool bypassed() const noexcept { return target_wet_ <= 0.0f; }
+    bool bypassed() const noexcept { return target_wet_ <= SampleType{0.0f}; }
     /// True while a crossfade is still in progress.
     bool fading() const noexcept { return current_wet_ != target_wet_; }
     /// Current wet mix in [0, 1] (1 = fully active, 0 = fully bypassed).
-    float wet_mix() const noexcept { return current_wet_; }
+    SampleType wet_mix() const noexcept { return current_wet_; }
 
     /// Process one sample with the current (possibly fading) bypass mix.
-    float process(float input) noexcept {
+    SampleType process(SampleType input) noexcept {
         advance_fade();
         // Fully bypassed and settled: skip the wrapped processor entirely. The
         // fade-in on re-engage ramps the wet contribution up from zero, so this
         // stays click-free despite the processor's state being frozen meanwhile.
-        if (current_wet_ <= 0.0f) return input;
-        const float wet = processor_.process(input);
-        if (current_wet_ >= 1.0f) return wet;
-        return input * (1.0f - current_wet_) + wet * current_wet_;
+        if (current_wet_ <= SampleType{0.0f}) return input;
+        const SampleType wet = processor_.process(input);
+        if (current_wet_ >= SampleType{1.0f}) return wet;
+        return input * (SampleType{1.0f} - current_wet_) + wet * current_wet_;
     }
 
     /// Process a buffer in place.
-    void process(float* data, int num_samples) noexcept {
+    void process(SampleType* data, int num_samples) noexcept {
         for (int i = 0; i < num_samples; ++i) data[i] = process(data[i]);
     }
 
@@ -92,9 +93,15 @@ private:
     }
 
     Processor processor_{};
-    float current_wet_ = 1.0f;  // start active
-    float target_wet_ = 1.0f;
-    float fade_step_ = 1.0f / 256.0f;  // ~256-sample default fade
+    SampleType current_wet_ = SampleType{1.0f};  // start active
+    SampleType target_wet_ = SampleType{1.0f};
+    SampleType fade_step_ = SampleType{1.0f} / SampleType{256.0f};  // ~256-sample default fade
 };
+
+template <typename Processor>
+using SoftBypass = SoftBypassT<Processor, float>;
+
+template <typename Processor>
+using SoftBypass64 = SoftBypassT<Processor, double>;
 
 }  // namespace pulp::signal

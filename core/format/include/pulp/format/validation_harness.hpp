@@ -115,6 +115,13 @@ public:
     std::vector<float> process_buffer(const std::vector<float>& interleaved_input,
                                        int num_channels, int num_samples);
 
+    /// Process a single double-precision block from the given input buffer.
+    /// Input is interleaved: [ch0_s0, ch1_s0, ch0_s1, ch1_s1, ...].
+    /// Returns interleaved double-precision output.
+    std::vector<double> process_buffer_f64(
+        const std::vector<double>& interleaved_input,
+        int num_channels, int num_samples);
+
     /// Save current plugin state to a binary blob.
     std::vector<uint8_t> save_state() const;
 

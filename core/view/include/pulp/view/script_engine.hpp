@@ -65,6 +65,14 @@ public:
     // Pump any engine-specific message loop / microtask queue.
     void pump_message_loop();
 
+    // Whether the active backend can cooperatively abort a running evaluation
+    // from another thread (QuickJS can; see JsEngine::request_interrupt).
+    bool supports_interrupt() const;
+
+    // Ask the active backend to abort its in-flight evaluation at the next
+    // interrupt check. Thread-safe on supporting backends; no-op otherwise.
+    void request_interrupt();
+
     // Check if the engine is valid
     explicit operator bool() const;
 

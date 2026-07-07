@@ -156,9 +156,14 @@ needs onset-bearing (percussive) material (too few onsets → `not_applicable`) 
   `no_material_change` + corroborated, and a change hidden behind a delay is measured cleanly.
   `--align varispeed:R` undoes a **declared** tape-style speed change (candidate = reference resampled
   by R) by resampling the candidate back to the reference time base — exact for that class, so the full
-  pipeline (incl. the sample residual) applies. Both **verify** their request and **refuse** (record
-  `alignment: not_aligned`) when the audio doesn't support it; default `none` is unchanged.
-  Pitch-preserving stretch + pitch-shift are later Tier 3 classes.
+  pipeline (incl. the sample residual) applies. `--align stretch:R` declares a **pitch-preserving
+  time-stretch**: the axes measure the unwarped pair directly (LTAS/HNR/width are warp-invariant),
+  graininess is measured at `hop·R` (else a clean stretch reads a false "smoother"), and corroboration
+  binds to a phase-blind LTAS distance (the sample residual is invalid across a stretch). All **verify**
+  their request (duration + that a single uniform ratio fits) and **refuse** (`alignment: not_aligned`)
+  when the audio doesn't support it. `--align pitch:S` declares a **duration-preserving pitch shift**
+  (S semitones): tonal-balance compensates for the expected centroid move so it measures the shifter's
+  added damage, not the shift itself. Default `none` is unchanged.
 - **Verdicts:** `regression_suspected` · `material_change_detected` · `no_material_change_detected`
   · `inconclusive` · `invalid` (a per-measurement `not_applicable` rolls up to `inconclusive`).
 - **Intent-safe:** `regression_suspected` is only emitted with `--reference-role golden` (reference

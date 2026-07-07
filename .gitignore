@@ -118,7 +118,13 @@ external/skia-build/android-gpu/
 # Fetched/generated Skia artifacts (platform libs, headers, icudtl.dat ~10MB).
 # Populated at setup; nothing under build/ is tracked. Ignoring it keeps a
 # stray `git add -A` from sweeping hundreds of binaries into a commit.
-external/skia-build/build/
+#
+# No trailing slash on purpose: `build` is materialized per-machine (a symlink
+# into the shared ~/.cache/pulp/skia-build cache, or a real dir) by
+# autofetch / pulp-worktree.sh. It must NOT be tracked — a committed absolute
+# symlink path re-forms a two-way symlink loop across worktrees and makes Skia
+# autofetch delete it at configure time, tripping Shipyard's drift guard (#238).
+external/skia-build/build
 # Asset-fetch marker written during CMake configure. Untracked + appearing
 # mid-build otherwise trips Shipyard's working-tree drift guard (#238).
 external/skia-build/.skia-asset-sha256

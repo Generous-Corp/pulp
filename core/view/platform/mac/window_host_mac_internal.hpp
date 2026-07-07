@@ -77,6 +77,20 @@ bool set_child_view_bounds_in_host(NSView* container,
 // Detach a child view previously attached via attach_child_view_to_host.
 void detach_child_view_from_host(NSView* container, void* child_view_handle);
 
+// Mask an attached child view to a visible sub-rectangle expressed in the
+// child's OWN top-left [0,0,frame_w,frame_h] box (Pulp convention), via a
+// CALayer mask, so a native child inside a scroll region is clipped to its
+// scroll ancestor's viewport without resizing (and reflowing) the child.
+// has_clip=false removes any mask. Returns false unless the child is a subview
+// of `container`.
+bool clip_child_view_in_host(NSView* container,
+                             void* child_view_handle,
+                             bool has_clip,
+                             float x,
+                             float y,
+                             float width,
+                             float height);
+
 // ── Coordinate / event translation ───────────────────────────────────
 
 // Translate an NSEvent modifier-flags mask into Pulp's kMod* bitmask.

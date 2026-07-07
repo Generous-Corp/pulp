@@ -427,6 +427,23 @@ TEST_CASE("SpectralEnvelopeShifter warp 1 is an exact bypass", "[signal][envelop
         REQUIRE(frame[static_cast<size_t>(k)] == copy[static_cast<size_t>(k)]);
 }
 
+TEST_CASE("SpectralEnvelopeShifter64 processes double frames", "[signal][envelope][f64]") {
+    SpectralEnvelopeShifterConfig config;
+    config.fft_size = 1024;
+    SpectralEnvelopeShifter64 shifter;
+    shifter.prepare(config);
+
+    std::vector<std::complex<double>> frame(513);
+    for (int k = 0; k < 513; ++k)
+        frame[static_cast<size_t>(k)] = {0.001 * static_cast<double>(k + 1), 0.0};
+    std::complex<double>* frames[1] = {frame.data()};
+    shifter.process_group(frames, 1, 513, 0.75);
+    for (const auto& bin : frame) {
+        REQUIRE(std::isfinite(bin.real()));
+        REQUIRE(std::isfinite(bin.imag()));
+    }
+}
+
 TEST_CASE("SpectralEnvelopeShifter moves envelope features by 1/warp", "[signal][envelope]") {
     SpectralEnvelopeShifterConfig config;
     config.fft_size = 2048;
@@ -570,4 +587,59 @@ TEST_CASE("MultichannelPhaseCoordinator applies one rotation to all channels",
             REQUIRE_THAT(rc.imag(), WithinAbs(r0.imag(), 1e-4f));
         }
     }
+}
+
+TEST_CASE("MultichannelPhaseCoordinator64 rotates double channel groups",
+          "[signal][phase-coordinator][f64]") {
+    MultichannelPhaseCoordinator64 coordinator;
+    coordinator.prepare(1024, 2);
+
+    constexpr int bins = 513;
+    std::vector<std::complex<double>> left(static_cast<size_t>(bins));
+    std::vector<std::complex<double>> right(static_cast<size_t>(bins));
+    auto fill = [&](double shift) {
+        for (int k = 0; k < bins; ++k) {
+            const double ph = 0.02 * k + shift;
+            left[static_cast<size_t>(k)] = {std::cos(ph), std::sin(ph)};
+            right[static_cast<size_t>(k)] = {std::cos(ph + 0.4), std::sin(ph + 0.4)};
+        }
+    };
+    std::complex<double>* frames[2] = {left.data(), right.data()};
+    fill(0.0);
+    coordinator.process_group(frames, bins, 256, 320);
+    fill(0.3);
+    coordinator.process_group(frames, bins, 256, 320, 0.25);
+    for (int k = 0; k < bins; k += 31) {
+        REQUIRE(std::isfinite(left[static_cast<size_t>(k)].real()));
+        REQUIRE(std::isfinite(right[static_cast<size_t>(k)].imag()));
+    }
+}
+
+TEST_CASE("RealtimePitchTimeProcessor64 processes double buffers",
+          "[signal][realtime-pitch][f64]") {
+    RealtimePitchTimeConfig config;
+    config.quality = PitchTimeQuality::low_latency;
+    config.channels = 1;
+    config.max_block = 256;
+    RealtimePitchTimeProcessor64 proc;
+    proc.prepare(kSr, config);
+
+    std::vector<double> in(4096);
+    for (std::size_t i = 0; i < in.size(); ++i)
+        in[i] = 0.1 * std::sin(2.0 * kPi * 330.0 * static_cast<double>(i) / kSr);
+    std::vector<double> out(in.size());
+    const double* ip[1];
+    double* op[1];
+    for (int pos = 0; pos < static_cast<int>(in.size()); pos += 256) {
+        ip[0] = in.data() + pos;
+        op[0] = out.data() + pos;
+        proc.process(ip, op, 256);
+    }
+
+    bool saw_signal = false;
+    for (double v : out) {
+        REQUIRE(std::isfinite(v));
+        saw_signal = saw_signal || std::abs(v) > 1e-10;
+    }
+    REQUIRE(saw_signal);
 }

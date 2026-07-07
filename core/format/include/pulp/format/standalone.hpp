@@ -10,12 +10,13 @@
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/message_collector.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/view/audio_bridge.hpp>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -123,6 +124,32 @@ struct StandaloneConfig {
     bool transport_playing = true;  // default-on so MIDI/tempo plugins are immediately useful
 };
 
+namespace detail {
+
+inline constexpr std::size_t kStandaloneMidiInputQueueCapacity = 2048;
+inline constexpr std::size_t kStandaloneMidiBufferEventCapacity =
+    kStandaloneMidiInputQueueCapacity +
+    midi::MidiMessageCollector<>::capacity() +
+    midi::MidiMessageCollector<>::pending_capacity();
+
+using StandaloneMidiInputQueue =
+    runtime::SpscQueue<midi::MidiEvent, kStandaloneMidiInputQueueCapacity>;
+
+inline std::size_t drain_standalone_midi_input(StandaloneMidiInputQueue& queue,
+                                               midi::MidiBuffer& out) {
+    std::size_t popped = 0;
+    std::size_t drained = 0;
+    while (popped < kStandaloneMidiInputQueueCapacity) {
+        auto event = queue.try_pop();
+        if (!event) break;
+        ++popped;
+        if (out.add(*event)) ++drained;
+    }
+    return drained;
+}
+
+}  // namespace detail
+
 class StandaloneApp {
 public:
     explicit StandaloneApp(ProcessorFactory factory);
@@ -195,8 +222,9 @@ private:
     std::unique_ptr<midi::MidiSystem> midi_system_;
     std::unique_ptr<midi::MidiInput> midi_input_;
 
-    midi::MidiBuffer pending_midi_;
-    std::mutex midi_mutex_;
+    detail::StandaloneMidiInputQueue hardware_midi_queue_;
+    midi::MidiBuffer midi_in_;
+    midi::MidiBuffer midi_out_;
     midi::MidiMessageCollector<> ui_midi_collector_;
     std::atomic<bool> running_{false};
 

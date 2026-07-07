@@ -4,7 +4,7 @@ All code that Pulp bundles, fetches automatically, exports via `cmake --install`
 
 ## Policy
 
-- **Allowed for bundled or redistributed code:** MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, zlib, BSL-1.0, Unlicense, public domain, SIL OFL 1.1 (fonts)
+- **Allowed for bundled or redistributed code:** MIT, 0BSD, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, zlib, BSL-1.0, Unlicense, public domain, SIL OFL 1.1 (fonts)
 - **Not allowed in the repo or shipped artifacts:** GPL, LGPL, AGPL, SSPL, proprietary, any copyleft
 - **Review required:** MPL-2.0 (weak copyleft, case-by-case evaluation)
 - **Optional vendor SDK carve-out:** AAX, ASIO, and similar SDKs may be supported only when they are off by default, separately obtained by the developer, kept outside the source tree, never committed, never exported by `cmake --install`, omitted from `NOTICE.md`, and not required by public CI.
@@ -41,6 +41,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | mkdocs-git-revision-date-localized-plugin | >=1.2,<2 | MIT | MkDocs plugin for git-revision dates; build-time only | docs | 2026-04-22 |
 | mkdocs-material | >=9.5,<10 | MIT | MkDocs Material theme. CSS, JS, SVG icons, and search worker from this theme are redistributed in the generated docs site (generouscorp.com/pulp/) | docs | 2026-04-22 |
 | Moonbase | 3.3.0 | MIT | License activation / copy protection (optional, opt-in). Header-only `moonbase-cpp` SDK fetched via FetchContent only when a developer runs `pulp add moonbase`; exports target `moonbase::licensing`. Not part of the default dependency chain; consumed by `examples/moonbase-activation/` | examples/moonbase-activation | 2026-06-30 |
+| MTS-ESP | f214739b | 0BSD | Optional microtuning client integration. Fetched via FetchContent only when `PULP_ENABLE_MTS_ESP=ON` or when a developer runs `pulp add mts-esp`; the client dynamically loads an installed libMTS shared library at runtime when present and falls back to local 12-TET or MTS SysEx data when no master is installed. Not part of the default dependency chain. | pulp-midi | 2026-07-07 |
 | msdfgen | 1.12 | MIT | Reserved for multi-channel SDF glyph generation (FetchContent) | pulp-canvas | 2026-04-12 |
 | nanosvg | vendored-snapshot | zlib | SVG parsing and rasterization | pulp-canvas | 2026-03-25 |
 | node-addon-api | 8.x | MIT | Node.js bindings via Node-API (optional, npm install) | bindings/nodejs | 2026-03-25 |

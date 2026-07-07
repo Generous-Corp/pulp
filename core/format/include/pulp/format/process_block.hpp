@@ -393,21 +393,22 @@ private:
 };
 
 /// Additive richer-surface process-buffer view. It is intentionally non-owning.
-struct ProcessBuffers {
-    ProcessBusBufferSet<const float> inputs;
-    ProcessBusBufferSet<float> outputs;
+template <typename SampleType = float>
+struct ProcessBuffersT {
+    ProcessBusBufferSet<const SampleType> inputs;
+    ProcessBusBufferSet<SampleType> outputs;
 
-    const audio::BufferView<const float>* main_input() const noexcept {
+    const audio::BufferView<const SampleType>* main_input() const noexcept {
         if (auto* bus = inputs.main(); bus && bus->active()) return &bus->buffer;
         return nullptr;
     }
 
-    audio::BufferView<float>* main_output() noexcept {
+    audio::BufferView<SampleType>* main_output() noexcept {
         if (auto* bus = outputs.main(); bus && bus->active()) return &bus->buffer;
         return nullptr;
     }
 
-    const audio::BufferView<const float>* sidechain_input() const noexcept {
+    const audio::BufferView<const SampleType>* sidechain_input() const noexcept {
         if (auto* bus = inputs.sidechain(); bus && bus->active()) return &bus->buffer;
         return nullptr;
     }
@@ -422,6 +423,9 @@ struct ProcessBuffers {
                outputs.active_buses_have_storage();
     }
 };
+
+using ProcessBuffers = ProcessBuffersT<float>;
+using ProcessBuffers64 = ProcessBuffersT<double>;
 
 struct EventDropCounters {
     std::uint32_t parameter_events = 0;

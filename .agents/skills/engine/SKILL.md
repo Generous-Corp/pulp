@@ -173,6 +173,32 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
 
 The engine choice is a **build-time** CMake option. Changing it requires reconfigure + rebuild. The abstraction ensures all JS bridge code works identically across engines — the switch is invisible to UI scripts.
 
+## Cooperative interrupt & the runtime inspector (no step debugger)
+
+`JsEngine` exposes `supports_interrupt()` / `request_interrupt()` — the one
+sanctioned **cross-thread** entry point on this otherwise single-threaded
+interface. It aborts a runaway evaluation (surfacing as a thrown "interrupted"
+exception on the engine thread). Gotchas:
+
+- **QuickJS reuses CHOC's handler — do NOT install your own.** CHOC's
+  `QuickJSContext` already installs a `JS_SetInterruptHandler` backed by an
+  atomic `shouldCancel`, exposed as the thread-safe `Context::cancel()`.
+  `QuickJsEngine::request_interrupt()` just calls `context_.cancel()`. Installing
+  a second `JS_SetInterruptHandler` would clobber CHOC's and break `cancel()`.
+- **Arming while idle aborts the *next* eval.** QuickJS only clears the cancel
+  flag on the next interrupt check, which fires only during JS execution. So
+  callers must arm the interrupt only while an evaluation is actually in flight
+  (`ScriptInspectorBridge` enforces this).
+- **Mainline QuickJS has NO source-line debugger protocol.** No breakpoints,
+  stepping, suspended frames, or local-scope inspection — those live only in
+  QuickJS *forks* (quickjs-ng / koush) Pulp does not vendor. The scripted-UI
+  runtime inspector (`ScriptInspectorBridge` + the inspector `Runtime.*`
+  domain) is therefore an honest **evaluate / capabilities / interrupt / device
+  logs** console, not a step debugger; `Runtime.getCapabilities` reports
+  `canBreak`/`canStep`/`canInspectLocals` = false. A real step debugger is a
+  future engine-capability milestone (a debugger-enabled backend, or the Chrome
+  DevTools inspector JSC/V8 expose). See `docs/reference/scripted-ui-inspector.md`.
+
 ## V8 provider library (how V8 is obtained)
 
 Pulp does **not** build V8 from source, and (since 2026-06) does **not**

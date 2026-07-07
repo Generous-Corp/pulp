@@ -154,6 +154,23 @@ public:
     // for engines that do not expose an explicit pump hook.
     virtual void pump_message_loop() {}
 
+    // ── Cooperative interrupt ────────────────────────────────────────────────
+    // Whether this backend can cooperatively abort a running evaluation that
+    // was started on the engine thread, from a *different* thread. QuickJS
+    // supports this via its host interrupt handler; backends without an
+    // equivalent hook return false.
+    virtual bool supports_interrupt() const { return false; }
+
+    // Request that the currently-running evaluation abort at the engine's next
+    // interrupt check, surfacing as a thrown "interrupted" exception on the
+    // engine thread. This ONLY sets a flag — it does not itself run JS — so it
+    // is safe to call from a thread other than the engine thread (the one true
+    // cross-thread entry point on this otherwise single-threaded interface).
+    // A no-op on backends where supports_interrupt() is false. Arming the flag
+    // while no evaluation is running would abort the *next* one, so callers
+    // (see ScriptInspectorBridge) only arm it while an evaluation is in flight.
+    virtual void request_interrupt() {}
+
     // ── Forward-compatibility capability flags (HostObject / TypedArray / Promise) ──
     // These are defined now so all backends can be designed with them in mind.
     // Default implementations return false / no-op. Backends enable as ready.

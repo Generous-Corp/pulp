@@ -37,16 +37,22 @@
 namespace pulp::signal {
 
 /// Interface for a processor placed inside the feedback loop.
-class FeedbackLoopProcessor {
+template <typename SampleType = float>
+class FeedbackLoopProcessorT {
 public:
-    virtual ~FeedbackLoopProcessor() = default;
+    virtual ~FeedbackLoopProcessorT() = default;
     virtual int loop_latency_samples() const = 0;
     virtual bool loop_is_frozen() const { return false; }
     /// Equal-length, RT-safe block processing.
-    virtual void loop_process(const float* const* in, float* const* out, int num_samples) = 0;
+    virtual void loop_process(const SampleType* const* in, SampleType* const* out,
+                              int num_samples) = 0;
 };
 
-class PitchedFeedbackDelay {
+using FeedbackLoopProcessor = FeedbackLoopProcessorT<float>;
+using FeedbackLoopProcessor64 = FeedbackLoopProcessorT<double>;
+
+template <typename SampleType = float>
+class PitchedFeedbackDelayT {
 public:
     struct Config {
         float max_delay_seconds = 4.0f;
@@ -66,9 +72,9 @@ public:
         while (ring_size_ < static_cast<int>(config.max_delay_seconds * sample_rate) + 8)
             ring_size_ <<= 1;
         ring_mask_ = ring_size_ - 1;
-        ring_.assign(static_cast<size_t>(config.channels) * ring_size_, 0.0f);
-        chunk_in_.assign(static_cast<size_t>(config.channels) * kMaxChunk, 0.0f);
-        chunk_out_.assign(static_cast<size_t>(config.channels) * kMaxChunk, 0.0f);
+        ring_.assign(static_cast<size_t>(config.channels) * ring_size_, SampleType{0});
+        chunk_in_.assign(static_cast<size_t>(config.channels) * kMaxChunk, SampleType{0});
+        chunk_out_.assign(static_cast<size_t>(config.channels) * kMaxChunk, SampleType{0});
         in_ptrs_.resize(static_cast<size_t>(config.channels));
         out_ptrs_.resize(static_cast<size_t>(config.channels));
         // ~50 ms gate and ~30 ms delay-glide one-pole coefficients.
@@ -78,7 +84,7 @@ public:
     }
 
     void reset() {
-        std::fill(ring_.begin(), ring_.end(), 0.0f);
+        std::fill(ring_.begin(), ring_.end(), SampleType{0});
         write_pos_ = 0;
         delay_current_ = delay_target_;
         gate_ = 1.0;
@@ -100,10 +106,11 @@ public:
 
     /// Clamped below unity for stability.
     void set_feedback(float feedback) {
-        feedback_ = std::clamp(feedback, 0.0f, 0.99f);
+        feedback_ = std::clamp(static_cast<SampleType>(feedback),
+                               SampleType{0}, static_cast<SampleType>(0.99));
     }
 
-    void set_loop_processor(FeedbackLoopProcessor* processor) {
+    void set_loop_processor(FeedbackLoopProcessorT<SampleType>* processor) {
         loop_ = processor;
         // Re-apply the floor in case the new processor's latency raised it.
         delay_target_ = std::max(delay_target_, static_cast<double>(min_delay_samples()));
@@ -114,7 +121,7 @@ public:
         return (loop_ != nullptr ? loop_->loop_latency_samples() : 0) + 1;
     }
 
-    void process(const float* const* in, float* const* out, int num_samples) {
+    void process(const SampleType* const* in, SampleType* const* out, int num_samples) {
         assert(num_samples <= config_.max_block);
         int done = 0;
         while (done < num_samples) {
@@ -130,7 +137,7 @@ public:
     }
 
 private:
-    void process_chunk(const float* const* in, float* const* out, int offset, int n) {
+    void process_chunk(const SampleType* const* in, SampleType* const* out, int offset, int n) {
         const bool frozen = loop_ != nullptr && loop_->loop_is_frozen();
         const double gate_target = frozen ? 0.0 : 1.0;
         const int read_latency = loop_ != nullptr ? loop_->loop_latency_samples() : 0;
@@ -148,11 +155,11 @@ private:
             const double read_at = static_cast<double>(write_pos_ + i)
                                    - (d - static_cast<double>(read_latency));
             const auto i0 = static_cast<std::int64_t>(std::floor(read_at));
-            const float frac = static_cast<float>(read_at - static_cast<double>(i0));
+            const SampleType frac = static_cast<SampleType>(read_at - static_cast<double>(i0));
             for (int ch = 0; ch < config_.channels; ++ch) {
-                const float* ring = ring_.data() + static_cast<size_t>(ch) * ring_size_;
-                const float a = ring[static_cast<size_t>(i0 & ring_mask_)];
-                const float b = ring[static_cast<size_t>((i0 + 1) & ring_mask_)];
+                const SampleType* ring = ring_.data() + static_cast<size_t>(ch) * ring_size_;
+                const SampleType a = ring[static_cast<size_t>(i0 & ring_mask_)];
+                const SampleType b = ring[static_cast<size_t>((i0 + 1) & ring_mask_)];
                 in_ptrs_[static_cast<size_t>(ch)][i] = a + frac * (b - a);
             }
         }
@@ -161,7 +168,7 @@ private:
         // Optional in-loop processor (adds back read_latency).
         if (loop_ != nullptr) {
             loop_->loop_process(
-                const_cast<const float* const*>(in_ptrs_.data()),
+                const_cast<const SampleType* const*>(in_ptrs_.data()),
                 out_ptrs_.data(), n);
         } else {
             for (int ch = 0; ch < config_.channels; ++ch)
@@ -173,10 +180,11 @@ private:
         // Write input + gated feedback; emit the wet signal.
         for (int i = 0; i < n; ++i) {
             gate_ += (1.0 - gate_coeff_) * (gate_target - gate_);
-            const float g = feedback_ * static_cast<float>(std::sin(gate_ * 1.5707963));
+            const SampleType g = feedback_ * static_cast<SampleType>(
+                std::sin(gate_ * 1.5707963));
             for (int ch = 0; ch < config_.channels; ++ch) {
-                const float wet = out_ptrs_[static_cast<size_t>(ch)][i];
-                float* ring = ring_.data() + static_cast<size_t>(ch) * ring_size_;
+                const SampleType wet = out_ptrs_[static_cast<size_t>(ch)][i];
+                SampleType* ring = ring_.data() + static_cast<size_t>(ch) * ring_size_;
                 ring[static_cast<size_t>((write_pos_ + i) & ring_mask_)] =
                     in[ch][offset + i] + g * wet;
                 out[ch][offset + i] = wet;
@@ -192,14 +200,14 @@ private:
     int ring_size_ = 0;
     int ring_mask_ = 0;
 
-    std::vector<float> ring_;
-    std::vector<float> chunk_in_;
-    std::vector<float> chunk_out_;
-    std::vector<float*> in_ptrs_;
-    std::vector<float*> out_ptrs_;
+    std::vector<SampleType> ring_;
+    std::vector<SampleType> chunk_in_;
+    std::vector<SampleType> chunk_out_;
+    std::vector<SampleType*> in_ptrs_;
+    std::vector<SampleType*> out_ptrs_;
 
-    FeedbackLoopProcessor* loop_ = nullptr;
-    float feedback_ = 0.0f;
+    FeedbackLoopProcessorT<SampleType>* loop_ = nullptr;
+    SampleType feedback_ = SampleType{0};
     double delay_target_ = 24000.0;
     double delay_current_ = 24000.0;
     double gate_ = 1.0;
@@ -207,5 +215,8 @@ private:
     double delay_coeff_ = 0.0;
     std::int64_t write_pos_ = 0;
 };
+
+using PitchedFeedbackDelay = PitchedFeedbackDelayT<float>;
+using PitchedFeedbackDelay64 = PitchedFeedbackDelayT<double>;
 
 } // namespace pulp::signal

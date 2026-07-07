@@ -16,6 +16,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 
+#include <memory>
 #include <string>
 
 using namespace pulp::view;
@@ -877,4 +878,321 @@ TEST_CASE("DesignFrameView rotates a <rect> indicator needle (tag-agnostic)",
     if (cmp.similarity >= 0.999f)
         SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
     CHECK(cmp.similarity < 0.999f);         // the rect needle visibly moved
+}
+
+namespace {
+
+// A Kind::custom element referencing the given factory id (with a source node so
+// the diagnostic can carry provenance). Sits inside the 80x80 panel.
+DesignFrameElement make_custom(std::string factory_id, std::string source_node = "1:42") {
+    DesignFrameElement e;
+    e.kind = DesignFrameElement::Kind::custom;
+    e.x = 20; e.y = 20; e.w = 40; e.h = 40;
+    e.factory_id = std::move(factory_id);
+    e.source_node_id = std::move(source_node);
+    return e;
+}
+
+}  // namespace
+
+TEST_CASE("DesignFrameView reports an unregistered custom control to the diagnostic",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();   // ensure "my_widget" is genuinely absent
+
+    DesignFrameView v(make_design_svg(), {make_custom("my_widget", "3:7")});
+
+    // The element is inert: no overlay widget is built, and the frame still
+    // renders (the baked SVG shows) — nothing crashes, nothing blanks.
+    CHECK(v.overlay_widget(0) == nullptr);
+
+    // The accumulator records the referenced-but-unregistered id + its node.
+    REQUIRE(v.unregistered_custom_controls().size() == 1);
+    CHECK(v.unregistered_custom_controls()[0].factory_id == "my_widget");
+    CHECK(v.unregistered_custom_controls()[0].source_node_id == "3:7");
+
+    // The callback fires exactly once, with the same id + node. (Attaching it
+    // after construction replays the initial build's miss.)
+    int calls = 0;
+    UnregisteredCustomControl seen;
+    v.set_on_unregistered_custom_control([&](const UnregisteredCustomControl& u) {
+        ++calls;
+        seen = u;
+    });
+    CHECK(calls == 1);
+    CHECK(seen.factory_id == "my_widget");
+    CHECK(seen.source_node_id == "3:7");
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("DesignFrameView builds a registered custom control without firing the diagnostic",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+    int built = 0;
+    std::string built_id;
+    register_design_control_factory(
+        "my_widget", [&](const DesignControlContext& ctx) -> std::unique_ptr<View> {
+            ++built;
+            built_id = ctx.factory_id;
+            return std::make_unique<View>();
+        });
+
+    int misses = 0;
+    DesignFrameView v(make_design_svg(), {make_custom("my_widget")});
+    v.set_on_unregistered_custom_control(
+        [&](const UnregisteredCustomControl&) { ++misses; });
+
+    CHECK(built == 1);                                   // factory ran
+    CHECK(built_id == "my_widget");                      // with the right ctx
+    CHECK(v.overlay_widget(0) != nullptr);               // overlay added as a child
+    CHECK(v.unregistered_custom_controls().empty());     // nothing unregistered
+    CHECK(misses == 0);                                  // callback never fired
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("DesignFrameView with no diagnostic callback is inert-safe for an unregistered custom",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+
+    // A knob alongside an unregistered custom: default path (no callback set)
+    // must build fine, leave the custom inert, and keep the knob fully working.
+    DesignFrameView v(make_design_svg(), {make_knob(), make_custom("ghost")});
+
+    CHECK(v.element_count() == 2);
+    CHECK(v.overlay_widget(1) == nullptr);               // custom stays inert
+    CHECK(v.element_value(0) == 0.5f);                   // knob unaffected
+
+    // The knob still turns — the inert custom neighbor doesn't break interaction.
+    v.set_bounds({0, 0, 80, 80});   // view == panel, so view coords map 1:1
+    v.on_mouse_down({40, 40});      // -> SVG (50,50), the knob center
+    v.on_mouse_drag({40, 10});      // drag up
+    v.on_mouse_up({40, 10});
+    CHECK(v.element_value(0) > 0.6f);
+
+    // The getter still records the miss even with no callback attached.
+    REQUIRE(v.unregistered_custom_controls().size() == 1);
+    CHECK(v.unregistered_custom_controls()[0].factory_id == "ghost");
+
+    clear_design_control_factories();
+}
+
+// ── custom-control value conduit (opt-in DesignControl mixin) ─────────────────
+
+namespace {
+
+// A custom control that joins the value conduit: View for the widget tree,
+// DesignControl for the normalized-value channel. Records silent host->view
+// pushes and can simulate user-driven edits through the conduit callbacks.
+class ValueControl : public View, public DesignControl {
+public:
+    void set_control_value(float v) override {
+        value_ = v;
+        ++pushes_;
+        // When echo_ is set this DELIBERATELY breaks the silent-push contract
+        // (re-emits from set_control_value) so a test can prove the build-time
+        // seed can't leak into the change funnel — it runs before the callback
+        // is installed.
+        if (echo_ && on_control_changed) on_control_changed(v);
+    }
+    float control_value() const override { return value_; }
+
+    // A bracketed continuous drag to `v` — begin, change, end, like a knob.
+    void user_drag(float v) {
+        if (on_gesture_begin) on_gesture_begin();
+        value_ = v;
+        if (on_control_changed) on_control_changed(v);
+        if (on_gesture_end) on_gesture_end();
+    }
+    // A bare value change with no gesture bracket (e.g. a discrete tap).
+    void user_move(float v) {
+        value_ = v;
+        if (on_control_changed) on_control_changed(v);
+    }
+
+    float value_ = 0.0f;
+    int pushes_ = 0;
+    bool echo_ = false;
+};
+
+// Register a factory that builds a ValueControl, handing its raw pointer back
+// via `out` so the test can drive it after DesignFrameView takes ownership.
+// `echo` makes the built control violate the silent-push contract on purpose.
+void register_value_control(const std::string& id, ValueControl** out,
+                            bool echo = false) {
+    register_design_control_factory(
+        id, [out, echo](const DesignControlContext&) -> std::unique_ptr<View> {
+            auto w = std::make_unique<ValueControl>();
+            w->echo_ = echo;
+            if (out) *out = w.get();
+            return w;
+        });
+}
+
+}  // namespace
+
+TEST_CASE("DesignFrameView seeds a conduit custom control with the element's value",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+    ValueControl* ctl = nullptr;
+    register_value_control("vknob", &ctl);
+
+    DesignFrameElement e = make_custom("vknob");
+    e.value = 0.25f;                               // the design/default state
+    DesignFrameView v(make_design_svg(), {e});
+
+    REQUIRE(ctl != nullptr);
+    CHECK(ctl->value_ == Catch::Approx(0.25f));    // seeded via set_control_value
+    CHECK(ctl->pushes_ == 1);                      // exactly the seed, once
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("DesignFrameView pushes host->view values to a conduit custom control silently",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+    ValueControl* ctl = nullptr;
+    register_value_control("vknob", &ctl);
+
+    DesignFrameView v(make_design_svg(), {make_custom("vknob")});
+    REQUIRE(ctl != nullptr);
+
+    int echoes = 0;
+    v.on_element_changed = [&](int, float) { ++echoes; };
+
+    v.set_element_value(0, 0.8f);
+    CHECK(ctl->value_ == Catch::Approx(0.8f));         // reached the control
+    CHECK(v.element_value(0) == Catch::Approx(0.8f));  // read back through the conduit
+    CHECK(echoes == 0);                                // host->view push does NOT echo
+
+    v.set_element_value(0, 1.7f);                      // out-of-range is clamped
+    CHECK(ctl->value_ == Catch::Approx(1.0f));
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("A conduit custom control's user edit funnels through on_element_changed",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+    ValueControl* ctl = nullptr;
+    register_value_control("vknob", &ctl);
+
+    DesignFrameView v(make_design_svg(), {make_custom("vknob")});
+    REQUIRE(ctl != nullptr);
+
+    int idx = -1;
+    float got = -1.0f;
+    v.on_element_changed = [&](int i, float val) { idx = i; got = val; };
+
+    ctl->user_move(0.6f);                          // simulate a user gesture
+    CHECK(idx == 0);                               // routed with the element index
+    CHECK(got == Catch::Approx(0.6f));             // and the edited value
+    CHECK(v.element_value(0) == Catch::Approx(0.6f));  // element_value reads it live
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("A custom control without the conduit has no value channel (unchanged)",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+    // Factory builds a plain View (does NOT inherit DesignControl): the
+    // pre-conduit behavior — built + rendered, but no normalized value.
+    register_design_control_factory(
+        "plain", [](const DesignControlContext&) -> std::unique_ptr<View> {
+            return std::make_unique<View>();
+        });
+
+    DesignFrameView v(make_design_svg(), {make_custom("plain")});
+    CHECK(v.overlay_widget(0) != nullptr);         // built + rendered
+    CHECK(v.element_value(0) == -1.0f);            // no value channel (sentinel)
+    v.set_element_value(0, 0.5f);                  // no-op, must not crash
+    CHECK(v.element_value(0) == -1.0f);
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("A conduit control routes user edits by param_key (both ways)",
+          "[view][design-import][frame][custom][param-key]") {
+    clear_design_control_factories();
+    ValueControl* ctl = nullptr;
+    register_value_control("vknob", &ctl);
+
+    DesignFrameElement e = make_custom("vknob");
+    e.param_key = "cutoff";
+    DesignFrameView v(make_design_svg(), {e});
+    REQUIRE(ctl != nullptr);
+
+    // String-key host bridge stand-in (the embed shim forwards by param_key).
+    std::vector<std::pair<std::string, float>> host_writes;
+    v.on_element_changed = [&](int i, float val) {
+        host_writes.emplace_back(v.element_param_key(i), val);
+    };
+
+    // UI -> host: a user edit is keyed by the element's param_key.
+    ctl->user_move(0.6f);
+    REQUIRE(host_writes.size() == 1);
+    CHECK(host_writes[0].first == "cutoff");
+    CHECK(host_writes[0].second == Catch::Approx(0.6f));
+
+    // host -> UI: automation/preset recall pushes silently — no echo back.
+    host_writes.clear();
+    const int idx = v.element_for_param_key("cutoff");
+    REQUIRE(idx == 0);
+    v.set_element_value(idx, 0.25f);
+    CHECK(ctl->value_ == Catch::Approx(0.25f));
+    CHECK(host_writes.empty());
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("A conduit control's drag brackets the edit with gesture begin/end",
+          "[view][design-import][frame][custom]") {
+    clear_design_control_factories();
+    ValueControl* ctl = nullptr;
+    register_value_control("vknob", &ctl);
+
+    DesignFrameView v(make_design_svg(), {make_custom("vknob")});
+    REQUIRE(ctl != nullptr);
+
+    std::vector<std::string> log;
+    v.on_gesture_begin  = [&](int i) { log.push_back("begin:" + std::to_string(i)); };
+    v.on_element_changed = [&](int i, float) { log.push_back("changed:" + std::to_string(i)); };
+    v.on_gesture_end    = [&](int i) { log.push_back("end:" + std::to_string(i)); };
+
+    ctl->user_drag(0.7f);                          // begin -> change -> end
+    REQUIRE(log.size() == 3);
+    CHECK(log[0] == "begin:0");                     // host can group one undo step
+    CHECK(log[1] == "changed:0");
+    CHECK(log[2] == "end:0");
+
+    clear_design_control_factories();
+}
+
+TEST_CASE("Frame swap re-seeds a conduit control without clobbering host state",
+          "[view][design-import][frame][custom][param-key]") {
+    clear_design_control_factories();
+    ValueControl* ctl = nullptr;
+    register_value_control("echo", &ctl, /*echo=*/true);  // violates silent contract
+
+    // Frame 0: a knob. Frame 1: an echoing custom control with a param_key.
+    DesignFrameView v(make_design_svg(), {make_knob()});
+    DesignFrameElement e = make_custom("echo");
+    e.value = 0.2f;
+    e.param_key = "cutoff";
+    v.add_frame(make_design_svg(), {e});
+
+    std::vector<std::pair<std::string, float>> host_writes;
+    v.on_element_changed = [&](int i, float val) {
+        host_writes.emplace_back(v.element_param_key(i), val);
+    };
+
+    // Swapping to frame 1 rebuilds overlays and re-seeds the control. The seed
+    // runs BEFORE the callback is wired, so even an echoing (contract-violating)
+    // control cannot re-emit — the host param is NOT clobbered with the default.
+    v.set_active_frame(1);
+    CHECK(host_writes.empty());                     // the seed-before-wire guarantee
+    REQUIRE(ctl != nullptr);
+    CHECK(ctl->value_ == Catch::Approx(0.2f));      // re-seeded to the element value
+
+    clear_design_control_factories();
 }

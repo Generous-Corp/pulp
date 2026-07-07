@@ -13,6 +13,7 @@
 
 using pulp::signal::Fft;
 using pulp::signal::PhaseVocoder;
+using pulp::signal::PhaseVocoder64;
 using pulp::signal::PhaseVocoderConfig;
 
 namespace {
@@ -109,6 +110,23 @@ TEST_CASE("PhaseVocoder pitch-shift preserves length, changes pitch",
         const auto out = pv.pitch_shift(input, 0.0);
         REQUIRE(out.size() == n);
     }
+}
+
+TEST_CASE("PhaseVocoder64 stretches double buffers", "[signal][phasevocoder][f64]") {
+    constexpr double sr = 48000.0;
+    std::vector<double> input(4096);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(2.0 * kPi * 220.0 * static_cast<double>(i) / sr);
+
+    PhaseVocoder64 pv;
+    const auto stretched = pv.time_stretch(input, 1.5);
+    REQUIRE(stretched.size() == static_cast<std::size_t>(std::lround(input.size() * 1.5)));
+    bool saw_signal = false;
+    for (double v : stretched) {
+        REQUIRE(std::isfinite(v));
+        saw_signal = saw_signal || std::abs(v) > 1e-9;
+    }
+    REQUIRE(saw_signal);
 }
 
 TEST_CASE("PhaseVocoder time-stretch honors the exact length contract at the edges",

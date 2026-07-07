@@ -466,6 +466,58 @@ public:
     }
 };
 
+class NativeF64CopyProcessor : public Processor {
+public:
+    int process_count = 0;
+    int process_f64_count = 0;
+    int observed_input_channels = 0;
+    int observed_output_channels = 0;
+    int observed_num_samples = 0;
+    bool layouts_match = false;
+    bool had_main_input = false;
+    bool had_main_output = false;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "NativeF64CopyCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.native-f64-copy";
+        d.version = "1.0.0";
+        d.supports_f64_audio = true;
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        ++process_count;
+    }
+    void process_f64(ProcessBuffers64& audio,
+                     midi::MidiBuffer&,
+                     midi::MidiBuffer&,
+                     const ProcessContext& context) override {
+        ++process_f64_count;
+        observed_num_samples = context.num_samples;
+        layouts_match = audio.layouts_match_descriptors();
+        auto* input = audio.main_input();
+        auto* output = audio.main_output();
+        had_main_input = input != nullptr;
+        had_main_output = output != nullptr;
+        if (!input || !output) return;
+        observed_input_channels = static_cast<int>(input->num_channels());
+        observed_output_channels = static_cast<int>(output->num_channels());
+        const auto channels = std::min(input->num_channels(), output->num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            const auto in = input->channel(ch);
+            auto out = output->channel(ch);
+            for (std::size_t i = 0; i < in.size(); ++i) out[i] = in[i];
+        }
+    }
+};
+
 // Emits a pre-programmed set of MIDI events on midi_out so we can test
 // the outbound bridge.
 class EmittingProcessor : public Processor {
@@ -807,6 +859,7 @@ ObservingSidecarProcessor* g_observing_sidecar = nullptr;
 OverflowingMidiOutProcessor* g_overflowing_midi_out = nullptr;
 ForwardingSysexProcessor* g_forwarding_sysex = nullptr;
 UnityCopyProcessor* g_unity_copy = nullptr;
+NativeF64CopyProcessor* g_native_f64_copy = nullptr;
 int g_pending_latency_samples = 0;
 int g_pending_tail_samples = 0;
 bool g_pending_opts_mpe = false;
@@ -849,6 +902,12 @@ std::unique_ptr<Processor> make_process_buffers_capturing() {
 std::unique_ptr<Processor> make_unity_copy() {
     auto up = std::make_unique<UnityCopyProcessor>();
     g_unity_copy = up.get();
+    return up;
+}
+
+std::unique_ptr<Processor> make_native_f64_copy() {
+    auto up = std::make_unique<NativeF64CopyProcessor>();
+    g_native_f64_copy = up.get();
     return up;
 }
 
@@ -1312,6 +1371,84 @@ TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
     REQUIRE(std::all_of(aux_right.begin(), aux_right.end(), [](float v) { return v == 0.0f; }));
 }
 
+TEST_CASE("CLAP processes data64 buffers through the f32 boundary path",
+          "[clap][audio][f64]") {
+    g_unity_copy = nullptr;
+    Harness h(make_unity_copy);
+    REQUIRE(g_unity_copy != nullptr);
+
+    std::array<double, Harness::kFrames> in_l{};
+    std::array<double, Harness::kFrames> in_r{};
+    std::array<double, Harness::kFrames> out_l{};
+    std::array<double, Harness::kFrames> out_r{};
+    for (std::size_t i = 0; i < Harness::kFrames; ++i) {
+        in_l[i] = 0.1 * static_cast<double>(i + 1);
+        in_r[i] = -0.125 * static_cast<double>(i + 1);
+    }
+    double* in_ptrs[2] = {in_l.data(), in_r.data()};
+    double* out_ptrs[2] = {out_l.data(), out_r.data()};
+    clap_audio_buffer_t audio_in{};
+    audio_in.data64 = in_ptrs;
+    audio_in.channel_count = 2;
+    clap_audio_buffer_t audio_out{};
+    audio_out.data64 = out_ptrs;
+    audio_out.channel_count = 2;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &audio_in, 1,
+                         &audio_out, 1) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_unity_copy->process_count == 1);
+    REQUIRE(g_unity_copy->observed_num_samples == static_cast<int>(Harness::kFrames));
+
+    for (std::size_t i = 0; i < Harness::kFrames; ++i) {
+        REQUIRE(out_l[i] == static_cast<double>(static_cast<float>(in_l[i])));
+        REQUIRE(out_r[i] == static_cast<double>(static_cast<float>(in_r[i])));
+    }
+}
+
+TEST_CASE("CLAP routes data64 buffers to native process_f64 when opted in",
+          "[clap][audio][f64]") {
+    g_native_f64_copy = nullptr;
+    Harness h(make_native_f64_copy);
+    REQUIRE(g_native_f64_copy != nullptr);
+
+    std::array<double, Harness::kFrames> in_l{};
+    std::array<double, Harness::kFrames> in_r{};
+    std::array<double, Harness::kFrames> out_l{};
+    std::array<double, Harness::kFrames> out_r{};
+    for (std::size_t i = 0; i < Harness::kFrames; ++i) {
+        in_l[i] = 0.1 + 1.0e-12 * static_cast<double>(i + 1);
+        in_r[i] = -0.125 + 1.0e-12 * static_cast<double>(i + 1);
+    }
+    REQUIRE(in_l[0] != static_cast<double>(static_cast<float>(in_l[0])));
+
+    double* in_ptrs[2] = {in_l.data(), in_r.data()};
+    double* out_ptrs[2] = {out_l.data(), out_r.data()};
+    clap_audio_buffer_t audio_in{};
+    audio_in.data64 = in_ptrs;
+    audio_in.channel_count = 2;
+    clap_audio_buffer_t audio_out{};
+    audio_out.data64 = out_ptrs;
+    audio_out.channel_count = 2;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &audio_in, 1,
+                         &audio_out, 1) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_native_f64_copy->process_count == 0);
+    REQUIRE(g_native_f64_copy->process_f64_count == 1);
+    REQUIRE(g_native_f64_copy->observed_num_samples == static_cast<int>(Harness::kFrames));
+    REQUIRE(g_native_f64_copy->observed_input_channels == 2);
+    REQUIRE(g_native_f64_copy->observed_output_channels == 2);
+    REQUIRE(g_native_f64_copy->had_main_input);
+    REQUIRE(g_native_f64_copy->had_main_output);
+    REQUIRE(g_native_f64_copy->layouts_match);
+
+    for (std::size_t i = 0; i < Harness::kFrames; ++i) {
+        REQUIRE(out_l[i] == in_l[i]);
+        REQUIRE(out_r[i] == in_r[i]);
+    }
+}
+
 TEST_CASE("CLAP supplies ProcessBuffers to processors that override the richer surface",
           "[clap][audio][process-buffers]") {
     g_pending_opts_mpe = false;
@@ -1666,9 +1803,12 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     transport.flags = CLAP_TRANSPORT_IS_PLAYING
                     | CLAP_TRANSPORT_HAS_TEMPO
                     | CLAP_TRANSPORT_HAS_BEATS_TIMELINE
+                    | CLAP_TRANSPORT_HAS_SECONDS_TIMELINE
                     | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
     transport.tempo = 132.25;
     transport.song_pos_beats = 25 * (CLAP_BEATTIME_FACTOR / 2);
+    transport.song_pos_seconds = static_cast<clap_sectime>(
+        2.25 * static_cast<double>(CLAP_SECTIME_FACTOR));
     transport.tsig_num = 7;
     transport.tsig_denom = 8;
 
@@ -1688,9 +1828,36 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     REQUIRE_FALSE(g_capturing->captured_context.is_maintenance_render());
     REQUIRE(g_capturing->captured_context.tempo_bpm == 132.25);
     REQUIRE(g_capturing->captured_context.position_beats == 12.5);
+    REQUIRE(g_capturing->captured_context.position_samples == 108000);
     REQUIRE(g_capturing->captured_context.time_sig_numerator == 7);
     REQUIRE(g_capturing->captured_context.time_sig_denominator == 8);
     REQUIRE(g_capturing->captured_context.num_samples == static_cast<int>(Harness::kFrames));
+}
+
+TEST_CASE("CLAP transport without seconds timeline leaves sample position unset",
+          "[clap][transport]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_HAS_TEMPO
+                    | CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+    transport.tempo = 120.0;
+    transport.song_pos_beats = 16 * CLAP_BEATTIME_FACTOR;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_capturing->captured_context.is_playing);
+    REQUIRE(g_capturing->captured_context.tempo_bpm == 120.0);
+    REQUIRE(g_capturing->captured_context.position_beats == 16.0);
+    REQUIRE(g_capturing->captured_context.position_samples == 0);
 }
 
 TEST_CASE("CLAP transport jumps request processor reset through ProcessContext",

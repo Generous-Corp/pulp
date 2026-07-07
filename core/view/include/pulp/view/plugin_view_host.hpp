@@ -196,6 +196,30 @@ public:
         (void) child_view;
     }
 
+    // Clip an attached native child to `(x, y, width, height)` — the visible
+    // sub-rectangle expressed in the child's OWN [0,0,frame_w,frame_h] box, in
+    // Pulp's top-left origin convention (same units as
+    // set_native_child_view_bounds). The host masks the native view to that rect
+    // (e.g. a CALayer mask on Apple) so a child inside a scroll region does not
+    // spill past the viewport; masking preserves the child's content size rather
+    // than reflowing it by resizing the frame. When has_clip is false, any
+    // existing clip is removed. Returns false when unsupported or when the child
+    // is not attached to this host. Default: no-op unsupported.
+    virtual bool set_native_child_view_clip(NativeViewHandle child_view,
+                                            bool has_clip,
+                                            float x,
+                                            float y,
+                                            float width,
+                                            float height) {
+        (void) child_view;
+        (void) has_clip;
+        (void) x;
+        (void) y;
+        (void) width;
+        (void) height;
+        return false;
+    }
+
     // Pump any pending native drag-and-drop (and related) events on a host
     // that owns its own platform connection. The Linux X11 host overrides this
     // to drain its X connection and run the XDND target protocol (XdndEnter /

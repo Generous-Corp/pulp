@@ -85,6 +85,14 @@ struct. It owns:
   skipping the synthesis when MIDI2 is present silently drops the
   note half from the UMP buffer. See Gotchas. `clap_activate()` reserves
   and capacity-limits this sidecar.
+- `native_f64_enabled` plus the `data64` scratch/pointer arrays — CLAP hosts
+  may provide double-precision audio buffers. If
+  `PluginDescriptor::effective_capabilities().supports_f64_audio` is false,
+  the adapter converts host `data64` to the normal f32 `process(...)` path and
+  converts f32 outputs back to `data64`. If the plugin opts in, every active
+  routed bus for the block must be f64 before the adapter calls
+  `Processor::process_f64(ProcessBuffers64&, ...)`; mixed f32/f64 blocks stay
+  on the compatibility path.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
 - `bridge` + `editor_host` + `editor_visible` — gated on
@@ -252,6 +260,27 @@ Serialisation goes through the single `StateStore::serialize()` /
 `deserialize(bytes)` path (in `clap_entry.hpp` `state_ext`). Format is
 the Pulp binary blob — identical bytes across CLAP / VST3 / AU, so
 round-trip parity is trivial to test.
+
+### Transport context
+
+`clap_process()` maps `process->transport` into `ProcessContext` when
+the host supplies it:
+
+- `is_playing` / `is_recording` from the CLAP transport flags.
+- `tempo_bpm` only when `CLAP_TRANSPORT_HAS_TEMPO` is set.
+- `position_beats` from `song_pos_beats / CLAP_BEATTIME_FACTOR` when
+  `CLAP_TRANSPORT_HAS_BEATS_TIMELINE` is set.
+- `position_samples` from `song_pos_seconds / CLAP_SECTIME_FACTOR *
+  sample_rate` when `CLAP_TRANSPORT_HAS_SECONDS_TIMELINE` is set.
+  Leave it at 0 when the host omits the seconds timeline; deriving an
+  absolute sample position from beats + current tempo is not authoritative
+  in tempo-mapped projects and can create false transport jumps.
+- time signature, loop range, and bar from the matching CLAP fields.
+
+Keep `position_samples` non-zero when the host provides a seconds timeline;
+native-core processors forward it as `playhead_frames`, so leaving it at the
+default 0 makes CLAP-only playhead-sensitive processors think every block
+starts at the song origin.
 
 ### Editor
 

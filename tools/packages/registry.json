@@ -1730,6 +1730,88 @@
         "build_status": {}
       }
     },
+    "mts-esp": {
+      "name": "ODDSound MTS-ESP",
+      "version": "f214739b",
+      "description": "Session-wide microtuning client API with MTS-ESP master support, MTS SysEx fallback, note filtering, and multi-channel tuning tables",
+      "license": "0BSD",
+      "category": "music-theory",
+      "url": "https://github.com/ODDSound/MTS-ESP",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/ODDSound/MTS-ESP.git",
+        "git_tag": "f214739b8832e7f297cb9970d0c0efbf783f1462"
+      },
+      "cmake": {
+        "targets": [
+          "mts_esp_client"
+        ],
+        "header_only": false,
+        "include_dir": "Client",
+        "sources": [
+          "Client/libMTSClient.cpp"
+        ]
+      },
+      "platforms": {
+        "macOS": {
+          "architectures": [
+            "arm64",
+            "x86_64"
+          ],
+          "notes": "The client source dynamically loads an installed libMTS.dylib from /Library/Application Support/MTS-ESP and falls back to its local tuning table when no master is installed."
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ],
+          "notes": "The client source dynamically loads an installed LIBMTS.dll from Common Files\\MTS-ESP and falls back to its local tuning table when no master is installed."
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ],
+          "notes": "The client source dynamically loads an installed libMTS.so from /usr/local/lib and falls back to its local tuning table when no master is installed."
+        }
+      },
+      "rt_safe": true,
+      "tags": [
+        "microtuning",
+        "mts-esp",
+        "midi-tuning-standard",
+        "scala",
+        "scl",
+        "kbm",
+        "sysex",
+        "tuning"
+      ],
+      "provides": [
+        "microtuning",
+        "mts-esp-client",
+        "midi-tuning-standard"
+      ],
+      "overlaps_with_builtin": {},
+      "unique_value": "Widely used session-wide microtuning client: plugin code can query an MTS-ESP master when present while still falling back to local 12-TET or incoming MTS SysEx data.",
+      "alternatives": [],
+      "migration_notes": {
+        "JUCE": "Projects that already include ODDSound's libMTSClient.h should map MTS_RegisterClient/MTS_NoteToFrequency/MTS_ParseMIDIData call sites to pulp::midi::MtsEspTuningProvider behind the provider-neutral TuningProvider API.",
+        "iPlug2": "Projects with direct libMTSClient.h usage should map ProcessMidiMsg/ProcessSysEx MTS parsing and note-frequency lookups to MtsEspTuningProvider while preserving the original note-on versus continuous-retuning policy.",
+        "importer": "Importers should detect libMTSClient.h, Client/libMTSClient.cpp, or MTS_* symbols, enable the optional mts-esp package or PULP_ENABLE_MTS_ESP, and avoid hard-coding MTS-specific calls into processor voice code."
+      },
+      "verification": {
+        "last_verified": "2026-07-07",
+        "verified_version": "f214739b",
+        "upstream_commit": "f214739b8832e7f297cb9970d0c0efbf783f1462",
+        "upstream_latest": "f214739b8832e7f297cb9970d0c0efbf783f1462",
+        "pulp_commit": "feature/mts-esp-microtuning",
+        "build_status": {
+          "macOS-arm64": "pass",
+          "Windows-x64": "untested",
+          "Linux-x64": "untested"
+        }
+      }
+    },
     "oboe": {
       "name": "Oboe",
       "version": "1.9.0",

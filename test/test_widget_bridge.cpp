@@ -7,6 +7,7 @@
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -580,6 +581,8 @@ inline std::vector<WidgetTagCase> widget_tag_cases() {
         {"select",   [](View* w){ return dynamic_cast<ComboBox*>(w) != nullptr; },     "ComboBox"},
         {"progress", [](View* w){ return dynamic_cast<ProgressBar*>(w) != nullptr; },  "ProgressBar"},
         {"img",      [](View* w){ return dynamic_cast<ImageView*>(w) != nullptr; },    "ImageView"},
+        // R1 native-view: a native-child embed box; must route on both surfaces.
+        {"native-view", [](View* w){ return dynamic_cast<NativeViewHost*>(w) != nullptr; }, "NativeViewHost"},
     };
 }
 }  // namespace

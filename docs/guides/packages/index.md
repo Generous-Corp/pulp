@@ -22,6 +22,12 @@ The live registry is `tools/packages/registry.json`. It currently contains more 
 | [PFFFT](pffft.md) | SIMD-optimized FFT | CMake |
 | [DaisySP](daisysp.md) | Physical modeling, effects, drum synthesis | CMake |
 
+### Music Theory
+
+| Package | What It Provides | Integration |
+|---------|-----------------|-------------|
+| [MTS-ESP](mts-esp.md) | Session-wide microtuning, MTS SysEx fallback, note filtering | Source-only |
+
 ### Audio I/O (File Formats, Resampling)
 
 | Package | What It Provides | Integration |

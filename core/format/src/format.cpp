@@ -1,6 +1,7 @@
 // pulp-format: processor interface and format adapters
 #include <pulp/format/format.hpp>
 #include <pulp/view/view.hpp>
+
 #include <utility>
 
 namespace pulp::format {
@@ -17,4 +18,4 @@ std::unique_ptr<view::View> Processor::create_view() {
     return nullptr;
 }
 
-}
+} // namespace pulp::format

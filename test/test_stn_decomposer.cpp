@@ -52,6 +52,29 @@ TEST_CASE("StnDecomposer classifies a sustained tone as sines", "[signal][stn]")
     REQUIRE(masks->sines[peak] > masks->noise[peak]);
 }
 
+TEST_CASE("StnDecomposer64 partitions double magnitudes", "[signal][stn][f64]") {
+    StnConfig config;
+    config.num_bins = kBins;
+    config.time_median = 5;
+    config.freq_median = 5;
+    StnDecomposer64 stn;
+    stn.prepare(config);
+
+    std::vector<double> frame(static_cast<size_t>(kBins), 0.01);
+    frame[100] = 1.0;
+    const StnMasks64* masks = nullptr;
+    for (int i = 0; i < 8; ++i) masks = &stn.process(frame.data());
+
+    REQUIRE(masks != nullptr);
+    for (int k = 0; k < kBins; k += 41) {
+        const double sum = masks->sines[static_cast<size_t>(k)]
+                         + masks->transients[static_cast<size_t>(k)]
+                         + masks->noise[static_cast<size_t>(k)];
+        REQUIRE(sum <= 1.0000001);
+        REQUIRE(sum >= 0.0);
+    }
+}
+
 TEST_CASE("StnDecomposer classifies an isolated broadband frame as transient",
           "[signal][stn]") {
     StnConfig config;

@@ -110,10 +110,13 @@ namespace methods {
 
     // Console domain
     constexpr auto kConsoleEnable       = "Console.enable";
+    constexpr auto kConsoleGetMessages  = "Console.getMessages";
     constexpr auto kConsoleMessageAdded = "Console.messageAdded";
 
     // Runtime domain
     constexpr auto kRuntimeEvaluate          = "Runtime.evaluate";
+    constexpr auto kRuntimeGetCapabilities   = "Runtime.getCapabilities";
+    constexpr auto kRuntimeInterrupt         = "Runtime.interrupt";
     constexpr auto kRuntimeGetHotReloadStatus = "Runtime.getHotReloadStatus";
     constexpr auto kRuntimeHotReloaded       = "Runtime.hotReloaded";
 

@@ -122,10 +122,19 @@ initialize → setBusArrangements → setupProcessing → setActive(true)
 
 `setupProcessing` calls `processor_->prepare(ctx)` with the host's
 sample rate, max buffer size, and the descriptor's default channel
-counts. `setActive(false)` calls `processor_->release()` so the
+counts, then prepares the default f64 fallback scratch. `setActive(false)` calls
+`processor_->release()` so the
 Processor can free prepare-time resources. Never move `prepare()` out
 of `setupProcessing` — Steinberg guarantees `process()` is only called
 after a successful `setupProcessing` + `setActive(true)` sequence.
+
+VST3 can ask for `kSample64`. If
+`PluginDescriptor::effective_capabilities().supports_f64_audio` is false, keep
+the adapter-boundary conversion path: copy host double buffers to f32 scratch,
+run the existing f32 Processor callback, and copy active outputs back to double.
+Only call `Processor::process_f64(ProcessBuffers64&, ...)` for plugins that
+explicitly opt in; native f64 processors are responsible for doing real double
+DSP, not relying on the compatibility conversion.
 
 ### Parameters
 
@@ -300,9 +309,12 @@ Load-bearing constraints:
   declared — existing param-count / state-format contracts are unaffected.
   (Controllers never enter `store_`, so saved state never contains a
   controller ID — verified by `[vst3][midimapping][state]`.)
-- **The event input bus must declare 16 channels** (`addEventInput(name, 16)`),
-  not 1 — the host queries `getMidiControllerAssignment` per channel up to the
-  bus's `channelCount`, so a 1-channel bus only ever maps channel 0.
+- **The event input/output buses must declare 16 channels**
+  (`addEventInput(name, 16)` / `addEventOutput(name, 16)`), not 1. Hosts query
+  `getMidiControllerAssignment` per input channel up to the input bus's
+  `channelCount`, and MIDI-output-aware hosts use the output bus count for
+  multi-channel routing. A 1-channel event bus silently collapses routing to
+  channel 0.
 - Controllers are decoded in the parameter-change loop (before the note/SysEx
   loop), so `midi_in_` is cleared at the **top** of `process()`, not just
   before the event loop, and `midi_in_.sort()` runs after both sources append

@@ -95,6 +95,47 @@ public:
                  const state::ParameterEventQueue& param_events,
                  ProcessContext context);
 
+    /// Process a double-precision block of audio (no MIDI).
+    /// @p input and @p output may alias for in-place processing.
+    void process_f64(audio::BufferView<double>& output,
+                     const audio::BufferView<const double>& input);
+
+    /// Process a double-precision block with explicit transport/timeline
+    /// context. Any non-positive `sample_rate` / `num_samples` fields are
+    /// defaulted from the prepared host configuration and current buffer size.
+    void process_f64(audio::BufferView<double>& output,
+                     const audio::BufferView<const double>& input,
+                     ProcessContext context);
+
+    /// Process a double-precision block with MIDI input and output.
+    void process_f64(audio::BufferView<double>& output,
+                     const audio::BufferView<const double>& input,
+                     midi::MidiBuffer& midi_in,
+                     midi::MidiBuffer& midi_out);
+
+    /// Process a double-precision block with explicit sample-accurate
+    /// parameter events.
+    void process_f64(audio::BufferView<double>& output,
+                     const audio::BufferView<const double>& input,
+                     const state::ParameterEventQueue& param_events);
+
+    /// Process a double-precision block with MIDI and explicit transport /
+    /// timeline context.
+    void process_f64(audio::BufferView<double>& output,
+                     const audio::BufferView<const double>& input,
+                     midi::MidiBuffer& midi_in,
+                     midi::MidiBuffer& midi_out,
+                     ProcessContext context);
+
+    /// Low-level double-precision process call with MIDI, context, and
+    /// parameter events.
+    void process_f64(audio::BufferView<double>& output,
+                     const audio::BufferView<const double>& input,
+                     midi::MidiBuffer& midi_in,
+                     midi::MidiBuffer& midi_out,
+                     const state::ParameterEventQueue& param_events,
+                     ProcessContext context);
+
     /// Render an effect-shaped in-memory audio file through this processor.
     ///
     /// The host must already be prepared for at least the largest scheduled

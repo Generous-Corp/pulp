@@ -7,6 +7,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/runtime/log.hpp>
 #include <web_compat_preludes_gen.hpp>
@@ -757,6 +758,9 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<ProgressBar>();
     } else if (tag == "img" || tag == "image") {
         w = std::make_unique<ImageView>();
+    } else if (tag == "native-view") {
+        // Native child-view box; a C++ host binds the OS handle by id (js-bridge.md).
+        w = std::make_unique<NativeViewHost>();
     }
     if (w) {
         w->set_id(id);
@@ -768,6 +772,7 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
 void WidgetBridge::clear() {
     pending_frame_ids_.clear();
     shortcuts_.clear();
+    param_bindings_.clear();  // bindings reference widgets torn down below
     ComboBox::close_active_popup();
     while (root_.child_count() > 0) {
         auto* child = root_.child_at(root_.child_count() - 1);
@@ -880,6 +885,8 @@ void WidgetBridge::poll_async_results() {
 }
 
 void WidgetBridge::service_frame_callbacks() {
+    // Declarative bindings first: pure C++ store→widget push, no JS crossing.
+    service_param_bindings();
     engine_.pump_message_loop();
     // Drain any expired native-tracked setTimeout/setInterval timers so
     // consumers do not need a JS shim around the frame loop.

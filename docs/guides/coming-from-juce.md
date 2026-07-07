@@ -138,6 +138,52 @@ The token is the cleanup. Forget the token, the listener is gone
 when the owner is gone. Forget JUCE's `removeParameterListener`,
 your callback fires after `this` was destroyed.
 
+### MIDI Learn And Parameter Maps
+
+If your JUCE project has a MIDI-learn layer that maps incoming controller
+messages to `AudioProcessorValueTreeState` parameters, port that to
+`pulp::state::MidiParameterMap`. It is a plugin-owned `(channel, cc) ->
+ParamID` map with an `arm_learn()` mode, so the next incoming CC can bind to the
+target parameter and subsequent CCs write the parameter in the normalized domain.
+
+That covers parameter learn. It is separate from "learn the next MIDI note and
+store it as a setting" workflows, which should use a small note-listener helper
+or project-local state until Pulp grows a generic note/control learn utility.
+
+## Migrating structured state
+
+Pulp separates owned tree structure from structured leaf values:
+
+- ValueTree-like records with children map to `StateTree` nodes plus
+  `add_child()` for owned child records.
+- var-style arrays/objects map to `PropertyValue` arrays and string-keyed
+  objects via `make_property_array()` and `make_property_object()`.
+- Scalars keep the existing `std::variant` shape: `bool`, `int64_t`, `double`,
+  and `std::string` still work with `tree->set("key", value)` and typed getters.
+
+```cpp
+auto root = StateTree::create("PluginState");
+root->set("ui", make_property_object({
+    {"theme", std::string("dark")},
+    {"recent", make_property_array({std::string("Init"), std::string("Wide")})},
+}));
+
+auto osc = StateTree::create("Oscillator");
+osc->set("id", std::string("osc1"));
+osc->set("extra", make_property_object({
+    {"wave", std::string("saw")},
+    {"weights", make_property_array({1.0, 0.5, 0.25})},
+}));
+root->add_child(osc);
+```
+
+That mapping preserves arrays, objects, and nested primitive data during JSON
+serialization and StateTree sync without importing framework-specific names into
+the Pulp API. Direct node-as-property storage is intentionally staged rather
+than omitted: embedding node references in `PropertyValue` would make ownership
+ambiguous and could create hidden aliasing/cycles across `deep_copy()`,
+`clone_synced()`, and cross-process sync.
+
 ## Audio thread: snapshot, don't atomic-load-per-sample
 
 ```cpp

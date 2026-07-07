@@ -198,9 +198,19 @@ the tool takes arguments:
   no args sidestep this, so don't copy their dispatch shape for a tool that
   carries a payload.
 - **Do not wrap inspector error text as media.** Protocol-reserved methods that
-  are not wired yet (for example screenshot/evaluate surfaces waiting on
-  WindowHost or ScriptEngine references) should return ordinary text/error
-  content through MCP until the inspector method returns a real payload.
+  are not wired yet (for example the screenshot surface waiting on a WindowHost
+  reference) should return ordinary text/error content through MCP until the
+  inspector method returns a real payload.
+- **The scripted-UI runtime inspector IS wired now.** `Runtime.evaluate`,
+  `Runtime.getCapabilities`, `Runtime.interrupt`, and `Console.getMessages`
+  (device-log cursor poll) reach the live JS engine when a host calls
+  `DomainHandler::set_script_inspector(session.script_inspector())`. Evaluate is
+  marshaled onto the engine thread by `ScriptInspectorBridge` — single in-flight,
+  ~2 s timeout, auto-interrupt on hang. It is an honest evaluate/inspect console,
+  NOT a step debugger: mainline QuickJS has no breakpoint protocol, so
+  `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
+  in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`
+  and the `engine` skill's interrupt section.
 - **Mutating tools must go through a typed inspector method** (e.g.
   `State.setParameter`) with validation + gesture wrapping in
   `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the
@@ -225,6 +235,22 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Output path flags should accept both nested paths and bare filenames; guard
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
+
+### Package command CMake generation
+
+`pulp add` can now generate CMake for source-backed FetchContent packages, not
+only header-only packages or upstream-exported targets. The registry's
+`cmake.sources` field means "compile these fetched source files into the
+declared target." Keep that behavior centralized in
+`package_commands_util.cpp` so guarded and unguarded blocks stay identical
+except for their surrounding `if(...)` condition.
+
+When adding a new generated-target package shape, update all four surfaces in
+one PR: `tools/packages/registry-schema.json`, `package_registry.{hpp,cpp}`,
+the CMake block generation helpers, and `test/test_cli_package_commands.cpp`.
+`mts-esp` is the reference source-backed case: generated static target,
+position-independent code, include dir rooted at the fetched source, and
+`${CMAKE_DL_LIBS}` linked when available.
 
 ### `pulp dev --hot-dsp` — live DSP hot-swap dev loop
 

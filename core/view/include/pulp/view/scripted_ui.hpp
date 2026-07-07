@@ -3,6 +3,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/hot_reload.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <pulp/view/script_inspector_bridge.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -54,6 +55,19 @@ public:
     void set_repaint_callback(std::function<void()> cb);
     WidgetBridge* bridge() const { return bridge_.get(); }
 
+    /// The runtime-inspector bridge for this session's JS engine. Always
+    /// present (even before load()); it tracks the live engine across hot
+    /// reloads and is pumped once per poll(). A host wires it to the inspector
+    /// protocol via DomainHandler::set_script_inspector() so `Runtime.evaluate`
+    /// / `Runtime.getCapabilities` / `Runtime.interrupt` reach the live UI.
+    ///
+    /// TEARDOWN CONTRACT: the bridge is owned by (and lives as long as) this
+    /// session, but its off-thread methods are called from an InspectorServer
+    /// reader thread. A host that wires it MUST, before destroying this session,
+    /// stop that reader thread and call `DomainHandler::set_script_inspector(
+    /// nullptr)` so no background call dereferences the bridge post-destruction.
+    ScriptInspectorBridge* script_inspector() { return &inspector_bridge_; }
+
     /// JS-axis reload timings, ms. Populated on every
     /// rebuild_from_code() — full on success, partial (later phases 0) on an
     /// early failure. The DSP-axis counterpart lives in reload_transaction.hpp's
@@ -99,6 +113,9 @@ private:
 
     std::unique_ptr<ScriptEngine> engine_;
     std::unique_ptr<WidgetBridge> bridge_;
+    // Marshals off-thread inspector evaluate/interrupt requests onto the engine
+    // thread. Re-attached to the live engine after every rebuild_from_code().
+    ScriptInspectorBridge inspector_bridge_;
     std::unique_ptr<HotReloader> reloader_;
     std::function<void()> repaint_callback_;
     render::GpuSurface* gpu_surface_ = nullptr;

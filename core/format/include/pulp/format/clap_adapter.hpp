@@ -15,6 +15,7 @@
 #include <pulp/signal/delay_line.hpp>
 #include <clap/clap.h>
 #include <array>
+#include <vector>
 
 // View includes only when building GUI-capable CLAP targets.
 //
@@ -77,12 +78,19 @@ struct PulpClapPlugin {
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
+    double* output64_ptrs[kMaxChannels] = {};
+    const double* input64_ptrs[kMaxChannels] = {};
+    std::array<std::vector<float>, kMaxChannels> f64_input_scratch{};
+    std::array<std::vector<float>, kMaxChannels> f64_output_scratch{};
     // Per-bus channel-pointer storage for secondary (aux) output buses, indexed
     // [aux_bus_minus_1][channel]: row i backs the BufferView for the host output
     // bus at index i+1 (the main bus at index 0 uses output_ptrs above). Pre-
     // allocated so the multi-out routing path allocates nothing on the audio
     // thread.
     float* aux_output_ptrs[kMaxOutputBuses - 1][kMaxChannels] = {};
+    double* aux_output64_ptrs[kMaxOutputBuses - 1][kMaxChannels] = {};
+    std::array<std::array<std::vector<float>, kMaxChannels>, kMaxOutputBuses - 1>
+        f64_aux_output_scratch{};
     // Descriptor-declared channel count per secondary output bus, cached in
     // clap_activate() (off the audio thread) so the process path can report a
     // bus's declared layout without calling descriptor() on the audio thread.
@@ -93,6 +101,9 @@ struct PulpClapPlugin {
     // kMaxChannels. Additional input buses beyond index 1 are currently
     // ignored; the Processor API is single-sidechain today.
     const float* sidechain_ptrs[kMaxChannels] = {};
+    const double* sidechain64_ptrs[kMaxChannels] = {};
+    std::array<std::vector<float>, kMaxChannels> f64_sidechain_scratch{};
+    bool native_f64_enabled = false;
 
     // Parameter snapshot for detecting plugin-side changes during process
     std::vector<float> param_snapshot;

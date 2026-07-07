@@ -270,6 +270,40 @@ TEST_CASE("SpectralFrameEngine frame cadence and bin count",
     REQUIRE(bins_seen == 513);
 }
 
+TEST_CASE("SpectralFrameEngine64 analyzes and synthesizes double frames",
+          "[signal][spectral-frame-engine][f64]") {
+    SpectralFrameEngineConfig config;
+    config.fft_size = 256;
+    config.analysis_hop = 64;
+    config.max_block = 64;
+    SpectralFrameEngine64 engine;
+    engine.prepare(config);
+
+    std::vector<double> input(512, 0.0);
+    std::vector<double> output(512, 0.0);
+    input[0] = 1.0;
+    const double* in_ptrs[1] = {input.data()};
+    double* out_ptrs[1] = {output.data()};
+
+    int frames = 0;
+    int bins_seen = 0;
+    for (int pos = 0; pos < static_cast<int>(input.size()); pos += 64) {
+        in_ptrs[0] = input.data() + pos;
+        out_ptrs[0] = output.data() + pos;
+        engine.process(in_ptrs, out_ptrs, 64,
+                       [&](std::complex<double>* const* frames_ptr, int bins) {
+                           ++frames;
+                           bins_seen = bins;
+                           frames_ptr[0][0] += std::complex<double>{0.0, 0.0};
+                       });
+    }
+
+    REQUIRE(frames > 0);
+    REQUIRE(bins_seen == 129);
+    for (double sample : output)
+        REQUIRE(std::isfinite(sample));
+}
+
 TEST_CASE("SpectralFrameEngine measured impulse latency matches latency_samples",
           "[signal][spectral-frame-engine]") {
     SpectralFrameEngineConfig config;

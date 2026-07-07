@@ -76,9 +76,40 @@ createModal(id, parentId)          // Full-screen modal overlay (Escape + backdr
 createGrid(id, parentId)           // CSS Grid container
 createPanel(id, parentId)          // Generic container with styling
 createScrollView(id, parentId)     // Scrollable container
+createNativeView(id, parentId)     // Layout box for a platform-native child view (see below)
 ```
 
 All creation functions return the widget `id` string. The `parentId` parameter specifies where in the view tree to insert the widget.
+
+### Native view embedding (`<native-view>` / `createNativeView`)
+
+`createNativeView` (JSX/React: `<native-view>` or `<NativeView>`) creates a
+Yoga-laid-out box that hosts a single **platform-native child view** — a system
+WebView, a native text field (IME + OS accessibility), a video / camera layer,
+or an OS picker — inside Pulp's GPU-painted UI. The box lays out, tracks scroll,
+and clips to its scroll / `overflow: hidden` ancestor like any other widget.
+
+JavaScript can declare the box but **cannot mint an OS view handle**, so the
+element materializes empty; a C++ host binds the native child by widget id:
+
+```cpp
+auto* nvh = dynamic_cast<pulp::view::NativeViewHost*>(bridge.widget("browser"));
+nvh->set_native_child(web_view->native_handle(),
+                      [web_view](uint32_t, uint32_t) { return web_view->snapshot_png(); });
+```
+
+Semantics (see `pulp/view/native_view_host.hpp`):
+
+- **Z-order is fixed.** A native child always composites **above** the entire GPU
+  layer of the same host view — GPU widgets cannot paint over it. Best suited to
+  full-region embeds (a WebView panel, a video pane), not a native control
+  floating beneath other GPU chrome.
+- **Clipping.** The child is masked to its scroll / clip ancestor's viewport (it
+  is not reflowed by resizing). Ancestor CSS transforms (rotate/scale) are not
+  applied to the native child — only translation and scroll are.
+- **Platform support.** Real on **macOS + iOS**; Windows / Linux / Android host
+  attach returns `false` today, so the box renders as an empty placeholder and
+  `contains_native_overlay()` still reports honestly for headless capture.
 
 ## Widget Values
 
@@ -113,6 +144,26 @@ setParam(name, value)   // Write normalized parameter value by name
 ```
 
 Parameters are defined in C++ (`define_parameters`) and shared with the audio thread via lock-free atomics. `setParam` triggers DAW host notification automatically.
+
+### Declarative bindings (no per-frame JS)
+
+```js
+bindWidgetToParam(widgetId, paramName, transform?)  // knob/fader/slider/toggle/progress tracks a param
+bindMeter(widgetId, paramName, transform?)          // Meter fill tracks a param (drives rms + peak)
+unbindWidget(widgetId)                              // remove the binding(s) for a widget → count removed
+```
+
+Register a binding **once**; C++ then pushes the store value onto the widget every frame off the host FrameClock with **zero per-frame JS crossing** — the native replacement for a `requestAnimationFrame` metering loop. `bindWidgetToParam`/`bindMeter` return `true` when the named param exists and the binding was set (a widget has a single source, so re-binding replaces).
+
+The optional `transform` object remaps the source before it reaches the widget, applied in order — dB→linear map → `scale` → `offset` → clamp:
+
+| Field | Meaning |
+|-------|---------|
+| `db` / `dbMin` / `dbMax` | read the raw (non-normalized) param and map `[dbMin,dbMax]` dB → `[0,1]` |
+| `scale` / `offset` | `out = out * scale + offset` |
+| `min` / `max` / `clamp` | clamp the result to `[min,max]` (auto-enabled when `min`/`max` is present) |
+
+**Precedence:** a binding owns the widget's value. A bound value widget (knob/fader/slider/toggle/progress) is re-asserted from the store **every frame**, so a stray `setValue` on it is corrected on the next frame; a bound `Meter` updates whenever its source changes. Either way the binding yields **while the user is dragging that widget** — the gesture wins, and the binding resumes on the first frame after the drag ends.
 
 ## Flexbox Layout
 

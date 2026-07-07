@@ -292,3 +292,26 @@ TEST_CASE("Mat3 multiplication preserves identity on both sides",
         }
     }
 }
+
+TEST_CASE("Polynomial and small matrix helpers support double precision",
+          "[signal][poly][matrix][f64]") {
+    std::vector<double> coeffs = {1.0, -2.0, 3.0};
+    REQUIRE_THAT(Polynomial::eval(coeffs, 0.5), WithinAbs(0.75, 1e-15));
+
+    auto complex_value =
+        Polynomial::eval_complex(coeffs, std::complex<double>{0.0, 1.0});
+    REQUIRE_THAT(complex_value.real(), WithinAbs(-2.0, 1e-15));
+    REQUIRE_THAT(complex_value.imag(), WithinAbs(-2.0, 1e-15));
+
+    auto [r1, r2] = Polynomial::roots_quadratic(1.0, -3.0, 2.0);
+    REQUIRE_THAT(r1.real(), WithinAbs(2.0, 1e-15));
+    REQUIRE_THAT(r2.real(), WithinAbs(1.0, 1e-15));
+
+    Mat2d m2{{{2.0, 3.0}, {1.0, 4.0}}};
+    REQUIRE_THAT(m2.determinant(), WithinAbs(5.0, 1e-15));
+    auto id2 = m2 * m2.inverse();
+    REQUIRE_THAT(id2.m[0][0], WithinAbs(1.0, 1e-15));
+
+    Mat3d m3{{{2.0, 0.0, 0.0}, {0.0, -3.0, 0.0}, {0.0, 0.0, 4.0}}};
+    REQUIRE_THAT(m3.determinant(), WithinAbs(-24.0, 1e-15));
+}

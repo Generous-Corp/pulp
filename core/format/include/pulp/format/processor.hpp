@@ -8,6 +8,7 @@
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <memory>
@@ -97,6 +98,7 @@ struct BusInfo {
 struct NodeCapabilities {
     bool supports_mpe = false;
     bool supports_ump = false;
+    bool supports_f64_audio = false;
 };
 
 /// Plugin metadata — declared once, immutable.
@@ -171,14 +173,24 @@ struct PluginDescriptor {
     std::string vendor_email;
 
     /// Node ABI capability bits. This is the forward-compatible capability
-    /// model; legacy supports_mpe/supports_ump remain accepted and are OR'd
+    /// model; legacy supports_mpe/supports_ump/supports_f64_audio remain accepted and are OR'd
     /// into effective_capabilities().
     NodeCapabilities node_capabilities;
+
+    /// Opt in to native double-precision audio processing. Appended after
+    /// the original descriptor fields so positional aggregate initializers
+    /// keep their existing meaning. Existing plugins leave this false and
+    /// use the adapter-boundary f64->f32 compatibility path when a host
+    /// supplies 64-bit buffers. Plugins that set it should override
+    /// process_f64() for their real double-precision DSP; the default still
+    /// converts through the f32 process() path so an early opt-in remains safe.
+    bool supports_f64_audio = false;
 
     NodeCapabilities effective_capabilities() const {
         return {
             .supports_mpe = supports_mpe || node_capabilities.supports_mpe,
             .supports_ump = supports_ump || node_capabilities.supports_ump,
+            .supports_f64_audio = supports_f64_audio || node_capabilities.supports_f64_audio,
         };
     }
 
@@ -966,6 +978,39 @@ public:
     /// thread. Appended to preserve additive-only vtable ordering.
     virtual std::uint64_t editor_reload_generation() const { return 0; }
 
+    /// Prepare scratch used by the default process_f64() fallback. Format
+    /// adapters call this after the plugin's prepare() while audio is stopped, so
+    /// a plugin that opts into f64 before overriding process_f64() can still run
+    /// without allocating on the audio thread.
+    void prepare_f64_fallback_scratch(const PrepareContext& context);
+
+    /// Native double-precision process entry point.
+    ///
+    /// Default implementation preserves compatibility for plugins that opt into
+    /// f64 before porting their DSP: it converts the double main input to the
+    /// prepared f32 fallback scratch, calls the original f32 process(), then
+    /// converts the f32 main output back to double. The fallback never allocates
+    /// during process(); if the adapter did not prepare enough scratch, it emits
+    /// silence rather than growing buffers on the audio thread.
+    virtual void process_f64(
+        audio::BufferView<double>& audio_output,
+        const audio::BufferView<const double>& audio_input,
+        midi::MidiBuffer& midi_in,
+        midi::MidiBuffer& midi_out,
+        const ProcessContext& context);
+
+    /// Additive double-precision richer-surface process entry point. The default
+    /// routes simple main-bus blocks through process_f64() so processors that
+    /// override the main-bus f64 virtual still run natively. For sidechain or aux
+    /// blocks, it falls back through the f32 richer surface using prepared
+    /// scratch so legacy sidechain/aux semantics are preserved without allocating
+    /// on the audio thread.
+    virtual void process_f64(
+        ProcessBuffers64& audio,
+        midi::MidiBuffer& midi_in,
+        midi::MidiBuffer& midi_out,
+        const ProcessContext& context);
+
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
     state::StateStore& state() { return *state_store_; }
@@ -1003,11 +1048,45 @@ public:
     void set_param_events(const state::ParameterEventQueue* events) { param_events_ = events; }
 
 private:
+    static constexpr std::size_t kF64FallbackMaxBuses = 16;
+
+    static std::size_t fallback_bus_channels(const std::vector<BusInfo>& buses,
+                                             std::size_t index,
+                                             std::size_t prepared_main_channels);
+
+    static bool requires_rich_f64_fallback(const ProcessBuffers64& audio);
+
+    bool f64_fallback_capacity_ok(std::size_t input_channels,
+                                  std::size_t output_channels,
+                                  std::size_t frames) const;
+
+    bool f64_fallback_process_buffers_capacity_ok(
+        const ProcessBuffers64& audio) const;
+
+    static void copy_f64_to_f32(audio::BufferView<float> dst,
+                                const audio::BufferView<const double>& src);
+
+    static void copy_f32_to_f64(audio::BufferView<double> dst,
+                                const audio::BufferView<const float>& src);
+
+    static void clear_active_outputs(ProcessBuffers64& audio);
+
+    void process_f64_via_f32_process_buffers(ProcessBuffers64& audio,
+                                             midi::MidiBuffer& midi_in,
+                                             midi::MidiBuffer& midi_out,
+                                             const ProcessContext& context);
+
     state::StateStore* state_store_ = nullptr;
     const audio::BufferView<const float>* sidechain_ = nullptr;
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
+    audio::Buffer<float> f64_fallback_input_scratch_;
+    audio::Buffer<float> f64_fallback_output_scratch_;
+    std::array<audio::Buffer<float>, kF64FallbackMaxBuses> f64_fallback_input_bus_scratch_{};
+    std::array<audio::Buffer<float>, kF64FallbackMaxBuses> f64_fallback_output_bus_scratch_{};
+    std::array<ProcessBusBufferView<const float>, kF64FallbackMaxBuses> f64_fallback_input_views_{};
+    std::array<ProcessBusBufferView<float>, kF64FallbackMaxBuses> f64_fallback_output_views_{};
     // RT-safe pending flags published from process() and consumed by adapters
     // on the host / main thread.
     std::atomic<bool> latency_changed_{false};

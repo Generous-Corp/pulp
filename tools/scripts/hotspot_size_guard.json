@@ -12,8 +12,8 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1215,
-      "note": "WidgetBridge shell after registrar split; lowered after comment-hygiene cleanup"
+      "max_loc": 1218,
+      "note": "WidgetBridge shell after registrar split; lowered after comment-hygiene cleanup. +3 for the native-view make_widget_for_tag branch (R1 NativeViewHost)."
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
@@ -87,8 +87,8 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2752,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Lowered from 2790: the duplicated view_needs_continuous_frames predicate was promoted to the shared pulp::view::needs_continuous_frames (continuous_frames.hpp) and removed from this host."
+      "max_loc": 2770,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost)."
     },
     {
       "path": "core/view/src/design_import.cpp",
@@ -137,18 +137,18 @@
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",
-      "max_loc": 2587,
-      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md"
+      "max_loc": 2645,
+      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md; grew for the semantic-knob tweaks panel + send-to-agent field"
     },
     {
       "path": "inspect/src/inspector_overlay_paint.cpp",
-      "max_loc": 1530,
-      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation"
+      "max_loc": 1541,
+      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation; grew for the semantic-knob tweaks panel + send-to-agent field"
     },
     {
       "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
-      "max_loc": 1491,
-      "note": "Inspector overlay public header hotspot; reduce private state deliberately"
+      "max_loc": 1584,
+      "note": "Inspector overlay public header hotspot; reduce private state deliberately; grew for the semantic-knob tweaks panel + send-to-agent field"
     },
     {
       "path": "inspect/src/inspector_window.cpp",
@@ -157,8 +157,8 @@
     },
     {
       "path": "inspect/src/domain_handler.cpp",
-      "max_loc": 912,
-      "note": "Inspector protocol dispatch hub; preserve optional-source errors"
+      "max_loc": 879,
+      "note": "Inspector protocol dispatch hub; preserve optional-source errors. Console/Runtime domains extracted to domain_runtime.cpp"
     },
     {
       "path": "inspect/src/tweak_store.cpp",

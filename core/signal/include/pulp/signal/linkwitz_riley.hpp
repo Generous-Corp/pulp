@@ -9,20 +9,25 @@ namespace pulp::signal {
 //
 // RT contract: coefficient updates, process, and reset are fixed-state only and
 // allocate no memory.
-class LinkwitzRiley {
+template <typename SampleType = float>
+class LinkwitzRileyT {
 public:
-    void set_frequency(float hz, float sample_rate) {
-        lp1_.set_coefficients(Biquad::Type::lowpass, hz, 0.707f, sample_rate);
-        lp2_.set_coefficients(Biquad::Type::lowpass, hz, 0.707f, sample_rate);
-        hp1_.set_coefficients(Biquad::Type::highpass, hz, 0.707f, sample_rate);
-        hp2_.set_coefficients(Biquad::Type::highpass, hz, 0.707f, sample_rate);
+    void set_frequency(SampleType hz, SampleType sample_rate) {
+        lp1_.set_coefficients(BiquadT<SampleType>::Type::lowpass, hz,
+                              SampleType{0.707f}, sample_rate);
+        lp2_.set_coefficients(BiquadT<SampleType>::Type::lowpass, hz,
+                              SampleType{0.707f}, sample_rate);
+        hp1_.set_coefficients(BiquadT<SampleType>::Type::highpass, hz,
+                              SampleType{0.707f}, sample_rate);
+        hp2_.set_coefficients(BiquadT<SampleType>::Type::highpass, hz,
+                              SampleType{0.707f}, sample_rate);
     }
 
-    struct BandSplit { float low, high; };
+    struct BandSplit { SampleType low, high; };
 
-    BandSplit process(float input) {
-        float low = lp2_.process(lp1_.process(input));
-        float high = hp2_.process(hp1_.process(input));
+    BandSplit process(SampleType input) {
+        SampleType low = lp2_.process(lp1_.process(input));
+        SampleType high = hp2_.process(hp1_.process(input));
         return {low, high};
     }
 
@@ -32,7 +37,10 @@ public:
     }
 
 private:
-    Biquad lp1_, lp2_, hp1_, hp2_;
+    BiquadT<SampleType> lp1_, lp2_, hp1_, hp2_;
 };
+
+using LinkwitzRiley = LinkwitzRileyT<float>;
+using LinkwitzRiley64 = LinkwitzRileyT<double>;
 
 } // namespace pulp::signal

@@ -693,6 +693,69 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
+TEST_CASE("VST3 processes kSample64 buffers through the f32 boundary path",
+          "[vst3][audio][f64]") {
+    reset_test_processor();
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    REQUIRE(processor.canProcessSampleSize(Steinberg::Vst::kSample32) == Steinberg::kResultTrue);
+    REQUIRE(processor.canProcessSampleSize(Steinberg::Vst::kSample64) == Steinberg::kResultTrue);
+    REQUIRE(processor.canProcessSampleSize(-1) == Steinberg::kResultFalse);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample64;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<double, kFrames> in_l{0.1, -0.25, 0.5, -0.75, 1.0, -1.25, 1.5, -1.75};
+    std::array<double, kFrames> in_r{-0.2, 0.3, -0.4, 0.6, -0.8, 1.2, -1.6, 2.4};
+    std::array<double, kFrames> out_l{};
+    std::array<double, kFrames> out_r{};
+    double* main_inputs[2] = {in_l.data(), in_r.data()};
+    double* main_outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers64 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers64 = main_outputs;
+
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample64;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE(test_processor->process_buffer_count == 1);
+    REQUIRE(test_processor->process_count == 1);
+    REQUIRE(test_processor->last_input_channels == 2);
+    REQUIRE(test_processor->last_output_channels == 2);
+    REQUIRE(test_processor->last_context.num_samples == kFrames);
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE(out_l[static_cast<std::size_t>(i)] ==
+                static_cast<double>(static_cast<float>(in_l[static_cast<std::size_t>(i)])));
+        REQUIRE(out_r[static_cast<std::size_t>(i)] ==
+                static_cast<double>(static_cast<float>(in_r[static_cast<std::size_t>(i)])));
+    }
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 declared-Bypass designation emits a toggle kIsBypass even on a "
           "continuous range",
           "[vst3][param-designation][bypass]") {
@@ -2827,6 +2890,36 @@ struct MidiControllerSetup {
 };
 
 }  // namespace
+
+TEST_CASE("VST3 MIDI event buses advertise all 16 channels",
+          "[vst3][midi][bus]") {
+    TestVst3Config config;
+    config.descriptor.accepts_midi = true;
+    config.descriptor.produces_midi = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::BusInfo input_info{};
+    REQUIRE(processor.getBusInfo(Steinberg::Vst::kEvent,
+                                 Steinberg::Vst::kInput,
+                                 0,
+                                 input_info) == Steinberg::kResultOk);
+    REQUIRE(input_info.channelCount ==
+            pulp::format::detail::kVst3MidiChannels);
+
+    Steinberg::Vst::BusInfo output_info{};
+    REQUIRE(processor.getBusInfo(Steinberg::Vst::kEvent,
+                                 Steinberg::Vst::kOutput,
+                                 0,
+                                 output_info) == Steinberg::kResultOk);
+    REQUIRE(output_info.channelCount ==
+            pulp::format::detail::kVst3MidiChannels);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
 
 TEST_CASE("VST3 IMidiMapping assigns stable, non-colliding controller ParamIDs",
           "[vst3][midi][midimapping]") {
