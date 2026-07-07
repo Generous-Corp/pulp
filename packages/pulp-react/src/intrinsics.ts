@@ -27,6 +27,10 @@ export const Col = (props: ColProps): ReactElement => createElement('Col' as unk
 export const Panel = (props: PanelProps): ReactElement => createElement('Panel' as unknown as 'div', props as unknown as object);
 export const ScrollView = (props: ScrollViewProps): ReactElement => createElement('ScrollView' as unknown as 'div', props as unknown as object);
 export const Modal = (props: ModalProps): ReactElement => createElement('Modal' as unknown as 'div', props as unknown as object);
+// A layout box for a platform-native child view (WebView / native text field /
+// video layer). Takes only layout props; the native child is bound from C++ by
+// widget id (see docs/reference/js-bridge.md → native view embedding).
+export const NativeView = (props: ViewProps): ReactElement => createElement('NativeView' as unknown as 'div', props as unknown as object);
 
 export const Label = (props: LabelProps): ReactElement => createElement('Label' as unknown as 'div', props as unknown as object);
 export const Button = (props: ButtonProps): ReactElement => createElement('Button' as unknown as 'div', props as unknown as object);

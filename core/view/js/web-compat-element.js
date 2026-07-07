@@ -77,7 +77,8 @@ var __widgetTagFactory__ = {
     meter:    function(id) { createMeter(id, "vertical", ""); },
     xypad:    function(id) { createXYPad(id, ""); },
     listbox:  function(id) { createListBox(id, ""); },
-    icon:     function(id) { createIcon(id, "image_upload", ""); }
+    icon:     function(id) { createIcon(id, "image_upload", ""); },
+    'native-view': function(id) { createNativeView(id, ""); }
 };
 
 // Create the native widget based on tag + type

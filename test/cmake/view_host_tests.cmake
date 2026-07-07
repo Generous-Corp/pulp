@@ -93,6 +93,13 @@ endif()
 # View::intrinsic_height returns 0.
 pulp_add_test_suite(pulp-test-design-tool-viewport-resolver LIBRARIES pulp::view)
 
+# NativeViewHost widget (R1) — native child embed geometry + lifecycle
+pulp_add_test_suite(pulp-test-native-view-host LIBRARIES pulp::view)
+if(APPLE AND NOT PULP_IOS)
+    # macOS companion: exercises the real CALayer-mask clip helper.
+    target_sources(pulp-test-native-view-host PRIVATE test_native_view_host_mac.mm)
+endif()
+
 # View host bridges — screenshot/window/plugin-view
 add_executable(pulp-test-view-host-bridge test_view_host_bridge.cpp)
 if(APPLE AND NOT PULP_IOS)

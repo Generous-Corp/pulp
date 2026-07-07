@@ -2,6 +2,7 @@
 #include "api_registry.hpp"
 
 #include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -341,6 +342,17 @@ void WidgetBridge::register_widget_factory_composite_api() {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto s = std::make_unique<ScrollView>(); s->set_id(id);
         widgets_[id] = s.get(); resolve_parent(pid)->add_child(std::move(s));
+        return choc::value::createString(id);
+    });
+
+    // A layout box for a platform-native child view (WebView / native text
+    // field / video layer). Materializes empty — JS can't mint an OS view
+    // handle — so a C++ host binds the native child by id afterwards via
+    // `dynamic_cast<NativeViewHost*>(bridge.widget(id))->set_native_child(...)`.
+    register_bridge_function(api, "createNativeView", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
+        auto nv = std::make_unique<NativeViewHost>(); nv->set_id(id);
+        widgets_[id] = nv.get(); resolve_parent(pid)->add_child(std::move(nv));
         return choc::value::createString(id);
     });
 

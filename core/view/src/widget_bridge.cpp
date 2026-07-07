@@ -7,6 +7,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/runtime/log.hpp>
 #include <web_compat_preludes_gen.hpp>
@@ -757,6 +758,9 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<ProgressBar>();
     } else if (tag == "img" || tag == "image") {
         w = std::make_unique<ImageView>();
+    } else if (tag == "native-view") {
+        // Native child-view box; a C++ host binds the OS handle by id (js-bridge.md).
+        w = std::make_unique<NativeViewHost>();
     }
     if (w) {
         w->set_id(id);
