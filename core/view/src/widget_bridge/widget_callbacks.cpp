@@ -116,8 +116,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         vl->set_row_binder([this, alive, engine, id_literal, row_bindings](View& row, std::size_t index) {
             const auto row_id = row.id();
             if (row_bindings->find(row_id) != row_bindings->end()) {
-                dispatch_virtual_list_row_release(alive, engine, id_literal, row_id);
-                if (!alive || !alive->load(std::memory_order_acquire)) return;
+                forget_widget_event_state(row);
                 while (row.child_count() > 0) {
                     auto* child = row.child_at(row.child_count() - 1);
                     auto removed = row.remove_child(child);

@@ -68,4 +68,24 @@ void WidgetBridge::forget_widget_subtree(View* node) {
     prune_dangling_bindings();
 }
 
+void WidgetBridge::forget_widget_event_state(View& view) {
+    if (!view.id().empty()) {
+        forget_js_widget_subtree(engine_, std::vector<std::string>{view.id()});
+        pointer_registered_.erase(view.id());
+        wheel_registered_.erase(view.id());
+    }
+    view.on_click = {};
+    view.on_pointer_event = {};
+    view.on_drag = {};
+    view.on_pointer_move = {};
+    view.on_gesture_cb = {};
+    view.on_context_menu = {};
+    view.on_drop = {};
+    view.on_hover_enter = {};
+    view.on_hover_leave = {};
+    view.on_overlay_dismissed = {};
+    view.release_overlay();
+    view.release_input_focus();
+}
+
 } // namespace pulp::view
