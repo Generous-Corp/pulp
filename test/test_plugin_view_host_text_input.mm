@@ -10,6 +10,7 @@
 #if defined(__APPLE__)
 
 #import <Cocoa/Cocoa.h>
+#import <objc/runtime.h>
 
 using namespace pulp::view;
 
@@ -59,6 +60,43 @@ NSEvent* make_left_mouse_down(NSPoint loc) {
                            clickCount:1
                              pressure:1.0];
 }
+
+int g_discard_marked_text_count = 0;
+IMP g_original_discard_marked_text = nullptr;
+
+void spy_discard_marked_text(id self, SEL cmd) {
+    ++g_discard_marked_text_count;
+    if (g_original_discard_marked_text) {
+        using Fn = void (*)(id, SEL);
+        reinterpret_cast<Fn>(g_original_discard_marked_text)(self, cmd);
+    }
+}
+
+struct DiscardMarkedTextSpy {
+    Method method = nullptr;
+    IMP original = nullptr;
+    bool active = false;
+
+    DiscardMarkedTextSpy() {
+        g_discard_marked_text_count = 0;
+        method = class_getInstanceMethod(NSClassFromString(@"NSTextInputContext"),
+                                         @selector(discardMarkedText));
+        if (!method) return;
+        original = method_getImplementation(method);
+        g_original_discard_marked_text = original;
+        method_setImplementation(method, reinterpret_cast<IMP>(&spy_discard_marked_text));
+        active = true;
+    }
+
+    ~DiscardMarkedTextSpy() {
+        if (active && method && original)
+            method_setImplementation(method, original);
+        if (g_original_discard_marked_text == original)
+            g_original_discard_marked_text = nullptr;
+    }
+
+    int count() const { return g_discard_marked_text_count; }
+};
 
 }  // namespace
 
@@ -366,8 +404,11 @@ TEST_CASE("PluginViewHost (mac CPU) — host focus loss cancels active IME marke
         REQUIRE(editor->text() == std::string("abc") + kNi);
         REQUIRE(editor->has_marked_text());
 
+        DiscardMarkedTextSpy discard_spy;
+        REQUIRE(discard_spy.active);
         [pulp_view resignFirstResponder];
 
+        REQUIRE(discard_spy.count() >= 1);
         REQUIRE(View::focused_input_ == nullptr);
         REQUIRE_FALSE(editor->has_focus());
         REQUIRE_FALSE(editor->has_marked_text());
@@ -570,8 +611,11 @@ TEST_CASE("PluginViewHost (mac CPU) — focus transfer cancels old active IME "
         REQUIRE(first->text() == std::string("abc") + kNi);
         REQUIRE(first->has_marked_text());
 
+        DiscardMarkedTextSpy discard_spy;
+        REQUIRE(discard_spy.active);
         [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(30, 110))];
 
+        REQUIRE(discard_spy.count() >= 1);
         REQUIRE(View::focused_input_ == second);
         REQUIRE_FALSE(first->has_focus());
         REQUIRE_FALSE(first->has_marked_text());
