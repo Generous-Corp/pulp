@@ -28,6 +28,13 @@ unit, so `window.addEventListener('keydown', ...)` and
 `registerShortcut(...)` continue to work for React apps without forcing
 core-only `pulp::view-core` consumers to link the JS runtime.
 
+The renderer exposes a typed `<VirtualList>` intrinsic for large rich-row
+lists. It lowers to the native `VirtualList` widget, keeps a bounded recycled
+row pool, and routes `rowCount`, fixed `rowHeight`, `overscan`,
+`selectionMode`, `selected`, `scrollToRow`, and `renderRow` through the
+bridge. Lowercase `virtual-list` / `virtuallist` DOM tags reach the same native
+widget for web-compat consumers.
+
 Follow-up: enumerate observed React features (concurrent rendering,
 suspense boundaries, transition state, error boundaries, portal
 targets) and populate per-feature entries.
