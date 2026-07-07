@@ -100,6 +100,7 @@ DNL="$ROOT/tools/scripts/docs_noise_lint.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
+PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 SCC="$ROOT/tools/import-validation/check-source-contracts.py"
 SCT="$ROOT/tools/import-validation/test_source_contracts.py"
 CFG="$ROOT/tools/scripts/versioning.json"
@@ -209,6 +210,18 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] hotspot_size_guard: internal error" >&2 ;;
+    esac
+fi
+
+# Planning-gitlink guard. Rejects an accidental `planning` submodule pointer
+# bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
+# deliberate re-pins pass with a `Planning-Bump:` trailer.
+if [ -f "$PGL" ]; then
+    "$PYTHON" "$PGL" --base "$BASE" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] planning_gitlink_guard: internal error" >&2 ;;
     esac
 fi
 

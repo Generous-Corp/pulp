@@ -93,7 +93,15 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
 2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,
-   re-dispatch the checks.
+   re-dispatch the checks. (Longer-term fix for this whole class:
+   planning/2026-07-07-parallel-merge-land-coordination.md.)
+2b. **Did a gate reject the push?** Besides skill-sync / version-bump, the
+   pre-push + CI `planning-gitlink` gate (`tools/scripts/planning_gitlink_guard.py`)
+   fails if the PR moved the `planning` submodule pointer without a
+   `Planning-Bump:` trailer — usually an accidental bump from a `git reset --hard`
+   + `git add -A`. Drop it with
+   `git restore --staged --worktree planning && git submodule update planning`,
+   or add `Planning-Bump: reason="..."` for a deliberate re-pin.
 3. **Only THEN consider capacity — and verify, don't assume.** The required
    `macos` gate runs on the **local self-hosted Mac Studios** (`pulp-studio-01/02/03`,
    + the M5 overflow), which are usually idle. Confirm with:
