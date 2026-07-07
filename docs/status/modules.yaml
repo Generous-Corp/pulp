@@ -21,7 +21,7 @@ modules:
     docs: reference/modules.md#audio
 
   - name: midi
-    summary: MIDI I/O (CoreMIDI, WinMIDI, ALSA; Web MIDI scaffold not build-wired), MIDI files, UMP/MIDI 2.0, MIDI-CI (device discovery, profiles, property exchange)
+    summary: MIDI I/O (CoreMIDI, WinMIDI, ALSA; Web MIDI scaffold not build-wired), MIDI files, UMP/MIDI 2.0, MIDI-CI (device discovery, profiles, property exchange), provider-neutral microtuning with optional MTS-ESP and Scala SCL/KBM providers
     status: usable
     dependencies: [runtime]
     docs: reference/modules.md#midi

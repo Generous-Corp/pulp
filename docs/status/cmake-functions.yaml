@@ -95,6 +95,16 @@ functions:
       - TOKENS
     docs: reference/cmake.md#pulp_add_plugin
 
+  - name: pulp_enable_midi_tuning_provider
+    status: usable
+    summary: Attach optional provider-neutral MIDI tuning wrappers to a plugin target after package CMake has created the required third-party targets.
+    required:
+      - target
+      - provider
+    optional:
+      - additional providers
+    docs: reference/cmake.md#pulp_enable_midi_tuning_provider
+
   - name: pulp_faust_generate
     status: experimental
     summary: Generate C++ from a FAUST .dsp file (requires faust compiler). Pre-generated files are used when faust is not installed.

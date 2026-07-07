@@ -5,6 +5,7 @@
 #   pulp_add_app()     — Create a standalone application target
 #   pulp_app_icon()    — Attach a generated app icon to a target
 #   pulp_use_kit_ui()  — Attach reviewed kit UI resources to plugin formats
+#   pulp_enable_midi_tuning_provider() — Attach optional tuning providers
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpAppIcon.cmake")
 
@@ -34,6 +35,8 @@ if(NOT _PULP_FORMAT_TARGET)
         "PulpUtils.cmake requires Pulp targets to exist first. "
         "Use add_subdirectory(Pulp) or find_package(Pulp) before including it.")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/PulpMidiTuning.cmake")
 
 # Resolve PulpUtils.cmake's sibling helper dirs without reaching into
 # CMAKE_SOURCE_DIR (which is the *consumer's* source tree when this

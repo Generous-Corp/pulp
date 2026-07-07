@@ -91,6 +91,37 @@ token files require the matching `SCRIPT` / `TOKENS` argument so the project
 makes the choice intentionally. The helper does not apply kits automatically
 and does not run package code.
 
+## pulp_enable_midi_tuning_provider
+
+Attach Pulp's provider-neutral optional microtuning wrappers to a plugin target.
+Use this after `pulp_add_plugin()` and after including any package CMake emitted
+by `pulp add`:
+
+```cmake
+include(cmake/pulp-packages.cmake OPTIONAL)
+
+pulp_add_plugin(MySynth
+    FORMATS CLAP Standalone
+    CATEGORY Instrument
+    ACCEPTS_MIDI
+    SOURCES src/PluginProcessor.cpp)
+
+pulp_enable_midi_tuning_provider(MySynth MTS_ESP SCALA)
+```
+
+Supported providers are `MTS_ESP` and `SCALA`. `MTS_ESP` requires the
+`mts_esp_client` target created by `pulp add mts-esp`; `SCALA` requires the
+`sst::tuning-library` target created by `pulp add sst-tuning-library`.
+When a project uses both, `MtsEspFallbackTuningProvider` can prefer the active
+MTS-ESP session or prefer loaded local Scala tuning via
+`MtsEspFallbackPolicy::PreferLocalTuning`.
+
+If the Pulp SDK was already built with the matching provider enabled, the helper
+only links `pulp::midi` and exposes the compile definition to the target. If an
+installed SDK was built without the optional provider, the helper compiles the
+small Pulp-owned wrapper source into your plugin target and links the package
+target. The third-party package remains opt-in either way.
+
 ### Created Targets
 
 | Target | Type | Description |

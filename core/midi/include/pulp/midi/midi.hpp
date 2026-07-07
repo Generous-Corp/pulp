@@ -6,3 +6,5 @@
 #include <pulp/midi/rpn_parser.hpp>
 #include <pulp/midi/keyboard_state.hpp>
 #include <pulp/midi/tuning.hpp>
+#include <pulp/midi/mts_esp_tuning.hpp>
+#include <pulp/midi/scala_tuning.hpp>

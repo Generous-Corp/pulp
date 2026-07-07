@@ -330,6 +330,7 @@ static PackageDescriptor parse_package(const std::string& id, const JsonValue& j
     if (auto c = j.get("cmake")) {
         if (auto v = c->get("targets")) pkg.cmake.targets = v->as_string_array();
         if (auto v = c->get("header_only")) pkg.cmake.header_only = v->as_bool();
+        if (auto v = c->get("add_subdirectory")) pkg.cmake.add_subdirectory = v->as_bool();
         if (auto v = c->get("include_dir")) pkg.cmake.include_dir = v->as_string();
         if (auto v = c->get("sources")) pkg.cmake.sources = v->as_string_array();
     }

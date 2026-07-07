@@ -144,6 +144,104 @@ void MtsEspTuningProvider::parse_midi_data(std::span<const std::uint8_t> data) {
         static_cast<int>(data.size()));
 }
 
+bool MtsEspTuningProvider::has_session_tuning() const {
+    if (!impl_ || !impl_->client)
+        return false;
+    return MTS_HasMaster(impl_->client) || MTS_HasReceivedMTSSysEx(impl_->client);
+}
+
+MtsEspFallbackTuningProvider::MtsEspFallbackTuningProvider(
+    std::unique_ptr<TuningProvider> local_fallback,
+    MtsEspFallbackPolicy policy)
+    : fallback_(std::move(local_fallback)), policy_(policy) {
+    if (!fallback_)
+        fallback_ = std::make_unique<EqualTemperamentTuningProvider>();
+}
+
+MtsEspFallbackTuningProvider::MtsEspFallbackTuningProvider(
+    MtsEspFallbackPolicy policy)
+    : MtsEspFallbackTuningProvider(
+          std::make_unique<EqualTemperamentTuningProvider>(),
+          policy) {}
+
+MtsEspFallbackTuningProvider::~MtsEspFallbackTuningProvider() = default;
+MtsEspFallbackTuningProvider::MtsEspFallbackTuningProvider(
+    MtsEspFallbackTuningProvider&&) noexcept = default;
+MtsEspFallbackTuningProvider& MtsEspFallbackTuningProvider::operator=(
+    MtsEspFallbackTuningProvider&&) noexcept = default;
+
+bool MtsEspFallbackTuningProvider::local_tuning_available() const {
+    if (!fallback_)
+        return false;
+    const auto local_status = fallback_->status();
+    return local_status.has_local_file_tuning || local_status.has_keyboard_mapping;
+}
+
+bool MtsEspFallbackTuningProvider::should_use_mts_session() const {
+    if (!mts_session_available())
+        return false;
+    return policy_ != MtsEspFallbackPolicy::PreferLocalTuning || !local_tuning_available();
+}
+
+bool MtsEspFallbackTuningProvider::using_mts_session() const {
+    return should_use_mts_session();
+}
+
+bool MtsEspFallbackTuningProvider::mts_session_available() const {
+    return mts_.has_session_tuning();
+}
+
+TuningQueryResult MtsEspFallbackTuningProvider::note_to_frequency(
+    int midi_note,
+    int midi_channel) const {
+    if (should_use_mts_session()) {
+        auto mts_result = mts_.note_to_frequency(midi_note, midi_channel);
+        if (mts_result.valid)
+            return mts_result;
+    }
+    return fallback_ ? fallback_->note_to_frequency(midi_note, midi_channel) : TuningQueryResult{};
+}
+
+TuningNoteResult MtsEspFallbackTuningProvider::frequency_to_note(
+    double frequency_hz,
+    int preferred_midi_channel) const {
+    if (should_use_mts_session()) {
+        auto mts_result = mts_.frequency_to_note(frequency_hz, preferred_midi_channel);
+        if (mts_result.valid)
+            return mts_result;
+    }
+    return fallback_ ? fallback_->frequency_to_note(frequency_hz, preferred_midi_channel)
+                     : TuningNoteResult{};
+}
+
+TuningNoteResult MtsEspFallbackTuningProvider::frequency_to_note_and_channel(
+    double frequency_hz) const {
+    if (should_use_mts_session()) {
+        auto mts_result = mts_.frequency_to_note_and_channel(frequency_hz);
+        if (mts_result.valid)
+            return mts_result;
+    }
+    return fallback_ ? fallback_->frequency_to_note_and_channel(frequency_hz)
+                     : TuningNoteResult{};
+}
+
+TuningStatus MtsEspFallbackTuningProvider::status() const {
+    const auto mts_status = mts_.status();
+    if (should_use_mts_session())
+        return mts_status;
+    auto local_status = fallback_ ? fallback_->status() : TuningStatus{};
+    local_status.has_external_master = mts_status.has_external_master;
+    local_status.has_local_mts_sysex = mts_status.has_local_mts_sysex;
+    local_status.library_update_recommended = mts_status.library_update_recommended;
+    return local_status;
+}
+
+void MtsEspFallbackTuningProvider::parse_midi_data(std::span<const std::uint8_t> data) {
+    mts_.parse_midi_data(data);
+    if (fallback_)
+        fallback_->parse_midi_data(data);
+}
+
 }  // namespace pulp::midi
 
 #endif  // PULP_HAS_MTS_ESP

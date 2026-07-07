@@ -46,7 +46,7 @@ cat tools/packages/registry.json | python3 -m json.tool
 |----------|----------|-------------------|
 | dsp | aubio, btrack, cycfi-q, daisysp, essentia, fftw, fluidsynth, freeverb, kfr, kissfft, libpd, pffft, rnnoise, rubber-band, signalsmith-dsp, signalsmith-stretch, soundtouch, speexdsp, stk, tinysoundfont | Pitch/time stretch, filters, FFT, pitch detection, physical modeling, noise reduction, synthesis |
 | audio-io | alac, dr-libs, fdk-aac, lame, libflac, libsamplerate, libsndfile, libvorbis, miniaudio, oboe, opus, r8brain-free-src | File codecs, sample-rate conversion, device/audio I/O |
-| music-theory | mts-esp | Optional microtuning client integration |
+| music-theory | mts-esp, sst-tuning-library | Optional microtuning client integration, direct Scala SCL/KBM file parsing |
 | ml | rtneural | Real-time neural network inference |
 | ui | fontaudio | Audio icon font |
 | utilities | libremidi, rtmidi | MIDI I/O helpers |
@@ -104,6 +104,13 @@ the generated target position-independent so plugins can link it safely.
 needed, and stays opt-in. When adding another source-backed package, update the
 registry schema, package-command generation tests, dependency manifest,
 `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md` together.
+
+Header-only packages whose upstream CMake builds tools/tests instead of a
+consumer-ready target can set `cmake.add_subdirectory=false`; the generated
+`pulp-packages.cmake` uses `FetchContent_MakeAvailable()` with an inert
+`SOURCE_SUBDIR` so the source tree is populated without adding upstream
+tools/tests, then creates the declared interface target. `sst-tuning-library`
+is the reference pattern for source-only SCL/KBM parsing.
 
 ## Overlap Awareness
 

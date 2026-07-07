@@ -242,6 +242,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateWindowsIcon.ps1"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
@@ -359,6 +360,24 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
     DESTINATION src/pulp/format
+)
+
+# Optional MIDI tuning provider wrappers used by installed-SDK consumers via
+# pulp_enable_midi_tuning_provider(). The third-party packages remain opt-in
+# through `pulp add`; these tiny wrapper sources are Pulp-owned glue.
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/midi/src/mts_esp_tuning.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/midi/src/scala_tuning.cpp"
+    DESTINATION src/pulp/midi
+)
+
+# Linux Skia compatibility source used by FindSkia.cmake when a prebuilt Skia
+# archive references Chromium raw_ptr / PartitionAlloc support symbols without
+# shipping a PartitionAlloc archive. Installed SDK consumers need the same
+# source because they link the installed Skia archives through find_package(Pulp).
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/canvas/src/skia_chromium_raw_ptr_compat.cpp"
+    DESTINATION src/pulp/canvas
 )
 
 # macOS view/window/accessibility Objective-C cluster. _pulp_apply_view_mac_objc_suffix()

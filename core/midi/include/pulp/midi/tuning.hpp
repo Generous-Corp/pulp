@@ -32,6 +32,8 @@ struct TuningNoteResult {
 struct TuningStatus {
     bool has_external_master = false;
     bool has_local_mts_sysex = false;
+    bool has_local_file_tuning = false;
+    bool has_keyboard_mapping = false;
     bool library_update_recommended = false;
     std::string scale_name;
     double period_ratio = 2.0;

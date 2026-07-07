@@ -54,6 +54,16 @@ if(PULP_HAS_MTS_ESP)
     endif()
 endif()
 
+if(PULP_HAS_SCALA_TUNING)
+    target_sources(pulp-midi PRIVATE
+        src/scala_tuning.cpp
+    )
+    target_include_directories(pulp-midi PRIVATE
+        "${PULP_SST_TUNING_LIBRARY_SOURCE_DIR}/include"
+    )
+    target_compile_definitions(pulp-midi PUBLIC PULP_HAS_SCALA_TUNING=1)
+endif()
+
 if(APPLE AND NOT IOS)
     target_sources(pulp-midi PRIVATE
         platform/mac/coremidi_device.mm

@@ -105,6 +105,10 @@
       "properties": {
         "targets":     { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "header_only": { "type": "boolean" },
+        "add_subdirectory": {
+          "type": "boolean",
+          "description": "Whether FetchContent_MakeAvailable should add the upstream CMakeLists. Set false for header/source-only packages whose upstream project builds tools/tests or otherwise should not be added to consumer builds."
+        },
         "include_dir": { "type": "string" },
         "sources":     { "type": "array", "items": { "type": "string" } }
       }

@@ -150,6 +150,48 @@ That covers parameter learn. It is separate from "learn the next MIDI note and
 store it as a setting" workflows, which should use a small note-listener helper
 or project-local state until Pulp grows a generic note/control learn utility.
 
+## Migrating microtuning
+
+JUCE does not provide one built-in microtuning stack, so projects usually carry
+their own Scala loader, tuning table, or direct ODDSound MTS-ESP client calls.
+Pulp maps those to the provider-neutral `pulp::midi::TuningProvider` API:
+
+- Direct `.scl` / `.kbm` file loading maps to `ScalaTuningProvider`, enabled
+  with `PULP_ENABLE_SCALA_TUNING=ON` in a Pulp source build, or
+  `pulp add sst-tuning-library` plus `pulp_enable_midi_tuning_provider(... SCALA)`
+  in a project that consumes an installed Pulp SDK.
+- Direct ODDSound `libMTSClient.h` calls map to `MtsEspTuningProvider`, enabled
+  with `PULP_ENABLE_MTS_ESP=ON` in a Pulp source build, or `pulp add mts-esp`
+  plus `pulp_enable_midi_tuning_provider(... MTS_ESP)` in a project that
+  consumes an installed Pulp SDK.
+- Products that support both local tuning files and a DAW/session-wide MTS-ESP
+  master should use `MtsEspFallbackTuningProvider`. Its default policy lets an
+  active MTS source win while local Scala tuning remains the fallback; pass
+  `MtsEspFallbackPolicy::PreferLocalTuning` when the original product had a
+  first-class local tuning UI and the local file should override the session.
+
+The project-import flow records this as `integration_requirements`: detected
+MTS calls request `mts-esp`, detected `.scl` / `.kbm` assets request
+`sst-tuning-library` and are copied into the scaffold, and `.tun` assets request
+`mts-esp`, are copied into the scaffold, and are represented through the
+MTS-ESP Mini/session tuning path because direct `.tun` parsing is not part of
+the Scala provider.
+
+Imported scaffolds should include `cmake/pulp-packages.cmake`, call
+`pulp_add_plugin(...)`, and then call:
+
+```cmake
+pulp_enable_midi_tuning_provider(MySynth MTS_ESP SCALA)
+```
+
+That works with either an installed SDK or a source-tree Pulp checkout. The
+third-party sources are still fetched only when the project opts in with
+`pulp add`.
+
+Keep file parsing and MTS SysEx parsing off the audio callback. Voice code should
+query `TuningProvider::note_to_frequency()` at note-on or at the same retuning
+cadence the original JUCE project used.
+
 ## Migrating structured state
 
 Pulp separates owned tree structure from structured leaf values:

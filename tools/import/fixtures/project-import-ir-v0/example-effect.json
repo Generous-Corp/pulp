@@ -102,6 +102,39 @@
     "framework_version": "unknown",
     "generated_roots": []
   },
+  "integration_requirements": {
+    "packages": [
+      {
+        "id": "example-tuning-provider",
+        "feature_key": "local_tuning_files",
+        "required": true,
+        "reason": "Source project loads local tuning files.",
+        "cmake_targets": ["example::tuning-provider"],
+        "source_refs": [
+          { "file": "PluginProcessor.cpp", "line": 96 }
+        ]
+      }
+    ],
+    "cmake_options": [
+      {
+        "name": "EXAMPLE_ENABLE_TUNING",
+        "value": true,
+        "reason": "Enable the generated tuning adapter."
+      }
+    ],
+    "asset_inputs": [
+      {
+        "path": "assets/example-scale.scl",
+        "kind": "tuning_scale",
+        "copy_policy": "copy_to_scaffold",
+        "reason": "Scale file is required to preserve local tuning behaviour.",
+        "source_ref": { "file": "PluginProcessor.cpp", "line": 96 }
+      }
+    ],
+    "notes": [
+      "The generated scaffold should keep tuning file loading off the audio callback."
+    ]
+  },
   "residual_policy": {
     "emission": "partial",
     "reason_codes": ["UNENUMERATED_PARAMS", "SKEWED_CURVE_LINEARIZED"]

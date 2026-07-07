@@ -43,6 +43,8 @@ void emit_fetchcontent(std::ostringstream& os,
     os << indent << "  GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
     os << indent << "  GIT_TAG        " << pkg.fetch.git_tag << "\n";
     os << indent << "  GIT_SHALLOW    TRUE\n";
+    if (!pkg.cmake.add_subdirectory)
+        os << indent << "  SOURCE_SUBDIR  cmake/pulp-source-only\n";
     os << indent << ")\n";
     os << indent << "FetchContent_MakeAvailable(" << pkg.id << ")\n";
 }

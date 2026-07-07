@@ -26,6 +26,25 @@ If you are building Pulp itself and want the provider available through
 cmake -S . -B build -DPULP_ENABLE_MTS_ESP=ON
 ```
 
+If your project consumes an installed Pulp SDK, keep the third-party client
+project-local and attach Pulp's wrapper to your plugin target:
+
+```cmake
+include(cmake/pulp-packages.cmake OPTIONAL)
+
+pulp_add_plugin(MySynth
+    FORMATS CLAP Standalone
+    CATEGORY Instrument
+    ACCEPTS_MIDI
+    SOURCES src/PluginProcessor.cpp)
+
+pulp_enable_midi_tuning_provider(MySynth MTS_ESP)
+```
+
+The helper uses the SDK's built-in provider when available. If the SDK was built
+without MTS-ESP, it compiles Pulp's small wrapper source into `MySynth` and
+links the `mts_esp_client` target from `pulp add mts-esp`.
+
 Then use the provider-neutral tuning API:
 
 ```cpp
@@ -57,16 +76,49 @@ void Voice::start_note(int note, int channel, const pulp::midi::TuningProvider& 
 ```
 
 That keeps MTS-ESP optional and leaves room for first-party Pulp tuning later.
-A future Scala/KBM loader, tuning-table object, host-provided tuning bridge, or
-project-local microtuning engine should implement `TuningProvider` too. Existing
-processors then switch providers without changing their note/voice code.
+The optional `ScalaTuningProvider` already implements the same interface for
+direct `.scl` / `.kbm` files, and future tuning-table objects, host-provided
+tuning bridges, or project-local microtuning engines should do the same.
+Existing processors then switch providers without changing their note/voice code.
+
+## With Local SCL/KBM Files
+
+ODDSound's free MTS-ESP Mini can load `.scl`, `.kbm`, `.tun`, and MTS SysEx and
+publish that tuning session-wide. That is often the right UX when a producer
+wants every MTS-aware plugin in the DAW to follow the same tuning.
+
+When a product needs project-local file tuning too, enable both optional
+providers and wrap the local file provider with `MtsEspFallbackTuningProvider`:
+
+```cpp
+auto local = std::make_unique<pulp::midi::ScalaTuningProvider>();
+local->load_scl_kbm_files("preset.scl", "preset.kbm");
+
+pulp::midi::MtsEspFallbackTuningProvider tuning(std::move(local));
+```
+
+By default, the wrapper uses an active MTS-ESP master or parsed MTS SysEx when
+present and falls back to the local provider only when no MTS session tuning is
+active. If the product's local tuning UI or preset state should override the
+session, pass the explicit local-priority policy:
+
+```cpp
+pulp::midi::MtsEspFallbackTuningProvider tuning(
+    std::move(local),
+    pulp::midi::MtsEspFallbackPolicy::PreferLocalTuning);
+```
 
 ## Porting Existing MTS-ESP Calls
 
 JUCE and iPlug2 do not ship MTS-ESP as a framework feature, but many projects
 include ODDSound's `libMTSClient.h` directly. Importers should detect that
-include, `MTS_*` calls, or bundled `Client/libMTSClient.cpp`, enable this
-optional integration, and rewrite the call sites toward `TuningProvider`.
+include, `MTS_*` calls, or bundled `Client/libMTSClient.cpp`, declare the
+`mts-esp` package plus `PULP_ENABLE_MTS_ESP` in ProjectIR
+`integration_requirements`, emit `pulp_enable_midi_tuning_provider(... MTS_ESP)`
+for installed-SDK scaffolds, and rewrite the call sites toward `TuningProvider`.
+Importers should also treat copied `.tun` assets as an MTS-ESP session-tuning
+path: preserve the file in the scaffold, request `mts-esp`, and let MTS-ESP Mini
+or another session master load the tuning for the imported plugin.
 
 | Existing client call | Pulp mapping |
 |---|---|
@@ -109,4 +161,6 @@ for products that want MTS-ESP support.
 
 MTS-ESP is 0BSD. It is fetched only when explicitly enabled with
 `PULP_ENABLE_MTS_ESP=ON` or `pulp add mts-esp`, so it is not part of Pulp's
-default dependency chain.
+default dependency chain. Installed SDKs ship only the Pulp-owned wrapper
+source needed by `pulp_enable_midi_tuning_provider()`, not the ODDSound client
+source itself.

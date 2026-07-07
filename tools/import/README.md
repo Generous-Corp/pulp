@@ -49,6 +49,19 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
   fabricated parameter count.
 - **`dsp.reachability_scope`** is explicit so portable-core confidence is never
   read from a shallow scan.
+- **`integration_requirements`** records optional Pulp packages, SDK build
+  options, and source assets the scaffold needs to preserve source-project
+  behavior. Importers use it for things like session microtuning clients and
+  local tuning files: SCL/KBM assets can be copied into the scaffold as
+  `copied-user-file`, and `.tun` assets should be copied while selecting the
+  MTS-ESP session provider path so MTS-ESP Mini or another MTS master can load
+  them for the imported plugin. When those requirements map to Pulp's
+  provider-neutral MIDI tuning wrappers, emitted CMake should include
+  `cmake/pulp-packages.cmake`,
+  then call `pulp_enable_midi_tuning_provider()` after `pulp_add_plugin()`. The
+  helper attaches the Pulp wrapper source and links the package target when the
+  installed SDK was not already built with that provider, so imported projects
+  do not need to rebuild Pulp for MTS-ESP or Scala SCL/KBM support.
 
 ## Roadmap
 
