@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06030"></a>
+## [0.603.0] - 2026-07-07
+
+- signal-graph: no-silence live topology swap — begin_swap_edit/prepare_swap (2.2b) ([#5677](https://github.com/danielraffel/pulp/pull/5677))
+- feature/release notes humanization ([#5565](https://github.com/danielraffel/pulp/pull/5565))
+
 <a id="v06020"></a>
 ## [0.602.0] - 2026-07-07
 
@@ -6029,6 +6035,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.603.0]: https://github.com/danielraffel/pulp/releases/tag/v0.603.0
 [0.602.0]: https://github.com/danielraffel/pulp/releases/tag/v0.602.0
 [0.600.0]: https://github.com/danielraffel/pulp/releases/tag/v0.600.0
 [0.599.0]: https://github.com/danielraffel/pulp/releases/tag/v0.599.0
