@@ -906,10 +906,22 @@ sync. The pre-push hook runs this check enforcing-by-default;
 `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes it to
 advisory if you genuinely need to push a known coverage gap.
 
+**A slow `git push` is almost always this build — NOT the network.** Before you
+ever diagnose a "stuck"/"hung" push as a network, SSH, MTU, or transport
+problem, confirm it is not the pre-push diff-coverage build compiling. The hook
+prints a loud `pre-push: DIFF-COVERAGE BUILD running` banner and a
+`…diff-coverage build still running (Ns elapsed)` heartbeat every 30s precisely
+so this is unmistakable — if you see those, it is a LOCAL BUILD (minutes), not a
+dead socket, so do NOT kill it and do NOT go debug the network. (Downloads
+working while a push "hangs" is the tell: `git fetch`/`ls-remote` succeed, so
+the transport is fine.) When the work is already validated (e.g. via
+`shipyard pr`), skip the build with `PULP_SKIP_DIFF_COVER=1 git push` and the
+push completes in seconds. Do not background-and-kill a push at an arbitrary
+timeout — that hides the banner/heartbeat and destroys the evidence.
+
 **Two different knobs — pick the right one.** `PULP_DISABLE_PREPUSH_DIFF_COVER=1`
 still runs the full configure + build, then only *demotes the failure* to
-advisory — so it does NOT make the push faster (a push that looks "hung" right
-after this is the diff-cover build compiling, not the network). To skip the
+advisory — so it does NOT make the push faster. To skip the
 build entirely, use `PULP_SKIP_DIFF_COVER=1`, which exits before any
 configure/build while skill-sync / version-bump / compat gates still run. Reach
 for `PULP_SKIP_PREPUSH=1` only when those other gates must be skipped too.

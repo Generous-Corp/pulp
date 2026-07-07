@@ -168,6 +168,18 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   of a foreground `shipyard`/`ci` watch, and shed idle load (close RepoPrompt/Figma
   /idle MCP) before building. `gates.sh` prints this banner advisorily on every
   pre-push.
+- **A "hung"/"stuck" `git push` is almost always the pre-push diff-cover BUILD,
+  not the network.** When the diff touches a coverage surface (`core/`,
+  `tools/cli/`, `tools/scripts/`), `.githooks/pre-push` runs a full local
+  configure + compile before the transfer. It prints a loud `DIFF-COVERAGE BUILD
+  running` banner and a `…still running (Ns elapsed)` heartbeat every 30s so this
+  is unmistakable — if you see those, it is a BUILD (minutes), NOT a transport
+  hang. Tell: `git fetch`/`ls-remote` succeed while the push "hangs", so SSH/HTTPS
+  are fine. Do NOT diagnose the network, and do NOT background-and-kill the push
+  at a short timeout (that hides the banner/heartbeat). When the work is already
+  validated (e.g. via `shipyard pr`), push with `PULP_SKIP_DIFF_COVER=1 git push`
+  and it completes in seconds. (Learned 2026-07-07 after ~an hour lost mis-blaming
+  MTU/SSH for a diff-cover build during a deps-bump push.)
 - **Continuous sensor:** `tools/scripts/install_host_vitals_sensor.sh` installs a
   per-user launchd agent (`com.pulp.host-vitals`, 60 s) that publishes the latest
   reading to `~/.local/state/pulp/host_vitals.json` and a rotating
