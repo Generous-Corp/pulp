@@ -137,7 +137,8 @@ identically, CPU or GPU):
 | Modulated (chorus / phaser / flanger / tremolo / ring-mod) | ✅ valid; corroboration will read `not_corroborated` (expected, informational) | time-variant; the axis verdict is what matters |
 | bendr time-stretch — **fixed-ratio** A/B ("did my stretch *algorithm* get worse?") | ✅ valid | same ratio, so the renders are time-aligned |
 | tempo-sampler / delay **constant offsets** | ✅ with `--align latency` | trims the constant lag first so the residual doesn't false-alarm on the shift (see below); refuses if it isn't a reliable pure delay |
-| bendr ratio changes (time-STRETCH, non-constant lag) | ⚠ engine path, not this net | a stretch is a time-warp, not a constant offset — needs the deferred warp alignment (Tier 3); use the reference-free engine path for now |
+| bendr time-stretch — **different ratios** ("compare the 1.5× output to the source") | ✅ with `--align stretch:R` | you declare the stretch ratio; the axes measure the warp-invariant qualities directly and graininess/corroboration are warp-normalized. Refuses if the audio isn't actually a uniform stretch of the reference |
+| tape-style **varispeed** speed change (pitch follows) | ✅ with `--align varispeed:R` | resamples the candidate back to the reference speed, then the full comparison applies |
 | Stereo width / imaging (widener / panner / M-S / collapse) | ✅ via `stereo-width` (opt-in) | add `"stereo-width"` to the manifest's `profiles`; it reads the 2-channel signal and flags a collapse or an out-of-phase candidate. The mono default profiles skip it |
 | Attack smear / transient softening (dynamics, phase-vocoder, transient designer) | ✅ via `transient-integrity` (opt-in) | add `"transient-integrity"`; onset-aligned per-attack. Percussive/onset material only — skipped by the mono default (it would be `not_applicable` on sustained material) |
 
@@ -185,8 +186,31 @@ You **declare** the ratio; the tool **verifies** it against the observed duratio
 length. A defect *hidden behind* a varispeed (added fizz, roughness) still flags after the resample-back
 (anti-masking). The one honest limit is physics: a speed-*up* (`R < 1`) bandlimits to a lower Nyquist,
 so a source with substantial near-Nyquist energy legitimately reads slightly duller — that is correct
-varispeed behavior, not a resampler artifact. Pitch-preserving time-**stretch** and pitch-shift (the
-other declared-warp classes) are later Tier 3 slices.
+varispeed behavior, not a resampler artifact.
+
+#### Declared pitch-preserving time-stretch (`--align stretch:R`)
+
+A **pitch-preserving time-stretch** (a phase-vocoder / bendr-style algorithm — candidate ≈ R× the
+reference duration, same pitch) has no exact inverse to apply, so — unlike varispeed — the axes
+measure the **unwarped** pair directly: LTAS centroid, HF fraction, HNR, and stereo width are
+time-averages, so they are warp-invariant and measure exactly the algorithm's spectral/roughness
+damage. Two axes are warp-**normalized** off the declared ratio: **graininess** measures the
+candidate flux at `hop·R` (else a clean stretch reads a false "smoother"), and **corroboration** binds
+to a phase-blind LTAS log-spectral distance (`ltas_residual`) because the sample residual is invalid
+across a stretch (the null residual is still emitted, marked not-a-corroborator).
+
+```bash
+pulp audio compare source.wav stretched_1.5x.wav --reference-role golden --align stretch:1.5
+```
+
+The declaration is verified twice and **refused** on failure: §6.1 duration (candidate within ±3% of
+R× the reference, `R ∈ [0.25, 4.0]`) and §6.3 that a **single uniform ratio actually fits** — for
+onset material the per-onset residual from the uniform-ratio prediction must have a small
+median-absolute-deviation (a non-uniformly warped render reads
+`"onset lags inconsistent with a uniform ratio"`), for sustained material a ratio-mapped envelope
+correlation must clear a floor. So a clean stretch reads `no_material_change` + corroborated, a grainy
+or fizzy stretch still flags its defect (anti-masking), and a non-uniform warp declared uniform
+refuses rather than measure a bad map.
 
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build

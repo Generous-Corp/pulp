@@ -480,8 +480,24 @@ harness or `ctest`.
   never resampling to a wrong length. Anti-masking holds (a defect behind the varispeed still flags).
   Honest physical limit: a speed-up (R<1) bandlimits to a lower Nyquist, so near-Nyquist energy is
   legitimately lost (correct varispeed behavior, matches an ideal brickwall to ~1% — not a resampler
-  artifact). Pitch-preserving **stretch** + **pitch**-shift + `ratio:auto` are later Tier 3 slices; a
-  non-constant warp / DTW stays on the engine path, not compare.
+  artifact).
+
+  **`--align stretch:R`** (Tier 3 / T3.2) — a declared PITCH-PRESERVING time-stretch (PV/bendr). No
+  exact inverse exists, so the axes measure the UNWARPED pair directly (LTAS centroid / HF fraction /
+  HNR / width are time-averages → warp-invariant). Two axes are warp-normalized off the ratio, threaded
+  via the `AlignSpec`: graininess is `warp_aware` (`_Axis.warp_aware`) and measures the candidate flux
+  at `mean_spectral_flux(..., hop_scale=R)` (`spectral_flux.v2-warp` — else a clean stretch reads a
+  false "smoother"); corroboration binds to `dsp.ltas_log_spectral_distance_db` (a phase-blind,
+  length-independent `ltas_residual` comparator) because the sample residual is invalid across a
+  stretch (the null residual is still emitted, marked not-a-corroborator). `_align_stretch` returns the
+  pair UNCHANGED after verifying §6.1 (duration within ±3% of R, `R∈[0.25,4]`) and §6.3 that a single
+  uniform ratio fits — onset material: MAD of the per-onset residual from the `ref_t·R` prediction
+  ≤ 15 ms with coverage ≥ 0.5; sustained: ratio-mapped `smooth_energy_env` correlation ≥ floor — else
+  REFUSE (`not_aligned`, "non-uniformly warped"). The `_WARP_MODES` set gates the capability
+  short-circuit (a warp is applied/routed for onset/stereo axes, not skipped like a constant lag);
+  `_MEASURE_UNWARPED_MODES` = {stretch} drives the graininess hop-scale + corroborator swap (varispeed
+  is NOT in it — it resamples back, so the standard pipeline applies verbatim). **Pitch**-shift +
+  `ratio:auto` are later Tier 3 slices; a non-constant warp / DTW stays on the engine path, not compare.
 
   **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
   mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is

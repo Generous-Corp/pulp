@@ -1441,7 +1441,7 @@ pulp audio validate summarize <file.wav> [--json]
 pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamental <hz>]
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
 pulp audio validate assert <audio-run-dir-or-assertions.json>
-pulp audio compare <reference.wav> <candidate.wav> [--profile tonal-balance|added-hf|noise-roughness|graininess|stereo-width|transient-integrity] [--reference-role peer|golden] [--align none|latency|varispeed:R] [--threshold <t>] [--json report.json]
+pulp audio compare <reference.wav> <candidate.wav> [--profile tonal-balance|added-hf|noise-roughness|graininess|stereo-width|transient-integrity] [--reference-role peer|golden] [--align none|latency|varispeed:R|stretch:R] [--threshold <t>] [--json report.json]
 pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]
 ```
 
