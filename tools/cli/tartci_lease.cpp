@@ -3,6 +3,8 @@
 #include "cli_common.hpp"
 #include "shell_redirect.hpp"
 
+#include <pulp/runtime/system.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -15,18 +17,10 @@
 
 #ifdef _WIN32
 #include <process.h>
-#include <windows.h>
 #define popen _popen
 #define pclose _pclose
 #define getpid _getpid
 #else
-#include <unistd.h>
-#endif
-
-#if defined(__APPLE__) || defined(__FreeBSD__)
-#include <sys/sysctl.h>
-#include <sys/types.h>
-#elif defined(__linux__)
 #include <unistd.h>
 #endif
 
@@ -157,41 +151,6 @@ int parse_shell_assignment_int(const std::string& text, const std::string& key) 
     return parse_positive_int(parse_shell_assignment(text, key));
 }
 
-namespace {
-
-// Physical RAM in bytes, 0 if it cannot be determined (callers fall back to a
-// core-only bound). Kept local to the Tier-0 default so the pure job-math stays
-// host-agnostic and unit-testable.
-unsigned long long host_physical_ram_bytes() {
-#if defined(__APPLE__) || defined(__FreeBSD__)
-    uint64_t mem = 0;
-    size_t len = sizeof(mem);
-    int mib[2] = {CTL_HW, HW_MEMSIZE};
-    if (sysctl(mib, 2, &mem, &len, nullptr, 0) == 0) {
-        return static_cast<unsigned long long>(mem);
-    }
-    return 0;
-#elif defined(_WIN32)
-    MEMORYSTATUSEX status;
-    status.dwLength = sizeof(status);
-    if (GlobalMemoryStatusEx(&status)) {
-        return static_cast<unsigned long long>(status.ullTotalPhys);
-    }
-    return 0;
-#elif defined(__linux__)
-    const long pages = sysconf(_SC_PHYS_PAGES);
-    const long page_size = sysconf(_SC_PAGE_SIZE);
-    if (pages > 0 && page_size > 0) {
-        return static_cast<unsigned long long>(pages) * static_cast<unsigned long long>(page_size);
-    }
-    return 0;
-#else
-    return 0;
-#endif
-}
-
-}  // namespace
-
 int tier0_default_build_jobs(unsigned hw_threads, unsigned long long mem_budget_bytes) {
     int cores = hw_threads > 0 ? static_cast<int>(hw_threads) : 1;
     // Budget ~1.5 GiB of resident memory per concurrent C++ compile job. This is
@@ -211,13 +170,25 @@ int tier0_default_build_jobs(unsigned hw_threads, unsigned long long mem_budget_
 int tier0_default_build_jobs() {
     const unsigned threads = std::thread::hardware_concurrency();
     unsigned long long budget = 0;
-    // Explicit override wins (deterministic tests + a user escape hatch).
-    if (const int mb = env_positive_int("PULP_BUILD_MEM_BUDGET_MB"); mb > 0) {
-        budget = static_cast<unsigned long long>(mb) * 1024ULL * 1024ULL;
-    } else if (const unsigned long long total = host_physical_ram_bytes(); total > 0) {
-        // Reserve ~25% for the OS and window server so a wide build cannot starve
-        // the UI / remote-desktop path on a shared desktop machine.
-        budget = total / 4ULL * 3ULL;
+    // Explicit override wins (deterministic tests + a user escape hatch). Parse
+    // it directly rather than via env_positive_int(), which clamps to a
+    // job-count ceiling that would silently truncate a megabyte budget.
+    if (const char* raw = std::getenv("PULP_BUILD_MEM_BUDGET_MB")) {
+        char* end = nullptr;
+        const long long mb = std::strtoll(raw, &end, 10);
+        if (end != raw && mb > 0) {
+            budget = static_cast<unsigned long long>(mb) * 1024ULL * 1024ULL;
+        }
+    }
+    if (budget == 0) {
+        // pulp::runtime already implements per-platform physical-RAM detection;
+        // reuse it rather than re-deriving hw.memsize / sysconf here.
+        const uint64_t total_mb = pulp::runtime::total_memory_mb();
+        if (total_mb > 0) {
+            // Reserve ~25% for the OS and window server so a wide build cannot
+            // starve the UI / remote-desktop path on a shared desktop machine.
+            budget = static_cast<unsigned long long>(total_mb) * 1024ULL * 1024ULL / 4ULL * 3ULL;
+        }
     }
     return tier0_default_build_jobs(threads, budget);
 }

@@ -63,6 +63,19 @@ class BuildParallelismGuardTest(unittest.TestCase):
     def test_powershell_bare_before_semicolon_is_flagged(self):
         self.assertTrue(scan("cmake --build build --config Release --parallel; exit 0\n"))
 
+    def test_bare_parallel_on_continuation_line_is_flagged(self):
+        # The build tool is on the previous physical line; folding continuations
+        # must still catch the bare --parallel.
+        self.assertTrue(scan("cmake --build build \\\n  --parallel\n"))
+
+    def test_bounded_parallel_on_continuation_line_is_ok(self):
+        self.assertFalse(scan("cmake --build build \\\n  --parallel 8\n"))
+
+    def test_continuation_reports_the_command_start_line(self):
+        findings = scan("echo hi\ncmake --build build \\\n  --parallel\n")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0][0], 2)  # the `cmake --build` line, not the `--parallel` line
+
 
 if __name__ == "__main__":
     unittest.main()

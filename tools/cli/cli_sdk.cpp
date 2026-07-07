@@ -363,8 +363,15 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         return {};
     }
 
+    // Honour an explicit PULP_BUILD_JOBS (a user's lower cap wins), else fall
+    // back to the host default so this install can never fan out unbounded.
+    int sdk_jobs = 0;
+    if (const char* raw = std::getenv("PULP_BUILD_JOBS")) {
+        sdk_jobs = std::atoi(raw);
+    }
+    if (sdk_jobs <= 0) sdk_jobs = tier0_default_build_jobs();
     std::string install_cmd = "cmake --build " + build_dir.string()
-        + " --target install --parallel " + std::to_string(tier0_default_build_jobs());
+        + " --target install --parallel " + std::to_string(sdk_jobs);
     if (run_with_spinner(install_cmd, "Installing local SDK") != 0) {
         return {};
     }

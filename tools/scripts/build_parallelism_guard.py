@@ -43,7 +43,7 @@ SCAN_DIRS = {
     "tools/scripts": (".sh",),
     "tools/validation": (".sh",),
     "tools/import-validation": (".sh",),
-    "ci": (".sh",),
+    "ci": (".sh", ".yml", ".yaml"),
     ".github/workflows": (".yml", ".yaml"),
 }
 
@@ -89,6 +89,23 @@ def _comment_cut(line: str, suffix: str) -> str:
     return line
 
 
+def _logical_lines(text: str):
+    """Yield (start_lineno, joined_line) folding shell/YAML `\\`-continuations
+    into one logical line, so a build command split across physical lines
+    (`cmake --build … \\` / `--parallel`) is scanned as a whole."""
+    raw_lines = text.splitlines()
+    i = 0
+    n = len(raw_lines)
+    while i < n:
+        start = i + 1
+        buf = raw_lines[i]
+        while buf.rstrip().endswith("\\") and i + 1 < n:
+            buf = buf.rstrip()[:-1] + " " + raw_lines[i + 1]
+            i += 1
+        yield start, buf
+        i += 1
+
+
 def scan_file(path: Path) -> list[tuple[int, str]]:
     findings: list[tuple[int, str]] = []
     try:
@@ -96,16 +113,16 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
     except OSError:
         return findings
     suffix = path.suffix
-    for lineno, raw in enumerate(text.splitlines(), start=1):
-        code = _comment_cut(raw, suffix)
+    for lineno, line in _logical_lines(text):
+        code = _comment_cut(line, suffix)
         if not code or not BUILD_CONTEXT.search(code):
             continue
         for m in PARALLEL.finditer(code):
             if not BOUNDED.match(code[m.end():]):
-                findings.append((lineno, raw.strip()))
+                findings.append((lineno, line.strip()))
         for m in DASH_J.finditer(code):
             if not BOUNDED.match(code[m.end():]):
-                findings.append((lineno, raw.strip()))
+                findings.append((lineno, line.strip()))
     return findings
 
 

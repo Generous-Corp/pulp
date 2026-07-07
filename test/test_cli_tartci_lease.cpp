@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <optional>
+#include <thread>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -158,16 +159,23 @@ TEST_CASE("tier-0 default falls back to cores when RAM is unknown") {
     REQUIRE(tier0_default_build_jobs(6, 0) == 6);
 }
 
-TEST_CASE("tier-0 default honors the memory-budget override env") {
-    ScopedEnvVar budget("PULP_BUILD_MEM_BUDGET_MB", "3072");  // 3 GiB → 2 jobs
+TEST_CASE("tier-0 memory-budget override is not clamped to a job ceiling") {
+    // A 3 GiB budget is 2 compile jobs (3 / 1.5). If the MB value were routed
+    // through the job-count parser (ceiling 1024), the budget would collapse to
+    // 1 GiB → <1.5 GiB/job → exactly 1 job. So >1 proves the clamp is gone.
+    ScopedEnvVar no_jobs("PULP_BUILD_JOBS", std::nullopt);
+    ScopedEnvVar budget("PULP_BUILD_MEM_BUDGET_MB", std::string{"3072"});
+    const unsigned hw = std::thread::hardware_concurrency();
     const int jobs = tier0_default_build_jobs();
-    REQUIRE(jobs >= 1);
-    REQUIRE(jobs <= 2);
+    REQUIRE(jobs == (hw >= 2 ? 2 : 1));
 }
 
-TEST_CASE("no-tartci build acquisition falls back to a bounded tier-0 cap") {
+TEST_CASE("no-lease build acquisition falls back to a bounded tier-0 cap") {
+    // With leases disabled there is no host store, so acquire() takes the same
+    // tier-0 fallback expression the "no tartci installed" branch uses:
+    // jobs = env_jobs>0 ? env_jobs : tier0_default_build_jobs(). The build is
+    // therefore always bounded — never the old 0/unbounded no-op.
     ScopedEnvVar no_jobs("PULP_BUILD_JOBS", std::nullopt);
-    ScopedEnvVar no_bin("PULP_TARTCI_BIN", std::string{"/nonexistent/tartci-does-not-exist"});
     ScopedEnvVar leases_off("PULP_TARTCI_LEASES", std::string{"0"});
 
     auto lease = TartciAgentBuildLease::acquire({fs::current_path(), "pulp-build", false});
