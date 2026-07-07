@@ -41,6 +41,11 @@ public:
     uint32_t fft_size() const { return fft_size_; }
 
 private:
+    void process_cpu_fallback_with(std::vector<signal::Convolver>& fallback,
+                                   const audio::BufferView<const float>& input,
+                                   audio::BufferView<float>& output,
+                                   uint32_t n) noexcept;
+
     uint32_t channels_;
     uint32_t block_;
     uint32_t sample_rate_;
@@ -56,7 +61,8 @@ private:
     std::vector<float> in_pad_;      // 2*fft_size interleaved complex input
     std::vector<float> time_;        // 2*fft_size inverse result (one readback)
 
-    std::vector<signal::Convolver> fallback_;  // per-channel CPU fallback
+    std::vector<signal::Convolver> fallback_;         // realtime miss fallback
+    std::vector<signal::Convolver> worker_fallback_;  // non-RT no-GPU worker path
     bool prepared_ = false;
 };
 

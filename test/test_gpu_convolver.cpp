@@ -97,3 +97,38 @@ TEST_CASE("GpuConvolver process_block uses CPU fallback without a GPU",
     }
     REQUIRE(fallback_produced_audio);
 }
+
+TEST_CASE("GpuConvolver worker fallback does not advance realtime fallback state",
+          "[gpu_audio][convolver]") {
+    constexpr uint32_t CH = 1, BS = 8, SR = 48000;
+    std::vector<float> ir = {0.5f, 0.25f};
+
+    GpuConvolver node(CH, BS, SR, ir);
+    REQUIRE(node.prepare());
+    if (node.gpu_available()) return;
+
+    GpuConvolver expected(CH, BS, SR, ir);
+    REQUIRE(expected.prepare());
+
+    std::vector<float> input(BS);
+    for (uint32_t i = 0; i < BS; ++i) input[i] = static_cast<float>(i + 1);
+    std::vector<float> worker_out(BS, -1.0f);
+    std::vector<float> miss_out(BS, -2.0f);
+    std::vector<float> expected_miss_out(BS, -3.0f);
+
+    const float* in_ptr[1] = {input.data()};
+    float* worker_ptr[1] = {worker_out.data()};
+    float* miss_ptr[1] = {miss_out.data()};
+    float* expected_miss_ptr[1] = {expected_miss_out.data()};
+    BufferView<const float> iv(in_ptr, 1, BS);
+    BufferView<float> worker_view(worker_ptr, 1, BS);
+    BufferView<float> miss_view(miss_ptr, 1, BS);
+    BufferView<float> expected_miss_view(expected_miss_ptr, 1, BS);
+
+    node.process_block(iv, worker_view, BS);
+    node.process_cpu_fallback(iv, miss_view, BS);
+    expected.process_cpu_fallback(iv, expected_miss_view, BS);
+
+    for (uint32_t i = 0; i < BS; ++i)
+        REQUIRE(std::abs(miss_out[i] - expected_miss_out[i]) < 1.0e-6f);
+}
