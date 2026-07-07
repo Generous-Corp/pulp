@@ -313,6 +313,10 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     if (type.default_name.empty()) type.default_name = type.type_id;
     const auto key = custom_node_key(type.type_id, type.version);
     custom_node_types_[key] = std::move(type);
+    // M6 (2.2b): any registry change bumps the generation so a reinit-free swap
+    // compiled against an older generation is rejected (a re-register rebinds
+    // callbacks to instances the old factory produced).
+    ++custom_registry_generation_;
     if (affects_existing_nodes) invalidate_live_();
     return true;
 }
@@ -1073,6 +1077,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
     cg->max_block_size = max_block_size;
     cg->sample_rate = sample_rate;
     cg->connections = connections_;
+    cg->custom_registry_generation = custom_registry_generation_;  // 2.2b predicate (M6)
 
 #ifndef NDEBUG
     // 2.2b (H2): every plugin node MUST have captured metadata. A cache miss
@@ -1165,6 +1170,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 (mit != prepared_plugin_meta_.end()) && mit->second.wants_transport;
         }
         if (n.type == NodeType::Custom) {
+            // 2.2b: record this Custom node's instance identity for the reinit-
+            // free-swap predicate (set-equality vs a prepare_swap candidate).
+            cg->custom_instances[n.id] = n.custom_instance.get();
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {

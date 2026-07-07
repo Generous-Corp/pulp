@@ -860,6 +860,16 @@ private:
                                    // into samples.
         int64_t total_latency_samples = 0;
         MidiBlockSnapshot midi_publish_scratch;
+        // 2.2b reinit-free-swap predicate inputs (captured at compile so a
+        // prepare_swap candidate can be compared against this live snapshot):
+        //  - custom_instances: NodeId → raw custom-instance identity for each
+        //    Custom node (set-equality vs the current nodes_ detects an added /
+        //    removed / re-instantiated custom node → not reinit-free).
+        //  - custom_registry_generation: the SignalGraph custom-type registry
+        //    generation at compile time (a re-register would rebind callbacks to
+        //    instances built by the old factory → not reinit-free).
+        std::unordered_map<NodeId, const void*> custom_instances;
+        std::uint64_t custom_registry_generation = 0;
 
         // Immutable canonical-executor routing for this snapshot, built in
         // compile_() when the topology is executor-eligible (see
@@ -962,6 +972,11 @@ private:
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
+    // Bumped on every register_custom_node_type; captured into each CompiledGraph
+    // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
+    // the custom registry changed (M6 — prevents binding new callbacks to
+    // instances the old factory built). Guarded by graph_mutation_mutex_.
+    std::uint64_t custom_registry_generation_{0};
     NodeId next_id_ = 1;
     GraphLimits limits_;
 
