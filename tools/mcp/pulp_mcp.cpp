@@ -82,6 +82,7 @@ using pulp_mcp::handle_audio_probe_json;
 using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_compare;
+using pulp_mcp::handle_inspect_pending_requests;
 
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ static std::string tools_list_json() {
     out += R"JSON({"name":"pulp_inspect_evaluate","description":"Request Runtime.evaluate in a running plugin. Currently returns the inspector unavailable error until ScriptEngine wiring lands.","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"}}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_performance","description":"Get render performance metrics from a running plugin","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_audio","description":"Get audio configuration from a running plugin via Audio.getConfig","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out += R"JSON({"name":"pulp_inspect_pending_requests","description":"Read the pull-based agent-request queue (.pulp-design-requests.json) for a design project: the not-yet-consumed free-text requests a human raised from the running design's send-to-agent affordance. Returns a JSON array of pending requests, each with id, text, design, screen, editmode_state, screenshot_path, created_at, and consumed. An empty or absent queue returns an empty array, not an error.","inputSchema":{"type":"object","properties":{"project_dir":{"type":"string","description":"Design project directory containing .pulp-design-requests.json (defaults to the enclosing Pulp project root)"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_start_trace","description":"Start a motion trace via the inspector Motion.startTrace protocol. Attaches one or more metric probes (geometry / scroll-geometry) on a target view and begins streaming Motion.sample events. Enables tracing on the Coordinator if it is currently off. Returns the assigned trace_id.","inputSchema":{"type":"object","required":["view_name","metrics"],"properties":{"view_name":{"type":"string","description":"Human-readable trace name attached to all emitted events"},"fps":{"type":"integer","description":"Target sample rate in frames per second (default 15)"},"metrics":{"type":"array","description":"Metric probes. Each item is {kind:'geometry'|'scroll-geometry', name, node_id, properties?, space?, source?}.","items":{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["geometry","scroll-geometry","scrollGeometry"]},"name":{"type":"string"},"node_id":{"type":"string"},"properties":{"type":"array","items":{"type":"string"}},"space":{"type":"string"},"source":{"type":"string"}}}}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_stop_trace","description":"Stop a previously started motion trace via Motion.stopTrace and release its probe handle. Returns {removed:bool}.","inputSchema":{"type":"object","required":["trace_id"],"properties":{"trace_id":{"type":"integer","description":"trace_id returned by pulp_motion_start_trace"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_snapshot","description":"Read a snapshot of the motion observability subsystem via Motion.snapshot. Returns tracing_enabled, firehose, active_traces, inspector_traces, emitted_events, cost_enabled, and cost_samples_emitted. Safe to call when nothing is being traced.","inputSchema":{"type":"object","properties":{}}},)JSON";
@@ -414,6 +416,13 @@ static std::string handle_request_raw(const std::string& json) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }
+        // Pending agent-request queue — an in-process read of the
+        // pulp::inspect queue core (no CLI shell-out, no audio device).
+        // Kept as its own branch because it resolves its own project dir
+        // and returns a structured JSON array rather than proxying the
+        // inspector wire.
+        else if (name == "pulp_inspect_pending_requests")
+            result = handle_inspect_pending_requests(args_json);
         // Inspector parameter mutation — delegate to `pulp inspect` with a
         // typed `--params` payload. Kept separate from the read-only inspector
         // tools below because those pass no arguments; this one carries id/value.
