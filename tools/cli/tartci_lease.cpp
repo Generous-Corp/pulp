@@ -3,6 +3,8 @@
 #include "cli_common.hpp"
 #include "shell_redirect.hpp"
 
+#include <pulp/runtime/system.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -10,6 +12,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
@@ -146,6 +149,53 @@ std::string parse_shell_assignment(const std::string& text, const std::string& k
 
 int parse_shell_assignment_int(const std::string& text, const std::string& key) {
     return parse_positive_int(parse_shell_assignment(text, key));
+}
+
+int tier0_default_build_jobs(unsigned hw_threads, unsigned long long mem_budget_bytes) {
+    int cores = hw_threads > 0 ? static_cast<int>(hw_threads) : 1;
+    // Budget ~1.5 GiB of resident memory per concurrent C++ compile job. This is
+    // a deliberately conservative compile-average estimate whose only job is to
+    // keep a wide `--parallel` from exhausting RAM on a memory-constrained host;
+    // when a tartci lease is present its per-host budget supersedes this.
+    const unsigned long long per_job = 1536ULL * 1024ULL * 1024ULL;
+    int mem_jobs = cores;
+    if (mem_budget_bytes > 0) {
+        mem_jobs = static_cast<int>(mem_budget_bytes / per_job);
+    }
+    if (mem_jobs < 1) mem_jobs = 1;
+    int jobs = std::min(cores, mem_jobs);
+    return jobs < 1 ? 1 : jobs;
+}
+
+int tier0_default_build_jobs() {
+    const unsigned threads = std::thread::hardware_concurrency();
+    unsigned long long budget = 0;
+    // Explicit override wins (deterministic tests + a user escape hatch). Parse
+    // it directly rather than via env_positive_int(), which clamps to a
+    // job-count ceiling that would silently truncate a megabyte budget.
+    if (const char* raw = std::getenv("PULP_BUILD_MEM_BUDGET_MB")) {
+        char* end = nullptr;
+        const long long mb = std::strtoll(raw, &end, 10);
+        if (end != raw && mb > 0) {
+            budget = static_cast<unsigned long long>(mb) * 1024ULL * 1024ULL;
+        }
+    }
+    if (budget == 0) {
+        // pulp::runtime already implements per-platform physical-RAM detection;
+        // reuse it rather than re-deriving hw.memsize / sysconf here.
+        const uint64_t total_mb = pulp::runtime::total_memory_mb();
+        if (total_mb > 0) {
+            // Reserve ~25% for the OS and window server so a wide build cannot
+            // starve the UI / remote-desktop path on a shared desktop machine.
+            budget = static_cast<unsigned long long>(total_mb) * 1024ULL * 1024ULL / 4ULL * 3ULL;
+        }
+    }
+    return tier0_default_build_jobs(threads, budget);
+}
+
+int resolve_local_build_jobs() {
+    const int env_jobs = env_positive_int("PULP_BUILD_JOBS");
+    return env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
 }
 
 CmakeParallelPlan cap_cmake_build_parallel_args(const std::vector<std::string>& args,
@@ -418,7 +468,11 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
 
     const int env_jobs = env_positive_int("PULP_BUILD_JOBS");
     if (env_false("PULP_TARTCI_LEASES") || env_value("PULP_TARTCI_LEASE_HELD") == "1") {
-        lease.jobs_ = env_jobs;
+        // Leases explicitly off, or a parent already holds one and exported the
+        // bound. Either way we do NOT acquire a lease — but Tier 0 still caps:
+        // fall back to the host default so a no-lease build can't fan out
+        // unbounded. A parent lease exports PULP_BUILD_JOBS, so env_jobs wins there.
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 
@@ -427,23 +481,27 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         tartci = find_executable_in_path("tartci");
     }
     if (tartci.empty()) {
-        lease.jobs_ = env_jobs;
+        // No tartci installed — the casual single-machine case (Tier 0). No lease
+        // store to consult, but the build is still bounded to a safe host default.
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 
     auto profile = capture_command(shell_quote(tartci) + " host-profile");
     if (profile.exit_code != 0) {
-        lease.ok_ = false;
-        lease.exit_code_ = profile.exit_code;
-        lease.error_ = "tartci host-profile failed: " + trim(profile.output);
+        // tartci is present but cannot supply a host profile — an older or
+        // incompatible build without the subcommand, or a transient failure. A
+        // usable lease is an optimization, not a prerequisite for a safe build:
+        // degrade to the bounded host default rather than failing the build.
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 
     const int profile_jobs = parse_shell_assignment_int(profile.output, "PULP_BUILD_JOBS");
     if (profile_jobs <= 0 && env_jobs <= 0) {
-        lease.ok_ = false;
-        lease.exit_code_ = 75;
-        lease.error_ = "tartci host-profile did not provide PULP_BUILD_JOBS";
+        // host-profile ran but advertised no build budget — same degrade-to-safe
+        // path: bound the build, don't fail it.
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 

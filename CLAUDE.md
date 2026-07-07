@@ -89,6 +89,17 @@ cmake --build build --target pulp-test-state
 cmake -S . -B build -DPULP_SANITIZER=address
 ```
 
+**Builds are always bounded.** Every build command Pulp emits or ships carries
+an explicit job count — a literal, a `$(getconf _NPROCESSORS_ONLN)` expansion,
+or a value from the tartci host lease. `pulp build/dev/loop` and the local-SDK
+build fall back to a host default of `min(cores, RAM_budget / 1.5 GiB)` when no
+lease store is present (override with `PULP_BUILD_MEM_BUDGET_MB`), so a build can
+never fan out unbounded and oversubscribe a shared machine. A bare
+`cmake --build … --parallel` (which maps to unbounded `make -j`) is rejected
+repo-wide by `tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard
+gate). When adding a build command anywhere — CLI, script, `.shipyard/config.toml`,
+CI workflow — give `--parallel`/`-j` an explicit count.
+
 **External SDKs** (not committed, cloned at configure time or manually):
 - VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.7.12_build_20`)
 - AudioUnitSDK → `external/AudioUnitSDK` (Apache 2.0, `git clone --depth 1`)

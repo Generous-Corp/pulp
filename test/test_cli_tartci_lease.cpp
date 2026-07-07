@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <optional>
+#include <thread>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -136,6 +137,51 @@ TEST_CASE("non-positive caps leave cmake build args unchanged") {
 
     REQUIRE(plan.jobs == 0);
     REQUIRE(plan.args == args);
+}
+
+TEST_CASE("tier-0 default is core-bound when memory is plentiful") {
+    // 16 GiB budget / 1.5 GiB per job = 10 memory-jobs, so 8 cores is the bind.
+    REQUIRE(tier0_default_build_jobs(8, 16ULL * 1024 * 1024 * 1024) == 8);
+}
+
+TEST_CASE("tier-0 default is memory-bound on a constrained host") {
+    // 8 cores but only 6 GiB of budget → 6/1.5 = 4 jobs is the bind.
+    REQUIRE(tier0_default_build_jobs(8, 6ULL * 1024 * 1024 * 1024) == 4);
+}
+
+TEST_CASE("tier-0 default never drops below one job") {
+    REQUIRE(tier0_default_build_jobs(0, 0) == 1);
+    REQUIRE(tier0_default_build_jobs(4, 256ULL * 1024 * 1024) == 1);  // <1.5 GiB budget
+}
+
+TEST_CASE("tier-0 default falls back to cores when RAM is unknown") {
+    // A zero budget means "could not read RAM" — bound by cores alone, not by 1.
+    REQUIRE(tier0_default_build_jobs(6, 0) == 6);
+}
+
+TEST_CASE("tier-0 memory-budget override is not clamped to a job ceiling") {
+    // A 3 GiB budget is 2 compile jobs (3 / 1.5). If the MB value were routed
+    // through the job-count parser (ceiling 1024), the budget would collapse to
+    // 1 GiB → <1.5 GiB/job → exactly 1 job. So >1 proves the clamp is gone.
+    ScopedEnvVar no_jobs("PULP_BUILD_JOBS", std::nullopt);
+    ScopedEnvVar budget("PULP_BUILD_MEM_BUDGET_MB", std::string{"3072"});
+    const unsigned hw = std::thread::hardware_concurrency();
+    const int jobs = tier0_default_build_jobs();
+    REQUIRE(jobs == (hw >= 2 ? 2 : 1));
+}
+
+TEST_CASE("no-lease build acquisition falls back to a bounded tier-0 cap") {
+    // With leases disabled there is no host store, so acquire() takes the same
+    // tier-0 fallback expression the "no tartci installed" branch uses:
+    // jobs = env_jobs>0 ? env_jobs : tier0_default_build_jobs(). The build is
+    // therefore always bounded — never the old 0/unbounded no-op.
+    ScopedEnvVar no_jobs("PULP_BUILD_JOBS", std::nullopt);
+    ScopedEnvVar leases_off("PULP_TARTCI_LEASES", std::string{"0"});
+
+    auto lease = TartciAgentBuildLease::acquire({fs::current_path(), "pulp-build", false});
+    REQUIRE(lease.ok());
+    REQUIRE_FALSE(lease.active());   // no store → not a real lease…
+    REQUIRE(lease.jobs() >= 1);      // …but still a bounded cap, never 0/unbounded.
 }
 
 TEST_CASE("scoped build parallel env injects build and test caps") {
@@ -332,6 +378,39 @@ esac
             != std::string::npos);
     REQUIRE(calls.find("leases release --id pulp-watch-loop") != std::string::npos);
     REQUIRE(read_file(store).find("pulp-watch-loop") == std::string::npos);
+
+    fs::remove_all(root);
+}
+
+TEST_CASE("build acquisition degrades to a bounded cap when host-profile fails") {
+    // A tartci that cannot answer `host-profile` (an older/incompatible deploy
+    // without the subcommand) must NOT fail the build — it degrades to the
+    // bounded tier-0 default. This is the on-pool reality that would otherwise
+    // make `pulp build` exit non-zero.
+    auto root = fs::temp_directory_path()
+        / ("pulp-tartci-lease-hp-"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    const auto script = root / "tartci";
+    {
+        std::ofstream out(script);
+        out << "#!/usr/bin/env bash\n"
+               "echo \"unknown command: ${1:-}\" >&2\n"
+               "exit 2\n";
+    }
+    fs::permissions(script,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                    fs::perm_options::replace);
+
+    ScopedEnvVar fake_bin("PULP_TARTCI_BIN", script.string());
+    ScopedEnvVar leases_enabled("PULP_TARTCI_LEASES", std::string{"1"});
+    ScopedEnvVar no_held("PULP_TARTCI_LEASE_HELD", std::nullopt);
+    ScopedEnvVar no_user_cap("PULP_BUILD_JOBS", std::nullopt);
+
+    auto lease = TartciAgentBuildLease::acquire({root, "pulp-build", false});
+    REQUIRE(lease.ok());            // must not fail the build
+    REQUIRE_FALSE(lease.active());  // no usable lease store
+    REQUIRE(lease.jobs() >= 1);     // …but a bounded tier-0 fallback
 
     fs::remove_all(root);
 }

@@ -3447,3 +3447,15 @@ release-health.yml treats a stuck draft as unhealthy. When debugging "tag exists
 but no published release", check both legs' runs AND the coordinator. A manual
 release-cli workflow_dispatch backfill still publishes directly (draft only on
 `push`).
+
+## Build strings must be bounded
+
+Every build command in `.shipyard/config.toml` and the CI workflows must pass an
+explicit `--parallel`/`-j` count — a literal, or `$(getconf _NPROCESSORS_ONLN
+2>/dev/null || echo N)` on POSIX backends. A bare `--parallel` maps to unbounded
+`make -j` and can exhaust memory / oversubscribe a shared runner (the mac
+`local` backend runs these strings directly on the host). The Windows
+(ssh-windows / PowerShell) overrides use a fixed literal — `$(…)` doesn't parse
+there, and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
+`tools/scripts/build_parallelism_guard.py` enforces this in the `validation.gates`
+setup chain and as a ctest; a bare `--parallel`/`-j` fails the gate.

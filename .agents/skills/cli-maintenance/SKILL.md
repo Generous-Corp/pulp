@@ -2178,3 +2178,15 @@ bool derived from the install policy (no failures, and under `--strict` no
 skips). CI and example harnesses key off these instead of scraping text — when
 you add a validator or change the gate, keep `install_ready` consistent with the
 command's exit code and update any consumer that reads the report.
+
+## Any CLI command that emits a build must bound its parallelism
+
+When a command shells out to `cmake --build` / `ctest` / `make`, route the job
+count through the tartci lease helpers in `tartci_lease.{hpp,cpp}`:
+`TartciAgentBuildLease::acquire()` returns `jobs()` (a host lease when tartci is
+present, else the tier-0 default `tier0_default_build_jobs()` =
+`min(cores, RAM_budget / 1.5 GiB)`), and `cap_cmake_build_parallel_args()` /
+`ScopedBuildParallelEnv` inject it. Never emit a bare `--parallel` (unbounded
+`make -j`): honor an explicit `PULP_BUILD_JOBS` if set, else fall back to
+`tier0_default_build_jobs()`. `build_parallelism_guard.py` fails CI on a bare
+`--parallel`/`-j` anywhere under `tools/cli/`.

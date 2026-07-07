@@ -39,16 +39,20 @@ versioning_config   = "tools/scripts/versioning.json"
 # fold those steps into the canonical four for now and revisit when
 # Shipyard supports arbitrary stage lists end-to-end.
 #
-# The build command intentionally avoids POSIX-only shell syntax
-# (`$(...)`, `||`) so it parses on PowerShell. CMake's `--parallel`
-# flag is portable across all generators and platforms; let CMake
-# pick the parallelism instead of computing core count in the shell.
+# The build command bounds `--parallel` to the host CPU count. A bare
+# `--parallel` (no count) delegates to the generator's default, which for
+# Unix Makefiles is `make -j` with NO limit — that fans out one compile per
+# ready translation unit and can exhaust memory / oversubscribe cores on a
+# shared machine. The POSIX backends (mac `local`, ssh-linux) compute the
+# count with `getconf _NPROCESSORS_ONLN`; the ssh-windows overrides below use
+# a fixed cap instead, because they run under PowerShell (no `$(...)`) and
+# because unlimited MSBuild link parallelism triggers LNK1104 on ARM64.
 
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
-build     = "cmake --build build --parallel"
+build     = "cmake --build build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
 # `--label-exclude slow` skips ctest entries tagged LABELS slow — currently
 # `cmake-ios-auv3-configure` (test/CMakeLists.txt:23, ~25-30 min fresh-cache
 # Xcode/iOS try-compile + FetchContent bootstrap). #1589 added the label
@@ -74,11 +78,11 @@ test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWor
 #                     under SSH + cross-compile emulation overhead)
 [validation.default.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
-# --parallel is replaced with -- /m:4 to limit MSBuild parallelism.
-# Unlimited parallelism causes LNK1104 (cannot open file) on ARM64
-# Windows because concurrent x64-emulated link steps create file
-# contention that Windows' file locking can't handle gracefully.
-build     = "cmake --build build --config Release --parallel"
+# --parallel is capped at 4 to limit MSBuild parallelism. Unlimited
+# parallelism causes LNK1104 (cannot open file) on ARM64 Windows because
+# concurrent x64-emulated link steps create file contention that Windows'
+# file locking can't handle gracefully.
+build     = "cmake --build build --config Release --parallel 4"
 # Only exclude tests with genuine platform incompatibility or
 # undiagnosable crashes. Timing-sensitive tests (EventLoop,
 # BufferingReader, VisualizationBridge) were fixed with proper
@@ -96,7 +100,7 @@ test      = "ctest --test-dir build -C Release --output-on-failure --exclude-reg
 # errors; the Python scripts inspect the same env var for parity.
 # See docs/guides/versioning.md for the full three-layer design.
 stages = ["setup"]
-setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base origin/main --mode=report && PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/version_bump_check.py --base origin/main --mode=report && python3 tools/scripts/hotspot_size_guard.py --base origin/main --config tools/scripts/hotspot_size_guard.json --mode=report && python3 tools/import-validation/check-source-contracts.py --strict && python3 tools/import-validation/test_source_contracts.py"
+setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base origin/main --mode=report && PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/version_bump_check.py --base origin/main --mode=report && python3 tools/scripts/hotspot_size_guard.py --base origin/main --config tools/scripts/hotspot_size_guard.json --mode=report && python3 tools/scripts/build_parallelism_guard.py && python3 tools/import-validation/check-source-contracts.py --strict && python3 tools/import-validation/test_source_contracts.py"
 
 [validation.parser]
 # Path-scoped lane for runtime-import parser PRs (pulp #1916).
@@ -120,12 +124,12 @@ setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
-build     = "cmake --build build --parallel"
+build     = "cmake --build build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
 test      = "ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
 
 [validation.parser.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
-build     = "cmake --build build --config Release --parallel"
+build     = "cmake --build build --config Release --parallel 4"
 test      = "ctest --test-dir build -C Release --output-on-failure --label-include parser-import --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
 
 [validation.smoke]
@@ -138,14 +142,14 @@ test      = "ctest --test-dir build -C Release --output-on-failure --label-inclu
 stages = ["setup", "configure", "build"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
-build     = "cmake --build build --parallel && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && cmake --build smoke/build --parallel"
+build     = "cmake --build build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8) && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && cmake --build smoke/build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
 
 [validation.smoke.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
 # PowerShell uses ; as the statement separator, not && — note the
 # different chaining. The semantics differ: PowerShell does NOT
 # short-circuit on failure, so each step is wrapped in a guard.
-build     = "cmake --build build --config Release --parallel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --install build --prefix install --config Release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake -S tools/validation/sdk-smoke -B smoke/build -G \"Visual Studio 17 2022\" -A x64 -DCMAKE_PREFIX_PATH=install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --build smoke/build --config Release --parallel"
+build     = "cmake --build build --config Release --parallel 4; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --install build --prefix install --config Release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake -S tools/validation/sdk-smoke -B smoke/build -G \"Visual Studio 17 2022\" -A x64 -DCMAKE_PREFIX_PATH=install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --build smoke/build --config Release --parallel 4"
 
 # ── Targets ────────────────────────────────────────────────────────────────
 # Three platforms today: mac (local), ubuntu (SSH), windows (SSH).

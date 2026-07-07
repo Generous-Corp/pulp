@@ -9,6 +9,7 @@
 
 #include "cli_common.hpp"
 #include "fetchcontent_cache.hpp"
+#include "tartci_lease.hpp"
 #include "version_diag.hpp"
 #include "update_check.hpp"
 
@@ -362,7 +363,10 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         return {};
     }
 
-    std::string install_cmd = "cmake --build " + build_dir.string() + " --target install --parallel";
+    // Bound to the same policy as every other no-lease build path: an explicit
+    // PULP_BUILD_JOBS wins, else the tier-0 host default. Never unbounded.
+    std::string install_cmd = "cmake --build " + build_dir.string()
+        + " --target install --parallel " + std::to_string(resolve_local_build_jobs());
     if (run_with_spinner(install_cmd, "Installing local SDK") != 0) {
         return {};
     }
