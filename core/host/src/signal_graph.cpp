@@ -912,6 +912,13 @@ SignalGraph::evaluate_optional_runtime_budget(
 }
 
 void SignalGraph::invalidate_live_() {
+    // 2.2b: during a swap-edit the OWNER thread's allow-set mutations must NOT
+    // silence the live snapshot — it keeps playing the old compiled graph until
+    // prepare_swap() atomically publishes the new one. Any other caller (a second
+    // control thread, or the lifecycle / limits / registry mutators, which
+    // force-abort the transaction at their top) falls through and invalidates as
+    // usual, which safely cancels the no-silence attempt.
+    if (in_swap_edit_ && std::this_thread::get_id() == swap_edit_owner_) return;
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
     // always require a re-prepare before audio resumes.
@@ -919,6 +926,74 @@ void SignalGraph::invalidate_live_() {
     retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
+}
+
+void SignalGraph::begin_swap_edit() {
+    std::lock_guard<std::mutex> lock(graph_mutation_mutex_);
+    if (in_swap_edit_) {
+        runtime::log_error("SignalGraph: begin_swap_edit() while a swap edit is "
+                           "already open — refused (nesting unsupported)");
+        return;
+    }
+    in_swap_edit_ = true;
+    swap_edit_owner_ = std::this_thread::get_id();
+}
+
+SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
+                                                  int max_block_size) {
+    std::lock_guard<std::mutex> lock(graph_mutation_mutex_);
+    if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
+    // Any exit but a successful publish invalidates the live snapshot and ends the
+    // transaction, so the caller falls back to an eager prepare() under the usual
+    // no-process/no-pump contract (CX1 — never re-prepare plugin/custom instances
+    // inline here while an old snapshot may still be draining on the audio thread).
+    // Clear the flag FIRST so invalidate_live_() does not self-skip for this thread.
+    auto fail = [&]() {
+        in_swap_edit_ = false;
+        invalidate_live_();
+        return SwapResult::NeedsEagerPrepare;
+    };
+    if (!preflight_locked_(max_block_size)) return fail();
+    if (!live_ ||
+        !snapshot_is_plugin_reinit_free_(*live_, sample_rate, max_block_size)) {
+        return fail();
+    }
+    auto next = compile_(sample_rate, max_block_size, CompileMode::SwapNoAnticipation);
+    if (!next) return fail();
+    // M3: reject a total-latency change (audible splice + wrong host PDC) or any PDC
+    // delay ring on either side — a nonzero delay_samples carries per-snapshot ring
+    // state a fresh snapshot zeroes (click). Compare the delay STRUCTURE, not the
+    // ConnectionDelay objects (ring/slew contents legitimately differ per snapshot,
+    // and the delay vectors are not index-aligned once connections change).
+    const auto has_pdc = [](const CompiledGraph& g) {
+        for (const auto& d : g.connection_delays) {
+            if (d.delay_samples != 0) return true;
+        }
+        return false;
+    };
+    if (next->total_latency_samples != live_->total_latency_samples ||
+        has_pdc(*next) || has_pdc(*live_)) {
+        return fail();  // discard `next` (never published); eager-prepare instead
+    }
+    // CX4 publish: store the new raw pointer while `next` still owns it, THEN retire
+    // the old — never the reverse; seq_cst pairs with process_impl's pinned load so
+    // the audio thread never sees a null/torn pointer (NO silent block).
+    live_raw_.store(next.get(), std::memory_order_seq_cst);
+    retire_snapshot_(std::move(live_));
+    live_ = next;
+    total_latency_samples_.store(next->total_latency_samples,
+                                 std::memory_order_relaxed);
+    publish_prepared_stats_(*next);
+    prune_retired_snapshots_();
+    in_swap_edit_ = false;
+    return SwapResult::Swapped;
+}
+
+void SignalGraph::abort_swap_edit() {
+    std::lock_guard<std::mutex> lock(graph_mutation_mutex_);
+    if (!in_swap_edit_) return;
+    in_swap_edit_ = false;  // clear FIRST so invalidate_live_ does not self-skip
+    invalidate_live_();
 }
 
 void SignalGraph::clear_prepared_stats_() {
@@ -1729,6 +1804,10 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     // never invert order with the reader-drain handshake.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
 
+    // 2.2b: an eager prepare() cancels any open swap-edit transaction (it nulls +
+    // re-prepares instances directly, bypassing invalidate_live_'s owner-skip).
+    in_swap_edit_ = false;
+
     live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
@@ -1901,6 +1980,10 @@ void SignalGraph::release() {
     // the pure-snapshot readers (inject_midi / extract_midi / node_latency_samples)
     // never take this mutex at all.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+
+    // 2.2b: release() cancels any open swap-edit transaction (it tears down
+    // instances, so a subsequent prepare_swap must not act on a stale flag).
+    in_swap_edit_ = false;
 
     live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
