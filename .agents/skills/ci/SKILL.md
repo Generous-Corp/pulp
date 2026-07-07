@@ -896,6 +896,12 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   `make_webview_embedded_resource_fetcher`. If you touch the release
   workflow or `tools/scripts/release-cli-local.sh`, preserve that
   contract or WebView-using downstream SDK consumers will link-fail.
+- **Release bodies are composed in `release-cli.yml`.** The release job
+  runs `tools/scripts/compose_release_notes.py` for grouped Highlights and
+  calls GitHub's generated-notes API for the native "What's Changed" /
+  "Full Changelog" block before the Install section. `CHANGELOG.md`
+  remains Shipyard-owned via `shipyard changelog regenerate`; do not route
+  the Release body back through the deleted in-tree changelog generator.
 - **Phase 8 CLI flip ships two CLI binaries.** Release CLI jobs must
   preserve Rust `pulp` as the user-facing binary and C++ `pulp-cpp`
   as the fallthrough delegate in the same archive. Smoke both names:
@@ -2989,8 +2995,8 @@ Gotchas surfaced while landing the four-phase SignalGraph follow-up:
 
 - **Release-time workflows must declare `permissions: contents: write`.**
   Both `release-cli.yml` and `sign-and-release.yml` write to the
-  GitHub Releases API (create the release, upload artifacts, fetch
-  generate-release-notes content). Without an explicit job-level
+  GitHub Releases API (create or patch the release, upload artifacts);
+  `release-cli.yml` also fetches generated-notes content. Without an explicit job-level
   permissions block they inherit a read-only `GITHUB_TOKEN` on
   `push: tags` events and the `Create GitHub Release` step fails with
   `Resource not accessible by integration` — silent release failure

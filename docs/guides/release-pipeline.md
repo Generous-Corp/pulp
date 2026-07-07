@@ -83,17 +83,19 @@ PR merge to main
 │ Final `release` job (runs once, after all 5 platforms): │
 │   - Downloads all 10 matrix artifacts                   │
 │     (5 CLI tarballs + 5 SDK tarballs)                   │
-│   - Patches the existing GitHub Release that            │
-│     sign-and-release.yml created as a draft: uploads    │
-│     the 10 platform tarballs alongside the appcast.xml  │
-│     already attached, and flips draft → published       │
-│     (softprops/action-gh-release@v2 with                │
-│     `draft: false`).                                     │
-│   - Does NOT generate appcast.xml or create the draft;  │
-│     both are owned by sign-and-release.yml (2b below).  │
-│   - Tag-push releases update GitHub's /releases/latest  │
-│     pointer. Manual workflow_dispatch backfills do not   │
-│     unless the operator sets make_latest=true.           │
+│   - Composes the Release body as grouped Highlights      │
+│     from compose_release_notes.py, then GitHub's native  │
+│     "What's Changed" / "Full Changelog" block, then     │
+│     the install instructions.                            │
+│   - Creates or patches the GitHub Release draft:        │
+│     uploads the 10 platform tarballs alongside any      │
+│     appcast.xml already attached by sign-and-release.   │
+│   - Does NOT generate appcast.xml; that is owned by     │
+│     sign-and-release.yml (2b below).                    │
+│   - On tag pushes, leaves the Release as a draft for    │
+│     release-publish.yml to publish once both release    │
+│     legs have succeeded. Manual workflow_dispatch       │
+│     backfills can publish directly.                     │
 └─────────────────────────────────────────────────────────┘
      │
      ▼
@@ -112,8 +114,8 @@ PR merge to main
 │   - Calls softprops/action-gh-release@v2 with            │
 │     `draft: true` to CREATE the GitHub Release as a      │
 │     draft, attaching only `appcast.xml`. The 10          │
-│     platform tarballs and the draft → published flip     │
-│     are owned by release-cli.yml's `release` job above.  │
+│     platform tarballs are owned by release-cli.yml;       │
+│     release-publish.yml owns the published flip.          │
 │                                                          │
 │ Concurrency group `sign-and-release-${ref}` with         │
 │ cancel-in-progress=false: partial notarization is hard   │
@@ -124,7 +126,7 @@ PR merge to main
 ┌─────────────────────────────────────────────────────────┐
 │ Post-publish (back on main, separate workflows)         │
 │                                                          │
-│   - regenerate_changelog.py commits                     │
+│   - shipyard changelog regenerate commits               │
 │     "docs: regenerate changelog for vX.Y.Z [skip ci]"   │
 │     so CHANGELOG.md links the new release block.        │
 │                                                          │
@@ -177,10 +179,9 @@ end. Triage by which assets are present:
   `actions/download-artifact` finds; failed matrix legs simply don't
   contribute artifacts.
 - **All 11 assets present but the release stays in DRAFT**:
-  `release-cli.yml`'s `release` job didn't reach its
-  `action-gh-release@v2` call, so the `draft: false` flip never landed.
-  Look at `release-cli.yml`'s run for a job that errored after the
-  per-platform matrix succeeded.
+  `release-publish.yml` did not reach its publish step after both release
+  legs produced their assets. Inspect the coordinator run and its upstream
+  workflow conclusions before rerunning either asset-producing workflow.
 
 In all three cases the `release-draft-stuck-check` watchdog will eventually
 flag a stuck draft (see release-watchdog.md).
@@ -249,7 +250,7 @@ Update this doc whenever you change any of these files:
 - `.github/workflows/auto-release-watchdog.yml`
 - `.github/workflows/release-cadence-check.yml`
 - `tools/scripts/package_cli.py`
-- `tools/scripts/regenerate_changelog.py`
+- `tools/scripts/compose_release_notes.py`
 
 These files form the release pipeline. The `ci` skill (`.agents/skills/ci/SKILL.md`)
 maps `.github/workflows/**` so the existing skill-sync check already requires `ci`

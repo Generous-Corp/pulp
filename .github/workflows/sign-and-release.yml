@@ -51,12 +51,10 @@ jobs:
     runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) }}
     name: Build, Sign, Notarize (macOS)
     # pulp #724: without `contents: write`, the final `Create GitHub Release`
-    # step fails with "Resource not accessible by integration" because
-    # softprops/action-gh-release@v2 calls the generate-release-notes API,
-    # which requires the scope. The workflow inherits a read-only token
+    # step fails with "Resource not accessible by integration" when it uploads
+    # appcast.xml to the draft Release. The workflow inherits a read-only token
     # otherwise, and the whole sign+notarize+publish pipeline silently fails
-    # even though every prior step succeeded. release-cli.yml explicitly
-    # sets this on its release-creating job (line ~360) for the same reason.
+    # even though every prior step succeeded.
     permissions:
       contents: write
 
@@ -286,4 +284,3 @@ jobs:
         with:
           files: artifacts/appcast.xml
           draft: true
-          generate_release_notes: true
