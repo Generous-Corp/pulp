@@ -1168,7 +1168,15 @@ private:
                              const audio::BufferView<const float>& input,
                              int num_samples,
                              CompiledGraph* cg);
-    std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
+    // compile_ mode. Normal is the full build (prepare()). SwapNoAnticipation is
+    // used by (2.2b) prepare_swap: it HARD-skips the anticipation-lane build so a
+    // swap-time recompile can never construct an AnticipationLane over the live
+    // interior instances (M5 — the reinit-free predicate already requires
+    // anticipation off, but this closes the TOCTOU where the host flips the atomic
+    // between the predicate check and compile).
+    enum class CompileMode { Normal, SwapNoAnticipation };
+    std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
+                                            CompileMode mode = CompileMode::Normal);
     // Shared preflight (generated-graph limits + audio-rate automation
     // event-capacity gate) for prepare() and (2.2b) prepare_swap(). PURE — mutates
     // no live state. Caller holds graph_mutation_mutex_. Returns false (logged) on

@@ -1072,7 +1072,7 @@ void SignalGraph::compile_snapshot_for_test(double sample_rate, int max_block_si
 }
 
 std::shared_ptr<SignalGraph::CompiledGraph>
-SignalGraph::compile_(double sample_rate, int max_block_size) {
+SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) {
     auto cg = std::make_shared<CompiledGraph>();
     cg->max_block_size = max_block_size;
     cg->sample_rate = sample_rate;
@@ -1460,7 +1460,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         // Recomputed every compile: with no active anticipation no node is forced
         // exterior, so the counter must read 0 rather than keep a prior value.
         transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
-        if (cg->routing_valid &&
+        if (mode == CompileMode::Normal &&
+            cg->routing_valid &&
             anticipation_enabled_.load(std::memory_order_relaxed) &&
             max_block_size > 0) {
             const auto eligibility =
@@ -1539,6 +1540,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             }
         }
     }
+    // M5: a SwapNoAnticipation compile must never have built an anticipation lane.
+    assert(mode == CompileMode::Normal || !cg->anticipation_valid);
     return cg;
 }
 
