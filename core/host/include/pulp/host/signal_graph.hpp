@@ -1161,7 +1161,9 @@ private:
     void prune_retired_snapshots_();
     void wait_for_retired_snapshots_();
     static void compute_latencies_for_(CompiledGraph& cg,
-                                       const std::vector<Connection>& connections);
+                                       const std::vector<Connection>& connections,
+                                       const std::unordered_map<NodeId, PreparedPluginMetadata>&
+                                           plugin_meta);
 };
 
 // Drag-add helper.

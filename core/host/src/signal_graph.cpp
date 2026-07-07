@@ -990,7 +990,9 @@ void SignalGraph::wait_for_retired_snapshots_() {
 }
 
 void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
-                                         const std::vector<Connection>& /*conns*/) {
+                                         const std::vector<Connection>& /*conns*/,
+                                         const std::unordered_map<NodeId, PreparedPluginMetadata>&
+                                             plugin_meta) {
     for (NodeId id : cg.order) {
         auto rt_it = cg.runtime.find(id);
         if (rt_it == cg.runtime.end()) continue;
@@ -1014,8 +1016,8 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         // 2.2b (H2): read cached latency, never the live slot — latency_samples()
         // reaches into the live plugin (e.g. VST3 getLatencySamples()) and is
         // unsafe concurrent with process() during a swap-time recompile.
-        auto mit = prepared_plugin_meta_.find(id);
-        if (mit != prepared_plugin_meta_.end()) {
+        auto mit = plugin_meta.find(id);
+        if (mit != plugin_meta.end()) {
             added = std::max<int64_t>(0, mit->second.latency_samples);
         }
         rt.output_latency = rt.input_latency + added;
@@ -1261,7 +1263,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         });
     }
 
-    compute_latencies_for_(*cg, connections_);
+    compute_latencies_for_(*cg, connections_, prepared_plugin_meta_);
 
     // Build the canonical-executor routing for this snapshot when the topology
     // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
