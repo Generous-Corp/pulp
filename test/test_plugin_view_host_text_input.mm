@@ -46,6 +46,18 @@ NSView* find_pulp_plugin_view(NSView* parent) {
     return find_view_with_class_name(parent, @"PulpPluginView");
 }
 
+NSEvent* make_left_mouse_down(NSPoint loc) {
+    return [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
+                             location:loc
+                        modifierFlags:0
+                            timestamp:0
+                         windowNumber:0
+                              context:nil
+                          eventNumber:0
+                           clickCount:1
+                             pressure:1.0];
+}
+
 }  // namespace
 
 TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to "
@@ -214,6 +226,367 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
         [pulp_view unmarkText];
         REQUIRE_FALSE(editor->has_marked_text());
         REQUIRE(editor->text() == std::string("abc") + kNi);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — host focus loss cancels active IME marked "
+          "text before releasing focus",
+          "[plugin-view-host][text-input][ime][focus][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME focus-loss test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_bounds({16, 20, 200, 40});
+        editor->set_text("abc");
+        root.add_child(std::move(editor_owned));
+        editor->on_focus_changed(true);
+        editor->claim_input_focus();
+        editor->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(View::focused_input_ == editor);
+        REQUIRE(window.firstResponder == pulp_view);
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->text() == std::string("abc") + kNi);
+        REQUIRE(editor->has_marked_text());
+
+        [pulp_view resignFirstResponder];
+
+        REQUIRE(View::focused_input_ == nullptr);
+        REQUIRE_FALSE(editor->has_focus());
+        REQUIRE_FALSE(editor->has_marked_text());
+        REQUIRE(editor->text() == "abc");
+        REQUIRE([pulp_view hasMarkedText] == NO);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — host focus loss survives IME cancellation "
+          "that unmounts the editor",
+          "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME focus-loss teardown test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_bounds({16, 20, 200, 40});
+        editor->set_text("abc");
+        root.add_child(std::move(editor_owned));
+        editor->on_focus_changed(true);
+        editor->claim_input_focus();
+        editor->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == pulp_view);
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->has_marked_text());
+
+        bool removed = false;
+        editor->on_change = [&](const std::string&) {
+            if (removed) return;
+            removed = true;
+            auto removed_child = root.remove_child(editor);
+            removed_child.reset();
+        };
+
+        [pulp_view resignFirstResponder];
+
+        REQUIRE(removed);
+        REQUIRE(root.child_count() == 0);
+        REQUIRE(View::focused_input_ == nullptr);
+        REQUIRE([pulp_view hasMarkedText] == NO);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — host focus loss clears a replacement "
+          "editor focused during IME cancellation",
+          "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME replacement-focus test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_bounds({16, 20, 200, 40});
+        editor->set_text("abc");
+        root.add_child(std::move(editor_owned));
+        editor->on_focus_changed(true);
+        editor->claim_input_focus();
+        editor->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == pulp_view);
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->has_marked_text());
+
+        TextEditor* replacement = nullptr;
+        editor->on_change = [&](const std::string&) {
+            auto replacement_owned = std::make_unique<TextEditor>();
+            replacement = replacement_owned.get();
+            replacement->set_bounds({16, 20, 200, 40});
+            replacement->set_text("replacement");
+            root.add_child(std::move(replacement_owned));
+            replacement->on_focus_changed(true);
+            replacement->claim_input_focus();
+            auto removed_child = root.remove_child(editor);
+            removed_child.reset();
+        };
+
+        [pulp_view resignFirstResponder];
+
+        REQUIRE(replacement != nullptr);
+        REQUIRE(View::focused_input_ == nullptr);
+        REQUIRE_FALSE(replacement->has_focus());
+        REQUIRE([pulp_view hasMarkedText] == NO);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — focus transfer cancels old active IME "
+          "composition",
+          "[plugin-view-host][text-input][ime][focus][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME focus-transfer test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto first_owned = std::make_unique<TextEditor>();
+        TextEditor* first = first_owned.get();
+        first->set_bounds({16, 20, 200, 40});
+        first->set_text("abc");
+        root.add_child(std::move(first_owned));
+
+        auto second_owned = std::make_unique<TextEditor>();
+        TextEditor* second = second_owned.get();
+        second->set_bounds({16, 90, 200, 40});
+        second->set_text("target");
+        root.add_child(std::move(second_owned));
+
+        first->on_focus_changed(true);
+        first->claim_input_focus();
+        first->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == pulp_view);
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(first->text() == std::string("abc") + kNi);
+        REQUIRE(first->has_marked_text());
+
+        [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(30, 110))];
+
+        REQUIRE(View::focused_input_ == second);
+        REQUIRE_FALSE(first->has_focus());
+        REQUIRE_FALSE(first->has_marked_text());
+        REQUIRE(first->text() == "abc");
+        REQUIRE(second->has_focus());
+        REQUIRE([pulp_view hasMarkedText] == NO);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — mouse focus changes clear replacement "
+          "focus from IME cancellation callbacks",
+          "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME mouse replacement-focus test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto first_owned = std::make_unique<TextEditor>();
+        TextEditor* first = first_owned.get();
+        first->set_bounds({16, 20, 200, 40});
+        first->set_text("abc");
+        root.add_child(std::move(first_owned));
+
+        first->on_focus_changed(true);
+        first->claim_input_focus();
+        first->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == pulp_view);
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(first->has_marked_text());
+
+        TextEditor* replacement = nullptr;
+        first->on_change = [&](const std::string&) {
+            auto replacement_owned = std::make_unique<TextEditor>();
+            replacement = replacement_owned.get();
+            replacement->set_bounds({16, 20, 200, 40});
+            replacement->set_text("replacement");
+            root.add_child(std::move(replacement_owned));
+            replacement->on_focus_changed(true);
+            replacement->claim_input_focus();
+            auto removed_child = root.remove_child(first);
+            removed_child.reset();
+        };
+
+        SECTION("clicking another focused field clears the replacement before "
+                "focusing the clicked field") {
+            auto second_owned = std::make_unique<TextEditor>();
+            TextEditor* second = second_owned.get();
+            second->set_bounds({16, 90, 200, 40});
+            second->set_text("target");
+            root.add_child(std::move(second_owned));
+
+            [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(30, 110))];
+
+            REQUIRE(replacement != nullptr);
+            REQUIRE(View::focused_input_ == second);
+            REQUIRE_FALSE(replacement->has_focus());
+            REQUIRE(second->has_focus());
+        }
+
+        SECTION("clicking a non-focusable view clears the replacement focus") {
+            auto target_owned = std::make_unique<View>();
+            View* target = target_owned.get();
+            target->set_bounds({16, 90, 200, 40});
+            root.add_child(std::move(target_owned));
+
+            [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(30, 110))];
+
+            REQUIRE(replacement != nullptr);
+            REQUIRE(View::focused_input_ == nullptr);
+            REQUIRE_FALSE(replacement->has_focus());
+            REQUIRE_FALSE(target->has_focus());
+        }
 
         host->detach();
         host.reset();

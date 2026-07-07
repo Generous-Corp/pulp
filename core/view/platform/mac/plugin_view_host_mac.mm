@@ -140,6 +140,8 @@ pulp::view::Point pulp_plugin_local_point(NSView* self, NSEvent* event) {
 // Forward declaration (defined below): the currently-focused input widget IF it
 // belongs to `root`'s tree, else nullptr. Used by the mouse-down focus protocol.
 static pulp::view::View* pulp_focus_under_root(pulp::view::View* root);
+static pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(
+    pulp::view::View* root, pulp::view::View* view);
 
 // Dispatched handlers (on_click / on_mouse_* / on_pointer_event / on_drag) are
 // std::function callbacks — for a scripted UI they reach into the JS bridge and
@@ -203,13 +205,28 @@ void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
     {
         auto* prev = pulp_focus_under_root(root);
         if ((*drag_target)->focusable()) {
-            if (prev && prev != *drag_target) prev->on_focus_changed(false);
+            if (prev && prev != *drag_target) {
+                prev = pulp_plugin_cancel_marked_text_and_revalidate(root, prev);
+                if (!prev) prev = pulp_focus_under_root(root);
+                if (!view_is_in_tree(*drag_target, root)) {
+                    *drag_target = nullptr;
+                    return;
+                }
+                if (prev && prev != *drag_target) {
+                    prev->on_focus_changed(false);
+                    prev->release_input_focus();
+                }
+            }
             (*drag_target)->on_focus_changed(true);
             (*drag_target)->claim_input_focus();
         } else if (prev) {
             // A click on a non-focusable target commits/closes any open type-in.
-            prev->on_focus_changed(false);
-            prev->release_input_focus();
+            prev = pulp_plugin_cancel_marked_text_and_revalidate(root, prev);
+            if (!prev) prev = pulp_focus_under_root(root);
+            if (prev) {
+                prev->on_focus_changed(false);
+                prev->release_input_focus();
+            }
         }
     }
 
@@ -387,6 +404,19 @@ PulpFocusIdentity pulp_focus_identity(pulp::view::View* view) {
     };
 }
 
+pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(pulp::view::View* root,
+                                                                pulp::view::View* view) {
+    if (!view) return nullptr;
+    auto identity = pulp_focus_identity(view);
+    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(view); te && te->has_marked_text()) {
+        te->set_marked_text("", 0, 0);
+        auto* current = pulp_focus_under_root(root);
+        if (!identity.matches(current)) return nullptr;
+        return current;
+    }
+    return view;
+}
+
 // Whether to grab the DAW keyboard: ONLY while a focused widget under this root
 // actually ACCEPTS TEXT INPUT (a TextEditor type-in). A focusable-but-non-text
 // widget — a ComboBox dropdown, a focusable container/root — must NOT make the
@@ -470,8 +500,11 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
                           (!te->multi_line && (ke.key == pulp::view::KeyCode::tab ||
                                                ke.key == pulp::view::KeyCode::enter));
         if (blur) {
-            te->on_focus_changed(false);
-            te->release_input_focus();
+            auto* current = pulp_plugin_cancel_marked_text_and_revalidate(root, te);
+            if (current) {
+                current->on_focus_changed(false);
+                current->release_input_focus();
+            }
         }
     }
     root->request_repaint();
@@ -515,6 +548,9 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
 static bool pulp_plugin_end_text_input(pulp::view::View* root) {
     auto* fv = pulp_focus_under_root(root);
     if (!fv) return false;
+    fv = pulp_plugin_cancel_marked_text_and_revalidate(root, fv);
+    if (!fv) fv = pulp_focus_under_root(root);
+    if (!fv) return true;
     fv->release_input_focus();
     try {
         fv->on_focus_changed(false);
