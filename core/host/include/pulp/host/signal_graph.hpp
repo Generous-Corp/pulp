@@ -1174,6 +1174,17 @@ private:
     // no live state. Caller holds graph_mutation_mutex_. Returns false (logged) on
     // any rejection.
     bool preflight_locked_(int max_block_size);
+    // 2.2b reinit-free-swap predicate (PRE-compile half). True iff a live topology
+    // swap to the current nodes_/connections_ needs NO plugin/custom re-init and
+    // carries no per-snapshot mutable state a fresh snapshot would glitch: same
+    // sr/block; unchanged custom registry (M6); anticipation off both sides (M5);
+    // no MIDI edge (M4); no smoothed sparse-automation edge (CX3); identical node
+    // set + plugin/custom instance identity (M2); every resolved plugin node has a
+    // cached-metadata entry (CX2). The latency-equality gate (M3) is checked
+    // POST-compile in prepare_swap(). Pure const read; caller holds the mutation
+    // mutex.
+    bool snapshot_is_plugin_reinit_free_(const CompiledGraph& old_cg,
+                                         double sr, int bs) const;
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
     void invalidate_live_();

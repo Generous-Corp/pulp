@@ -1571,6 +1571,61 @@ int SignalGraph::pump_anticipation(int max_blocks) {
     return rendered;
 }
 
+// 2.2b reinit-free-swap predicate (PRE-compile half — see the header). Returns
+// true only when a live swap to the current nodes_/connections_ can reuse every
+// existing plugin/custom instance with no re-init and no per-snapshot state glitch.
+// Any doubt returns false → prepare_swap falls back to an eager prepare().
+bool SignalGraph::snapshot_is_plugin_reinit_free_(const CompiledGraph& old_cg,
+                                                  double sr, int bs) const {
+    // (1) A sample-rate / block-size change requires re-preparing every instance.
+    if (old_cg.sample_rate != sr || old_cg.max_block_size != bs) return false;
+    // (2) M6 — a custom-type re-register rebinds callbacks to instances the old
+    // factory produced (audio-thread type confusion on an opaque void*).
+    if (custom_registry_generation_ != old_cg.custom_registry_generation) return false;
+    // (3) M5 — a swap over a live anticipation pump races the interior instances
+    // and the new lane's ring starts empty; exclude anticipation on either side.
+    if (anticipation_enabled_.load(std::memory_order_seq_cst) ||
+        old_cg.anticipation_valid) {
+        return false;
+    }
+    // (4) M4 / (5) CX3 — MIDI edges carry per-snapshot mailbox state (a dropped
+    // note-off = stuck note) and a smoothed sparse-automation edge would snap its
+    // destination mid-ramp when the fresh snapshot re-primes the slew.
+    for (const auto& c : connections_) {
+        if (c.midi) return false;
+        if (c.automation && c.automation_smoothing_ms > 0.0f) return false;
+    }
+    for (const auto& c : old_cg.connections) {
+        if (c.midi) return false;  // defensive: the live snapshot itself had MIDI
+    }
+    // (6) M2 — identical node SET (no node added / removed / re-typed since this
+    // snapshot compiled; cg->shapes holds every node id) plus per-node plugin /
+    // custom instance identity, and (8) CX2 release-mode cache coverage.
+    if (nodes_.size() != old_cg.shapes.size()) return false;
+    for (const auto& n : nodes_) {
+        if (old_cg.shapes.find(n.id) == old_cg.shapes.end()) return false;
+        if (n.type == NodeType::Plugin) {
+            const auto it = old_cg.plugins.find(n.id);
+            const bool was_resolved = (it != old_cg.plugins.end());
+            const bool now_resolved = (n.plugin != nullptr);
+            if (was_resolved != now_resolved) return false;  // resolved-since / lost slot
+            if (now_resolved) {
+                if (it->second.get() != n.plugin.get()) return false;  // re-instanced
+                // CX2: a cache miss would silently yield empty params / 0 latency.
+                if (prepared_plugin_meta_.find(n.id) == prepared_plugin_meta_.end()) {
+                    return false;
+                }
+            }
+        } else if (n.type == NodeType::Custom) {
+            if (n.custom_state_pending) return false;  // a pending blob needs a re-prepare
+            const auto it = old_cg.custom_instances.find(n.id);
+            if (it == old_cg.custom_instances.end()) return false;
+            if (it->second != n.custom_instance.get()) return false;  // re-instanced
+        }
+    }
+    return true;
+}
+
 // Shared preflight for prepare() and (2.2b) prepare_swap(): PURE validation over
 // the current nodes_/connections_/limits — the generated-graph limit checks plus
 // the audio-rate automation event-capacity gate. Mutates no live state, so
