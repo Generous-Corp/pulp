@@ -334,7 +334,21 @@ void DesignFrameView::set_active_frame(int index) {
     request_repaint();
 }
 
+void DesignFrameView::set_on_unregistered_custom_control(
+    std::function<void(const UnregisteredCustomControl&)> cb) {
+    on_unregistered_custom_ = std::move(cb);
+    // The constructor already built the initial frame's overlays before a caller
+    // could attach this callback, so replay any unregistered controls seen in the
+    // most recent build. A callback set right after construction still learns
+    // about them; thereafter it fires live from build_overlays on each rebuild.
+    if (on_unregistered_custom_)
+        for (const auto& miss : unregistered_custom_) on_unregistered_custom_(miss);
+}
+
 void DesignFrameView::build_overlays() {
+    // Rebuilt fresh each activation: the diagnostic reflects the active frame's
+    // current element set, not an accumulation across frame swaps.
+    unregistered_custom_.clear();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
         std::unique_ptr<View> widget;
@@ -403,6 +417,35 @@ void DesignFrameView::build_overlays() {
                 ctx.source_node_id = e.source_node_id;
                 ctx.default_value = e.value;
                 widget = it->second(ctx);
+                // If the factory-built control joined the value conduit, wire it
+                // into the frame's channel. Seed the element's value FIRST, then
+                // install the callbacks — so the seed can never re-emit (a frame
+                // swap would otherwise let a contract-violating control clobber the
+                // host param with its default). Matches the choice widgets'
+                // seed-then-wire order. A control that didn't opt in is still built
+                // and rendered — it just has no value channel.
+                if (auto* dc = dynamic_cast<DesignControl*>(widget.get())) {
+                    dc->set_control_value(e.value);
+                    dc->on_control_changed = [this, i](float v) {
+                        emit_element_changed(i, v);
+                    };
+                    dc->on_gesture_begin = [this, i]() { emit_gesture_begin(i); };
+                    dc->on_gesture_end = [this, i]() { emit_gesture_end(i); };
+                }
+            } else {
+                // No factory registered (or a null one): the element stays inert
+                // and the baked SVG still shows — rendering is unchanged. Record
+                // the id (de-duplicated, first-seen order) and, if a diagnostic
+                // callback is set, hand it the id + source node so a developer or
+                // a --validate check learns which controls were unwired.
+                UnregisteredCustomControl miss{e.factory_id, e.source_node_id};
+                const bool seen = std::any_of(
+                    unregistered_custom_.begin(), unregistered_custom_.end(),
+                    [&](const UnregisteredCustomControl& u) {
+                        return u.factory_id == miss.factory_id;
+                    });
+                if (!seen) unregistered_custom_.push_back(miss);
+                if (on_unregistered_custom_) on_unregistered_custom_(miss);
             }
         }
         if (widget) {
@@ -605,11 +648,17 @@ float DesignFrameView::element_value(int i) const {
             return -1.0f;  // text is not a normalized value
         case DesignFrameElement::Kind::momentary:
             return e.value;  // pressed/lit flag (0 or 1)
+        case DesignFrameElement::Kind::custom:
+            // A custom control that joined the value conduit reports its value;
+            // one that didn't has no normalized value (unchanged sentinel).
+            if (View* w = overlay_widget(i))
+                if (auto* dc = dynamic_cast<DesignControl*>(w))
+                    return dc->control_value();
+            return -1.0f;
         case DesignFrameElement::Kind::swap:
         case DesignFrameElement::Kind::action:
         case DesignFrameElement::Kind::value_label:
-        case DesignFrameElement::Kind::custom:
-            return -1.0f;  // buttons / labels / custom: no standard normalized value
+            return -1.0f;  // buttons / labels: no standard normalized value
     }
     return -1.0f;
 }
@@ -651,11 +700,20 @@ void DesignFrameView::set_element_value(int i, float v) {
             // Light/clear the key via the native overlay; no on_element_changed.
             e.value = (v > 0.5f) ? 1.0f : 0.0f;
             break;
+        case DesignFrameElement::Kind::custom:
+            // Silent host->view push to a custom control that joined the value
+            // conduit; a control that didn't is unchanged (the factory owns its
+            // own state). No on_element_changed echo, matching the other kinds.
+            if (View* w = overlay_widget(i))
+                if (auto* dc = dynamic_cast<DesignControl*>(w))
+                    dc->set_control_value(std::clamp(v, 0.0f, 1.0f));
+            request_repaint();  // guarantee the push reflects even if the control
+                                // doesn't self-invalidate (automation/preset recall)
+            return;
         case DesignFrameElement::Kind::swap:
         case DesignFrameElement::Kind::action:
         case DesignFrameElement::Kind::value_label:
-        case DesignFrameElement::Kind::custom:
-            return;  // buttons / labels / custom (factory owns its own state)
+            return;  // buttons / labels (no normalized value)
     }
     request_repaint();
 }

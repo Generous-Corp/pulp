@@ -25,6 +25,7 @@ declare global {
     function createModal(id: string, parentId: string): void;
     function createTextEditor(id: string, parentId: string): void;
     function createScrollView(id: string, parentId: string): void;
+    function createNativeView(id: string, parentId: string): void;
     function createImage(id: string, parentId: string): void;
     function createIcon(id: string, parentId: string): void;
     function createProgress(id: string, parentId: string): void;
@@ -294,6 +295,7 @@ export function createMockBridge(): MockBridge {
         'createKnob', 'createFader', 'createSpectrum', 'createWaveform', 'createCanvas',
         'createCheckbox', 'createToggle', 'createToggleButton', 'createCombo',
         'createListBox', 'createModal', 'createTextEditor', 'createScrollView',
+        'createNativeView',
         'createImage', 'createIcon', 'createProgress', 'createMeter', 'createXYPad',
         'createGrid',
         // Ink & Signal design-system widgets.

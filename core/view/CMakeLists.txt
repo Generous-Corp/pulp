@@ -404,6 +404,7 @@ target_sources(pulp-view-core PRIVATE
     src/screenshot_gpu.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp
+    src/native_view_host.cpp
     src/design_frame_view.cpp
     src/svg_fragment.cpp
     src/callout_box.cpp
@@ -553,6 +554,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_gallery.cpp
         src/design_handoff.cpp
         src/design_tweaks.cpp
+        src/design_knobs.cpp
         src/lock_to_source.cpp
         src/jsx_lock.cpp
         src/design_import_shortcuts.cpp
