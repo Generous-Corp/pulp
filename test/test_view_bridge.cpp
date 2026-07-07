@@ -8,12 +8,59 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <cstdlib>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 
 using namespace pulp;
 
 namespace {
+
+int set_env_var(const char* name, const char* value) {
+#if defined(_WIN32)
+    return _putenv_s(name, value);
+#else
+    return ::setenv(name, value, 1);
+#endif
+}
+
+int unset_env_var(const char* name) {
+#if defined(_WIN32)
+    return _putenv_s(name, "");
+#else
+    return ::unsetenv(name);
+#endif
+}
+
+class ScopedEnvVar {
+public:
+    explicit ScopedEnvVar(const char* name)
+        : name_(name) {
+        if (const char* value = std::getenv(name)) previous_ = value;
+    }
+
+    ~ScopedEnvVar() {
+        if (previous_) {
+            static_cast<void>(set_env_var(name_.c_str(), previous_->c_str()));
+        } else {
+            static_cast<void>(unset_env_var(name_.c_str()));
+        }
+    }
+
+    void set(const char* value) const {
+        REQUIRE(set_env_var(name_.c_str(), value) == 0);
+    }
+
+    void unset() const {
+        REQUIRE(unset_env_var(name_.c_str()) == 0);
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> previous_;
+};
 
 class StubProcessor : public format::Processor {
 public:
@@ -460,25 +507,19 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
 // opts in via PULP_DEV_HOT_RELOAD; default (unset) is OFF so a shipping plugin
 // never watches + reloads from disk inside a host.
 TEST_CASE("dev_editor_hot_reload_enabled honors PULP_DEV_HOT_RELOAD", "[format][view-bridge][issue-1-3]") {
-    const char* prev = std::getenv("PULP_DEV_HOT_RELOAD");
-    const std::string saved = prev ? prev : "";
-    const bool had = prev != nullptr;
+    ScopedEnvVar hot_reload("PULP_DEV_HOT_RELOAD");
 
-    ::unsetenv("PULP_DEV_HOT_RELOAD");
+    hot_reload.unset();
     CHECK_FALSE(format::dev_editor_hot_reload_enabled());     // default OFF
 
     for (const char* on : {"1", "true", "yes", "T", "Y"}) {
-        ::setenv("PULP_DEV_HOT_RELOAD", on, 1);
+        hot_reload.set(on);
         CHECK(format::dev_editor_hot_reload_enabled());
     }
     for (const char* off : {"0", "false", "no", ""}) {
-        ::setenv("PULP_DEV_HOT_RELOAD", off, 1);
+        hot_reload.set(off);
         CHECK_FALSE(format::dev_editor_hot_reload_enabled());
     }
-
-    // Restore the environment for other tests.
-    if (had) ::setenv("PULP_DEV_HOT_RELOAD", saved.c_str(), 1);
-    else ::unsetenv("PULP_DEV_HOT_RELOAD");
 }
 
 // ── Live editor reload (live-swap 1.9) ───────────────────────────────────────
