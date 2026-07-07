@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 #include <pulp/state/sequencer_state_channel.hpp>
 #include <pulp/view/view.hpp>
@@ -80,6 +81,9 @@ public:
     struct Cell { std::uint8_t lane; std::uint8_t step; };
     std::optional<Cell> cell_at(Point pos) const;
     Rect cell_rect(std::uint8_t lane, std::uint8_t step) const;
+    /// Root-of-column strip a playhead overlay occupies at `step` (all lanes),
+    /// matching paint()'s overlay geometry. Public for tests.
+    Rect playhead_column_rect(std::uint8_t step) const;
 
 private:
     int rebuild_all_visible();                  // full CellVisual rebuild for the shown pattern; returns count
@@ -101,6 +105,15 @@ private:
 
     // Precomputed visuals for the shown pattern (active-pattern relative).
     std::array<std::array<CellVisual, state::kStepCount>, state::kLaneCount> visible_cache_{};
+
+    // Per-pump dirty accounting for bounded invalidation. Reset at the top of
+    // pump(): rebuild_region() appends each recomputed visible cell to
+    // pump_dirty_cells_, and sets pump_full_ when it rebuilds every cell
+    // (pattern-length change). pump() then invalidates only those cell rects
+    // (plus the leaving/entering playhead columns) instead of the whole grid,
+    // escalating to a full repaint when pump_full_ or a resync occurred.
+    std::vector<Cell> pump_dirty_cells_;
+    bool pump_full_ = false;
 
     // Playhead overlay state (kept separate from cell visuals).
     std::uint8_t playhead_step_ = 0;

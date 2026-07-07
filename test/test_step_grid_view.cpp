@@ -2,13 +2,30 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/step_grid_view.hpp>
+#include <pulp/view/window_host.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <memory>
 
 using namespace pulp::view;
 using namespace pulp::state;
 
 namespace {
+
+// Minimal headless host so a hosted StepGridView's bounded request_repaint(Rect)
+// lands in an observable dirty region. The accumulation lives in the WindowHost
+// base class (see test_partial_invalidation.cpp for the core-API coverage).
+class TestWindowHost : public WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override {}
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+};
 
 StepCell on_cell(std::uint8_t vel) {
     StepCell c;
@@ -378,4 +395,122 @@ TEST_CASE("StepGridView paint draws enabled and disabled cells distinctly",
     }
     REQUIRE(saw_on);
     REQUIRE(saw_off);
+}
+
+// ── Bounded invalidation (hosted) ─────────────────────────────────────────────
+// A live grid drives a repaint every tick from the sequencer echo/playhead
+// stream. With bounded invalidation it dirties only the changed cells and the
+// leaving/entering playhead columns, so the static grid chrome is not
+// re-composited each tick. These pin the mapped root rects a host would clip to.
+
+namespace {
+// Nest the grid at an offset inside a root so the tests also exercise the
+// local->root offset mapping (grid origin folds into the dirty rect).
+StepGridView* host_grid(std::unique_ptr<View>& root, TestWindowHost& host,
+                        SequencerStateChannel& ch, Rect grid_bounds) {
+    root = std::make_unique<View>();
+    root->set_bounds({0, 0, 640, 480});
+    auto grid_o = std::make_unique<StepGridView>();
+    grid_o->set_bounds(grid_bounds);
+    StepGridView* v = grid_o.get();
+    root->add_child(std::move(grid_o));
+    root->set_window_host(&host);
+    v->set_channel(&ch);
+    return v;
+}
+}  // namespace
+
+TEST_CASE("StepGridView cell echo invalidates only that cell's mapped rect",
+          "[view][sequencer][partial-render]") {
+    SequencerStateChannel ch;
+    TestWindowHost host;
+    std::unique_ptr<View> root;
+    const Rect gb{40, 30, 320, 96};
+    StepGridView* v = host_grid(root, host, ch, gb);
+    v->pump();                       // initial resync -> full (expected)
+    host.clear_pending_dirty();
+
+    ch.audio_try_publish_applied(cell_echo(1, 0, 3, 7, on_cell(90)));
+    v->pump();
+
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    const Rect cr = v->cell_rect(3, 7);
+    const Rect d = host.pending_dirty_bounds();
+    REQUIRE(d.x == cr.x + gb.x);
+    REQUIRE(d.y == cr.y + gb.y);
+    REQUIRE(d.width == cr.width);
+    REQUIRE(d.height == cr.height);
+    // Sanity: a single cell is a small fraction of the whole grid.
+    REQUIRE(d.width * d.height < gb.width * gb.height * 0.1f);
+}
+
+TEST_CASE("StepGridView playhead advance invalidates only the two columns",
+          "[view][sequencer][partial-render]") {
+    SequencerStateChannel ch;
+    TestWindowHost host;
+    std::unique_ptr<View> root;
+    const Rect gb{40, 30, 320, 96};
+    StepGridView* v = host_grid(root, host, ch, gb);
+    v->pump();
+
+    ch.audio_publish_playhead(playhead(0, 5, true));
+    v->pump();                       // becomes visible at step 5
+    host.clear_pending_dirty();
+
+    ch.audio_publish_playhead(playhead(0, 6, true));
+    v->pump();                       // 5 -> 6: leaving column 5 + entering column 6
+
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    const Rect c5 = v->playhead_column_rect(5);
+    const Rect c6 = v->playhead_column_rect(6);
+    const float ux = std::min(c5.x, c6.x);
+    const float uy = std::min(c5.y, c6.y);
+    const float ur = std::max(c5.x + c5.width, c6.x + c6.width);
+    const float ub = std::max(c5.y + c5.height, c6.y + c6.height);
+    const Rect d = host.pending_dirty_bounds();
+    REQUIRE(d.x == ux + gb.x);
+    REQUIRE(d.y == uy + gb.y);
+    REQUIRE(d.width == ur - ux);
+    REQUIRE(d.height == ub - uy);
+    // Two adjacent columns are still a small slice of the full grid width.
+    REQUIRE(d.width < gb.width * 0.2f);
+}
+
+TEST_CASE("StepGridView pattern-length change escalates to a full repaint",
+          "[view][sequencer][partial-render]") {
+    SequencerStateChannel ch;
+    TestWindowHost host;
+    std::unique_ptr<View> root;
+    StepGridView* v = host_grid(root, host, ch, Rect{40, 30, 320, 96});
+    v->pump();
+    host.clear_pending_dirty();
+
+    AppliedEdit e;
+    e.engine_sequence = 1;
+    e.kind = AppliedEditKind::PatternLengthChanged;
+    e.dirty = {DirtyKind::FullSnapshot, 0, 0, 0, 0};
+    e.payload.pattern_length = SetPatternLengthEdit{0, 8};  // shown pattern shrinks
+    ch.audio_try_publish_applied(e);
+    v->pump();
+
+    REQUIRE(host.pending_repaint_is_full());  // every cell's muted flag may flip
+}
+
+TEST_CASE("StepGridView resync escalates to a full repaint",
+          "[view][sequencer][partial-render]") {
+    SequencerStateChannel ch;
+    TestWindowHost host;
+    std::unique_ptr<View> root;
+    StepGridView* v = host_grid(root, host, ch, Rect{40, 30, 320, 96});
+    v->pump();
+    host.clear_pending_dirty();
+
+    Snapshot s;
+    s.epoch = 2;
+    s.engine_sequence = 9;
+    s.patterns[0].lanes[1][1] = on_cell(80);
+    publish_snapshot(ch, s);
+    v->pump();
+
+    REQUIRE(host.pending_repaint_is_full());
 }
