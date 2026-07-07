@@ -10,7 +10,7 @@
 # Inputs (set via -D):
 #   DEMO_BIN          : path to the built pulp-threejs-native-demo binary
 #   CAPTURE_PATH      : path where the cube demo should write the PNG
-#   EXPECTED_VERSION  : expected V8 runtime version (e.g. 15.1.27); optional
+#   EXPECTED_VERSION  : expected V8 runtime version (e.g. 15.2.24); optional
 #   EXPECTED_KIND     : expected provider kind (default: v8builder)
 
 if(NOT DEFINED DEMO_BIN)

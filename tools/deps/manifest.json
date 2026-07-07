@@ -136,13 +136,13 @@
       "name": "Dawn",
       "category": "render",
       "license": "BSD-3-Clause",
-      "version": "chrome/m150 deps (bundled in Skia toolchain)",
+      "version": "chrome/m151 deps (bundled in Skia toolchain)",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://dawn.googlesource.com/dawn",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Bundled through the Skia chrome/m150 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file on chrome/m150.",
+      "notes": "Bundled through the Skia chrome/m151 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file on chrome/m151; the bundled build reports Dawn SHA1 7807dcbdca245e462617c04d544706394db245ba (include/dawn/dawn_version.h).",
       "source_files": [
         "CMakeLists.txt",
         "tools/build-skia.sh",
@@ -901,41 +901,41 @@
       "name": "Skia",
       "category": "canvas",
       "license": "BSD-3-Clause",
-      "version": "chrome/m150",
+      "version": "chrome/m151",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://skia.googlesource.com/skia.git",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m150 release ships all platform slices including linux-arm64 (the linux-arm64 slice was republished after an initial m150 gap that hard-failed release-cli.yml's linux-arm64 leg under PULP_REQUIRE_GPU_FOR_SDK and stalled CLI/SDK publishing). Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m151 release ships all platform slices including linux-arm64. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "determinism": {
-        "skia_branch": "chrome/m150",
+        "skia_branch": "chrome/m151",
         "skia_builder_fork": "https://github.com/danielraffel/skia-builder",
         "skia_python_smoke_version": "144.0.post2",
         "release_assets": {
           "ios-device-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-ios-device-arm64-gpu-release.zip",
-            "sha256": "0b0a0dbb0224e94ea61d0f9d0107afb7ae063eae3ddb3ea0590bcd0f05fd0c44"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-ios-device-arm64-gpu-release.zip",
+            "sha256": "d82341a075cf63ce70c659828017a928b3b5cc41bed74795dde61edce9c8f29b"
           },
           "ios-simulator-arm64-x86_64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
-            "sha256": "86a60cf963b41da8d30a46e98bb69d24a8bc7f102d8c0908087c9a8be3aa6a75"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
+            "sha256": "2c98b79b4f4c20282ce665ba79bb040124ee6424f16b087c2c6c01c1acb177a2"
           },
           "linux-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-linux-arm64-gpu-release.zip",
-            "sha256": "4420a7a0dd040d6e4f07332aea3966d5d7b35cf23b02cb4501b5a877ca305aac"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-linux-arm64-gpu-release.zip",
+            "sha256": "2420eed074e041384973338f9d8a41364b9ff444ffa0eb1857cb1ebdbd8781e9"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-linux-x64-gpu-release.zip",
-            "sha256": "bb4d3a868a72560b25e467952bb7792d4af2bc9dcab1f77afca208b7b1f0d07b"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-linux-x64-gpu-release.zip",
+            "sha256": "68315e29a8fd3848ab05225b18355b5fe8c85f6e7df3575087ff02d8ce17a56a"
           },
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-mac-arm64-gpu-release.zip",
-            "sha256": "13b0e9818c3b05db661af85cb1e2bf2ef10e30d468b81351dd90295237d17734"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-mac-arm64-gpu-release.zip",
+            "sha256": "229a0822c1bd9103abbf51eb7baf5fd22141ed7b023199fd9417d8f6d13b0b0e"
           },
           "mac-universal": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m150/skia-build-mac-universal-gpu-release.zip",
-            "sha256": "f27908b847a6a130828073f65a02d052bb1672c999bc9d26384348719c315035"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "2f8caa1cb805b8af6cd6a712d59a8b845f6bf981a35063608de7be8e955bc302"
           }
         },
         "rebuild_triggers": [
@@ -994,51 +994,51 @@
       "name": "V8",
       "category": "view",
       "license": "BSD-3-Clause",
-      "version": "v8-15.1.27",
+      "version": "v8-15.2.24-lkgr-97440bd4f523",
       "external_names": ["v8-build"],
       "source_kind": "prebuilt-toolchain",
       "repository": "https://chromium.googlesource.com/v8/v8.git",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. Each release pairs V8 against a specific Skia/Dawn revision; re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
+      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. Each release records the Skia/Dawn revision it was seal+ODR validated against in paired_skia/paired_dawn; because the seal exports only v8::/cppgc:: and keeps ICU/zlib/Abseil internal, V8 coexists with a different pinned Skia without ODR clashes. v8-15.2.24 was validated against Skia chrome/m150 (paired_skia c0e2b966.../paired_dawn 3f761495...); Pulp pins Skia chrome/m151, one milestone ahead — the provider-identity/ODR gate (examples/threejs-native-demo/provider_identity_test.cmake) proves coexistence at the pinned Skia. Re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
       "determinism": {
         "v8_builder_fork": "https://github.com/danielraffel/v8-builder",
-        "built_revision": "535361f082f89df6b3ceecea73b3ba7503bc83ef",
-        "paired_skia": "4fdb859c8da740f1c1d94183637ff0c175329bc2",
-        "paired_dawn": "075626b4b324101b06cd309c4140672588a5adf2",
+        "built_revision": "97440bd4f523ca4d2af200556160023b466658a1",
+        "paired_skia": "c0e2b9667d91d8e5d76ce2ac2fca922edf2821bb",
+        "paired_dawn": "3f7614958732bcbddb339b639aa521e0c40ee645",
         "release_assets": {
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-mac-arm64-15.1.27.zip",
-            "sha256": "458fc35de48613c43148077a5057515f54cd47e26ad3b29832e8207a34e5f939"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-mac-arm64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "2d8ba8f41c57628c8b11822433433cf521abd03af1f125c40164872d07fb0247"
           },
           "mac-x86_64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-mac-x86_64-15.1.27.zip",
-            "sha256": "159e244f47c9c3e51c6b55c2398031fbc67298e32ab367b080d68dbcbd5d6fe4"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-mac-x86_64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "49d87422b0e8b12ea501613484ea9b683b8af7c0af8019a452e085f02728ce64"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-linux-x64-15.1.27.zip",
-            "sha256": "3f702331e0c62c18b69bce2d98dab0e441d057eb0d00f850d9011195ac344338"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-linux-x64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "5f4cefd1ba7c20523f723e2182c185b35631f563cec5cbb4141b1697fcc12381"
           },
           "linux-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-linux-arm64-15.1.27.zip",
-            "sha256": "4a8b639ec5d448a44d15982f9556c9a29163d9f8935d4dfca1cf845288f8f8bf"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-linux-arm64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "c62a7efec0e27437b3bbe4031c4e8f54b02ab92f7c37cc29a8376d6b4acfa8b0"
           },
           "win-x64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-win-x64-15.1.27.zip",
-            "sha256": "4d7efebe50f154d79ab2790762db34aa09e81300b1ca25f32d65077d54470b90"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-win-x64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "aca2383443170d63f6613ca616c7f21eb93867eba20aae7672dfcd58fa2cb47d"
           },
           "win-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-win-arm64-15.1.27.zip",
-            "sha256": "fe6014f6de58abcdd1266717f4dd361167e306d203f10fbe3e33f850f5f1f0b2"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-win-arm64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "dad674d9a446c2f7850521ec0e8064a9e3bce68b671f95b9596e6ce1fca1d5a1"
           },
           "android-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-android-arm64-15.1.27.zip",
-            "sha256": "8f1f6ff31b13567bf24ff0559298ae7706fde4da5fb82345247730ecdd732e17"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-android-arm64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "b9f2676af946b964aedbfa31bf434b9e4f50544c982eba9f4b821c7f336aa3fa"
           },
           "ios-simulator-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.1.27/v8-ios-simulator-arm64-15.1.27.zip",
-            "sha256": "b343409e6ca4f2d33ff4929a7578bc5ce25291aa367ed8b041a3c618d2562779",
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-ios-simulator-arm64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "f9f653022712680339df33a8438c200ba30cfceb2699ee12e276fc440a1818d4",
             "library": false
           }
         }

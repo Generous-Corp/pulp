@@ -4,18 +4,18 @@ These constants mirror ``tools/deps/manifest.json`` so tests and tooling can
 fail early when the deterministic rendering stack drifts without an explicit
 manifest update.
 
-Skia is pinned at chrome/m150 via the danielraffel/skia-builder fork
+Skia is pinned at chrome/m151 via the danielraffel/skia-builder fork
 (see manifest.json determinism.skia_builder_fork). The fork tracks
 upstream olilarkin's tag pattern and adds iOS/visionOS/mac-x86_64
 slices upstream does not. ``SKIA_COMMIT`` and ``SKIA_BUILDER_REF`` are
-intentionally omitted on the m150 manifest entry — the fork tracks
+intentionally omitted on the m151 manifest entry — the fork tracks
 branch HEAD rather than a specific commit, and the test fixtures
 match the structured fields actually present in manifest.json.
 """
 
 from __future__ import annotations
 
-SKIA_BRANCH = "chrome/m150"
+SKIA_BRANCH = "chrome/m151"
 SKIA_BUILDER_FORK = "https://github.com/danielraffel/skia-builder"
 SKIA_PYTHON_SMOKE_VERSION = "144.0.post2"
 
@@ -29,19 +29,19 @@ FONT_SHA256 = {
 }
 
 RELEASE_ASSET_SHA256 = {
-    # linux-arm64 was backfilled onto the chrome/m150 release after the fork's
-    # build lane (skia-builder 634672f) was wired into create-release; must stay
-    # in lockstep with manifest.json (guarded by test_skia_linux_arm64_asset.py).
+    # The chrome/m151 release ships linux-arm64 alongside the other slices; must
+    # stay in lockstep with manifest.json (guarded by
+    # test_skia_linux_arm64_asset.py).
     "linux-arm64": (
-        "4420a7a0dd040d6e4f07332aea3966d5d7b35cf23b02cb4501b5a877ca305aac"
+        "2420eed074e041384973338f9d8a41364b9ff444ffa0eb1857cb1ebdbd8781e9"
     ),
     "linux-x64": (
-        "bb4d3a868a72560b25e467952bb7792d4af2bc9dcab1f77afca208b7b1f0d07b"
+        "68315e29a8fd3848ab05225b18355b5fe8c85f6e7df3575087ff02d8ce17a56a"
     ),
     "mac-arm64": (
-        "13b0e9818c3b05db661af85cb1e2bf2ef10e30d468b81351dd90295237d17734"
+        "229a0822c1bd9103abbf51eb7baf5fd22141ed7b023199fd9417d8f6d13b0b0e"
     ),
     "mac-universal": (
-        "f27908b847a6a130828073f65a02d052bb1672c999bc9d26384348719c315035"
+        "2f8caa1cb805b8af6cd6a712d59a8b845f6bf981a35063608de7be8e955bc302"
     ),
 }

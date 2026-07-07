@@ -64,6 +64,7 @@ HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
+MANIFEST_MIRRORS="$ROOT/tools/scripts/check_manifest_mirrors.py"
 IMPORT_PROV="$ROOT/tools/scripts/check_import_provenance.py"
 CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
 CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
@@ -182,6 +183,23 @@ if [ -f "$DEPS_AUDIT" ]; then
         fail=1
     else
         echo "  deps-audit: ok" >&2
+    fi
+fi
+
+# ── 7b. manifest-mirror drift (tooling-consumed pin mirrors) ────────────────
+# Global invariant — the Skia/V8 pin data is hand-mirrored into files that
+# tooling actually trusts: external/skia-build/VERSION.md's digest table is a
+# fetch cache-skip oracle, and DEPENDENCIES.md's version cells are the license
+# inventory of record. A hand-sync typo there is a silent behavioural bug, so
+# assert both match tools/deps/manifest.json. Sub-second.
+if [ -f "$MANIFEST_MIRRORS" ]; then
+    echo "" >&2
+    echo "▸ manifest-mirror drift (VERSION.md digests + DEPENDENCIES.md versions)" >&2
+    if ! "$PYTHON" "$MANIFEST_MIRRORS" >/dev/null 2>&1; then
+        echo "  manifest-mirrors: drift detected — run \`python3 tools/scripts/check_manifest_mirrors.py\` for details." >&2
+        fail=1
+    else
+        echo "  manifest-mirrors: ok" >&2
     fi
 fi
 

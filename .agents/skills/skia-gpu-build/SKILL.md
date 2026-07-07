@@ -55,9 +55,9 @@ consistent. Don't mix this worktree's headers with another's libs.
 
 ## Building from source (only when no cached libs anywhere)
 
-`tools/build-skia.sh` builds the chrome/m150 Skia+Dawn from source — slow
+`tools/build-skia.sh` builds the chrome/m151 Skia+Dawn from source — slow
 (tens of minutes). Prefer the release zip from
-`danielraffel/skia-builder` (chrome/m150, see `external/skia-build/VERSION.md`)
+`danielraffel/skia-builder` (chrome/m151, see `external/skia-build/VERSION.md`)
 or reusing a sibling checkout's `build/`.
 
 ## Verify it's REALLY a GPU build (necessary AND sufficient)

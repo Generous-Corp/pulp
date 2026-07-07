@@ -19,11 +19,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PULP_ROOT="$(dirname "$SCRIPT_DIR")"
 SKIA_BUILDER_DIR="$PULP_ROOT/external/skia-builder"
 SKIA_BUILD_OUTPUT="$PULP_ROOT/external/skia-build"
-# Default to the fork's chrome/m150 branch HEAD. Override with SKIA_BUILDER_REF
+# Default to the fork's chrome/m151 branch HEAD. Override with SKIA_BUILDER_REF
 # to pin to a specific commit (omit to track the fork branch head).
 SKIA_BUILDER_URL="${SKIA_BUILDER_URL:-https://github.com/danielraffel/skia-builder.git}"
 SKIA_BUILDER_REF="${SKIA_BUILDER_REF:-}"
-SKIA_BRANCH="${SKIA_BRANCH:-chrome/m150}"
+SKIA_BRANCH="${SKIA_BRANCH:-chrome/m151}"
 
 PLATFORM="${1:-mac}"
 

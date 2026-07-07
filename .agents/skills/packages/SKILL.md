@@ -185,7 +185,7 @@ Same rule for Skia *modules* (e.g. `skottie`/`sksg`, linked only when the opt-in
 prebuilt under the same Skia BSD-3-Clause entry — clarify their use in the Skia
 row of `DEPENDENCIES.md`, do **not** add a separate dependency/NOTICE entry.
 
-The Skia toolchain itself is pinned at `chrome/m149` via the
+The Skia toolchain itself is pinned at `chrome/m151` via the
 `danielraffel/skia-builder` fork (see `tools/deps/manifest.json` →
 `determinism.skia_builder_fork`). The fork tracks upstream
 `olilarkin/skia-builder`'s tag pattern and additionally publishes iOS
@@ -217,7 +217,7 @@ Apple Silicon dev machines) only needs `arm64`.
 
 The **V8** toolchain follows the same prebuilt-pin pattern (added 2026-06).
 It is the optional JS engine backend (`PULP_JS_ENGINE=v8`), a sealed
-embeddable `libv8` pinned at tag `v8-15.1.27` via the
+embeddable `libv8` pinned at tag `v8-15.2.24-lkgr-97440bd4f523` via the
 `danielraffel/v8-builder` fork (`tools/deps/manifest.json` → V8 entry,
 `determinism.release_assets` per-platform URL + sha256). Fetched by
 `tools/scripts/fetch_v8_for_release.py` into `external/v8-build/<platform>/`
