@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <functional>
@@ -182,6 +183,54 @@ TEST_CASE("a full mark this frame is sticky against a later bounded mark",
     meter->request_repaint(meter->local_bounds());    // bounded, but too late
 
     REQUIRE(host.pending_repaint_is_full());  // never shrinks a full repaint
+}
+
+TEST_CASE("a scrolled ScrollView ancestor escalates a child to full repaint",
+          "[view][partial-render]") {
+    // ScrollView::paint_all translates children by (-scroll_x, -scroll_y), so a
+    // scrolled sub-view no longer sits at a plain bounds offset. The bounded
+    // path must escalate to full rather than target the unscrolled root rect.
+    TestWindowHost host;
+    auto scroll = std::make_unique<ScrollView>();
+    scroll->set_bounds({0, 0, 400, 300});
+    scroll->set_content_size({400, 1000});  // taller than viewport → scrollable
+    auto meter_o = std::make_unique<View>();
+    meter_o->set_bounds({10, 20, 30, 120});
+    View* meter = meter_o.get();
+    scroll->add_child(std::move(meter_o));
+    scroll->set_window_host(&host);
+
+    // Unscrolled: the plain offset holds, so a bounded mark stays bounded.
+    host.clear_pending_dirty();
+    meter->request_repaint(meter->local_bounds());
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+
+    // Scroll down; now the child's painted position is offset by the scroll.
+    scroll->set_scroll(0.0f, 40.0f);
+    REQUIRE(scroll->scroll_y() == 40.0f);
+    REQUIRE(scroll->applies_child_paint_offset());
+
+    host.clear_pending_dirty();
+    meter->request_repaint(meter->local_bounds());
+    REQUIRE(host.pending_repaint_is_full());  // escalated: never the wrong rect
+}
+
+TEST_CASE("a pixel-spreading filter on an ancestor escalates to full repaint",
+          "[view][partial-render]") {
+    // filter: blur re-samples neighbors, so a child's changed pixels spread
+    // past its mapped box. Bounded invalidation must escalate to full to avoid
+    // leaving a stale blurred halo around the updated region.
+    TestWindowHost host;
+    View* meter = nullptr;
+    auto root = make_root_with(meter, {0, 0, 400, 300}, {10, 20, 30, 120});
+    root->set_filter_blur(8.0f);
+    root->set_window_host(&host);
+    host.clear_pending_dirty();
+
+    REQUIRE(root->has_filter_effect());
+    meter->request_repaint(meter->local_bounds());
+
+    REQUIRE(host.pending_repaint_is_full());
 }
 
 TEST_CASE("bounded request_repaint with no host attached is a safe no-op",
