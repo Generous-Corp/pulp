@@ -107,6 +107,22 @@ without opening a window.
   live window.
 - **First GPU link is slow-ish** (~45s here for the view lib + Skia/Dawn link),
   but subsequent incremental builds are fast.
+- **The `external/skia-build/build` symlink loop → Shipyard tree-drift.** This
+  path is materialized per-machine (a symlink into the shared
+  `~/.cache/pulp/skia-build` cache) and is **untracked + `.gitignore`d as of PR
+  #5588** (`4cd76c0f5`). Before that fix it was *tracked* with a machine-specific
+  absolute target that formed a two-way self-referential loop across worktrees;
+  at CMake configure, `PULP_SKIA_AUTOFETCH` deletes the looped/dangling symlink to
+  repopulate, which `shipyard run/pr/ship` sees as `working tree changed during
+  shipyard run (stage=configure)` / `D external/skia-build/build` and fails
+  validation — so the local macOS lane never posts its required `macos` status and
+  the PR stays BLOCKED. Symptoms if you still hit it on a **pre-#5588 checkout**
+  (the stale tracked symlink lingers until you pull main + let autofetch
+  re-materialize): repoint the PRIMARY checkout's `external/skia-build/build` at a
+  real cache — `ln -sfn ~/.cache/pulp/skia-build/build external/skia-build/build` —
+  every worktree's symlink chains through the primary, so that one fix resolves all
+  of them. `--allow-tree-drift` exists only on `shipyard run` (not `pr`/`ship`), so
+  fixing the symlink is the durable answer, not suppressing the guard.
 
 ## GPU bundles MUST be relocatable (the libwgpu_native.dylib rpath footgun)
 
