@@ -236,6 +236,22 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
 
+### Package command CMake generation
+
+`pulp add` can now generate CMake for source-backed FetchContent packages, not
+only header-only packages or upstream-exported targets. The registry's
+`cmake.sources` field means "compile these fetched source files into the
+declared target." Keep that behavior centralized in
+`package_commands_util.cpp` so guarded and unguarded blocks stay identical
+except for their surrounding `if(...)` condition.
+
+When adding a new generated-target package shape, update all four surfaces in
+one PR: `tools/packages/registry-schema.json`, `package_registry.{hpp,cpp}`,
+the CMake block generation helpers, and `test/test_cli_package_commands.cpp`.
+`mts-esp` is the reference source-backed case: generated static target,
+position-independent code, include dir rooted at the fetched source, and
+`${CMAKE_DL_LIBS}` linked when available.
+
 ### `pulp dev --hot-dsp` — live DSP hot-swap dev loop
 
 `pulp dev --hot-dsp` (cmd_dev.cpp) is a watch-loop MODE flag, not a new command.

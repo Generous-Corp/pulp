@@ -1,9 +1,15 @@
 #include <pulp/state/state_tree_sync.hpp>
+
+#include <algorithm>
 #include <cstring>
+#include <limits>
+#include <map>
 
 namespace pulp::state {
 
 namespace {
+
+constexpr size_t kMaxSyncSequenceItems = std::numeric_limits<uint16_t>::max();
 
 // Compute the dot-separated child-index path from `root` to `node`.
 // Returns "" when node == root. Walks parent pointers leaf→root, so the
@@ -60,6 +66,149 @@ StateTree* resolve_path(StateTree& root, const std::string& path) {
         pos = dot + 1;
     }
     return cur;
+}
+
+void append_u16(std::vector<uint8_t>& buf, uint16_t value) {
+    buf.push_back(static_cast<uint8_t>(value & 0xFF));
+    buf.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+}
+
+bool read_u16(const uint8_t* data, size_t size, size_t& pos, uint16_t& value) {
+    if (pos + 2 > size) return false;
+    value = static_cast<uint16_t>(data[pos] | (data[pos + 1] << 8));
+    pos += 2;
+    return true;
+}
+
+void append_string(std::vector<uint8_t>& buf, const std::string& value) {
+    auto len = static_cast<uint16_t>(std::min(value.size(), kMaxSyncSequenceItems));
+    append_u16(buf, len);
+    buf.insert(buf.end(), value.begin(), value.begin() + len);
+}
+
+bool read_string(const uint8_t* data, size_t size, size_t& pos, std::string& value) {
+    uint16_t len = 0;
+    if (!read_u16(data, size, pos, len)) return false;
+    if (pos + len > size) return false;
+    value.assign(reinterpret_cast<const char*>(data + pos), len);
+    pos += len;
+    return true;
+}
+
+void append_property_value(std::vector<uint8_t>& buf, const PropertyValue& value) {
+    if (auto* str = std::get_if<std::string>(&value)) {
+        buf.push_back(1);
+        append_string(buf, *str);
+    } else if (auto* i = std::get_if<int64_t>(&value)) {
+        buf.push_back(2);
+        auto bits = static_cast<uint64_t>(*i);
+        for (int b = 0; b < 8; ++b)
+            buf.push_back(static_cast<uint8_t>((bits >> (b * 8)) & 0xFF));
+    } else if (auto* f = std::get_if<double>(&value)) {
+        buf.push_back(3);
+        uint8_t bytes[8];
+        std::memcpy(bytes, f, 8);
+        buf.insert(buf.end(), bytes, bytes + 8);
+    } else if (auto* b = std::get_if<bool>(&value)) {
+        buf.push_back(4);
+        buf.push_back(*b ? 1 : 0);
+    } else if (const auto* array = get_property_array(value)) {
+        buf.push_back(5);
+        auto count = static_cast<uint16_t>(std::min(array->values.size(), kMaxSyncSequenceItems));
+        append_u16(buf, count);
+        for (uint16_t i = 0; i < count; ++i)
+            append_property_value(buf, array->values[i]);
+    } else if (const auto* object = get_property_object(value)) {
+        buf.push_back(6);
+        auto count = static_cast<uint16_t>(std::min(object->values.size(), kMaxSyncSequenceItems));
+        append_u16(buf, count);
+        uint16_t written = 0;
+        for (const auto& [key, member] : object->values) {
+            if (written++ >= count) break;
+            append_string(buf, key);
+            append_property_value(buf, member);
+        }
+    } else {
+        buf.push_back(0);
+    }
+}
+
+bool read_property_value(const uint8_t* data, size_t size, size_t& pos, PropertyValue& value) {
+    if (pos >= size) return false;
+    uint8_t val_type = data[pos++];
+    if (val_type == 0) {
+        value = PropertyValue{};
+        return true;
+    }
+    if (val_type == 1) {
+        std::string s;
+        if (!read_string(data, size, pos, s)) return false;
+        value = std::move(s);
+        return true;
+    }
+    if (val_type == 2) {
+        if (pos + 8 > size) return false;
+        uint64_t bits = 0;
+        for (int b = 0; b < 8; ++b)
+            bits |= static_cast<uint64_t>(data[pos++]) << (b * 8);
+        value = static_cast<int64_t>(bits);
+        return true;
+    }
+    if (val_type == 3) {
+        if (pos + 8 > size) return false;
+        double v;
+        std::memcpy(&v, data + pos, 8);
+        pos += 8;
+        value = v;
+        return true;
+    }
+    if (val_type == 4) {
+        if (pos >= size) return false;
+        value = data[pos++] != 0;
+        return true;
+    }
+    if (val_type == 5) {
+        uint16_t count = 0;
+        if (!read_u16(data, size, pos, count)) return false;
+        std::vector<PropertyValue> values;
+        values.reserve(count);
+        for (uint16_t i = 0; i < count; ++i) {
+            PropertyValue element;
+            if (!read_property_value(data, size, pos, element)) return false;
+            values.push_back(std::move(element));
+        }
+        value = make_property_array(std::move(values));
+        return true;
+    }
+    if (val_type == 6) {
+        uint16_t count = 0;
+        if (!read_u16(data, size, pos, count)) return false;
+        std::map<std::string, PropertyValue, std::less<>> values;
+        for (uint16_t i = 0; i < count; ++i) {
+            std::string key;
+            PropertyValue member;
+            if (!read_string(data, size, pos, key)) return false;
+            if (!read_property_value(data, size, pos, member)) return false;
+            values.emplace(std::move(key), std::move(member));
+        }
+        value = make_property_object(std::move(values));
+        return true;
+    }
+
+    // Unknown future value tags cannot be skipped safely without a length field.
+    // Reject the delta rather than applying a misleading null value.
+    return false;
+}
+
+bool is_valid_delta_type(SyncDeltaType type) {
+    switch (type) {
+        case SyncDeltaType::PropertySet:
+        case SyncDeltaType::PropertyRemove:
+        case SyncDeltaType::ChildAdd:
+        case SyncDeltaType::ChildRemove:
+            return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -179,51 +328,17 @@ std::vector<SyncDelta> StateTreeSynchroniser::take_deltas() {
 std::vector<uint8_t> StateTreeSynchroniser::encode(const std::vector<SyncDelta>& deltas) {
     std::vector<uint8_t> buf;
 
-    // Simple encoding: count + per-delta [type, path_len, path, key_len, key, value_type, value_data]
-    uint32_t count = static_cast<uint32_t>(deltas.size());
-    buf.push_back(count & 0xFF);
-    buf.push_back((count >> 8) & 0xFF);
+    // Encoding: count + per-delta [type, path, key, child_index, recursive value].
+    uint16_t count = static_cast<uint16_t>(std::min(deltas.size(), kMaxSyncSequenceItems));
+    append_u16(buf, count);
 
-    for (auto& d : deltas) {
+    for (uint16_t i = 0; i < count; ++i) {
+        const auto& d = deltas[i];
         buf.push_back(static_cast<uint8_t>(d.type));
-
-        // Path
-        uint16_t path_len = static_cast<uint16_t>(d.path.size());
-        buf.push_back(path_len & 0xFF);
-        buf.push_back((path_len >> 8) & 0xFF);
-        buf.insert(buf.end(), d.path.begin(), d.path.end());
-
-        // Key
-        uint16_t key_len = static_cast<uint16_t>(d.key.size());
-        buf.push_back(key_len & 0xFF);
-        buf.push_back((key_len >> 8) & 0xFF);
-        buf.insert(buf.end(), d.key.begin(), d.key.end());
-
-        // Child index
+        append_string(buf, d.path);
+        append_string(buf, d.key);
         buf.push_back(static_cast<uint8_t>(d.child_index & 0xFF));
-
-        // Value type + data
-        if (auto* s = std::get_if<std::string>(&d.value)) {
-            buf.push_back(1);
-            uint16_t len = static_cast<uint16_t>(s->size());
-            buf.push_back(len & 0xFF);
-            buf.push_back((len >> 8) & 0xFF);
-            buf.insert(buf.end(), s->begin(), s->end());
-        } else if (auto* i = std::get_if<int64_t>(&d.value)) {
-            buf.push_back(2);
-            for (int b = 0; b < 8; ++b)
-                buf.push_back(static_cast<uint8_t>((*i >> (b * 8)) & 0xFF));
-        } else if (auto* f = std::get_if<double>(&d.value)) {
-            buf.push_back(3);
-            uint8_t bytes[8];
-            std::memcpy(bytes, f, 8);
-            buf.insert(buf.end(), bytes, bytes + 8);
-        } else if (auto* b = std::get_if<bool>(&d.value)) {
-            buf.push_back(4);
-            buf.push_back(*b ? 1 : 0);
-        } else {
-            buf.push_back(0);  // null/monostate
-        }
+        append_property_value(buf, d.value);
     }
 
     return buf;
@@ -231,56 +346,25 @@ std::vector<uint8_t> StateTreeSynchroniser::encode(const std::vector<SyncDelta>&
 
 std::vector<SyncDelta> StateTreeSynchroniser::decode(const uint8_t* data, size_t size) {
     std::vector<SyncDelta> deltas;
-    if (size < 2) return deltas;
+    if (size < 2 || data == nullptr) return deltas;
 
     size_t pos = 0;
-    uint32_t count = data[pos] | (data[pos + 1] << 8);
-    pos += 2;
+    uint16_t count = 0;
+    if (!read_u16(data, size, pos, count)) return deltas;
 
-    for (uint32_t i = 0; i < count && pos < size; ++i) {
+    for (uint16_t i = 0; i < count && pos < size; ++i) {
         SyncDelta d;
         if (pos >= size) break;
         d.type = static_cast<SyncDeltaType>(data[pos++]);
+        if (!is_valid_delta_type(d.type)) break;
 
-        // Path
-        if (pos + 2 > size) break;
-        uint16_t path_len = data[pos] | (data[pos + 1] << 8); pos += 2;
-        if (pos + path_len > size) break;
-        d.path = std::string(reinterpret_cast<const char*>(data + pos), path_len); pos += path_len;
+        if (!read_string(data, size, pos, d.path)) break;
+        if (!read_string(data, size, pos, d.key)) break;
 
-        // Key
-        if (pos + 2 > size) break;
-        uint16_t key_len = data[pos] | (data[pos + 1] << 8); pos += 2;
-        if (pos + key_len > size) break;
-        d.key = std::string(reinterpret_cast<const char*>(data + pos), key_len); pos += key_len;
-
-        // Child index
         if (pos >= size) break;
         d.child_index = static_cast<int8_t>(data[pos++]);
 
-        // Value
-        if (pos >= size) break;
-        uint8_t val_type = data[pos++];
-        if (val_type == 1) {
-            if (pos + 2 > size) break;
-            uint16_t len = data[pos] | (data[pos + 1] << 8); pos += 2;
-            if (pos + len > size) break;
-            d.value = std::string(reinterpret_cast<const char*>(data + pos), len); pos += len;
-        } else if (val_type == 2) {
-            if (pos + 8 > size) break;
-            int64_t v = 0;
-            for (int b = 0; b < 8; ++b)
-                v |= static_cast<int64_t>(data[pos++]) << (b * 8);
-            d.value = v;
-        } else if (val_type == 3) {
-            if (pos + 8 > size) break;
-            double v;
-            std::memcpy(&v, data + pos, 8); pos += 8;
-            d.value = v;
-        } else if (val_type == 4) {
-            if (pos >= size) break;
-            d.value = data[pos++] != 0;
-        }
+        if (!read_property_value(data, size, pos, d.value)) break;
 
         deltas.push_back(std::move(d));
     }

@@ -67,6 +67,9 @@ std::string generate_cmake_block(const PackageDescriptor& pkg,
                                  bool platform_guard = false,
                                  const std::string& guard_platform = "");
 
+std::string generate_cmake_block_for_condition(const PackageDescriptor& pkg,
+                                               const std::string& guard_condition);
+
 std::string generate_packages_cmake(const LockFile& lock, const Registry& reg,
                                      const fs::path& project_root);
 

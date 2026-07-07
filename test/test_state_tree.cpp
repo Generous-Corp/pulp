@@ -7,6 +7,18 @@
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
+static const PropertyArray& require_array(const PropertyValue& value) {
+    auto* array = get_property_array(value);
+    REQUIRE(array != nullptr);
+    return *array;
+}
+
+static const PropertyObject& require_object(const PropertyValue& value) {
+    auto* object = get_property_object(value);
+    REQUIRE(object != nullptr);
+    return *object;
+}
+
 // ── Basic property operations ───────────────────────────────────────────
 
 TEST_CASE("StateTree create and type name", "[state][tree]") {
@@ -625,8 +637,8 @@ TEST_CASE("StateTree from_json skips unsupported properties and child values",
             "voice_count": 8,
             "gain": 0.25,
             "ignored_null": null,
-            "ignored_array": [1, 2],
-            "ignored_object": {"nested": true}
+            "var_array": [1, 2, {"nested": true}],
+            "var_object": {"nested": true, "name": "leaf"}
         },
         "children": [
             {"type": "osc", "properties": {"wave": "sine"}},
@@ -643,8 +655,14 @@ TEST_CASE("StateTree from_json skips unsupported properties and child values",
     REQUIRE(result->get_int("voice_count") == 8);
     REQUIRE_THAT(result->get_double("gain"), WithinAbs(0.25, 1e-9));
     REQUIRE_FALSE(result->has("ignored_null"));
-    REQUIRE_FALSE(result->has("ignored_array"));
-    REQUIRE_FALSE(result->has("ignored_object"));
+    const auto& var_array = require_array(result->get("var_array"));
+    REQUIRE(var_array.values.size() == 3);
+    REQUIRE(std::get<int64_t>(var_array.values[0]) == 1);
+    REQUIRE(std::get<int64_t>(var_array.values[1]) == 2);
+    REQUIRE(std::get<bool>(require_object(var_array.values[2]).values.at("nested")));
+    const auto& var_object = require_object(result->get("var_object"));
+    REQUIRE(std::get<bool>(var_object.values.at("nested")));
+    REQUIRE(std::get<std::string>(var_object.values.at("name")) == "leaf");
     REQUIRE(result->child_count() == 2);
     REQUIRE(result->child(0)->type_name() == "osc");
     REQUIRE(result->child(1)->type_name() == "node");
@@ -661,7 +679,7 @@ TEST_CASE("StateTree from_json ignores malformed members and children",
         "properties": {
             "ok_bool": true,
             "ok_int32": 7,
-            "skip_array": [1, 2, 3],
+            "ok_array": [1, 2, 3],
             "skip_null": null
         },
         "children": [
@@ -675,7 +693,9 @@ TEST_CASE("StateTree from_json ignores malformed members and children",
     REQUIRE(result->type_name() == "node");
     REQUIRE(result->get_bool("ok_bool"));
     REQUIRE(result->get_int("ok_int32") == 7);
-    REQUIRE_FALSE(result->has("skip_array"));
+    const auto& ok_array = require_array(result->get("ok_array"));
+    REQUIRE(ok_array.values.size() == 3);
+    REQUIRE(std::get<int64_t>(ok_array.values[2]) == 3);
     REQUIRE_FALSE(result->has("skip_null"));
     REQUIRE(result->child_count() == 2);
     REQUIRE(result->child(0)->type_name() == "kept");
@@ -716,6 +736,103 @@ TEST_CASE("StateTree JSON serialization skips explicit null properties",
     REQUIRE_FALSE(restored->has("nullable"));
     REQUIRE(restored->get_string("name") == "kept");
 }
+
+TEST_CASE("StateTree JSON round-trip preserves nested array and object properties",
+          "[state][tree][json]") {
+    auto tree = StateTree::create("structured-state");
+    tree->set("leaf", make_property_object({
+        {"enabled", true},
+        {"name", std::string("Layer A")},
+        {"steps", make_property_array({int64_t(1), 0.5, PropertyValue{}, std::string("tail")})},
+        {"meta", make_property_object({{"author", std::string("pulp")}, {"revision", int64_t(3)}})},
+    }));
+
+    auto restored = StateTree::from_json(tree->to_json());
+    REQUIRE(restored != nullptr);
+    const auto& leaf = require_object(restored->get("leaf"));
+    REQUIRE(std::get<bool>(leaf.values.at("enabled")));
+    REQUIRE(std::get<std::string>(leaf.values.at("name")) == "Layer A");
+
+    const auto& steps = require_array(leaf.values.at("steps"));
+    REQUIRE(steps.values.size() == 4);
+    REQUIRE(std::get<int64_t>(steps.values[0]) == 1);
+    REQUIRE_THAT(std::get<double>(steps.values[1]), WithinAbs(0.5, 1e-9));
+    REQUIRE(std::holds_alternative<std::monostate>(steps.values[2]));
+    REQUIRE(std::get<std::string>(steps.values[3]) == "tail");
+
+    const auto& meta = require_object(leaf.values.at("meta"));
+    REQUIRE(std::get<std::string>(meta.values.at("author")) == "pulp");
+    REQUIRE(std::get<int64_t>(meta.values.at("revision")) == 3);
+}
+
+TEST_CASE("StateTree structured PropertyValue equality is structural",
+          "[state][tree][import]") {
+    auto left = make_property_object({
+        {"items", make_property_array({int64_t(1), make_property_object({{"name", std::string("one")}})})},
+        {"enabled", true},
+    });
+    auto same = make_property_object({
+        {"items", make_property_array({int64_t(1), make_property_object({{"name", std::string("one")}})})},
+        {"enabled", true},
+    });
+    auto different = make_property_object({
+        {"items", make_property_array({int64_t(2), make_property_object({{"name", std::string("one")}})})},
+        {"enabled", true},
+    });
+
+    REQUIRE(left == same);
+    REQUIRE(left != different);
+}
+
+TEST_CASE("StateTree import-shaped JUCE var-style array/object maps to PropertyValue leaves",
+          "[state][tree][json][import]") {
+    auto imported = StateTree::from_json(R"JSON({
+        "type": "plugin-state",
+        "properties": {
+            "varArray": [true, 7, 0.25, "saw", {"id": "osc1", "weights": [1, 2, 3]}],
+            "varObject": {"preset": "Init", "macro": {"name": "Brightness", "value": 0.75}}
+        }
+    })JSON");
+
+    REQUIRE(imported != nullptr);
+    const auto& var_array = require_array(imported->get("varArray"));
+    REQUIRE(var_array.values.size() == 5);
+    REQUIRE(std::get<bool>(var_array.values[0]));
+    REQUIRE(std::get<int64_t>(var_array.values[1]) == 7);
+    REQUIRE_THAT(std::get<double>(var_array.values[2]), WithinAbs(0.25, 1e-9));
+    REQUIRE(std::get<std::string>(var_array.values[3]) == "saw");
+    const auto& embedded_object = require_object(var_array.values[4]);
+    REQUIRE(std::get<std::string>(embedded_object.values.at("id")) == "osc1");
+    REQUIRE(require_array(embedded_object.values.at("weights")).values.size() == 3);
+
+    const auto& var_object = require_object(imported->get("varObject"));
+    REQUIRE(std::get<std::string>(var_object.values.at("preset")) == "Init");
+    const auto& macro = require_object(var_object.values.at("macro"));
+    REQUIRE(std::get<std::string>(macro.values.at("name")) == "Brightness");
+    REQUIRE_THAT(std::get<double>(macro.values.at("value")), WithinAbs(0.75, 1e-9));
+}
+
+TEST_CASE("StateTree import-shaped ValueTree records use children for owned nodes",
+          "[state][tree][json][import]") {
+    auto root = StateTree::create("ValueTreeLikePluginState");
+    root->set("leafData", make_property_object({
+        {"ui", make_property_object({{"theme", std::string("dark")}, {"zoom", 1.25}})},
+    }));
+
+    auto oscillator = StateTree::create("Oscillator");
+    oscillator->set("id", std::string("osc1"));
+    oscillator->set("varLeaf", make_property_array({std::string("sine"), int64_t(8)}));
+    root->add_child(oscillator);
+
+    auto restored = StateTree::from_json(root->to_json());
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->child_count() == 1);
+    REQUIRE(restored->child(0)->type_name() == "Oscillator");
+    REQUIRE(restored->child(0)->get_string("id") == "osc1");
+    REQUIRE(std::get<std::string>(require_array(restored->child(0)->get("varLeaf")).values[0]) == "sine");
+    REQUIRE(std::get<std::string>(require_object(require_object(restored->get("leafData")).values.at("ui")).values.at("theme")) == "dark");
+}
+
 
 // ── Deep copy ───────────────────────────────────────────────────────────
 
@@ -776,6 +893,26 @@ TEST_CASE("StateTree deep copy does not copy listeners",
     REQUIRE(removed_count == 0);
     REQUIRE(root->child_count() == 1);
     REQUIRE(copy->child_count() == 1);
+}
+
+TEST_CASE("StateTree deep copy clones structured PropertyValue storage",
+          "[state][tree]") {
+    auto root = StateTree::create("root");
+    root->set("structured", make_property_object({
+        {"items", make_property_array({int64_t(1), make_property_object({{"name", std::string("one")}})})},
+    }));
+
+    auto copy = root->deep_copy();
+    const auto& original_object = require_object(root->get("structured"));
+    const auto& copied_object = require_object(copy->get("structured"));
+    REQUIRE(&original_object != &copied_object);
+    const auto& original_items = require_array(original_object.values.at("items"));
+    const auto& copied_items = require_array(copied_object.values.at("items"));
+    REQUIRE(&original_items != &copied_items);
+    REQUIRE(std::get<std::string>(require_object(copied_items.values[1]).values.at("name")) == "one");
+
+    copy->set("structured", make_property_object({{"changed", true}}));
+    REQUIRE_FALSE(original_object.values.contains("changed"));
 }
 
 // ── ObservableValue ─────────────────────────────────────────────────────
@@ -1279,6 +1416,32 @@ TEST_CASE("StateTreeSynchroniser encode and decode round-trip", "[state][sync]")
     REQUIRE(decoded[6].child_index == 0);
 }
 
+TEST_CASE("StateTreeSynchroniser encode/decode/apply round-trips structured PropertyValue",
+          "[state][sync][import]") {
+    auto src = StateTree::create("root");
+    auto dst = StateTree::create("root");
+    StateTreeSynchroniser sync;
+    sync.attach(src);
+
+    src->set("structured", make_property_object({
+        {"customState", make_property_array({std::string("slotA"), int64_t(64), make_property_object({{"gain", 0.9}})})},
+        {"enabled", true},
+    }));
+
+    auto deltas = sync.take_deltas();
+    auto encoded = StateTreeSynchroniser::encode(deltas);
+    auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
+    StateTreeSynchroniser::apply(*dst, decoded);
+
+    const auto& structured = require_object(dst->get("structured"));
+    REQUIRE(std::get<bool>(structured.values.at("enabled")));
+    const auto& custom_state = require_array(structured.values.at("customState"));
+    REQUIRE(std::get<std::string>(custom_state.values[0]) == "slotA");
+    REQUIRE(std::get<int64_t>(custom_state.values[1]) == 64);
+    REQUIRE_THAT(std::get<double>(require_object(custom_state.values[2]).values.at("gain")), WithinAbs(0.9, 1e-9));
+}
+
+
 TEST_CASE("StateTreeSynchroniser decode rejects undersized buffers", "[state][sync]") {
     std::vector<uint8_t> encoded = {1, 0, static_cast<uint8_t>(SyncDeltaType::PropertySet)};
     auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
@@ -1329,7 +1492,7 @@ TEST_CASE("StateTreeSynchroniser preserves negative child indexes in encoding",
     REQUIRE(decoded[1].child_index == -1);
 }
 
-TEST_CASE("StateTreeSynchroniser decode treats unknown value types as null",
+TEST_CASE("StateTreeSynchroniser decode rejects unknown value types",
           "[state][sync]") {
     SyncDelta delta{SyncDeltaType::PropertySet, "root", "mystery", {}, -1};
     auto encoded = StateTreeSynchroniser::encode({delta});
@@ -1337,10 +1500,7 @@ TEST_CASE("StateTreeSynchroniser decode treats unknown value types as null",
     encoded.back() = 99;
 
     auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
-    REQUIRE(decoded.size() == 1);
-    REQUIRE(decoded[0].type == SyncDeltaType::PropertySet);
-    REQUIRE(decoded[0].key == "mystery");
-    REQUIRE(std::holds_alternative<std::monostate>(decoded[0].value));
+    REQUIRE(decoded.empty());
 }
 
 TEST_CASE("StateTreeSynchroniser decode rejects truncated typed values",
@@ -1431,14 +1591,13 @@ TEST_CASE("StateTreeSynchroniser decode rejects malformed delta framing",
 
     auto unknown_value_type = missing_value_type;
     unknown_value_type.push_back(99);
-    auto decoded = StateTreeSynchroniser::decode(unknown_value_type.data(),
-                                                 unknown_value_type.size());
-    REQUIRE(decoded.size() == 1);
-    REQUIRE(decoded[0].type == SyncDeltaType::PropertySet);
-    REQUIRE(decoded[0].path == "root");
-    REQUIRE(decoded[0].key == "name");
-    REQUIRE(decoded[0].child_index == 0);
-    REQUIRE(decoded[0].value.index() == 0);
+    REQUIRE(StateTreeSynchroniser::decode(unknown_value_type.data(),
+                                          unknown_value_type.size()).empty());
+
+    auto unknown_delta_type = one_delta_prefix();
+    unknown_delta_type[2] = 99;
+    REQUIRE(StateTreeSynchroniser::decode(unknown_delta_type.data(),
+                                          unknown_delta_type.size()).empty());
 }
 
 TEST_CASE("StateTreeSynchroniser decode keeps available deltas when count is too large",
@@ -1902,6 +2061,20 @@ TEST_CASE("SyncedClone mirrors set / remove on original",
     src->remove("a");
     REQUIRE_FALSE(clone->has("a"));
 }
+
+TEST_CASE("SyncedClone mirrors structured PropertyValue without shared storage surprises",
+          "[state][tree][synced-clone]") {
+    auto src = StateTree::create("root");
+    auto sync = src->clone_synced();
+    auto clone = sync.clone();
+
+    src->set("structured", make_property_array({int64_t(1), make_property_object({{"name", std::string("copied")}})}));
+    const auto& src_array = require_array(src->get("structured"));
+    const auto& clone_array = require_array(clone->get("structured"));
+    REQUIRE(&src_array != &clone_array);
+    REQUIRE(std::get<std::string>(require_object(clone_array.values[1]).values.at("name")) == "copied");
+}
+
 
 TEST_CASE("SyncedClone mirrors add_child / remove_child on original",
           "[state][tree][synced-clone]") {

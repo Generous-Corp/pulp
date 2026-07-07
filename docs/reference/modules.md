@@ -574,6 +574,30 @@ std::string json = root->to_json();           // Serialize
 auto restored = StateTree::from_json(json);   // Deserialize
 ```
 
+`PropertyValue` supports scalar values (`std::monostate`, `bool`, `int64_t`,
+`double`, `std::string`) plus provider-neutral structured leaves:
+
+```cpp
+root->set("macroState", make_property_object({
+    {"name", std::string("Brightness")},
+    {"points", make_property_array({0.0, 0.5, 1.0})},
+    {"metadata", make_property_object({{"enabled", true}, {"revision", int64_t(2)}})},
+}));
+```
+
+Use arrays/objects for structured leaf data that belongs to a property
+(JSON-like arrays, dictionaries, custom state records, imported `var`-style
+values). Use child `StateTree` nodes for owned tree structure: a ValueTree-like
+record with child records should become a `StateTree` parent with child nodes,
+while each node's non-structural payload can use scalar/array/object
+properties. Pulp intentionally does **not** store `StateTree` nodes inside
+`PropertyValue`: node ownership lives in the parent/child graph, which keeps
+`deep_copy()`, `clone_synced()`, and `StateTreeSynchroniser` free from hidden
+aliasing and cycles.
+
+Existing scalar typed getters and `std::get_if` checks keep working; exhaustive
+`std::visit` handlers over `PropertyValue` should add Array/Object cases.
+
 ### Persistent settings
 
 ```cpp

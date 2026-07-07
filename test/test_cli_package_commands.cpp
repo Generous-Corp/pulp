@@ -136,6 +136,42 @@ void write_registry_fixture(const fs::path& root,
         }
       }
     },
+    "mts-esp": {
+      "name": "ODDSound MTS-ESP",
+      "version": "f214739b",
+      "description": "Session-wide microtuning client API with local MTS SysEx fallback",
+      "license": "0BSD",
+      "category": "music-theory",
+      "url": "https://example.com/mts-esp",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://example.com/mts-esp.git",
+        "git_tag": "f214739b8832e7f297cb9970d0c0efbf783f1462"
+      },
+      "cmake": {
+        "targets": ["mts_esp_client"],
+        "header_only": false,
+        "include_dir": "Client",
+        "sources": ["Client/libMTSClient.cpp"]
+      },
+      "platforms": {
+        "macOS": {"architectures": ["arm64", "x86_64"]},
+        "Windows": {"architectures": ["x64", "arm64"]},
+        "Linux": {"architectures": ["x64", "arm64"]}
+      },
+      "rt_safe": true,
+      "tags": ["microtuning", "mts-esp", "sysex"],
+      "provides": ["microtuning", "midi-tuning-standard"],
+      "overlaps_with_builtin": {},
+      "unique_value": "MTS-ESP session tuning plus MTS SysEx fallback",
+      "verification": {
+        "last_verified": "2026-07-07",
+        "verified_version": "f214739b",
+        "build_status": {
+          "macOS": "pass"
+        }
+      }
+    },
     "gpl-filter": {
       "name": "GPL Filter",
       "version": "3.0.0",
@@ -953,9 +989,35 @@ TEST_CASE("cmd_add writes unguarded generated cmake and cmd_remove deletes last 
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json")
                 .packages.count("signalsmith-dsp") == 1);
 
+    auto source_added = run_in_project(tmp.path, [&] { return cmd_add({"mts-esp"}); });
+    REQUIRE(source_added.exit_code == 0);
+    cmake = read_file(cmake_path);
+    REQUIRE(cmake.find("FetchContent_Declare(mts-esp") != std::string::npos);
+    REQUIRE(cmake.find("add_library(mts_esp_client STATIC)") != std::string::npos);
+    REQUIRE(cmake.find("${mts-esp_SOURCE_DIR}/Client/libMTSClient.cpp") !=
+            std::string::npos);
+    REQUIRE(cmake.find("target_include_directories(mts_esp_client PUBLIC ${mts-esp_SOURCE_DIR}/Client)") !=
+            std::string::npos);
+    REQUIRE(cmake.find("target_link_libraries(mts_esp_client PUBLIC ${CMAKE_DL_LIBS})") !=
+            std::string::npos);
+
     auto removed = run_in_project(tmp.path, [&] { return cmd_remove({"signalsmith-dsp"}); });
     REQUIRE(removed.exit_code == 0);
     REQUIRE(removed.stdout_text.find("Removed Signalsmith DSP") != std::string::npos);
+    REQUIRE(fs::exists(cmake_path));
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.count("mts-esp") == 1);
+    cmake = read_file(cmake_path);
+    REQUIRE(cmake.find("FetchContent_Declare(mts-esp") != std::string::npos);
+    REQUIRE(cmake.find("add_library(mts_esp_client STATIC)") != std::string::npos);
+    REQUIRE(cmake.find("${mts-esp_SOURCE_DIR}/Client/libMTSClient.cpp") !=
+            std::string::npos);
+    REQUIRE(cmake.find("target_include_directories(mts_esp_client PUBLIC ${mts-esp_SOURCE_DIR}/Client)") !=
+            std::string::npos);
+    REQUIRE(cmake.find("target_link_libraries(mts_esp_client PUBLIC ${CMAKE_DL_LIBS})") !=
+            std::string::npos);
+    auto source_removed = run_in_project(tmp.path, [&] { return cmd_remove({"mts-esp"}); });
+    REQUIRE(source_removed.exit_code == 0);
+    REQUIRE(source_removed.stdout_text.find("Removed ODDSound MTS-ESP") != std::string::npos);
     REQUIRE_FALSE(fs::exists(cmake_path));
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
     REQUIRE(read_file(tmp.path / "DEPENDENCIES.md").find("Signalsmith DSP") ==
