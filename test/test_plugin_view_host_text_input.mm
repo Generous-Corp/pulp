@@ -98,6 +98,22 @@ struct DiscardMarkedTextSpy {
     int count() const { return g_discard_marked_text_count; }
 };
 
+class RecordingMouseView : public View {
+public:
+    int mouse_events = 0;
+    int mouse_downs = 0;
+
+    void on_mouse_event(const MouseEvent& event) override {
+        (void)event;
+        ++mouse_events;
+    }
+
+    void on_mouse_down(pulp::view::Point pos) override {
+        (void)pos;
+        ++mouse_downs;
+    }
+};
+
 }  // namespace
 
 TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to "
@@ -717,6 +733,74 @@ TEST_CASE("PluginViewHost (mac CPU) — mouse focus changes clear replacement "
             REQUIRE_FALSE(replacement->has_focus());
             REQUIRE_FALSE(target->has_focus());
         }
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — non-focusable click target removed during "
+          "IME cancellation is not dispatched",
+          "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME removed-target test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto first_owned = std::make_unique<TextEditor>();
+        TextEditor* first = first_owned.get();
+        first->set_bounds({16, 20, 200, 40});
+        first->set_text("abc");
+        root.add_child(std::move(first_owned));
+
+        auto target_owned = std::make_unique<RecordingMouseView>();
+        RecordingMouseView* target = target_owned.get();
+        target->set_bounds({16, 90, 200, 40});
+        root.add_child(std::move(target_owned));
+
+        first->on_focus_changed(true);
+        first->claim_input_focus();
+        first->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == pulp_view);
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(first->has_marked_text());
+
+        std::unique_ptr<View> removed_target;
+        first->on_change = [&](const std::string&) {
+            removed_target = root.remove_child(target);
+        };
+
+        [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(30, 110))];
+
+        REQUIRE(removed_target != nullptr);
+        REQUIRE(target->mouse_events == 0);
+        REQUIRE(target->mouse_downs == 0);
 
         host->detach();
         host.reset();

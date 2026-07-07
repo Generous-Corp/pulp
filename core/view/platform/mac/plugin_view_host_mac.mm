@@ -223,6 +223,10 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
             // A click on a non-focusable target commits/closes any open type-in.
             prev = pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
             if (!prev) prev = pulp_focus_under_root(root);
+            if (!view_is_in_tree(*drag_target, root)) {
+                *drag_target = nullptr;
+                return;
+            }
             if (prev) {
                 prev->on_focus_changed(false);
                 prev->release_input_focus();
