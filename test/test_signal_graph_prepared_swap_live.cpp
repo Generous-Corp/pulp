@@ -149,7 +149,11 @@ TEST_CASE("prepare_swap publishes a reinit-free edit with NO silent block "
                 swapped.fetch_add(1, std::memory_order_relaxed);
             } else if (r == SignalGraph::SwapResult::NeedsEagerPrepare) {
                 needs_eager.fetch_add(1, std::memory_order_relaxed);
-                REQUIRE(g.prepare(kSr, kFrames));
+                // No Catch2 macro on a worker thread (thread-unsafe). This branch
+                // is defensive — a pure gain graph always Swaps — and the
+                // needs_eager==0 CHECK after join (on the main thread) is the real
+                // assertion. Recover so the render thread isn't left on a null graph.
+                (void)g.prepare(kSr, kFrames);
             }
             std::this_thread::yield();
         }
