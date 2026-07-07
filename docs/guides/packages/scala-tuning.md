@@ -84,9 +84,11 @@ pulp::midi::MtsEspFallbackTuningProvider tuning(std::move(local));
 auto note = tuning.note_to_frequency(midi_note, midi_channel);
 ```
 
-`MtsEspFallbackTuningProvider` uses an active MTS-ESP master or parsed MTS SysEx
-when present. If no MTS session tuning is active, it falls back to the local
-provider, which can be a Scala tuning provider or any other `TuningProvider`.
+`MtsEspFallbackTuningProvider` defaults to the central-session workflow: active
+MTS-ESP master or parsed MTS SysEx wins when present, then the local provider is
+used as the fallback. If local `.scl` / `.kbm` tuning is product or preset state
+that should override the session, pass
+`MtsEspFallbackPolicy::PreferLocalTuning`.
 
 ## Importing Existing Projects
 
@@ -107,8 +109,8 @@ optional integrations and preserve the original priority policy:
   DAW-wide tuning source.
 - Local `.scl` / `.kbm` tuning wins when the product treated tuning files as
   project or preset state.
-- If both are supported, use `MtsEspFallbackTuningProvider` so MTS can override
-  local file tuning only while an MTS session source is active.
+- If both are supported, use `MtsEspFallbackTuningProvider` and choose the
+  matching `MtsEspFallbackPolicy` instead of baking the priority into voice code.
 
 `.tun` files are not parsed directly by this provider. Importers should copy
 detected `.tun` assets into the scaffold, mark them for manual review, and

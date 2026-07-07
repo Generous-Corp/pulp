@@ -112,6 +112,9 @@ pulp_enable_midi_tuning_provider(MySynth MTS_ESP SCALA)
 Supported providers are `MTS_ESP` and `SCALA`. `MTS_ESP` requires the
 `mts_esp_client` target created by `pulp add mts-esp`; `SCALA` requires the
 `sst::tuning-library` target created by `pulp add sst-tuning-library`.
+When a project uses both, `MtsEspFallbackTuningProvider` can prefer the active
+MTS-ESP session or prefer loaded local Scala tuning via
+`MtsEspFallbackPolicy::PreferLocalTuning`.
 
 If the Pulp SDK was already built with the matching provider enabled, the helper
 only links `pulp::midi` and exposes the compile definition to the target. If an

@@ -165,8 +165,10 @@ Pulp maps those to the provider-neutral `pulp::midi::TuningProvider` API:
   plus `pulp_enable_midi_tuning_provider(... MTS_ESP)` in a project that
   consumes an installed Pulp SDK.
 - Products that support both local tuning files and a DAW/session-wide MTS-ESP
-  master should use `MtsEspFallbackTuningProvider` so an active MTS source wins
-  while the local Scala provider remains the fallback.
+  master should use `MtsEspFallbackTuningProvider`. Its default policy lets an
+  active MTS source win while local Scala tuning remains the fallback; pass
+  `MtsEspFallbackPolicy::PreferLocalTuning` when the original product had a
+  first-class local tuning UI and the local file should override the session.
 
 The project-import flow records this as `integration_requirements`: detected
 MTS calls request `mts-esp`, detected `.scl` / `.kbm` assets request

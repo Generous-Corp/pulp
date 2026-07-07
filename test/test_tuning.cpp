@@ -319,4 +319,37 @@ TEST_CASE("MTS-ESP fallback provider uses Scala tuning until an MTS session is a
     REQUIRE(mts_note.frequency_hz == Approx(pulp::midi::equal_temperament_frequency(61)));
 }
 
+TEST_CASE("MTS-ESP fallback provider can let local tuning override a session") {
+    auto local = std::make_unique<pulp::midi::ScalaTuningProvider>();
+    std::string error;
+    REQUIRE(local->load_scl_data(kTwentyFourEdoScl, &error));
+
+    pulp::midi::MtsEspFallbackTuningProvider tuning(
+        std::move(local),
+        pulp::midi::MtsEspFallbackPolicy::PreferLocalTuning);
+
+    const auto local_note_before = tuning.note_to_frequency(61, 0);
+    REQUIRE(local_note_before.valid);
+    REQUIRE_FALSE(tuning.using_mts_session());
+
+    const std::array<std::uint8_t, 21> scale_octave_one_byte = {
+        0xf0, 0x7f, 0x7f, 0x08, 0x08, 0x00, 0x00, 0x7f,
+        0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+        0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+        0xf7,
+    };
+    tuning.parse_midi_data(scale_octave_one_byte);
+
+    REQUIRE(tuning.mts_session_available());
+    REQUIRE_FALSE(tuning.using_mts_session());
+
+    const auto local_note_after = tuning.note_to_frequency(61, 0);
+    REQUIRE(local_note_after.valid);
+    REQUIRE(local_note_after.frequency_hz == Approx(local_note_before.frequency_hz));
+
+    const auto status = tuning.status();
+    REQUIRE(status.has_local_file_tuning);
+    REQUIRE(status.has_local_mts_sysex);
+}
+
 #endif  // PULP_HAS_MTS_ESP && PULP_HAS_SCALA_TUNING

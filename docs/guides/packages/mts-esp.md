@@ -97,8 +97,16 @@ local->load_scl_kbm_files("preset.scl", "preset.kbm");
 pulp::midi::MtsEspFallbackTuningProvider tuning(std::move(local));
 ```
 
-The wrapper uses an active MTS-ESP master or parsed MTS SysEx when present. If
-no MTS session tuning is active, it falls back to the local provider.
+By default, the wrapper uses an active MTS-ESP master or parsed MTS SysEx when
+present and falls back to the local provider only when no MTS session tuning is
+active. If the product's local tuning UI or preset state should override the
+session, pass the explicit local-priority policy:
+
+```cpp
+pulp::midi::MtsEspFallbackTuningProvider tuning(
+    std::move(local),
+    pulp::midi::MtsEspFallbackPolicy::PreferLocalTuning);
+```
 
 ## Porting Existing MTS-ESP Calls
 
