@@ -36,10 +36,47 @@ public:
     TuningNoteResult frequency_to_note_and_channel(double frequency_hz) const override;
     TuningStatus status() const override;
     void parse_midi_data(std::span<const std::uint8_t> data) override;
+    bool has_session_tuning() const;
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+};
+
+class MtsEspFallbackTuningProvider final : public TuningProvider {
+public:
+    explicit MtsEspFallbackTuningProvider(
+        std::unique_ptr<TuningProvider> local_fallback =
+            std::make_unique<EqualTemperamentTuningProvider>());
+    ~MtsEspFallbackTuningProvider() override;
+
+    MtsEspFallbackTuningProvider(const MtsEspFallbackTuningProvider&) = delete;
+    MtsEspFallbackTuningProvider& operator=(const MtsEspFallbackTuningProvider&) = delete;
+
+    MtsEspFallbackTuningProvider(MtsEspFallbackTuningProvider&&) noexcept;
+    MtsEspFallbackTuningProvider& operator=(MtsEspFallbackTuningProvider&&) noexcept;
+
+    TuningQueryResult note_to_frequency(
+        int midi_note,
+        int midi_channel = kUnknownMidiChannel) const override;
+
+    TuningNoteResult frequency_to_note(
+        double frequency_hz,
+        int preferred_midi_channel = kUnknownMidiChannel) const override;
+
+    TuningNoteResult frequency_to_note_and_channel(double frequency_hz) const override;
+    TuningStatus status() const override;
+    void parse_midi_data(std::span<const std::uint8_t> data) override;
+
+    bool using_mts_session() const;
+    const MtsEspTuningProvider& mts_provider() const noexcept { return mts_; }
+    MtsEspTuningProvider& mts_provider() noexcept { return mts_; }
+    const TuningProvider* local_fallback() const noexcept { return fallback_.get(); }
+    TuningProvider* local_fallback() noexcept { return fallback_.get(); }
+
+private:
+    MtsEspTuningProvider mts_;
+    std::unique_ptr<TuningProvider> fallback_;
 };
 
 #endif  // PULP_HAS_MTS_ESP

@@ -57,16 +57,38 @@ void Voice::start_note(int note, int channel, const pulp::midi::TuningProvider& 
 ```
 
 That keeps MTS-ESP optional and leaves room for first-party Pulp tuning later.
-A future Scala/KBM loader, tuning-table object, host-provided tuning bridge, or
-project-local microtuning engine should implement `TuningProvider` too. Existing
-processors then switch providers without changing their note/voice code.
+The optional `ScalaTuningProvider` already implements the same interface for
+direct `.scl` / `.kbm` files, and future tuning-table objects, host-provided
+tuning bridges, or project-local microtuning engines should do the same.
+Existing processors then switch providers without changing their note/voice code.
+
+## With Local SCL/KBM Files
+
+ODDSound's free MTS-ESP Mini can load `.scl`, `.kbm`, `.tun`, and MTS SysEx and
+publish that tuning session-wide. That is often the right UX when a producer
+wants every MTS-aware plugin in the DAW to follow the same tuning.
+
+When a product needs project-local file tuning too, enable both optional
+providers and wrap the local file provider with `MtsEspFallbackTuningProvider`:
+
+```cpp
+auto local = std::make_unique<pulp::midi::ScalaTuningProvider>();
+local->load_scl_kbm_files("preset.scl", "preset.kbm");
+
+pulp::midi::MtsEspFallbackTuningProvider tuning(std::move(local));
+```
+
+The wrapper uses an active MTS-ESP master or parsed MTS SysEx when present. If
+no MTS session tuning is active, it falls back to the local provider.
 
 ## Porting Existing MTS-ESP Calls
 
 JUCE and iPlug2 do not ship MTS-ESP as a framework feature, but many projects
 include ODDSound's `libMTSClient.h` directly. Importers should detect that
-include, `MTS_*` calls, or bundled `Client/libMTSClient.cpp`, enable this
-optional integration, and rewrite the call sites toward `TuningProvider`.
+include, `MTS_*` calls, or bundled `Client/libMTSClient.cpp`, declare the
+`mts-esp` package plus `PULP_ENABLE_MTS_ESP` in ProjectIR
+`integration_requirements`, and rewrite the call sites toward
+`TuningProvider`.
 
 | Existing client call | Pulp mapping |
 |---|---|

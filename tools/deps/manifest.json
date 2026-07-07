@@ -639,6 +639,31 @@
       ]
     },
     {
+      "name": "Surge Synth Team tuning-library",
+      "category": "music-theory",
+      "license": "MIT",
+      "version": "release_1.1.0",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/surge-synthesizer/tuning-library.git",
+      "upstream": { "kind": "git-commit", "ref": "64a939111891cb698f37d6ca9ecfc4b8c260053d" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional, opt-in Scala .scl/.kbm parser and tuning-table lookup. Fetched source-only via FetchContent only when PULP_ENABLE_SCALA_TUNING=ON or when a developer runs `pulp add sst-tuning-library`; Pulp exposes it through `pulp::midi::ScalaTuningProvider` behind the provider-neutral TuningProvider API. The upstream CMake tools/tests are intentionally not added to Pulp or consumer builds. Not part of the default dependency chain.",
+      "source_files": [
+        "CMakeLists.txt",
+        "tools/cmake/PulpDependencies.cmake",
+        "core/midi/CMakeLists.txt",
+        "core/midi/include/pulp/midi/tuning.hpp",
+        "core/midi/include/pulp/midi/scala_tuning.hpp",
+        "core/midi/src/tuning.cpp",
+        "core/midi/src/scala_tuning.cpp",
+        "tools/packages/registry.json",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "msdfgen",
       "category": "canvas",
       "license": "MIT",

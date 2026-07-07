@@ -143,10 +143,11 @@ Key headers: `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio
 | MidiEvent / MidiBuffer | usable | [midi](modules.md#midi) | [modules](modules.md#midi) |
 | MIDI device I/O (CoreMIDI) | usable | [midi](modules.md#midi) | |
 | MIDI file read/write | usable | [midi](modules.md#midi) | |
+| Provider-neutral microtuning | usable | [midi](modules.md#midi) | Optional MTS-ESP session/SysEx provider and Scala SCL/KBM local-file provider |
 | Win32 MIDI | experimental | [midi](modules.md#midi) | |
 | ALSA Raw MIDI | experimental | [midi](modules.md#midi) | |
 
-Key headers: `pulp/midi/message.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`
+Key headers: `pulp/midi/message.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`, `pulp/midi/tuning.hpp`, `pulp/midi/mts_esp_tuning.hpp`, `pulp/midi/scala_tuning.hpp`
 
 ---
 

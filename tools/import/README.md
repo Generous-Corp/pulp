@@ -49,6 +49,13 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
   fabricated parameter count.
 - **`dsp.reachability_scope`** is explicit so portable-core confidence is never
   read from a shallow scan.
+- **`integration_requirements`** records optional Pulp packages, SDK build
+  options, and source assets the scaffold needs to preserve source-project
+  behavior. Importers use it for things like session microtuning clients and
+  local tuning files: SCL/KBM assets can be copied into the scaffold as
+  `copied-user-file`, while unsupported-but-relevant assets such as direct
+  `.tun` files should also be copied and flagged for manual review without
+  hiding them in prose.
 
 ## Roadmap
 

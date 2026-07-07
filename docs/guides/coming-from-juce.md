@@ -150,6 +150,30 @@ That covers parameter learn. It is separate from "learn the next MIDI note and
 store it as a setting" workflows, which should use a small note-listener helper
 or project-local state until Pulp grows a generic note/control learn utility.
 
+## Migrating microtuning
+
+JUCE does not provide one built-in microtuning stack, so projects usually carry
+their own Scala loader, tuning table, or direct ODDSound MTS-ESP client calls.
+Pulp maps those to the provider-neutral `pulp::midi::TuningProvider` API:
+
+- Direct `.scl` / `.kbm` file loading maps to `ScalaTuningProvider`, enabled
+  with `PULP_ENABLE_SCALA_TUNING=ON` or `pulp add sst-tuning-library`.
+- Direct ODDSound `libMTSClient.h` calls map to `MtsEspTuningProvider`, enabled
+  with `PULP_ENABLE_MTS_ESP=ON` or `pulp add mts-esp`.
+- Products that support both local tuning files and a DAW/session-wide MTS-ESP
+  master should use `MtsEspFallbackTuningProvider` so an active MTS source wins
+  while the local Scala provider remains the fallback.
+
+The project-import flow records this as `integration_requirements`: detected
+MTS calls request `mts-esp`, detected `.scl` / `.kbm` assets request
+`sst-tuning-library` and are copied into the scaffold, and `.tun` assets are
+copied into the scaffold but marked for review because direct `.tun` parsing is
+not part of the Scala provider.
+
+Keep file parsing and MTS SysEx parsing off the audio callback. Voice code should
+query `TuningProvider::note_to_frequency()` at note-on or at the same retuning
+cadence the original JUCE project used.
+
 ## Migrating structured state
 
 Pulp separates owned tree structure from structured leaf values:

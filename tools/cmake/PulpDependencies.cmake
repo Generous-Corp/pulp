@@ -444,6 +444,25 @@ if(PULP_ENABLE_MTS_ESP)
     endif()
 endif()
 
+# Surge Synth Team tuning-library (MIT) — optional Scala .scl/.kbm parser.
+set(PULP_HAS_SCALA_TUNING FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+set(PULP_SST_TUNING_LIBRARY_SOURCE_DIR "" CACHE INTERNAL "Surge Synth Team tuning-library source directory" FORCE)
+if(PULP_ENABLE_SCALA_TUNING)
+    pulp_register_fetchcontent_source(sst_tuning_library
+        REF 64a939111891cb698f37d6ca9ecfc4b8c260053d)
+    FetchContent_Declare(
+        sst_tuning_library
+        GIT_REPOSITORY https://github.com/surge-synthesizer/tuning-library.git
+        GIT_TAG 64a939111891cb698f37d6ca9ecfc4b8c260053d
+        GIT_SHALLOW TRUE
+        SOURCE_SUBDIR cmake/pulp-source-only
+    )
+    FetchContent_MakeAvailable(sst_tuning_library)
+    set(PULP_SST_TUNING_LIBRARY_SOURCE_DIR "${sst_tuning_library_SOURCE_DIR}" CACHE INTERNAL "Surge Synth Team tuning-library source directory" FORCE)
+    set(PULP_HAS_SCALA_TUNING TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
+    message(STATUS "Pulp: Scala .scl/.kbm tuning enabled (Surge Synth Team tuning-library)")
+endif()
+
 # Facebook Yoga (MIT license) — cross-platform CSS Flexbox/Grid layout engine
 pulp_register_fetchcontent_source(yoga REF v3.2.1)
 FetchContent_Declare(

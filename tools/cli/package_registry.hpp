@@ -47,6 +47,7 @@ struct FetchInfo {
 struct CMakeInfo {
     std::vector<std::string> targets;
     bool header_only = false;
+    bool add_subdirectory = true;
     std::string include_dir;
     std::vector<std::string> sources;
 };

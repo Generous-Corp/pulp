@@ -33,6 +33,7 @@
     "lifecycle_hooks": { "$ref": "#/$defs/lifecycle_hooks" },
     "format_matrix": { "$ref": "#/$defs/format_matrix" },
     "project_inputs": { "$ref": "#/$defs/project_inputs" },
+    "integration_requirements": { "$ref": "#/$defs/integration_requirements" },
     "residual_policy": { "$ref": "#/$defs/residual_policy" },
     "diagnostics": {
       "type": "array",
@@ -294,6 +295,72 @@
         "framework_modules": { "type": "array", "items": { "type": "string" } },
         "framework_version": { "type": "string" },
         "generated_roots": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "integration_requirements": {
+      "type": "object",
+      "description": "Optional Pulp packages, build options, and source assets the generated scaffold should preserve or enable because the source project used an external integration or file-backed data format. Package ids and option names are runtime DATA, not SDK enums; importers should emit neutral facts here and keep explanatory prose in diagnostics/migration_tasks.",
+      "additionalProperties": true,
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/package_requirement" }
+        },
+        "cmake_options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/cmake_option_requirement" }
+        },
+        "asset_inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/asset_input_requirement" }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "package_requirement": {
+      "type": "object",
+      "description": "A curated Pulp package the scaffold needs or can optionally use.",
+      "required": ["id", "reason"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "description": "Package registry id, interpreted by the SDK/package registry." },
+        "feature_key": { "type": "string", "description": "Stable importer-owned feature key such as 'session_tuning' or 'local_tuning_files'." },
+        "required": { "type": "boolean", "description": "True when omitting the package would remove source-project behaviour; false when it is a recommended enhancement." },
+        "reason": { "type": "string" },
+        "cmake_targets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional CMake targets exposed by this package. The shared emitter links them when the generated scaffold has installed the package."
+        },
+        "source_refs": { "type": "array", "items": { "$ref": "#/$defs/source_ref" } }
+      }
+    },
+    "cmake_option_requirement": {
+      "type": "object",
+      "description": "A CMake option/value the generated scaffold should set or document when enabling an integration.",
+      "required": ["name", "value", "reason"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": ["string", "boolean", "number"] },
+        "reason": { "type": "string" },
+        "source_refs": { "type": "array", "items": { "$ref": "#/$defs/source_ref" } }
+      }
+    },
+    "asset_input_requirement": {
+      "type": "object",
+      "description": "A source asset the scaffold should copy, reference, or flag for manual review.",
+      "required": ["path", "kind", "copy_policy", "reason"],
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string", "description": "Source-project-relative path." },
+        "kind": { "type": "string", "description": "Importer-owned asset kind, e.g. tuning_scale, keyboard_mapping, preset_data, web_asset." },
+        "copy_policy": {
+          "type": "string",
+          "enum": ["copy_to_scaffold", "reference_source", "manual_review"]
+        },
+        "reason": { "type": "string" },
+        "source_ref": { "$ref": "#/$defs/source_ref" }
       }
     },
     "residual_policy": {

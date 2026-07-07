@@ -337,7 +337,7 @@ same `audio_sha256` and a zero residual while still carrying different
 
 ## midi
 
-MIDI I/O, file handling, and MIDI 2.0 support.
+MIDI I/O, file handling, MIDI 2.0 support, and provider-neutral note tuning.
 
 **Link:** `pulp::midi` · **Include prefix:** `<pulp/midi/...>`
 
@@ -377,6 +377,7 @@ send_sysex(inquiry);  // Send over MIDI port
 | Device I/O | platform/ | CoreMIDI (macOS), WinMIDI (Windows), ALSA (Linux); Web MIDI scaffold is not wired into the shipped WASM build |
 | Files | `midi_file.hpp` | Read/write Standard MIDI Files |
 | Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
+| Tuning | `tuning.hpp`, `mts_esp_tuning.hpp`, `scala_tuning.hpp` | Provider-neutral note-to-frequency API with 12-TET default, optional MTS-ESP session/SysEx provider, and optional Scala SCL/KBM local-file provider |
 | UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
 | MPE | `mpe_voice_tracker.hpp`, `mpe_buffer.hpp`, `mpe_synth_voice.hpp` | Per-note pitch bend / pressure / timbre tracking, opt-in sidecar buffer, and voice/allocator helpers. See [docs/guides/mpe.md](../guides/mpe.md) |
 

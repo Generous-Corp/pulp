@@ -148,6 +148,7 @@ developer-supplied SDKs above.
 |------|---------|---------|--------------|
 | **Moonbase** ([moonbase-cpp](https://github.com/Moonbase-sh/moonbase-cpp)) | MIT | License activation / copy protection (online/offline/trial activation, RS256 JWT validation, seat management) | Header-only SDK fetched via FetchContent on opt-in (`pulp add moonbase`); exports the CMake target `moonbase::licensing`. Used by `examples/moonbase-activation/`. |
 | **MTS-ESP** ([ODDSound/MTS-ESP](https://github.com/ODDSound/MTS-ESP)) | 0BSD | Session-wide microtuning client API, including MTS-ESP master queries, MTS SysEx fallback, note filtering, and multi-channel tuning tables | Source-only client fetched via FetchContent on opt-in (`PULP_ENABLE_MTS_ESP=ON` or `pulp add mts-esp`). The client dynamically loads an installed libMTS shared library at runtime when present and falls back locally when no master is installed. |
+| **Surge Synth Team tuning-library** ([surge-synthesizer/tuning-library](https://github.com/surge-synthesizer/tuning-library)) | MIT | Scala `.scl` / `.kbm` parsing and tuning-table lookup for direct local file-based microtuning | Header-only source fetched via FetchContent on opt-in (`PULP_ENABLE_SCALA_TUNING=ON` or `pulp add sst-tuning-library`). Pulp uses it source-only and exposes it through `pulp::midi::ScalaTuningProvider`; the upstream CMake tools/tests are not added to consumer builds. |
 
 See the [Copyright Protection guide](../guides/copyright-protection.md) for
 setup, the audio-thread gating rule, and the reference plugin.

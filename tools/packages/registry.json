@@ -2766,6 +2766,103 @@
         "build_status": {}
       }
     },
+    "sst-tuning-library": {
+      "name": "Surge Synth Team tuning-library",
+      "version": "release_1.1.0",
+      "description": "Header-only Scala .scl/.kbm microtuning parser and frequency lookup library",
+      "license": "MIT",
+      "category": "music-theory",
+      "url": "https://github.com/surge-synthesizer/tuning-library",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/surge-synthesizer/tuning-library.git",
+        "git_tag": "64a939111891cb698f37d6ca9ecfc4b8c260053d"
+      },
+      "cmake": {
+        "targets": [
+          "sst::tuning-library"
+        ],
+        "header_only": true,
+        "add_subdirectory": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": {
+          "architectures": [
+            "arm64",
+            "x86_64"
+          ],
+          "notes": "Header-only C++ parser/lookup library."
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ],
+          "notes": "Header-only C++ parser/lookup library."
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ],
+          "notes": "Header-only C++ parser/lookup library."
+        },
+        "Android": {
+          "architectures": [
+            "arm64-v8a",
+            "x86_64"
+          ],
+          "ndk_compatible": true,
+          "notes": "Header-only C++ parser/lookup library."
+        },
+        "iOS": {
+          "architectures": [
+            "arm64"
+          ],
+          "min_version": "15.0",
+          "notes": "Header-only C++ parser/lookup library."
+        }
+      },
+      "rt_safe": true,
+      "tags": [
+        "microtuning",
+        "scala",
+        "scl",
+        "kbm",
+        "tuning"
+      ],
+      "provides": [
+        "scala-tuning",
+        "scl-parser",
+        "kbm-parser",
+        "microtuning"
+      ],
+      "overlaps_with_builtin": {},
+      "unique_value": "Battle-tested SCL/KBM tuning tables from Surge XT in a permissive header-only package; source-only FetchContent avoids building upstream tools/tests in plugin projects.",
+      "alternatives": [
+        "MTS-ESP Mini as an external session master for .scl/.kbm/.tun/MTS SysEx"
+      ],
+      "migration_notes": {
+        "JUCE": "Projects that load Scala files directly should map .scl/.kbm parsing and note-frequency lookups to pulp::midi::ScalaTuningProvider behind the provider-neutral TuningProvider API.",
+        "iPlug2": "Projects with direct SCL/KBM tuning tables should keep file loading on the non-audio side and hand voices a TuningProvider reference for note frequency lookup.",
+        "importer": "Importers should detect .scl/.kbm file-loading helpers or direct Surge tuning-library usage, enable PULP_ENABLE_SCALA_TUNING or add sst-tuning-library, and preserve MTS-ESP session priority when both local files and MTS are present."
+      },
+      "verification": {
+        "last_verified": "2026-07-07",
+        "verified_version": "release_1.1.0",
+        "upstream_commit": "64a939111891cb698f37d6ca9ecfc4b8c260053d",
+        "upstream_latest": "64a939111891cb698f37d6ca9ecfc4b8c260053d",
+        "pulp_commit": "feature/scala-kbm-tuning",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
     "stk": {
       "name": "STK (Synthesis ToolKit)",
       "version": "5.0.1",

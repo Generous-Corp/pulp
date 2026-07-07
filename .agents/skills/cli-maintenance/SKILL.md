@@ -252,6 +252,13 @@ the CMake block generation helpers, and `test/test_cli_package_commands.cpp`.
 position-independent code, include dir rooted at the fetched source, and
 `${CMAKE_DL_LIBS}` linked when available.
 
+Some header-only packages should be fetched source-only because their upstream
+`CMakeLists.txt` builds tools/tests or exports a target shape Pulp does not want
+to impose on plugin projects. Set `cmake.add_subdirectory=false`; generation
+must use `FetchContent_MakeAvailable()` with an inert `SOURCE_SUBDIR`, then
+create the declared interface target itself. `sst-tuning-library` is the
+reference case.
+
 ### `pulp dev --hot-dsp` — live DSP hot-swap dev loop
 
 `pulp dev --hot-dsp` (cmd_dev.cpp) is a watch-loop MODE flag, not a new command.

@@ -2089,7 +2089,7 @@ commands:
             required: true
             description: Project directory to scan
       - name: inspect
-        summary: Resolve the importer (tool registry or --importer-cmd) and run its SPI analyze verb to produce a ProjectIR; prints an install hint and exits non-zero when no importer is resolvable
+        summary: Resolve the importer (tool registry or --importer-cmd) and run its SPI analyze verb to produce a ProjectIR, including optional integration requirements when detected; prints an install hint and exits non-zero when no importer is resolvable
         args:
           - name: --from
             kind: option
@@ -2118,7 +2118,7 @@ commands:
             kind: flag
             description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
       - name: emit
-        summary: Resolve the importer, run its SPI analyze then emit verbs to get an EmissionManifest, then the SDK writes a buildable migration scaffold under --output. Every generated file passes a clean-room output denylist scan (framework source is rejected; copied-user-file DSP is exempt); a .pulp-import-provenance.json marker and migration_status.json are written by the SDK.
+        summary: Resolve the importer, run its SPI analyze then emit verbs to get an EmissionManifest, then the SDK writes a buildable migration scaffold under --output. Every generated file passes a clean-room output denylist scan (framework source is rejected; copied-user-file DSP and safe source assets are exempt); a .pulp-import-provenance.json marker and migration_status.json are written by the SDK.
         args:
           - name: --from
             kind: option

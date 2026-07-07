@@ -172,6 +172,44 @@ void write_registry_fixture(const fs::path& root,
         }
       }
     },
+    "sst-tuning-library": {
+      "name": "Surge Synth Team tuning-library",
+      "version": "release_1.1.0",
+      "description": "Header-only Scala SCL/KBM microtuning parser and frequency lookup library",
+      "license": "MIT",
+      "category": "music-theory",
+      "url": "https://example.com/sst-tuning-library",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://example.com/sst-tuning-library.git",
+        "git_tag": "64a939111891cb698f37d6ca9ecfc4b8c260053d"
+      },
+      "cmake": {
+        "targets": ["sst::tuning-library"],
+        "header_only": true,
+        "add_subdirectory": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": {"architectures": ["arm64", "x86_64"]},
+        "Windows": {"architectures": ["x64", "arm64"]},
+        "Linux": {"architectures": ["x64", "arm64"]},
+        "iOS": {"architectures": ["arm64"]},
+        "Android": {"architectures": ["arm64-v8a", "x86_64"]}
+      },
+      "rt_safe": true,
+      "tags": ["microtuning", "scala", "scl", "kbm"],
+      "provides": ["scala-tuning", "scl-parser", "kbm-parser"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Battle-tested SCL/KBM tuning tables from Surge XT in a permissive header-only package",
+      "verification": {
+        "last_verified": "2026-07-07",
+        "verified_version": "release_1.1.0",
+        "build_status": {
+          "macOS": "pass"
+        }
+      }
+    },
     "gpl-filter": {
       "name": "GPL Filter",
       "version": "3.0.0",
@@ -1001,11 +1039,28 @@ TEST_CASE("cmd_add writes unguarded generated cmake and cmd_remove deletes last 
     REQUIRE(cmake.find("target_link_libraries(mts_esp_client PUBLIC ${CMAKE_DL_LIBS})") !=
             std::string::npos);
 
+    auto scala_added = run_in_project(tmp.path, [&] { return cmd_add({"sst-tuning-library"}); });
+    REQUIRE(scala_added.exit_code == 0);
+    REQUIRE(scala_added.stdout_text.find("Added Surge Synth Team tuning-library") !=
+            std::string::npos);
+    cmake = read_file(cmake_path);
+    REQUIRE(cmake.find("FetchContent_Declare(sst-tuning-library") != std::string::npos);
+    REQUIRE(cmake.find("SOURCE_SUBDIR  cmake/pulp-source-only") !=
+            std::string::npos);
+    REQUIRE(cmake.find("FetchContent_MakeAvailable(sst-tuning-library") !=
+            std::string::npos);
+    REQUIRE(cmake.find("FetchContent_Populate(sst-tuning-library") == std::string::npos);
+    REQUIRE(cmake.find("add_library(sst::tuning-library INTERFACE)") !=
+            std::string::npos);
+    REQUIRE(cmake.find("target_include_directories(sst::tuning-library INTERFACE ${sst-tuning-library_SOURCE_DIR}/include)") !=
+            std::string::npos);
+
     auto removed = run_in_project(tmp.path, [&] { return cmd_remove({"signalsmith-dsp"}); });
     REQUIRE(removed.exit_code == 0);
     REQUIRE(removed.stdout_text.find("Removed Signalsmith DSP") != std::string::npos);
     REQUIRE(fs::exists(cmake_path));
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.count("mts-esp") == 1);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.count("sst-tuning-library") == 1);
     cmake = read_file(cmake_path);
     REQUIRE(cmake.find("FetchContent_Declare(mts-esp") != std::string::npos);
     REQUIRE(cmake.find("add_library(mts_esp_client STATIC)") != std::string::npos);
@@ -1018,6 +1073,15 @@ TEST_CASE("cmd_add writes unguarded generated cmake and cmd_remove deletes last 
     auto source_removed = run_in_project(tmp.path, [&] { return cmd_remove({"mts-esp"}); });
     REQUIRE(source_removed.exit_code == 0);
     REQUIRE(source_removed.stdout_text.find("Removed ODDSound MTS-ESP") != std::string::npos);
+    REQUIRE(fs::exists(cmake_path));
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.count("sst-tuning-library") == 1);
+    cmake = read_file(cmake_path);
+    REQUIRE(cmake.find("FetchContent_Declare(sst-tuning-library") != std::string::npos);
+
+    auto scala_removed = run_in_project(tmp.path, [&] { return cmd_remove({"sst-tuning-library"}); });
+    REQUIRE(scala_removed.exit_code == 0);
+    REQUIRE(scala_removed.stdout_text.find("Removed Surge Synth Team tuning-library") !=
+            std::string::npos);
     REQUIRE_FALSE(fs::exists(cmake_path));
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
     REQUIRE(read_file(tmp.path / "DEPENDENCIES.md").find("Signalsmith DSP") ==

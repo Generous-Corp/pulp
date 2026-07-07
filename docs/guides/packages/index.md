@@ -27,6 +27,7 @@ The live registry is `tools/packages/registry.json`. It currently contains more 
 | Package | What It Provides | Integration |
 |---------|-----------------|-------------|
 | [MTS-ESP](mts-esp.md) | Session-wide microtuning, MTS SysEx fallback, note filtering | Source-only |
+| [Surge Synth Team tuning-library](scala-tuning.md) | Direct Scala `.scl` / `.kbm` file-based microtuning | Header-only, source-only |
 
 ### Audio I/O (File Formats, Resampling)
 
