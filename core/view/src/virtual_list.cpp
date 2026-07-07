@@ -380,14 +380,8 @@ bool VirtualList::wants_wheel_scroll() const {
 std::size_t VirtualList::desired_pool_size() const {
     const auto b = local_bounds();
     if (row_count_ == 0 || row_height_ <= 0.0f || b.height <= 0.0f) return 0;
-    const auto first_visible =
-        static_cast<std::size_t>(std::max(0.0f, std::floor(scroll_y_ / row_height_)));
-    const auto last_visible_exclusive =
-        static_cast<std::size_t>(std::ceil((scroll_y_ + b.height) / row_height_));
     const auto visible_rows =
-        std::max<std::size_t>(1, last_visible_exclusive > first_visible
-                                     ? last_visible_exclusive - first_visible
-                                     : 1);
+        std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(b.height / row_height_)) + 1);
     const auto overscan = static_cast<std::size_t>(std::max(0, overscan_rows_)) * 2U;
     return std::min(row_count_, visible_rows + overscan);
 }

@@ -77,8 +77,8 @@ TEST_CASE("VirtualList realizes only visible rows plus overscan",
     list.set_overscan(3);
     list.set_row_count(50000);
 
-    REQUIRE(list.realized_row_count() == 16);
-    REQUIRE(list.child_count() == 16);
+    REQUIRE(list.realized_row_count() == 17);
+    REQUIRE(list.child_count() == 17);
     REQUIRE(list.content_height() == Catch::Approx(1000000.0f));
     REQUIRE(list.realized_row_count() < 50000);
 }
@@ -137,19 +137,19 @@ TEST_CASE("VirtualList recycles stable row identities while rebinding indices",
     });
     list.set_row_count(50000);
 
-    REQUIRE(creates == 14);
+    REQUIRE(creates == 15);
     auto before = row_identities(list);
     list.clear_dirty();
     list.set_scroll_y(1000);
     auto after = row_identities(list);
     REQUIRE(after == before);
-    REQUIRE(creates == 14);
+    REQUIRE(creates == 15);
     REQUIRE(destructs == 0);
     REQUIRE(list.first_realized_index() == 98);
 
     auto indices = list.realized_indices();
     REQUIRE(indices.front() == 98);
-    REQUIRE(indices.back() == 111);
+    REQUIRE(indices.back() == 112);
     for (std::size_t i = 0; i < list.realized_row_count(); ++i) {
         auto* row = list.realized_row_at_slot(i);
         REQUIRE(row != nullptr);
@@ -167,7 +167,7 @@ TEST_CASE("VirtualList keeps child traversal order sorted after recycling",
 
     list.set_scroll_y(10);
 
-    REQUIRE(list.realized_row_count() == 5);
+    REQUIRE(list.realized_row_count() == 6);
     for (std::size_t i = 0; i < list.realized_row_count(); ++i) {
         REQUIRE(list.bound_index_for_slot(i) == i + 1);
         REQUIRE(list.child_at(i) == list.realized_row_at_slot(i));
@@ -183,6 +183,7 @@ TEST_CASE("VirtualList keeps child traversal order sorted after recycling",
         "row 4 of 100",
         "row 5 of 100",
         "row 6 of 100",
+        "row 7 of 100",
     }));
 }
 
@@ -194,9 +195,12 @@ TEST_CASE("VirtualList realizes trailing partial rows for pixel scroll offsets",
     list.set_overscan(0);
     list.set_row_count(1000);
 
-    REQUIRE(list.realized_row_count() == 10);
+    auto before = row_identities(list);
+    REQUIRE(list.realized_row_count() == 11);
     list.set_scroll_y(5);
+    auto after = row_identities(list);
 
+    REQUIRE(after == before);
     const auto indices = list.realized_indices();
     REQUIRE(list.realized_row_count() == 11);
     REQUIRE(indices.front() == 0);
@@ -247,12 +251,12 @@ TEST_CASE("VirtualList owns recycled row layout during parent Yoga layout",
     root->add_child(std::move(list));
 
     root->layout_children();
-    REQUIRE(raw->realized_row_count() == 20);
+    REQUIRE(raw->realized_row_count() == 21);
 
     raw->flex().preferred_height = 50;
     root->layout_children();
 
-    REQUIRE(raw->realized_row_count() == 5);
+    REQUIRE(raw->realized_row_count() == 6);
     const auto* row = raw->realized_row_at_slot(0);
     REQUIRE(row != nullptr);
     REQUIRE(row->bounds().height == Catch::Approx(10.0f));
@@ -268,9 +272,9 @@ TEST_CASE("VirtualList releases recycled row slots when the pool shrinks",
     list.set_row_releaser([&](View&) { ++releases; });
     list.set_row_count(50000);
 
-    REQUIRE(list.realized_row_count() == 14);
+    REQUIRE(list.realized_row_count() == 15);
     list.set_row_count(0);
-    REQUIRE(releases == 14);
+    REQUIRE(releases == 15);
     REQUIRE(list.realized_row_count() == 0);
     REQUIRE(list.child_count() == 0);
 }
@@ -285,9 +289,9 @@ TEST_CASE("VirtualList releases realized rows when destroyed",
         list->set_overscan(2);
         list->set_row_releaser([&](View&) { ++releases; });
         list->set_row_count(50000);
-        REQUIRE(list->realized_row_count() == 14);
+        REQUIRE(list->realized_row_count() == 15);
     }
-    REQUIRE(releases == 14);
+    REQUIRE(releases == 15);
 }
 
 TEST_CASE("VirtualList row release tolerates reentrant layout",
@@ -302,10 +306,10 @@ TEST_CASE("VirtualList row release tolerates reentrant layout",
         list.layout_children();
     });
     list.set_row_count(50000);
-    REQUIRE(list.realized_row_count() == 14);
+    REQUIRE(list.realized_row_count() == 15);
 
     list.set_row_count(0);
-    REQUIRE(releases == 14);
+    REQUIRE(releases == 15);
     REQUIRE(list.realized_row_count() == 0);
     REQUIRE(list.child_count() == 0);
 }
@@ -781,7 +785,7 @@ TEST_CASE("VirtualList layouts only realized row subtrees",
         calls += probe->layout_calls;
     }
     REQUIRE(calls == static_cast<int>(list.realized_row_count()));
-    REQUIRE(calls == 12);
+    REQUIRE(calls == 13);
 }
 
 TEST_CASE("VirtualList selection and keyboard focus survive recycling",
