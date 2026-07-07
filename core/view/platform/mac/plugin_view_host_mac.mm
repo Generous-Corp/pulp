@@ -511,6 +511,7 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
         const NSEventModifierFlags cmd_ctrl =
             NSEventModifierFlagCommand | NSEventModifierFlagControl;
         if ((event.modifierFlags & cmd_ctrl) == 0 &&
+            ke.key != pulp::view::KeyCode::tab &&
             !pulp_plugin_event_has_private_use_function_character(event)) {
             [host interpretKeyEvents:@[ event ]];
             fv = pulp_focus_under_root(root);

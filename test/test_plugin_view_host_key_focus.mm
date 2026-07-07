@@ -494,6 +494,14 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
             REQUIRE(editor->text() == "abcx");
         }
 
+        SECTION("Tab moves focus without inserting a tab character") {
+            editor->set_caret_pos(3);
+            [pulp_view keyDown:make_key_event(48, 0, @"\t")];  // 48 = Tab
+            REQUIRE(editor->text() == "abc");
+            REQUIRE(View::focused_input_ == nullptr);
+            REQUIRE(editor->lost_count == 1);
+        }
+
         SECTION("unhandled function key inserts no private-use character") {
             editor->set_caret_pos(3);
             [pulp_view keyDown:make_key_event(
