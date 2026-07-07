@@ -84,6 +84,19 @@ bool pulp_plugin_apply_replacement_range(pulp::view::TextEditor* te,
     return true;
 }
 
+bool pulp_plugin_replacement_range_is_marked_range(pulp::view::TextEditor* te,
+                                                   NSRange replacement_range) {
+    if (!te || !te->has_marked_text() || replacement_range.location == NSNotFound)
+        return false;
+    auto [start, len] = te->marked_range();
+    const auto start16 = pulp::canvas::utf16_offset_for_utf8_offset(
+        te->text(), static_cast<std::size_t>(start));
+    const auto end16 = pulp::canvas::utf16_offset_for_utf8_offset(
+        te->text(), static_cast<std::size_t>(start + len));
+    return replacement_range.location == static_cast<NSUInteger>(start16) &&
+           replacement_range.length == static_cast<NSUInteger>(end16 - start16);
+}
+
 void pulp_plugin_request_text_redraw(NSView* host, pulp::view::View* root) {
     [host setNeedsDisplay:YES];
     if (root) root->request_repaint();
@@ -147,7 +160,10 @@ void pulp_plugin_set_marked_text(NSView* host,
                                  NSRange replacement_range) {
     auto* te = pulp_plugin_focused_text_editor(root);
     if (!te) return;
-    pulp_plugin_apply_replacement_range(te, replacement_range);
+    if (!te->has_marked_text() ||
+        (replacement_range.location != NSNotFound &&
+         !pulp_plugin_replacement_range_is_marked_range(te, replacement_range)))
+        pulp_plugin_apply_replacement_range(te, replacement_range);
     NSString* str = pulp_plugin_string_from_input(string);
     const char* utf8 = str.UTF8String;
     std::string marked = utf8 ? utf8 : "";

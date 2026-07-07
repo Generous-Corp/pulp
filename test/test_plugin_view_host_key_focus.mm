@@ -640,6 +640,37 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
         REQUIRE(actual.location == static_cast<NSUInteger>(3));
         REQUIRE(actual.length == static_cast<NSUInteger>(1));
 
+        [pulp_view setMarkedText:@""
+                   selectedRange:NSMakeRange(0, 0)
+                replacementRange:marked];
+        REQUIRE(editor->text() == "abc");
+        REQUIRE_FALSE(editor->has_marked_text());
+
+        editor->set_text("abcd");
+        editor->set_caret_pos(4);
+        [pulp_view setMarkedText:@"X"
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->text() == "abcdX");
+        REQUIRE(editor->has_marked_text());
+
+        [pulp_view setMarkedText:@"Y"
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(1, 1)];
+        REQUIRE(editor->text() == "aYcdX");
+        NSRange retargeted = [pulp_view markedRange];
+        REQUIRE(retargeted.location == static_cast<NSUInteger>(1));
+        REQUIRE(retargeted.length == static_cast<NSUInteger>(1));
+        [pulp_view unmarkText];
+
+        editor->set_text("abc");
+        editor->set_caret_pos(3);
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->text() == std::string("abc") + kNi);
+        REQUIRE(editor->has_marked_text());
+
         NSRect first_rect =
             [pulp_view firstRectForCharacterRange:NSMakeRange(0, 0)
                                       actualRange:&actual];
