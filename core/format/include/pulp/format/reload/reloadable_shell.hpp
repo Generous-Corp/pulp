@@ -43,6 +43,7 @@
 #include <pulp/format/reload/processor_hotswap_slot.hpp>
 #include <pulp/format/reload/reload_abi.hpp>
 #include <pulp/format/reload/reload_controller.hpp>
+#include <pulp/format/reload/reload_trust_policy.hpp>
 #include <pulp/format/reload/reload_library.hpp>
 #include <pulp/format/reload/reload_transaction.hpp>
 #include <pulp/runtime/log.hpp>
@@ -134,6 +135,19 @@ public:
         on_reloaded_ = std::move(cb);
     }
 
+    /// Opt-in "require signed reloads" for this shell's dev watcher (default OFF =
+    /// the frictionless unsigned dev loop). When enabled with the pinned key, the
+    /// watcher refuses any reload whose bytes are not covered by a valid signed
+    /// sidecar manifest — the same fail-closed verification consumers get, applied
+    /// in dev. Set BEFORE prepare() so the controller adopts it; a call after
+    /// prepare() takes effect on the next prepare()/re-emplace.
+    void set_reload_trust_policy(ReloadTrustPolicy policy) {
+        std::lock_guard<std::mutex> g(controller_mutex_);
+        reload_trust_policy_ = std::move(policy);
+        if (controller_) controller_.emplace(*session_, logic_path_,
+                                              std::filesystem::path{}, reload_trust_policy_);
+    }
+
     // The host caches latency once (for plugin-delay compensation), so it is part
     // of the frozen contract: report the initial logic's latency, and a reload
     // that changes latency is rejected (see prepare()/the reload note below).
@@ -188,7 +202,8 @@ public:
             // The raw-path controller (dev filesystem reload) is compiled out of
             // a shipping build; without it reload_now() / the watcher have no
             // path to dlopen an arbitrary on-disk artifact.
-            controller_.emplace(*session_, logic_path_);
+            controller_.emplace(*session_, logic_path_, std::filesystem::path{},
+                                 reload_trust_policy_);
 #endif
         }
         start_watcher();  // no-op (compiled out) when the watcher is gated off
@@ -428,6 +443,7 @@ private:
     std::function<void()> on_reloaded_snapshot() const { return on_reloaded_; }
 
     std::string logic_path_;
+    ReloadTrustPolicy reload_trust_policy_;  // opt-in require_signed (default OFF)
     PluginDescriptor descriptor_;
     int initial_latency_ = 0;                     // host-cached latency of the initial logic
     std::unique_ptr<Processor> initial_;          // pre-prepare; moved into slot_
