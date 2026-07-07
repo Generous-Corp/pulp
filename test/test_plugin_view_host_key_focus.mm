@@ -84,6 +84,19 @@ public:
     int lost_count = 0;
 };
 
+class BlurMutatingTextEditor : public TextEditor {
+public:
+    View* root = nullptr;
+    View* remove_on_blur = nullptr;
+    std::unique_ptr<View> removed;
+
+    void on_focus_changed(bool gained) override {
+        TextEditor::on_focus_changed(gained);
+        if (!gained && root && remove_on_blur && !removed)
+            removed = root->remove_child(remove_on_blur);
+    }
+};
+
 class ReusedAddressTextEditor : public FocusRecordingTextEditor {
 public:
     static void* operator new(std::size_t size);
@@ -674,8 +687,8 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
         REQUIRE(pulp_view != nil);
 
         // A single-line editor filling the root so any in-bounds click hits it.
-        auto editor_owned = std::make_unique<TextEditor>();
-        TextEditor* editor = editor_owned.get();
+        auto editor_owned = std::make_unique<BlurMutatingTextEditor>();
+        BlurMutatingTextEditor* editor = editor_owned.get();
         editor->multi_line = false;
         editor->set_text("hello");
         editor->set_bounds({0, 0, 400, 200});
@@ -731,6 +744,22 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
             [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
             REQUIRE(fv->has_focus());                 // not force-blurred
             REQUIRE(View::focused_input_ == fv);
+        }
+
+        SECTION("#3 click focus transfer revalidates target after blur callback") {
+            editor->set_bounds({0, 0, 180, 200});
+            auto target_owned = std::make_unique<FocusRecordingTextEditor>();
+            FocusRecordingTextEditor* target = target_owned.get();
+            target->set_bounds({200, 0, 200, 200});
+            root.add_child(std::move(target_owned));
+            editor->root = &root;
+            editor->remove_on_blur = target;
+            editor->on_focus_changed(true);
+            editor->claim_input_focus();
+            [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(300, 100))];
+            REQUIRE(editor->removed != nullptr);
+            REQUIRE_FALSE(target->has_focus());
+            REQUIRE(View::focused_input_ == nullptr);
         }
 
         host->detach();

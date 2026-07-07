@@ -218,8 +218,12 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                     return;
                 }
                 if (prev && prev != *drag_target) {
-                    prev->on_focus_changed(false);
                     prev->release_input_focus();
+                    prev->on_focus_changed(false);
+                    if (!view_is_in_tree(*drag_target, root)) {
+                        *drag_target = nullptr;
+                        return;
+                    }
                 }
             }
             (*drag_target)->on_focus_changed(true);
@@ -231,8 +235,12 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                 return;
             }
             if (prev) {
-                prev->on_focus_changed(false);
                 prev->release_input_focus();
+                prev->on_focus_changed(false);
+                if (!view_is_in_tree(*drag_target, root)) {
+                    *drag_target = nullptr;
+                    return;
+                }
             }
         }
     }
