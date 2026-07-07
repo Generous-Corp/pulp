@@ -119,6 +119,11 @@ jobs:
 
       - name: Build C++ CLI (pulp-cli target only)
         id: cpp-build
+        # This build is intentionally best-effort: the pytest harness can still
+        # run binary-free and Rust-backed coverage when the C++ delegate is
+        # unavailable. Bound the step itself so a slow hosted macOS cold build
+        # does not consume the whole job timeout before pytest can run.
+        timeout-minutes: 60
         run: |
           set -o pipefail
           cmake -S . -B build \

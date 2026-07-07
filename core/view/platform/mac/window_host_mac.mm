@@ -159,12 +159,8 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
 
 @end
 
-// request_app_close, find_topmost_modal, configure_window_type, the
-// child-view geometry helpers, and the coordinate / event-translation
-// helpers (modifiers_from_ns_flags, to_local, view_is_in_tree,
-// key_code_from_ns) were extracted to window_host_mac_geometry.mm in
-// window_host_mac_geometry.mm — see window_host_mac_internal.hpp. Used here via
-// the `pulp::view::mac_geometry` namespace.
+// Window setup, geometry, event, and gesture helpers live in
+// window_host_mac_geometry.mm; use them via pulp::view::mac_geometry.
 using namespace pulp::view::mac_geometry;
 
 extern "C" void pulp_mac_text_input_client_category_anchor();
@@ -521,7 +517,7 @@ static void install_app_menu(NSString* appName) {
         // sibling under the menu or misses a scrolled/flipped-up row.
         if (auto* combo = [self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
                 me.button = pulp::view::MouseButton::left;
-                me.is_down = true;
+                me.is_down = true; me.phase = pulp::view::MousePhase::press;
                 me.click_count = 1;
             }]) {
             _dragTarget = combo;
@@ -581,7 +577,7 @@ static void install_app_menu(NSString* appName) {
                     me.window_position = pt;
                     me.button = pulp::view::MouseButton::left;
                     me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-                    me.is_down = true;
+                    me.is_down = true; me.phase = pulp::view::MousePhase::press;
                     me.click_count = static_cast<int>(event.clickCount);
                     (void)dispatch_mouse_down_if_live(self, _dragTarget, me, local);
                     [self setNeedsDisplay:YES];
@@ -608,6 +604,7 @@ static void install_app_menu(NSString* appName) {
             }
         }
 
+        if (dispatch_mac_gesture_pointer_event(self.rootView, pt, event, pulp::view::MousePhase::press, true)) { _dragTarget = nullptr; [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
         _dragTarget = self.rootView->hit_test(pt);
         pulp::view::ComboBox::notify_global_click(_dragTarget);
 
@@ -631,7 +628,7 @@ static void install_app_menu(NSString* appName) {
             me.window_position = pt;
             me.button = pulp::view::MouseButton::left;
             me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-            me.is_down = true;
+            me.is_down = true; me.phase = pulp::view::MousePhase::press;
             me.click_count = static_cast<int>(event.clickCount);
             const bool target_alive = dispatch_mouse_down_if_live(self, _dragTarget, me, local);
 
@@ -703,12 +700,14 @@ static void install_app_menu(NSString* appName) {
             // drag event arrives, e.g. when a click triggers a React state
             // change that destroys the widget. Re-validate against the
             // live tree before any deref.
-            if (!_dragTarget || !self.rootView) return;
+            if (!self.rootView) return;
+            auto pt = [self localPoint:event];
+            if (dispatch_mac_gesture_pointer_event(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) { [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
+            if (!_dragTarget) return;
             if (!view_is_in_tree(_dragTarget, self.rootView)) {
                 _dragTarget = nullptr;
                 return;
             }
-            auto pt = [self localPoint:event];
             auto local = to_local(pt, _dragTarget, self.rootView);
             _dragTarget->on_mouse_drag(local);
             if (_dragTarget->on_drag) _dragTarget->on_drag(local);
@@ -759,6 +758,8 @@ static void install_app_menu(NSString* appName) {
                     return;
                 }
             }
+            auto pt = [self localPoint:event];
+            if (dispatch_mac_gesture_pointer_event(self.rootView, pt, event, pulp::view::MousePhase::release, false)) { _dragTarget = nullptr; [self setNeedsDisplay:YES]; return; }
             if (_dragTarget) {
                 // _dragTarget may point at a freed View if
                 // the mouseDown handler triggered a React unmount of the
@@ -773,7 +774,6 @@ static void install_app_menu(NSString* appName) {
                     [self setNeedsDisplay:YES];
                     return;
                 }
-                auto pt = [self localPoint:event];
                 auto local = to_local(pt, _dragTarget, self.rootView);
                 auto released_target = self.rootView ? self.rootView->hit_test(pt) : nullptr;
                 // DOM-style click bubbling. `hit_test` returns
@@ -814,7 +814,7 @@ static void install_app_menu(NSString* appName) {
                 up_me.window_position = pt;
                 up_me.button = pulp::view::MouseButton::left;
                 up_me.modifiers = modifiers;
-                up_me.is_down = false;
+                up_me.is_down = false; up_me.phase = pulp::view::MousePhase::release;
                 up_me.click_count = static_cast<int>(event.clickCount);
                 _dragTarget->on_mouse_event(up_me);
                 for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
@@ -1338,19 +1338,18 @@ static void install_app_menu(NSString* appName) {
     // 60fps timer to drive animations
     self.animationTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/60.0
         repeats:YES block:^(NSTimer* timer) {
-            if (self.frameClock) {
-                self.frameClock->tick(1.0f / 60.0f);
-            }
+            if (self.frameClock) self.frameClock->tick(1.0f / 60.0f);
+            if (self.rootView) self.rootView->advance_gesture_recognizers();
             // Advance widget animations
             [self advanceWidgetAnimations:self.rootView dt:1.0f/60.0f];
             [self setNeedsDisplay:YES];
 
             // Stop timer when no animations are active
-            if (self.frameClock && !self.frameClock->has_active_subscribers()) {
-                if (![self hasActiveAnimations:self.rootView]) {
-                    [self.animationTimer invalidate];
-                    self.animationTimer = nil;
-                }
+            if (self.frameClock && !self.frameClock->has_active_subscribers() &&
+                (!self.rootView || !self.rootView->has_time_driven_gestures()) &&
+                ![self hasActiveAnimations:self.rootView]) {
+                [self.animationTimer invalidate];
+                self.animationTimer = nil;
             }
         }];
 }
@@ -2708,6 +2707,7 @@ private:
                         return;
                     }
                     self->frame_clock_.tick(1.0f / 60.0f);
+                    self->root_.advance_gesture_recognizers();
                     advance_widget_animations(&self->root_, 1.0f / 60.0f);
                     if (animate || tick_subscribers) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);

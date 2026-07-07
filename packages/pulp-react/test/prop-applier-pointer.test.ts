@@ -190,4 +190,79 @@ describe('@pulp/react prop-applier — pointer registration', () => {
         expect(regPointer.length).toBe(3);
         expect(regHover.length).toBe(2);
     });
+
+    it('arms tap and double-tap native recognizers from React props', () => {
+        applyAllProps(instance('gestures1', 'View', {
+            onTap: () => {},
+            onDoubleTap: () => {},
+        }));
+        expect(bridge.calls.filter((c) => c.fn === 'registerTapGesture')[0].args)
+            .toEqual(['gestures1']);
+        expect(bridge.calls.filter((c) => c.fn === 'registerDoubleTapGesture')[0].args)
+            .toEqual(['gestures1']);
+        const on = bridge.calls.filter((c) => c.fn === 'on');
+        expect(on.map((c) => c.args[1])).toEqual(['tap', 'doubletap']);
+    });
+
+    it('arms pan recognizer once per pan phase handler at the prop-applier layer', () => {
+        applyAllProps(instance('gestures2', 'View', {
+            onPanStart: () => {},
+            onPanChange: () => {},
+            onPanEnd: () => {},
+        }));
+        const reg = bridge.calls.filter((c) => c.fn === 'registerPanGesture');
+        expect(reg.length).toBe(3);
+        expect(reg.every((c) => c.args[0] === 'gestures2')).toBe(true);
+        const on = bridge.calls.filter((c) => c.fn === 'on');
+        expect(on.map((c) => c.args[1])).toEqual(['panstart', 'panchange', 'panend']);
+    });
+
+    it('arms multi-touch native recognizers from pinch and rotate props', () => {
+        applyAllProps(instance('gestures3', 'View', {
+            onPinchStart: () => {},
+            onPinchChange: () => {},
+            onRotateStart: () => {},
+            onRotateEnd: () => {},
+        }));
+        expect(bridge.calls.filter((c) => c.fn === 'registerPinchGesture').length).toBe(2);
+        expect(bridge.calls.filter((c) => c.fn === 'registerRotateGesture').length).toBe(2);
+        const on = bridge.calls.filter((c) => c.fn === 'on');
+        expect(on.map((c) => c.args[1])).toEqual([
+            'pinchstart',
+            'pinchchange',
+            'rotatestart',
+            'rotateend',
+        ]);
+    });
+
+    it('maps continuous gesture aliases to change events', () => {
+        applyAllProps(instance('gestures5', 'View', {
+            onPan: () => {},
+            onPinch: () => {},
+            onRotate: () => {},
+        }));
+        expect(bridge.calls.filter((c) => c.fn === 'registerPanGesture').length).toBe(1);
+        expect(bridge.calls.filter((c) => c.fn === 'registerPinchGesture').length).toBe(1);
+        expect(bridge.calls.filter((c) => c.fn === 'registerRotateGesture').length).toBe(1);
+        const on = bridge.calls.filter((c) => c.fn === 'on');
+        expect(on.map((c) => c.args[1])).toEqual([
+            'panchange',
+            'pinchchange',
+            'rotatechange',
+        ]);
+    });
+
+    it('arms long-press, swipe, and fling native recognizers from React props', () => {
+        applyAllProps(instance('gestures4', 'View', {
+            onLongPress: () => {},
+            onSwipe: () => {},
+            onFling: () => {},
+        }));
+        expect(bridge.calls.filter((c) => c.fn === 'registerLongPressGesture')[0].args)
+            .toEqual(['gestures4']);
+        expect(bridge.calls.filter((c) => c.fn === 'registerSwipeGesture')[0].args)
+            .toEqual(['gestures4']);
+        expect(bridge.calls.filter((c) => c.fn === 'registerFlingGesture')[0].args)
+            .toEqual(['gestures4']);
+    });
 });

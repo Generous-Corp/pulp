@@ -1,5 +1,6 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/motion.hpp>
+#include <pulp/view/gesture.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/drag_drop.hpp>
@@ -15,6 +16,7 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 namespace pulp::view {
@@ -151,6 +153,13 @@ void build_continuous_corner_rounded_rect_path(
     canvas.close_path();
 }
 
+View* root_for_gesture_relationship_cleanup(View* view) {
+    if (!view) return nullptr;
+    while (view->parent())
+        view = view->parent();
+    return view;
+}
+
 } // namespace
 
 View::View()
@@ -161,6 +170,8 @@ View::View()
 // View destructor stays out-of-line while remaining virtual + public so vtable
 // layout + SDK contract are unchanged.
 View::~View() {
+    if (gesture_arbiter_)
+        gesture_arbiter_->reset();
     // Clear the overlay slot if this dying View holds it. Without this, an
     // unmounted React popover leaves a dangling pointer that the platform
     // window host would dereference on the next click.
@@ -734,6 +745,20 @@ void View::simulate_click(Point root_pos) {
     }
     if (!target) return;
 
+    MouseEvent down;
+    down.position = root_pos;
+    down.window_position = root_pos;
+    down.button = MouseButton::left;
+    down.is_down = true;
+    down.phase = MousePhase::press;
+    const bool gesture_down = dispatch_gesture_pointer_event(down);
+
+    MouseEvent up = down;
+    up.is_down = false;
+    up.phase = MousePhase::release;
+    const bool gesture_up = dispatch_gesture_pointer_event(up);
+    if (gesture_down || gesture_up) return;
+
     // Convert to target's local coordinates
     Point local = root_pos;
     View* v = target;
@@ -778,6 +803,37 @@ void View::simulate_drag(Point start, Point end, int steps) {
     }
     if (!target) return;
 
+    MouseEvent down;
+    down.position = start;
+    down.window_position = start;
+    down.button = MouseButton::left;
+    down.is_down = true;
+    down.phase = MousePhase::press;
+    bool gesture_consumed = dispatch_gesture_pointer_event(down);
+
+    if (gesture_consumed) {
+        for (int i = 1; i <= steps; ++i) {
+            float t = static_cast<float>(i) / steps;
+            Point p = {start.x + (end.x - start.x) * t,
+                       start.y + (end.y - start.y) * t};
+            MouseEvent move;
+            move.position = p;
+            move.window_position = p;
+            move.button = MouseButton::left;
+            move.is_down = true;
+            move.phase = MousePhase::drag;
+            dispatch_gesture_pointer_event(move);
+        }
+        MouseEvent up;
+        up.position = end;
+        up.window_position = end;
+        up.button = MouseButton::left;
+        up.is_down = false;
+        up.phase = MousePhase::release;
+        dispatch_gesture_pointer_event(up);
+        return;
+    }
+
     auto to_target_local = [this, target](Point p) {
         View* v = target;
         while (v && v != this) {
@@ -793,8 +849,23 @@ void View::simulate_drag(Point start, Point end, int steps) {
         float t = static_cast<float>(i) / steps;
         Point p = {start.x + (end.x - start.x) * t,
                    start.y + (end.y - start.y) * t};
+        MouseEvent move;
+        move.position = p;
+        move.window_position = p;
+        move.button = MouseButton::left;
+        move.is_down = true;
+        move.phase = MousePhase::drag;
+        gesture_consumed = dispatch_gesture_pointer_event(move) || gesture_consumed;
         target->on_mouse_drag(to_target_local(p));
     }
+    MouseEvent up;
+    up.position = end;
+    up.window_position = end;
+    up.button = MouseButton::left;
+    up.is_down = false;
+    up.phase = MousePhase::release;
+    gesture_consumed = dispatch_gesture_pointer_event(up) || gesture_consumed;
+    if (gesture_consumed) return;
     target->on_mouse_up(to_target_local(end));
 }
 
@@ -902,6 +973,34 @@ std::unique_ptr<View> View::remove_child(View* child) {
     auto it = std::find_if(children_.begin(), children_.end(),
         [child](const auto& p) { return p.get() == child; });
     if (it == children_.end()) return nullptr;
+
+    std::vector<GestureRecognizer*> removed_recognizers;
+    auto collect_removed = [&](auto&& self, View& node) -> void {
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (recognizer)
+                removed_recognizers.push_back(recognizer.get());
+        }
+        for (auto& descendant : node.children_)
+            self(self, *descendant);
+    };
+    collect_removed(collect_removed, *child);
+
+    for (View* root = this; root; root = root->parent_) {
+        if (root->gesture_arbiter_)
+            root->gesture_arbiter_->reset();
+    }
+    auto scrub_relationships = [&](auto&& self, View& node) -> void {
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (!recognizer) continue;
+            for (auto* removed : removed_recognizers) {
+                if (removed && removed != recognizer.get())
+                    recognizer->remove_relationships_to(*removed);
+            }
+        }
+        for (auto& descendant : node.children_)
+            self(self, *descendant);
+    };
+    scrub_relationships(scrub_relationships, *this);
 
     child->on_detached();
     child->set_window_host(nullptr);
@@ -1246,6 +1345,73 @@ std::optional<int> View::inheritable_text_align() const {
 }
 
 // ── Pointer capture ─────────────────────────────────────────────────────
+
+GestureRecognizer& View::add_gesture_recognizer(
+        std::unique_ptr<GestureRecognizer> recognizer) {
+    if (!recognizer)
+        throw std::invalid_argument("add_gesture_recognizer requires a recognizer");
+    recognizer->set_owner(this);
+    gesture_recognizers_.push_back(std::move(recognizer));
+    return *gesture_recognizers_.back();
+}
+
+void View::clear_gesture_recognizers() {
+    std::vector<GestureRecognizer*> removed_recognizers;
+    removed_recognizers.reserve(gesture_recognizers_.size());
+    for (auto& recognizer : gesture_recognizers_) {
+        if (recognizer)
+            removed_recognizers.push_back(recognizer.get());
+    }
+
+    for (View* root = this; root; root = root->parent_) {
+        if (root->gesture_arbiter_)
+            root->gesture_arbiter_->reset();
+    }
+
+    if (auto* root = root_for_gesture_relationship_cleanup(this)) {
+        auto scrub_relationships = [&](auto&& self, View& node) -> void {
+            for (auto& recognizer : node.gesture_recognizers_) {
+                if (!recognizer) continue;
+                for (auto* removed : removed_recognizers) {
+                    if (removed && removed != recognizer.get())
+                        recognizer->remove_relationships_to(*removed);
+                }
+            }
+            for (auto& descendant : node.children_)
+                self(self, *descendant);
+        };
+        scrub_relationships(scrub_relationships, *root);
+    }
+
+    gesture_recognizers_.clear();
+}
+
+GestureRecognizer* View::gesture_recognizer_at(size_t index) {
+    if (index >= gesture_recognizers_.size()) return nullptr;
+    return gesture_recognizers_[index].get();
+}
+
+const GestureRecognizer* View::gesture_recognizer_at(size_t index) const {
+    if (index >= gesture_recognizers_.size()) return nullptr;
+    return gesture_recognizers_[index].get();
+}
+
+bool View::dispatch_gesture_pointer_event(const MouseEvent& root_event,
+                                          double timestamp_seconds) {
+    if (!gesture_arbiter_)
+        gesture_arbiter_ = std::make_unique<GestureArbiter>();
+    return gesture_arbiter_->handle_pointer_event(*this, root_event,
+                                                  timestamp_seconds);
+}
+
+void View::advance_gesture_recognizers(double timestamp_seconds) {
+    if (gesture_arbiter_)
+        gesture_arbiter_->advance_time(*this, timestamp_seconds);
+}
+
+bool View::has_time_driven_gestures() const {
+    return gesture_arbiter_ && gesture_arbiter_->wants_time_updates();
+}
 
 void View::set_pointer_capture(int pointer_id) {
     if (!has_pointer_capture(pointer_id))

@@ -91,7 +91,17 @@ function isVirtualListType(type: string): boolean {
 ///   mouseenter / mouseleave   (Hover)
 ///   dismiss                   (Modal close)
 function eventNameFor(propName: string): string {
-    return propName.slice(2).toLowerCase();
+    const eventName = propName.slice(2);
+    switch (eventName) {
+        case 'Pan':
+            return 'panchange';
+        case 'Pinch':
+            return 'pinchchange';
+        case 'Rotate':
+            return 'rotatechange';
+        default:
+            return eventName.toLowerCase();
+    }
 }
 
 /// Hover/pointer events the bridge gates behind registerHover(id).
@@ -137,6 +147,35 @@ function isWheelEvent(eventName: string): boolean {
     return eventName === 'wheel';
 }
 
+function gestureRegistrarFor(eventName: string): string | null {
+    switch (eventName) {
+        case 'tap':
+            return 'registerTapGesture';
+        case 'doubletap':
+            return 'registerDoubleTapGesture';
+        case 'longpress':
+            return 'registerLongPressGesture';
+        case 'panstart':
+        case 'panchange':
+        case 'panend':
+            return 'registerPanGesture';
+        case 'swipe':
+            return 'registerSwipeGesture';
+        case 'fling':
+            return 'registerFlingGesture';
+        case 'pinchstart':
+        case 'pinchchange':
+        case 'pinchend':
+            return 'registerPinchGesture';
+        case 'rotatestart':
+        case 'rotatechange':
+        case 'rotateend':
+            return 'registerRotateGesture';
+        default:
+            return null;
+    }
+}
+
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
@@ -166,6 +205,10 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     if (isWheelEvent(eventName)) {
         // Wheel dispatch is separately armed from pointer dispatch.
         call('registerWheel', id);
+    }
+    const gestureRegistrar = gestureRegistrarFor(eventName);
+    if (gestureRegistrar) {
+        call(gestureRegistrar, id);
     }
     // Wrap the React handler in a synthetic-event factory so JSX
     // consumers receive a React-DOM-shaped event object (with

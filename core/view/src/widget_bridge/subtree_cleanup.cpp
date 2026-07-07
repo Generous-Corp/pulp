@@ -60,6 +60,20 @@ void forget_js_widget_subtree(ScriptEngine& engine,
 
 } // namespace
 
+void WidgetBridge::forget_widget_registrations(const std::string& id) {
+    pointer_registered_.erase(id);
+    wheel_registered_.erase(id);
+
+    const std::string prefix = id + ":";
+    for (auto it = gesture_recognizer_registered_.begin();
+         it != gesture_recognizer_registered_.end();) {
+        if (it->compare(0, prefix.size(), prefix) == 0)
+            it = gesture_recognizer_registered_.erase(it);
+        else
+            ++it;
+    }
+}
+
 void WidgetBridge::forget_widget_subtree(View* node, bool preserve_js_dom_state) {
     std::vector<std::string> ids;
     collect_widget_subtree_ids(node, ids);
@@ -68,8 +82,7 @@ void WidgetBridge::forget_widget_subtree(View* node, bool preserve_js_dom_state)
     forget_js_widget_subtree(engine_, ids, preserve_js_dom_state);
     for (const auto& id : ids) {
         widgets_.erase(id);
-        pointer_registered_.erase(id);
-        wheel_registered_.erase(id);
+        forget_widget_registrations(id);
     }
     prune_dangling_bindings();
 }
@@ -77,8 +90,7 @@ void WidgetBridge::forget_widget_subtree(View* node, bool preserve_js_dom_state)
 void WidgetBridge::forget_widget_event_state(View& view) {
     if (!view.id().empty()) {
         forget_js_widget_subtree(engine_, std::vector<std::string>{view.id()}, false);
-        pointer_registered_.erase(view.id());
-        wheel_registered_.erase(view.id());
+        forget_widget_registrations(view.id());
     }
     view.on_click = {};
     view.on_pointer_event = {};

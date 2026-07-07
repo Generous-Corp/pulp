@@ -59,9 +59,9 @@ static float g_display_density = 2.625f;  // default xxhdpi, overridden by Kotli
 static float g_safe_top = 0, g_safe_bottom = 0, g_safe_left = 0, g_safe_right = 0;
 
 // Touch state
-// g_captured_view has external linkage: the nativeOnTouchCancel JNI export
-// in gpu_surface_android_jni.cpp clears it directly. Declared in
-// gpu_surface_android_internal.hpp.
+// g_captured_view has external linkage for the JNI bridge declarations.
+// Cancellation still routes through android_touch_cancel() before clearing it.
+// Declared in gpu_surface_android_internal.hpp.
 view::View* g_captured_view = nullptr;
 static std::chrono::steady_clock::time_point g_last_tap_time{};
 static float g_last_tap_x = 0, g_last_tap_y = 0;
@@ -877,6 +877,7 @@ void android_render_frame(float dt) {
 
                 // Advance animations with real dt from choreographer,
                 // or 1.0f to snap to completion on touch-only repaints
+                g_root_view->advance_gesture_recognizers();
                 advance_view_animations(g_root_view.get(), dt);
 
                 // SkiaSurface applies display density scaling internally
@@ -956,12 +957,19 @@ void android_touch_down(int pointer_id, float px_x, float px_y, float pressure) 
     g_last_tap_y = dp_y;
 
     view::Point pt{dp_x, dp_y};
+    auto gesture_ev = make_touch_event(pt, pt, pointer_id, pressure, true);
+    gesture_ev.click_count = click_count;
+    gesture_ev.phase = view::MousePhase::press;
+    if (g_root_view->dispatch_gesture_pointer_event(gesture_ev))
+        return;
+
     auto* target = g_root_view->hit_test(pt);
     if (target) {
         auto local = to_local(target, dp_x, dp_y);
         // Dispatch rich event (Fader dragging_, Knob double-click reset)
         auto ev = make_touch_event(local, pt, pointer_id, pressure, true);
         ev.click_count = click_count;
+        ev.phase = view::MousePhase::press;
         target->on_mouse_event(ev);
         // Dispatch legacy event (Knob drag_start_y_, Toggle on/off)
         target->on_mouse_down(local);
@@ -971,25 +979,59 @@ void android_touch_down(int pointer_id, float px_x, float px_y, float pressure) 
 }
 
 void android_touch_move(int pointer_id, float px_x, float px_y, float pressure) {
-    if (!g_captured_view) return;
+    if (!g_root_view) return;
 
     float dp_x = px_x / g_display_density;
     float dp_y = px_y / g_display_density;
+    view::Point pt{dp_x, dp_y};
+
+    auto gesture_ev = make_touch_event(pt, pt, pointer_id, pressure, true);
+    gesture_ev.phase = view::MousePhase::drag;
+    if (g_root_view->dispatch_gesture_pointer_event(gesture_ev))
+        return;
+
+    if (!g_captured_view) return;
 
     auto local = to_local(g_captured_view, dp_x, dp_y);
     g_captured_view->on_mouse_drag(local);
 }
 
 void android_touch_up(int pointer_id, float px_x, float px_y) {
-    if (!g_captured_view) return;
+    if (!g_root_view) return;
 
     float dp_x = px_x / g_display_density;
     float dp_y = px_y / g_display_density;
+    view::Point pt{dp_x, dp_y};
+
+    auto gesture_ev = make_touch_event(pt, pt, pointer_id, 0.0f, false);
+    gesture_ev.phase = view::MousePhase::release;
+    if (g_root_view->dispatch_gesture_pointer_event(gesture_ev)) {
+        g_captured_view = nullptr;
+        return;
+    }
+
+    if (!g_captured_view) return;
 
     auto local = to_local(g_captured_view, dp_x, dp_y);
     auto ev = make_touch_event(local, {dp_x, dp_y}, pointer_id, 0.0f, false);
+    ev.phase = view::MousePhase::release;
     g_captured_view->on_mouse_event(ev);
     g_captured_view->on_mouse_up(local);
+    g_captured_view = nullptr;
+}
+
+void android_touch_cancel(int pointer_id, float px_x, float px_y) {
+    if (g_root_view) {
+        const float dp_x = px_x / g_display_density;
+        const float dp_y = px_y / g_display_density;
+        const view::Point pt{dp_x, dp_y};
+
+        auto gesture_ev = make_touch_event(pt, pt, pointer_id, 0.0f, false);
+        gesture_ev.phase = view::MousePhase::release;
+        gesture_ev.is_cancelled = true;
+        g_root_view->dispatch_gesture_pointer_event(gesture_ev);
+    }
+
     g_captured_view = nullptr;
 }
 

@@ -174,6 +174,29 @@ describe('@pulp/react prop-applier — synthetic event factory', () => {
         expect((evtOff.target as unknown as { checked: boolean }).checked).toBe(false);
     });
 
+    it('gesture events lift native gesture payload fields', () => {
+        const evt = makeSyntheticEvent('pad1', 'panchange', [{
+            scale: 1.25,
+            deltaScale: 0.05,
+            rotation: 0.75,
+            deltaRotation: 0.1,
+            translationX: 12,
+            translationY: -8,
+            velocityX: 320,
+            velocityY: -140,
+            tapCount: 2,
+        }]);
+        expect(evt.scale).toBe(1.25);
+        expect(evt.deltaScale).toBe(0.05);
+        expect(evt.rotation).toBe(0.75);
+        expect(evt.deltaRotation).toBe(0.1);
+        expect(evt.translationX).toBe(12);
+        expect(evt.translationY).toBe(-8);
+        expect(evt.velocityX).toBe(320);
+        expect(evt.velocityY).toBe(-140);
+        expect(evt.tapCount).toBe(2);
+    });
+
     it('multiple style writes route to the matching bridge setters', () => {
         const handler = vi.fn((e: { currentTarget: { style: Record<string, unknown> } }) => {
             e.currentTarget.style.background = '#112233';
