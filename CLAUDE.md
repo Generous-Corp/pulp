@@ -743,6 +743,7 @@ Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scr
 | Version bump   | `Version-Bump: <surface>=<patch\|minor\|major\|skip> reason="..."` |
 | Skill update   | `Skill-Update: skip skill=<name> reason="..."`                  |
 | Auto-release   | `Release: skip reason="..."`                                     |
+| Planning bump  | `Planning-Bump: reason="..."` (authorize a deliberate `planning` submodule pointer re-pin) |
 
 **Reference-Lineage trailer** (required on any commit touching
 `core/format/host_quirks.cpp` or `core/format/include/pulp/format/host_quirks/`):
@@ -1031,6 +1032,47 @@ git worktree add /tmp/pulp-audit origin/main
 - Squash exploration work before landing
 - Every commit should build and pass tests
 - Sign commits if GPG is configured
+
+### Git hygiene in a submodule repo (avoid the `planning` gitlink trap)
+
+This repo carries the `planning` submodule. A recurring, expensive mistake is
+**accidentally bumping the `planning` gitlink**:
+
+- **Never `git add -A` / `git commit -a` here.** Stage explicit paths. `add -A`
+  will happily stage the `planning` submodule pointer (and any other incidental
+  change) into a feature commit.
+- **After `git reset --hard <ref>`, run `git submodule update`.** `reset --hard`
+  moves the index gitlink but leaves the submodule *working tree* at the old
+  commit; a later `git add -A` then re-stages that drifted pointer. (`.gitmodules`
+  `ignore = all` does NOT prevent this — it only hides the pointer from
+  `status`/`diff` while `add -A` still stages it. Verified; do not rely on it.)
+- The **`planning-gitlink` gate** (pre-push + CI, `tools/scripts/planning_gitlink_guard.py`)
+  fails a PR that moves the pointer without a `Planning-Bump:` trailer. A
+  deliberate re-pin is fine — add `Planning-Bump: reason="..."` to a commit in
+  the range. To drop an accidental bump:
+  `git restore --staged --worktree planning && git submodule update planning`.
+
+### Pre-PR closeout — review then sweep (standing expectation)
+
+Before finalizing a non-trivial PR (any change with real runtime surface, not
+docs-only), run a two-part review and fix what it surfaces — this is expected of
+every agent (Claude and Codex) and contributor, not optional:
+
+1. **Architectural / code-health review** — files growing past ~1k LOC or mixed
+   concerns; missing modularization/extraction; leaky abstractions or duplicated
+   logic; temporary hacks becoming architecture; poor runtime/importer/render/
+   layout/platform boundaries; awkward/hard-to-extend APIs; unclear naming/
+   ownership; hidden coupling; helper sprawl. Separate **must-fix-before-PR /
+   should-fix-soon / acceptable-for-now**; prefer small targeted refactors; fix
+   the must-fix items before the PR.
+2. **Adversarial review** (complete-feature bar, not happy-path) — hunt for
+   correctness bugs, missed edge cases, and unverified claims.
+
+Run both **inline by default** (cheap — you read the diff and apply the two
+lenses) or via `/code-review`. The heavier `autoreview` (Codex panel) and
+`thermo-nuclear-code-quality-review` skills are **opt-in** — use them only when
+you want the deep/expensive pass. Either way the review happens and findings are
+swept before the PR lands.
 
 ---
 

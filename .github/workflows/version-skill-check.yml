@@ -135,6 +135,14 @@ jobs:
               --mode=report \
               --require-ceiling-reduction
 
+      - name: Planning-gitlink guard
+        # Rejects an accidental `planning` submodule pointer bump in a PR; a
+        # deliberate re-pin passes with a `Planning-Bump:` trailer.
+        run: |
+          python3 tools/scripts/planning_gitlink_guard.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --mode=report
+
       - name: Source-contract registry check
         # Lightweight import-provider contract gate. The registry linter is
         # intentionally no-build and treats optional planning-submodule paths
@@ -184,6 +192,7 @@ jobs:
           python3 tools/scripts/test_gates.py
           python3 tools/scripts/test_node_abi_gate.py
           python3 tools/scripts/test_hotspot_size_guard.py
+          python3 tools/scripts/test_planning_gitlink_guard.py
           python3 tools/scripts/test_downstream_validation_manifest.py
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
