@@ -64,6 +64,13 @@ CATEGORY_LABELS = {
     "widget_value": "Widget Value",
 }
 
+DOC_CATEGORY_NOTES = {
+    "widget_schema": [
+        "`setWidgetLottie` stores Lottie JSON and scrub state on a widget for tool workflows.",
+        "Native Skottie rendering is available through the `LottieView` widget and `LottieAnimation` canvas path; opt in with the `PULP_LOTTIE` CMake option, which links the Skia skottie module when the bundled Skia toolchain provides the required SkJSON and skresources support.",
+    ],
+}
+
 CAPABILITY_ORDER = ["exec", "clipboard", "filesystem", "storage", "ai", "runtime_import", "network"]
 CALLABLE_KINDS = {"function", "promise_function"}
 
@@ -709,6 +716,9 @@ def emit_docs(rows: list[ManifestRow], autocaps: dict[str, str], fingerprint: st
                 f"| `{row.name}` | `{row.kind}` | `{md_escape(signature_for(row))}` | {cap_text} | `{md_escape(jsx)}` | `{row.source}` |"
             )
         lines.append("")
+        if notes := DOC_CATEGORY_NOTES.get(category):
+            lines.extend(notes)
+            lines.append("")
     return "\n".join(lines)
 
 

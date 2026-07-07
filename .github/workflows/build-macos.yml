@@ -143,7 +143,13 @@ jobs:
       - name: Configure
         run: |
           set -euo pipefail
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+          # PULP_LOTTIE=ON exercises the opt-in skottie render path (bundled in
+          # the Skia toolchain from chrome/m151 onward, which ships SkJSON +
+          # skresources). The try-link auto-disables if a Skia bundle can't link
+          # skottie, so this can never break the build; it only gives the Lottie
+          # render + playback tests real coverage. Affects test binaries only —
+          # shipped plugins default PULP_LOTTIE OFF.
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_LOTTIE=ON
 
       - name: Build
         run: cmake --build "$PULP_BUILD_DIR" --config Release
