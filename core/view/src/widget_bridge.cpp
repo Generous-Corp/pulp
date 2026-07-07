@@ -1164,7 +1164,6 @@ void WidgetBridge::register_api() {
     register_widget_style_background_gradient_api(parseColor);
     register_widget_style_box_shadow_api(parseHexColor);
 
-
     register_shader_widget_api();
 
     // Persists style presets to temp files → gated by Storage.
