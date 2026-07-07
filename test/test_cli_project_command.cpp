@@ -154,6 +154,15 @@ std::string read_file_text(const fs::path& path) {
                        std::istreambuf_iterator<char>());
 }
 
+const DoctorCheck& require_doctor_check(const std::vector<DoctorCheck>& checks,
+                                        const std::string& name) {
+    auto it = std::find_if(checks.begin(), checks.end(), [&](const DoctorCheck& check) {
+        return check.name == name;
+    });
+    REQUIRE(it != checks.end());
+    return *it;
+}
+
 std::string normalize_newlines(std::string text) {
     text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
     return text;
@@ -1411,4 +1420,82 @@ TEST_CASE("resolve_standalone_sdk handles custom sdk_path and checkout local cac
     REQUIRE(installed_checkout != checkout_checks.end());
     REQUIRE(installed_checkout->passed);
     REQUIRE(installed_checkout->detail.find("(local cache)") != std::string::npos);
+}
+
+TEST_CASE("doctor WidgetBridge generated API passes for the checked-in generated files",
+          "[project-command][doctor][widget-bridge]") {
+    auto checks = run_doctor_checks(fs::path(PULP_SOURCE_DIR), false, "WidgetBridge");
+    const auto& check = require_doctor_check(checks, "WidgetBridge generated API");
+
+    REQUIRE(check.passed);
+    REQUIRE(check.detail.find("input fingerprint matches") != std::string::npos);
+}
+
+TEST_CASE("doctor WidgetBridge generated API reports stale generated files",
+          "[project-command][doctor][widget-bridge]") {
+    TempDir tmp;
+    auto repo = tmp.path / "repo";
+
+    write_file(repo / "tools" / "scripts" / "generate_widget_bridge_api.py",
+               "print('generator')\r\n");
+    write_file(repo / "core" / "view" / "src" / "widget_bridge_api_manifest.tsv",
+               "name\tkind\r\ncreatePanel\tfunction\r\n");
+    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
+                   / "reload_autocaps.hpp",
+               "#pragma once\rclass ReloadAutocaps {};\r");
+    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
+                   / "reload_capabilities.hpp",
+               "#pragma once\nclass ReloadCapability {};\n");
+
+    write_file(repo / "packages" / "pulp-react" / "src"
+                   / "bridge-globals.generated.d.ts",
+               "Pulp-WidgetBridge-Input-Fingerprint: stale\n");
+    write_file(repo / "packages" / "pulp-react" / "src"
+                   / "bridge-mock-functions.generated.ts",
+               "Pulp-WidgetBridge-Input-Fingerprint: stale\n");
+    write_file(repo / "packages" / "pulp-react" / "src"
+                   / "bridge-mock-safe-functions.generated.ts",
+               "Pulp-WidgetBridge-Input-Fingerprint: stale\n");
+    write_file(repo / "docs" / "reference" / "js-bridge.md",
+               "Pulp-WidgetBridge-Input-Fingerprint: stale\n");
+
+    auto checks = run_doctor_checks(repo, false, "WidgetBridge");
+    const auto& check = require_doctor_check(checks, "WidgetBridge generated API");
+
+    REQUIRE_FALSE(check.passed);
+    REQUIRE(check.detail.find("stale input fingerprints") != std::string::npos);
+    REQUIRE(check.detail.find("bridge-globals.generated.d.ts") != std::string::npos);
+    REQUIRE(check.detail.find("js-bridge.md") != std::string::npos);
+}
+
+TEST_CASE("doctor WidgetBridge generated API reports missing inputs and outputs",
+          "[project-command][doctor][widget-bridge]") {
+    TempDir tmp;
+    auto repo = tmp.path / "repo";
+
+    write_file(repo / "core" / "view" / "src" / "widget_bridge_api_manifest.tsv",
+               "name\tkind\n");
+
+    auto missing_input_checks = run_doctor_checks(repo, false, "WidgetBridge");
+    const auto& missing_input =
+        require_doctor_check(missing_input_checks, "WidgetBridge generated API");
+    REQUIRE_FALSE(missing_input.passed);
+    REQUIRE(missing_input.detail.find("tools/scripts/generate_widget_bridge_api.py")
+            != std::string::npos);
+
+    write_file(repo / "tools" / "scripts" / "generate_widget_bridge_api.py",
+               "print('generator')\n");
+    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
+                   / "reload_autocaps.hpp",
+               "#pragma once\n");
+    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
+                   / "reload_capabilities.hpp",
+               "#pragma once\n");
+
+    auto missing_output_checks = run_doctor_checks(repo, false, "WidgetBridge");
+    const auto& missing_output =
+        require_doctor_check(missing_output_checks, "WidgetBridge generated API");
+    REQUIRE_FALSE(missing_output.passed);
+    REQUIRE(missing_output.detail.find("packages/pulp-react/src/bridge-globals.generated.d.ts")
+            != std::string::npos);
 }

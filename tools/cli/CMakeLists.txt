@@ -229,6 +229,13 @@ if(PULP_BUILD_TESTS)
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Pulp Doctor")
 
+    add_test(NAME cli-doctor-widgetbridge-generated-api
+        COMMAND pulp-cli doctor --only WidgetBridge
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-doctor-widgetbridge-generated-api PROPERTIES
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
+        PASS_REGULAR_EXPRESSION "input fingerprint matches")
+
     # `pulp doctor --versions` must print the version diagnostics header
     # and exit 0 regardless of skew — skew warnings are advisory, not
     # failures.

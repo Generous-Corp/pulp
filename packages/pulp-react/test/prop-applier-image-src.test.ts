@@ -12,6 +12,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
+import { bridgeMockFunctionNames } from '../src/bridge-mock-functions.generated.js';
 import { applyAllProps, applyChangedProps } from '../src/prop-applier.js';
 import type { PulpInstance } from '../src/types.js';
 
@@ -26,7 +27,7 @@ function imageSourceCalls(b: MockBridge) {
 describe('@pulp/react prop-applier - <Image src> to setImageSource', () => {
     let bridge: MockBridge;
     beforeEach(() => {
-        bridge = createMockBridge();
+        bridge = createMockBridge(bridgeMockFunctionNames);
         bridge.install();
     });
     afterEach(() => {

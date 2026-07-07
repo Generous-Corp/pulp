@@ -51,13 +51,13 @@ describe('@pulp/react widget routing parity', () => {
     // always on-bridge, so that append is the trigger that flushes the
     // createX call). Drive the same public lifecycle the SvgRect/SvgLine
     // attachment tests use.
-    async function lowerOne(type: string): Promise<MockBridge['calls']> {
+    async function lowerOne(type: string, props: Record<string, unknown> = {}): Promise<MockBridge['calls']> {
         bridge.reset();
         const hc = await import('../src/host-config.js');
         const container = { rootId: 'root', nextId: 0 } as never;
         const child = hc.PulpHostConfig.createInstance(
             type as never,
-            {} as never,
+            props as never,
             container,
             {} as never,
             null as never,
@@ -86,4 +86,32 @@ describe('@pulp/react widget routing parity', () => {
             expect(calls.some((c) => c.fn === 'createCol')).toBe(false);
         });
     }
+
+    it('passes Icon name through as the native icon type', async () => {
+        bridge.reset();
+        const hc = await import('../src/host-config.js');
+        const container = { rootId: 'root', nextId: 0 } as never;
+        const child = hc.PulpHostConfig.createInstance(
+            'Icon' as never,
+            { name: 'search' } as never,
+            container,
+            {} as never,
+            null as never,
+        );
+
+        hc.PulpHostConfig.appendChildToContainer(container, child);
+
+        const created = bridge.calls.find((c) => c.fn === 'createIcon');
+        expect(created?.args.slice(1)).toEqual(['search', 'root']);
+    });
+
+    it('passes Meter orientation before the parent id', async () => {
+        let calls = await lowerOne('Meter');
+        let created = calls.find((c) => c.fn === 'createMeter');
+        expect(created?.args.slice(1)).toEqual(['vertical', 'root']);
+
+        calls = await lowerOne('meter', { orientation: 'horizontal' });
+        created = calls.find((c) => c.fn === 'createMeter');
+        expect(created?.args.slice(1)).toEqual(['horizontal', 'root']);
+    });
 });

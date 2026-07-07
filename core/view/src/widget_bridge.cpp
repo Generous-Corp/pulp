@@ -1164,7 +1164,6 @@ void WidgetBridge::register_api() {
     register_widget_style_background_gradient_api(parseColor);
     register_widget_style_box_shadow_api(parseHexColor);
 
-
     register_shader_widget_api();
 
     // Persists style presets to temp files → gated by Storage.
@@ -1207,7 +1206,8 @@ void WidgetBridge::register_api() {
 
     register_drop_event_api();
 
-    register_font_assets_api();
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_font_assets_api();
 
     register_shader_canvas_api();
 

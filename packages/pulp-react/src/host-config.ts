@@ -89,7 +89,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'Fader':       call('createFader', id, (props.orientation as 'vertical' | 'horizontal') ?? 'vertical', parentId); return;
         case 'Spectrum':    call('createSpectrum', id, parentId); return;
         case 'Waveform':    call('createWaveform', id, parentId); return;
-        case 'Meter':       call('createMeter', id, parentId); return;
+        case 'Meter':       call('createMeter', id, (props.orientation as 'vertical' | 'horizontal') ?? 'vertical', parentId); return;
         case 'Progress':    call('createProgress', id, parentId); return;
         case 'XYPad':       call('createXYPad', id, parentId); return;
         case 'Checkbox':    call('createCheckbox', id, parentId); return;
@@ -102,7 +102,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'ListBox':     call('createListBox', id, parentId); return;
         case 'Canvas':      call('createCanvas', id, parentId); return;
         case 'Image':       call('createImage', id, parentId); return;
-        case 'Icon':        call('createIcon', id, parentId); return;
+        case 'Icon':        call('createIcon', id, (props.name as string) ?? 'image_upload', parentId); return;
         case 'SvgPath':     call('createSvgPath', id, parentId); return;
         case 'SvgRect':     call('createSvgRect', id, parentId); return;
         case 'SvgLine':     call('createSvgLine', id, parentId); return;
@@ -191,14 +191,14 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'checkbox': call('createCheckbox', id, parentId); return;
                 case 'spectrum': call('createSpectrum', id, parentId); return;
                 case 'waveform': call('createWaveform', id, parentId); return;
-                case 'meter':    call('createMeter', id, parentId); return;
+                case 'meter':    call('createMeter', id, (props.orientation as 'vertical' | 'horizontal') ?? 'vertical', parentId); return;
                 case 'xypad':    call('createXYPad', id, parentId); return;
                 case 'listbox':  call('createListBox', id, parentId); return;
                 case 'native-view': call('createNativeView', id, parentId); return;
                 case 'badge':    call('createBadge', id, asText(props.children) ?? (props.text as string ?? ''), (props.tone as string) ?? 'neutral', parentId); return;
                 case 'stepper':  call('createStepper', id, parentId); return;
                 case 'pan':      call('createPan', id, parentId); return;
-                case 'icon':     call('createIcon', id, parentId); return;
+                case 'icon':     call('createIcon', id, (props.name as string) ?? 'image_upload', parentId); return;
                 case 'svg':      call('createCol', id, parentId); return;  // SVG = container; children paint
                 case 'path': {
                     call('createSvgPath', id, parentId);

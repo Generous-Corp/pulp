@@ -431,6 +431,7 @@ export interface WaveformProps extends BaseProps {
 }
 
 export interface MeterProps extends BaseProps {
+    orientation?: 'vertical' | 'horizontal';
     level?: number;     // 0..1
 }
 

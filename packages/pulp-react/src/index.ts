@@ -107,6 +107,18 @@ export {
 } from './design-system.js';
 export type { DesignComponent, DesignCategory } from './design-system.js';
 
+export type {
+    PulpBridgeCapability,
+    PulpBridgeGlobals,
+    PulpBridgeAlwaysGlobals,
+    PulpBridgeExecGlobals,
+    PulpBridgeClipboardGlobals,
+    PulpBridgeFilesystemGlobals,
+    PulpBridgeStorageGlobals,
+    PulpBridgeAiGlobals,
+    PulpBridgeRuntimeImportGlobals,
+} from './bridge-globals.generated.js';
+
 // ── Re-export the mock bridge for downstream tests ─────────────────
 export { createMockBridge } from './bridge.js';
 export type { MockBridge, MockBridgeCall } from './bridge.js';

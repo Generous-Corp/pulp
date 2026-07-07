@@ -29,7 +29,8 @@ Options:
 - `pulp doctor --host-quirks` / `pulp doctor quirks` — show the runtime DAW host-quirks policy and enforced accommodations
 - `pulp doctor --au-cache --dry-run` — preview macOS AudioComponentRegistrar refresh after AU metadata changes
 - `pulp doctor list` / `pulp doctor --only "<name>"` — enumerate checks or run one targeted probe
+- `pulp doctor --only WidgetBridge` — check generated WidgetBridge `.d.ts`, mock function lists, and JS bridge docs for source-tree input-fingerprint freshness
 
-Default checks include C++20 compiler availability, CMake, git/git-lfs, LFS-backed Skia binaries when present, VST3/AudioUnit SDKs where relevant, optional AAX setup, package/platform alignment, Cmajor when used, build configuration, and pulp-mcp availability. Mobile subcommands add Android SDK/NDK/adb/emulator and iOS/Xcode/Simulator checks.
+Default checks include C++20 compiler availability, CMake, git/git-lfs, LFS-backed Skia binaries when present, generated WidgetBridge API artifacts in source-tree mode, VST3/AudioUnit SDKs where relevant, optional AAX setup, package/platform alignment, Cmajor when used, build configuration, and pulp-mcp availability. Mobile subcommands add Android SDK/NDK/adb/emulator and iOS/Xcode/Simulator checks.
 
 Run this first when builds fail unexpectedly or on a new machine. Run `pulp doctor --validators` if `pulp validate` aborts with "broken code signature", `pulp doctor --caches` if build/test reports FetchContent cache drift, and `pulp doctor --host-quirks` when DAW accommodations or host-specific runtime behavior look suspicious.

@@ -1,588 +1,508 @@
 # JS Bridge API Reference
 
-Reference for the author-facing bridge helpers and related DOM-style APIs that
-Pulp UI scripts commonly call directly. This page is not an exhaustive registry
-dump; lower-level runtime, DOM/web-compat, GPU, canvas, SVG, and style helpers
-used by `@pulp/react` and compatibility shims are tracked in
-`core/view/src/widget_bridge_api_manifest.tsv` and contract-tested against the
-native `WidgetBridge` registrars.
-
-**Status**: experimental
-
-**Capabilities**: effectful bridge groups (shell exec, clipboard, filesystem/asset
-loading, storage, AI, runtime-import) are *capability-gated* when a UI is hot-reloaded
-under the trust model — an ungranted group's functions are simply absent, and `exec`
-is compiled out of shipping builds. Pure-UI groups (widgets, layout, canvas, style,
-GPU) are always available. See [reload-trust.md](../guides/reload-trust.md).
-
-## Widget Creation
-
-### Basic Controls
-
-```js
-createKnob(id, parentId)           // Rotary knob control
-createFader(id, orientation, parentId) // Linear slider ("vertical" | "horizontal")
-createToggle(id, parentId)         // On/off switch
-createCheckbox(id, parentId)       // Checkbox control
-createToggleButton(id, parentId)   // Stateful push button
-createLabel(id, text, parentId)    // Text display
-createIcon(id, type, parentId)     // Icon glyph ("image_upload" | "send" | "search" | "close")
-```
-
-### Data Visualization
-
-```js
-createMeter(id, orientation, parentId)  // Level meter with peak hold
-createWaveform(id, parentId)            // Waveform display
-createSpectrum(id, parentId)            // Frequency spectrum analyzer
-createXYPad(id, parentId)              // 2D parameter control
-createProgress(id, parentId)            // Progress bar
-```
-
-### Input
-
-```js
-createTextEditor(id, parentId)     // Text input field
-createCombo(id, parentId)          // Dropdown selector
-```
-
-`createTextEditor` uses the SDK `TextEditor`, so native text behavior is
-inherited by JS-authored UIs and imported HTML inputs: grapheme-safe UTF-8
-caret/delete, platform word/line/document/page movement, Shift-selection
-variants, clipboard shortcuts, undo/redo, double-click word selection with
-word-granular drag extension, triple-click line selection in multi-line mode,
-IME marked text, paste-and-match-style shortcut routing, standard
-Cut/Copy/Paste/Select All context menus, and multi-line scrolling.
-Programmatic bridge `setText()`
-syncs state without creating a user undo entry; typed input, paste, delete,
-and cut still participate in the editor undo model. SDK policies such as
-read-only, disabled, Tab/Return handling, clipboard/password export,
-line-ending normalization, max length, paste sanitization, input filtering,
-and whole-buffer validation live on `TextEditor`, so imported inputs inherit
-the same behavior.
-
-### Custom Drawing
-
-```js
-createCanvas(id, parentId)         // Canvas for 2D draw commands
-```
-
-### Layout Containers
-
-```js
-createRow(id, parentId)            // Flex row (horizontal)
-createCol(id, parentId)            // Flex column (vertical)
-createModal(id, parentId)          // Full-screen modal overlay (Escape + backdrop dismiss)
-createGrid(id, parentId)           // CSS Grid container
-createPanel(id, parentId)          // Generic container with styling
-createScrollView(id, parentId)     // Scrollable container
-createNativeView(id, parentId)     // Layout box for a platform-native child view (see below)
-```
-
-All creation functions return the widget `id` string. The `parentId` parameter specifies where in the view tree to insert the widget.
-
-### Native view embedding (`<native-view>` / `createNativeView`)
-
-`createNativeView` (JSX/React: `<native-view>` or `<NativeView>`) creates a
-Yoga-laid-out box that hosts a single **platform-native child view** — a system
-WebView, a native text field (IME + OS accessibility), a video / camera layer,
-or an OS picker — inside Pulp's GPU-painted UI. The box lays out, tracks scroll,
-and clips to its scroll / `overflow: hidden` ancestor like any other widget.
-
-JavaScript can declare the box but **cannot mint an OS view handle**, so the
-element materializes empty; a C++ host binds the native child by widget id:
-
-```cpp
-auto* nvh = dynamic_cast<pulp::view::NativeViewHost*>(bridge.widget("browser"));
-nvh->set_native_child(web_view->native_handle(),
-                      [web_view](uint32_t, uint32_t) { return web_view->snapshot_png(); });
-```
-
-Semantics (see `pulp/view/native_view_host.hpp`):
-
-- **Z-order is fixed.** A native child always composites **above** the entire GPU
-  layer of the same host view — GPU widgets cannot paint over it. Best suited to
-  full-region embeds (a WebView panel, a video pane), not a native control
-  floating beneath other GPU chrome.
-- **Clipping.** The child is masked to its scroll / clip ancestor's viewport (it
-  is not reflowed by resizing). Ancestor CSS transforms (rotate/scale) are not
-  applied to the native child — only translation and scroll are.
-- **Platform support.** Real on **macOS + iOS**; Windows / Linux / Android host
-  attach returns `false` today, so the box renders as an empty placeholder and
-  `contains_native_overlay()` still reports honestly for headless capture.
-
-## Widget Values
-
-```js
-setValue(id, value)    // Set normalized value (0-1) on Knob, Fader, Toggle, Checkbox, ToggleButton
-getValue(id)           // Get normalized value — returns number
-setLabel(id, text)     // Set label text on Knob, Fader, Toggle, ToggleButton, Label
-setText(id, text)      // Set text on TextEditor or Label
-getText(id)            // Get text from TextEditor or Label — returns string
-```
-
-### Widget-Specific Data
-
-```js
-setItems(id, ["Option A", "Option B"])   // Set Combo dropdown items
-setSelected(id, index)                    // Set Combo selection without firing "select"
-setProgress(id, 0.75)                     // Set Progress bar value (0-1)
-setMeterLevel(id, peak, rms)              // Set Meter peak and RMS levels
-setXY(id, x, y)                           // Set XYPad position (0-1 each axis)
-setWaveformData(id, [0.1, -0.3, ...])     // Set WaveformView sample data
-setSpectrumData(id, [0.5, 0.8, ...])      // Set SpectrumView frequency bins
-setPlaceholder(id, "Type here...")         // Set TextEditor placeholder text
-setScrollContentSize(id, width, height)    // Set ScrollView content dimensions
-setPanelStyle(id, bgToken, borderToken, radius, width) // Style Panel via tokens
-```
-
-## Parameter Store
-
-```js
-getParam(name)          // Read normalized parameter value by name — returns number
-setParam(name, value)   // Write normalized parameter value by name
-```
-
-Parameters are defined in C++ (`define_parameters`) and shared with the audio thread via lock-free atomics. `setParam` triggers DAW host notification automatically.
-
-### Declarative bindings (no per-frame JS)
-
-```js
-bindWidgetToParam(widgetId, paramName, transform?)  // knob/fader/slider/toggle/progress tracks a param
-bindMeter(widgetId, paramName, transform?)          // Meter fill tracks a param (drives rms + peak)
-unbindWidget(widgetId)                              // remove the binding(s) for a widget → count removed
-```
-
-Register a binding **once**; C++ then pushes the store value onto the widget every frame off the host FrameClock with **zero per-frame JS crossing** — the native replacement for a `requestAnimationFrame` metering loop. `bindWidgetToParam`/`bindMeter` return `true` when the named param exists and the binding was set (a widget has a single source, so re-binding replaces).
-
-The optional `transform` object remaps the source before it reaches the widget, applied in order — dB→linear map → `scale` → `offset` → clamp:
-
-| Field | Meaning |
-|-------|---------|
-| `db` / `dbMin` / `dbMax` | read the raw (non-normalized) param and map `[dbMin,dbMax]` dB → `[0,1]` |
-| `scale` / `offset` | `out = out * scale + offset` |
-| `min` / `max` / `clamp` | clamp the result to `[min,max]` (auto-enabled when `min`/`max` is present) |
-
-**Precedence:** a binding owns the widget's value. A bound value widget (knob/fader/slider/toggle/progress) is re-asserted from the store **every frame**, so a stray `setValue` on it is corrected on the next frame; a bound `Meter` updates whenever its source changes. Either way the binding yields **while the user is dragging that widget** — the gesture wins, and the binding resumes on the first frame after the drag ends.
-
-## Flexbox Layout
-
-```js
-setFlex(id, property, value)
-```
-
-| Property | Type | Example | Description |
-|----------|------|---------|-------------|
-| `direction` | string | `"row"`, `"column"` | Flex direction |
-| `gap` | number | `8` | Gap between children (px) |
-| `row_gap` | number | `8` | Row gap for wrap layouts |
-| `column_gap` | number | `12` | Column gap for wrap layouts |
-| `padding_top` | number | `16` | Top padding (px) |
-| `padding_right` | number | `16` | Right padding |
-| `padding_bottom` | number | `16` | Bottom padding |
-| `padding_left` | number | `16` | Left padding |
-| `margin_top` | number | `8` | Top margin |
-| `margin_right` | number | `8` | Right margin |
-| `margin_bottom` | number | `8` | Bottom margin |
-| `margin_left` | number | `8` | Left margin |
-| `width` | number | `200` | Fixed width (px) |
-| `height` | number | `40` | Fixed height (px) |
-| `min_width` | number | `100` | Minimum width |
-| `max_width` | number | `400` | Maximum width |
-| `min_height` | number | `30` | Minimum height |
-| `max_height` | number | `300` | Maximum height |
-| `flex_grow` | number | `1` | Flex grow factor |
-| `flex_shrink` | number | `0` | Flex shrink factor |
-| `flex_basis` | number | `100` | Flex basis (px) |
-| `order` | number | `2` | Layout order |
-| `justify_content` | string | `"center"` | Main axis alignment |
-| `align_items` | string | `"center"` | Cross axis alignment |
-| `align_self` | string | `"stretch"` | Self alignment override |
-| `justify_self` | string | `"start"` | Self justify override |
-
-## Grid Layout
-
-```js
-setGrid(id, property, value)
-```
-
-| Property | Type | Example | Description |
-|----------|------|---------|-------------|
-| `template_columns` | string | `"1fr 2fr 1fr"` | Column track definitions |
-| `template_rows` | string | `"auto 1fr"` | Row track definitions |
-| `column_gap` | number | `8` | Column gap (px) |
-| `row_gap` | number | `8` | Row gap (px) |
-| `gap` | number | `8` | Both column and row gap |
-| `column_start` | number | `1` | Grid column start line |
-| `column_end` | number | `3` | Grid column end line |
-| `row_start` | number | `1` | Grid row start line |
-| `row_end` | number | `2` | Grid row end line |
-
-## Typography
-
-```js
-setFontSize(id, 14)              // Font size in pixels
-setFontWeight(id, 700)           // Font weight (100-900)
-setFontStyle(id, "italic")       // "normal" | "italic"
-setLetterSpacing(id, 0.5)        // Letter spacing (px)
-setLineHeight(id, 1.5)           // Line height multiplier
-setTextAlign(id, "center")       // "left" | "center" | "right"
-setTextColor(id, "#ffffff")      // Text color (CSS Color L4)
-setTextTransform(id, "uppercase") // "uppercase" | "lowercase" | "capitalize" | "none"
-setTextDecoration(id, "underline") // "underline" | "line-through" | "overline" | "none"
-setTextOverflow(id, "ellipsis")  // "ellipsis" | "clip"
-setMultiLine(id, 1)              // Enable multi-line text (0 or 1)
-```
-
-## Visual Styling
-
-```js
-setBackground(id, "#1a1a2e")                          // Background color
-setBackgroundGradient(id, "linear-gradient(to right, #ff0000, #0000ff)") // CSS gradient
-setBorder(id, "#333333", 1, 8)                        // Border color, width, radius
-setOpacity(id, 0.5)                                    // Opacity (0-1)
-setBoxShadow(id, 0, 4, 8, 0, "rgba(0,0,0,0.3)")     // Shadow: offsetX, offsetY, blur, spread, color
-setFilter(id, "blur(4px)")                             // CSS filter string
-setOverflow(id, "hidden")                              // "visible" | "hidden"
-setCursor(id, "pointer")                               // "pointer" | "crosshair" | "text" | "grab" | "default"
-setVisible(id, true)                                   // Show/hide widget
-setZIndex(id, 10)                                      // Stacking order
-```
-
-## Transforms
-
-```js
-setTranslate(id, x, y)          // Translate in pixels
-setScale(id, sx, sy)            // Scale factor (1.0 = normal)
-setRotation(id, degrees)        // Rotation in degrees
-setTransformOrigin(id, x, y)   // Origin (0-1 normalized, 0.5 = center)
-setTransform(id, a, b, c, d, e, f) // Full 2D affine matrix; composes with parent
-clearTransform(id)              // Drop the affine, fall back to scalar transforms
-setPosition(id, "absolute")    // "static" | "relative" | "absolute" | "fixed" | "sticky"
-setTop(id, px)                  // CSS top offset
-setRight(id, px)                // CSS right offset
-setBottom(id, px)               // CSS bottom offset
-setLeft(id, px)                 // CSS left offset
-```
-
-## Animation
-
-```js
-// Animate a single property
-animate(id, property, targetValue, durationMs, easingName)
-// Example: animate("knob", "opacity", 1.0, 300, "ease_out_cubic")
-// Properties: "value", "opacity", "x", "y", "scale", "rotation"
-
-// Define keyframe sequences
-defineKeyframes("pulse", [
-    { offset: 0,   opacity: 0.5, scale: 1.0 },
-    { offset: 0.5, opacity: 1.0, scale: 1.1 },
-    { offset: 1,   opacity: 0.5, scale: 1.0 },
-])
-
-// Apply keyframe animation
-setAnimation(id, "pulse", 1000)  // name, duration in ms
-
-// Set transition duration for property changes
-setTransitionDuration(id, 200)   // milliseconds
-
-// Motion tokens (theme-integrated timing)
-setMotionToken("motion.duration.fast", 80)
-getMotionToken("motion.duration.fast")  // returns 80
-```
-
-### Easing Functions
-
-`linear`, `ease_in_quad`, `ease_out_quad`, `ease_in_out_quad`, `ease_in_cubic`, `ease_out_cubic`, `ease_in_out_cubic`, `ease_in_quart`, `ease_out_quart`, `ease_in_out_quart`, `ease_in_expo`, `ease_out_expo`, `ease_in_out_expo`
-
-## Events
-
-```js
-// Register event types (required before on() will fire)
-registerClick(id)     // Enable click events
-registerHover(id)     // Enable mouseenter/mouseleave events
-registerPointer(id)   // Enable pointer events (pointerdown/pointermove/pointerup)
-registerGesture(id)   // Enable gesture events (gesturestart/gesturechange/gestureend)
-
-// Listen for events
-on(id, "change", (value) => { })        // Knob, Fader, Checkbox value changed
-on(id, "toggle", (state) => { })        // Toggle, ToggleButton state changed
-on(id, "click", () => { })              // Click (requires registerClick)
-on(id, "mouseenter", () => { })         // Mouse enter (requires registerHover)
-on(id, "mouseleave", () => { })         // Mouse leave (requires registerHover)
-
-// Inspector (developer tool)
-enableInspectClick()
-on("__inspect__", "click", (id) => { }) // Cmd+click reports widget ID
-```
-
-### Pointer Events (W3C PointerEvent)
-
-Unified input model — same code works for mouse (macOS), touch (iOS), and stylus (Apple Pencil):
-
-```js
-el.addEventListener("pointerdown", (e) => {
-    console.log(e.pointerId);       // Stable per-finger ID (0 = primary)
-    console.log(e.pointerType);     // "mouse", "touch", or "pen"
-    console.log(e.isPrimary);       // true for first finger / mouse
-    console.log(e.clientX, e.clientY);
-    console.log(e.pressure);        // 0.0–1.0 (Apple Pencil force)
-    console.log(e.altitudeAngle);   // Pencil tilt (radians)
-    console.log(e.azimuthAngle);    // Pencil rotation (radians)
-});
-
-el.addEventListener("pointermove", (e) => {
-    // API shape is present now; extra native touch samples only appear when the
-    // platform producer populates them.
-    for (const pt of e.getCoalescedEvents()) {
-        drawLine(pt.clientX, pt.clientY);
-    }
-});
-
-el.addEventListener("pointerup", (e) => { /* finger/mouse released */ });
-el.addEventListener("pointercancel", (e) => { /* touch cancelled by system */ });
-```
-
-`getCoalescedEvents()` / `getPredictedEvents()` are currently structural JS APIs.
-The native iOS `coalescedTouches` / `predictedTouches` enrichment path is still
-planned, so callers should be prepared for the current event or an empty list.
-
-### Pointer Capture
-
-Lock pointer events to an element during drag, even if the pointer leaves its bounds:
-
-```js
-el.addEventListener("pointerdown", (e) => {
-    el.setPointerCapture(e.pointerId);
-});
-el.addEventListener("gotpointercapture", (e) => { /* capture acquired */ });
-el.addEventListener("lostpointercapture", (e) => { /* capture released */ });
-// Capture is automatically released on pointerup
-```
-
-### Gesture Events
-
-High-level multi-touch and trackpad gestures:
-
-```js
-el.addEventListener("gesturestart", (e) => { /* two-finger gesture began */ });
-el.addEventListener("gesturechange", (e) => {
-    console.log(e.scale);     // Pinch zoom factor (1.0 = no change)
-    console.log(e.rotation);  // Rotation in radians
-});
-el.addEventListener("gestureend", (e) => { /* gesture ended */ });
-```
-
-Works on macOS trackpad (magnifyWithEvent/rotateWithEvent) and iOS multi-touch.
-
-### touch-action CSS
-
-Control default gesture handling on touch platforms:
-
-```js
-el.style.touchAction = "none";          // Disable all default gestures
-el.style.touchAction = "pan-x";         // Allow horizontal panning only
-el.style.touchAction = "manipulation";  // Allow pan + pinch, disable double-tap zoom
-```
-
-## Canvas 2D Drawing
-
-All canvas functions take the canvas widget `id` as the first parameter.
-
-### State
-
-```js
-canvasSave(id)                    // Push graphics state
-canvasRestore(id)                 // Pop graphics state
-canvasClear(id)                   // Clear all draw commands
-```
-
-### Shapes
-
-```js
-canvasRect(id, x, y, w, h, color)                    // Filled rectangle
-canvasStrokeRect(id, x, y, w, h, color, lineWidth)   // Rectangle outline
-canvasFillCircle(id, x, y, radius, color)             // Filled circle
-canvasStrokeLine(id, x1, y1, x2, y2, color, lineWidth) // Line segment
-canvasFillText(id, text, x, y, fontSize, color)       // Rendered text
-```
-
-### Paths
-
-```js
-canvasBeginPath(id)               // Start new path
-canvasMoveTo(id, x, y)           // Move pen
-canvasLineTo(id, x, y)           // Line segment
-canvasQuadTo(id, cpx, cpy, x, y) // Quadratic Bezier curve
-canvasCubicTo(id, cp1x, cp1y, cp2x, cp2y, x, y) // Cubic Bezier curve
-canvasClosePath(id)               // Close path to start point
-canvasFillPath(id)                // Fill current path
-canvasStrokePath(id)              // Stroke current path
-```
-
-### Style
-
-```js
-canvasSetFillColor(id, color)     // Fill color for shapes/paths
-canvasSetStrokeColor(id, color)   // Stroke color for outlines/paths
-canvasSetLineWidth(id, width)     // Line width in pixels
-canvasSetFont(id, fontFamily, fontSize) // Font for text rendering
-```
-
-### Transforms
-
-```js
-canvasTranslate(id, x, y)        // Translate origin
-canvasScale(id, sx, sy)          // Scale drawing
-canvasRotate(id, radians)        // Rotate drawing
-```
-
-### Images
-
-```js
-canvasDrawImage(id, src, dx, dy, dw, dh)                 // Draw file-backed image
-canvasDrawImage(id, src, dx, dy, dw, dh, sx, sy, sw, sh) // Draw source sub-rect
-canvasSetImageSmoothing(id, enabled, quality)            // Sticky image sampling state
-```
-
-On Skia-backed canvases, file-backed images decode and render through the
-active canvas. Missing files, unsupported image formats, data URIs, and
-non-Skia backends render the labeled placeholder fallback.
-
-## Theme
-
-```js
-setTheme("dark")                  // Built-in: "dark", "light", "pro_audio"
-getThemeJson()                    // Returns full theme as JSON string
-applyTokenDiff(jsonString)        // Apply partial theme overrides from JSON
-importDesignTokens(w3cJson)       // Apply W3C Design Tokens JSON to the current theme
-exportDesignTokens()              // Export current theme as W3C Design Tokens JSON
-saveStylePreset(name, object)     // Persist a style payload as JSON
-loadStylePreset(name)             // Load a saved style payload object
-setAICli(command)                 // Override the AI CLI command used by JS tools
-getAICli()                        // Read the current AI CLI command
-```
-
-## Layout & Geometry
-
-```js
-layout()                          // Trigger layout recalculation on all widgets
-removeWidget(id)                  // Remove widget from tree
-getLayoutRect(id)                 // Returns { x, y, width, height, top, right, bottom, left } in root coords
-getRootSize()                     // Returns { width, height } of root view (for vw/vh units)
-getComputedValue(id, property)    // Returns resolved CSS property value as string
-measureText(text, fontSize)       // Returns { width, ascent, descent, lineHeight }
-```
-
-## Platform Integration
-
-```js
-// Context menus
-registerContextMenu(id, callbackName) // Register right-click handler: callbackName(x, y)
-showContextMenu(itemsJSON, x, y)      // Request platform popup menu; returns selected id only
-                                      // when the backend reports one, otherwise -1.
-                                      // Current in-tree backends do not report selection.
-                                      // itemsJSON: '[{"id":1,"label":"Cut"},{"separator":true}]'
-
-// Keyboard shortcuts
-registerShortcut(keyCode, modifiers, callbackName)  // Global shortcut: callbackName()
-
-// File dialogs
-showOpenDialog(title, filterDesc, extensions)   // Returns path or "" (extensions: "js;json;txt")
-showSaveDialog(title, filterDesc, extensions)   // Returns path or ""
-chooseFolder(title)                              // Returns path or ""
-```
-
-## Visual Properties
-
-```js
-setPointerEvents(id, "none"|"auto")   // CSS pointer-events (skip in hit testing)
-setVisibility(id, "visible"|"hidden") // CSS visibility (hidden preserves layout)
-setWhiteSpace(id, "normal"|"nowrap")  // CSS white-space
-setUserSelect(id, "none"|"text")      // CSS user-select
-```
-
-## Utility
-
-```js
-compileShader(skslCode)           // Validate SkSL shader — returns { success, error }
-exec(command)                     // Run shell command — returns output string
-execAsync(command, callbackId)    // Run shell command in background, dispatches callbackId:result later
-```
-
-## Widget Styling Extensions
-
-```js
-setWidgetShader(id, skslCode)     // Apply custom SkSL body shader to Knob/Fader/Toggle
-clearWidgetShader(id)             // Remove custom shader and restore default paint
-setWidgetSchema(id, schemaJson)   // Apply declarative widget schema to Knob/Fader/Toggle
-clearWidgetSchema(id)             // Remove widget schema override
-setWidgetLottie(id, lottieJson)   // Store Lottie JSON on Knob/Fader/Toggle
-seekWidgetLottie(id, time01)      // Scrub stored Lottie state to a normalized time
-```
-
-These APIs are intended for the design tool and other style-system workflows.
-The recommended restyling path is preset/material or declarative-schema driven.
-The built-in design-tool workflow also routes higher-level audio-plugin style
-families (for example precision analyzer, heritage hardware, retro character,
-modular neon, mastering lab, and console strip) into deterministic per-widget
-presets before applying SkSL.
-`setWidgetShader` remains available as a lower-level developer escape hatch when
-you need direct SkSL control. Widget shaders receive the standard widget uniforms
-(`resolution`, `value`, `time`, token colors), and `time` is driven from the
-view `FrameClock` when the host is actively rendering.
-
-`setWidgetLottie` stores Lottie JSON and scrub state on a widget for tool
-workflows. Native Skottie rendering is available through the `LottieView` widget
-and `LottieAnimation` (canvas), which composite real Bodymovin frames onto a
-Skia canvas — opt-in via the `PULP_LOTTIE` CMake option, which links the skottie
-module bundled in the Skia toolchain (functional from Skia chrome/m151 onward,
-the first bundle to ship SkJSON + skresources; a configure-time try-link
-auto-disables it on older bundles).
-
-### AI CLI Templates
-
-`setAICli(command)` accepts a shell command template. The design tool and
-`pulp design-debug` expand these placeholders before execution:
-
-- `{prompt_file}`: temp file containing the full structured prompt
-- `{model}`: selected provider-specific model id
-- `{provider}`: provider id such as `claude` or `codex`
-- `{reasoning_effort}`: selected effort (`low`, `medium`, `high`, `xhigh`) when supported
-- `{output_file}`: optional temp file for CLIs that write their result to disk
-
-The current built-in defaults are:
-- Claude: `cat {prompt_file} | claude --print --model {model}`
-- Codex: `cat {prompt_file} | codex exec - --model {model} ... -c model_reasoning_effort={reasoning_effort} -o {output_file}`
-
-`execAsync()` is the non-blocking shell path used by the interactive design tool
-chat. The headless `pulp design-debug` harness uses the same prompt builder and
-command-template expansion so provider/model metadata stays aligned across both tools.
-
-## Color Format
-
-All color parameters accept CSS Color Level 4 syntax:
-
-```js
-"#RGB"                  // Short hex
-"#RRGGBB"              // Hex
-"#RRGGBBAA"            // Hex with alpha
-"rgb(255, 128, 0)"     // RGB
-"rgba(255, 128, 0, 0.5)" // RGBA
-"hsl(30, 100%, 50%)"   // HSL
-"hsla(30, 100%, 50%, 0.5)" // HSLA
-"transparent"           // Named colors
-```
-
-## Legacy Positioning API
-
-Widget creation functions also accept absolute coordinates for backward compatibility:
-
-```js
-createKnob(id, x, y, w, h)        // Absolute position
-createFader(id, x, y, w, h, orientation)
-createToggle(id, x, y, w, h)
-createLabel(id, text, x, y, w, h)
-```
-
-Prefer the `parentId` API with flex/grid layout for new code.
+<!-- Pulp-WidgetBridge-Input-Fingerprint: fnv1a64:9291cfae4cc89ae3 -->
+
+Generated by `tools/scripts/generate_widget_bridge_api.py --write` from `core/view/src/widget_bridge_api_manifest.tsv`, JS preamble globals, and the capability map in `core/view/include/pulp/view/reload_autocaps.hpp`.
+
+**Status:** experimental
+
+The bridge installs these names as globals on the active JS engine. Pure UI groups are always registered. Effectful groups are capability-scoped during hot reload, so an ungranted group's symbols are absent at runtime rather than installed and guarded. Generated TypeScript marks those gated globals as `| undefined` and exposes per-capability groups through `PulpBridgeGlobals<C>`.
+
+Run `python3 tools/scripts/generate_widget_bridge_api.py --check` for an exact content check. `pulp doctor --only WidgetBridge` performs a non-executing input-fingerprint freshness check.
+
+## Capability Model
+
+| Capability | Bridge globals |
+|---|---:|
+| `exec` | 2 |
+| `clipboard` | 2 |
+| `filesystem` | 14 |
+| `storage` | 9 |
+| `ai` | 2 |
+| `runtime_import` | 2 |
+| always registered | 334 |
+
+## API Surface
+
+### Accessibility
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setAccessibilityLabel` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/accessibility_api.cpp` |
+| `setAccessibilityRole` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/accessibility_api.cpp` |
+| `setAccessibilityState` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/accessibility_api.cpp` |
+
+### Animation
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `animate` | `function` | `(id: string, property: string, targetValue: number \| string, durationMs: number, easingName?: string) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTransitionDuration` | `function` | `(id: string, seconds: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTransition` | `function` | `(id: string, css: string) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTransitionProperty` | `function` | `(id: string, properties: string) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTransitionTimingFunction` | `function` | `(id: string, easing: string) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTransitionDelay` | `function` | `(id: string, seconds: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTranslate` | `function` | `(id: string, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setRotation` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTransform` | `function` | `(id: string, a: number, b: number, c: number, d: number, e: number, f: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `clearTransform` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setTransformOrigin` | `function` | `(id: string, x: number, y?: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `defineKeyframes` | `function` | `(name: string, stopsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setAnimation` | `function` | `(id: string, name: string, duration: number, iterations?: number, direction?: string) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setScale` | `function` | `(id: string, scale: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+| `setSkew` | `function` | `(id: string, xDegrees: number, yDegrees: number) => void` | always | `-` | `core/view/src/widget_bridge/animation_api.cpp` |
+
+### CSS Style
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setVisible` | `function` | `(id: string, value: boolean) => void` | always | `-` | `core/view/src/widget_bridge/style_visibility_api.cpp` |
+| `setPointerEvents` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visibility_api.cpp` |
+| `setBackfaceVisibility` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visibility_api.cpp` |
+| `setVisibility` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visibility_api.cpp` |
+| `setWhiteSpace` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visibility_api.cpp` |
+| `setUserSelect` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visibility_api.cpp` |
+| `setBackground` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visual_api.cpp` |
+| `setBorder` | `function` | `(id: string, color: string, width?: number, radius?: number) => void` | always | `-` | `core/view/src/widget_bridge/border_box_api.cpp` |
+| `setBorderSide` | `function` | `(id: string, side: 'top' \| 'right' \| 'bottom' \| 'left', width: number, color: string) => void` | always | `-` | `core/view/src/widget_bridge/border_box_api.cpp` |
+| `setCornerRadius` | `function` | `(id: string, corner: 'All' \| 'TopLeft' \| 'TopRight' \| 'BottomLeft' \| 'BottomRight' \| string, radius: number) => void` | always | `-` | `core/view/src/widget_bridge/border_box_api.cpp` |
+| `setBorderColor` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/border_box_api.cpp` |
+| `setBorderWidth` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_box_api.cpp` |
+| `setBorderStyle` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/border_box_api.cpp` |
+| `setListStyleType` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/list_style_api.cpp` |
+| `setListStyleImage` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/list_style_api.cpp` |
+| `setListStylePosition` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/list_style_api.cpp` |
+| `setOutlineColor` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/outline_api.cpp` |
+| `setOutlineOffset` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/outline_api.cpp` |
+| `setOutlineStyle` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/outline_api.cpp` |
+| `setOutlineWidth` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/outline_api.cpp` |
+| `setBorderRadius` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_radius_api.cpp` |
+| `setBorderTopLeftRadius` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_radius_api.cpp` |
+| `setBorderTopRightRadius` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_radius_api.cpp` |
+| `setBorderBottomLeftRadius` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_radius_api.cpp` |
+| `setBorderBottomRightRadius` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_radius_api.cpp` |
+| `setBorderTopColor` | `function` | `(id: string, color: string) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setBorderRightColor` | `function` | `(id: string, color: string) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setBorderBottomColor` | `function` | `(id: string, color: string) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setBorderLeftColor` | `function` | `(id: string, color: string) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setBorderTopWidth` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setBorderRightWidth` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setBorderBottomWidth` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setBorderLeftWidth` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/border_side_api.cpp` |
+| `setShadow` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/style_visual_api.cpp` |
+| `setOpacity` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/style_visual_api.cpp` |
+| `setOverflow` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visual_api.cpp` |
+| `setStateStyle` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/style_state_api.cpp` |
+| `setEnabled` | `function` | `(id: string, value: boolean) => void` | always | `-` | `core/view/src/widget_bridge/style_state_api.cpp` |
+| `setDebugPaint` | `function` | `(id: string, value: boolean) => void` | always | `-` | `core/view/src/widget_bridge/style_state_api.cpp` |
+| `setBackgroundRepeat` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setCursor` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_cursor_api.cpp` |
+| `setDirection` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_cursor_api.cpp` |
+| `setFilter` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_effects_api.cpp` |
+| `setBackdropFilter` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/style_effects_api.cpp` |
+| `setClipPath` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_effects_api.cpp` |
+| `setMaskImage` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setMask` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setMaskSize` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setAppearance` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setObjectFit` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setObjectPosition` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setMixBlendMode` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/style_effects_api.cpp` |
+| `setShadowColor` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setShadowOffset` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setShadowOpacity` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setShadowRadius` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setIncludeFontPadding` | `function` | `(id: string, value: boolean) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setBorderCurve` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setIsolation` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setElevation` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setScrollBehavior` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setOverscrollBehavior` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_rn_compat_api.cpp` |
+| `setBackgroundAttachment` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setBackgroundClip` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setBackgroundOrigin` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setBackgroundPosition` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setBackgroundSize` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_storage_api.cpp` |
+| `setBackgroundGradient` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visual_api.cpp` |
+| `setBoxShadow` | `function` | `(id: string, offsetX: number, offsetY: number, blur: number, spread: number, color: string, inset?: boolean) => void` | always | `-` | `core/view/src/widget_bridge/style_visual_api.cpp` |
+| `clearBoxShadow` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/style_visual_api.cpp` |
+
+### Canvas 2D
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `createCanvas` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasClear` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number, color?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasFillRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number, color?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasStrokeRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number, color?: string, lineWidth?: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasFillCircle` | `function` | `(canvasId: string, x: number, y: number, radius: number, color?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasStrokeLine` | `function` | `(canvasId: string, x1: number, y1: number, x2: number, y2: number, color?: string, lineWidth?: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasFillText` | `function` | `(canvasId: string, text: string, x: number, y: number, fontSize?: number, color?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasStrokeText` | `function` | `(canvasId: string, text: string, x: number, y: number, fontSize?: number, color?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetFillColor` | `function` | `(canvasId: string, color: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetStrokeColor` | `function` | `(canvasId: string, color: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetLineWidth` | `function` | `(canvasId: string, width: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetFont` | `function` | `(canvasId: string, fontFamily: string, fontSize: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetFontFull` | `function` | `(canvasId: string, fontFamily: string, fontSize: number, fontWeight?: number, fontStyle?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasBeginPath` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasMoveTo` | `function` | `(canvasId: string, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasLineTo` | `function` | `(canvasId: string, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasQuadTo` | `function` | `(canvasId: string, cpx: number, cpy: number, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasCubicTo` | `function` | `(canvasId: string, cp1x: number, cp1y: number, cp2x: number, cp2y: number, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasClosePath` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasFillPath` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasStrokePath` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasPathArc` | `function` | `(canvasId: string, x: number, y: number, radius: number, startAngle: number, endAngle: number, anticlockwise?: boolean) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasPathArcTo` | `function` | `(canvasId: string, x1: number, y1: number, x2: number, y2: number, radius: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasPathEllipse` | `function` | `(canvasId: string, x: number, y: number, radiusX: number, radiusY: number, rotation: number, startAngle: number, endAngle: number, anticlockwise?: boolean) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasPathRoundRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number, radius: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSave` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasRestore` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasTranslate` | `function` | `(canvasId: string, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasScale` | `function` | `(canvasId: string, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasRotate` | `function` | `(canvasId: string, radians: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `beginPath` | `function` | `() => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `drawPath` | `function` | `(commands: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `measureText` | `function` | `(text: string, fontSize?: number) => PulpBridgeTextMetrics` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetLinearGradient` | `function` | `(canvasId: string, x0: number, y0: number, x1: number, y1: number, stopsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetRadialGradient` | `function` | `(canvasId: string, x: number, y: number, radius: number, stopsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetRadialGradientTwoCircles` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasClearGradient` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetStrokeLinearGradient` | `function` | `(canvasId: string, x0: number, y0: number, x1: number, y1: number, stopsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetStrokeRadialGradient` | `function` | `(canvasId: string, x: number, y: number, radius: number, stopsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetStrokeRadialGradientTwoCircles` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetStrokeConicGradient` | `function` | `(canvasId: string, x: number, y: number, angle: number, stopsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasClearStrokeGradient` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetConicGradient` | `function` | `(canvasId: string, x: number, y: number, angle: number, stopsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetFillPattern` | `function` | `(canvasId: string, source: string, repetition?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetStrokePattern` | `function` | `(canvasId: string, source: string, repetition?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetMiterLimit` | `function` | `(canvasId: string, limit: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetImageSmoothing` | `function` | `(canvasId: string, enabled: boolean, quality?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetDirection` | `function` | `(canvasId: string, direction: 'ltr' \| 'rtl' \| 'inherit' \| string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetFilter` | `function` | `(canvasId: string, filter: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasArc` | `function` | `(canvasId: string, x: number, y: number, radius: number, startAngle: number, endAngle: number, anticlockwise?: boolean) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetTextAlign` | `function` | `(canvasId: string, align: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetTextBaseline` | `function` | `(canvasId: string, baseline: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasClearRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasClipRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasFillRoundedRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number, radius: number, color?: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasStrokeRoundedRect` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number, radius: number, color?: string, lineWidth?: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasStrokeCircle` | `function` | `(canvasId: string, x: number, y: number, radius: number, color?: string, lineWidth?: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetGlobalAlpha` | `function` | `(canvasId: string, alpha: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetLineCap` | `function` | `(canvasId: string, lineCap: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetLineJoin` | `function` | `(canvasId: string, lineJoin: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetBlendMode` | `function` | `(canvasId: string, blendMode: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasGlobalCompositeOperation` | `function` | `(canvasId: string, operation: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetTransform` | `function` | `(canvasId: string, a: number, b: number, c: number, d: number, e: number, f: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasClip` | `function` | `(canvasId: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasDrawImage` | `function` | `(canvasId: string, source: string, dx: number, dy: number, dw?: number, dh?: number, sx?: number, sy?: number, sw?: number, sh?: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasMeasureText` | `function` | `(canvasId: string, text: string) => PulpBridgeTextMetrics` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetLineDash` | `function` | `(canvasId: string, segments: number[]) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetShadowColor` | `function` | `(canvasId: string, color: string) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetShadowBlur` | `function` | `(canvasId: string, blur: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetShadowOffsetX` | `function` | `(canvasId: string, x: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasSetShadowOffsetY` | `function` | `(canvasId: string, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasGetImageData` | `function` | `(canvasId: string, x: number, y: number, width: number, height: number) => PulpBridgeCanvasImageData` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+| `canvasPutImageData` | `function` | `(canvasId: string, imageData: PulpBridgeCanvasImageData, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/canvas2d_api.cpp` |
+
+### DOM Compatibility
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `__domAppend` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/dom_api.cpp` |
+| `__domRemove` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/dom_api.cpp` |
+
+### Events
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `registerHover` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `registerClick` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `claimOverlay` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `releaseOverlay` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `registerPointer` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `registerGesture` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `nativeSetPointerCapture` | `function` | `(id: string, pointerId: number) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `nativeReleasePointerCapture` | `function` | `(id: string, pointerId: number) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `enableInspectClick` | `function` | `() => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `registerWheel` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `registerContextMenu` | `function` | `(id: string, callbackName: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `showContextMenu` | `function` | `(itemsJson: string, x: number, y: number) => number` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `registerShortcut` | `function` | `(keyCode: number, modMask: number, callbackName: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `registerDrop` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/event_api.cpp` |
+| `on` | `function` | `(id: string, eventName: string, fn: (...args: unknown[]) => void) => void` | always | `event:names` | `core/view/src/widget_bridge.cpp` |
+
+### GPU
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `getGPUInfo` | `function` | `() => PulpBridgeJsonObject` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `navigatorGPU` | `host_object` | `PulpBridgeHostObject` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__describeNativeAdapterImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__describeNativeDeviceImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuCanvasConfigureImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuCanvasDescribeCurrentTextureImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuCreateTextureImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuQueueWriteTextureImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__decodeImageDataImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuDestroyTextureImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuQueueSubmitImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuQueueDrawImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuQueueDrawBufferedImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuQueuePresentTextureImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuCanvasPresentImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__requestAdapterImpl` | `promise_function` | `(...args: unknown[]) => Promise<unknown>` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__gpuComputeDispatchImpl` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__registerNativeBuffer` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__writeNativeBuffer` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+| `__dracoDecodeBuffer` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/gpu_api.cpp` |
+
+### Layout
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `createGrid` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setGrid` | `function` | `(id: string, key: string, value: number \| string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setFlex` | `function` | `(id: string, key: string, value: number \| string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `layout` | `function` | `() => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `getLayoutRect` | `function` | `(id: string) => PulpBridgeRect` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `getLayoutAncestorRects` | `function` | `(id: string) => PulpBridgeRect[]` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `getRootSize` | `function` | `() => PulpBridgeSize` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setBoxSizing` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setPosition` | `function` | `(id: string, position: string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setTop` | `function` | `(id: string, value: number \| string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setRight` | `function` | `(id: string, value: number \| string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setBottom` | `function` | `(id: string, value: number \| string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setLeft` | `function` | `(id: string, value: number \| string) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+| `setZIndex` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/layout_api.cpp` |
+
+### Metadata
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `removeWidget` | `function` | `(id: string) => void` | always | `-` | `core/view/src/widget_bridge/metadata_api.cpp` |
+| `setAnchor` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/metadata_api.cpp` |
+| `setSource` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/metadata_api.cpp` |
+| `getComputedValue` | `function` | `(id: string, property: string) => string` | always | `-` | `core/view/src/widget_bridge/metadata_api.cpp` |
+
+### Platform Services
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setAICli` | `function` | `(command: string) => void` | requires `ai` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `getAICli` | `function` | `() => string` | requires `ai` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `exec` | `function` | `(command: string) => string` | requires `exec` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `execAsync` | `function` | `(command: string, callbackId: string) => void` | requires `exec` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `showOpenDialog` | `function` | `(title?: string, filterDescription?: string, extensions?: string) => string` | requires `filesystem` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `showSaveDialog` | `function` | `(title?: string, filterDescription?: string, extensions?: string) => string` | requires `filesystem` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `chooseFolder` | `function` | `(title?: string) => string` | requires `filesystem` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `readClipboard` | `function` | `() => string` | requires `clipboard` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+| `writeClipboard` | `function` | `(text: string) => void` | requires `clipboard` | `-` | `core/view/src/widget_bridge/platform_services_api.cpp` |
+
+### Runtime
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `__requestFrame__` | `function` | `(callbackName: string) => number` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__cancelFrame__` | `function` | `(requestId: number) => void` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__flushFrames__` | `function` | `() => void` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__motionPublishValue__` | `function` | `(key: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__motionSetProvenance__` | `function` | `(key: string, source: string) => void` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__motionClearProvenance__` | `function` | `(key: string) => void` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__scheduleTimer__` | `function` | `(callbackName: string, delayMs: number, repeat?: boolean) => number` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__cancelTimer__` | `function` | `(timerId: number) => void` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__flushTimers__` | `function` | `() => void` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+| `__performanceNow__` | `function` | `() => number` | always | `-` | `core/view/src/widget_bridge/runtime_api.cpp` |
+
+### Runtime Import
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `__pulpRuntimeImport__` | `function` | `(specifier: string, options?: unknown) => unknown` | requires `runtime_import` | `-` | `core/view/src/widget_bridge/runtime_import_api.cpp` |
+| `__pulpRuntimeSettle__` | `function` | `(rounds?: number) => void` | requires `runtime_import` | `-` | `core/view/src/widget_bridge/runtime_import_api.cpp` |
+
+### SVG
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `createSvgPath` | `function` | `(id: string, parentId: string) => string` | always | `factory:SvgPath` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgPath` | `function` | `(id: string, pathData: string) => void` | always | `prop:SvgPath.d` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgViewBox` | `function` | `(id: string, width: number, height: number) => void` | always | `prop:SvgPath.viewBox` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgFill` | `function` | `(id: string, value: string) => void` | always | `prop:SvgPath.fill` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgFillGradient` | `function` | `(id: string, value: string) => void` | always | `prop:SvgPath.fillGradient` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgFillRule` | `function` | `(id: string, value: string) => void` | always | `prop:SvgPath.fillRule` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgStroke` | `function` | `(id: string, value: string) => void` | always | `prop:SvgPath.stroke` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgStrokeWidth` | `function` | `(id: string, width: number) => void` | always | `prop:SvgPath.strokeWidth` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `createSvgRect` | `function` | `(id: string, parentId: string) => string` | always | `factory:SvgRect` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgRect` | `function` | `(id: string, x: number, y: number, width: number, height: number) => void` | always | `geometry:SvgRect.x,y,width,height` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `createSvgLine` | `function` | `(id: string, parentId: string) => string` | always | `factory:SvgLine` | `core/view/src/widget_bridge/svg_api.cpp` |
+| `setSvgLine` | `function` | `(id: string, x1: number, y1: number, x2: number, y2: number) => void` | always | `geometry:SvgLine.x1,y1,x2,y2` | `core/view/src/widget_bridge/svg_api.cpp` |
+
+### Shader
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `compileShader` | `function` | `(skslCode: string) => PulpBridgeJsonObject` | always | `-` | `core/view/src/widget_bridge/shader_api.cpp` |
+| `setWidgetShader` | `function` | `(id: string, skslCode: string) => void` | always | `-` | `core/view/src/widget_bridge/shader_api.cpp` |
+| `clearWidgetShader` | `function` | `(...args: unknown[]) => unknown` | always | `-` | `core/view/src/widget_bridge/shader_api.cpp` |
+| `applyShader` | `function` | `(id: string, shaderName: string, uniforms?: PulpBridgeJsonObject) => void` | always | `-` | `core/view/src/widget_bridge/shader_api.cpp` |
+
+### State Binding
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `getParam` | `function` | `(name: string) => number` | always | `-` | `core/view/src/widget_bridge/state_binding_api.cpp` |
+| `setParam` | `function` | `(name: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/state_binding_api.cpp` |
+| `bindWidgetToParam` | `function` | `(widgetId: string, paramName: string, transform?: PulpBridgeBindingTransform) => boolean` | always | `-` | `core/view/src/widget_bridge/state_binding_api.cpp` |
+| `bindMeter` | `function` | `(widgetId: string, source: string, transform?: PulpBridgeBindingTransform) => boolean` | always | `-` | `core/view/src/widget_bridge/state_binding_api.cpp` |
+| `unbindWidget` | `function` | `(widgetId: string) => number` | always | `-` | `core/view/src/widget_bridge/state_binding_api.cpp` |
+
+### Storage and Assets
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `storageGetItem` | `function` | `(key: string) => string \| null` | requires `storage` | `-` | `core/view/src/widget_bridge/storage_assets_api.cpp` |
+| `storageSetItem` | `function` | `(key: string, value: string) => void` | requires `storage` | `-` | `core/view/src/widget_bridge/storage_assets_api.cpp` |
+| `storageRemoveItem` | `function` | `(key: string) => void` | requires `storage` | `-` | `core/view/src/widget_bridge/storage_assets_api.cpp` |
+| `__loadAssetSync__` | `function` | `(...args: unknown[]) => unknown` | requires `filesystem` | `-` | `core/view/src/widget_bridge/storage_assets_api.cpp` |
+| `loadFont` | `function` | `(path: string) => boolean` | requires `filesystem` | `-` | `core/view/src/widget_bridge/storage_assets_api.cpp` |
+| `registerFont` | `function` | `(family: string, path: string) => boolean` | requires `filesystem` | `-` | `core/view/src/widget_bridge/storage_assets_api.cpp` |
+
+### Theme
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setTheme` | `function` | `(name: 'dark' \| 'light' \| 'pro_audio' \| string) => void` | always | `-` | `core/view/src/widget_bridge/theme_api.cpp` |
+| `applyTokenDiff` | `function` | `(json: string) => void` | always | `-` | `core/view/src/widget_bridge/theme_api.cpp` |
+| `getThemeJson` | `function` | `() => string` | always | `-` | `core/view/src/widget_bridge/theme_api.cpp` |
+| `importDesignTokens` | `function` | `(json: string) => void` | always | `-` | `core/view/src/widget_bridge/theme_api.cpp` |
+| `exportDesignTokens` | `function` | `() => string` | always | `-` | `core/view/src/widget_bridge/theme_api.cpp` |
+
+### Tokens
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setMotionToken` | `function` | `(name: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/tokens_api.cpp` |
+| `getMotionToken` | `function` | `(name: string) => number \| undefined` | always | `-` | `core/view/src/widget_bridge/tokens_api.cpp` |
+| `setStringToken` | `function` | `(name: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/tokens_api.cpp` |
+| `getStringToken` | `function` | `(name: string) => string \| undefined` | always | `-` | `core/view/src/widget_bridge/tokens_api.cpp` |
+| `setColorToken` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/tokens_api.cpp` |
+| `setDimensionToken` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/tokens_api.cpp` |
+
+### Typography
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setFontFamily` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setFontWeight` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setFontStyle` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setLetterSpacing` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setLineHeight` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextAlign` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setMultiLine` | `function` | `(id: string, value: boolean) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setFontSize` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextRuns` | `function` | `(id: string, runsJson: string) => void` | always | `-` | `core/view/src/widget_bridge/text_runs_api.cpp` |
+| `setTextColor` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextTransform` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextDecoration` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextDecorationColor` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextDecorationStyle` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setLineClamp` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextOverflow` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextIndent` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setVerticalAlign` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setWordBreak` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setFontVariant` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextShadowColor` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextShadowOffset` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextShadowRadius` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+| `setTextShadow` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/typography_api.cpp` |
+
+### Widget Assets
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setImageSource` | `function` | `(id: string, path: string) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+| `setKnobSpriteStrip` | `function` | `(id: string, imagePath: string, frameCount?: number, orientation?: 'vertical' \| 'horizontal' \| string) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+| `setKnobSpriteCore` | `function` | `(id: string, coreX: number, coreY: number, coreWidth: number, coreHeight: number) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+| `setFaderSkin` | `function` | `(id: string, trackColor?: string, fillColor?: string, thumbColor?: string, thumbBorderColor?: string, thumbWidth?: number, thumbHeight?: number, cornerRadius?: number) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+| `setFaderTrackWidth` | `function` | `(id: string, width: number) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+| `setFaderTrackBorder` | `function` | `(id: string, color: string) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+| `setMeterColors` | `function` | `(id: string, backgroundColor: string, stopsCsv: string) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+| `setMeterBarRatio` | `function` | `(id: string, ratio: number) => void` | requires `filesystem` | `-` | `core/view/src/widget_bridge/widget_assets_api.cpp` |
+
+### Widget Factory
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `createKnob` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createFader` | `function` | `(id: string, orientation: 'vertical' \| 'horizontal', parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createToggle` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createRangeSlider` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createIcon` | `function` | `(id: string, type: 'image_upload' \| 'send' \| 'search' \| 'close' \| string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createImage` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createCheckbox` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createToggleButton` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createLabel` | `function` | `(id: string, text: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createBadge` | `function` | `(id: string, text: string, tone: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createStepper` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createPan` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createRow` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createCol` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createModal` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createPanel` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createMeter` | `function` | `(id: string, orientation: 'vertical' \| 'horizontal', parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createXYPad` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createWaveform` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createSpectrum` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createCombo` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createProgress` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createScrollView` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createNativeView` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createListBox` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+| `createTextEditor` | `function` | `(id: string, parentId: string) => string` | always | `-` | `core/view/src/widget_bridge/factory_api.cpp` |
+
+### Widget Schema
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setWidgetSchema` | `function` | `(id: string, schemaJson: string) => void` | requires `storage` | `-` | `core/view/src/widget_bridge/widget_schema_api.cpp` |
+| `setWidgetLottie` | `function` | `(id: string, lottieJson: string) => void` | requires `storage` | `-` | `core/view/src/widget_bridge/widget_schema_api.cpp` |
+| `seekWidgetLottie` | `function` | `(id: string, time01: number) => void` | requires `storage` | `-` | `core/view/src/widget_bridge/widget_schema_api.cpp` |
+| `clearWidgetSchema` | `function` | `(id: string) => void` | requires `storage` | `-` | `core/view/src/widget_bridge/widget_schema_api.cpp` |
+| `saveStylePreset` | `function` | `(name: string, payload: unknown) => void` | requires `storage` | `-` | `core/view/src/widget_bridge/widget_schema_api.cpp` |
+| `loadStylePreset` | `function` | `(name: string) => unknown` | requires `storage` | `-` | `core/view/src/widget_bridge/widget_schema_api.cpp` |
+
+`setWidgetLottie` stores Lottie JSON and scrub state on a widget for tool workflows.
+Native Skottie rendering is available through the `LottieView` widget and `LottieAnimation` canvas path; opt in with the `PULP_LOTTIE` CMake option, which links the Skia skottie module when the bundled Skia toolchain provides the required SkJSON and skresources support.
+
+### Widget Value
+
+| Name | Kind | Signature | Capability | JSX | Source |
+|---|---|---|---|---|---|
+| `setValue` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_controls_api.cpp` |
+| `getValue` | `function` | `(id: string) => number` | always | `-` | `core/view/src/widget_bridge/widget_value_controls_api.cpp` |
+| `setMin` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_controls_api.cpp` |
+| `setMax` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_controls_api.cpp` |
+| `setStep` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_controls_api.cpp` |
+| `setOrientation` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_controls_api.cpp` |
+| `setAccentColor` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_controls_api.cpp` |
+| `setListItems` | `function` | `(id: string, items: string[] \| string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_list_api.cpp` |
+| `setListSelected` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_list_api.cpp` |
+| `setListRowHeight` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_list_api.cpp` |
+| `setLabel` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_basic_api.cpp` |
+| `setStyle` | `function` | `(id: string, ...args: unknown[]) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_basic_api.cpp` |
+| `setWidgetStyle` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_basic_api.cpp` |
+| `setItems` | `function` | `(id: string, items: string[] \| string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_basic_api.cpp` |
+| `setSelected` | `function` | `(id: string, index: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_basic_api.cpp` |
+| `setProgress` | `function` | `(id: string, value: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setMeterLevel` | `function` | `(id: string, peak: number, rms?: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setXY` | `function` | `(id: string, x: number, y: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setWaveformData` | `function` | `(id: string, samples: PulpBridgeArrayLikeNumber) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setSpectrumData` | `function` | `(id: string, samples: PulpBridgeArrayLikeNumber) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setPlaceholder` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setText` | `function` | `(id: string, value: string) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `getText` | `function` | `(id: string) => string` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setPanelStyle` | `function` | `(id: string, backgroundToken: string, borderToken?: string, radius?: number, width?: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
+| `setScrollContentSize` | `function` | `(id: string, width: number, height: number) => void` | always | `-` | `core/view/src/widget_bridge/widget_value_content_api.cpp` |
