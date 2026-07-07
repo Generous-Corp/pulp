@@ -107,6 +107,19 @@ without opening a window.
   live window.
 - **First GPU link is slow-ish** (~45s here for the view lib + Skia/Dawn link),
   but subsequent incremental builds are fast.
+- **Linux release-path `RawPtrBackupRefImpl` / `PartitionAddressSpace::setup_`
+  link failures mean the Skia bundle omitted Chromium PartitionAlloc support.**
+  The chrome/m151 Linux archive can reference Chromium BackupRefPtr /
+  PartitionAlloc symbols from `libskia.a(libskia.SkSLParser.o)` even though the
+  standalone `skia-builder` bundle does not ship a `partition_alloc` archive.
+  `FindSkia.cmake` inspects `libskia.a` with `CMAKE_NM`; when those symbols are
+  unresolved and no bundled Skia archive defines them, it appends
+  `pulp-skia-chromium-raw-ptr-compat` after the Skia archive group. The source is
+  `core/canvas/src/skia_chromium_raw_ptr_compat.cpp` in-tree and is installed to
+  `src/pulp/canvas/` for SDK consumers. If the failure returns, confirm the
+  install-layout regression `cmake-pulp-install-skia-compat-source` passes and
+  inspect the release asset with `nm -uC libskia.a | rg
+  'RawPtrBackupRefImpl|PartitionAddressSpace::setup_'`.
 - **The `external/skia-build/build` symlink loop → Shipyard tree-drift.** This
   path is materialized per-machine (a symlink into the shared
   `~/.cache/pulp/skia-build` cache) and is **untracked + `.gitignore`d as of PR
