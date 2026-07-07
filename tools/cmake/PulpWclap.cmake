@@ -98,6 +98,7 @@ set(_PULP_WCLAP_INCLUDES
 # shared across every WebCLAP plugin target.
 set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
+    ${_PULP_WCLAP_ROOT}/core/format/src/processor_f64.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/host_quirks.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/host_version.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/host_type.cpp
