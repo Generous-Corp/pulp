@@ -13,7 +13,9 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -21,6 +23,12 @@
 #include <string>
 #include <system_error>
 #include <vector>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace pulp_test_cli {
 
@@ -80,8 +88,17 @@ private:
 };
 
 inline fs::path unique_temp_dir(const std::string& prefix) {
+    static std::atomic<unsigned long long> counter{0};
     auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
+#if defined(_WIN32)
+    const auto pid = static_cast<std::uint64_t>(_getpid());
+#else
+    const auto pid = static_cast<std::uint64_t>(::getpid());
+#endif
+    const auto serial = counter.fetch_add(1, std::memory_order_relaxed);
+    return fs::temp_directory_path() /
+           (prefix + "-" + std::to_string(pid) + "-" +
+            std::to_string(tick) + "-" + std::to_string(serial));
 }
 
 // Shellout tests must use the CMake-provided CLI path for this configure.
