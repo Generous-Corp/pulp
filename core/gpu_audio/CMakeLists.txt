@@ -4,7 +4,7 @@ add_library(pulp::gpu-audio ALIAS pulp-gpu-audio)
 target_include_directories(pulp-gpu-audio
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        # The public GPU-node headers (gpu_convolver.hpp, gpu_stft.hpp, …) name
+        # The public GPU-node headers (gpu_convolver.hpp, gpu_stft.hpp, ...)
         # render::GpuCompute, so they #include <pulp/render/gpu_compute.hpp>. Those
         # render headers are Dawn-free (opaque void* device/queue handles), so
         # exposing render's include dir keeps the gpu_audio public headers
@@ -23,9 +23,9 @@ target_sources(pulp-gpu-audio
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
 
 # GPU-agnostic real-time transport: depends only on the audio buffer/ring
-# primitives and the lock-free runtime. Later slices add pulp::signal (CPU
-# fallbacks like PartitionedConvolver) and pulp::render (GPU nodes) when the
-# code actually uses them.
+# primitives and the lock-free runtime. The public convolver classes are also
+# defined in GPU-off builds so examples and SDK consumers can compile the same
+# source and observe gpu_available() == false.
 find_package(Threads REQUIRED)
 target_link_libraries(pulp-gpu-audio
     PUBLIC
@@ -36,13 +36,15 @@ target_link_libraries(pulp-gpu-audio
 )
 
 # The GPU convolver node uses render::GpuCompute (FFT) + signal::Convolver (CPU
-# fallback). Built only when GPU is enabled (pulp::render exists); the transport
-# above stays GPU-agnostic. The GPU path is a runtime no-op without a Skia
-# device (GpuCompute::create() returns null → CPU fallback).
+# fallback). Without pulp::render, compile no-render definitions that satisfy the
+# public API and let callers fall back cleanly at runtime.
 if(TARGET pulp::render)
     target_sources(pulp-gpu-audio PRIVATE
         src/gpu_convolver.cpp src/gpu_multi_convolver.cpp src/gpu_stft.cpp
         src/gpu_spectral_freeze.cpp src/gpu_spectral_morph.cpp
         src/gpu_hyper_freeze.cpp src/spectral_stack.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::render pulp::signal)
+else()
+    target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp)
+    target_link_libraries(pulp-gpu-audio PUBLIC pulp::signal)
 endif()
