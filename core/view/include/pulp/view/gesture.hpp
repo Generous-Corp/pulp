@@ -67,6 +67,7 @@ private:
     void set_owner(View* owner) { owner_ = owner; }
     bool has_pending_callbacks() const { return !pending_callbacks_.empty(); }
     void clear_pending_callbacks() { pending_callbacks_.clear(); }
+    void remove_relationships_to(const GestureRecognizer& other);
     void dispatch_pending_callbacks();
 
     View* owner_ = nullptr;

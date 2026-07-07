@@ -226,13 +226,11 @@ public:
     virtual void on_gesture_event(const GestureEvent& event) {
         if (on_gesture_cb) on_gesture_cb(event);
     }
-
     GestureRecognizer& add_gesture_recognizer(std::unique_ptr<GestureRecognizer> recognizer);
     void clear_gesture_recognizers(); size_t gesture_recognizer_count() const { return gesture_recognizers_.size(); }
     GestureRecognizer* gesture_recognizer_at(size_t index); const GestureRecognizer* gesture_recognizer_at(size_t index) const;
     bool dispatch_gesture_pointer_event(const MouseEvent& root_event, double timestamp_seconds = -1.0);
     void advance_gesture_recognizers(double timestamp_seconds = -1.0); bool has_time_driven_gestures() const;
-
     // ── Pointer capture (W3C setPointerCapture) ─────────────────────────
 
     /// Capture pointer events for this view — all events for pointer_id

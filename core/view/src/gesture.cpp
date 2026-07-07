@@ -150,6 +150,16 @@ void GestureRecognizer::fail() {
     pending_callbacks_.clear();
 }
 
+void GestureRecognizer::remove_relationships_to(const GestureRecognizer& other) {
+    auto remove = [&other](std::vector<GestureRecognizer*>& recognizers) {
+        recognizers.erase(
+            std::remove(recognizers.begin(), recognizers.end(), &other),
+            recognizers.end());
+    };
+    remove(require_failures_);
+    remove(simultaneous_);
+}
+
 void GestureRecognizer::cancel() {
     if (state_ == GestureState::began || state_ == GestureState::changed) {
         state_ = GestureState::cancelled;

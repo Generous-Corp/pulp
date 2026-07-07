@@ -565,3 +565,69 @@ TEST_CASE("touch UI proof combines XY pan, waveform pinch, and nested list pan",
     REQUIRE(row_claims == 1);
     REQUIRE(scroll_claims == 0);
 }
+
+TEST_CASE("removing a gesture subtree cancels root arbiter sessions",
+          "[view][gesture][lifetime]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 100, 100});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    int began = 0;
+    int cancelled = 0;
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->on_began = [&](GestureRecognizer&) { ++began; };
+    pan->on_cancelled = [&](GestureRecognizer&) { ++cancelled; };
+    child_ptr->add_gesture_recognizer(std::move(pan));
+
+    double t = 0.0;
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        pointer_event({10, 10}, MousePhase::press, &t), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        pointer_event({30, 10}, MousePhase::drag, &t), t));
+    REQUIRE(began == 1);
+
+    auto removed = root.remove_child(child_ptr);
+    REQUIRE(removed);
+    CHECK(cancelled == 1);
+
+    removed.reset();
+    CHECK_FALSE(root.dispatch_gesture_pointer_event(
+        pointer_event({40, 10}, MousePhase::drag, &t), t));
+    CHECK_FALSE(root.dispatch_gesture_pointer_event(
+        pointer_event({40, 10}, MousePhase::release, &t), t));
+}
+
+TEST_CASE("clearing child recognizers cancels root arbiter sessions",
+          "[view][gesture][lifetime]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 100, 100});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    int began = 0;
+    int cancelled = 0;
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->on_began = [&](GestureRecognizer&) { ++began; };
+    pan->on_cancelled = [&](GestureRecognizer&) { ++cancelled; };
+    child_ptr->add_gesture_recognizer(std::move(pan));
+
+    double t = 0.0;
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        pointer_event({10, 10}, MousePhase::press, &t), t));
+    REQUIRE(root.dispatch_gesture_pointer_event(
+        pointer_event({30, 10}, MousePhase::drag, &t), t));
+    REQUIRE(began == 1);
+
+    child_ptr->clear_gesture_recognizers();
+    CHECK(cancelled == 1);
+
+    CHECK_FALSE(root.dispatch_gesture_pointer_event(
+        pointer_event({40, 10}, MousePhase::drag, &t), t));
+    CHECK_FALSE(root.dispatch_gesture_pointer_event(
+        pointer_event({40, 10}, MousePhase::release, &t), t));
+}

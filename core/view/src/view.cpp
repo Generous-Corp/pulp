@@ -153,6 +153,13 @@ void build_continuous_corner_rounded_rect_path(
     canvas.close_path();
 }
 
+View* root_for_gesture_relationship_cleanup(View* view) {
+    if (!view) return nullptr;
+    while (view->parent())
+        view = view->parent();
+    return view;
+}
+
 } // namespace
 
 View::View()
@@ -967,6 +974,34 @@ std::unique_ptr<View> View::remove_child(View* child) {
         [child](const auto& p) { return p.get() == child; });
     if (it == children_.end()) return nullptr;
 
+    std::vector<GestureRecognizer*> removed_recognizers;
+    auto collect_removed = [&](auto&& self, View& node) -> void {
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (recognizer)
+                removed_recognizers.push_back(recognizer.get());
+        }
+        for (auto& descendant : node.children_)
+            self(self, *descendant);
+    };
+    collect_removed(collect_removed, *child);
+
+    for (View* root = this; root; root = root->parent_) {
+        if (root->gesture_arbiter_)
+            root->gesture_arbiter_->reset();
+    }
+    auto scrub_relationships = [&](auto&& self, View& node) -> void {
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (!recognizer) continue;
+            for (auto* removed : removed_recognizers) {
+                if (removed && removed != recognizer.get())
+                    recognizer->remove_relationships_to(*removed);
+            }
+        }
+        for (auto& descendant : node.children_)
+            self(self, *descendant);
+    };
+    scrub_relationships(scrub_relationships, *this);
+
     child->on_detached();
     child->set_window_host(nullptr);
     child->set_plugin_view_host(nullptr);
@@ -1321,8 +1356,33 @@ GestureRecognizer& View::add_gesture_recognizer(
 }
 
 void View::clear_gesture_recognizers() {
-    if (gesture_arbiter_)
-        gesture_arbiter_->reset();
+    std::vector<GestureRecognizer*> removed_recognizers;
+    removed_recognizers.reserve(gesture_recognizers_.size());
+    for (auto& recognizer : gesture_recognizers_) {
+        if (recognizer)
+            removed_recognizers.push_back(recognizer.get());
+    }
+
+    for (View* root = this; root; root = root->parent_) {
+        if (root->gesture_arbiter_)
+            root->gesture_arbiter_->reset();
+    }
+
+    if (auto* root = root_for_gesture_relationship_cleanup(this)) {
+        auto scrub_relationships = [&](auto&& self, View& node) -> void {
+            for (auto& recognizer : node.gesture_recognizers_) {
+                if (!recognizer) continue;
+                for (auto* removed : removed_recognizers) {
+                    if (removed && removed != recognizer.get())
+                        recognizer->remove_relationships_to(*removed);
+                }
+            }
+            for (auto& descendant : node.children_)
+                self(self, *descendant);
+        };
+        scrub_relationships(scrub_relationships, *root);
+    }
+
     gesture_recognizers_.clear();
 }
 
