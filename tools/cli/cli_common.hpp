@@ -302,6 +302,7 @@ struct WatchOptions {
                                       // rebuilt logic instead of a process restart
     int build_jobs = 0;                // optional host-governed build/test cap
     std::string build_qos;             // optional host role QoS hint
+    bool build_watchdog = false;       // true when a lease-backed build should be CPU-watched
 };
 
 // Watch source files and rebuild on changes. Optionally runs tests,

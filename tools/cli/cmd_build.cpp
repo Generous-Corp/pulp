@@ -205,7 +205,11 @@ int cmd_build(const std::vector<std::string>& args) {
     }
 
     pulp_debug("cmd_build: run build (cmake --build)");
-    int rc = run_with_spinner(apply_agent_build_qos(build_cmd, lease.qos()), "Building");
+    int rc = run_with_spinner(
+        apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
+                                   lease.jobs(),
+                                   lease.active()),
+        "Building");
     if (rc != 0) return rc;
 
     // Item 7.4b: build → validate → install pipeline.
@@ -289,5 +293,6 @@ int cmd_build(const std::vector<std::string>& args) {
     opts.run_validate = watch_validate;
     opts.build_jobs = capped_build.jobs;
     opts.build_qos = lease.qos();
+    opts.build_watchdog = lease.active();
     return watch_loop(opts);
 }

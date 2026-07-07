@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "tools/cli/cli_common.hpp"
 #include "tools/cli/tartci_lease.hpp"
 
 #include <algorithm>
@@ -173,6 +174,72 @@ TEST_CASE("background qos wraps build command on macOS only") {
     REQUIRE(apply_agent_build_qos("cmake --build build", "normal")
             == "cmake --build build");
 }
+
+TEST_CASE("build watchdog wraps only active leased commands") {
+    ScopedEnvVar watchdog_default("PULP_TARTCI_WATCHDOG", std::nullopt);
+
+#ifdef _WIN32
+    REQUIRE(apply_agent_build_watchdog("cmake --build build", 4, true)
+            == "cmake --build build");
+#else
+    REQUIRE(apply_agent_build_watchdog("cmake --build build", 4, false)
+            == "cmake --build build");
+    REQUIRE(apply_agent_build_watchdog("cmake --build build", 0, true)
+            == "cmake --build build");
+
+    const auto wrapped = apply_agent_build_watchdog("cmake --build build", 4, true);
+    REQUIRE(wrapped.find("python3") != std::string::npos);
+    REQUIRE(wrapped.find(" -c ") != std::string::npos);
+    REQUIRE(wrapped.find("cmake --build build") != std::string::npos);
+    REQUIRE(wrapped.find(" kill") != std::string::npos);
+#endif
+}
+
+TEST_CASE("build watchdog exposes kill switch and monitor-only mode") {
+#ifdef _WIN32
+    SUCCEED("watchdog wrapper is POSIX-only");
+#else
+    ScopedEnvVar watchdog_off("PULP_TARTCI_WATCHDOG", "0");
+    REQUIRE(apply_agent_build_watchdog("cmake --build build", 4, true)
+            == "cmake --build build");
+
+    ScopedEnvVar watchdog_monitor("PULP_TARTCI_WATCHDOG", "monitor");
+    const auto wrapped = apply_agent_build_watchdog("cmake --build build", 4, true);
+    REQUIRE(wrapped.find("python3") != std::string::npos);
+    REQUIRE(wrapped.find(" -c ") != std::string::npos);
+    REQUIRE(wrapped.find("monitor") != std::string::npos);
+#endif
+}
+
+#ifndef _WIN32
+TEST_CASE("build watchdog fails open when python is unavailable") {
+    ScopedEnvVar watchdog_default("PULP_TARTCI_WATCHDOG", std::nullopt);
+    ScopedEnvVar watchdog_python("PULP_TARTCI_WATCHDOG_PYTHON",
+                                 "pulp-missing-python-for-watchdog-test");
+
+    REQUIRE(apply_agent_build_watchdog("cmake --build build", 4, true)
+            == "cmake --build build");
+}
+
+TEST_CASE("build watchdog preserves child exit code in monitor mode") {
+    ScopedEnvVar watchdog_monitor("PULP_TARTCI_WATCHDOG", "monitor");
+    ScopedEnvVar interval("PULP_TARTCI_WATCHDOG_INTERVAL_SECS", "1");
+
+    const auto wrapped = apply_agent_build_watchdog("sh -c 'exit 7'", 1, true);
+    REQUIRE(run(wrapped) == 7);
+}
+
+TEST_CASE("build watchdog kills sustained CPU over budget") {
+    ScopedEnvVar watchdog_kill("PULP_TARTCI_WATCHDOG", "kill");
+    ScopedEnvVar interval("PULP_TARTCI_WATCHDOG_INTERVAL_SECS", "1");
+    ScopedEnvVar samples("PULP_TARTCI_WATCHDOG_SAMPLES", "1");
+    ScopedEnvVar grace("PULP_TARTCI_WATCHDOG_TERM_GRACE_SECS", "1");
+    ScopedEnvVar cpu_per_job("PULP_TARTCI_WATCHDOG_CPU_PER_JOB", "1");
+
+    const auto wrapped = apply_agent_build_watchdog("python3 -c 'while True: pass'", 1, true);
+    REQUIRE(run(wrapped) == 124);
+}
+#endif
 
 #ifndef _WIN32
 TEST_CASE("concurrent watch loops are rejected by one fixed host lease") {
