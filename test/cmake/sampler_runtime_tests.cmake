@@ -142,6 +142,13 @@ pulp_add_test_suite(pulp-test-signal-graph-prepared-swap
 pulp_add_test_suite(pulp-test-signal-graph-metadata-cache
     SOURCES test_signal_graph_metadata_cache.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# 2.2b: the no-silence LIVE swap — begin_swap_edit/prepare_swap publishes a
+# reinit-free gain-graph edit with no silent block under a concurrent render, and
+# rejects non-reinit-free edits (SR change / removed node / anticipation) as
+# NeedsEagerPrepare.
+pulp_add_test_suite(pulp-test-signal-graph-prepared-swap-live
+    SOURCES test_signal_graph_prepared_swap_live.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Transport plumbing for SignalGraph::process: the transport-aware overload is
 # bit-identical for transport-inert routed nodes, populates the routed block so a
 # ProcessorNode consumer receives the host transport / process_mode / render-speed

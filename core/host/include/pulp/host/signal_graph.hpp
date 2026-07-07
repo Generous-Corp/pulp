@@ -27,6 +27,7 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <atomic>
+#include <thread>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -426,6 +427,31 @@ public:
 
     // Lifecycle
     bool prepare(double sample_rate, int max_block_size);
+
+    // 2.2b no-silence live swap. Outcome of prepare_swap().
+    enum class SwapResult {
+        Swapped,           // the new topology was published with no silent block.
+        NeedsEagerPrepare, // not reinit-free (or a latency change) — caller must
+                           // call prepare() under the usual no-process/no-pump
+                           // contract; the live snapshot has been invalidated.
+        NotInSwapEdit,     // prepare_swap called without a matching begin_swap_edit.
+    };
+    // Begin a transactional topology edit that MAY publish with no silence. Between
+    // begin_swap_edit() and prepare_swap()/abort_swap_edit(), the CALLING thread's
+    // graph mutations (connect/disconnect/gain/add/remove) do NOT invalidate the
+    // live snapshot — it keeps playing the old compiled graph until prepare_swap
+    // atomically publishes the new one. A mutation from any OTHER thread, or a
+    // lifecycle/limits/registry mutation from any thread, cancels the no-silence
+    // attempt (the live snapshot is invalidated as usual). Single-owner: nesting is
+    // refused. Caller must pair with prepare_swap or abort_swap_edit.
+    void begin_swap_edit();
+    // Publish the staged topology with no silent block if it is reinit-free (same
+    // instances, no re-init, unchanged latency, no per-snapshot state to glitch);
+    // otherwise invalidate + return NeedsEagerPrepare so the caller eager-prepares.
+    SwapResult prepare_swap(double sample_rate, int max_block_size);
+    // Abandon the no-silence attempt: invalidate the live snapshot (the staged
+    // edits remain in the graph and take effect on the next prepare()).
+    void abort_swap_edit();
     void release();
 
     // Prepare-time topology bounds. Hosts that accept generated or user-built
@@ -860,6 +886,16 @@ private:
                                    // into samples.
         int64_t total_latency_samples = 0;
         MidiBlockSnapshot midi_publish_scratch;
+        // 2.2b reinit-free-swap predicate inputs (captured at compile so a
+        // prepare_swap candidate can be compared against this live snapshot):
+        //  - custom_instances: NodeId → raw custom-instance identity for each
+        //    Custom node (set-equality vs the current nodes_ detects an added /
+        //    removed / re-instantiated custom node → not reinit-free).
+        //  - custom_registry_generation: the SignalGraph custom-type registry
+        //    generation at compile time (a re-register would rebind callbacks to
+        //    instances built by the old factory → not reinit-free).
+        std::unordered_map<NodeId, const void*> custom_instances;
+        std::uint64_t custom_registry_generation = 0;
 
         // Immutable canonical-executor routing for this snapshot, built in
         // compile_() when the topology is executor-eligible (see
@@ -962,6 +998,11 @@ private:
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
+    // Bumped on every register_custom_node_type; captured into each CompiledGraph
+    // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
+    // the custom registry changed (M6 — prevents binding new callbacks to
+    // instances the old factory built). Guarded by graph_mutation_mutex_.
+    std::uint64_t custom_registry_generation_{0};
     NodeId next_id_ = 1;
     GraphLimits limits_;
 
@@ -979,6 +1020,14 @@ private:
         int latency_samples = 0;
         bool wants_transport = false;
     };
+    // Captured once per prepare() (cleared + rebuilt); read by compile_ / the
+    // routing build / edit-time param validation instead of the live PluginSlot.
+    // STALENESS INVARIANT: an entry is valid ONLY while the node set and per-node
+    // slot identities are unchanged since the last prepare(). A 2.2b swap never
+    // recaptures it — the reinit-free predicate (snapshot_is_plugin_reinit_free_)
+    // enforces exactly that invariant, and a non-reinit-free edit falls back to a
+    // full prepare() which rebuilds this map. Do NOT read it after a mutation that
+    // could add/remove/re-instantiate a node without a matching re-prepare.
     std::unordered_map<NodeId, PreparedPluginMetadata> prepared_plugin_meta_;
 
     // Audio-thread snapshot, published by prepare() / mutators. The audio
@@ -1011,6 +1060,16 @@ private:
     // (see CompiledGraph::routing_*_parallel).
     std::atomic<bool> parallel_routing_enabled_{false};
     std::atomic<bool> anticipation_enabled_{false};
+
+    // 2.2b swap-edit transaction state (guarded by graph_mutation_mutex_).
+    // in_swap_edit_ is set between begin_swap_edit() and prepare_swap()/
+    // abort_swap_edit(); swap_edit_owner_ is the thread that opened it. While set,
+    // invalidate_live_() no-ops for the OWNER thread's allow-set mutations (so the
+    // live snapshot keeps playing); any direct invalidate_live_() from a non-owner
+    // thread, and the lifecycle/limits/registry mutators which force-abort at their
+    // top, cancel the transaction.
+    bool in_swap_edit_{false};
+    std::thread::id swap_edit_owner_{};
     // Guards the single-producer contract on pump_anticipation: a concurrent or
     // reentrant call degrades to a no-op instead of corrupting the lane's
     // unsynchronized executor/pool/scratch + interior plugin state.
@@ -1153,7 +1212,37 @@ private:
                              const audio::BufferView<const float>& input,
                              int num_samples,
                              CompiledGraph* cg);
-    std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
+    // compile_ mode. Normal is the full build (prepare()). SwapNoAnticipation is
+    // used by (2.2b) prepare_swap: it HARD-skips the anticipation-lane build so a
+    // swap-time recompile can never construct an AnticipationLane over the live
+    // interior instances (M5 — the reinit-free predicate already requires
+    // anticipation off, but this closes the TOCTOU where the host flips the atomic
+    // between the predicate check and compile).
+    enum class CompileMode { Normal, SwapNoAnticipation };
+    std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
+                                            CompileMode mode = CompileMode::Normal);
+    // Shared preflight (generated-graph limits + audio-rate automation
+    // event-capacity gate) for prepare() and (2.2b) prepare_swap(). PURE — mutates
+    // no live state. Caller holds graph_mutation_mutex_. Returns false (logged) on
+    // any rejection.
+    bool preflight_locked_(int max_block_size);
+    // 2.2b reinit-free-swap predicate (PRE-compile half). True iff a live topology
+    // swap to the current nodes_/connections_ needs NO plugin/custom re-init and
+    // carries no per-snapshot mutable state a fresh snapshot would glitch: same
+    // sr/block; unchanged custom registry (M6); anticipation off both sides (M5);
+    // no MIDI edge (M4); no smoothed sparse-automation edge (CX3); identical node
+    // set + plugin/custom instance identity (M2); every resolved plugin node has a
+    // cached-metadata entry (CX2). The latency-equality gate (M3) is checked
+    // POST-compile in prepare_swap(). Pure const read; caller holds the mutation
+    // mutex.
+    bool snapshot_is_plugin_reinit_free_(const CompiledGraph& old_cg,
+                                         double sr, int bs) const;
+    // Edit-time plugin parameter list for connection validation. Prefers the
+    // prepare-time cache (prepared_plugin_meta_) so a connect during a swap-edit
+    // does NOT call the live PluginSlot::parameters() concurrently with process()
+    // on that slot (2.2b S4); falls back to the live slot for a not-yet-prepared
+    // node. Edit-path only (not real-time), so the by-value copy is fine.
+    std::vector<HostParamInfo> cached_or_live_params_(const GraphNode& n) const;
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
     void invalidate_live_();

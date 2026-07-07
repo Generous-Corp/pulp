@@ -304,6 +304,10 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
     // assumes the caller holds this mutex (true for every internal caller below).
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    // 2.2b (M7): a non-allow-set mutator cancels any open swap-edit — clear the
+    // flag FIRST so the invalidate_live_() below actually fires (it self-skips for
+    // the owner thread while a swap-edit is open).
+    in_swap_edit_ = false;
     const bool affects_existing_nodes = std::any_of(
         nodes_.begin(), nodes_.end(), [&](const GraphNode& node) {
             return node.type == NodeType::Custom
@@ -313,6 +317,10 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     if (type.default_name.empty()) type.default_name = type.type_id;
     const auto key = custom_node_key(type.type_id, type.version);
     custom_node_types_[key] = std::move(type);
+    // M6 (2.2b): any registry change bumps the generation so a reinit-free swap
+    // compiled against an older generation is rejected (a re-register rebinds
+    // callbacks to instances the old factory produced).
+    ++custom_registry_generation_;
     if (affects_existing_nodes) invalidate_live_();
     return true;
 }
@@ -482,7 +490,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
 
     // Parameter must exist, be automatable, and not read-only.
     bool ok_param = false;
-    for (const auto& pi : dst_n->plugin->parameters()) {
+    for (const auto& pi : cached_or_live_params_(*dst_n)) {
         if (pi.id != dest_param_id) continue;
         if (!pi.flags.automatable || pi.flags.read_only) return false;
         ok_param = true;
@@ -533,7 +541,7 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     if (would_create_cycle(src, dest)) return false;
 
     bool ok_param = false;
-    for (const auto& pi : dst_n->plugin->parameters()) {
+    for (const auto& pi : cached_or_live_params_(*dst_n)) {
         if (pi.id != dest_param_id) continue;
         if (!parameter_allows_modulation(
                 pi, dest_param_id, state::ParamRate::AudioRate, true)) {
@@ -596,7 +604,7 @@ bool SignalGraph::audio_rate_modulation_lane_locked_(const Connection& connectio
         return false;
     }
 
-    for (const auto& pi : dst_n->plugin->parameters()) {
+    for (const auto& pi : cached_or_live_params_(*dst_n)) {
         if (pi.id != connection.automation_param_id) continue;
 
         lane = state::ModulationLane{
@@ -629,7 +637,7 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
     // is not the prepare/release thread, so without the guard a concurrent
     // prepare()/release()/invalidate could retire+free `cg` mid-use.
     ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -652,7 +660,7 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
     // Pin the live snapshot for the whole dereference (see inject_midi). const
     // method: ProcessReadGuard only touches the mutable atomic counter.
     ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -773,7 +781,7 @@ float SignalGraph::get_node_parameter(NodeId id, uint32_t param_id) const {
 int SignalGraph::node_latency_samples(NodeId id) const {
     // Pin the live snapshot for the whole dereference (see inject_midi).
     ProcessReadGuard read_guard{*this};
-    const auto* cg = live_raw_.load(std::memory_order_acquire);
+    const auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (!cg) return 0;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return 0;
@@ -908,6 +916,13 @@ SignalGraph::evaluate_optional_runtime_budget(
 }
 
 void SignalGraph::invalidate_live_() {
+    // 2.2b: during a swap-edit the OWNER thread's allow-set mutations must NOT
+    // silence the live snapshot — it keeps playing the old compiled graph until
+    // prepare_swap() atomically publishes the new one. Any other caller (a second
+    // control thread, or the lifecycle / limits / registry mutators, which
+    // force-abort the transaction at their top) falls through and invalidates as
+    // usual, which safely cancels the no-silence attempt.
+    if (in_swap_edit_ && std::this_thread::get_id() == swap_edit_owner_) return;
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
     // always require a re-prepare before audio resumes.
@@ -915,6 +930,74 @@ void SignalGraph::invalidate_live_() {
     retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
+}
+
+void SignalGraph::begin_swap_edit() {
+    std::lock_guard<std::mutex> lock(graph_mutation_mutex_);
+    if (in_swap_edit_) {
+        runtime::log_error("SignalGraph: begin_swap_edit() while a swap edit is "
+                           "already open — refused (nesting unsupported)");
+        return;
+    }
+    in_swap_edit_ = true;
+    swap_edit_owner_ = std::this_thread::get_id();
+}
+
+SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
+                                                  int max_block_size) {
+    std::lock_guard<std::mutex> lock(graph_mutation_mutex_);
+    if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
+    // Any exit but a successful publish invalidates the live snapshot and ends the
+    // transaction, so the caller falls back to an eager prepare() under the usual
+    // no-process/no-pump contract (CX1 — never re-prepare plugin/custom instances
+    // inline here while an old snapshot may still be draining on the audio thread).
+    // Clear the flag FIRST so invalidate_live_() does not self-skip for this thread.
+    auto fail = [&]() {
+        in_swap_edit_ = false;
+        invalidate_live_();
+        return SwapResult::NeedsEagerPrepare;
+    };
+    if (!preflight_locked_(max_block_size)) return fail();
+    if (!live_ ||
+        !snapshot_is_plugin_reinit_free_(*live_, sample_rate, max_block_size)) {
+        return fail();
+    }
+    auto next = compile_(sample_rate, max_block_size, CompileMode::SwapNoAnticipation);
+    if (!next) return fail();
+    // M3: reject a total-latency change (audible splice + wrong host PDC) or any PDC
+    // delay ring on either side — a nonzero delay_samples carries per-snapshot ring
+    // state a fresh snapshot zeroes (click). Compare the delay STRUCTURE, not the
+    // ConnectionDelay objects (ring/slew contents legitimately differ per snapshot,
+    // and the delay vectors are not index-aligned once connections change).
+    const auto has_pdc = [](const CompiledGraph& g) {
+        for (const auto& d : g.connection_delays) {
+            if (d.delay_samples != 0) return true;
+        }
+        return false;
+    };
+    if (next->total_latency_samples != live_->total_latency_samples ||
+        has_pdc(*next) || has_pdc(*live_)) {
+        return fail();  // discard `next` (never published); eager-prepare instead
+    }
+    // CX4 publish: store the new raw pointer while `next` still owns it, THEN retire
+    // the old — never the reverse; seq_cst pairs with process_impl's pinned load so
+    // the audio thread never sees a null/torn pointer (NO silent block).
+    live_raw_.store(next.get(), std::memory_order_seq_cst);
+    retire_snapshot_(std::move(live_));
+    live_ = next;
+    total_latency_samples_.store(next->total_latency_samples,
+                                 std::memory_order_relaxed);
+    publish_prepared_stats_(*next);
+    prune_retired_snapshots_();
+    in_swap_edit_ = false;
+    return SwapResult::Swapped;
+}
+
+void SignalGraph::abort_swap_edit() {
+    std::lock_guard<std::mutex> lock(graph_mutation_mutex_);
+    if (!in_swap_edit_) return;
+    in_swap_edit_ = false;  // clear FIRST so invalidate_live_ does not self-skip
+    invalidate_live_();
 }
 
 void SignalGraph::clear_prepared_stats_() {
@@ -1068,11 +1151,12 @@ void SignalGraph::compile_snapshot_for_test(double sample_rate, int max_block_si
 }
 
 std::shared_ptr<SignalGraph::CompiledGraph>
-SignalGraph::compile_(double sample_rate, int max_block_size) {
+SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) {
     auto cg = std::make_shared<CompiledGraph>();
     cg->max_block_size = max_block_size;
     cg->sample_rate = sample_rate;
     cg->connections = connections_;
+    cg->custom_registry_generation = custom_registry_generation_;  // 2.2b predicate (M6)
 
 #ifndef NDEBUG
     // 2.2b (H2): every plugin node MUST have captured metadata. A cache miss
@@ -1165,6 +1249,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 (mit != prepared_plugin_meta_.end()) && mit->second.wants_transport;
         }
         if (n.type == NodeType::Custom) {
+            // 2.2b: record this Custom node's instance identity for the reinit-
+            // free-swap predicate (set-equality vs a prepare_swap candidate).
+            cg->custom_instances[n.id] = n.custom_instance.get();
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {
@@ -1452,7 +1539,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         // Recomputed every compile: with no active anticipation no node is forced
         // exterior, so the counter must read 0 rather than keep a prior value.
         transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
-        if (cg->routing_valid &&
+        if (mode == CompileMode::Normal &&
+            cg->routing_valid &&
             anticipation_enabled_.load(std::memory_order_relaxed) &&
             max_block_size > 0) {
             const auto eligibility =
@@ -1531,6 +1619,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             }
         }
     }
+    // M5: a SwapNoAnticipation compile must never have built an anticipation lane.
+    assert(mode == CompileMode::Normal || !cg->anticipation_valid);
     return cg;
 }
 
@@ -1563,30 +1653,79 @@ int SignalGraph::pump_anticipation(int max_blocks) {
     return rendered;
 }
 
-bool SignalGraph::prepare(double sample_rate, int max_block_size) {
-    // Serialize the ENTIRE prepare against concurrent control-thread mutators
-    // (set_node_gain / add_*/remove_node, which all run on the UI thread). The
-    // lock covers two distinct shared surfaces:
-    //   1. The source topology — nodes_ iteration + GraphNode plain-field reads,
-    //      including GraphNode::gain in compile_() — vs the mutators' writes.
-    //   2. The snapshot-publication state (live_ / live_raw_ / retired_snapshots_)
-    //      mutated by the prologue's retire_snapshot_ + the epilogue's
-    //      publish/prune, which a concurrent mutator's invalidate_live_() also
-    //      touches. Those were previously single-control-thread-owned; with a
-    //      second control thread editing the graph they must be serialized too.
-    //
-    // Deadlock-free: prepare() only ever drives the NON-blocking
-    // prune_retired_snapshots_() (never the blocking wait_for_retired_snapshots_),
-    // and the one place a thread holds a ProcessReadGuard reader pin AND wants this
-    // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
-    // never invert order with the reader-drain handshake.
-    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+// Edit-time plugin parameter list (see header). Cached copy when prepared, else
+// the live slot — so a connect during a swap-edit avoids a live parameters() call
+// racing process() on that slot.
+std::vector<HostParamInfo>
+SignalGraph::cached_or_live_params_(const GraphNode& n) const {
+    const auto it = prepared_plugin_meta_.find(n.id);
+    if (it != prepared_plugin_meta_.end()) return it->second.parameters;
+    return n.plugin ? n.plugin->parameters() : std::vector<HostParamInfo>{};
+}
 
-    live_raw_.store(nullptr, std::memory_order_seq_cst);
-    retire_snapshot_(std::move(live_));
-    total_latency_samples_.store(0, std::memory_order_relaxed);
-    clear_prepared_stats_();
+// 2.2b reinit-free-swap predicate (PRE-compile half — see the header). Returns
+// true only when a live swap to the current nodes_/connections_ can reuse every
+// existing plugin/custom instance with no re-init and no per-snapshot state glitch.
+// Any doubt returns false → prepare_swap falls back to an eager prepare().
+bool SignalGraph::snapshot_is_plugin_reinit_free_(const CompiledGraph& old_cg,
+                                                  double sr, int bs) const {
+    // (1) A sample-rate / block-size change requires re-preparing every instance.
+    if (old_cg.sample_rate != sr || old_cg.max_block_size != bs) return false;
+    // (2) M6 — a custom-type re-register rebinds callbacks to instances the old
+    // factory produced (audio-thread type confusion on an opaque void*).
+    if (custom_registry_generation_ != old_cg.custom_registry_generation) return false;
+    // (3) M5 — a swap over a live anticipation pump races the interior instances
+    // and the new lane's ring starts empty; exclude anticipation on either side.
+    if (anticipation_enabled_.load(std::memory_order_seq_cst) ||
+        old_cg.anticipation_valid) {
+        return false;
+    }
+    // (4) M4 / (5) CX3 — MIDI edges carry per-snapshot mailbox state (a dropped
+    // note-off = stuck note) and a smoothed sparse-automation edge would snap its
+    // destination mid-ramp when the fresh snapshot re-primes the slew.
+    for (const auto& c : connections_) {
+        if (c.midi) return false;
+        if (c.automation && c.automation_smoothing_ms > 0.0f) return false;
+    }
+    for (const auto& c : old_cg.connections) {
+        if (c.midi) return false;  // defensive: the live snapshot itself had MIDI
+    }
+    // (6) M2 — identical node SET (no node added / removed / re-typed since this
+    // snapshot compiled; cg->shapes holds every node id) plus per-node plugin /
+    // custom instance identity, and (8) CX2 release-mode cache coverage.
+    if (nodes_.size() != old_cg.shapes.size()) return false;
+    for (const auto& n : nodes_) {
+        if (old_cg.shapes.find(n.id) == old_cg.shapes.end()) return false;
+        if (n.type == NodeType::Plugin) {
+            const auto it = old_cg.plugins.find(n.id);
+            const bool was_resolved = (it != old_cg.plugins.end());
+            const bool now_resolved = (n.plugin != nullptr);
+            if (was_resolved != now_resolved) return false;  // resolved-since / lost slot
+            if (now_resolved) {
+                if (it->second.get() != n.plugin.get()) return false;  // re-instanced
+                // CX2: a cache miss would silently yield empty params / 0 latency.
+                if (prepared_plugin_meta_.find(n.id) == prepared_plugin_meta_.end()) {
+                    return false;
+                }
+            }
+        } else if (n.type == NodeType::Custom) {
+            if (n.custom_state_pending) return false;  // a pending blob needs a re-prepare
+            const auto it = old_cg.custom_instances.find(n.id);
+            if (it == old_cg.custom_instances.end()) return false;
+            if (it->second != n.custom_instance.get()) return false;  // re-instanced
+        }
+    }
+    return true;
+}
 
+// Shared preflight for prepare() and (2.2b) prepare_swap(): PURE validation over
+// the current nodes_/connections_/limits — the generated-graph limit checks plus
+// the audio-rate automation event-capacity gate. Mutates no live state, so
+// prepare_swap() can run it before its reinit-free predicate WITHOUT silencing the
+// live snapshot (unlike prepare()'s destructive null-first prologue, which stays in
+// prepare()). Caller holds graph_mutation_mutex_. Returns false (with a logged
+// reason) on any rejection; true if the graph passes every gate.
+bool SignalGraph::preflight_locked_(int max_block_size) {
     const auto generated_validation = validate_generated_graph(max_block_size);
     switch (generated_validation.reason) {
     case GeneratedGraphValidationRejectReason::None:
@@ -1657,6 +1796,42 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
             return false;
         }
     }
+    return true;
+}
+
+bool SignalGraph::prepare(double sample_rate, int max_block_size) {
+    // Serialize the ENTIRE prepare against concurrent control-thread mutators
+    // (set_node_gain / add_*/remove_node, which all run on the UI thread). The
+    // lock covers two distinct shared surfaces:
+    //   1. The source topology — nodes_ iteration + GraphNode plain-field reads,
+    //      including GraphNode::gain in compile_() — vs the mutators' writes.
+    //   2. The snapshot-publication state (live_ / live_raw_ / retired_snapshots_)
+    //      mutated by the prologue's retire_snapshot_ + the epilogue's
+    //      publish/prune, which a concurrent mutator's invalidate_live_() also
+    //      touches. Those were previously single-control-thread-owned; with a
+    //      second control thread editing the graph they must be serialized too.
+    //
+    // Deadlock-free: prepare() only ever drives the NON-blocking
+    // prune_retired_snapshots_() (never the blocking wait_for_retired_snapshots_),
+    // and the one place a thread holds a ProcessReadGuard reader pin AND wants this
+    // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
+    // never invert order with the reader-drain handshake.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+
+    // 2.2b: an eager prepare() cancels any open swap-edit transaction (it nulls +
+    // re-prepares instances directly, bypassing invalidate_live_'s owner-skip).
+    in_swap_edit_ = false;
+
+    live_raw_.store(nullptr, std::memory_order_seq_cst);
+    retire_snapshot_(std::move(live_));
+    total_latency_samples_.store(0, std::memory_order_relaxed);
+    clear_prepared_stats_();
+
+    // Generated-graph limits + audio-rate automation event-capacity gate (H3 —
+    // shared with prepare_swap()). prepare() has already nulled the live snapshot
+    // above, so a preflight failure here leaves the graph silent (existing
+    // behavior); prepare_swap() runs the same preflight BEFORE any mutation.
+    if (!preflight_locked_(max_block_size)) return false;
 
     // Prepare each plugin slot first (pre-compile step). Immediately capture
     // each slot's metadata (params/latency/transport) into prepared_plugin_meta_
@@ -1716,6 +1891,7 @@ void SignalGraph::set_limits(GraphLimits limits) {
     // Mutates limits_ (read by validate_generated_graph under the lock) and drives
     // invalidate_live_(); serialize against a concurrent prepare()/mutator.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    in_swap_edit_ = false;  // 2.2b (M7): non-allow-set mutator cancels the swap-edit
     limits_ = limits;
     invalidate_live_();
 }
@@ -1820,6 +1996,10 @@ void SignalGraph::release() {
     // never take this mutex at all.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
 
+    // 2.2b: release() cancels any open swap-edit transaction (it tears down
+    // instances, so a subsequent prepare_swap must not act on a stale flag).
+    in_swap_edit_ = false;
+
     live_raw_.store(nullptr, std::memory_order_seq_cst);
     retire_snapshot_(std::move(live_));
     wait_for_retired_snapshots_();
@@ -1866,6 +2046,7 @@ bool SignalGraph::set_custom_node_state(NodeId id,
     // Writes GraphNode custom fields + invalidate_live_(); serialize against a
     // concurrent mutator/prepare.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    in_swap_edit_ = false;  // 2.2b (M7): non-allow-set mutator cancels the swap-edit
     for (auto& n : nodes_) {
         if (n.id != id) continue;
         if (n.type != NodeType::Custom) return false;
@@ -2149,6 +2330,7 @@ void SignalGraph::clear() {
     // concurrent mutator/prepare. invalidate_live_() drives only the non-blocking
     // prune, so holding the mutex across it is deadlock-free.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    in_swap_edit_ = false;  // 2.2b (M7): non-allow-set mutator cancels the swap-edit
     connections_.clear();
     nodes_.clear();
     next_id_ = 1;
@@ -2177,7 +2359,7 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // guard a concurrent prepare()/release() could retire+free `cg` between the
     // load and the store (use-after-free).
     ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (cg) {
         auto it = cg->runtime.find(id);
         if (it != cg->runtime.end() && it->second.gain) {
