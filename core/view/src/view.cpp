@@ -1327,12 +1327,23 @@ void View::request_repaint(const Rect& local_dirty) {
     }
     // Map local_dirty (this view's local space) to root/window space by summing
     // each ancestor's origin (paint applies canvas.translate(bounds_.x,
-    // bounds_.y) descending the tree). If this view or any ancestor carries a
-    // render transform, the plain offset is wrong — conservatively repaint the
-    // whole surface instead.
+    // bounds_.y) descending the tree). The plain offset only holds when nothing
+    // on the chain moves or spreads this view's pixels past that mapping, so
+    // conservatively escalate to a full repaint when:
+    //   - the view or an ancestor carries a render transform (affine), or
+    //   - the view or an ancestor carries a pixel-spreading filter (blur), or
+    //   - an ancestor translates its children's paint (a scrolled ScrollView),
+    //     which the offset walk cannot model.
+    // Escalating never under-invalidates; it only forgoes the optimization.
     float off_x = 0.0f, off_y = 0.0f;
     for (const View* v = this; v; v = v->parent()) {
-        if (v->has_render_transform()) {
+        if (v->has_render_transform() || v->has_filter_effect()) {
+            request_repaint();
+            return;
+        }
+        // Child-paint offsets (scroll) come from ancestors, not from this view
+        // painting itself; a container's own offset does not move its own box.
+        if (v != this && v->applies_child_paint_offset()) {
             request_repaint();
             return;
         }
