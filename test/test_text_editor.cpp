@@ -917,6 +917,24 @@ TEST_CASE("TextEditor marked text selected range drives caret and selection",
     REQUIRE(editor.caret_pos() == 8);
 }
 
+TEST_CASE("TextEditor marked text updates caret_rect before paint",
+          "[view][text_editor][ime][caret]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 40});
+    editor.on_focus_changed(true);
+    editor.set_text("base");
+    editor.set_caret_pos(4);
+
+    const auto before = editor.caret_rect();
+    editor.set_marked_text("draft", 5, 0);
+    const auto after = editor.caret_rect();
+
+    REQUIRE(editor.has_marked_text());
+    REQUIRE(after.x > before.x + 10.0f);
+    REQUIRE(after.y == before.y);
+    REQUIRE(after.height > 0.0f);
+}
+
 TEST_CASE("TextEditor marked text selected range uses UTF-8 byte offsets",
           "[view][text_editor][ime][unicode][selection]") {
     const std::string ni = "\xE3\x81\xAB";
