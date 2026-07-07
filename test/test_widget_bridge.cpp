@@ -1007,6 +1007,94 @@ TEST_CASE("WidgetBridge prunes bindings for released virtual list row widgets",
     REQUIRE_THAT(rebound_knob->value(), WithinAbs(0.0, 0.001));
 }
 
+TEST_CASE("WidgetBridge clears recycled virtual list row children before rebind",
+          "[view][bridge][virtual-list]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var release_hits = 0;
+        createVirtualList('vl', '');
+        setListRowHeight('vl', 10);
+        setVirtualListOverscan('vl', 0);
+        on('vl', 'bindrow', function(ev) {
+            __domAppend(ev.rowId, ev.rowId + '__label_' + ev.index, 'label');
+        });
+        on('vl', 'releaserow', function() {
+            release_hits += 1;
+        });
+    )");
+
+    auto* list = dynamic_cast<VirtualList*>(bridge.widget("vl"));
+    REQUIRE(list != nullptr);
+    list->set_bounds({0, 0, 120, 20});
+    list->set_row_count(100);
+    REQUIRE(list->realized_row_count() >= 3);
+
+    auto* row = list->realized_row_at_slot(0);
+    REQUIRE(row != nullptr);
+    const auto row_id = row->id();
+    const auto old_child_id = row_id + "__label_0";
+    REQUIRE(row->child_count() == 1);
+    REQUIRE(bridge.widget(old_child_id) != nullptr);
+
+    list->set_scroll_y(50);
+
+    REQUIRE(list->realized_row_at_slot(0) == row);
+    REQUIRE(row->child_count() == 1);
+    REQUIRE(bridge.widget(old_child_id) == nullptr);
+    REQUIRE(bridge.widget(row_id + "__label_5") != nullptr);
+    REQUIRE(engine.evaluate("release_hits").getWithDefault<int>(0) >= 1);
+}
+
+TEST_CASE("WidgetBridge clears recycled virtual list row callbacks before reusing ids",
+          "[view][bridge][virtual-list][events]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var stale_hits = 0;
+        createVirtualList('vl', '');
+        setListRowHeight('vl', 10);
+        setVirtualListOverscan('vl', 0);
+        on('vl', 'bindrow', function(ev) {
+            var checkboxId = ev.rowId + '__check';
+            __domAppend(ev.rowId, checkboxId, 'checkbox');
+            if (ev.index === 0) {
+                on(checkboxId, 'change', function() { stale_hits += 1; });
+            }
+        });
+    )");
+
+    auto* list = dynamic_cast<VirtualList*>(bridge.widget("vl"));
+    REQUIRE(list != nullptr);
+    list->set_bounds({0, 0, 120, 20});
+    list->set_row_count(100);
+    REQUIRE(list->realized_row_count() >= 3);
+
+    auto* row = list->realized_row_at_slot(0);
+    REQUIRE(row != nullptr);
+    const auto checkbox_id = row->id() + "__check";
+    auto* initial_checkbox = dynamic_cast<Checkbox*>(bridge.widget(checkbox_id));
+    REQUIRE(initial_checkbox != nullptr);
+
+    initial_checkbox->on_mouse_down({0, 0});
+    REQUIRE(engine.evaluate("stale_hits").getWithDefault<int>(0) == 1);
+
+    list->set_scroll_y(50);
+
+    auto* recycled_checkbox = dynamic_cast<Checkbox*>(bridge.widget(checkbox_id));
+    REQUIRE(recycled_checkbox != nullptr);
+    recycled_checkbox->on_mouse_down({0, 0});
+    REQUIRE(engine.evaluate("stale_hits").getWithDefault<int>(0) == 1);
+}
+
 TEST_CASE("WidgetBridge rewires native events when a recycled subtree reuses ids",
           "[view][bridge][virtual-list][events]") {
     ScriptEngine engine;

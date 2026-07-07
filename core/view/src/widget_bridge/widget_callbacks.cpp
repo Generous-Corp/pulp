@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
@@ -36,6 +37,16 @@ void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
 
 std::string js_string_literal(std::string_view text) {
     return choc::json::toString(choc::value::createString(std::string(text)), false);
+}
+
+void dispatch_virtual_list_row_release(const std::shared_ptr<std::atomic<bool>>& alive,
+                                       ScriptEngine* engine,
+                                       const std::string& id_literal,
+                                       const std::string& row_id) {
+    safe_dispatch_eval(alive, engine,
+        "__dispatch__(" + id_literal + ", 'releaserow', { rowId: " +
+        js_string_literal(row_id) + " })",
+        "virtual list releaserow");
 }
 
 } // namespace
@@ -85,12 +96,11 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
     } else if (auto* vl = dynamic_cast<VirtualList*>(w)) {
         const auto id_literal = js_string_literal(id);
         auto* widgets = &widgets_;
-        vl->set_row_releaser([this, alive, engine, id_literal](View& row) {
+        auto row_bindings = std::make_shared<std::unordered_map<std::string, std::size_t>>();
+        vl->set_row_releaser([this, alive, engine, id_literal, row_bindings](View& row) {
             if (!alive || !alive->load(std::memory_order_acquire)) return;
-            safe_dispatch_eval(alive, engine,
-                "__dispatch__(" + id_literal + ", 'releaserow', { rowId: " +
-                js_string_literal(row.id()) + " })",
-                "virtual list releaserow");
+            row_bindings->erase(row.id());
+            dispatch_virtual_list_row_release(alive, engine, id_literal, row.id());
             if (!alive || !alive->load(std::memory_order_acquire)) return;
             forget_widget_subtree(&row);
         });
@@ -103,10 +113,21 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             }
             return row;
         });
-        vl->set_row_binder([alive, engine, id_literal](View& row, std::size_t index) {
+        vl->set_row_binder([this, alive, engine, id_literal, row_bindings](View& row, std::size_t index) {
+            const auto row_id = row.id();
+            if (row_bindings->find(row_id) != row_bindings->end()) {
+                dispatch_virtual_list_row_release(alive, engine, id_literal, row_id);
+                if (!alive || !alive->load(std::memory_order_acquire)) return;
+                while (row.child_count() > 0) {
+                    auto* child = row.child_at(row.child_count() - 1);
+                    auto removed = row.remove_child(child);
+                    forget_widget_subtree(removed.get());
+                }
+            }
+            (*row_bindings)[row_id] = index;
             safe_dispatch_eval(alive, engine,
                 "__dispatch__(" + id_literal + ", 'bindrow', { rowId: " +
-                js_string_literal(row.id()) + ", index: " + std::to_string(index) + " })",
+                js_string_literal(row_id) + ", index: " + std::to_string(index) + " })",
                 "virtual list bindrow");
         });
         vl->on_selection_changed([alive, engine, id_literal](const std::vector<std::size_t>& selection) {
