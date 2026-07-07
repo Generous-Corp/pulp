@@ -182,6 +182,21 @@ and that `external/skia-build/*-gpu/lib/Release` (or `SKIA_DIR` env) is populate
 there — a headers-only submodule checkout hits the same locked-raster trap as the
 in-tree case above.
 
+## Lottie / skottie in the bundle
+
+The Skia bundle links `skottie` + `sksg` + `svg` via `FindSkia.cmake`'s glob, but
+skottie also needs `SkJSON` (`libjsonreader.a`) + `skresources` to actually link.
+Bundles before Skia chrome/m151 shipped skottie's headers/archive but omitted
+those, so the opt-in `PULP_LOTTIE` try-link in `core/canvas/CMakeLists.txt`
+auto-disabled (LottieView degraded to a no-op). **chrome/m151 onward ships
+`libjsonreader.a` (SkJSON) + `libskresources.a`**, so the try-link now succeeds
+and `LottieAnimation` composites real frames. `PULP_LOTTIE` stays default OFF
+(it retains skottie in the binary); the macOS CI lane builds it ON for coverage
+(`test_canvas.cpp` pixel-tests the render, `test_lottie_view.cpp` the playback).
+If Lottie silently no-ops, check the configure line for
+`Pulp: PULP_LOTTIE requested but this Skia bundle cannot link skottie` — that
+means a pre-m151 (or otherwise skjson-less) bundle.
+
 ## When to reach for this
 
 Any time GPU rendering "isn't working", a window looks CPU-ish (no aspect-lock,

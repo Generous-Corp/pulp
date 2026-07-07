@@ -10,7 +10,9 @@
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/svg_dom_cache.hpp>
+#include <pulp/canvas/lottie_animation.hpp>
 #include <cstdlib>
+#include <string>
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
@@ -1157,6 +1159,74 @@ TEST_CASE("SvgDomCache output is byte-identical to the uncached path",
     REQUIRE(uncached.size() == cached.size());
     REQUIRE_FALSE(uncached.empty());
     REQUIRE(uncached == cached);  // the cache only skips the parse, never the render
+}
+
+// ── Lottie (skottie) render path ────────────────────────────────────────────
+// The playback/loop logic is covered by test_lottie_view.cpp; this asserts the
+// one thing those tests can't — that LottieAnimation actually composites skottie
+// pixels onto a SkiaCanvas. It is the pixel-level proof that the bundled skottie
+// module links and renders (unlocked once the Skia bundle shipped SkJSON +
+// skresources). Guarded on supported(): a no-Lottie build (PULP_LOTTIE off)
+// takes the graceful-skip branch, matching the source contract.
+namespace {
+// Minimal Bodymovin: a 100x100, 1-second, fully-opaque red solid layer.
+const char* kLottieRedSolid = R"({
+  "v":"5.7.0","fr":30,"ip":0,"op":30,"w":100,"h":100,"nm":"t","ddd":0,"assets":[],
+  "layers":[{"ddd":0,"ind":1,"ty":1,"nm":"solid","sr":1,
+    "ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[50,50,0]},
+          "a":{"a":0,"k":[50,50,0]},"s":{"a":0,"k":[100,100,100]}},
+    "ao":0,"sw":100,"sh":100,"sc":"#ff0000","ip":0,"op":30,"st":0,"bm":0}]
+})";
+
+// Render the first frame of `json` into an unpremultiplied RGBA8888 raster of
+// px x px through the real LottieAnimation → SkiaCanvas compositing path.
+std::vector<uint8_t> render_lottie_frame_rgba(const std::string& json, int px) {
+    std::vector<uint8_t> pixels(static_cast<std::size_t>(px) * px * 4, 0);
+    SkImageInfo info = SkImageInfo::Make(px, px, kRGBA_8888_SkColorType,
+                                         kUnpremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    if (!surface) return pixels;
+    SkCanvas* sk = surface->getCanvas();
+    sk->clear(SK_ColorTRANSPARENT);
+    {
+        SkiaCanvas canvas(sk);
+        LottieAnimation anim;
+        if (!anim.load_json(json)) return pixels;
+        anim.render(canvas, 0.0, 0.0f, 0.0f,
+                    static_cast<float>(px), static_cast<float>(px));
+    }
+    surface->readPixels(info, pixels.data(),
+                        static_cast<std::size_t>(px) * 4, 0, 0);
+    return pixels;
+}
+}  // namespace
+
+TEST_CASE("LottieAnimation composites skottie frames onto a SkiaCanvas",
+          "[canvas][skia][lottie]") {
+    if (!LottieAnimation::supported()) {
+        SUCCEED("Lottie not compiled in (PULP_LOTTIE off) — render is a no-op");
+        return;
+    }
+    const int px = 100;
+    const auto rgba = render_lottie_frame_rgba(kLottieRedSolid, px);
+    REQUIRE(rgba.size() == static_cast<std::size_t>(px) * px * 4);
+
+    // The centre pixel must be the authored opaque red — proves skottie parsed
+    // the solid layer and the frame was composited, not left transparent.
+    const std::size_t c = ((static_cast<std::size_t>(px) / 2) * px + px / 2) * 4;
+    CAPTURE(rgba[c], rgba[c + 1], rgba[c + 2], rgba[c + 3]);
+    REQUIRE(rgba[c + 3] > 200);  // opaque
+    REQUIRE(rgba[c + 0] > 200);  // red high
+    REQUIRE(rgba[c + 1] < 60);   // green low
+    REQUIRE(rgba[c + 2] < 60);   // blue low
+
+    // The solid fills the composition, so most of the frame must be painted —
+    // guards against a one-pixel fluke or a mostly-transparent render.
+    std::size_t painted = 0;
+    for (std::size_t i = 3; i < rgba.size(); i += 4)
+        if (rgba[i] > 10) ++painted;
+    REQUIRE(painted > static_cast<std::size_t>(px) * px / 2);
 }
 
 #endif  // PULP_HAS_SKIA
