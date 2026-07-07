@@ -9,6 +9,77 @@ namespace {
 namespace fmt = pulp::format;
 } // namespace
 
+LowerabilityProof lowerability_of(std::span<const GraphNode> nodes,
+                                  std::span<const Connection> connections) {
+    LowerabilityProof proof;
+    // Order matters: the Plugin/Custom node-kind refusals are checked BEFORE the
+    // executor-eligibility predicate. A Plugin node with no live slot is executor-
+    // ineligible; a Custom node now IS executor-eligible (it routes), but neither
+    // can be baked — a hosted plugin and a custom instance both hold opaque state a
+    // frozen topology cannot capture. The explicit kind checks give those graphs a
+    // specific, actionable reason instead of a generic NotExecutorEligible.
+    for (const auto& node : nodes) {
+        if (node.type == NodeType::Plugin) {
+            // A hosted Plugin owns opaque external state (its own DSP, presets,
+            // sample caches). Freezing the topology cannot capture that state, so
+            // a baked Processor would not be self-contained.
+            proof.reason = LowerRejectReason::HostedPluginNotSelfContained;
+            proof.offending_node = node.id;
+            proof.message =
+                "hosted Plugin node holds opaque external state and is not "
+                "self-contained; refusing to bake";
+            return proof;
+        }
+        if (node.type == NodeType::Custom) {
+            // Custom-node lowering is a deliberate follow-up (see the header).
+            proof.reason = LowerRejectReason::CustomNotYetLowerable;
+            proof.offending_node = node.id;
+            proof.message =
+                "Custom node lowering is not yet implemented; refusing to bake";
+            return proof;
+        }
+        // The lowerable subset is audio-only. The routed executor also accepts
+        // MidiInput/MidiOutput nodes, but a BakedGraphProcessor advertises no MIDI
+        // bus and process() carries no MIDI scratch, so a MIDI node would be
+        // silently dropped — refuse rather than bake a graph that cannot match.
+        if (node.type != NodeType::AudioInput && node.type != NodeType::AudioOutput &&
+            node.type != NodeType::Gain) {
+            proof.reason = LowerRejectReason::NonAudioLaneNotLowerable;
+            proof.offending_node = node.id;
+            proof.message =
+                "only audio I/O and Gain nodes are lowerable in this slice; MIDI and "
+                "other node kinds are a follow-up";
+            return proof;
+        }
+    }
+
+    // Likewise refuse any non-audio connection lane. The executor can route MIDI /
+    // automation / audio-rate-modulation / sidechain edges, but this slice bakes
+    // only plain audio, and process() supplies no MIDI/automation scratch — so such
+    // an edge would diverge from the live graph. Fail closed.
+    for (const auto& c : connections) {
+        if (c.midi || c.automation || c.audio_rate_modulation || c.sidechain) {
+            proof.reason = LowerRejectReason::NonAudioLaneNotLowerable;
+            proof.offending_node = c.dest_node;
+            proof.message =
+                "only plain audio connections are lowerable in this slice; "
+                "MIDI/automation/audio-rate-modulation/sidechain are a follow-up";
+            return proof;
+        }
+    }
+
+    if (!signal_graph_topology_executor_eligible(nodes, connections)) {
+        proof.reason = LowerRejectReason::NotExecutorEligible;
+        proof.message =
+            "graph is outside the routed executor's bit-exact subset; refusing to bake";
+        return proof;
+    }
+
+    proof.accepted = true;
+    proof.reason = LowerRejectReason::None;
+    return proof;
+}
+
 LowerResult bake(const SignalGraph& graph) {
     LowerResult result;
 
@@ -25,60 +96,14 @@ LowerResult bake(const SignalGraph& graph) {
         return result;
     }
 
-    for (const auto& node : graph.nodes()) {
-        if (node.type == NodeType::Plugin) {
-            // A hosted Plugin owns opaque external state (its own DSP, presets,
-            // sample caches). Freezing the topology cannot capture that state, so
-            // a baked Processor would not be self-contained.
-            result.reason = LowerRejectReason::HostedPluginNotSelfContained;
-            result.offending_node = node.id;
-            result.message =
-                "hosted Plugin node holds opaque external state and is not "
-                "self-contained; refusing to bake";
-            return result;
-        }
-        if (node.type == NodeType::Custom) {
-            // Custom-node lowering is a deliberate follow-up (see the header).
-            result.reason = LowerRejectReason::CustomNotYetLowerable;
-            result.offending_node = node.id;
-            result.message =
-                "Custom node lowering is not yet implemented; refusing to bake";
-            return result;
-        }
-        // The lowerable subset is audio-only. The routed executor also accepts
-        // MidiInput/MidiOutput nodes, but a BakedGraphProcessor advertises no MIDI
-        // bus and process() carries no MIDI scratch, so a MIDI node would be
-        // silently dropped — refuse rather than bake a graph that cannot match.
-        if (node.type != NodeType::AudioInput && node.type != NodeType::AudioOutput &&
-            node.type != NodeType::Gain) {
-            result.reason = LowerRejectReason::NonAudioLaneNotLowerable;
-            result.offending_node = node.id;
-            result.message =
-                "only audio I/O and Gain nodes are lowerable in this slice; MIDI and "
-                "other node kinds are a follow-up";
-            return result;
-        }
-    }
-
-    // Likewise refuse any non-audio connection lane. The executor can route MIDI /
-    // automation / audio-rate-modulation / sidechain edges, but this slice bakes
-    // only plain audio, and process() supplies no MIDI/automation scratch — so such
-    // an edge would diverge from the live graph. Fail closed.
-    for (const auto& c : graph.connections()) {
-        if (c.midi || c.automation || c.audio_rate_modulation || c.sidechain) {
-            result.reason = LowerRejectReason::NonAudioLaneNotLowerable;
-            result.offending_node = c.dest_node;
-            result.message =
-                "only plain audio connections are lowerable in this slice; "
-                "MIDI/automation/audio-rate-modulation/sidechain are a follow-up";
-            return result;
-        }
-    }
-
-    if (!signal_graph_topology_executor_eligible(graph.nodes(), graph.connections())) {
-        result.reason = LowerRejectReason::NotExecutorEligible;
-        result.message =
-            "graph is outside the routed executor's bit-exact subset; refusing to bake";
+    // Topology lowerability — the shared gate (see lowerability_of). bake()'s only
+    // extra precondition is is_prepared() above; the node-kind / lane / executor-
+    // eligibility proof is identical to what the on-disk load path will re-run.
+    if (const auto proof = lowerability_of(graph.nodes(), graph.connections());
+        !proof.accepted) {
+        result.reason = proof.reason;
+        result.offending_node = proof.offending_node;
+        result.message = proof.message;
         return result;
     }
 

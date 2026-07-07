@@ -35,6 +35,8 @@ using pulp::host::LowerRejectReason;
 using pulp::host::LowerResult;
 using pulp::host::SignalGraph;
 using pulp::host::bake;
+using pulp::host::lowerability_of;
+using pulp::host::PluginInfo;
 
 constexpr double kSr = 48000.0;
 constexpr int kFrames = 128;
@@ -407,4 +409,44 @@ TEST_CASE("Bake refuses an unprepared graph loudly",
     REQUIRE_FALSE(r.accepted);
     REQUIRE(r.processor == nullptr);
     REQUIRE(r.reason == LowerRejectReason::NotPrepared);
+}
+
+// Direct unit coverage of lowerability_of() — the shared gate bake() consults to
+// prove a topology is bakeable — asserting the accept case and each refusal reason
+// independently of bake()'s is_prepared() precondition.
+TEST_CASE("lowerability_of proves the bakeable subset and refuses with a reason",
+          "[host][bake][lowerability]") {
+    SECTION("audio I/O + Gain + plain-audio connections are lowerable") {
+        SignalGraph g;
+        const auto in = g.add_input_node(1, "In");
+        const auto gn = g.add_gain_node("G");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, gn, 0));
+        REQUIRE(g.connect(gn, 0, out, 0));
+        const auto proof = lowerability_of(g.nodes(), g.connections());
+        CHECK(proof.accepted);
+        CHECK(proof.reason == LowerRejectReason::None);
+    }
+    SECTION("a Plugin node -> HostedPluginNotSelfContained") {
+        SignalGraph g;
+        const auto in = g.add_input_node(1, "In");
+        const auto p = g.add_unresolved_plugin_node(PluginInfo{}, 1, 1, "P");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, p, 0));
+        REQUIRE(g.connect(p, 0, out, 0));
+        const auto proof = lowerability_of(g.nodes(), g.connections());
+        CHECK_FALSE(proof.accepted);
+        CHECK(proof.reason == LowerRejectReason::HostedPluginNotSelfContained);
+        CHECK(proof.offending_node == p);
+    }
+    SECTION("a MIDI node -> NonAudioLaneNotLowerable") {
+        SignalGraph g;
+        (void)g.add_input_node(1, "In");
+        const auto mi = g.add_midi_input_node("MI");
+        (void)g.add_output_node(1, "Out");
+        const auto proof = lowerability_of(g.nodes(), g.connections());
+        CHECK_FALSE(proof.accepted);
+        CHECK(proof.reason == LowerRejectReason::NonAudioLaneNotLowerable);
+        CHECK(proof.offending_node == mi);
+    }
 }
