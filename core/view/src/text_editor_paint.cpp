@@ -483,16 +483,50 @@ int TextEditor::char_index_at_point(float x, float y) const {
 }
 
 Rect TextEditor::caret_rect() const {
-    // No paint has run yet: anchor the caret to the inner padding so an
-    // IME host querying us before the first frame still gets a
-    // non-degenerate rect. All coordinates returned by `caret_rect()`
-    // are in local view space, matching what `paint()` records.
+    // IME hosts can ask for candidate-window placement immediately after text
+    // input invalidates the paint cache, so the fallback still follows the
+    // current caret position instead of snapping back to the padding origin.
+    // All coordinates returned by `caret_rect()` are in local view space,
+    // matching what `paint()` records.
     if (last_layout_.lines.empty()) {
         Rect fallback;
-        fallback.x = std::max(9.0f, border_width() + 7.0f);
-        fallback.y = 2.0f;
+        const auto b = local_bounds();
+        const float text_pad_x = std::max(9.0f, border_width() + 7.0f);
+        const float left_pad = std::max(text_pad_x, content_inset_left_);
+        const float char_w = std::max(1.0f, font_size_ * 0.6f);
+        const float line_h = std::max(font_size_, font_size_ * 1.35f);
+        if (multi_line) {
+            const int start = text_edit::line_start(text_, caret_position_);
+            const int column = text_edit::cluster_column_in_line(text_, start, caret_position_);
+            int hard_line = 0;
+            for (int i = 0; i < start && i < static_cast<int>(text_.size()); ++i) {
+                if (text_[static_cast<std::size_t>(i)] == '\n') ++hard_line;
+            }
+            fallback.x = left_pad + static_cast<float>(column) * char_w;
+            fallback.y = 2.0f + static_cast<float>(hard_line) * line_h - scroll_offset_;
+            fallback.height = line_h;
+        } else {
+            const auto boundaries = text_edit::cluster_boundaries(text_);
+            const int column = text_edit::cluster_index_for_position(boundaries, caret_position_);
+            const float caret_w = static_cast<float>(column) * char_w;
+            const float text_inner_w = std::max(0.0f, b.width - left_pad - text_pad_x);
+            const auto cluster_total = boundaries.empty() ? 0u : boundaries.size() - 1u;
+            const float total_w = static_cast<float>(cluster_total) * char_w;
+            float effective_scroll = scroll_offset_;
+            if (has_focus() || has_selection()) {
+                if (caret_w - effective_scroll > text_inner_w) {
+                    effective_scroll = caret_w - text_inner_w;
+                } else if (caret_w - effective_scroll < 0.0f) {
+                    effective_scroll = caret_w;
+                }
+                effective_scroll = std::clamp(
+                    effective_scroll, 0.0f, std::max(0.0f, total_w - text_inner_w));
+            }
+            fallback.x = left_pad - effective_scroll + caret_w;
+            fallback.y = 2.0f;
+            fallback.height = std::max(font_size_, b.height - 4.0f);
+        }
         fallback.width = 1.5f;
-        fallback.height = std::max(font_size_, local_bounds().height - 4.0f);
         return fallback;
     }
 

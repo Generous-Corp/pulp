@@ -93,7 +93,22 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
 2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,
-   re-dispatch the checks.
+   re-dispatch the checks. (Longer-term fix for this whole class:
+   planning/2026-07-07-parallel-merge-land-coordination.md.)
+2b. **Did a gate reject the push?** Besides skill-sync / version-bump, the
+   pre-push + CI `planning-gitlink` gate (`tools/scripts/planning_gitlink_guard.py`)
+   fails if the PR moved the `planning` submodule pointer without a
+   `Planning-Bump:` trailer — usually an accidental bump from a `git reset --hard`
+   + `git add -A`. Drop it with
+   `git restore --staged --worktree planning && git submodule update planning`,
+   or add `Planning-Bump: reason="..."` for a deliberate re-pin.
+2c. **Is a RED check even your fault?** Before investigating a failing check,
+   run `python3 tools/scripts/pr_check_triage.py <PR#>` — it labels each red
+   check REQUIRED vs advisory and PRE-EXISTING (also red / not run on main —
+   not your change) vs REGRESSED (green on main, red here). Advisory +
+   pre-existing red (e.g. a known-broken sanitizer lane on main) does NOT block
+   the merge and is not yours to fix; only a REQUIRED + REGRESSED row needs
+   action. This alone avoids chasing main-side breakage.
 3. **Only THEN consider capacity — and verify, don't assume.** The required
    `macos` gate runs on the **local self-hosted Mac Studios** (`pulp-studio-01/02/03`,
    + the M5 overflow), which are usually idle. Confirm with:
@@ -3459,3 +3474,15 @@ explicit `--parallel`/`-j` count — a literal, or `$(getconf _NPROCESSORS_ONLN
 there, and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
 `tools/scripts/build_parallelism_guard.py` enforces this in the `validation.gates`
 setup chain and as a ctest; a bare `--parallel`/`-j` fails the gate.
+
+The mac `local` and ssh-linux `build` strings run through
+`tools/ci/governed-build.sh`, NOT a bare `cmake --build`. Shipyard's `local`
+backend executes the config string directly on the host (bypassing the pulp
+CLI's lease integration), so the wrapper is what puts a host-native validation
+build under a tartci host lease: it sizes `-j` from `tartci host-profile`,
+holds a `build`-priority lease for the build's duration (released via an EXIT
+trap — it runs the build as a child, never `exec`, so the trap fires), and
+falls back to a bounded local `-j` when tartci is absent (build VM / plain
+checkout) or the lease is denied (it never fails the build and never piles onto
+a saturated host). Keep new POSIX build strings routed through it; don't add a
+bare `cmake --build … --parallel` back to the `local`/ssh-linux lanes.

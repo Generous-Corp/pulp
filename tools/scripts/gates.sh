@@ -13,6 +13,7 @@
 #   - compat-aggregate (compat.json stays byte-identical to compat/ parts)
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
+#   - planning-gitlink (no accidental `planning` submodule pointer bump)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
@@ -62,6 +63,7 @@ COMPAT_AGG="$ROOT/tools/scripts/compat_aggregate.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
+PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 MANIFEST_MIRRORS="$ROOT/tools/scripts/check_manifest_mirrors.py"
@@ -170,6 +172,15 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     echo "▸ hotspot-size guard" >&2
     if ! "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
             --require-ceiling-reduction; then
+        fail=1
+    fi
+fi
+
+# ── 6b. planning-gitlink guard ──────────────────────────────────────────────
+if [ -f "$PGL" ]; then
+    echo "" >&2
+    echo "▸ planning-gitlink guard (no accidental submodule pointer bump)" >&2
+    if ! "$PYTHON" "$PGL" --base "$BASE" --mode=report; then
         fail=1
     fi
 fi

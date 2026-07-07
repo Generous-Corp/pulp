@@ -314,17 +314,37 @@ void ImageView::paint(canvas::Canvas& canvas) {
 
 // ── Meter ────────────────────────────────────────────────────────────────────
 
+// The peak / held-peak indicator lines are stroked (line width up to 2px)
+// CENTERED on the meter's extreme edge coordinate (y=0 or y=height at full
+// scale), so they bleed ~1px past local_bounds(); paint is unclipped
+// (overflow: visible). Bounded invalidation must therefore cover a slightly
+// padded rect, or that fringe is never re-cleared when the peak decays and a
+// stale line persists on the static chrome. See the request_repaint(Rect)
+// caller contract (out-of-bounds decoration → pass the padded rect).
+namespace {
+constexpr float kMeterPeakOverscan = 2.0f;
+}
+
 void Meter::set_level(float rms, float peak) {
     current_rms_ = std::clamp(rms, 0.0f, 1.0f);
     current_peak_ = std::clamp(peak, 0.0f, 1.0f);
     ballistics_.display_rms = current_rms_;
     ballistics_.display_peak = current_peak_;
-    request_repaint();
+    // A meter repaints every frame from its source; invalidate only its own
+    // (peak-overscanned) rect so a plugin's static chrome does not re-composite
+    // each level tick.
+    const auto b = local_bounds();
+    request_repaint(Rect{b.x - kMeterPeakOverscan, b.y - kMeterPeakOverscan,
+                         b.width + 2 * kMeterPeakOverscan,
+                         b.height + 2 * kMeterPeakOverscan});
 }
 
 void Meter::update(float raw_peak, float raw_rms, float dt) {
     ballistics_.update(raw_peak, raw_rms, dt);
-    request_repaint();
+    const auto b = local_bounds();
+    request_repaint(Rect{b.x - kMeterPeakOverscan, b.y - kMeterPeakOverscan,
+                         b.width + 2 * kMeterPeakOverscan,
+                         b.height + 2 * kMeterPeakOverscan});
 }
 
 void Meter::set_source(std::shared_ptr<MeterSource> source, int channel) {

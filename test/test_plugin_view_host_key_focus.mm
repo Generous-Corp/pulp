@@ -30,9 +30,13 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
 #if defined(__APPLE__)
+#include <new>
+#include <stdexcept>
+
 #import <Cocoa/Cocoa.h>
 
 using namespace pulp::view;
@@ -72,19 +76,83 @@ public:
     int lost_count = 0;
 };
 
+class FocusRecordingTextEditor : public TextEditor {
+public:
+    void on_focus_changed(bool gained) override {
+        TextEditor::on_focus_changed(gained);
+        if (!gained) ++lost_count;
+    }
+    int lost_count = 0;
+};
+
+class BlurMutatingTextEditor : public TextEditor {
+public:
+    View* root = nullptr;
+    View* remove_on_blur = nullptr;
+    std::unique_ptr<View> removed;
+    bool throw_on_blur = false;
+
+    void on_focus_changed(bool gained) override {
+        TextEditor::on_focus_changed(gained);
+        if (!gained && root && remove_on_blur && !removed)
+            removed = root->remove_child(remove_on_blur);
+        if (!gained && throw_on_blur)
+            throw std::runtime_error("blur callback failed");
+    }
+};
+
+class ReusedAddressTextEditor : public FocusRecordingTextEditor {
+public:
+    static void* operator new(std::size_t size);
+    static void operator delete(void* ptr) noexcept;
+    static std::function<void()>& key_event_hook() {
+        static std::function<void()> hook;
+        return hook;
+    }
+
+    bool on_key_event(const KeyEvent& e) override {
+        auto& hook = key_event_hook();
+        if (hook && e.is_down && e.key == KeyCode::enter) {
+            hook();
+            return true;
+        }
+        return FocusRecordingTextEditor::on_key_event(e);
+    }
+};
+
+alignas(ReusedAddressTextEditor) unsigned char
+    reused_text_editor_storage[sizeof(ReusedAddressTextEditor)];
+bool reused_text_editor_in_use = false;
+
+void* ReusedAddressTextEditor::operator new(std::size_t size) {
+    if (reused_text_editor_in_use || size > sizeof(reused_text_editor_storage))
+        throw std::bad_alloc();
+    reused_text_editor_in_use = true;
+    return reused_text_editor_storage;
+}
+
+void ReusedAddressTextEditor::operator delete(void* ptr) noexcept {
+    if (ptr == reused_text_editor_storage)
+        reused_text_editor_in_use = false;
+}
+
 struct FocusGuard {
     FocusGuard() { View::focused_input_ = nullptr; }
     ~FocusGuard() { View::focused_input_ = nullptr; }
 };
 
-NSView* find_pulp_plugin_view(NSView* parent) {
+NSView* find_view_with_class_name(NSView* parent, NSString* class_name) {
     for (NSView* sub in parent.subviews) {
-        if ([NSStringFromClass(sub.class) isEqualToString:@"PulpPluginView"])
+        if ([NSStringFromClass(sub.class) isEqualToString:class_name])
             return sub;
-        NSView* nested = find_pulp_plugin_view(sub);
+        NSView* nested = find_view_with_class_name(sub, class_name);
         if (nested) return nested;
     }
     return nil;
+}
+
+NSView* find_pulp_plugin_view(NSView* parent) {
+    return find_view_with_class_name(parent, @"PulpPluginView");
 }
 
 }  // namespace
@@ -354,6 +422,7 @@ NSEvent* make_key_event(unsigned short keyCode,
 // macOS function-key codepoints (what -[NSEvent characters] returns for arrows).
 constexpr unichar kNSLeftArrow = 0xF702;
 constexpr unichar kNSRightArrow = 0xF703;
+constexpr unichar kNSF1 = 0xF704;
 
 }  // namespace
 
@@ -385,8 +454,8 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
         REQUIRE(pulp_view != nil);
 
         // A focused single-line editor inside the host's root tree.
-        auto editor_owned = std::make_unique<TextEditor>();
-        TextEditor* editor = editor_owned.get();
+        auto editor_owned = std::make_unique<ReusedAddressTextEditor>();
+        ReusedAddressTextEditor* editor = editor_owned.get();
         editor->set_text("abc");
         root.add_child(std::move(editor_owned));
         editor->claim_input_focus();
@@ -423,6 +492,87 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
             editor->set_caret_pos(3);  // end
             [pulp_view keyDown:make_key_event(7, 0, @"x")];  // keyCode 7 = 'x'
             REQUIRE(editor->text() == "abcx");
+        }
+
+        SECTION("Tab moves focus without inserting a tab character") {
+            editor->set_caret_pos(3);
+            [pulp_view keyDown:make_key_event(48, 0, @"\t")];  // 48 = Tab
+            REQUIRE(editor->text() == "abc");
+            REQUIRE(View::focused_input_ == nullptr);
+            REQUIRE(editor->lost_count == 1);
+        }
+
+        SECTION("unhandled function key inserts no private-use character") {
+            editor->set_caret_pos(3);
+            [pulp_view keyDown:make_key_event(
+                122, 0,
+                [NSString stringWithCharacters:&kNSF1 length:1])];
+            REQUIRE(editor->text() == "abc");
+            REQUIRE(editor->caret_pos() == 3);
+        }
+
+        SECTION("printable key revalidates focus after synchronous text teardown") {
+            bool removed = false;
+            editor->on_change = [&](const std::string&) {
+                if (removed) return;
+                removed = true;
+                auto removed_child = root.remove_child(editor);
+                removed_child.reset();
+            };
+            editor->set_caret_pos(3);
+            [pulp_view keyDown:make_key_event(7, 0, @"x")];  // keyCode 7 = 'x'
+            REQUIRE(removed);
+            REQUIRE(root.child_count() == 0);
+            REQUIRE(View::focused_input_ == nullptr);
+        }
+
+        SECTION("Return revalidates focus after synchronous command teardown") {
+            std::unique_ptr<View> detached;
+            editor->on_return = [&](const std::string&) {
+                View::focused_input_ = nullptr;
+                detached = root.remove_child(editor);
+            };
+            [pulp_view keyDown:make_key_event(36, 0, @"\r")];  // 36 = Return
+            REQUIRE(detached != nullptr);
+            REQUIRE(editor->lost_count == 0);
+            REQUIRE(View::focused_input_ == nullptr);
+        }
+
+        SECTION("Return callback can transfer focus without blurring replacement") {
+            auto next_owned = std::make_unique<FocusRecordingTextEditor>();
+            FocusRecordingTextEditor* next = next_owned.get();
+            root.add_child(std::move(next_owned));
+            editor->on_return = [&](const std::string&) {
+                editor->on_focus_changed(false);
+                editor->release_input_focus();
+                next->on_focus_changed(true);
+                next->claim_input_focus();
+            };
+            [pulp_view keyDown:make_key_event(36, 0, @"\r")];  // 36 = Return
+            REQUIRE(View::focused_input_ == next);
+            REQUIRE(next->lost_count == 0);
+            REQUIRE(next->has_focus());
+        }
+
+        SECTION("Return teardown plus same-address replacement keeps replacement focused") {
+            ReusedAddressTextEditor* replacement = nullptr;
+            bool same_address = false;
+            ReusedAddressTextEditor::key_event_hook() = [&] {
+                auto removed = root.remove_child(editor);
+                removed.reset();
+                auto replacement_owned = std::make_unique<ReusedAddressTextEditor>();
+                replacement = replacement_owned.get();
+                same_address = replacement == editor;
+                root.add_child(std::move(replacement_owned));
+                replacement->on_focus_changed(true);
+                replacement->claim_input_focus();
+            };
+            [pulp_view keyDown:make_key_event(36, 0, @"\r")];  // 36 = Return
+            ReusedAddressTextEditor::key_event_hook() = {};
+            REQUIRE(same_address);
+            REQUIRE(View::focused_input_ == replacement);
+            REQUIRE(replacement->lost_count == 0);
+            REQUIRE(replacement->has_focus());
         }
 
         SECTION("⌘A selects all via performKeyEquivalent") {
@@ -549,8 +699,8 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
         REQUIRE(pulp_view != nil);
 
         // A single-line editor filling the root so any in-bounds click hits it.
-        auto editor_owned = std::make_unique<TextEditor>();
-        TextEditor* editor = editor_owned.get();
+        auto editor_owned = std::make_unique<BlurMutatingTextEditor>();
+        BlurMutatingTextEditor* editor = editor_owned.get();
         editor->multi_line = false;
         editor->set_text("hello");
         editor->set_bounds({0, 0, 400, 200});
@@ -569,6 +719,14 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
             REQUIRE(editor->has_focus());
             [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
             REQUIRE_FALSE(editor->has_focus());
+            REQUIRE(View::focused_input_ == nullptr);
+        }
+
+        SECTION("#3 Escape clears focus before a throwing blur callback") {
+            editor->on_focus_changed(true);
+            editor->claim_input_focus();
+            editor->throw_on_blur = true;
+            [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
             REQUIRE(View::focused_input_ == nullptr);
         }
 
@@ -606,6 +764,22 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
             [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
             REQUIRE(fv->has_focus());                 // not force-blurred
             REQUIRE(View::focused_input_ == fv);
+        }
+
+        SECTION("#3 click focus transfer revalidates target after blur callback") {
+            editor->set_bounds({0, 0, 180, 200});
+            auto target_owned = std::make_unique<FocusRecordingTextEditor>();
+            FocusRecordingTextEditor* target = target_owned.get();
+            target->set_bounds({200, 0, 200, 200});
+            root.add_child(std::move(target_owned));
+            editor->root = &root;
+            editor->remove_on_blur = target;
+            editor->on_focus_changed(true);
+            editor->claim_input_focus();
+            [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(300, 100))];
+            REQUIRE(editor->removed != nullptr);
+            REQUIRE_FALSE(target->has_focus());
+            REQUIRE(View::focused_input_ == nullptr);
         }
 
         host->detach();
