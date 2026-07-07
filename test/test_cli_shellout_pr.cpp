@@ -27,14 +27,14 @@ TEST_CASE("pulp pr validates workflow selection before shipping",
     home_env.set(home.string());
     os_home_env.set(home.string());
 
-    auto missing_value = run_pulp({"pr", "--workflow"}, 10000);
+    auto missing_value = run_pulp({"pr", "--workflow"});
     REQUIRE_FALSE(missing_value.timed_out);
     REQUIRE(missing_value.exit_code == 2);
     REQUIRE(missing_value.stderr_output.find("--workflow requires a value")
             != std::string::npos);
 
     workflow_env.set("svn");
-    auto invalid_env = run_pulp({"pr", "--dry-run"}, 10000);
+    auto invalid_env = run_pulp({"pr", "--dry-run"});
     REQUIRE_FALSE(invalid_env.timed_out);
     REQUIRE(invalid_env.exit_code == 2);
     REQUIRE(invalid_env.stderr_output.find("invalid PR workflow 'svn' from env:PULP_PR_WORKFLOW")
@@ -46,7 +46,7 @@ TEST_CASE("pulp pr validates workflow selection before shipping",
     auto path_dir = home / "empty-path";
     fs::create_directories(path_dir);
     path_env.set(path_dir.string());
-    auto missing_shipyard = run_pulp({"pr", "--workflow", "shipyard"}, 10000);
+    auto missing_shipyard = run_pulp({"pr", "--workflow", "shipyard"});
     REQUIRE_FALSE(missing_shipyard.timed_out);
     REQUIRE(missing_shipyard.exit_code == 2);
     REQUIRE(missing_shipyard.stderr_output.find("shipyard is not on PATH")
@@ -71,7 +71,7 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
     home_env.set(home.string());
 
     auto manual = run_pulp({"pr", "--workflow=manual", "--base", "origin/main",
-                            "--title", "Manual PR Plan"}, 10000);
+                            "--title", "Manual PR Plan"});
     REQUIRE_FALSE(manual.timed_out);
     REQUIRE(manual.exit_code == 0);
     REQUIRE(manual.stdout_output.find("manual PR workflow selected")
@@ -82,7 +82,7 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
             != std::string::npos);
 
     auto github_dry_run = run_pulp({"pr", "--workflow", "github", "--dry-run",
-                                    "--title", "GitHub PR Plan"}, 10000);
+                                    "--title", "GitHub PR Plan"});
     REQUIRE_FALSE(github_dry_run.timed_out);
     REQUIRE(github_dry_run.exit_code == 0);
     REQUIRE(github_dry_run.stderr_output.find("using github workflow via `gh`")
@@ -112,7 +112,7 @@ TEST_CASE("pulp pr github workflow requires gh for real PR creation",
     os_home_env.set(home.string());
     path_env.set(path_dir.string());
 
-    auto missing_gh = run_pulp({"pr", "--workflow", "github"}, 10000);
+    auto missing_gh = run_pulp({"pr", "--workflow", "github"});
     fs::remove_all(home);
 
     REQUIRE_FALSE(missing_gh.timed_out);
@@ -144,7 +144,7 @@ TEST_CASE("pulp pr delegates shipyard workflow when the pinned binary is present
     write_fake_shipyard(bin_dir, pinned);
     prepend_to_path(bin_dir);
 
-    auto delegated = run_pulp({"pr", "--help"}, 10000);
+    auto delegated = run_pulp({"pr", "--help"});
     fs::remove_all(home);
 
     REQUIRE_FALSE(delegated.timed_out);
@@ -175,7 +175,7 @@ TEST_CASE("pulp status reports shipyard version and pin health",
     auto shipyard = write_fake_shipyard(bin_dir, pinned);
     prepend_to_path(bin_dir);
 
-    auto status = run_pulp({"status"}, 10000);
+    auto status = run_pulp({"status"});
     fs::remove_all(home);
 
     REQUIRE_FALSE(status.timed_out);
@@ -267,7 +267,7 @@ TEST_CASE("pulp pr native validates option values before checkout lookup",
              {{"pr", "--native", "--title"}, "--title requires a value"},
              {{"pr", "--native", "--title", "--no-push"}, "--title requires a value"},
          }) {
-        auto r = exec(bin.string(), c.first, 10000);
+        auto r = exec(bin.string(), c.first);
         REQUIRE_FALSE(r.timed_out);
         REQUIRE(r.exit_code == 2);
         REQUIRE(r.stderr_output.find(c.second) != std::string::npos);
@@ -287,7 +287,7 @@ TEST_CASE("pulp pr native mode refuses to run outside a project",
     const auto bin = fs::absolute(pulp_binary());
     auto cwd_saver = fs::current_path();
     fs::current_path(fs::temp_directory_path());
-    auto r = exec(bin.string(), {"pr", "--native", "--no-push"}, 10000);
+    auto r = exec(bin.string(), {"pr", "--native", "--no-push"});
     fs::current_path(cwd_saver);
 
     REQUIRE_FALSE(r.timed_out);
