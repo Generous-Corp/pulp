@@ -163,10 +163,17 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout << "  pulp inspect                              # Interactive REPL\n";
             std::cout << "  pulp inspect --command DOM.getDocument     # One-shot query\n";
             std::cout << "  pulp inspect --command State.getParameters # Parameter snapshot\n";
+            std::cout << "  pulp inspect --command Runtime.getCapabilities  # Debug-console capabilities\n";
+            std::cout << "  pulp inspect --command Runtime.evaluate --params '{\"code\":\"1+1\"}'  # Evaluate in the live UI\n";
+            std::cout << "  pulp inspect --command Console.getMessages --params '{\"sinceSeq\":0}'  # Tail device logs\n";
             std::cout << "  pulp inspect --host 192.168.1.42          # Remote debugging\n";
             std::cout << "\n";
-            std::cout << "Note: Runtime.evaluate and Capture.screenshot currently report unavailable\n";
-            std::cout << "until script-engine and host-capture wiring lands.\n";
+            std::cout << "Note: Runtime.evaluate / Runtime.interrupt reach the live scripted UI only\n";
+            std::cout << "when the host wired the runtime inspector AND opted into eval (off by\n";
+            std::cout << "default — eval is RCE over an unauthenticated transport). Runtime reports\n";
+            std::cout << "honest capabilities via Runtime.getCapabilities; source-line\n";
+            std::cout << "breakpoints/stepping are not offered (mainline QuickJS has no debug protocol).\n";
+            std::cout << "Capture.screenshot reports unavailable until host-capture wiring lands.\n";
             return 0;
         }
         if (args[i] == "--host") {

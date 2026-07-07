@@ -14,6 +14,8 @@
 #include <pulp/render/render_pass.hpp>
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/view/inspector.hpp>
+#include <pulp/view/script_engine.hpp>
+#include <pulp/view/script_inspector_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/live_constant_editor.hpp>
 #include <pulp/state/store.hpp>
@@ -707,4 +709,213 @@ TEST_CASE("LiveConstant.reset rolls a value back to its default",
     REQUIRE_FALSE(resp.is_error);
     REQUIRE_THAT(registry.get("test_reset"),
                  Catch::Matchers::WithinAbs(2.0, 0.001));
+}
+
+// ── Runtime domain: scripted-UI inspector / debug console ────────────────────
+// These wire a real ScriptEngine through the ScriptInspectorBridge. The test
+// thread is the engine thread, so Runtime.evaluate runs inline (no pump loop).
+
+TEST_CASE("DomainHandler: Runtime.getCapabilities reports QuickJS honestly",
+          "[inspect][domain][runtime]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    DomainHandler handler;
+    handler.set_script_inspector(&bridge);
+    handler.set_runtime_eval_enabled(true);  // opt in so canEvaluate is true
+
+    auto resp = handler.handle(make_request(1, methods::kRuntimeGetCapabilities));
+    REQUIRE_FALSE(resp.is_error);
+    auto caps = choc::json::parse(resp.params_json);
+    REQUIRE(caps["engine"].toString() == "QuickJS");
+    REQUIRE(caps["attached"].getWithDefault(false));
+    REQUIRE(caps["canEvaluate"].getWithDefault(false));
+    REQUIRE(caps["canInterrupt"].getWithDefault(false));
+    // Mainline QuickJS has no source-line debug protocol — must report false.
+    REQUIRE_FALSE(caps["canBreak"].getWithDefault(true));
+    REQUIRE_FALSE(caps["canStep"].getWithDefault(true));
+    REQUIRE_FALSE(caps["canInspectLocals"].getWithDefault(true));
+}
+
+TEST_CASE("DomainHandler: Runtime.getCapabilities without an engine",
+          "[inspect][domain][runtime]") {
+    DomainHandler handler;  // no script inspector attached
+    auto resp = handler.handle(make_request(1, methods::kRuntimeGetCapabilities));
+    REQUIRE_FALSE(resp.is_error);
+    auto caps = choc::json::parse(resp.params_json);
+    REQUIRE(caps["engine"].toString().empty());
+    REQUIRE_FALSE(caps["attached"].getWithDefault(true));
+    REQUIRE_FALSE(caps["canEvaluate"].getWithDefault(true));
+}
+
+TEST_CASE("DomainHandler: Runtime.evaluate returns a typed result",
+          "[inspect][domain][runtime]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    DomainHandler handler;
+    handler.set_script_inspector(&bridge);
+    handler.set_runtime_eval_enabled(true);
+
+    auto resp = handler.handle(make_request(1, methods::kRuntimeEvaluate,
+                                            R"({"code":"40 + 2"})"));
+    REQUIRE_FALSE(resp.is_error);
+    auto result = choc::json::parse(resp.params_json);
+    REQUIRE(result["result"].getWithDefault(0) == 42);
+
+    // CDP-compatible alias 'expression'.
+    auto aliased = handler.handle(make_request(2, methods::kRuntimeEvaluate,
+                                               R"({"expression":"'ab' + 'cd'"})"));
+    REQUIRE_FALSE(aliased.is_error);
+    auto astr = choc::json::parse(aliased.params_json);
+    REQUIRE(astr["result"].toString() == "abcd");
+}
+
+TEST_CASE("DomainHandler: Runtime.evaluate surfaces JS errors and bad params",
+          "[inspect][domain][runtime]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    DomainHandler handler;
+    handler.set_script_inspector(&bridge);
+    handler.set_runtime_eval_enabled(true);
+
+    auto thrown = handler.handle(make_request(1, methods::kRuntimeEvaluate,
+                                              R"json({"code":"throw new Error('boom')"})json"));
+    REQUIRE(thrown.is_error);
+    REQUIRE(thrown.params_json.find("boom") != std::string::npos);
+
+    auto empty = handler.handle(make_request(2, methods::kRuntimeEvaluate, R"({"code":""})"));
+    REQUIRE(empty.is_error);
+
+    auto bad = handler.handle(make_request(3, methods::kRuntimeEvaluate, "{"));
+    REQUIRE(bad.is_error);
+}
+
+TEST_CASE("DomainHandler: Runtime.evaluate is disabled by default (security)",
+          "[inspect][domain][runtime]") {
+    // Even with an engine wired, evaluate must not run until the host opts in —
+    // the inspector transport is unauthenticated, and evaluate is RCE.
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    DomainHandler handler;
+    handler.set_script_inspector(&bridge);  // wired but NOT enabled
+
+    auto disabled = handler.handle(make_request(1, methods::kRuntimeEvaluate,
+                                                R"({"code":"1+1"})"));
+    REQUIRE(disabled.is_error);
+    REQUIRE(disabled.params_json.find("disabled") != std::string::npos);
+
+    // getCapabilities reports the honest false so a client never tries.
+    auto caps = choc::json::parse(
+        handler.handle(make_request(2, methods::kRuntimeGetCapabilities)).params_json);
+    REQUIRE(caps["attached"].getWithDefault(false));
+    REQUIRE_FALSE(caps["canEvaluate"].getWithDefault(true));
+
+    // Enabled but no engine → unavailable (distinct from disabled).
+    DomainHandler enabled_no_engine;
+    enabled_no_engine.set_runtime_eval_enabled(true);
+    auto no_engine = enabled_no_engine.handle(make_request(3, methods::kRuntimeEvaluate,
+                                                           R"({"code":"1+1"})"));
+    REQUIRE(no_engine.is_error);
+    REQUIRE(no_engine.params_json.find("no scripted-UI engine") != std::string::npos);
+}
+
+TEST_CASE("DomainHandler: Runtime.evaluate never breaks response framing (NaN/Infinity)",
+          "[inspect][domain][runtime]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    DomainHandler handler;
+    handler.set_script_inspector(&bridge);
+    handler.set_runtime_eval_enabled(true);
+
+    // 1/0 → Infinity; ({x:0/0}) → nested NaN. Whichever the engine yields, the
+    // response must remain parseable JSON (no bare NaN/Infinity token).
+    for (const char* expr : {R"json({"code":"1/0"})json", R"json({"code":"({x: 0/0})"})json"}) {
+        auto resp = handler.handle(make_request(1, methods::kRuntimeEvaluate, expr));
+        if (!resp.is_error) {
+            // params_json must parse; the runtime inspector guarantees valid JSON.
+            REQUIRE_NOTHROW(choc::json::parse(resp.params_json));
+        }
+    }
+}
+
+TEST_CASE("DomainHandler: Runtime.interrupt reports whether it armed",
+          "[inspect][domain][runtime]") {
+    // No engine → cannot interrupt.
+    DomainHandler bare;
+    auto none = bare.handle(make_request(1, methods::kRuntimeInterrupt));
+    REQUIRE_FALSE(none.is_error);
+    REQUIRE_FALSE(choc::json::parse(none.params_json)["interrupted"].getWithDefault(true));
+
+    // Engine attached but nothing in flight → interrupt is a no-op (false),
+    // which prevents spuriously aborting the next evaluation.
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    DomainHandler handler;
+    handler.set_script_inspector(&bridge);
+    handler.set_runtime_eval_enabled(true);  // reach the idle-guard, not the gate
+    auto idle = handler.handle(make_request(2, methods::kRuntimeInterrupt));
+    REQUIRE_FALSE(idle.is_error);
+    REQUIRE_FALSE(choc::json::parse(idle.params_json)["interrupted"].getWithDefault(true));
+}
+
+// ── Console domain: device-log cursor poll ───────────────────────────────────
+
+TEST_CASE("DomainHandler: Console.getMessages pages by cursor",
+          "[inspect][domain][console]") {
+    ConsoleCapture console;
+    auto cb = console.callback();
+    cb("log", "first");
+    cb("warn", "second");
+
+    DomainHandler handler;
+    handler.set_console_capture(&console);
+
+    auto all = handler.handle(make_request(1, methods::kConsoleGetMessages));
+    REQUIRE_FALSE(all.is_error);
+    auto page1 = choc::json::parse(all.params_json);
+    REQUIRE(page1["messages"].size() == 2);
+    REQUIRE(page1["messages"][0]["message"].toString() == "first");
+    auto next_seq = page1["nextSeq"].getWithDefault<int64_t>(0);
+    REQUIRE(next_seq == 2);
+
+    // Nothing new since the cursor.
+    auto since = handler.handle(make_request(2, methods::kConsoleGetMessages,
+                                             R"({"sinceSeq":2})"));
+    REQUIRE_FALSE(since.is_error);
+    REQUIRE(choc::json::parse(since.params_json)["messages"].size() == 0);
+
+    // A new log advances past the cursor.
+    cb("error", "third");
+    auto tail = handler.handle(make_request(3, methods::kConsoleGetMessages,
+                                            R"({"sinceSeq":2})"));
+    auto page2 = choc::json::parse(tail.params_json);
+    REQUIRE(page2["messages"].size() == 1);
+    REQUIRE(page2["messages"][0]["message"].toString() == "third");
+    REQUIRE(page2["nextSeq"].getWithDefault<int64_t>(0) == 3);
+}
+
+TEST_CASE("ConsoleCapture: entry sink fires live and seq increases",
+          "[inspect][console]") {
+    ConsoleCapture capture;
+    std::vector<std::string> pushed;
+    capture.set_entry_sink([&](const ConsoleCapture::Entry& e) {
+        pushed.push_back(e.message);
+    });
+    auto cb = capture.callback();
+    cb("log", "one");
+    cb("log", "two");
+    REQUIRE(pushed.size() == 2);
+    REQUIRE(pushed[0] == "one");
+    REQUIRE(capture.latest_seq() == 2);
+
+    uint64_t next = 0;
+    auto since = capture.entries_since(1, next);
+    REQUIRE(since.size() == 1);
+    REQUIRE(since[0].message == "two");
+    REQUIRE(next == 2);
 }

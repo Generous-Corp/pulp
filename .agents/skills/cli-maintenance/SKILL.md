@@ -198,9 +198,19 @@ the tool takes arguments:
   no args sidestep this, so don't copy their dispatch shape for a tool that
   carries a payload.
 - **Do not wrap inspector error text as media.** Protocol-reserved methods that
-  are not wired yet (for example screenshot/evaluate surfaces waiting on
-  WindowHost or ScriptEngine references) should return ordinary text/error
-  content through MCP until the inspector method returns a real payload.
+  are not wired yet (for example the screenshot surface waiting on a WindowHost
+  reference) should return ordinary text/error content through MCP until the
+  inspector method returns a real payload.
+- **The scripted-UI runtime inspector IS wired now.** `Runtime.evaluate`,
+  `Runtime.getCapabilities`, `Runtime.interrupt`, and `Console.getMessages`
+  (device-log cursor poll) reach the live JS engine when a host calls
+  `DomainHandler::set_script_inspector(session.script_inspector())`. Evaluate is
+  marshaled onto the engine thread by `ScriptInspectorBridge` — single in-flight,
+  ~2 s timeout, auto-interrupt on hang. It is an honest evaluate/inspect console,
+  NOT a step debugger: mainline QuickJS has no breakpoint protocol, so
+  `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
+  in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`
+  and the `engine` skill's interrupt section.
 - **Mutating tools must go through a typed inspector method** (e.g.
   `State.setParameter`) with validation + gesture wrapping in
   `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the

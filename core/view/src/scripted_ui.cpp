@@ -37,7 +37,15 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
 {
 }
 
-ScriptedUiSession::~ScriptedUiSession() = default;
+ScriptedUiSession::~ScriptedUiSession() {
+    // Detach so a blocked off-thread evaluate wakes with a "detached" result
+    // and no later pump touches the engine being destroyed. NOTE: this wakes a
+    // *blocked* waiter but does not join a background thread mid-interrupt()/
+    // capabilities(); a host that wired the bridge to an InspectorServer must
+    // stop that server's reader thread and DomainHandler::set_script_inspector
+    // (nullptr) BEFORE destroying this session. See set_script_inspector.
+    inspector_bridge_.detach();
+}
 
 // Late-attach of the host's GpuSurface. Hosts (e.g. au_view_controller_ios.mm)
 // call this AFTER PluginViewHost::create returns, so the JS-side navigator.gpu
@@ -116,6 +124,11 @@ bool ScriptedUiSession::poll(std::string* error) {
         bridge_->poll_async_results();
         bridge_->service_frame_callbacks();
     }
+    // Drain one queued inspector evaluate on the engine thread here — after the
+    // frame pump, never mid-paint / mid-layout — so an off-thread
+    // Runtime.evaluate never races the render. Off-thread requests block until
+    // this runs.
+    inspector_bridge_.pump();
     if (reloader_ && reloader_->poll_reload()) {
         changed = true;
     }
@@ -192,8 +205,20 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         next_bridge->load_script(code);
         base_theme_ = root_.theme();
 
+        // Detach the bridge from the OLD engine BEFORE the move destroys it, so
+        // an off-thread interrupt() can't dereference a freed ScriptEngine. The
+        // engine pointer is only mutated on this thread, so detach()+attach()
+        // bracket the swap atomically w.r.t. the engine thread; a concurrent
+        // interrupt() either completes on the still-alive old engine or sees the
+        // null gap.
+        inspector_bridge_.detach();
         engine_ = std::move(next_engine);
         bridge_ = std::move(next_bridge);
+        // Re-point the inspector bridge at the freshly-committed engine so a
+        // debug console survives hot reloads. attach() runs on the UI/engine
+        // thread (same thread as poll()'s pump), which it records for
+        // inline-eval detection.
+        inspector_bridge_.attach(engine_.get());
         // Infallible apply of the pre-resolved theme — no failure point past the
         // commit (item 1.5).
         if (theme_reload_enabled_) {

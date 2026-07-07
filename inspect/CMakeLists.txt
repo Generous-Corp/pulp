@@ -20,6 +20,7 @@ target_sources(pulp-inspect PRIVATE
     src/inspector_server.cpp
     src/audio_inspector.cpp
     src/domain_handler.cpp
+    src/domain_runtime.cpp
     src/editor_url.cpp
     src/source_jump.cpp
     src/motion_inspector.cpp
