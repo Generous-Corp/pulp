@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05870"></a>
+## [0.587.0] - 2026-07-06
+
+- docs(skills): capture Skia symlink-loop / Shipyard tree-drift gotcha durably ([#5599](https://github.com/danielraffel/pulp/pull/5599))
+
 <a id="v05860"></a>
 ## [0.586.0] - 2026-07-06
 
@@ -5946,6 +5951,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.587.0]: https://github.com/danielraffel/pulp/releases/tag/v0.587.0
 [0.586.0]: https://github.com/danielraffel/pulp/releases/tag/v0.586.0
 [0.584.0]: https://github.com/danielraffel/pulp/releases/tag/v0.584.0
 [0.583.0]: https://github.com/danielraffel/pulp/releases/tag/v0.583.0
