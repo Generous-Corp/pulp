@@ -10,6 +10,7 @@
 // scripts fail gently, but they only print diagnostics today.
 
 #include "cli_common.hpp"
+#include "tartci_lease.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -292,6 +293,18 @@ int cmd_loop(const std::vector<std::string>& args) {
 
     auto build_dir = project_root / "build";
 
+    auto lease = TartciAgentBuildLease::acquire({
+        project_root,
+        "pulp-loop",
+        true,
+    });
+    if (!lease.ok()) {
+        std::cerr << "pulp loop: " << lease.error() << "\n";
+        return lease.exit_code();
+    }
+    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
+    auto capped_build = cap_cmake_build_parallel_args(build_args, lease.jobs());
+
     // Ensure configured. Reuse cmd_build's bootstrap path and the current
     // project's normal build configuration.
     if (!fs::exists(build_dir / "CMakeCache.txt")) {
@@ -304,8 +317,8 @@ int cmd_loop(const std::vector<std::string>& args) {
 
     // Initial build
     std::string build_cmd = "cmake --build " + build_dir.string();
-    for (auto& arg : build_args) build_cmd += " " + arg;
-    int rc = run_with_spinner(build_cmd, "Building");
+    for (auto& arg : capped_build.args) build_cmd += " " + arg;
+    int rc = run_with_spinner(apply_agent_build_qos(build_cmd, lease.qos()), "Building");
     if (rc != 0) {
         std::cerr << "Initial build failed. Watch loop will retry on changes.\n";
     }
@@ -313,11 +326,13 @@ int cmd_loop(const std::vector<std::string>& args) {
     WatchOptions opts;
     opts.root = project_root;
     opts.build_dir = build_dir;
-    opts.build_args = build_args;
+    opts.build_args = capped_build.args;
     opts.run_tests = run_tests;
     opts.test_filter = test_filter;
     opts.run_validate = run_validate;
     opts.launch_target = launch_target;
     opts.launch_args = launch_args;
+    opts.build_jobs = capped_build.jobs;
+    opts.build_qos = lease.qos();
     return watch_loop(opts);
 }

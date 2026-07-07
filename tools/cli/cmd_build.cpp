@@ -2,6 +2,7 @@
 
 #include "cli_common.hpp"
 #include "install_paths_mac.hpp"
+#include "tartci_lease.hpp"
 
 #include <iostream>
 
@@ -184,15 +185,27 @@ int cmd_build(const std::vector<std::string>& args) {
         pulp_debug("cmd_build: configure complete");
     }
 
+    auto lease = TartciAgentBuildLease::acquire({
+        project_root,
+        watch_mode ? "pulp-build-watch" : "pulp-build",
+        watch_mode,
+    });
+    if (!lease.ok()) {
+        std::cerr << "pulp build: " << lease.error() << "\n";
+        return lease.exit_code();
+    }
+    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
+    auto capped_build = cap_cmake_build_parallel_args(passthrough_args, lease.jobs());
+
     std::string build_cmd = "cmake --build " + build_dir.string();
 
     // Pass through extra args (e.g., --target, -j)
-    for (auto& arg : passthrough_args) {
+    for (auto& arg : capped_build.args) {
         build_cmd += " " + arg;
     }
 
     pulp_debug("cmd_build: run build (cmake --build)");
-    int rc = run_with_spinner(build_cmd, "Building");
+    int rc = run_with_spinner(apply_agent_build_qos(build_cmd, lease.qos()), "Building");
     if (rc != 0) return rc;
 
     // Item 7.4b: build → validate → install pipeline.
@@ -270,9 +283,11 @@ int cmd_build(const std::vector<std::string>& args) {
     WatchOptions opts;
     opts.root = project_root;
     opts.build_dir = build_dir;
-    opts.build_args = passthrough_args;
+    opts.build_args = capped_build.args;
     opts.run_tests = watch_test;
     opts.test_filter = test_filter;
     opts.run_validate = watch_validate;
+    opts.build_jobs = capped_build.jobs;
+    opts.build_qos = lease.qos();
     return watch_loop(opts);
 }
