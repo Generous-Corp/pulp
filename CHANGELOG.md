@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05990"></a>
+## [0.599.0] - 2026-07-07
+
+- feat(view): add plugin-host IME text input ([#5567](https://github.com/danielraffel/pulp/pull/5567))
+
 <a id="v05980"></a>
 ## [0.598.0] - 2026-07-07
 
@@ -6011,6 +6016,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.599.0]: https://github.com/danielraffel/pulp/releases/tag/v0.599.0
 [0.598.0]: https://github.com/danielraffel/pulp/releases/tag/v0.598.0
 [0.597.0]: https://github.com/danielraffel/pulp/releases/tag/v0.597.0
 [0.596.0]: https://github.com/danielraffel/pulp/releases/tag/v0.596.0
