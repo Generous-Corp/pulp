@@ -1375,6 +1375,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                     auto it = cgr.custom_transport_processors.find(id);
                     return it == cgr.custom_transport_processors.end() ? nullptr
                                                                        : &it->second;
+                },
+                // 2.2b (H2): cached plugin metadata (anticipation is swap-excluded
+                // by H4, but keep the whole compile path off live PluginSlot calls).
+                [this](NodeId id) -> int {
+                    auto it = prepared_plugin_meta_.find(id);
+                    return it == prepared_plugin_meta_.end()
+                               ? 0 : it->second.latency_samples;
+                },
+                [this](NodeId id) -> const std::vector<HostParamInfo>* {
+                    auto it = prepared_plugin_meta_.find(id);
+                    return it == prepared_plugin_meta_.end()
+                               ? nullptr : &it->second.parameters;
                 });
             if (ok) {
                 cg->routing_levelization = graph::build_graph_runtime_levelization(
