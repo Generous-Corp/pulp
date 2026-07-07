@@ -409,7 +409,14 @@ pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(pulp::view::View
     if (!view) return nullptr;
     auto identity = pulp_focus_identity(view);
     if (auto* te = dynamic_cast<pulp::view::TextEditor*>(view); te && te->has_marked_text()) {
-        te->set_marked_text("", 0, 0);
+        try {
+            te->set_marked_text("", 0, 0);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[plugin-view-host] IME marked-text cancellation threw: %s\n",
+                         e.what());
+        } catch (...) {
+            std::fprintf(stderr, "[plugin-view-host] IME marked-text cancellation threw (unknown)\n");
+        }
         auto* current = pulp_focus_under_root(root);
         if (!identity.matches(current)) return nullptr;
         return current;

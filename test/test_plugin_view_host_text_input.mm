@@ -5,6 +5,8 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
+#include <stdexcept>
+
 #if defined(__APPLE__)
 
 #import <Cocoa/Cocoa.h>
@@ -226,6 +228,90 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
         [pulp_view unmarkText];
         REQUIRE_FALSE(editor->has_marked_text());
         REQUIRE(editor->text() == std::string("abc") + kNi);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient contains throwing text "
+          "callbacks",
+          "[plugin-view-host][text-input][ime][exceptions][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME exception-containment test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_bounds({16, 20, 200, 40});
+        editor->set_text("abc");
+        root.add_child(std::move(editor_owned));
+        editor->on_focus_changed(true);
+        editor->claim_input_focus();
+        editor->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == pulp_view);
+
+        int throws = 0;
+        editor->on_change = [&](const std::string&) {
+            ++throws;
+            throw std::runtime_error("text callback failed");
+        };
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        constexpr const char kNichi[] = "\xE6\x97\xA5";
+        NSString* nichi = [NSString stringWithUTF8String:kNichi];
+        REQUIRE_NOTHROW(([&] {
+            [pulp_view setMarkedText:ni
+                       selectedRange:NSMakeRange(1, 0)
+                    replacementRange:NSMakeRange(NSNotFound, 0)];
+        }()));
+        REQUIRE(throws == 1);
+        REQUIRE(editor->has_marked_text());
+
+        REQUIRE_NOTHROW(([&] {
+            [pulp_view insertText:nichi replacementRange:[pulp_view markedRange]];
+        }()));
+        REQUIRE(throws == 2);
+        REQUIRE_FALSE(editor->has_marked_text());
+
+        REQUIRE_NOTHROW(([&] {
+            [pulp_view setMarkedText:ni
+                       selectedRange:NSMakeRange(1, 0)
+                    replacementRange:NSMakeRange(NSNotFound, 0)];
+        }()));
+        REQUIRE(throws == 3);
+        REQUIRE(editor->has_marked_text());
+
+        REQUIRE_NOTHROW(([&] {
+            [pulp_view resignFirstResponder];
+        }()));
+        REQUIRE(throws == 4);
+        REQUIRE(View::focused_input_ == nullptr);
+        REQUIRE_FALSE(editor->has_focus());
+        REQUIRE_FALSE(editor->has_marked_text());
 
         host->detach();
         host.reset();

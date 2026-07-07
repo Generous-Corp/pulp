@@ -13,6 +13,8 @@
 #import <Cocoa/Cocoa.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <exception>
 #include <limits>
 #include <string>
 
@@ -100,6 +102,37 @@ bool pulp_plugin_replacement_range_is_marked_range(pulp::view::TextEditor* te,
 void pulp_plugin_request_text_redraw(NSView* host, pulp::view::View* root) {
     [host setNeedsDisplay:YES];
     if (root) root->request_repaint();
+}
+
+void pulp_plugin_log_text_input_exception(const char* op, const std::exception& e) {
+    std::fprintf(stderr, "[plugin-view-host] %s threw: %s\n", op, e.what());
+}
+
+void pulp_plugin_log_text_input_unknown_exception(const char* op) {
+    std::fprintf(stderr, "[plugin-view-host] %s threw (unknown)\n", op);
+}
+
+template <typename F>
+void pulp_plugin_guard_text_input(const char* op, F fn) {
+    try {
+        fn();
+    } catch (const std::exception& e) {
+        pulp_plugin_log_text_input_exception(op, e);
+    } catch (...) {
+        pulp_plugin_log_text_input_unknown_exception(op);
+    }
+}
+
+template <typename Result, typename F>
+Result pulp_plugin_guard_text_input_value(const char* op, Result fallback, F fn) {
+    try {
+        return fn();
+    } catch (const std::exception& e) {
+        pulp_plugin_log_text_input_exception(op, e);
+    } catch (...) {
+        pulp_plugin_log_text_input_unknown_exception(op);
+    }
+    return fallback;
 }
 
 void pulp_plugin_insert_text(NSView* host,
@@ -283,27 +316,41 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 @implementation PulpPluginView (TextInputClient)
 
 - (void)insertText:(id)string replacementRange:(NSRange)range {
-    pulp_plugin_insert_text(self, self.rootView, string, range);
+    pulp_plugin_guard_text_input("insertText:", [&] {
+        pulp_plugin_insert_text(self, self.rootView, string, range);
+    });
 }
 
 - (BOOL)hasMarkedText {
-    return pulp_plugin_has_marked_text(self.rootView);
+    return pulp_plugin_guard_text_input_value<BOOL>("hasMarkedText", NO, [&] {
+        return pulp_plugin_has_marked_text(self.rootView);
+    });
 }
 
 - (NSRange)markedRange {
-    return pulp_plugin_marked_range(self.rootView);
+    return pulp_plugin_guard_text_input_value<NSRange>(
+        "markedRange", NSMakeRange(NSNotFound, 0), [&] {
+            return pulp_plugin_marked_range(self.rootView);
+        });
 }
 
 - (NSRange)selectedRange {
-    return pulp_plugin_selected_range(self.rootView);
+    return pulp_plugin_guard_text_input_value<NSRange>(
+        "selectedRange", NSMakeRange(0, 0), [&] {
+            return pulp_plugin_selected_range(self.rootView);
+        });
 }
 
 - (void)setMarkedText:(id)string selectedRange:(NSRange)sel replacementRange:(NSRange)rep {
-    pulp_plugin_set_marked_text(self, self.rootView, string, sel, rep);
+    pulp_plugin_guard_text_input("setMarkedText:selectedRange:replacementRange:", [&] {
+        pulp_plugin_set_marked_text(self, self.rootView, string, sel, rep);
+    });
 }
 
 - (void)unmarkText {
-    pulp_plugin_unmark_text(self, self.rootView);
+    pulp_plugin_guard_text_input("unmarkText", [&] {
+        pulp_plugin_unmark_text(self, self.rootView);
+    });
 }
 
 - (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText {
@@ -312,7 +359,10 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 
 - (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range
                                                actualRange:(NSRangePointer)actualRange {
-    return pulp_plugin_attributed_substring(self.rootView, range, actualRange);
+    return pulp_plugin_guard_text_input_value<NSAttributedString*>(
+        "attributedSubstringForProposedRange:actualRange:", nil, [&] {
+            return pulp_plugin_attributed_substring(self.rootView, range, actualRange);
+        });
 }
 
 - (NSUInteger)characterIndexForPoint:(NSPoint)point {
@@ -321,12 +371,18 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 }
 
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
-    return pulp_plugin_first_rect_for_character_range(
-        self, self.rootView, self.designW, self.designH, self.designTopAlign, range, actualRange);
+    return pulp_plugin_guard_text_input_value<NSRect>(
+        "firstRectForCharacterRange:actualRange:", NSZeroRect, [&] {
+            return pulp_plugin_first_rect_for_character_range(
+                self, self.rootView, self.designW, self.designH, self.designTopAlign, range,
+                actualRange);
+        });
 }
 
 - (void)doCommandBySelector:(SEL)selector {
-    pulp_plugin_do_command(self, self.rootView, selector);
+    pulp_plugin_guard_text_input("doCommandBySelector:", [&] {
+        pulp_plugin_do_command(self, self.rootView, selector);
+    });
 }
 
 @end
@@ -339,27 +395,41 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 @implementation PulpGpuPluginView (TextInputClient)
 
 - (void)insertText:(id)string replacementRange:(NSRange)range {
-    pulp_plugin_insert_text(self, self.rootView, string, range);
+    pulp_plugin_guard_text_input("insertText:", [&] {
+        pulp_plugin_insert_text(self, self.rootView, string, range);
+    });
 }
 
 - (BOOL)hasMarkedText {
-    return pulp_plugin_has_marked_text(self.rootView);
+    return pulp_plugin_guard_text_input_value<BOOL>("hasMarkedText", NO, [&] {
+        return pulp_plugin_has_marked_text(self.rootView);
+    });
 }
 
 - (NSRange)markedRange {
-    return pulp_plugin_marked_range(self.rootView);
+    return pulp_plugin_guard_text_input_value<NSRange>(
+        "markedRange", NSMakeRange(NSNotFound, 0), [&] {
+            return pulp_plugin_marked_range(self.rootView);
+        });
 }
 
 - (NSRange)selectedRange {
-    return pulp_plugin_selected_range(self.rootView);
+    return pulp_plugin_guard_text_input_value<NSRange>(
+        "selectedRange", NSMakeRange(0, 0), [&] {
+            return pulp_plugin_selected_range(self.rootView);
+        });
 }
 
 - (void)setMarkedText:(id)string selectedRange:(NSRange)sel replacementRange:(NSRange)rep {
-    pulp_plugin_set_marked_text(self, self.rootView, string, sel, rep);
+    pulp_plugin_guard_text_input("setMarkedText:selectedRange:replacementRange:", [&] {
+        pulp_plugin_set_marked_text(self, self.rootView, string, sel, rep);
+    });
 }
 
 - (void)unmarkText {
-    pulp_plugin_unmark_text(self, self.rootView);
+    pulp_plugin_guard_text_input("unmarkText", [&] {
+        pulp_plugin_unmark_text(self, self.rootView);
+    });
 }
 
 - (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText {
@@ -368,7 +438,10 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 
 - (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range
                                                actualRange:(NSRangePointer)actualRange {
-    return pulp_plugin_attributed_substring(self.rootView, range, actualRange);
+    return pulp_plugin_guard_text_input_value<NSAttributedString*>(
+        "attributedSubstringForProposedRange:actualRange:", nil, [&] {
+            return pulp_plugin_attributed_substring(self.rootView, range, actualRange);
+        });
 }
 
 - (NSUInteger)characterIndexForPoint:(NSPoint)point {
@@ -377,12 +450,18 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 }
 
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
-    return pulp_plugin_first_rect_for_character_range(
-        self, self.rootView, self.designW, self.designH, self.designTopAlign, range, actualRange);
+    return pulp_plugin_guard_text_input_value<NSRect>(
+        "firstRectForCharacterRange:actualRange:", NSZeroRect, [&] {
+            return pulp_plugin_first_rect_for_character_range(
+                self, self.rootView, self.designW, self.designH, self.designTopAlign, range,
+                actualRange);
+        });
 }
 
 - (void)doCommandBySelector:(SEL)selector {
-    pulp_plugin_do_command(self, self.rootView, selector);
+    pulp_plugin_guard_text_input("doCommandBySelector:", [&] {
+        pulp_plugin_do_command(self, self.rootView, selector);
+    });
 }
 
 @end
