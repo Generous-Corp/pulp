@@ -420,7 +420,7 @@ TEST_CASE("V8 engine reports a non-empty runtime version and provider identity",
     REQUIRE(engine != nullptr);
     REQUIRE(engine->type() == JsEngineType::v8);
 
-    // v8::V8::GetVersion() must yield something like "15.1.27.0".
+    // v8::V8::GetVersion() must yield something like "15.2.24.0".
     const auto runtime = engine->runtime_version();
     INFO("runtime_version=" << runtime);
     REQUIRE_FALSE(runtime.empty());

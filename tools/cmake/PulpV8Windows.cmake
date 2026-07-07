@@ -1,7 +1,7 @@
 # PulpV8Windows.cmake — Windows V8-consumer ABI contract for the sealed
 # v8-builder drop-in.
 #
-# The sealed Windows v8.dll (v8-builder, v8-15.1.27) is built — by deliberate,
+# The sealed Windows v8.dll (v8-builder, v8-15.2.24-lkgr-97440bd4f523) is built — by deliberate,
 # documented decision in v8-builder/build-v8.py:win_gn_args() — with:
 #
 #   * v8_enable_pointer_compression = true   (Windows-only; mac/linux are OFF)
@@ -38,7 +38,7 @@
 # Proof: a consumer that includes the real choc V8 wrapper
 # (choc_javascript_V8.h + Console) built with the flags below links the sealed
 # v8.dll.lib + a __Cr-ABI libc++.lib and runs —
-#   V8::GetVersion() = 15.1.27 / evaluateExpression('40 + 2') = 42 / PASS.
+#   V8::GetVersion() = 15.2.24 / evaluateExpression('40 + 2') = 42 / PASS.
 #
 # This module is a NO-OP off Windows.
 

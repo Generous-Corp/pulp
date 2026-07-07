@@ -277,9 +277,19 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     set(PULP_V8_EXPECTED_RUNTIME_VERSION "")
     if(EXISTS "${PULP_ROOT_DIR}/tools/deps/manifest.json")
         file(READ "${PULP_ROOT_DIR}/tools/deps/manifest.json" _pulp_v8_manifest_text)
-        # Match the V8 dependency's pinned tag (e.g. "v8-15.1.27") and reduce it
-        # to the bare runtime version (15.1.27) the runtime reports at startup.
-        if(_pulp_v8_manifest_text MATCHES "\"name\"[ \t]*:[ \t]*\"V8\"[^}]*\"version\"[ \t]*:[ \t]*\"v8-([0-9][^\"]*)\"")
+        # Match the V8 dependency's pinned tag and reduce it to the bare dotted
+        # runtime version that V8::GetVersion() reports at startup. The tag may
+        # carry an LKGR suffix (e.g. "v8-15.2.24-lkgr-97440bd4f523" or the older
+        # bare "v8-15.1.27"); capture only the leading numeric-dotted run so the
+        # identity gate compares "15.2.24" against a runtime "15.2.24.0" (a
+        # startswith match) rather than the full tag with its -lkgr-<sha> suffix.
+        # Anchor on the `v8-` version-value prefix (unique to the V8 dependency
+        # across the whole manifest) rather than bridging from "name":"V8" — the
+        # latter would need to span an arbitrary field gap, and a `[^}]*` bridge
+        # silently fails the moment any braces-delimited field (e.g. "upstream":
+        # { ... }) is reordered ahead of "version", emptying the expected version
+        # and silently disabling the strict provider-identity cross-check.
+        if(_pulp_v8_manifest_text MATCHES "\"version\"[ \t]*:[ \t]*\"v8-([0-9]+(\\.[0-9]+)*)")
             set(PULP_V8_EXPECTED_RUNTIME_VERSION "${CMAKE_MATCH_1}")
         endif()
         unset(_pulp_v8_manifest_text)

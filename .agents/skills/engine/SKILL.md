@@ -208,7 +208,7 @@ prebuilt `libv8`** from the
 fork — the same pin/fetch/Find pattern as Skia:
 
 1. **Pin:** the `V8` entry in `tools/deps/manifest.json`
-   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-15.1.27`).
+   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-15.2.24-lkgr-97440bd4f523`).
 2. **Fetch:** `python3 tools/scripts/fetch_v8_for_release.py <platform>`
    downloads + sha256-verifies + unpacks to `external/v8-build/<platform>/`
    (`include/` + `lib/`). Platforms: `darwin-arm64`, `darwin-x64`,
@@ -250,7 +250,7 @@ header.
 
 ## Windows sealed v8-builder V8 (clang-cl + Chromium libc++ `__Cr`)
 
-The v8-builder sealed Windows `v8.dll` (e.g. `v8-15.1.27`) is a special
+The v8-builder sealed Windows `v8.dll` (e.g. `v8-15.2.24-lkgr-97440bd4f523`) is a special
 ABI lane, NOT a drop-in for MSVC cl. It is built (v8-builder
 `build-v8.py:win_gn_args()`) with **pointer compression ON**, **Chromium's
 bundled libc++ (`__Cr` ABI namespace)**, sandbox OFF, rtti OFF. So
@@ -293,7 +293,7 @@ On Windows, additionally supply `PULP_V8_WIN_LIBCXX_INCLUDE` and
 `__Cr`-ABI `libc++.lib`). `core/view/CMakeLists.txt` links `v8::v8` and
 then calls `pulp_v8_windows_apply_abi(pulp-view-script)` (no-op off
 Windows). Proven: choc V8 consumer init + `evaluateExpression
-("40 + 2") == 42`, `V8::GetVersion() == 15.1.27`. The mac/linux sealed
+("40 + 2") == 42`, `V8::GetVersion() == 15.2.24`. The mac/linux sealed
 artifacts use the **system** libc++ (no `__Cr`) and need none of this —
 the `__Cr` contract is Windows-only.
 

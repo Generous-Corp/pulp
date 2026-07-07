@@ -108,7 +108,7 @@ Prove which V8 is actually linked:
 ```bash
 ./build-v8seal/examples/threejs-native-demo/pulp-threejs-native-demo \
   --print-engine-identity
-# → engine_type=V8 / runtime_version=15.1.27 / provider_kind=v8builder
+# → engine_type=V8 / runtime_version=15.2.24 / provider_kind=v8builder
 #   pulp_has_v8=1 / gpu_backend=Metal / gpu_software=0
 
 otool -L ./build-v8seal/examples/threejs-native-demo/pulp-threejs-native-demo \

@@ -290,13 +290,13 @@ cmake --build build-android -j$(sysctl -n hw.ncpu)
 
 **Android Skia must be built from source — there is NO prebuilt slice.** The
 `danielraffel/skia-builder` release fork ships ios / linux / mac slices but no
-`android` asset (verified at `chrome/m150` + `m149`). So unlike the other
+`android` asset (verified at `chrome/m151` + `m150`). So unlike the other
 platforms (which `fetch_skia_for_release.py` downloads), Android Skia comes from:
 
 ```bash
 export ANDROID_HOME=$HOME/Library/Android/sdk
 export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/<version>
-SKIA_BRANCH=chrome/m150 bash tools/build-skia-android.sh   # needs `ninja` on PATH
+SKIA_BRANCH=chrome/m151 bash tools/build-skia-android.sh   # needs `ninja` on PATH
 # -> external/skia-build/android-gpu/lib/Release/*.a (gitignored; headers under
 #    external/skia-build/include/android/** ARE tracked). For the x86_64 emulator
 #    set ANDROID_ABI=x86_64 and FindSkia.cmake picks android-gpu-x86_64/.
