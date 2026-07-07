@@ -193,6 +193,7 @@ jobs:
           python3 tools/scripts/test_node_abi_gate.py
           python3 tools/scripts/test_hotspot_size_guard.py
           python3 tools/scripts/test_planning_gitlink_guard.py
+          python3 tools/scripts/test_pr_check_triage.py
           python3 tools/scripts/test_downstream_validation_manifest.py
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py

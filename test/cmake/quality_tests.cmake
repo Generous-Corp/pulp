@@ -36,6 +36,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME planning-gitlink-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_planning_gitlink_guard.py")
 
+    # PR-check triage: pure comparison logic that labels a red PR check as
+    # pre-existing-on-main vs regressed-by-this-PR (the "also-red-on-main"
+    # diagnostic). The CLI half is a thin gh-api wrapper (not unit-tested).
+    add_test(NAME pr-check-triage-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_check_triage.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest

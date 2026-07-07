@@ -102,6 +102,13 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    + `git add -A`. Drop it with
    `git restore --staged --worktree planning && git submodule update planning`,
    or add `Planning-Bump: reason="..."` for a deliberate re-pin.
+2c. **Is a RED check even your fault?** Before investigating a failing check,
+   run `python3 tools/scripts/pr_check_triage.py <PR#>` — it labels each red
+   check REQUIRED vs advisory and PRE-EXISTING (also red / not run on main —
+   not your change) vs REGRESSED (green on main, red here). Advisory +
+   pre-existing red (e.g. a known-broken sanitizer lane on main) does NOT block
+   the merge and is not yours to fix; only a REQUIRED + REGRESSED row needs
+   action. This alone avoids chasing main-side breakage.
 3. **Only THEN consider capacity — and verify, don't assume.** The required
    `macos` gate runs on the **local self-hosted Mac Studios** (`pulp-studio-01/02/03`,
    + the M5 overflow), which are usually idle. Confirm with:
