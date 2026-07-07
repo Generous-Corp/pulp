@@ -304,6 +304,10 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
     // assumes the caller holds this mutex (true for every internal caller below).
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    // 2.2b (M7): a non-allow-set mutator cancels any open swap-edit — clear the
+    // flag FIRST so the invalidate_live_() below actually fires (it self-skips for
+    // the owner thread while a swap-edit is open).
+    in_swap_edit_ = false;
     const bool affects_existing_nodes = std::any_of(
         nodes_.begin(), nodes_.end(), [&](const GraphNode& node) {
             return node.type == NodeType::Custom
@@ -1887,6 +1891,7 @@ void SignalGraph::set_limits(GraphLimits limits) {
     // Mutates limits_ (read by validate_generated_graph under the lock) and drives
     // invalidate_live_(); serialize against a concurrent prepare()/mutator.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    in_swap_edit_ = false;  // 2.2b (M7): non-allow-set mutator cancels the swap-edit
     limits_ = limits;
     invalidate_live_();
 }
@@ -2041,6 +2046,7 @@ bool SignalGraph::set_custom_node_state(NodeId id,
     // Writes GraphNode custom fields + invalidate_live_(); serialize against a
     // concurrent mutator/prepare.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    in_swap_edit_ = false;  // 2.2b (M7): non-allow-set mutator cancels the swap-edit
     for (auto& n : nodes_) {
         if (n.id != id) continue;
         if (n.type != NodeType::Custom) return false;
@@ -2324,6 +2330,7 @@ void SignalGraph::clear() {
     // concurrent mutator/prepare. invalidate_live_() drives only the non-blocking
     // prune, so holding the mutex across it is deadlock-free.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+    in_swap_edit_ = false;  // 2.2b (M7): non-allow-set mutator cancels the swap-edit
     connections_.clear();
     nodes_.clear();
     next_id_ = 1;
