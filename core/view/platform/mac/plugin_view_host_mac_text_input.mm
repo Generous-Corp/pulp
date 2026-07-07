@@ -190,6 +190,16 @@ void pulp_plugin_unmark_text(NSView* host, pulp::view::View* root) {
     pulp_plugin_request_text_redraw(host, root);
 }
 
+void pulp_plugin_do_command(NSView* host, pulp::view::View* root, SEL selector) {
+    auto* te = pulp_plugin_focused_text_editor(root);
+    if (!te) return;
+
+    if (selector == @selector(cancelOperation:) && te->has_marked_text()) {
+        te->set_marked_text("", 0, 0);
+        pulp_plugin_request_text_redraw(host, root);
+    }
+}
+
 NSAttributedString* pulp_plugin_attributed_substring(pulp::view::View* root,
                                                     NSRange range,
                                                     NSRangePointer actual_range) {
@@ -316,7 +326,7 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 }
 
 - (void)doCommandBySelector:(SEL)selector {
-    (void)selector;
+    pulp_plugin_do_command(self, self.rootView, selector);
 }
 
 @end
@@ -372,7 +382,7 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
 }
 
 - (void)doCommandBySelector:(SEL)selector {
-    (void)selector;
+    pulp_plugin_do_command(self, self.rootView, selector);
 }
 
 @end

@@ -64,6 +64,7 @@ using namespace pulp::view;
 - (BOOL)hasMarkedText;
 - (NSRange)markedRange;
 - (NSRange)selectedRange;
+- (void)doCommandBySelector:(SEL)selector;
 - (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range
                                                actualRange:(NSRangePointer)actualRange;
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange;
@@ -630,6 +631,18 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
         NSRange selected = [pulp_view selectedRange];
         REQUIRE(selected.location == static_cast<NSUInteger>(4));
         REQUIRE(selected.length == static_cast<NSUInteger>(0));
+
+        [pulp_view doCommandBySelector:@selector(cancelOperation:)];
+        REQUIRE(editor->text() == "abc");
+        REQUIRE_FALSE(editor->has_marked_text());
+        REQUIRE([pulp_view hasMarkedText] == NO);
+
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->text() == std::string("abc") + kNi);
+        REQUIRE(editor->has_marked_text());
+        marked = [pulp_view markedRange];
 
         NSRange actual = NSMakeRange(NSNotFound, 0);
         NSAttributedString* substring =
