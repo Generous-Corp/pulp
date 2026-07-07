@@ -277,20 +277,41 @@ if(PULP_JS_ENGINE STREQUAL "v8")
     set(PULP_V8_EXPECTED_RUNTIME_VERSION "")
     if(EXISTS "${PULP_ROOT_DIR}/tools/deps/manifest.json")
         file(READ "${PULP_ROOT_DIR}/tools/deps/manifest.json" _pulp_v8_manifest_text)
-        # Match the V8 dependency's pinned tag and reduce it to the bare dotted
-        # runtime version that V8::GetVersion() reports at startup. The tag may
-        # carry an LKGR suffix (e.g. "v8-15.2.24-lkgr-97440bd4f523" or the older
-        # bare "v8-15.1.27"); capture only the leading numeric-dotted run so the
-        # identity gate compares "15.2.24" against a runtime "15.2.24.0" (a
-        # startswith match) rather than the full tag with its -lkgr-<sha> suffix.
-        # Anchor on the `v8-` version-value prefix (unique to the V8 dependency
-        # across the whole manifest) rather than bridging from "name":"V8" — the
-        # latter would need to span an arbitrary field gap, and a `[^}]*` bridge
-        # silently fails the moment any braces-delimited field (e.g. "upstream":
-        # { ... }) is reordered ahead of "version", emptying the expected version
-        # and silently disabling the strict provider-identity cross-check.
-        if(_pulp_v8_manifest_text MATCHES "\"version\"[ \t]*:[ \t]*\"v8-([0-9]+(\\.[0-9]+)*)")
-            set(PULP_V8_EXPECTED_RUNTIME_VERSION "${CMAKE_MATCH_1}")
+        # Derive the expected V8 runtime version structurally from the manifest
+        # (the dependency source of truth) so the strict provider-identity gate
+        # can cross-check the sealed libv8 against its pinned version. Parse with
+        # string(JSON), NOT a text regex over the raw file: scope to the entry
+        # whose "name" is exactly "V8" — matching "the first v8- version anywhere"
+        # would silently read the wrong entry if another dependency ever carried a
+        # v8- prefix or was ordered earlier — and read its "version" field
+        # regardless of sibling-field order within the entry (a name→version text
+        # bridge breaks when a braces-delimited field like "upstream": { ... } is
+        # reordered ahead of "version"). The tag may carry an LKGR suffix (e.g.
+        # "v8-15.2.24-lkgr-<sha>" or the older bare "v8-15.1.27"); reduce it to the
+        # leading dotted-numeric run so the gate compares "15.2.24" against a
+        # runtime "15.2.24.0" (a startswith match) rather than the full tag.
+        string(JSON _pulp_v8_dep_count ERROR_VARIABLE _pulp_v8_json_err
+               LENGTH "${_pulp_v8_manifest_text}" dependencies)
+        if(NOT _pulp_v8_json_err AND _pulp_v8_dep_count GREATER 0)
+            math(EXPR _pulp_v8_last "${_pulp_v8_dep_count} - 1")
+            foreach(_pulp_v8_i RANGE ${_pulp_v8_last})
+                string(JSON _pulp_v8_dep ERROR_VARIABLE _pulp_v8_derr
+                       GET "${_pulp_v8_manifest_text}" dependencies ${_pulp_v8_i})
+                if(_pulp_v8_derr)
+                    continue()
+                endif()
+                string(JSON _pulp_v8_name ERROR_VARIABLE _pulp_v8_nerr
+                       GET "${_pulp_v8_dep}" name)
+                if(NOT _pulp_v8_nerr AND _pulp_v8_name STREQUAL "V8")
+                    string(JSON _pulp_v8_ver ERROR_VARIABLE _pulp_v8_verr
+                           GET "${_pulp_v8_dep}" version)
+                    if(NOT _pulp_v8_verr AND
+                       _pulp_v8_ver MATCHES "^v8-([0-9]+(\\.[0-9]+)*)")
+                        set(PULP_V8_EXPECTED_RUNTIME_VERSION "${CMAKE_MATCH_1}")
+                    endif()
+                    break()
+                endif()
+            endforeach()
         endif()
         unset(_pulp_v8_manifest_text)
     endif()

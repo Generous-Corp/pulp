@@ -2009,7 +2009,20 @@ for the B.0 SkPicture byte-identity smoke. The skia-python pin intentionally
 trails the C++ surface because the Python bindings ship one milestone behind
 on PyPI; the C++ raster harness is the source of truth for goldens. The
 workflow runs that Linux container and also runs the same pytest smoke on
-macOS arm64 so the future canonical raster lane has a platform signal. The
+macOS arm64 so the future canonical raster lane has a platform signal.
+
+**Pin-drift guards (manifest is source of truth).** The Skia/V8 pin data is
+hand-mirrored into several files; two mirrors are *tooling-consumed*, so a
+hand-sync typo is a silent behavioural bug rather than a doc lag. When bumping
+`tools/deps/manifest.json`, keep these in lockstep — all are enforced in CI
+(`workflow-lint.yml`) and pre-push (`gates.sh`):
+- `ci/visual-harness.Dockerfile` ← `tools/harness/visual/check_skia_pin.py`
+- `external/skia-build/VERSION.md` digest table (a *fetch cache-skip oracle* —
+  `fetch_skia_for_release.py` trusts it to skip downloads) and `DEPENDENCIES.md`
+  Skia/Dawn/V8 version cells ← `tools/scripts/check_manifest_mirrors.py`
+- `tools/harness/visual/pins.py` ← `test_skia_determinism.py`
+
+The `macOS local smoke` job resolves `runs-on` from
 `macOS local smoke` job resolves `runs-on` from
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
 when the local selector variable is absent. On the persistent local runner,

@@ -134,6 +134,12 @@ jobs:
           # PULP_REQUIRE_GPU_FOR_SDK=ON must have a Skia release asset in
           # the manifest, or the release leg FATALs and stays a draft.
           python3 tools/scripts/test_release_cli_gpu_asset_coverage.py
+          # Tooling-consumed pin mirrors must match the manifest:
+          # external/skia-build/VERSION.md's digest table is a fetch
+          # cache-skip oracle and DEPENDENCIES.md's versions are the
+          # license inventory of record (both Skia and V8).
+          python3 tools/scripts/test_check_manifest_mirrors.py
+          python3 tools/scripts/check_manifest_mirrors.py
 
       - name: actionlint
         # Disable shellcheck + pyflakes — the Pulp repo has accumulated
