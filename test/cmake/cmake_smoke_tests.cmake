@@ -120,6 +120,15 @@ add_test(NAME cmake-pulp-install-midi-tuning-sources
 set_tests_properties(cmake-pulp-install-midi-tuning-sources PROPERTIES
     LABELS "cmake;sdk;midi;tuning;slow"
     TIMEOUT 120)
+# Install-layout regression for Linux Skia raw_ptr compatibility source used
+# by FindSkia.cmake for standalone Skia archives that omit PartitionAlloc.
+add_test(NAME cmake-pulp-install-skia-compat-source
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_install_skia_compat_source.cmake)
+set_tests_properties(cmake-pulp-install-skia-compat-source PROPERTIES
+    LABELS "cmake;sdk;skia;linux;slow"
+    TIMEOUT 120)
 # PULP_REQUIRE_GPU_FOR_SDK gate smoke. Two full configures
 # in a tmpdir: ON+missing-skia must FAIL, OFF+missing-skia must SUCCEED.
 # Tagged `slow` because each configure pays the SDL3 / FetchContent cost.

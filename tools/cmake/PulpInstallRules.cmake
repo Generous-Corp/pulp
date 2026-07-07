@@ -371,6 +371,15 @@ install(FILES
     DESTINATION src/pulp/midi
 )
 
+# Linux Skia compatibility source used by FindSkia.cmake when a prebuilt Skia
+# archive references Chromium raw_ptr / PartitionAlloc support symbols without
+# shipping a PartitionAlloc archive. Installed SDK consumers need the same
+# source because they link the installed Skia archives through find_package(Pulp).
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/canvas/src/skia_chromium_raw_ptr_compat.cpp"
+    DESTINATION src/pulp/canvas
+)
+
 # macOS view/window/accessibility Objective-C cluster. _pulp_apply_view_mac_objc_suffix()
 # (PulpUtils.cmake) compiles a per-binary copy of these into each shipped plug-in /
 # app so two Pulp binaries in one host don't register colliding ObjC class names.

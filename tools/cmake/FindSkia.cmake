@@ -221,6 +221,71 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     file(GLOB _skia_all_libs "${_skia_lib_dir}/*.a" "${_skia_lib_dir}/*.lib")
     set(SKIA_LIBRARIES ${_skia_all_libs})
 
+    # Skia m151 Linux prebuilts can reference Chromium BackupRefPtr /
+    # PartitionAlloc support symbols without shipping a matching
+    # partition_alloc archive. If the archive has those unresolved symbols and
+    # no Skia-side library defines them, link a tiny Pulp-owned compatibility
+    # archive after the Skia archive group. It is Linux-only and only created
+    # when the inspected archive needs it.
+    set(_pulp_skia_support_libraries "")
+    set(_pulp_skia_needs_raw_ptr_compat FALSE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_NM AND EXISTS "${SKIA_LIBRARY}")
+        execute_process(
+            COMMAND "${CMAKE_NM}" -uC "${SKIA_LIBRARY}"
+            RESULT_VARIABLE _pulp_skia_nm_undefined_rc
+            OUTPUT_VARIABLE _pulp_skia_undefined_symbols
+            ERROR_QUIET)
+        if(_pulp_skia_nm_undefined_rc EQUAL 0 AND
+                (_pulp_skia_undefined_symbols MATCHES "RawPtrBackupRefImpl<false>::AcquireInternal" OR
+                 _pulp_skia_undefined_symbols MATCHES "PartitionAddressSpace::setup_"))
+            execute_process(
+                COMMAND "${CMAKE_NM}" -gC --defined-only ${_skia_all_libs}
+                RESULT_VARIABLE _pulp_skia_nm_defined_rc
+                OUTPUT_VARIABLE _pulp_skia_defined_symbols
+                ERROR_QUIET)
+            if(_pulp_skia_nm_defined_rc EQUAL 0 AND
+                    NOT _pulp_skia_defined_symbols MATCHES "RawPtrBackupRefImpl<false>::AcquireInternal" AND
+                    NOT _pulp_skia_defined_symbols MATCHES "PartitionAddressSpace::setup_")
+                set(_pulp_skia_needs_raw_ptr_compat TRUE)
+            endif()
+        endif()
+    endif()
+
+    if(_pulp_skia_needs_raw_ptr_compat)
+        set(_pulp_skia_raw_ptr_compat_source "")
+        set(_pulp_skia_raw_ptr_compat_candidates "")
+        if(DEFINED PULP_ROOT_DIR)
+            list(APPEND _pulp_skia_raw_ptr_compat_candidates
+                "${PULP_ROOT_DIR}/core/canvas/src/skia_chromium_raw_ptr_compat.cpp")
+        endif()
+        if(DEFINED PULP_SDK_DIR)
+            list(APPEND _pulp_skia_raw_ptr_compat_candidates
+                "${PULP_SDK_DIR}/src/pulp/canvas/skia_chromium_raw_ptr_compat.cpp")
+        endif()
+        foreach(_candidate IN LISTS _pulp_skia_raw_ptr_compat_candidates)
+            if(EXISTS "${_candidate}")
+                set(_pulp_skia_raw_ptr_compat_source "${_candidate}")
+                break()
+            endif()
+        endforeach()
+
+        if(_pulp_skia_raw_ptr_compat_source)
+            if(NOT TARGET pulp-skia-chromium-raw-ptr-compat)
+                add_library(pulp-skia-chromium-raw-ptr-compat STATIC
+                    "${_pulp_skia_raw_ptr_compat_source}")
+                target_compile_features(pulp-skia-chromium-raw-ptr-compat PUBLIC cxx_std_20)
+                set_target_properties(pulp-skia-chromium-raw-ptr-compat PROPERTIES
+                    POSITION_INDEPENDENT_CODE ON)
+            endif()
+            list(APPEND _pulp_skia_support_libraries pulp-skia-chromium-raw-ptr-compat)
+        else()
+            message(WARNING
+                "Skia: Linux archive references Chromium raw_ptr support symbols, "
+                "but Pulp's compatibility source was not found. Installed SDKs "
+                "should ship src/pulp/canvas/skia_chromium_raw_ptr_compat.cpp.")
+        endif()
+    endif()
+
     # Skia chrome/m144+ split SkUnicode into libskunicode_core.a (definitions)
     # and libskunicode_icu.a (uses core symbols). Still split in m150. file(GLOB) returns
     # alphabetical order, so core comes first. With GNU ld's single-pass
@@ -235,6 +300,9 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     if(SKIA_LIBRARIES AND (UNIX AND NOT APPLE))
         set(SKIA_LIBRARIES
             "-Wl,--start-group" ${SKIA_LIBRARIES} "-Wl,--end-group")
+    endif()
+    if(_pulp_skia_support_libraries)
+        list(APPEND SKIA_LIBRARIES ${_pulp_skia_support_libraries})
     endif()
 
     # Create imported interface target that links everything
