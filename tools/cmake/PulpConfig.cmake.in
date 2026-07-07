@@ -121,6 +121,33 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")
 
+function(_pulp_add_lowercase_alias imported_target alias_target)
+    if(TARGET "${imported_target}" AND NOT TARGET "${alias_target}")
+        add_library("${alias_target}" ALIAS "${imported_target}")
+    endif()
+endfunction()
+
+function(_pulp_require_cxx20 imported_target)
+    if(TARGET "${imported_target}")
+        set_property(TARGET "${imported_target}" APPEND PROPERTY
+            INTERFACE_COMPILE_FEATURES cxx_std_20)
+    endif()
+endfunction()
+
+# In-tree builds expose lower-case `pulp::` aliases and inherit Pulp's C++20
+# baseline from the root project. Preserve both pieces of public shape for
+# installed-SDK consumers so examples/templates can switch between
+# add_subdirectory(Pulp) and find_package(Pulp) without changing build files.
+set(_pulp_sdk_export_targets "@PULP_SDK_TARGETS@")
+foreach(_pulp_sdk_target IN LISTS _pulp_sdk_export_targets)
+    string(REPLACE "pulp-" "" _pulp_export_name "${_pulp_sdk_target}")
+    _pulp_require_cxx20("Pulp::${_pulp_export_name}")
+    _pulp_add_lowercase_alias("Pulp::${_pulp_export_name}" "pulp::${_pulp_export_name}")
+endforeach()
+unset(_pulp_export_name)
+unset(_pulp_sdk_target)
+unset(_pulp_sdk_export_targets)
+
 if(TARGET Pulp::yogacore)
     set_target_properties(Pulp::yogacore PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${PULP_SDK_DIR}/include"
