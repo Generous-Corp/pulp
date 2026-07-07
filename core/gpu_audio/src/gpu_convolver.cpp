@@ -5,6 +5,22 @@
 
 namespace pulp::gpu_audio {
 
+namespace {
+
+void load_cpu_fallback(std::vector<signal::Convolver>& fallback,
+                       uint32_t channels,
+                       const std::vector<float>& ir,
+                       uint32_t block) {
+    fallback.clear();
+    fallback.resize(channels);
+    for (uint32_t ch = 0; ch < channels; ++ch) {
+        fallback[ch].load_ir(ir.data(), static_cast<int>(ir.size()),
+                             static_cast<int>(block));
+    }
+}
+
+}  // namespace
+
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
@@ -43,15 +59,11 @@ bool GpuConvolver::prepare() {
     carry_.assign(channels_, std::vector<float>(fft_size_, 0.0f));
 
     // CPU fallback path (RT-safe after load_ir).
-    fallback_.clear();
-    fallback_.resize(channels_);
-    for (uint32_t ch = 0; ch < channels_; ++ch) {
-        fallback_[ch].load_ir(ir_.data(), static_cast<int>(ir_.size()),
-                              static_cast<int>(block_));
-    }
+    load_cpu_fallback(fallback_, channels_, ir_, block_);
+    load_cpu_fallback(worker_fallback_, channels_, ir_, block_);
 
     // GPU path: build the IR spectrum once. If no GPU device, the node still
-    // prepares (CPU fallback only); process_block then outputs silence.
+    // prepares and the worker path uses the CPU fallback.
     gpu_ = render::GpuCompute::create();
     if (gpu_ && gpu_->initialize_standalone()) {
         std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
@@ -72,9 +84,13 @@ bool GpuConvolver::prepare() {
 
 void GpuConvolver::process_block(const audio::BufferView<const float>& input,
                                  audio::BufferView<float>& output, uint32_t n) {
-    if (!prepared_ || !gpu_ || n != block_ ||
+    if (!prepared_ || n != block_ ||
         input.num_channels() < channels_ || output.num_channels() < channels_) {
         output.clear();
+        return;
+    }
+    if (!gpu_) {
+        process_cpu_fallback_with(worker_fallback_, input, output, n);
         return;
     }
 
@@ -109,6 +125,13 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
 void GpuConvolver::process_cpu_fallback(const audio::BufferView<const float>& input,
                                         audio::BufferView<float>& output,
                                         uint32_t n) noexcept {
+    process_cpu_fallback_with(fallback_, input, output, n);
+}
+
+void GpuConvolver::process_cpu_fallback_with(std::vector<signal::Convolver>& fallback,
+                                             const audio::BufferView<const float>& input,
+                                             audio::BufferView<float>& output,
+                                             uint32_t n) noexcept {
     // Degraded path (note: signal::Convolver has a one-block streaming latency,
     // so it is NOT sample-aligned with the GPU path — fine as a fallback, not
     // for live A/B-switching with the GPU output). Take full-buffer ownership:
@@ -122,10 +145,10 @@ void GpuConvolver::process_cpu_fallback(const audio::BufferView<const float>& in
     if (!prepared_) return;
 
     const uint32_t ch_count = channels_ < out_ch ? channels_ : out_ch;
-    for (uint32_t ch = 0; ch < ch_count && ch < fallback_.size(); ++ch) {
+    for (uint32_t ch = 0; ch < ch_count && ch < fallback.size(); ++ch) {
         if (ch >= input.num_channels()) continue;  // leave cleared
-        fallback_[ch].process(input.channel_ptr(ch), output.channel_ptr(ch),
-                              static_cast<int>(n));
+        fallback[ch].process(input.channel_ptr(ch), output.channel_ptr(ch),
+                             static_cast<int>(n));
     }
 }
 

@@ -55,6 +55,8 @@ namespace pulp::view {
 NSArray* pulp_text_accessibility_all_elements_macos();
 }
 
+extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
+
 // ── PulpPluginView: NSView subclass for DAW embedding ────────────────────────
 
 @interface PulpPluginView : NSView
@@ -73,6 +75,7 @@ NSArray* pulp_text_accessibility_all_elements_macos();
 // paint_all so the rendered surface matches the standalone host.
 @property (nonatomic, assign) float designW;
 @property (nonatomic, assign) float designH;
+@property (nonatomic, assign) BOOL designTopAlign;
 @end
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
@@ -137,6 +140,8 @@ pulp::view::Point pulp_plugin_local_point(NSView* self, NSEvent* event) {
 // Forward declaration (defined below): the currently-focused input widget IF it
 // belongs to `root`'s tree, else nullptr. Used by the mouse-down focus protocol.
 static pulp::view::View* pulp_focus_under_root(pulp::view::View* root);
+static pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(
+    pulp::view::View* root, NSView* host, pulp::view::View* view);
 
 // Dispatched handlers (on_click / on_mouse_* / on_pointer_event / on_drag) are
 // std::function callbacks — for a scripted UI they reach into the JS bridge and
@@ -167,7 +172,7 @@ pulp::view::ComboBox* pulp_plugin_route_to_open_popup(
     return combo;
 }
 
-void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
+void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event,
                             pulp::view::Point pt, pulp::view::View** drag_target) {
   try {
     if (!root) return;
@@ -199,14 +204,44 @@ void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
     // process-global; never touch another open editor's focus).
     {
         auto* prev = pulp_focus_under_root(root);
+        if (auto* te = dynamic_cast<pulp::view::TextEditor*>(prev); te && te->has_marked_text()) {
+            prev = pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
+            *drag_target = root->hit_test(pt);
+            if (!*drag_target) return;
+            local = to_local(pt, *drag_target, root);
+            if (!prev) prev = pulp_focus_under_root(root);
+        }
         if ((*drag_target)->focusable()) {
-            if (prev && prev != *drag_target) prev->on_focus_changed(false);
+            if (prev && prev != *drag_target) {
+                if (!view_is_in_tree(*drag_target, root)) {
+                    *drag_target = nullptr;
+                    return;
+                }
+                if (prev && prev != *drag_target) {
+                    prev->release_input_focus();
+                    prev->on_focus_changed(false);
+                    if (!view_is_in_tree(*drag_target, root)) {
+                        *drag_target = nullptr;
+                        return;
+                    }
+                }
+            }
             (*drag_target)->on_focus_changed(true);
             (*drag_target)->claim_input_focus();
         } else if (prev) {
             // A click on a non-focusable target commits/closes any open type-in.
-            prev->on_focus_changed(false);
-            prev->release_input_focus();
+            if (!view_is_in_tree(*drag_target, root)) {
+                *drag_target = nullptr;
+                return;
+            }
+            if (prev) {
+                prev->release_input_focus();
+                prev->on_focus_changed(false);
+                if (!view_is_in_tree(*drag_target, root)) {
+                    *drag_target = nullptr;
+                    return;
+                }
+            }
         }
     }
 
@@ -364,6 +399,48 @@ static pulp::view::View* pulp_focus_under_root(pulp::view::View* root) {
     return nullptr;
 }
 
+struct PulpFocusIdentity {
+    pulp::view::View* view = nullptr;
+    std::uint64_t instance_id = 0;
+    std::weak_ptr<const std::uint64_t> lifetime;
+
+    bool matches(pulp::view::View* current) const {
+        return current && current == view && !lifetime.expired() &&
+               current->import_binding_instance_id() == instance_id;
+    }
+};
+
+PulpFocusIdentity pulp_focus_identity(pulp::view::View* view) {
+    return {
+        .view = view,
+        .instance_id = view ? view->import_binding_instance_id() : 0,
+        .lifetime = view ? view->import_binding_lifetime_token()
+                         : std::weak_ptr<const std::uint64_t>{},
+    };
+}
+
+pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(pulp::view::View* root,
+                                                                NSView* host,
+                                                                pulp::view::View* view) {
+    if (!view) return nullptr;
+    auto identity = pulp_focus_identity(view);
+    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(view); te && te->has_marked_text()) {
+        try {
+            te->set_marked_text("", 0, 0);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[plugin-view-host] IME marked-text cancellation threw: %s\n",
+                         e.what());
+        } catch (...) {
+            std::fprintf(stderr, "[plugin-view-host] IME marked-text cancellation threw (unknown)\n");
+        }
+        if (host) [[host inputContext] discardMarkedText];
+        auto* current = pulp_focus_under_root(root);
+        if (!identity.matches(current)) return nullptr;
+        return current;
+    }
+    return view;
+}
+
 // Whether to grab the DAW keyboard: ONLY while a focused widget under this root
 // actually ACCEPTS TEXT INPUT (a TextEditor type-in). A focusable-but-non-text
 // widget — a ComboBox dropdown, a focusable container/root — must NOT make the
@@ -378,7 +455,17 @@ static bool pulp_text_input_focused_under_root(pulp::view::View* root) {
     return fv != nullptr && fv->accepts_text_input();
 }
 
-bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
+bool pulp_plugin_event_has_private_use_function_character(NSEvent* event) {
+    NSString* chars = event.charactersIgnoringModifiers;
+    if (!chars) chars = event.characters;
+    for (NSUInteger i = 0; i < chars.length; ++i) {
+        const unichar ch = [chars characterAtIndex:i];
+        if (ch >= 0xF700 && ch <= 0xF8FF) return true;
+    }
+    return false;
+}
+
+bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) {
   try {
     if (!root) return false;
     // Only dispatch to a focused widget that belongs to THIS editor's tree —
@@ -392,6 +479,16 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // into its own musical typing; that fights the host. (The standalone drives its
     // own QWERTY musical typing through a different window host.)
     if (!fv) return false;
+    const auto handled_focus = pulp_focus_identity(fv);
+
+    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
+        if (te->has_marked_text()) {
+            [host interpretKeyEvents:@[ event ]];
+            root->request_repaint();
+            return true;
+        }
+    }
+
     pulp::view::KeyEvent ke;
     ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
     ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
@@ -401,27 +498,26 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     // The return value tells us whether the editor already handled this key as a
     // command — if so it must NOT also be inserted as text.
     const bool consumed = fv->on_key_event(ke);
+    fv = pulp_focus_under_root(root);
+    if (!handled_focus.matches(fv)) {
+        root->request_repaint();
+        return true;
+    }
 
-    // Printable characters → text insertion, but only when the key was NOT
-    // consumed as a command above. Without the !consumed gate an arrow key both
-    // moves the caret AND inserts its character: macOS reports arrows/function
-    // keys as private-use codepoints (0xF700–0xF8FF, e.g. 0xF702 = left arrow),
-    // which are >= 0x20 and would otherwise pass the printable test and render
-    // as tofu (□) in the field (pulp: AU hosted-view key routing).
-    // (Full IME / marked-text via NSTextInputClient is a follow-up; this covers
-    // ASCII + most Latin typing.)
+    // Text insertion is offered to AppKit's text input manager so dead keys and
+    // IME composition reach insertText:/setMarkedText:. Command/control chords
+    // stay on the key-command path above and must not also insert text.
     if (!consumed) {
-        NSString* chars = event.characters;
         const NSEventModifierFlags cmd_ctrl =
             NSEventModifierFlagCommand | NSEventModifierFlagControl;
-        const bool has_cmd_ctrl = (event.modifierFlags & cmd_ctrl) != 0;
-        if (chars.length > 0 && !has_cmd_ctrl) {
-            unichar c0 = [chars characterAtIndex:0];
-            const bool is_function_key = (c0 >= 0xF700 && c0 <= 0xF8FF);
-            if (c0 >= 0x20 && c0 != 0x7f && !is_function_key) {
-                pulp::view::TextInputEvent te;
-                te.text = chars.UTF8String;
-                fv->on_text_input(te);
+        if ((event.modifierFlags & cmd_ctrl) == 0 &&
+            ke.key != pulp::view::KeyCode::tab &&
+            !pulp_plugin_event_has_private_use_function_character(event)) {
+            [host interpretKeyEvents:@[ event ]];
+            fv = pulp_focus_under_root(root);
+            if (!handled_focus.matches(fv)) {
+                root->request_repaint();
+                return true;
             }
         }
     }
@@ -440,8 +536,11 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
                           (!te->multi_line && (ke.key == pulp::view::KeyCode::tab ||
                                                ke.key == pulp::view::KeyCode::enter));
         if (blur) {
-            te->on_focus_changed(false);
-            te->release_input_focus();
+            auto* current = pulp_plugin_cancel_marked_text_and_revalidate(root, host, te);
+            if (current) {
+                current->release_input_focus();
+                current->on_focus_changed(false);
+            }
         }
     }
     root->request_repaint();
@@ -482,9 +581,12 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
 // recursing. Returns true when a widget was actually ended (repaint needed).
 // Scoped to `root`: a resignFirstResponder on THIS editor must never end a
 // type-in owned by another open plugin editor (focused_input_ is global).
-static bool pulp_plugin_end_text_input(pulp::view::View* root) {
+static bool pulp_plugin_end_text_input(NSView* host, pulp::view::View* root) {
     auto* fv = pulp_focus_under_root(root);
     if (!fv) return false;
+    fv = pulp_plugin_cancel_marked_text_and_revalidate(root, host, fv);
+    if (!fv) fv = pulp_focus_under_root(root);
+    if (!fv) return true;
     fv->release_input_focus();
     try {
         fv->on_focus_changed(false);
@@ -656,11 +758,11 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 // Musical Typing again".
 - (BOOL)resignFirstResponder {
     _priorResponder = nil;  // the host chose a new responder; nothing to restore
-    if (pulp_plugin_end_text_input(self.rootView)) [self setNeedsDisplay:YES];
+    if (pulp_plugin_end_text_input(self, self.rootView)) [self setNeedsDisplay:YES];
     return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
-    if (!pulp_plugin_key_down(self.rootView, event)) {
+    if (!pulp_plugin_key_down(self, self.rootView, event)) {
         // No focused field consumed it — try to hand it to the DAW host
         // (transport keys), then fall back to the normal responder chain.
         if (!pulp_plugin_forward_key_to_host(self, event)) {
@@ -717,7 +819,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
-    pulp_plugin_mouse_down(self.rootView, event, [self localPoint:event], &_dragTarget);
+    pulp_plugin_mouse_down(self, self.rootView, event, [self localPoint:event], &_dragTarget);
     [self setNeedsDisplay:YES];
     [self syncKeyFocus];
 }
@@ -979,6 +1081,7 @@ public:
     MacPluginViewHost(View& root, Size size)
         : root_(root), size_(size) {
         @autoreleasepool {
+            pulp_mac_plugin_text_input_client_category_anchor();
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             view_ = [[PulpPluginView alloc] initWithFrame:frame];
             view_.rootView = &root_;
@@ -1187,6 +1290,7 @@ public:
         @autoreleasepool {
             view_.designW = design_w;
             view_.designH = design_h;
+            view_.designTopAlign = design_top_align_;
             if (design_w > 0.0f && design_h > 0.0f) {
                 __block MacPluginViewHost* host = this;
                 view_.pointTransform = ^pulp::view::Point(pulp::view::Point pt) {
@@ -1273,6 +1377,9 @@ private:
 // before hit_test. Mirrors PulpPluginView + the standalone host. nil =
 // identity. Set by MacGpuPluginViewHost::set_design_viewport.
 @property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
+@property (nonatomic, assign) float designW;
+@property (nonatomic, assign) float designH;
+@property (nonatomic, assign) BOOL designTopAlign;
 @end
 
 @implementation PulpGpuPluginView {
@@ -1305,12 +1412,12 @@ private:
 // See PulpPluginView::resignFirstResponder.
 - (BOOL)resignFirstResponder {
     _priorResponder = nil;
-    if (pulp_plugin_end_text_input(self.rootView) && self.rootView)
+    if (pulp_plugin_end_text_input(self, self.rootView) && self.rootView)
         self.rootView->request_repaint();
     return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
-    if (!pulp_plugin_key_down(self.rootView, event)) {
+    if (!pulp_plugin_key_down(self, self.rootView, event)) {
         // No focused field consumed it — try to hand it to the DAW host
         // (transport keys), then fall back to the normal responder chain.
         if (!pulp_plugin_forward_key_to_host(self, event)) {
@@ -1366,7 +1473,7 @@ private:
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
-    pulp_plugin_mouse_down(self.rootView, event, [self localPoint:event], &_dragTarget);
+    pulp_plugin_mouse_down(self, self.rootView, event, [self localPoint:event], &_dragTarget);
     if (self.rootView) self.rootView->request_repaint();
     [self syncKeyFocus];
 }
@@ -1522,6 +1629,7 @@ public:
         : root_(root), size_(size),
           alive_(std::make_shared<std::atomic<bool>>(true)) {
         @autoreleasepool {
+            pulp_mac_plugin_text_input_client_category_anchor();
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             metal_view_ = [[PulpGpuPluginView alloc] initWithFrame:frame];
@@ -1696,6 +1804,9 @@ public:
         design_viewport_w_ = design_w;
         design_viewport_h_ = design_h;
         @autoreleasepool {
+            metal_view_.designW = design_w;
+            metal_view_.designH = design_h;
+            metal_view_.designTopAlign = design_top_align_;
             if (design_w > 0.0f && design_h > 0.0f) {
                 __block MacGpuPluginViewHost* host = this;
                 metal_view_.pointTransform = ^pulp::view::Point(pulp::view::Point pt) {
@@ -1710,6 +1821,9 @@ public:
 
     void set_design_viewport_top_align(bool top_align) override {
         design_top_align_ = top_align;
+        @autoreleasepool {
+            metal_view_.designTopAlign = top_align;
+        }
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 
