@@ -367,6 +367,26 @@ static pulp::view::View* pulp_focus_under_root(pulp::view::View* root) {
     return nullptr;
 }
 
+struct PulpFocusIdentity {
+    pulp::view::View* view = nullptr;
+    std::uint64_t instance_id = 0;
+    std::weak_ptr<const std::uint64_t> lifetime;
+
+    bool matches(pulp::view::View* current) const {
+        return current && current == view && !lifetime.expired() &&
+               current->import_binding_instance_id() == instance_id;
+    }
+};
+
+PulpFocusIdentity pulp_focus_identity(pulp::view::View* view) {
+    return {
+        .view = view,
+        .instance_id = view ? view->import_binding_instance_id() : 0,
+        .lifetime = view ? view->import_binding_lifetime_token()
+                         : std::weak_ptr<const std::uint64_t>{},
+    };
+}
+
 // Whether to grab the DAW keyboard: ONLY while a focused widget under this root
 // actually ACCEPTS TEXT INPUT (a TextEditor type-in). A focusable-but-non-text
 // widget — a ComboBox dropdown, a focusable container/root — must NOT make the
@@ -395,6 +415,7 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
     // into its own musical typing; that fights the host. (The standalone drives its
     // own QWERTY musical typing through a different window host.)
     if (!fv) return false;
+    const auto handled_focus = pulp_focus_identity(fv);
 
     if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
         if (te->has_marked_text()) {
@@ -413,6 +434,11 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
     // The return value tells us whether the editor already handled this key as a
     // command — if so it must NOT also be inserted as text.
     const bool consumed = fv->on_key_event(ke);
+    fv = pulp_focus_under_root(root);
+    if (!handled_focus.matches(fv)) {
+        root->request_repaint();
+        return true;
+    }
 
     // Text insertion is offered to AppKit's text input manager so dead keys and
     // IME composition reach insertText:/setMarkedText:. Command/control chords
@@ -420,8 +446,14 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
     if (!consumed) {
         const NSEventModifierFlags cmd_ctrl =
             NSEventModifierFlagCommand | NSEventModifierFlagControl;
-        if ((event.modifierFlags & cmd_ctrl) == 0)
+        if ((event.modifierFlags & cmd_ctrl) == 0) {
             [host interpretKeyEvents:@[ event ]];
+            fv = pulp_focus_under_root(root);
+            if (!handled_focus.matches(fv)) {
+                root->request_repaint();
+                return true;
+            }
+        }
     }
 
     // Focus-release affordance — hand the keyboard back to the DAW. While a text
