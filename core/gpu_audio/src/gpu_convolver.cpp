@@ -51,7 +51,7 @@ bool GpuConvolver::prepare() {
     }
 
     // GPU path: build the IR spectrum once. If no GPU device, the node still
-    // prepares (CPU fallback only); process_block then outputs silence.
+    // prepares and the worker path uses the CPU fallback.
     gpu_ = render::GpuCompute::create();
     if (gpu_ && gpu_->initialize_standalone()) {
         std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
@@ -72,9 +72,13 @@ bool GpuConvolver::prepare() {
 
 void GpuConvolver::process_block(const audio::BufferView<const float>& input,
                                  audio::BufferView<float>& output, uint32_t n) {
-    if (!prepared_ || !gpu_ || n != block_ ||
+    if (!prepared_ || n != block_ ||
         input.num_channels() < channels_ || output.num_channels() < channels_) {
         output.clear();
+        return;
+    }
+    if (!gpu_) {
+        process_cpu_fallback(input, output, n);
         return;
     }
 

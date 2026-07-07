@@ -174,13 +174,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
 
-# GPU convolver node (first real GPU audio node): golden test vs direct
-# convolution. Only when GPU/render is available; skips at runtime without a
-# Skia device.
+# GPU convolver node: golden test vs direct convolution when GPU/render is
+# available, plus CPU-fallback coverage in GPU-off builds.
+pulp_add_test_suite(pulp-test-gpu-convolver
+    SOURCES test_gpu_convolver.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
 if(PULP_HAS_SKIA)
-    pulp_add_test_suite(pulp-test-gpu-convolver
-        SOURCES test_gpu_convolver.cpp
-        LIBRARIES pulp::gpu-audio pulp::audio)
     # GPU STFT primitive: window+FFT analyze, inverse-FFT synthesize,
     # and COLA overlap-add reconstruction.
     pulp_add_test_suite(pulp-test-gpu-stft

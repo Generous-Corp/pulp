@@ -43,9 +43,9 @@ bool GpuConvolver::prepare() {
     return true;
 }
 
-void GpuConvolver::process_block(const audio::BufferView<const float>&,
-                                 audio::BufferView<float>& output, uint32_t) {
-    output.clear();
+void GpuConvolver::process_block(const audio::BufferView<const float>& input,
+                                 audio::BufferView<float>& output, uint32_t n) {
+    process_cpu_fallback(input, output, n);
 }
 
 void GpuConvolver::process_cpu_fallback(const audio::BufferView<const float>& input,
