@@ -40,6 +40,26 @@ int tier0_default_build_jobs();
 // the tier-0 host default. Single source of truth for every no-lease build path
 // (the CLI SDK install and the lease-acquisition fallbacks).
 int resolve_local_build_jobs();
+
+// The build-governance tier that is currently active on this host — the model a
+// build's parallelism is bounded by. Reported by `pulp status` so a user can see
+// which layer of the host-resource governor is in effect:
+//   Tier 0 — always available: the CLI's built-in bounded builds (min cores/RAM).
+//   Tier 1 — a tartci host-lease store is present (`tartci host-profile` works);
+//            builds acquire host leases. `jobs`/`mem_budget_mb` surface the host
+//            budget when the profile advertises one.
+//   Tier 2 — a fleet is configured (`TARTCI_ORCHARD_URL` set).
+// `detail` is a human-readable summary suitable for the parenthetical in the
+// status line. Detection is fail-safe and never throws: any missing tool, failed
+// exec, or unreadable profile degrades to a lower tier rather than erroring.
+struct BuildGovernance {
+    int tier = 0;
+    std::string detail;
+    int jobs = 0;            // host-lease job budget (Tier 1), 0 if unadvertised
+    long long mem_budget_mb = 0;  // host-lease RAM budget in MB (Tier 1), 0 if unadvertised
+};
+
+BuildGovernance detect_build_governance();
 std::string tartci_agent_lease_id(const TartciAgentLeaseRequest& req);
 std::string apply_agent_build_qos(const std::string& command, const std::string& qos);
 std::string apply_agent_build_watchdog(const std::string& command,

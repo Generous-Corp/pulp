@@ -6,6 +6,7 @@
 #include "cli_common.hpp"
 #include "sdk_cache_paths.hpp"
 #include "shell_redirect.hpp"
+#include "tartci_lease.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -252,6 +253,11 @@ int cmd_status(const std::vector<std::string>& args) {
     } else {
         std::cout << "Build: not configured (run `pulp build`)\n";
     }
+
+    const auto governance = detect_build_governance();
+    std::cout << "Build governance: Tier " << governance.tier
+              << " (" << governance.detail << ")\n";
+
     print_pr_workflow_status(root, !standalone_mode);
     print_import_design_default_status();
 
