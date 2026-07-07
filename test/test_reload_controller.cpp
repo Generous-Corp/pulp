@@ -9,6 +9,9 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/reload/reload_controller.hpp>
+#include <pulp/format/reload/reload_trust_policy.hpp>
+#include <pulp/format/reload/swap_pack.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -290,4 +293,78 @@ TEST_CASE("ReloadController.reload_now forces a reload regardless of mtime",
     REQUIRE_FALSE(controller.poll().has_value());
 
     std::error_code ec; fs::remove(watched, ec);
+}
+
+// ── require_signed enforcement (opt-in dev-watcher trust policy) ────────────
+// With the policy off (default) the watcher loads whatever appears — covered by
+// the cases above. With it on + the pinned key, the watcher must refuse a reload
+// whose bytes are not covered by a valid signed sidecar, and accept one that is.
+TEST_CASE("ReloadController require_signed refuses an unsigned reload",
+          "[reload][controller][require-signed]") {
+    const fs::path watched = fs::path(RELOAD_WATCH_DIR) / "pulp_reload_reqsig_none.dylib";
+    install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/0);
+    std::error_code ec;
+    fs::remove(reload_sidecar_manifest_path(watched), ec);  // ensure NO sidecar
+
+    state::StateStore live;
+    auto initial = std::make_unique<InitialGain>();
+    initial->define_parameters(live);
+    initial->set_state_store(&live);
+    live.set_value(1, 0.5f);
+    ProcessorHotSwapSlot slot(std::move(initial));
+    ReloadSession session(slot, live, current_build_fingerprint(), format::PrepareContext{});
+
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    ReloadTrustPolicy policy{/*require_signed=*/true, kp->public_key};
+    ReloadController controller(session, watched, {}, policy);
+
+    const float before = render_one(slot);   // unity × 0.5 = 0.5
+    const auto outcome = controller.reload_now();
+    REQUIRE_FALSE(outcome.ok());
+    REQUIRE(outcome.status == ReloadOutcome::Status::RejectedSignature);
+    REQUIRE(outcome.detail.find("require_signed") != std::string::npos);
+    REQUIRE(render_one(slot) == before);      // slot untouched — nothing was loaded
+}
+
+TEST_CASE("ReloadController require_signed loads a validly-signed reload",
+          "[reload][controller][require-signed]") {
+    const fs::path watched = fs::path(RELOAD_WATCH_DIR) / "pulp_reload_reqsig_ok.dylib";
+    install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/0);
+
+    // Sign a pack manifest whose one member IS the watched logic (matching bytes).
+    auto kp = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(kp.has_value());
+    std::ifstream in(watched, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+    SwapPackManifest m;
+    m.id = "reqsig";
+    m.plugin_id = "com.pulp.reload.gain";
+    m.files = {{watched.filename().string(), pulp::runtime::sha256_hex(bytes),
+                SwapPackKind::Unknown}};
+    m.signer_public_key = kp->public_key;
+    const auto msg = swap_pack_signed_message(m);
+    auto sig = pulp::runtime::ed25519_sign(kp->private_key.data(), kp->private_key.size(),
+                                           msg.data(), msg.size());
+    REQUIRE(sig.has_value());
+    m.signature = *sig;
+    std::ofstream(reload_sidecar_manifest_path(watched), std::ios::binary)
+        << serialize_swap_pack_manifest(m);
+
+    state::StateStore live;
+    auto initial = std::make_unique<InitialGain>();
+    initial->define_parameters(live);
+    initial->set_state_store(&live);
+    live.set_value(1, 0.5f);
+    ProcessorHotSwapSlot slot(std::move(initial));
+    ReloadSession session(slot, live, current_build_fingerprint(), format::PrepareContext{});
+    ReloadTrustPolicy policy{/*require_signed=*/true, kp->public_key};
+    ReloadController controller(session, watched, {}, policy);
+
+    REQUIRE(render_one(slot) == 0.5f);        // before: unity × 0.5
+    const auto outcome = controller.reload_now();
+    INFO("detail: " << outcome.detail);
+    REQUIRE(outcome.ok());                     // signed + verified → loaded
+    REQUIRE(render_one(slot) == 1.0f);         // after: 2x × the preserved 0.5
 }

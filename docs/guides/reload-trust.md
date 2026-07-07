@@ -66,6 +66,33 @@ to run and *safer* — there's no central system whose compromise would push mal
 to everyone. Revocation ships as a signed list; remote UX updates (opt-in) pull a
 signed pack from a plain static host and verify it locally.
 
+### Remote UX updates (opt-in, offline-first)
+
+`check_and_fetch_remote_ux_update()` (in `reload/remote_update_fetch.hpp`) is the
+network layer over the pure gate. It is **off by default**; when enabled it fetches a
+signed pack over **HTTPS** and applies it only if the gate accepts (signature →
+not-revoked → not-a-downgrade → capabilities ⊆ granted), then installs it
+content-addressed so the loader reads immutable, re-verified bytes.
+
+- **Offline is a normal outcome, never a failure.** An unreachable host, timeout, or
+  non-2xx returns `Unavailable` — the plugin just keeps its current UI; nothing blocks
+  or throws. Supply an `offline_fallback_root` and that pack is surfaced so the plugin
+  keeps *your* look with no network.
+- **Bring your own transport.** The `fetcher` is injectable, so any delivery style
+  works — a CDN, an object store, an authed server. `make_http_pack_fetcher()` is a
+  convenience default over `runtime::http_*`.
+- **Privacy.** An update check sends only what the server needs to choose a pack —
+  plugin id, channel, installed version — over HTTPS. No device id, no user id, no
+  telemetry (`build_update_check_url()` is pure, so that contract is testable).
+
+### Enforcing "signed only" in the dev watcher
+
+Setting `reload.require_signed = true` is enforced by the dev watcher itself: before
+staging a changed logic file it resolves the signed sidecar manifest and verifies the
+watched bytes against the pinned key **before any load**, refusing fail-closed if the
+sidecar is missing or invalid (`ReloadableShell::set_reload_trust_policy`). The default
+(OFF) is the frictionless unsigned dev loop.
+
 ## Signing a pack
 
 ```
