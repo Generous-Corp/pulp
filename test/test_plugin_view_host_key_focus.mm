@@ -35,6 +35,7 @@
 
 #if defined(__APPLE__)
 #include <new>
+#include <stdexcept>
 
 #import <Cocoa/Cocoa.h>
 
@@ -89,11 +90,14 @@ public:
     View* root = nullptr;
     View* remove_on_blur = nullptr;
     std::unique_ptr<View> removed;
+    bool throw_on_blur = false;
 
     void on_focus_changed(bool gained) override {
         TextEditor::on_focus_changed(gained);
         if (!gained && root && remove_on_blur && !removed)
             removed = root->remove_child(remove_on_blur);
+        if (!gained && throw_on_blur)
+            throw std::runtime_error("blur callback failed");
     }
 };
 
@@ -707,6 +711,14 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
             REQUIRE(editor->has_focus());
             [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
             REQUIRE_FALSE(editor->has_focus());
+            REQUIRE(View::focused_input_ == nullptr);
+        }
+
+        SECTION("#3 Escape clears focus before a throwing blur callback") {
+            editor->on_focus_changed(true);
+            editor->claim_input_focus();
+            editor->throw_on_blur = true;
+            [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
             REQUIRE(View::focused_input_ == nullptr);
         }
 

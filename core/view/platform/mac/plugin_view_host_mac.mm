@@ -537,8 +537,8 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
         if (blur) {
             auto* current = pulp_plugin_cancel_marked_text_and_revalidate(root, host, te);
             if (current) {
-                current->on_focus_changed(false);
                 current->release_input_focus();
+                current->on_focus_changed(false);
             }
         }
     }
