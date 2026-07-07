@@ -236,6 +236,18 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
 
+### `pulp status` — build-governance tier line
+
+`pulp status` reports the active host-resource governance tier via a
+`Build governance: Tier N (…)` line, backed by `detect_build_governance()` in
+`tools/cli/tartci_lease.cpp`. Detection is fail-safe (never throws): Tier 2 when
+`TARTCI_ORCHARD_URL` is set, else Tier 1 when a resolvable `tartci`
+(`PULP_TARTCI_BIN` or PATH, unless `PULP_TARTCI_LEASES=0`) answers
+`tartci host-profile` (surfacing its `PULP_BUILD_JOBS` / `PULP_BUILD_MEM_BUDGET_MB`),
+else Tier 0 (the CLI's built-in bounded builds). Coverage lives in
+`test/test_cli_tartci_lease.cpp`. Keep the tier semantics in step with the
+lease-acquisition path in the same file.
+
 ### Package command CMake generation
 
 `pulp add` can now generate CMake for source-backed FetchContent packages, not
