@@ -46,6 +46,7 @@ cat tools/packages/registry.json | python3 -m json.tool
 |----------|----------|-------------------|
 | dsp | aubio, btrack, cycfi-q, daisysp, essentia, fftw, fluidsynth, freeverb, kfr, kissfft, libpd, pffft, rnnoise, rubber-band, signalsmith-dsp, signalsmith-stretch, soundtouch, speexdsp, stk, tinysoundfont | Pitch/time stretch, filters, FFT, pitch detection, physical modeling, noise reduction, synthesis |
 | audio-io | alac, dr-libs, fdk-aac, lame, libflac, libsamplerate, libsndfile, libvorbis, miniaudio, oboe, opus, r8brain-free-src | File codecs, sample-rate conversion, device/audio I/O |
+| music-theory | mts-esp | Optional microtuning client integration |
 | ml | rtneural | Real-time neural network inference |
 | ui | fontaudio | Audio icon font |
 | utilities | libremidi, rtmidi | MIDI I/O helpers |
@@ -89,6 +90,20 @@ This will:
 4. Generate `cmake/pulp-packages.cmake` with FetchContent declarations
 5. Update `packages.lock.json`, `DEPENDENCIES.md`, `NOTICE.md`
 6. Print usage instructions (target_link_libraries + #include)
+
+### Source-backed FetchContent packages
+
+Registry entries can describe packages where upstream does not export the exact
+CMake target Pulp wants. Use `cmake.sources` for source files that should be
+compiled into a generated static target after FetchContent populates the source
+tree. Keep `cmake.include_dir` rooted at the fetched source directory and make
+the generated target position-independent so plugins can link it safely.
+
+`mts-esp` is the reference pattern: it fetches ODDSound's source, compiles
+`Client/libMTSClient.cpp` into `mts_esp_client`, links `${CMAKE_DL_LIBS}` when
+needed, and stays opt-in. When adding another source-backed package, update the
+registry schema, package-command generation tests, dependency manifest,
+`DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md` together.
 
 ## Overlap Awareness
 

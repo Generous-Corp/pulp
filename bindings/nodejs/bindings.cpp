@@ -95,6 +95,7 @@ public:
             InstanceMethod("getAllParams", &HeadlessHostWrap::GetAllParams),
             InstanceMethod("getDescriptor", &HeadlessHostWrap::GetDescriptor),
             InstanceMethod("process", &HeadlessHostWrap::Process),
+            InstanceMethod("processF64", &HeadlessHostWrap::ProcessF64),
             InstanceMethod("saveState", &HeadlessHostWrap::SaveState),
             InstanceMethod("loadState", &HeadlessHostWrap::LoadState),
         });
@@ -224,6 +225,8 @@ private:
         obj.Set("bundleId", Napi::String::New(env, d.bundle_id));
         obj.Set("isInstrument", Napi::Boolean::New(env,
             d.category == format::PluginCategory::Instrument));
+        obj.Set("supportsF64Audio", Napi::Boolean::New(env,
+            d.effective_capabilities().supports_f64_audio));
         return obj;
     }
 
@@ -269,6 +272,53 @@ private:
             auto buf = Napi::Float32Array::New(env, static_cast<size_t>(frames));
             for (int i = 0; i < frames; ++i) {
                 buf[static_cast<uint32_t>(i)] = out_data[static_cast<size_t>(ch)][static_cast<size_t>(i)];
+            }
+            result.Set(static_cast<uint32_t>(ch), buf);
+        }
+        return result;
+    }
+
+    /// Process audio using Float64Arrays.
+    /// Input: { channels: number, frames: number, data: Float64Array[] }
+    /// Returns: Float64Array[] (one per channel)
+    Napi::Value ProcessF64(const Napi::CallbackInfo& info) {
+        auto env = info.Env();
+        if (!host_) return env.Null();
+
+        auto input_obj = info[0].As<Napi::Object>();
+        int channels = input_obj.Get("channels").As<Napi::Number>().Int32Value();
+        int frames = input_obj.Get("frames").As<Napi::Number>().Int32Value();
+        auto data_arr = input_obj.Get("data").As<Napi::Array>();
+
+        std::vector<std::vector<double>> in_data(static_cast<size_t>(channels));
+        std::vector<const double*> in_ptrs(static_cast<size_t>(channels));
+        for (int ch = 0; ch < channels; ++ch) {
+            auto typed = data_arr.Get(static_cast<uint32_t>(ch)).As<Napi::Float64Array>();
+            in_data[static_cast<size_t>(ch)].resize(static_cast<size_t>(frames));
+            for (int i = 0; i < frames; ++i) {
+                in_data[static_cast<size_t>(ch)][static_cast<size_t>(i)] =
+                    typed[static_cast<uint32_t>(i)];
+            }
+            in_ptrs[static_cast<size_t>(ch)] = in_data[static_cast<size_t>(ch)].data();
+        }
+        audio::BufferView<const double> in_view(in_ptrs.data(), channels, frames);
+
+        std::vector<std::vector<double>> out_data(static_cast<size_t>(channels),
+            std::vector<double>(static_cast<size_t>(frames), 0.0));
+        std::vector<double*> out_ptrs(static_cast<size_t>(channels));
+        for (int ch = 0; ch < channels; ++ch) {
+            out_ptrs[static_cast<size_t>(ch)] = out_data[static_cast<size_t>(ch)].data();
+        }
+        audio::BufferView<double> out_view(out_ptrs.data(), channels, frames);
+
+        host_->process_f64(out_view, in_view);
+
+        auto result = Napi::Array::New(env, static_cast<size_t>(channels));
+        for (int ch = 0; ch < channels; ++ch) {
+            auto buf = Napi::Float64Array::New(env, static_cast<size_t>(frames));
+            for (int i = 0; i < frames; ++i) {
+                buf[static_cast<uint32_t>(i)] =
+                    out_data[static_cast<size_t>(ch)][static_cast<size_t>(i)];
             }
             result.Set(static_cast<uint32_t>(ch), buf);
         }

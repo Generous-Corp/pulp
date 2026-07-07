@@ -24,37 +24,40 @@ namespace pulp::signal {
 /// freq.set_target(880.0f); // smooth glide up one octave
 /// for (int i = 0; i < block_size; ++i) osc.set_freq(freq.next());
 /// @endcode
-class LogRampedValue {
+template <typename SampleType = float>
+class LogRampedValueT {
 public:
-    LogRampedValue() = default;
-    explicit LogRampedValue(float initial) : current_(initial), target_(initial) {}
+    LogRampedValueT() = default;
+    explicit LogRampedValueT(SampleType initial) : current_(initial), target_(initial) {}
 
-    void set_ramp_time(float seconds, float sample_rate) {
+    void set_ramp_time(SampleType seconds, SampleType sample_rate) {
         ramp_samples_ = std::max(1, static_cast<int>(seconds * sample_rate));
     }
 
-    void set_target(float value) {
+    void set_target(SampleType value) {
         target_ = value;
-        if (ramp_samples_ <= 1 || current_ <= 0.0f || target_ <= 0.0f) {
+        if (ramp_samples_ <= 1 || current_ <= SampleType{0.0f} ||
+            target_ <= SampleType{0.0f}) {
             current_ = target_;
             steps_remaining_ = 0;
-            multiplier_ = 1.0f;
+            multiplier_ = SampleType{1.0f};
         } else {
             // Compute per-sample multiplier: current * multiplier^N = target
             multiplier_ = std::pow(target_ / current_,
-                                    1.0f / static_cast<float>(ramp_samples_));
+                                    SampleType{1.0f} /
+                                        static_cast<SampleType>(ramp_samples_));
             steps_remaining_ = ramp_samples_;
         }
     }
 
-    void set_immediate(float value) {
+    void set_immediate(SampleType value) {
         current_ = value;
         target_ = value;
         steps_remaining_ = 0;
-        multiplier_ = 1.0f;
+        multiplier_ = SampleType{1.0f};
     }
 
-    float next() {
+    SampleType next() {
         if (steps_remaining_ > 0) {
             current_ *= multiplier_;
             --steps_remaining_;
@@ -70,21 +73,24 @@ public:
             current_ = target_;
             steps_remaining_ = 0;
         } else {
-            current_ *= std::pow(multiplier_, static_cast<float>(n));
+            current_ *= std::pow(multiplier_, static_cast<SampleType>(n));
             steps_remaining_ -= n;
         }
     }
 
-    float current_value() const { return current_; }
-    float target_value() const { return target_; }
+    SampleType current_value() const { return current_; }
+    SampleType target_value() const { return target_; }
     bool is_smoothing() const { return steps_remaining_ > 0; }
 
 private:
-    float current_ = 0.0f;
-    float target_ = 0.0f;
-    float multiplier_ = 1.0f;
+    SampleType current_ = SampleType{0.0f};
+    SampleType target_ = SampleType{0.0f};
+    SampleType multiplier_ = SampleType{1.0f};
     int ramp_samples_ = 1;
     int steps_remaining_ = 0;
 };
+
+using LogRampedValue = LogRampedValueT<float>;
+using LogRampedValue64 = LogRampedValueT<double>;
 
 } // namespace pulp::signal

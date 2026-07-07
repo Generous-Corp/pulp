@@ -100,8 +100,16 @@ inline fs::path pulp_binary() {
 #endif
 }
 
+// Default timeout is deliberately generous. These tests spawn `pulp`, which for
+// some subcommands itself spawns AND CAPTURES a grandchild — clang-format (`pulp
+// fmt`), or the `shipyard --version` pin-probe (`pulp pr`/`pulp status`). Under the
+// CI gate's `ctest -j8` on a core-limited macOS VM, that grandchild is CPU-starved
+// and a tight 10s budget flakily times out (`r.timed_out`) — the macOS-runner
+// starvation class that reddens the required leg on unlucky, loaded runs while the
+// retry usually saves it. 30s tolerates the contention without serializing the
+// suite (RUN_SERIAL/PROCESSORS would over-serialize the 63 sibling cases here).
 inline ProcessResult run_pulp(const std::vector<std::string>& args,
-                              int timeout_ms = 10000) {
+                              int timeout_ms = 30000) {
     auto bin = pulp_binary();
     if (!fs::exists(bin)) {
         ProcessResult r;
@@ -133,7 +141,7 @@ private:
 
 inline ProcessResult run_pulp_in_directory(const fs::path& dir,
                                            const std::vector<std::string>& args,
-                                           int timeout_ms = 10000) {
+                                           int timeout_ms = 30000) {  // see run_pulp: grandchild-spawn budget
     const auto bin = fs::absolute(pulp_binary());
     REQUIRE(fs::exists(bin));
     ScopedCurrentPath cwd(dir);

@@ -23,6 +23,7 @@ target_sources(pulp-midi PRIVATE
     src/mcoded7.cpp
     src/mpe_voice_tracker.cpp
     src/running_status.cpp
+    src/tuning.cpp
     # macOS plan 8.1 — UMP Session + Endpoint + VirtualEndpoint.
     # Cross-platform virtual-endpoint registry; platform .mm/.cpp adds
     # the OS-backed half via a static-init registrar.
@@ -38,6 +39,20 @@ target_sources(pulp-midi PRIVATE
     # platforms whose central never registers anything (the stub central).
     src/ble_midi_registry.cpp
 )
+
+if(PULP_HAS_MTS_ESP)
+    target_sources(pulp-midi PRIVATE
+        src/mts_esp_tuning.cpp
+        "${PULP_MTS_ESP_SOURCE_DIR}/Client/libMTSClient.cpp"
+    )
+    target_include_directories(pulp-midi PRIVATE
+        "${PULP_MTS_ESP_SOURCE_DIR}/Client"
+    )
+    target_compile_definitions(pulp-midi PUBLIC PULP_HAS_MTS_ESP=1)
+    if(CMAKE_DL_LIBS)
+        target_link_libraries(pulp-midi PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+endif()
 
 if(APPLE AND NOT IOS)
     target_sources(pulp-midi PRIVATE

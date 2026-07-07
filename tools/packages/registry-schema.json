@@ -105,7 +105,8 @@
       "properties": {
         "targets":     { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "header_only": { "type": "boolean" },
-        "include_dir": { "type": "string" }
+        "include_dir": { "type": "string" },
+        "sources":     { "type": "array", "items": { "type": "string" } }
       }
     },
     "platform-entry": {

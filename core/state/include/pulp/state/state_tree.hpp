@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -18,14 +19,146 @@
 
 namespace pulp::state {
 
-/// Property value — can hold common types
+/// Recursive property containers. These intentionally hold values, not
+/// StateTree node references: embedding nodes as property values would create
+/// ambiguous ownership, hidden aliasing, and potential cycles with parent/child
+/// links. Represent tree shape with StateTree children; use PropertyArray /
+/// PropertyObject for structured leaf data imported from frameworks such as
+/// JUCE var or custom/iPlug2 state blobs.
+struct PropertyArray;
+struct PropertyObject;
+
+struct PropertyArrayValue {
+    std::shared_ptr<const PropertyArray> storage;
+
+    PropertyArrayValue() = default;
+    explicit PropertyArrayValue(std::shared_ptr<const PropertyArray> s)
+        : storage(std::move(s)) {}
+
+    const PropertyArray* get() const noexcept { return storage.get(); }
+    explicit operator bool() const noexcept { return static_cast<bool>(storage); }
+};
+
+struct PropertyObjectValue {
+    std::shared_ptr<const PropertyObject> storage;
+
+    PropertyObjectValue() = default;
+    explicit PropertyObjectValue(std::shared_ptr<const PropertyObject> s)
+        : storage(std::move(s)) {}
+
+    const PropertyObject* get() const noexcept { return storage.get(); }
+    explicit operator bool() const noexcept { return static_cast<bool>(storage); }
+};
+
+bool operator==(const PropertyArrayValue& a, const PropertyArrayValue& b);
+bool operator!=(const PropertyArrayValue& a, const PropertyArrayValue& b);
+bool operator==(const PropertyObjectValue& a, const PropertyObjectValue& b);
+bool operator!=(const PropertyObjectValue& a, const PropertyObjectValue& b);
+
+/// Property value — can hold scalar values plus immutable recursive arrays and
+/// string-keyed objects. Arrays/objects use immutable shared storage only to
+/// make the recursive variant possible; StateTree::set() deep-copies them on
+/// ingress so callers do not create mutable aliases inside the tree.
 using PropertyValue = std::variant<
     std::monostate,  // null/unset
     bool,
     int64_t,
     double,
-    std::string
+    std::string,
+    PropertyArrayValue,
+    PropertyObjectValue
 >;
+
+struct PropertyArray {
+    std::vector<PropertyValue> values;
+
+    PropertyArray() = default;
+    explicit PropertyArray(std::vector<PropertyValue> v) : values(std::move(v)) {}
+    PropertyArray(std::initializer_list<PropertyValue> v) : values(v) {}
+};
+
+struct PropertyObject {
+    using Member = std::pair<std::string, PropertyValue>;
+
+    std::map<std::string, PropertyValue, std::less<>> values;
+
+    PropertyObject() = default;
+    explicit PropertyObject(std::map<std::string, PropertyValue, std::less<>> v)
+        : values(std::move(v)) {}
+    PropertyObject(std::initializer_list<Member> v) {
+        for (const auto& [key, value] : v)
+            values.emplace(key, value);
+    }
+};
+
+inline bool operator==(const PropertyArray& a, const PropertyArray& b) {
+    return a.values == b.values;
+}
+
+inline bool operator!=(const PropertyArray& a, const PropertyArray& b) {
+    return !(a == b);
+}
+
+inline bool operator==(const PropertyObject& a, const PropertyObject& b) {
+    return a.values == b.values;
+}
+
+inline bool operator!=(const PropertyObject& a, const PropertyObject& b) {
+    return !(a == b);
+}
+
+inline bool operator==(const PropertyArrayValue& a, const PropertyArrayValue& b) {
+    if (a.storage == b.storage) return true;
+    if (!a.storage || !b.storage) return false;
+    return *a.storage == *b.storage;
+}
+
+inline bool operator!=(const PropertyArrayValue& a, const PropertyArrayValue& b) {
+    return !(a == b);
+}
+
+inline bool operator==(const PropertyObjectValue& a, const PropertyObjectValue& b) {
+    if (a.storage == b.storage) return true;
+    if (!a.storage || !b.storage) return false;
+    return *a.storage == *b.storage;
+}
+
+inline bool operator!=(const PropertyObjectValue& a, const PropertyObjectValue& b) {
+    return !(a == b);
+}
+
+inline PropertyValue make_property_array(std::vector<PropertyValue> values) {
+    return PropertyArrayValue{
+        std::make_shared<const PropertyArray>(PropertyArray{std::move(values)})};
+}
+
+inline PropertyValue make_property_array(std::initializer_list<PropertyValue> values) {
+    return PropertyArrayValue{
+        std::make_shared<const PropertyArray>(PropertyArray{values})};
+}
+
+inline PropertyValue make_property_object(std::map<std::string, PropertyValue, std::less<>> values) {
+    return PropertyObjectValue{
+        std::make_shared<const PropertyObject>(PropertyObject{std::move(values)})};
+}
+
+inline PropertyValue make_property_object(
+    std::initializer_list<PropertyObject::Member> values) {
+    return PropertyObjectValue{
+        std::make_shared<const PropertyObject>(PropertyObject{values})};
+}
+
+inline const PropertyArray* get_property_array(const PropertyValue& value) {
+    if (auto* ptr = std::get_if<PropertyArrayValue>(&value))
+        return ptr->get();
+    return nullptr;
+}
+
+inline const PropertyObject* get_property_object(const PropertyValue& value) {
+    if (auto* ptr = std::get_if<PropertyObjectValue>(&value))
+        return ptr->get();
+    return nullptr;
+}
 
 /// Listener callback — receives the tree node, property name, old value, new value
 class StateTree;

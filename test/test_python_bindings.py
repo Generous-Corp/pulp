@@ -109,6 +109,7 @@ def assert_exported_type_contracts(pulp) -> None:
     assert hasattr(pulp.PluginDescriptor, "manufacturer")
     assert hasattr(pulp.PluginDescriptor, "version")
     assert hasattr(pulp.PluginDescriptor, "bundle_id")
+    assert hasattr(pulp.PluginDescriptor, "supports_f64_audio")
     assert hasattr(pulp.PluginDescriptor, "is_instrument")
 
     assert hasattr(pulp.HeadlessHost, "prepare")
@@ -119,6 +120,8 @@ def assert_exported_type_contracts(pulp) -> None:
     assert hasattr(pulp.HeadlessHost, "load_state")
     assert hasattr(pulp.HeadlessHost, "process_numpy")
     assert hasattr(pulp.HeadlessHost, "process_numpy_midi")
+    assert hasattr(pulp.HeadlessHost, "process_numpy_f64")
+    assert hasattr(pulp.HeadlessHost, "process_numpy_midi_f64")
 
     assert_raises(TypeError, lambda: pulp.StateStore())
     assert_raises(TypeError, lambda: pulp.PluginDescriptor())

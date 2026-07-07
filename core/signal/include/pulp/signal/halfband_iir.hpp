@@ -96,32 +96,36 @@ namespace pulp::signal {
 ///
 /// RT contract: setters, queries, `process()`, and `reset()` are fixed-state
 /// and allocate no memory.
-class HalfBandAllpassSection {
+template <typename SampleType = float>
+class HalfBandAllpassSectionT {
 public:
-    HalfBandAllpassSection() = default;
-    explicit HalfBandAllpassSection(float a) : a_(a) {}
+    HalfBandAllpassSectionT() = default;
+    explicit HalfBandAllpassSectionT(SampleType a) : a_(a) {}
 
-    void set_coefficient(float a) { a_ = a; }
-    float coefficient() const { return a_; }
+    void set_coefficient(SampleType a) { a_ = a; }
+    SampleType coefficient() const { return a_; }
 
     void reset() {
-        x_z1_ = 0.0f;
-        y_z1_ = 0.0f;
+        x_z1_ = SampleType{0.0f};
+        y_z1_ = SampleType{0.0f};
     }
 
     /// Process one sample. Returns y[n].
-    float process(float x) {
-        const float y = a_ * (x - y_z1_) + x_z1_;
+    SampleType process(SampleType x) {
+        const SampleType y = a_ * (x - y_z1_) + x_z1_;
         x_z1_ = x;
         y_z1_ = y;
         return y;
     }
 
 private:
-    float a_ = 0.0f;
-    float x_z1_ = 0.0f;
-    float y_z1_ = 0.0f;
+    SampleType a_ = SampleType{0.0f};
+    SampleType x_z1_ = SampleType{0.0f};
+    SampleType y_z1_ = SampleType{0.0f};
 };
+
+using HalfBandAllpassSection = HalfBandAllpassSectionT<float>;
+using HalfBandAllpassSection64 = HalfBandAllpassSectionT<double>;
 
 /// Default Tier-2 half-band design — six allpass sections in path A.
 ///
@@ -174,15 +178,28 @@ inline constexpr std::array<float, 6> kDefaultCoefficientsB = {
 
 namespace detail {
 
-inline std::vector<HalfBandAllpassSection> make_sections(std::span<const float> coeffs) {
-    std::vector<HalfBandAllpassSection> out;
+template <typename SampleType>
+inline std::vector<HalfBandAllpassSectionT<SampleType>> make_sections(
+    std::span<const SampleType> coeffs) {
+    std::vector<HalfBandAllpassSectionT<SampleType>> out;
     out.reserve(coeffs.size());
-    for (float a : coeffs) out.emplace_back(a);
+    for (SampleType a : coeffs) out.emplace_back(a);
     return out;
 }
 
-inline float run_path(std::vector<HalfBandAllpassSection>& path, float x) {
-    float v = x;
+template <typename SampleType>
+inline std::vector<HalfBandAllpassSectionT<SampleType>> make_sections_from_float(
+    std::span<const float> coeffs) {
+    std::vector<HalfBandAllpassSectionT<SampleType>> out;
+    out.reserve(coeffs.size());
+    for (float a : coeffs) out.emplace_back(static_cast<SampleType>(a));
+    return out;
+}
+
+template <typename SampleType>
+inline SampleType run_path(std::vector<HalfBandAllpassSectionT<SampleType>>& path,
+                           SampleType x) {
+    SampleType v = x;
     for (auto& s : path) v = s.process(v);
     return v;
 }
@@ -200,16 +217,19 @@ inline float run_path(std::vector<HalfBandAllpassSection>& path, float x) {
 /// RT contract: constructors allocate section storage. `sections_*()`,
 /// `process()`, `process_block()`, and `reset()` allocate no memory after
 /// construction.
-class HalfBandUpsampler2x {
+template <typename SampleType = float>
+class HalfBandUpsampler2xT {
 public:
-    HalfBandUpsampler2x()
-        : path_a_(detail::make_sections(std::span<const float>(kDefaultCoefficientsA))),
-          path_b_(detail::make_sections(std::span<const float>(kDefaultCoefficientsB))) {}
+    HalfBandUpsampler2xT()
+        : path_a_(detail::make_sections_from_float<SampleType>(
+              std::span<const float>(kDefaultCoefficientsA))),
+          path_b_(detail::make_sections_from_float<SampleType>(
+              std::span<const float>(kDefaultCoefficientsB))) {}
 
-    HalfBandUpsampler2x(std::span<const float> coeffs_a,
-                       std::span<const float> coeffs_b)
-        : path_a_(detail::make_sections(coeffs_a)),
-          path_b_(detail::make_sections(coeffs_b)) {}
+    HalfBandUpsampler2xT(std::span<const SampleType> coeffs_a,
+                         std::span<const SampleType> coeffs_b)
+        : path_a_(detail::make_sections<SampleType>(coeffs_a)),
+          path_b_(detail::make_sections<SampleType>(coeffs_b)) {}
 
     /// Number of allpass sections in path A.
     std::size_t sections_a() const { return path_a_.size(); }
@@ -231,15 +251,16 @@ public:
     /// interleaved into a single 2x-rate stream — the path phase
     /// difference is 0 in the passband (samples reinforce) and pi in
     /// the stopband (samples cancel).
-    void process(float x, float& out_lo, float& out_hi) {
-        const float a = detail::run_path(path_a_, x);
-        const float b = detail::run_path(path_b_, x);
+    void process(SampleType x, SampleType& out_lo, SampleType& out_hi) {
+        const SampleType a = detail::run_path(path_a_, x);
+        const SampleType b = detail::run_path(path_b_, x);
         out_lo = a;
         out_hi = b;
     }
 
     /// Block helper. `input` length N produces `output` length 2N.
-    void process_block(std::span<const float> input, std::span<float> output) {
+    void process_block(std::span<const SampleType> input,
+                       std::span<SampleType> output) {
         const std::size_t n = input.size();
         for (std::size_t i = 0; i < n; ++i) {
             process(input[i], output[2 * i], output[2 * i + 1]);
@@ -247,9 +268,12 @@ public:
     }
 
 private:
-    std::vector<HalfBandAllpassSection> path_a_;
-    std::vector<HalfBandAllpassSection> path_b_;
+    std::vector<HalfBandAllpassSectionT<SampleType>> path_a_;
+    std::vector<HalfBandAllpassSectionT<SampleType>> path_b_;
 };
+
+using HalfBandUpsampler2x = HalfBandUpsampler2xT<float>;
+using HalfBandUpsampler2x64 = HalfBandUpsampler2xT<double>;
 
 /// 2x half-band downsampler.
 ///
@@ -264,16 +288,19 @@ private:
 /// RT contract: constructors allocate section storage. `sections_*()`,
 /// `process()`, `process_block()`, and `reset()` allocate no memory after
 /// construction.
-class HalfBandDownsampler2x {
+template <typename SampleType = float>
+class HalfBandDownsampler2xT {
 public:
-    HalfBandDownsampler2x()
-        : path_a_(detail::make_sections(std::span<const float>(kDefaultCoefficientsA))),
-          path_b_(detail::make_sections(std::span<const float>(kDefaultCoefficientsB))) {}
+    HalfBandDownsampler2xT()
+        : path_a_(detail::make_sections_from_float<SampleType>(
+              std::span<const float>(kDefaultCoefficientsA))),
+          path_b_(detail::make_sections_from_float<SampleType>(
+              std::span<const float>(kDefaultCoefficientsB))) {}
 
-    HalfBandDownsampler2x(std::span<const float> coeffs_a,
-                         std::span<const float> coeffs_b)
-        : path_a_(detail::make_sections(coeffs_a)),
-          path_b_(detail::make_sections(coeffs_b)) {}
+    HalfBandDownsampler2xT(std::span<const SampleType> coeffs_a,
+                           std::span<const SampleType> coeffs_b)
+        : path_a_(detail::make_sections<SampleType>(coeffs_a)),
+          path_b_(detail::make_sections<SampleType>(coeffs_b)) {}
 
     std::size_t sections_a() const { return path_a_.size(); }
     std::size_t sections_b() const { return path_b_.size(); }
@@ -293,14 +320,15 @@ public:
     /// "lower-frequency" allpass coefficients, so the wiring runs
     /// `in_hi → path_a_`, `in_lo → path_b_` to land at the correct
     /// `z^-1` alignment for the decimation polyphase identity.
-    float process(float in_lo, float in_hi) {
-        const float a = detail::run_path(path_a_, in_hi);
-        const float b = detail::run_path(path_b_, in_lo);
-        return 0.5f * (a + b);
+    SampleType process(SampleType in_lo, SampleType in_hi) {
+        const SampleType a = detail::run_path(path_a_, in_hi);
+        const SampleType b = detail::run_path(path_b_, in_lo);
+        return SampleType{0.5f} * (a + b);
     }
 
     /// Block helper. `input` length 2N produces `output` length N.
-    void process_block(std::span<const float> input, std::span<float> output) {
+    void process_block(std::span<const SampleType> input,
+                       std::span<SampleType> output) {
         const std::size_t n = output.size();
         for (std::size_t i = 0; i < n; ++i) {
             output[i] = process(input[2 * i], input[2 * i + 1]);
@@ -308,8 +336,11 @@ public:
     }
 
 private:
-    std::vector<HalfBandAllpassSection> path_a_;
-    std::vector<HalfBandAllpassSection> path_b_;
+    std::vector<HalfBandAllpassSectionT<SampleType>> path_a_;
+    std::vector<HalfBandAllpassSectionT<SampleType>> path_b_;
 };
+
+using HalfBandDownsampler2x = HalfBandDownsampler2xT<float>;
+using HalfBandDownsampler2x64 = HalfBandDownsampler2xT<double>;
 
 } // namespace pulp::signal

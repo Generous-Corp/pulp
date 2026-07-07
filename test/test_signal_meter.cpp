@@ -31,6 +31,24 @@ TEST_CASE("MultiChannelMeter emits peak RMS clipping and stereo correlation", "[
     REQUIRE(std::isfinite(snap.channels[0].lufs_momentary));
 }
 
+TEST_CASE("MultiChannelMeter64 accepts double input buffers", "[signal][meter][f64]") {
+    MultiChannelMeter64 meter;
+    meter.prepare(1000.0, 2);
+
+    std::vector<double> left(10, 0.125);
+    std::vector<double> right(10, -0.125);
+    left[4] = 1.25;
+    right[4] = -1.25;
+    const double* channels[] = {left.data(), right.data()};
+    meter.process(channels, 2, static_cast<int>(left.size()));
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == 2);
+    REQUIRE(snap.channels[0].clipped);
+    REQUIRE_THAT(snap.channels[0].peak, WithinAbs(1.25f, 1e-6f));
+    REQUIRE_THAT(snap.correlation, WithinAbs(-1.0f, 1e-3f));
+}
+
 TEST_CASE("MultiChannelMeter tracks negative correlation and integrated loudness", "[signal][meter]") {
     MultiChannelMeter meter;
     meter.prepare(1000.0f, 2);

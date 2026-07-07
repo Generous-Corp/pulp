@@ -37,11 +37,14 @@ enum class MixCurve {
     Sqrt4_5dB,
 };
 
-class DryWetMixer {
+template <typename SampleType = float>
+class DryWetMixerT {
 public:
     /// Set the mix ratio (0.0 = fully dry, 1.0 = fully wet)
-    void set_mix(float mix) { mix_ = std::clamp(mix, 0.0f, 1.0f); }
-    float mix() const { return mix_; }
+    void set_mix(SampleType mix) {
+        mix_ = std::clamp(mix, SampleType{0.0f}, SampleType{1.0f});
+    }
+    SampleType mix() const { return mix_; }
 
     /// Set the mixing curve type
     void set_curve(MixCurve curve) { curve_ = curve; }
@@ -56,12 +59,13 @@ public:
         delay_pos_ = 0;
 
         if (latency_ > 0 && max_channels_ > 0)
-            delay_buffer_.assign(static_cast<size_t>(latency_ * max_channels_), 0.0f);
+            delay_buffer_.assign(static_cast<size_t>(latency_ * max_channels_),
+                                 SampleType{0.0f});
         else
             delay_buffer_.clear();
 
         for (auto& ch : dry_buffer_)
-            std::fill(ch.begin(), ch.end(), 0.0f);
+            std::fill(ch.begin(), ch.end(), SampleType{0.0f});
     }
 
     /// Prepare for processing.
@@ -76,19 +80,20 @@ public:
         max_block_size_ = std::max(0, max_block_size);
         delay_pos_ = 0;
         if (latency_ > 0 && max_channels_ > 0)
-            delay_buffer_.assign(static_cast<size_t>(latency_ * max_channels_), 0.0f);
+            delay_buffer_.assign(static_cast<size_t>(latency_ * max_channels_),
+                                 SampleType{0.0f});
         else
             delay_buffer_.clear();
 
         dry_buffer_.resize(static_cast<size_t>(max_channels_));
         for (auto& ch : dry_buffer_)
-            ch.assign(static_cast<size_t>(max_block_size_), 0.0f);
+            ch.assign(static_cast<size_t>(max_block_size_), SampleType{0.0f});
         active_dry_channels_ = 0;
         active_dry_samples_ = 0;
     }
 
     /// Push dry samples before processing (call before your wet processing)
-    void push_dry(const float* const* channels, int num_channels, int num_samples) {
+    void push_dry(const SampleType* const* channels, int num_channels, int num_samples) {
         if (channels == nullptr || num_channels <= 0 || num_samples <= 0) {
             active_dry_channels_ = 0;
             active_dry_samples_ = 0;
@@ -101,7 +106,7 @@ public:
             // No latency compensation — just store the dry signal
             for (int ch = 0; ch < num_channels; ++ch) {
                 std::memcpy(dry_buffer_[ch].data(), channels[ch],
-                           static_cast<size_t>(num_samples) * sizeof(float));
+                            static_cast<size_t>(num_samples) * sizeof(SampleType));
             }
             active_dry_channels_ = num_channels;
             active_dry_samples_ = num_samples;
@@ -126,8 +131,8 @@ public:
     }
 
     /// Mix dry and wet signals, writing result to wet_channels (in-place)
-    void mix_wet(float* const* wet_channels, int num_channels, int num_samples) {
-        float dry_gain, wet_gain;
+    void mix_wet(SampleType* const* wet_channels, int num_channels, int num_samples) {
+        SampleType dry_gain, wet_gain;
         compute_gains(dry_gain, wet_gain);
 
         const int channel_count = std::min(num_channels, active_dry_channels_);
@@ -141,14 +146,14 @@ public:
     }
 
     void reset() {
-        std::fill(delay_buffer_.begin(), delay_buffer_.end(), 0.0f);
+        std::fill(delay_buffer_.begin(), delay_buffer_.end(), SampleType{0.0f});
         delay_pos_ = 0;
         for (auto& ch : dry_buffer_)
-            std::fill(ch.begin(), ch.end(), 0.0f);
+            std::fill(ch.begin(), ch.end(), SampleType{0.0f});
     }
 
 private:
-    float mix_ = 1.0f;
+    SampleType mix_ = SampleType{1.0f};
     MixCurve curve_ = MixCurve::Linear;
     int latency_ = 0;
     int max_channels_ = 2;
@@ -156,8 +161,8 @@ private:
     int delay_pos_ = 0;
     int active_dry_channels_ = 0;
     int active_dry_samples_ = 0;
-    std::vector<float> delay_buffer_;
-    std::vector<std::vector<float>> dry_buffer_;
+    std::vector<SampleType> delay_buffer_;
+    std::vector<std::vector<SampleType>> dry_buffer_;
 
     void ensure_dry_storage(int num_channels, int num_samples) {
         if (num_channels <= static_cast<int>(dry_buffer_.size())) {
@@ -178,12 +183,12 @@ private:
         }
     }
 
-    void compute_gains(float& dry, float& wet) const {
-        constexpr float kHalfPi = 1.57079632679489661923f;
-        const float theta = mix_ * kHalfPi;
+    void compute_gains(SampleType& dry, SampleType& wet) const {
+        constexpr SampleType kHalfPi = SampleType{1.57079632679489661923f};
+        const SampleType theta = mix_ * kHalfPi;
         switch (curve_) {
             case MixCurve::Linear:
-                dry = 1.0f - mix_;
+                dry = SampleType{1.0f} - mix_;
                 wet = mix_;
                 break;
             case MixCurve::EqualPower:
@@ -192,15 +197,19 @@ private:
                 wet = std::sin(theta);
                 break;
             case MixCurve::Balanced:
-                dry = mix_ <= 0.5f ? 1.0f : (1.0f - mix_) * 2.0f;
-                wet = mix_ >= 0.5f ? 1.0f : mix_ * 2.0f;
+                dry = mix_ <= SampleType{0.5f}
+                    ? SampleType{1.0f}
+                    : (SampleType{1.0f} - mix_) * SampleType{2.0f};
+                wet = mix_ >= SampleType{0.5f}
+                    ? SampleType{1.0f}
+                    : mix_ * SampleType{2.0f};
                 break;
             case MixCurve::Sin4_5dB: {
                 // Clamp before pow to guard against tiny negative residue.
-                const float c = std::max(0.0f, std::cos(theta));
-                const float s = std::max(0.0f, std::sin(theta));
-                dry = std::pow(c, 1.5f);
-                wet = std::pow(s, 1.5f);
+                const SampleType c = std::max(SampleType{0.0f}, std::cos(theta));
+                const SampleType s = std::max(SampleType{0.0f}, std::sin(theta));
+                dry = std::pow(c, SampleType{1.5f});
+                wet = std::pow(s, SampleType{1.5f});
                 break;
             }
             case MixCurve::Sin6dB:
@@ -208,7 +217,7 @@ private:
                 wet = std::sin(theta) * std::sin(theta);
                 break;
             case MixCurve::Sqrt3dB:
-                dry = std::sqrt(1.0f - mix_);
+                dry = std::sqrt(SampleType{1.0f} - mix_);
                 wet = std::sqrt(mix_);
                 break;
             case MixCurve::Sqrt4_5dB:
@@ -216,11 +225,14 @@ private:
                 // -6 dB linear (exp 1.0) → exponent 0.75. At mix=0.5
                 // produces 0.5^0.75 ≈ 0.5946 per side ≈ -4.51 dB,
                 // matching the documented midpoint notch.
-                dry = std::pow(1.0f - mix_, 0.75f);
-                wet = std::pow(mix_, 0.75f);
+                dry = std::pow(SampleType{1.0f} - mix_, SampleType{0.75f});
+                wet = std::pow(mix_, SampleType{0.75f});
                 break;
         }
     }
 };
+
+using DryWetMixer = DryWetMixerT<float>;
+using DryWetMixer64 = DryWetMixerT<double>;
 
 }  // namespace pulp::signal

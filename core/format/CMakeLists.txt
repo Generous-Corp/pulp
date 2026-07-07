@@ -9,6 +9,7 @@ target_include_directories(pulp-format
 
 target_sources(pulp-format PRIVATE
     src/format.cpp
+    src/processor_f64.cpp
     src/registry.cpp
     src/headless.cpp
     src/offline_render_host.cpp

@@ -175,9 +175,10 @@ struct ResamplerProcessResult {
     std::size_t input_frames_consumed = 0;
 };
 
-class Resampler {
+template <typename SampleType = float>
+class ResamplerT {
 public:
-    Resampler() = default;
+    ResamplerT() = default;
 
     /// Configure the conversion. `input_rate` and `output_rate` may be
     /// any positive values; the polyphase table is designed once at
@@ -253,11 +254,11 @@ public:
         // most-recent-`taps` window newest-last, so reversing the phase table
         // here lets the hot loop walk the window and the coefficients in the
         // same ascending direction — straight vector loads, no reverse shuffle.
-        phases_.assign(L, std::vector<float>(taps_per_phase, 0.0f));
+        phases_.assign(L, std::vector<SampleType>(taps_per_phase, SampleType{0.0f}));
         for (std::size_t p = 0; p < L; ++p) {
             for (std::size_t k = 0; k < taps_per_phase; ++k) {
                 phases_[p][k] =
-                    static_cast<float>(prototype_[(taps_per_phase - 1u - k) * L + p]);
+                    static_cast<SampleType>(prototype_[(taps_per_phase - 1u - k) * L + p]);
             }
         }
         taps_per_phase_ = taps_per_phase;
@@ -268,14 +269,16 @@ public:
         // always a contiguous physical span. The convolution then reads it with a
         // plain pointer walk instead of a per-tap wrap branch — same taps in the
         // same order (bit-identical), but branch-free and vectorizable.
-        delays_.assign(channels_, std::vector<float>(taps_per_phase * 2u, 0.0f));
+        delays_.assign(channels_, std::vector<SampleType>(taps_per_phase * 2u,
+                                                         SampleType{0.0f}));
         write_pos_.assign(channels_, 0u);
 
         // Output scratch — worst-case output count for a max-size input block.
         const double ratio = output_rate_ / input_rate_;
         const std::size_t worst_out =
             static_cast<std::size_t>(std::ceil(static_cast<double>(max_block_size) * ratio)) + 8u;
-        scratch_out_.assign(channels_, std::vector<float>(worst_out, 0.0f));
+        scratch_out_.assign(channels_, std::vector<SampleType>(worst_out,
+                                                              SampleType{0.0f}));
 
         // Step (input samples per output sample) in the input domain.
         step_ = input_rate_ / output_rate_;
@@ -296,7 +299,7 @@ public:
     /// concurrently with `process_*` — call from the audio thread
     /// between blocks, or while bypassed.
     void reset() {
-        for (auto& d : delays_) std::fill(d.begin(), d.end(), 0.0f);
+        for (auto& d : delays_) std::fill(d.begin(), d.end(), SampleType{0.0f});
         std::fill(write_pos_.begin(), write_pos_.end(), 0u);
         phase_acc_ = 0.0;
     }
@@ -306,9 +309,9 @@ public:
     /// Returns the actual number of output samples produced.
     ///
     /// Allocation-free after `prepare()`.
-    ResamplerProcessResult process_block_detailed(const float* const* input,
+    ResamplerProcessResult process_block_detailed(const SampleType* const* input,
                                                   std::size_t in_count,
-                                                  float* const* output,
+                                                  SampleType* const* output,
                                                   std::size_t out_capacity) {
         if (channels_ == 0 || taps_per_phase_ == 0 || phases_.empty()) return {};
         const std::size_t L = phases_.size();
@@ -330,7 +333,7 @@ public:
                 }
                 for (std::size_t c = 0; c < channels_; ++c) {
                     auto& d = delays_[c];
-                    const float xs = input[c][input_consumed];
+                    const SampleType xs = input[c][input_consumed];
                     // Mirror-write at `wp` and `wp + taps` so the read window stays
                     // contiguous (see the convolution below).
                     d[write_pos_[c]] = xs;
@@ -372,22 +375,28 @@ public:
                 // error sits ~69 dB below the filter's stopband floor (the
                 // "float reassociation stays below the stopband" test asserts it),
                 // far under any audible or spec-relevant level.
-                const float* win = &d[wp];   // window = win[0 .. taps-1], oldest→newest
+                const SampleType* win = &d[wp]; // window = win[0 .. taps-1], oldest→newest
                 const std::size_t T = taps_per_phase_;
-                float a0 = 0.f, a1 = 0.f, a2 = 0.f, a3 = 0.f;
+                SampleType a0 = SampleType{0.0f};
+                SampleType a1 = SampleType{0.0f};
+                SampleType a2 = SampleType{0.0f};
+                SampleType a3 = SampleType{0.0f};
                 std::size_t k = 0;
                 if (frac != 0.0) {
-                    float b0 = 0.f, b1 = 0.f, b2 = 0.f, b3 = 0.f;
+                    SampleType b0 = SampleType{0.0f};
+                    SampleType b1 = SampleType{0.0f};
+                    SampleType b2 = SampleType{0.0f};
+                    SampleType b3 = SampleType{0.0f};
                     for (; k + 4u <= T; k += 4u) {
                         a0 += win[k]      * ph0[k];      b0 += win[k]      * ph1[k];
                         a1 += win[k + 1u] * ph0[k + 1u]; b1 += win[k + 1u] * ph1[k + 1u];
                         a2 += win[k + 2u] * ph0[k + 2u]; b2 += win[k + 2u] * ph1[k + 2u];
                         a3 += win[k + 3u] * ph0[k + 3u]; b3 += win[k + 3u] * ph1[k + 3u];
                     }
-                    float acc0 = (a0 + a1) + (a2 + a3);
-                    float acc1 = (b0 + b1) + (b2 + b3);
+                    SampleType acc0 = (a0 + a1) + (a2 + a3);
+                    SampleType acc1 = (b0 + b1) + (b2 + b3);
                     for (; k < T; ++k) { acc0 += win[k] * ph0[k]; acc1 += win[k] * ph1[k]; }
-                    output[c][out_n] = acc0 + static_cast<float>(frac) * (acc1 - acc0);
+                    output[c][out_n] = acc0 + static_cast<SampleType>(frac) * (acc1 - acc0);
                 } else {
                     // Integer phase position (e.g. integer resample ratios): the
                     // second phase is weighted by frac == 0, so it never reaches the
@@ -398,7 +407,7 @@ public:
                         a2 += win[k + 2u] * ph0[k + 2u];
                         a3 += win[k + 3u] * ph0[k + 3u];
                     }
-                    float acc0 = (a0 + a1) + (a2 + a3);
+                    SampleType acc0 = (a0 + a1) + (a2 + a3);
                     for (; k < T; ++k) acc0 += win[k] * ph0[k];
                     output[c][out_n] = acc0;
                 }
@@ -410,26 +419,26 @@ public:
         return {out_n, input_consumed};
     }
 
-    std::size_t process_block(const float* const* input,
+    std::size_t process_block(const SampleType* const* input,
                               std::size_t in_count,
-                              float* const* output,
+                              SampleType* const* output,
                               std::size_t out_capacity) {
         return process_block_detailed(input, in_count, output, out_capacity).output_frames;
     }
 
-    ResamplerProcessResult process_block_mono_detailed(const float* input,
+    ResamplerProcessResult process_block_mono_detailed(const SampleType* input,
                                                        std::size_t in_count,
-                                                       float* output,
+                                                       SampleType* output,
                                                        std::size_t out_capacity) {
-        const float* in_ptrs[1] = { input };
-        float* out_ptrs[1] = { output };
+        const SampleType* in_ptrs[1] = { input };
+        SampleType* out_ptrs[1] = { output };
         return process_block_detailed(in_ptrs, in_count, out_ptrs, out_capacity);
     }
 
     /// Mono convenience wrapper around `process_block`.
-    std::size_t process_block_mono(const float* input,
+    std::size_t process_block_mono(const SampleType* input,
                                    std::size_t in_count,
-                                   float* output,
+                                   SampleType* output,
                                    std::size_t out_capacity) {
         return process_block_mono_detailed(input, in_count, output, out_capacity).output_frames;
     }
@@ -469,21 +478,24 @@ private:
     // Prototype LP (length L * taps_per_phase). Kept around so tests
     // can introspect it. Phases are the runtime representation.
     std::vector<double> prototype_;
-    std::vector<std::vector<float>> phases_;
+    std::vector<std::vector<SampleType>> phases_;
     std::size_t taps_per_phase_ = 0;
 
     // Per-channel circular delay line + write head.
-    std::vector<std::vector<float>> delays_;
+    std::vector<std::vector<SampleType>> delays_;
     std::vector<std::size_t> write_pos_;
 
     // Per-channel scratch — not used directly by process_block but
     // kept available so future block-process variants can drain into
     // it without allocating.
-    std::vector<std::vector<float>> scratch_out_;
+    std::vector<std::vector<SampleType>> scratch_out_;
 
     // Phase accumulator in input samples per output sample.
     double step_ = 1.0;
     double phase_acc_ = 0.0;
 };
+
+using Resampler = ResamplerT<float>;
+using Resampler64 = ResamplerT<double>;
 
 } // namespace pulp::signal

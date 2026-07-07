@@ -1,52 +1,77 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <pulp/signal/special_functions.hpp>
+#include <type_traits>
 
 namespace pulp::signal {
 
 // Simple gain processor.
 // RT contract: setters and process paths are scalar-only and allocate no
 // memory.
-class Gain {
+template <typename SampleType = float>
+class GainT {
+    static_assert(std::is_floating_point_v<SampleType>,
+                  "GainT requires a floating-point sample type");
+
 public:
-    void set_gain_db(float db) { gain_ = db_to_linear(db); }
-    void set_gain_linear(float linear) { gain_ = linear; }
-    float gain_db() const { return linear_to_db(gain_); }
-    float gain_linear() const { return gain_; }
+    void set_gain_db(SampleType db) {
+        gain_ = std::pow(SampleType{10}, db / SampleType{20});
+    }
+    void set_gain_linear(SampleType linear) { gain_ = linear; }
+    SampleType gain_db() const {
+        return SampleType{20} *
+               std::log10(std::max(gain_, SampleType{1e-10f}));
+    }
+    SampleType gain_linear() const { return gain_; }
 
-    float process(float input) const { return input * gain_; }
+    SampleType process(SampleType input) const { return input * gain_; }
 
-    void process(float* buffer, int num_samples) const {
+    void process(SampleType* buffer, int num_samples) const {
         for (int i = 0; i < num_samples; ++i)
             buffer[i] *= gain_;
     }
 
 private:
-    float gain_ = 1.0f;
+    SampleType gain_ = SampleType{1};
 };
 
 // Simple dry/wet mixer (single-sample, no latency compensation).
 // RT contract: setters and process paths are scalar-only and allocate no
 // memory. For the full multi-channel version with latency compensation, use
 // dry_wet_mixer.hpp.
-class SimpleMixer {
-public:
-    void set_mix(float mix) { mix_ = std::clamp(mix, 0.0f, 1.0f); }
-    float mix() const { return mix_; }
+template <typename SampleType = float>
+class SimpleMixerT {
+    static_assert(std::is_floating_point_v<SampleType>,
+                  "SimpleMixerT requires a floating-point sample type");
 
-    float process(float dry, float wet) const {
-        return dry * (1.0f - mix_) + wet * mix_;
+public:
+    void set_mix(SampleType mix) {
+        mix_ = std::clamp(mix, SampleType{0}, SampleType{1});
+    }
+    SampleType mix() const { return mix_; }
+
+    SampleType process(SampleType dry, SampleType wet) const {
+        return dry * (SampleType{1} - mix_) + wet * mix_;
     }
 
-    void process(const float* dry, const float* wet, float* output, int num_samples) const {
-        float d = 1.0f - mix_;
+    void process(const SampleType* dry,
+                 const SampleType* wet,
+                 SampleType* output,
+                 int num_samples) const {
+        const SampleType d = SampleType{1} - mix_;
         for (int i = 0; i < num_samples; ++i)
             output[i] = dry[i] * d + wet[i] * mix_;
     }
 
 private:
-    float mix_ = 1.0f; // 1.0 = fully wet
+    SampleType mix_ = SampleType{1}; // 1.0 = fully wet
 };
+
+using Gain = GainT<float>;
+using Gain64 = GainT<double>;
+using SimpleMixer = SimpleMixerT<float>;
+using SimpleMixer64 = SimpleMixerT<double>;
 
 } // namespace pulp::signal

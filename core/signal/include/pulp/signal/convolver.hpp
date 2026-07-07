@@ -41,16 +41,17 @@ namespace pulp::signal {
 ///   conv.try_swap_ir(swapper);
 ///   // background thread, periodically:
 ///   swapper.drain_old();
-class PartitionedConvolver {
+template <typename SampleType = float>
+class PartitionedConvolverT {
 public:
-    PartitionedConvolver() = default;
+    PartitionedConvolverT() = default;
 
     /// Load an impulse response. block_size should match your audio
     /// callback size. block_size must be a power of two (for the
     /// radix-2 FFT); if not, it is rounded up to the next one.
     ///
     /// Allocates and FFTs inline — call off the audio thread.
-    void load_ir(const float* ir, std::size_t ir_length, std::size_t block_size) {
+    void load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size) {
         state_ = detail::build_convolver_ir_state(ir, ir_length, block_size);
         partition_index_ = 0;
     }
@@ -64,7 +65,7 @@ public:
     ///
     /// Must be called at a block boundary (between `process()` calls)
     /// so the in-flight overlap buffers don't pick up midway through.
-    bool try_swap_ir(ConvolverIrSwapper& swapper) {
+    bool try_swap_ir(ConvolverIrSwapperT<SampleType>& swapper) {
         // Gate the swap on retire-ring capacity FIRST so the audio
         // thread never has to free the displaced IR inline if the
         // ring is saturated. A single retired slot would let the audio
@@ -151,11 +152,16 @@ public:
     void set_crossfade(std::size_t samples, TransitionCurve curve = TransitionCurve::Smoothstep) {
         fade_samples_ = samples;
         fade_curve_ = curve;
-        if (state_) fade_scratch_.assign(static_cast<std::size_t>(state_->block_size), 0.0f);
+        if (state_) {
+            fade_scratch_.assign(static_cast<std::size_t>(state_->block_size),
+                                 SampleType{0.0f});
+        }
     }
 
     /// Process a block of audio. num_samples must equal block_size.
-    void process(const float* input, float* output, std::size_t num_samples) {
+    void process(const SampleType* input,
+                 SampleType* output,
+                 std::size_t num_samples) {
         if (!state_ || state_->ir_spectra.empty()
             || static_cast<int>(num_samples) != state_->block_size) {
             std::copy_n(input, num_samples, output);
@@ -175,7 +181,7 @@ public:
                              fade_scratch_.data(), num_samples);
                 const std::size_t base = fade_mixer_.position();
                 for (std::size_t i = 0; i < num_samples; ++i) {
-                    float old_gain, new_gain;
+                    SampleType old_gain, new_gain;
                     fade_mixer_.gains_at(base + i, old_gain, new_gain);
                     output[i] = output[i] * new_gain + fade_scratch_[i] * old_gain;
                 }
@@ -190,9 +196,10 @@ public:
     void reset() {
         if (!state_) return;
         for (auto& spec : state_->input_spectra)
-            std::fill(spec.begin(), spec.end(), std::complex<float>{0.0f, 0.0f});
+            std::fill(spec.begin(), spec.end(),
+                      std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
         std::fill(state_->input_buffer.begin(), state_->input_buffer.end(),
-                  std::complex<float>{0.0f, 0.0f});
+                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
         partition_index_ = 0;
     }
 
@@ -215,18 +222,22 @@ private:
     // partition index. Shared by the live path (state_) and the parallel
     // fade-out render (fading_). Caller guarantees num_samples == s.block_size
     // and s has a loaded IR.
-    void render_state(ConvolverIrState& s, std::size_t& partition_index,
-                      const float* input, float* output, std::size_t num_samples) {
+    void render_state(ConvolverIrStateT<SampleType>& s,
+                      std::size_t& partition_index,
+                      const SampleType* input,
+                      SampleType* output,
+                      std::size_t num_samples) {
         (void)num_samples;
         for (int i = 0; i < s.block_size; ++i)
-            s.input_buffer[s.block_size + i] = {input[i], 0.0f};
+            s.input_buffer[s.block_size + i] = {input[i], SampleType{0.0f}};
 
         auto& current_spectrum = s.input_spectra[partition_index];
         std::copy(s.input_buffer.begin(), s.input_buffer.end(),
                   current_spectrum.begin());
         s.fft->forward(current_spectrum.data());
 
-        std::fill(s.accum.begin(), s.accum.end(), std::complex<float>{0.0f, 0.0f});
+        std::fill(s.accum.begin(), s.accum.end(),
+                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
         // Input and IR are FFTs of real data, so every spectrum is Hermitian
         // (bin N-i is the conjugate of bin i). The frequency-domain product is
         // therefore Hermitian too, so only the lower half + Nyquist (N/2+1 bins)
@@ -236,17 +247,17 @@ private:
         for (std::size_t p = 0; p < s.num_partitions; ++p) {
             const std::size_t idx =
                 (partition_index + s.num_partitions - p) % s.num_partitions;
-            const std::complex<float>* in = s.input_spectra[idx].data();
-            const std::complex<float>* ir = s.ir_spectra[p].data();
+            const std::complex<SampleType>* in = s.input_spectra[idx].data();
+            const std::complex<SampleType>* ir = s.ir_spectra[p].data();
             for (int i = 0; i <= half; ++i) {
                 // Complex MAC as explicit float ops: the finite-value result of
                 // std::complex::operator* without its libm NaN/Inf-recovery
                 // branch, so the loop vectorizes. Matches operator* for the
                 // finite spectra a convolver sees (differences are sub-ulp).
-                const float ar = in[i].real(), ai = in[i].imag();
-                const float br = ir[i].real(), bi = ir[i].imag();
-                s.accum[i] += std::complex<float>(ar * br - ai * bi,
-                                                  ar * bi + ai * br);
+                const SampleType ar = in[i].real(), ai = in[i].imag();
+                const SampleType br = ir[i].real(), bi = ir[i].imag();
+                s.accum[i] += std::complex<SampleType>(ar * br - ai * bi,
+                                                       ar * bi + ai * br);
             }
         }
         // Mirror the lower half onto the conjugate-symmetric upper half so the
@@ -263,21 +274,24 @@ private:
         std::copy_n(s.input_buffer.begin() + s.block_size, s.block_size,
                     s.input_buffer.begin());
         std::fill(s.input_buffer.begin() + s.block_size, s.input_buffer.end(),
-                  std::complex<float>{0.0f, 0.0f});
+                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
 
         partition_index = (partition_index + 1) % s.num_partitions;
     }
 
-    std::unique_ptr<ConvolverIrState> state_;
+    std::unique_ptr<ConvolverIrStateT<SampleType>> state_;
     std::size_t partition_index_ = 0;
 
     // ── Crossfade state (item 2.1b; opt-in via set_crossfade) ─────────────────
-    std::unique_ptr<ConvolverIrState> fading_;    // IR fading out (parallel render)
+    std::unique_ptr<ConvolverIrStateT<SampleType>> fading_; // IR fading out (parallel render)
     std::size_t fading_partition_index_ = 0;      // its own overlap-save cursor
-    signal::TransitionMixer fade_mixer_;          // shared click-free blend (item 2.1)
+    signal::TransitionMixerT<SampleType> fade_mixer_; // shared click-free blend (item 2.1)
     std::size_t fade_samples_ = 0;                // configured fade length (0 = instant)
     TransitionCurve fade_curve_ = TransitionCurve::Smoothstep;
-    std::vector<float> fade_scratch_;             // parallel-render output, pre-sized off-RT
+    std::vector<SampleType> fade_scratch_;        // parallel-render output, pre-sized off-RT
 };
+
+using PartitionedConvolver = PartitionedConvolverT<float>;
+using PartitionedConvolver64 = PartitionedConvolverT<double>;
 
 } // namespace pulp::signal

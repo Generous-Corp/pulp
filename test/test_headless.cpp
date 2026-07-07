@@ -3,8 +3,10 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/headless.hpp>
 #include <pulp/format/registry.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 // Simple test processor for headless testing
@@ -139,8 +141,82 @@ public:
     std::vector<pulp::format::ProcessContext> contexts;
 };
 
+class NativeF64ProbeProcessor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "NativeF64Probe",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.native-f64",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Audio In", 1}},
+            .output_buses = {{"Audio Out", 1}},
+            .supports_f64_audio = true,
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(
+        pulp::audio::BufferView<float>& output,
+        const pulp::audio::BufferView<const float>&,
+        pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+        const pulp::format::ProcessContext&) override
+    {
+        ++f32_process_calls;
+        output.clear();
+    }
+
+    void process_f64(
+        pulp::format::ProcessBuffers64& audio,
+        pulp::midi::MidiBuffer& midi_in,
+        pulp::midi::MidiBuffer&,
+        const pulp::format::ProcessContext& context) override
+    {
+        ++f64_process_calls;
+        last_context = context;
+        midi_in_events = 0;
+        for (const auto& event : midi_in) {
+            static_cast<void>(event);
+            ++midi_in_events;
+        }
+        had_param_events = (param_events() != nullptr);
+        last_param_events.clear();
+        if (auto* events = param_events()) {
+            for (const auto& event : *events) last_param_events.push_back(event);
+        }
+
+        auto* output = audio.main_output();
+        auto* input = audio.main_input();
+        if (!output || !input) return;
+
+        const auto channels =
+            (std::min)(output->num_channels(), input->num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            const auto src = input->channel(ch);
+            auto dst = output->channel(ch);
+            for (std::size_t i = 0; i < dst.size(); ++i) {
+                dst[i] = src[i] + 1.0e-12;
+            }
+        }
+    }
+
+    int f32_process_calls = 0;
+    int f64_process_calls = 0;
+    int midi_in_events = 0;
+    bool had_param_events = false;
+    pulp::format::ProcessContext last_context{};
+    std::vector<pulp::state::ParameterEvent> last_param_events;
+};
+
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
     return std::make_unique<TestGainProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_native_f64_probe() {
+    return std::make_unique<NativeF64ProbeProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_null_processor() {
@@ -421,6 +497,88 @@ TEST_CASE("HeadlessHost defaults non-positive context fields",
     REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Realtime);
     REQUIRE(last_context.render_speed_hint == pulp::format::RenderSpeedHint::Realtime);
     REQUIRE_FALSE(last_context.allows_offline_quality_work());
+}
+
+TEST_CASE("HeadlessHost prepares and drives the f64 fallback path",
+          "[headless][f64]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
+    host.prepare(96000.0, 16, 1, 1);
+
+    pulp::audio::Buffer<double> in(1, 5), out(1, 5);
+    in.channel(0)[0] = 0.123456789012345;
+    in.channel(0)[1] = -0.25;
+    in.channel(0)[2] = 0.5;
+    in.channel(0)[3] = -0.75;
+    in.channel(0)[4] = 0.875;
+
+    auto in_view = std::as_const(in).view();
+    auto out_view = out.view();
+
+    last_context = {};
+    host.process_f64(out_view, in_view);
+
+    REQUIRE(processor->process_calls == 1);
+    REQUIRE(processor->process_buffer_calls == 0);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(96000.0, 0.001));
+    REQUIRE(last_context.num_samples == 5);
+    REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Offline);
+    REQUIRE(last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+
+    const double expected =
+        static_cast<double>(static_cast<float>(in.channel(0)[0]));
+    REQUIRE_THAT(out.channel(0)[0], WithinAbs(expected, 0.0));
+    REQUIRE(out.channel(0)[0] != 0.0);
+}
+
+TEST_CASE("HeadlessHost routes opted-in plugins to native f64 processing",
+          "[headless][f64]") {
+    pulp::format::HeadlessHost host(create_native_f64_probe);
+    auto* processor = host.processor_as<NativeF64ProbeProcessor>();
+    REQUIRE(processor != nullptr);
+    REQUIRE(host.descriptor().effective_capabilities().supports_f64_audio);
+    host.prepare(48000.0, 32, 1, 1);
+
+    pulp::audio::Buffer<double> in(1, 4), out(1, 4);
+    in.channel(0)[0] = 1.0 / 3.0;
+    in.channel(0)[1] = -0.5;
+    in.channel(0)[2] = 0.75;
+    in.channel(0)[3] = -1.0;
+
+    auto in_view = std::as_const(in).view();
+    auto out_view = out.view();
+    pulp::midi::MidiBuffer midi_in;
+    pulp::midi::MidiBuffer midi_out;
+    midi_in.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+
+    pulp::state::ParameterEventQueue events;
+    events.push({7, 2, 0.25f});
+
+    pulp::format::ProcessContext context;
+    context.sample_rate = 44100.0;
+    context.num_samples = 4;
+    context.position_samples = 128;
+
+    host.process_f64(out_view, in_view, midi_in, midi_out, events, context);
+
+    REQUIRE(processor->f64_process_calls == 1);
+    REQUIRE(processor->f32_process_calls == 0);
+    REQUIRE(processor->midi_in_events == 1);
+    REQUIRE(processor->had_param_events);
+    REQUIRE(processor->last_param_events.size() == 1);
+    REQUIRE(processor->last_param_events[0].sample_offset == 2);
+    REQUIRE_THAT(processor->last_context.sample_rate,
+                 WithinAbs(44100.0, 0.001));
+    REQUIRE(processor->last_context.num_samples == 4);
+    REQUIRE(processor->last_context.position_samples == 128);
+
+    REQUIRE_THAT(out.channel(0)[0],
+                 WithinAbs((1.0 / 3.0) + 1.0e-12, 1.0e-18));
+    REQUIRE(std::abs(out.channel(0)[0] -
+                     static_cast<double>(static_cast<float>(1.0 / 3.0)))
+            > 1.0e-10);
 }
 
 TEST_CASE("HeadlessHost applies parameter changes", "[headless]") {

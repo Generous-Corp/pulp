@@ -94,4 +94,6 @@ private:
     int steps_remaining_ = 0;
 };
 
+using SmoothedValue64 = SmoothedValue<double>;
+
 } // namespace pulp::signal

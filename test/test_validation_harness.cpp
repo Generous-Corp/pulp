@@ -346,6 +346,36 @@ TEST_CASE("ValidationHarness process_buffer auto-prepares with caller channel la
     REQUIRE_THAT(static_cast<double>(output[2]), WithinAbs(0.75, 0.0001));
 }
 
+TEST_CASE("ValidationHarness process_buffer_f64 auto-prepares double buffers",
+          "[harness][f64]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({.buffer_size = 4, .input_channels = 1, .output_channels = 1});
+    harness.set_param(1, 0.0f);
+
+    std::vector<double> input = {0.123456789012345, -0.5, 0.75, -1.0};
+    auto output = harness.process_buffer_f64(input, 1, 4);
+
+    REQUIRE(output.size() == input.size());
+    REQUIRE_THAT(output[0],
+                 WithinAbs(static_cast<double>(static_cast<float>(input[0])), 0.0));
+    REQUIRE(output[0] != 0.0);
+}
+
+TEST_CASE("ValidationHarness process_buffer_f64 consumes queued MIDI",
+          "[harness][f64]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({.buffer_size = 2, .input_channels = 1, .output_channels = 1});
+    harness.prepare();
+    REQUIRE(last_processor != nullptr);
+
+    harness.send_midi_note_on(0, 60, 100);
+    std::vector<double> input = {0.0, 0.0};
+    auto output = harness.process_buffer_f64(input, 1, 2);
+
+    REQUIRE(output.size() == input.size());
+    REQUIRE(last_processor->note_on_count_ == 1);
+}
+
 TEST_CASE("ValidationHarness MIDI note-on queuing", "[harness]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({.buffer_size = 64});

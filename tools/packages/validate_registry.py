@@ -16,7 +16,7 @@ SCHEMA = ROOT / "tools" / "packages" / "registry-schema.json"
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 ALLOWED_LICENSES = {
-    "MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0",
+    "0BSD", "MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0",
     "ISC", "zlib", "BSL-1.0", "Unlicense", "CC0-1.0",
 }
 

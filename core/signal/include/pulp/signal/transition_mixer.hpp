@@ -25,9 +25,10 @@ namespace pulp::signal {
 
 enum class TransitionCurve { Smoothstep, EqualPower };
 
-class TransitionMixer {
+template <typename SampleType = float>
+class TransitionMixerT {
 public:
-    TransitionMixer() = default;
+    TransitionMixerT() = default;
 
     /// Configure the fade length (samples) + curve and rewind to the start.
     /// length 0 means "no fade" (done() is immediately true).
@@ -49,18 +50,22 @@ public:
     /// Old/new blend gains at an ABSOLUTE fade position (pure — no state change),
     /// so a caller can compute per-sample gains as `gains_at(position()+n, ...)`.
     /// Evaluated over the smoothstep ramp: click-free ends for both curves.
-    void gains_at(std::size_t fade_pos, float& old_gain, float& new_gain) const {
-        float t = (length_ == 0) ? 1.0f
-                                 : static_cast<float>(fade_pos) / static_cast<float>(length_);
-        if (t > 1.0f) t = 1.0f;
-        const float ramp = t * t * (3.0f - 2.0f * t);   // smoothstep: 0 slope at 0 and 1
+    void gains_at(std::size_t fade_pos,
+                  SampleType& old_gain,
+                  SampleType& new_gain) const {
+        SampleType t = (length_ == 0)
+            ? SampleType{1.0f}
+            : static_cast<SampleType>(fade_pos) / static_cast<SampleType>(length_);
+        if (t > SampleType{1.0f}) t = SampleType{1.0f};
+        const SampleType ramp =
+            t * t * (SampleType{3.0f} - SampleType{2.0f} * t);
         if (curve_ == TransitionCurve::EqualPower) {
-            constexpr float kHalfPi = 1.57079632679489661923f;
-            const float theta = ramp * kHalfPi;
+            constexpr SampleType kHalfPi = SampleType{1.57079632679489661923f};
+            const SampleType theta = ramp * kHalfPi;
             old_gain = std::cos(theta);                 // old²+new² == 1
             new_gain = std::sin(theta);
         } else {
-            old_gain = 1.0f - ramp;                     // old+new == 1
+            old_gain = SampleType{1.0f} - ramp;         // old+new == 1
             new_gain = ramp;
         }
     }
@@ -70,5 +75,8 @@ private:
     std::size_t pos_ = 0;
     TransitionCurve curve_ = TransitionCurve::Smoothstep;
 };
+
+using TransitionMixer = TransitionMixerT<float>;
+using TransitionMixer64 = TransitionMixerT<double>;
 
 }  // namespace pulp::signal

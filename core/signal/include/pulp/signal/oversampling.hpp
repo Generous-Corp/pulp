@@ -31,7 +31,8 @@ namespace pulp::signal {
 // `process_block()` do not allocate after construction/configuration as
 // long as the supplied callback is also allocation-free.
 //
-class Oversampler {
+template <typename SampleType = float>
+class OversamplerT {
 public:
     enum class Factor { x2 = 2, x4 = 4 };
 
@@ -41,7 +42,7 @@ public:
         polyphase_iir, ///< Half-band polyphase IIR (allpass-network).
     };
 
-    Oversampler() { configure_filters(); }
+    OversamplerT() { configure_filters(); }
 
     /// RT contract: set_factor(), set_sample_rate(), set_kind(), and reset()
     /// are setup/control operations that mutate filter state and should run
@@ -54,7 +55,7 @@ public:
         configure_filters();
         reset();
     }
-    void set_sample_rate(float sr) {
+    void set_sample_rate(SampleType sr) {
         sample_rate_ = sr;
         configure_filters();
         reset();
@@ -70,22 +71,23 @@ public:
     // xN (the loop runs at the oversampled rate). Prefer this templated path
     // for realtime use; it does not need to type-erase callbacks.
     template <typename Callback>
-    float process(float input, Callback&& callback) {
+    SampleType process(SampleType input, Callback&& callback) {
         return process_with_callback(input, std::forward<Callback>(callback));
     }
 
     // Source-compatible convenience overload for callers that already hold a
     // std::function. Capturing or heap-backed std::function payloads are not a
     // realtime-safety guarantee; hot paths should use the templated overload.
-    float process(float input, std::function<float(float)> callback) {
+    SampleType process(SampleType input,
+                       std::function<SampleType(SampleType)> callback) {
         return process_with_callback(input, callback);
     }
 
     // Process a contiguous block through the same callback. `input` and
     // `output` may alias for in-place processing.
     template <typename Callback>
-    void process_block(const float* input,
-                       float* output,
+    void process_block(const SampleType* input,
+                       SampleType* output,
                        std::size_t num_samples,
                        Callback&& callback) {
         for (std::size_t i = 0; i < num_samples; ++i)
@@ -104,14 +106,14 @@ public:
 private:
     Factor factor_ = Factor::x2;
     Kind kind_ = Kind::fir_biquad;
-    float sample_rate_ = 44100.0f;
+    SampleType sample_rate_ = SampleType{44100.0f};
 
     static constexpr int factor_value(Factor factor) noexcept {
         return factor == Factor::x4 ? 4 : 2;
     }
 
     template <typename Callback>
-    float process_with_callback(float input, Callback&& callback) {
+    SampleType process_with_callback(SampleType input, Callback&& callback) {
         if (kind_ == Kind::polyphase_iir) {
             return process_polyphase_iir(input, callback);
         }
@@ -119,21 +121,24 @@ private:
     }
 
     // ── fir_biquad lane ────────────────────────────────────────────────
-    Biquad aa_up_, aa_down_;
+    BiquadT<SampleType> aa_up_, aa_down_;
 
     void configure_filters() {
-        float os_rate = sample_rate_ * static_cast<float>(factor_value(factor_));
-        float cutoff = sample_rate_ * 0.4f; // Below Nyquist of original rate
-        aa_up_.set_coefficients(Biquad::Type::lowpass, cutoff, 0.707f, os_rate);
-        aa_down_.set_coefficients(Biquad::Type::lowpass, cutoff, 0.707f, os_rate);
+        SampleType os_rate =
+            sample_rate_ * static_cast<SampleType>(factor_value(factor_));
+        SampleType cutoff = sample_rate_ * SampleType{0.4f}; // Below Nyquist of original rate
+        aa_up_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
+                                SampleType{0.707f}, os_rate);
+        aa_down_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
+                                  SampleType{0.707f}, os_rate);
     }
 
     template <typename Callback>
-    float process_fir_biquad(float input, Callback& callback) {
+    SampleType process_fir_biquad(SampleType input, Callback& callback) {
         const int n = factor_value(factor_);
         // Upsample: insert zeros.
-        std::array<float, static_cast<std::size_t>(Factor::x4)> upsampled{};
-        upsampled[0] = input * static_cast<float>(n); // scale-up to preserve energy
+        std::array<SampleType, static_cast<std::size_t>(Factor::x4)> upsampled{};
+        upsampled[0] = input * static_cast<SampleType>(n); // scale-up to preserve energy
         for (int i = 0; i < n; ++i)
             upsampled[i] = aa_up_.process(upsampled[i]);
         for (int i = 0; i < n; ++i)
@@ -145,37 +150,40 @@ private:
 
     // ── polyphase_iir lane ─────────────────────────────────────────────
     // x2 uses one stage; x4 cascades two stages (Fs → 2Fs → 4Fs and back).
-    HalfBandUpsampler2x   hb_up_stage1_;
-    HalfBandDownsampler2x hb_down_stage1_;
-    HalfBandUpsampler2x   hb_up_stage2_;
-    HalfBandDownsampler2x hb_down_stage2_;
+    HalfBandUpsampler2xT<SampleType>   hb_up_stage1_;
+    HalfBandDownsampler2xT<SampleType> hb_down_stage1_;
+    HalfBandUpsampler2xT<SampleType>   hb_up_stage2_;
+    HalfBandDownsampler2xT<SampleType> hb_down_stage2_;
 
     template <typename Callback>
-    float process_polyphase_iir(float input, Callback& callback) {
+    SampleType process_polyphase_iir(SampleType input, Callback& callback) {
         if (factor_ == Factor::x2) {
             // 1 in → 2 oversampled samples → 2 callback hits → 1 out.
-            float u_lo = 0.f, u_hi = 0.f;
+            SampleType u_lo = 0.f, u_hi = 0.f;
             hb_up_stage1_.process(input, u_lo, u_hi);
-            const float p_lo = callback(u_lo);
-            const float p_hi = callback(u_hi);
+            const SampleType p_lo = callback(u_lo);
+            const SampleType p_hi = callback(u_hi);
             return hb_down_stage1_.process(p_lo, p_hi);
         }
         // x4: cascade. Stage 1 produces (lo, hi) at 2Fs. Stage 2 expands
         // each of those to (lo, hi) at 4Fs, the callback runs 4×, and
         // the decimation mirror-images the structure.
-        float s1_lo = 0.f, s1_hi = 0.f;
+        SampleType s1_lo = 0.f, s1_hi = 0.f;
         hb_up_stage1_.process(input, s1_lo, s1_hi);
-        float a_lo = 0.f, a_hi = 0.f, b_lo = 0.f, b_hi = 0.f;
+        SampleType a_lo = 0.f, a_hi = 0.f, b_lo = 0.f, b_hi = 0.f;
         hb_up_stage2_.process(s1_lo, a_lo, a_hi);
         hb_up_stage2_.process(s1_hi, b_lo, b_hi);
-        const float pa_lo = callback(a_lo);
-        const float pa_hi = callback(a_hi);
-        const float pb_lo = callback(b_lo);
-        const float pb_hi = callback(b_hi);
-        const float d_a = hb_down_stage2_.process(pa_lo, pa_hi);
-        const float d_b = hb_down_stage2_.process(pb_lo, pb_hi);
+        const SampleType pa_lo = callback(a_lo);
+        const SampleType pa_hi = callback(a_hi);
+        const SampleType pb_lo = callback(b_lo);
+        const SampleType pb_hi = callback(b_hi);
+        const SampleType d_a = hb_down_stage2_.process(pa_lo, pa_hi);
+        const SampleType d_b = hb_down_stage2_.process(pb_lo, pb_hi);
         return hb_down_stage1_.process(d_a, d_b);
     }
 };
+
+using Oversampler = OversamplerT<float>;
+using Oversampler64 = OversamplerT<double>;
 
 } // namespace pulp::signal

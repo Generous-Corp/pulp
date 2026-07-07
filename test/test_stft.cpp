@@ -48,6 +48,28 @@ TEST_CASE("STFT produces frame after enough samples", "[signal][stft]") {
     REQUIRE(stft.latest_frame().num_bins == 129);
 }
 
+TEST_CASE("STFT64 produces double-precision impulse frame", "[signal][stft][f64]") {
+    StftConfig cfg;
+    cfg.fft_size = 256;
+    cfg.hop_size = 256;
+    cfg.window = WindowFunction::Type::rectangular;
+
+    Stft64 stft(cfg);
+    std::vector<double> impulse(256, 0.0);
+    impulse[0] = 1.0;
+
+    REQUIRE(stft.push_samples(impulse.data(), static_cast<int>(impulse.size())));
+    REQUIRE(stft.frame_ready());
+
+    const auto& frame = stft.latest_frame();
+    REQUIRE(frame.num_bins == 129);
+    for (double mag : frame.magnitude)
+        REQUIRE_THAT(mag, WithinAbs(1.0, 1e-12));
+
+    auto db = stft.latest_magnitude_db();
+    REQUIRE_THAT(db[0], WithinAbs(0.0, 1e-12));
+}
+
 TEST_CASE("STFT does not produce frame before fft_size samples", "[signal][stft]") {
     StftConfig cfg;
     cfg.fft_size = 1024;
@@ -346,6 +368,19 @@ TEST_CASE("SpectrogramBuffer push and read", "[signal][spectrogram]") {
     // At -40 dB in -80..0 range, normalized = 0.5, grayscale → ~128
     REQUIRE(px[0].r > 100);
     REQUIRE(px[0].r < 160);
+}
+
+TEST_CASE("SpectrogramBuffer accepts double magnitude columns",
+          "[signal][spectrogram][f64]") {
+    SpectrogramBuffer buf;
+    buf.configure(2, 2);
+    ColorMapper mapper(ColorRamp::grayscale);
+    const double mags[] = {-80.0, 0.0};
+    buf.push_column(mags, 2, mapper, -80.0f, 0.0f);
+
+    REQUIRE(buf.frames_written() == 1);
+    REQUIRE(static_cast<int>(buf.pixels()[0].r) == 0);
+    REQUIRE(static_cast<int>(buf.pixels()[2].r) == 255);
 }
 
 TEST_CASE("ColorMapper ramp switching and control points", "[signal][spectrogram][issue-645]") {

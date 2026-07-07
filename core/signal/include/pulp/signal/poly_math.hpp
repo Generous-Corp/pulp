@@ -28,9 +28,10 @@ struct Polynomial {
 
     /// Evaluate polynomial using Horner's method.
     /// coeffs[0] = constant, coeffs[n] = x^n coefficient.
-    static float eval(const std::vector<float>& coeffs, float x) {
+    template <typename SampleType = float>
+    static SampleType eval(const std::vector<SampleType>& coeffs, SampleType x) {
         if (coeffs.empty()) return 0;
-        float result = coeffs.back();
+        SampleType result = coeffs.back();
         for (int i = static_cast<int>(coeffs.size()) - 2; i >= 0; --i) {
             result = result * x + coeffs[static_cast<size_t>(i)];
         }
@@ -38,10 +39,12 @@ struct Polynomial {
     }
 
     /// Evaluate complex polynomial (for frequency response).
-    static std::complex<float> eval_complex(const std::vector<float>& coeffs,
-                                             std::complex<float> z) {
+    template <typename SampleType = float>
+    static std::complex<SampleType> eval_complex(
+        const std::vector<SampleType>& coeffs,
+        std::complex<SampleType> z) {
         if (coeffs.empty()) return {0, 0};
-        std::complex<float> result = coeffs.back();
+        std::complex<SampleType> result = coeffs.back();
         for (int i = static_cast<int>(coeffs.size()) - 2; i >= 0; --i) {
             result = result * z + coeffs[static_cast<size_t>(i)];
         }
@@ -50,30 +53,36 @@ struct Polynomial {
 
     /// Roots of quadratic ax^2 + bx + c.
     /// Returns complex roots (may be real with imag=0).
-    static std::pair<std::complex<float>, std::complex<float>>
-    roots_quadratic(float a, float b, float c) {
-        if (std::abs(a) < 1e-12f) {
-            if (std::abs(b) < 1e-12f) return {{0.0f, 0.0f}, {0.0f, 0.0f}};
-            const auto root = std::complex<float>{-c / b, 0.0f};
+    template <typename SampleType = float>
+    static std::pair<std::complex<SampleType>, std::complex<SampleType>>
+    roots_quadratic(SampleType a, SampleType b, SampleType c) {
+        if (std::abs(a) < SampleType{1e-12f}) {
+            if (std::abs(b) < SampleType{1e-12f}) {
+                return {{SampleType{0.0f}, SampleType{0.0f}},
+                        {SampleType{0.0f}, SampleType{0.0f}}};
+            }
+            const auto root = std::complex<SampleType>{-c / b, SampleType{0.0f}};
             return {root, root};
         }
 
-        float disc = b * b - 4.0f * a * c;
+        SampleType disc = b * b - SampleType{4.0f} * a * c;
         if (disc >= 0) {
-            float sq = std::sqrt(disc);
-            return {(-b + sq) / (2.0f * a), (-b - sq) / (2.0f * a)};
+            SampleType sq = std::sqrt(disc);
+            return {(-b + sq) / (SampleType{2.0f} * a),
+                    (-b - sq) / (SampleType{2.0f} * a)};
         } else {
-            float real = -b / (2.0f * a);
-            float imag = std::sqrt(-disc) / (2.0f * a);
+            SampleType real = -b / (SampleType{2.0f} * a);
+            SampleType imag = std::sqrt(-disc) / (SampleType{2.0f} * a);
             return {{real, imag}, {real, -imag}};
         }
     }
 
     /// Multiply two polynomials (convolution of coefficients). Not RT-safe.
-    static std::vector<float> multiply(const std::vector<float>& a,
-                                        const std::vector<float>& b) {
+    template <typename SampleType = float>
+    static std::vector<SampleType> multiply(const std::vector<SampleType>& a,
+                                            const std::vector<SampleType>& b) {
         if (a.empty() || b.empty()) return {};
-        std::vector<float> result(a.size() + b.size() - 1, 0.0f);
+        std::vector<SampleType> result(a.size() + b.size() - 1, SampleType{0.0f});
         for (size_t i = 0; i < a.size(); ++i) {
             for (size_t j = 0; j < b.size(); ++j) {
                 result[i + j] += a[i] * b[j];
@@ -83,11 +92,12 @@ struct Polynomial {
     }
 
     /// Add two polynomials. Not RT-safe.
-    static std::vector<float> add(const std::vector<float>& a,
-                                   const std::vector<float>& b) {
+    template <typename SampleType = float>
+    static std::vector<SampleType> add(const std::vector<SampleType>& a,
+                                       const std::vector<SampleType>& b) {
         auto& longer = (a.size() >= b.size()) ? a : b;
         auto& shorter = (a.size() >= b.size()) ? b : a;
-        std::vector<float> result = longer;
+        std::vector<SampleType> result = longer;
         for (size_t i = 0; i < shorter.size(); ++i) {
             result[i] += shorter[i];
         }
@@ -95,31 +105,39 @@ struct Polynomial {
     }
 
     /// Scale all coefficients by a constant. Not RT-safe.
-    static std::vector<float> scale(const std::vector<float>& p, float s) {
-        std::vector<float> result(p.size());
+    template <typename SampleType = float>
+    static std::vector<SampleType> scale(const std::vector<SampleType>& p,
+                                         SampleType s) {
+        std::vector<SampleType> result(p.size());
         for (size_t i = 0; i < p.size(); ++i) result[i] = p[i] * s;
         return result;
     }
 
     /// Derivative of a polynomial. Not RT-safe.
-    static std::vector<float> derivative(const std::vector<float>& p) {
+    template <typename SampleType = float>
+    static std::vector<SampleType> derivative(const std::vector<SampleType>& p) {
         if (p.size() <= 1) return {0};
-        std::vector<float> result(p.size() - 1);
+        std::vector<SampleType> result(p.size() - 1);
         for (size_t i = 1; i < p.size(); ++i) {
-            result[i - 1] = p[i] * static_cast<float>(i);
+            result[i - 1] = p[i] * static_cast<SampleType>(i);
         }
         return result;
     }
 };
 
 /// Simple 2x2 matrix for biquad coefficient manipulation.
-struct Mat2 {
-    float m[2][2] = {{1, 0}, {0, 1}};
+template <typename SampleType = float>
+struct Mat2T {
+    SampleType m[2][2] = {{SampleType{1}, SampleType{0}},
+                          {SampleType{0}, SampleType{1}}};
 
-    static Mat2 identity() { return {{{1, 0}, {0, 1}}}; }
+    static Mat2T identity() {
+        return {{{SampleType{1}, SampleType{0}},
+                 {SampleType{0}, SampleType{1}}}};
+    }
 
-    Mat2 operator*(const Mat2& b) const {
-        Mat2 r;
+    Mat2T operator*(const Mat2T& b) const {
+        Mat2T r;
         r.m[0][0] = m[0][0] * b.m[0][0] + m[0][1] * b.m[1][0];
         r.m[0][1] = m[0][0] * b.m[0][1] + m[0][1] * b.m[1][1];
         r.m[1][0] = m[1][0] * b.m[0][0] + m[1][1] * b.m[1][0];
@@ -127,27 +145,39 @@ struct Mat2 {
         return r;
     }
 
-    float determinant() const {
+    SampleType determinant() const {
         return m[0][0] * m[1][1] - m[0][1] * m[1][0];
     }
 
-    Mat2 inverse() const {
-        float d = determinant();
-        if (std::abs(d) < 1e-10f) return identity();
-        float inv_d = 1.0f / d;
+    Mat2T inverse() const {
+        SampleType d = determinant();
+        if (std::abs(d) < SampleType{1e-10f}) return identity();
+        SampleType inv_d = SampleType{1.0f} / d;
         return {{{m[1][1] * inv_d, -m[0][1] * inv_d},
                  {-m[1][0] * inv_d, m[0][0] * inv_d}}};
     }
 };
 
+using Mat2 = Mat2T<float>;
+using Mat2d = Mat2T<double>;
+
 /// Simple 3x3 matrix for state-space filter representations.
-struct Mat3 {
-    float m[3][3] = {{1,0,0}, {0,1,0}, {0,0,1}};
+template <typename SampleType = float>
+struct Mat3T {
+    SampleType m[3][3] = {{SampleType{1}, SampleType{0}, SampleType{0}},
+                          {SampleType{0}, SampleType{1}, SampleType{0}},
+                          {SampleType{0}, SampleType{0}, SampleType{1}}};
 
-    static Mat3 identity() { return {{{1,0,0}, {0,1,0}, {0,0,1}}}; }
+    static Mat3T identity() {
+        return {{{SampleType{1}, SampleType{0}, SampleType{0}},
+                 {SampleType{0}, SampleType{1}, SampleType{0}},
+                 {SampleType{0}, SampleType{0}, SampleType{1}}}};
+    }
 
-    Mat3 operator*(const Mat3& b) const {
-        Mat3 r{{{0,0,0}, {0,0,0}, {0,0,0}}};
+    Mat3T operator*(const Mat3T& b) const {
+        Mat3T r{{{SampleType{0}, SampleType{0}, SampleType{0}},
+                 {SampleType{0}, SampleType{0}, SampleType{0}},
+                 {SampleType{0}, SampleType{0}, SampleType{0}}}};
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
                 for (int k = 0; k < 3; ++k)
@@ -155,11 +185,14 @@ struct Mat3 {
         return r;
     }
 
-    float determinant() const {
+    SampleType determinant() const {
         return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
              - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
              + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
     }
 };
+
+using Mat3 = Mat3T<float>;
+using Mat3d = Mat3T<double>;
 
 } // namespace pulp::signal

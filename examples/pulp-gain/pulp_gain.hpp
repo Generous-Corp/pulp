@@ -30,6 +30,7 @@ public:
             .accepts_midi = false,
             .produces_midi = false,
             .tail_samples = 0,
+            .supports_f64_audio = true,
         };
     }
 
@@ -82,6 +83,42 @@ public:
         float input_gain = std::pow(10.0f, input_db / 20.0f);
         float output_gain = std::pow(10.0f, output_db / 20.0f);
         float total_gain = input_gain * output_gain;
+
+        for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
+            auto in = input.channel(ch);
+            auto out = output.channel(ch);
+            for (std::size_t i = 0; i < output.num_samples(); ++i) {
+                out[i] = in[i] * total_gain;
+            }
+        }
+    }
+
+    void process_f64(
+        audio::BufferView<double>& output,
+        const audio::BufferView<const double>& input,
+        midi::MidiBuffer&,
+        midi::MidiBuffer&,
+        const format::ProcessContext&) override
+    {
+        bool bypass = state().get_value(kBypass) >= 0.5f;
+
+        if (bypass) {
+            // Pass-through
+            for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
+                auto in = input.channel(ch);
+                auto out = output.channel(ch);
+                for (std::size_t i = 0; i < output.num_samples(); ++i) {
+                    out[i] = in[i];
+                }
+            }
+            return;
+        }
+
+        double input_db = static_cast<double>(state().get_value(kInputGain));
+        double output_db = static_cast<double>(state().get_value(kOutputGain));
+        double input_gain = std::pow(10.0, input_db / 20.0);
+        double output_gain = std::pow(10.0, output_db / 20.0);
+        double total_gain = input_gain * output_gain;
 
         for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
             auto in = input.channel(ch);

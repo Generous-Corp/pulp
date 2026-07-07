@@ -9,21 +9,22 @@ namespace pulp::signal {
 // memory. Retune at block boundaries if coefficient continuity matters.
 // Provides simultaneous lowpass, highpass, bandpass, and notch outputs.
 // Numerically stable at all frequencies, no cramping at Nyquist.
-class Svf {
+template <typename SampleType = float>
+class SvfT {
 public:
     enum class Mode { lowpass, highpass, bandpass, notch };
 
-    void set_sample_rate(float sr) { sample_rate_ = sr; update(); }
-    void set_frequency(float hz) { freq_ = hz; update(); }
-    void set_resonance(float q) { q_ = q; update(); }
+    void set_sample_rate(SampleType sr) { sample_rate_ = sr; update(); }
+    void set_frequency(SampleType hz) { freq_ = hz; update(); }
+    void set_resonance(SampleType q) { q_ = q; update(); }
     void set_mode(Mode m) { mode_ = m; }
 
-    float process(float input) {
-        float v3 = input - ic2_;
-        float v1 = a1_ * ic1_ + a2_ * v3;
-        float v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
-        ic1_ = 2.0f * v1 - ic1_;
-        ic2_ = 2.0f * v2 - ic2_;
+    SampleType process(SampleType input) {
+        SampleType v3 = input - ic2_;
+        SampleType v1 = a1_ * ic1_ + a2_ * v3;
+        SampleType v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
+        ic1_ = SampleType{2.0f} * v1 - ic1_;
+        ic2_ = SampleType{2.0f} * v2 - ic2_;
 
         switch (mode_) {
             case Mode::lowpass:  return v2;
@@ -34,7 +35,7 @@ public:
         return v2;
     }
 
-    void process(float* buffer, int num_samples) {
+    void process(SampleType* buffer, int num_samples) {
         for (int i = 0; i < num_samples; ++i)
             buffer[i] = process(buffer[i]);
     }
@@ -42,22 +43,25 @@ public:
     void reset() { ic1_ = 0; ic2_ = 0; }
 
 private:
-    float sample_rate_ = 44100.0f;
-    float freq_ = 1000.0f;
-    float q_ = 0.707f;
+    SampleType sample_rate_ = SampleType{44100.0f};
+    SampleType freq_ = SampleType{1000.0f};
+    SampleType q_ = SampleType{0.707f};
     Mode mode_ = Mode::lowpass;
 
-    float g_ = 0, k_ = 0;
-    float a1_ = 0, a2_ = 0, a3_ = 0;
-    float ic1_ = 0, ic2_ = 0;
+    SampleType g_ = 0, k_ = 0;
+    SampleType a1_ = 0, a2_ = 0, a3_ = 0;
+    SampleType ic1_ = 0, ic2_ = 0;
 
     void update() {
-        g_ = std::tan(3.14159265f * freq_ / sample_rate_);
-        k_ = 1.0f / q_;
-        a1_ = 1.0f / (1.0f + g_ * (g_ + k_));
+        g_ = std::tan(SampleType{3.14159265f} * freq_ / sample_rate_);
+        k_ = SampleType{1.0f} / q_;
+        a1_ = SampleType{1.0f} / (SampleType{1.0f} + g_ * (g_ + k_));
         a2_ = g_ * a1_;
         a3_ = g_ * a2_;
     }
 };
+
+using Svf = SvfT<float>;
+using Svf64 = SvfT<double>;
 
 } // namespace pulp::signal

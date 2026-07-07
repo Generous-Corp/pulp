@@ -614,6 +614,31 @@
       ]
     },
     {
+      "name": "MTS-ESP",
+      "category": "music-theory",
+      "license": "0BSD",
+      "version": "f214739b",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/ODDSound/MTS-ESP.git",
+      "upstream": { "kind": "git-commit", "ref": "f214739b8832e7f297cb9970d0c0efbf783f1462" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional, opt-in microtuning client integration. Fetched via FetchContent only when PULP_ENABLE_MTS_ESP=ON or when a developer runs `pulp add mts-esp`. Pulp compiles the upstream Client/libMTSClient.cpp source and exposes a provider-neutral tuning API; the client dynamically loads an installed libMTS shared library at runtime when present and falls back to local 12-TET or MTS SysEx data when no master is installed. Not part of the default dependency chain.",
+      "source_files": [
+        "CMakeLists.txt",
+        "tools/cmake/PulpDependencies.cmake",
+        "core/midi/CMakeLists.txt",
+        "core/midi/include/pulp/midi/tuning.hpp",
+        "core/midi/include/pulp/midi/mts_esp_tuning.hpp",
+        "core/midi/src/tuning.cpp",
+        "core/midi/src/mts_esp_tuning.cpp",
+        "tools/packages/registry.json",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "msdfgen",
       "category": "canvas",
       "license": "MIT",

@@ -285,8 +285,10 @@ assert descriptor.manufacturer == "PulpTest"
 assert descriptor.bundle_id == "com.pulp.test.bindings-smoke"
 assert descriptor.version == "1.2.3"
 assert descriptor.is_instrument is False
+assert descriptor.supports_f64_audio is False
 assert raises(AttributeError, lambda: setattr(descriptor, "name", "Mutable"))
 assert raises(AttributeError, lambda: setattr(descriptor, "is_instrument", True))
+assert raises(AttributeError, lambda: setattr(descriptor, "supports_f64_audio", True))
 assert raises(AttributeError, lambda: setattr(descriptor, "bundle_id", "mutable"))
 host.release()
 host.release()
@@ -334,6 +336,30 @@ assert raises(RuntimeError, lambda: host.process_numpy_midi(
 assert raises(RuntimeError, lambda: host.process_numpy_midi(
     np.zeros((1, 2, 3), dtype=np.float32), midi_in))
 assert raises(TypeError, lambda: host.process_numpy_midi(audio, object()))
+
+audio64 = np.array([[0.123456789012345, 0.25, -0.5, 1.0],
+                    [1.0, -0.25, 0.5, 0.0]], dtype=np.float64)
+processed64 = host.process_numpy_f64(audio64)
+assert processed64.shape == audio64.shape
+assert processed64.dtype == np.float64
+assert np.allclose(processed64, audio64.astype(np.float32).astype(np.float64))
+assert processed64[0, 0] == np.float64(np.float32(audio64[0, 0]))
+assert raises(RuntimeError, lambda: host.process_numpy_f64(
+    np.array([1.0, 2.0], dtype=np.float64)))
+assert raises(RuntimeError, lambda: host.process_numpy_f64(
+    np.zeros((1, 2, 3), dtype=np.float64)))
+
+midi_in64 = pulp.MidiBuffer()
+midi_in64.add(pulp.MidiEvent.note_on(1, 65, 100))
+processed64_with_midi, midi_out64 = host.process_numpy_midi_f64(audio64, midi_in64)
+assert np.allclose(processed64_with_midi, audio64.astype(np.float32).astype(np.float64))
+assert isinstance(midi_out64, pulp.MidiBuffer)
+assert midi_out64.empty()
+assert raises(RuntimeError, lambda: host.process_numpy_midi_f64(
+    np.array([1.0, 2.0], dtype=np.float64), midi_in64))
+assert raises(RuntimeError, lambda: host.process_numpy_midi_f64(
+    np.zeros((1, 2, 3), dtype=np.float64), midi_in64))
+assert raises(TypeError, lambda: host.process_numpy_midi_f64(audio64, object()))
 
 host.release()
 )PY";
