@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -56,6 +57,23 @@ struct LowerResult {
     NodeId offending_node = 0;
     std::string message;
 };
+
+// Proof that a graph topology is lowerable into a self-contained baked Processor.
+// The single gate both bake() and (later) the on-disk load path consult, so the
+// trusted and untrusted paths can never diverge on what is bakeable. accepted==true
+// means every node kind is bakeable (audio I/O + Gain; Plugin/Custom/MIDI refused
+// with a specific reason), every connection is plain audio, and the topology is
+// executor-eligible. Pure — no allocation, no graph state. bake() calls it after
+// its is_prepared() precondition.
+struct LowerabilityProof {
+    bool accepted = false;
+    NodeId offending_node = 0;
+    LowerRejectReason reason = LowerRejectReason::None;
+    std::string message;
+};
+
+LowerabilityProof lowerability_of(std::span<const GraphNode> nodes,
+                                  std::span<const Connection> connections);
 
 // A SignalGraph frozen into a shippable Processor. Owns the reconstructed plan
 // (nodes + connections), its own heap-stable Gain atomics, and the canonical
