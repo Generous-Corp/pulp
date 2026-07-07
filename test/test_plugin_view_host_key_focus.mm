@@ -660,6 +660,16 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
         editor->password_mode = false;
         editor->clipboard_policy = TextEditor::ClipboardPolicy::standard;
 
+        editor->input_filter = [&](std::string_view text) {
+            if (text == std::string_view{kNichi, sizeof(kNichi) - 1})
+                return std::string{};
+            return std::string{text};
+        };
+        [pulp_view insertText:nichi replacementRange:marked];
+        REQUIRE(editor->text() == std::string("abc") + kNi);
+        REQUIRE(editor->has_marked_text());
+        editor->input_filter = nullptr;
+
         [pulp_view setMarkedText:@""
                    selectedRange:NSMakeRange(0, 0)
                 replacementRange:marked];

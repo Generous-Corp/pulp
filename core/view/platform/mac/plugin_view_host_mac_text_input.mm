@@ -116,8 +116,10 @@ void pulp_plugin_insert_text(NSView* host,
 
     auto* fv = pulp_plugin_focus_under_root(root);
     if (!fv) return;
-    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv))
-        pulp_plugin_apply_replacement_range(te, replacement_range);
+    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
+        if (!pulp_plugin_replacement_range_is_marked_range(te, replacement_range))
+            pulp_plugin_apply_replacement_range(te, replacement_range);
+    }
     pulp::view::TextInputEvent event;
     event.text = inspector_event.text;
     fv->on_text_input(event);
