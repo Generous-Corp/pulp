@@ -63,6 +63,7 @@ function firstRawArg(event: unknown): unknown {
 interface BoundVirtualRow {
     index: number;
     container: PulpContainer;
+    bindGeneration: number;
 }
 
 export const VirtualList = (props: VirtualListProps): ReactElement => {
@@ -91,11 +92,11 @@ export const VirtualList = (props: VirtualListProps): ReactElement => {
             withSuppressedLayoutFlush(() => {
                 setBoundRows((previous) => {
                     const existing = previous.get(rowId);
-                    if (existing?.index === index) return previous;
                     const next = new Map(previous);
                     next.set(rowId, {
                         index,
                         container: createRoot(rowId, rowId + '__pr_'),
+                        bindGeneration: (existing?.bindGeneration ?? 0) + 1,
                     });
                     return next;
                 });
@@ -125,7 +126,7 @@ export const VirtualList = (props: VirtualListProps): ReactElement => {
         ...Array.from(boundRows, ([rowId, entry]) => createPortal(
             createElement(Row, { key: entry.index, width: '100%', height: '100%' }, renderRow(entry.index)),
             entry.container,
-            rowId + ':' + entry.index,
+            rowId + ':' + entry.index + ':' + entry.bindGeneration,
         )),
     );
 };

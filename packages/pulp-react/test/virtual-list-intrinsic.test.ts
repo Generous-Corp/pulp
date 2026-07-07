@@ -325,6 +325,41 @@ describe('@pulp/react VirtualList intrinsic', () => {
         }
     });
 
+    it('remounts row content when a recycled slot is rebound to the same index', () => {
+        const { bridge, root } = renderWithBridge(createElement(VirtualList, {
+            id: 'vl_same_index',
+            rowCount: 100,
+            rowHeight: 24,
+            renderRow: (index: number) => index,
+        }));
+        try {
+            const bindRow = bridgeEvent(bridge, 'vl_same_index', 'bindrow');
+
+            bridge.reset();
+            bindRow({ rowId: 'vl_same_index__row_0', index: 3 });
+            const firstRow = bridge.calls.find(
+                (call) => call.fn === 'createRow' && call.args[1] === 'vl_same_index__row_0',
+            )?.args[0];
+            expect(typeof firstRow).toBe('string');
+
+            bridge.reset();
+            bindRow({ rowId: 'vl_same_index__row_0', index: 3 });
+
+            expect(bridge.calls).toContainEqual({
+                fn: 'removeWidget',
+                args: [firstRow],
+            });
+            expect(bridge.calls.some(
+                (call) => call.fn === 'createRow' && call.args[1] === 'vl_same_index__row_0',
+            )).toBe(true);
+            expect(bridge.calls.some(
+                (call) => call.fn === 'setText' && call.args[1] === '3',
+            )).toBe(true);
+        } finally {
+            cleanupBridge(bridge, root);
+        }
+    });
+
     it('preserves React context for row content rendered into recycled slots', () => {
         const Theme = createContext('default');
         function ThemedRow(): ReactElement {
