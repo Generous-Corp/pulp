@@ -471,6 +471,8 @@ export function applyChangedProps(
     let mutated = false;
     const selectionModeChanged = isVirtualListType(type) &&
         oldProps.selectionMode !== newProps.selectionMode;
+    const rowCountChanged = isVirtualListType(type) &&
+        oldProps.rowCount !== newProps.rowCount;
 
     // Coalesce SvgRect / SvgLine geometry changes into a single
     // setSvgRect / setSvgLine call sourced from the post-update props
@@ -586,7 +588,7 @@ export function applyChangedProps(
         }
     }
 
-    if (selectionModeChanged && Object.prototype.hasOwnProperty.call(newProps, 'selected')) {
+    if ((selectionModeChanged || rowCountChanged) && Object.prototype.hasOwnProperty.call(newProps, 'selected')) {
         applyOne(id, type, 'selected', newProps.selected, newProps);
         mutated = true;
     }

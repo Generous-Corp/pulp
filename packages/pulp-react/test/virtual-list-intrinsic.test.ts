@@ -176,6 +176,33 @@ describe('@pulp/react VirtualList intrinsic', () => {
         });
     });
 
+    it('reapplies selected after virtual-list row count changes', () => {
+        const bridge = createMockBridge();
+        bridge.install();
+        try {
+            applyChangedProps(
+                instance('vl_row_count_selected', {}),
+                { rowCount: 1, selected: 5 },
+                { rowCount: 10, selected: 5 },
+            );
+        } finally {
+            bridge.uninstall();
+        }
+
+        const rowCount = bridge.calls.findIndex((c) => c.fn === 'setVirtualListRowCount');
+        const selected = bridge.calls.findIndex((c) => c.fn === 'setVirtualListSelected');
+        expect(rowCount).toBeGreaterThanOrEqual(0);
+        expect(selected).toBeGreaterThan(rowCount);
+        expect(bridge.calls).toContainEqual({
+            fn: 'setVirtualListRowCount',
+            args: ['vl_row_count_selected', 10],
+        });
+        expect(bridge.calls).toContainEqual({
+            fn: 'setVirtualListSelected',
+            args: ['vl_row_count_selected', 5],
+        });
+    });
+
     it('resets removed virtual-list selection mode before replaying selected', () => {
         const bridge = createMockBridge();
         bridge.install();
