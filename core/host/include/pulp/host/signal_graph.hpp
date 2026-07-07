@@ -1229,6 +1229,12 @@ private:
     // mutex.
     bool snapshot_is_plugin_reinit_free_(const CompiledGraph& old_cg,
                                          double sr, int bs) const;
+    // Edit-time plugin parameter list for connection validation. Prefers the
+    // prepare-time cache (prepared_plugin_meta_) so a connect during a swap-edit
+    // does NOT call the live PluginSlot::parameters() concurrently with process()
+    // on that slot (2.2b S4); falls back to the live slot for a not-yet-prepared
+    // node. Edit-path only (not real-time), so the by-value copy is fine.
+    std::vector<HostParamInfo> cached_or_live_params_(const GraphNode& n) const;
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
     void invalidate_live_();

@@ -486,7 +486,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
 
     // Parameter must exist, be automatable, and not read-only.
     bool ok_param = false;
-    for (const auto& pi : dst_n->plugin->parameters()) {
+    for (const auto& pi : cached_or_live_params_(*dst_n)) {
         if (pi.id != dest_param_id) continue;
         if (!pi.flags.automatable || pi.flags.read_only) return false;
         ok_param = true;
@@ -537,7 +537,7 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     if (would_create_cycle(src, dest)) return false;
 
     bool ok_param = false;
-    for (const auto& pi : dst_n->plugin->parameters()) {
+    for (const auto& pi : cached_or_live_params_(*dst_n)) {
         if (pi.id != dest_param_id) continue;
         if (!parameter_allows_modulation(
                 pi, dest_param_id, state::ParamRate::AudioRate, true)) {
@@ -600,7 +600,7 @@ bool SignalGraph::audio_rate_modulation_lane_locked_(const Connection& connectio
         return false;
     }
 
-    for (const auto& pi : dst_n->plugin->parameters()) {
+    for (const auto& pi : cached_or_live_params_(*dst_n)) {
         if (pi.id != connection.automation_param_id) continue;
 
         lane = state::ModulationLane{
@@ -1647,6 +1647,16 @@ int SignalGraph::pump_anticipation(int max_blocks) {
     active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
     anticipation_pump_busy_.store(false, std::memory_order_release);
     return rendered;
+}
+
+// Edit-time plugin parameter list (see header). Cached copy when prepared, else
+// the live slot — so a connect during a swap-edit avoids a live parameters() call
+// racing process() on that slot.
+std::vector<HostParamInfo>
+SignalGraph::cached_or_live_params_(const GraphNode& n) const {
+    const auto it = prepared_plugin_meta_.find(n.id);
+    if (it != prepared_plugin_meta_.end()) return it->second.parameters;
+    return n.plugin ? n.plugin->parameters() : std::vector<HostParamInfo>{};
 }
 
 // 2.2b reinit-free-swap predicate (PRE-compile half — see the header). Returns
