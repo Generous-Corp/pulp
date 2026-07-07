@@ -405,6 +405,7 @@ NSEvent* make_key_event(unsigned short keyCode,
 // macOS function-key codepoints (what -[NSEvent characters] returns for arrows).
 constexpr unichar kNSLeftArrow = 0xF702;
 constexpr unichar kNSRightArrow = 0xF703;
+constexpr unichar kNSF1 = 0xF704;
 
 }  // namespace
 
@@ -474,6 +475,15 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
             editor->set_caret_pos(3);  // end
             [pulp_view keyDown:make_key_event(7, 0, @"x")];  // keyCode 7 = 'x'
             REQUIRE(editor->text() == "abcx");
+        }
+
+        SECTION("unhandled function key inserts no private-use character") {
+            editor->set_caret_pos(3);
+            [pulp_view keyDown:make_key_event(
+                122, 0,
+                [NSString stringWithCharacters:&kNSF1 length:1])];
+            REQUIRE(editor->text() == "abc");
+            REQUIRE(editor->caret_pos() == 3);
         }
 
         SECTION("printable key revalidates focus after synchronous text teardown") {

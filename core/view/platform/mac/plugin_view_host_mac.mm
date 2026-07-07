@@ -447,6 +447,16 @@ static bool pulp_text_input_focused_under_root(pulp::view::View* root) {
     return fv != nullptr && fv->accepts_text_input();
 }
 
+bool pulp_plugin_event_has_private_use_function_character(NSEvent* event) {
+    NSString* chars = event.charactersIgnoringModifiers;
+    if (!chars) chars = event.characters;
+    for (NSUInteger i = 0; i < chars.length; ++i) {
+        const unichar ch = [chars characterAtIndex:i];
+        if (ch >= 0xF700 && ch <= 0xF8FF) return true;
+    }
+    return false;
+}
+
 bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) {
   try {
     if (!root) return false;
@@ -492,7 +502,8 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
     if (!consumed) {
         const NSEventModifierFlags cmd_ctrl =
             NSEventModifierFlagCommand | NSEventModifierFlagControl;
-        if ((event.modifierFlags & cmd_ctrl) == 0) {
+        if ((event.modifierFlags & cmd_ctrl) == 0 &&
+            !pulp_plugin_event_has_private_use_function_character(event)) {
             [host interpretKeyEvents:@[ event ]];
             fv = pulp_focus_under_root(root);
             if (!handled_focus.matches(fv)) {
