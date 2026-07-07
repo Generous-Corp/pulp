@@ -451,6 +451,15 @@ public:
     };
     std::vector<NodeLoadReport> node_loads() const;
 
+    // Test-only: run compile_() once and DISCARD the result, WITHOUT prepare()'s
+    // null-first prologue. Exists so a TSan/ASan test can run compile_() on one
+    // thread while process() runs the live snapshot on another — proving compile_()
+    // never mutates state the audio thread reads (the 2.2a no-silence-swap
+    // contract; planning/2026-07-02-signalgraph-prepared-swap-design.md). Publishes
+    // nothing, so it has no audible effect and no production caller; it only
+    // exercises the compilation path for the race test. Control-thread only.
+    void compile_snapshot_for_test(double sample_rate, int max_block_size);
+
     // ── Canonical-executor migration ─────────────────────────────────────
     // Hooks the SignalGraph→GraphRuntimeExecutor translation needs without
     // exposing the private CompiledGraph. The translation lives in

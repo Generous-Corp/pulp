@@ -130,6 +130,12 @@ pulp_add_test_suite(pulp-test-anticipation-lane
 pulp_add_test_suite(pulp-test-signal-graph-anticipation
     SOURCES test_signal_graph_anticipation.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# 2.2a no-silence-swap contract: compile_() runs race-free against a live
+# process() (TSan). Proves compile_() never mutates state the audio thread reads —
+# the invariant the compile-first prepared-swap (2.2b) is built on.
+pulp_add_test_suite(pulp-test-signal-graph-prepared-swap
+    SOURCES test_signal_graph_prepared_swap.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Transport plumbing for SignalGraph::process: the transport-aware overload is
 # bit-identical for transport-inert routed nodes, populates the routed block so a
 # ProcessorNode consumer receives the host transport / process_mode / render-speed
