@@ -738,6 +738,16 @@ void InspectorOverlay::cancel_text_edit() {
 }
 
 bool InspectorOverlay::handle_text_input(const TextInputEvent& event) {
+    // Send-to-agent free-text field: its own editing mode, independent of the
+    // in-place text-editing path below. Insert typed characters at the caret.
+    if (active_ && agent_field_active_) {
+        if (!event.text.empty()) {
+            agent_caret_ = std::min(agent_caret_, agent_text_buffer_.size());
+            agent_text_buffer_.insert(agent_caret_, event.text);
+            agent_caret_ += event.text.size();
+        }
+        return true;
+    }
     if (!active_ || !text_editing()) return false;
     // Never write to a freed target. If the edited view
     // left the tree, drop the edit state and stop consuming text.
@@ -1473,6 +1483,45 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         }
         if (event.key == KeyCode::y) {
             edit_history_->redo();       // Cmd+Y = redo (Windows-style)
+            return true;
+        }
+    }
+
+    // Send-to-agent text field owns the keyboard while focused: Enter submits
+    // the request through the sink, Esc defocuses (keeping the draft), Backspace
+    // trims one codepoint, Left/Right move the caret. Character input arrives via
+    // handle_text_input(). Checked before the inline text-edit / numeric paths so
+    // the field's control keys are exclusive while it is active.
+    if (active_ && agent_field_active_ && event.is_down) {
+        if (event.key == KeyCode::enter) {
+            submit_agent_request();
+            return true;
+        }
+        if (event.key == KeyCode::escape) {
+            agent_field_active_ = false;
+            return true;
+        }
+        if (event.key == KeyCode::backspace) {
+            if (agent_caret_ > 0 && !agent_text_buffer_.empty()) {
+                // Trim one UTF-8 codepoint ending at the caret (skip continuation
+                // bytes 0b10xxxxxx) so a multibyte glyph deletes whole.
+                std::size_t n = 1;
+                while (agent_caret_ - n > 0 &&
+                       (static_cast<unsigned char>(agent_text_buffer_[agent_caret_ - n]) & 0xC0) ==
+                           0x80)
+                    ++n;
+                n = std::min(n, agent_caret_);
+                agent_text_buffer_.erase(agent_caret_ - n, n);
+                agent_caret_ -= n;
+            }
+            return true;
+        }
+        if (event.key == KeyCode::left) {
+            if (agent_caret_ > 0) --agent_caret_;
+            return true;
+        }
+        if (event.key == KeyCode::right) {
+            if (agent_caret_ < agent_text_buffer_.size()) ++agent_caret_;
             return true;
         }
     }
@@ -2350,6 +2399,15 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         alt_hover_target_ = nullptr;
 
         if (event.is_down) {
+            // Clicks on the semantic-knob controls / send-to-agent field at the
+            // top of the tweaks panel. Checked first so a knob or field click
+            // never falls through to a tweak-row icon or tree selection. The hit
+            // lists (knob_hits_, agent field rects) are populated by the most
+            // recent paint_knob_controls() call. A non-consuming click here also
+            // defocuses the text field.
+            if (tweaks_panel_visible_ && handle_knob_panel_click(pos))
+                return true;
+
             // Clicks on a tweak-row icon (bypass / lock /
             // delete) in the management panel. Checked first so an
             // icon click never falls through to tree selection or

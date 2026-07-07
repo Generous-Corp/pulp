@@ -6,6 +6,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/design/design_knobs.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/source_jump.hpp>
 #include <pulp/inspect/tweak_store.hpp>
@@ -20,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -162,6 +164,63 @@ public:
     bool has_reparent_source_sink() const {
         return static_cast<bool>(reparent_source_sink_);
     }
+
+    /// Semantic knobs → apply-to-artifact.
+    ///
+    /// A knob is one expressive control (a "minimalism" slider, a theme flip, a
+    /// layout-variant switch) whose value drives a bundle of parameter writes at
+    /// once (see pulp::design::design_knobs). The overlay renders the schema set
+    /// here in the tweaks panel and, when a value is chosen, emits the knob id +
+    /// selected value through this sink. Like the reparent sink, the overlay
+    /// never touches files: the host owns the design artifact + manifest and
+    /// applies the change (pulp::design::apply_knob — persist the local writes
+    /// into the artifact's EDITMODE block, apply the token writes at the theme
+    /// layer, re-import), so the model stays testable without a filesystem.
+    void set_knob_schema(pulp::design::KnobSchema schema) { knob_schema_ = std::move(schema); }
+    const pulp::design::KnobSchema& knob_schema() const { return knob_schema_; }
+
+    struct KnobApplyEdit {
+        std::string knob_id;  ///< the chosen knob's stable id
+        std::string value;    ///< the selected position: label (Enum/Toggle) or slider value
+    };
+    void set_knob_apply_sink(std::function<void(const KnobApplyEdit&)> sink) {
+        knob_apply_sink_ = std::move(sink);
+    }
+    bool has_knob_apply_sink() const { return static_cast<bool>(knob_apply_sink_); }
+
+    /// The knob's currently-selected value (empty when never set). The overlay
+    /// tracks selection only for display; the host owns the authoritative state.
+    std::string knob_selection(std::string_view knob_id) const;
+
+    /// Send-to-agent → free-text request.
+    ///
+    /// The tweaks panel carries a single-line text field: a human describes a
+    /// change in words and hits Send. The overlay emits the text through this
+    /// sink; the host owns the project dir + design/screen/state context and
+    /// enqueues it (pulp::inspect::enqueue_to_file) for the driving agent to pick
+    /// up on its next turn. Pull-based: nothing is pushed to the agent.
+    struct AgentRequestEdit {
+        std::string text;  ///< the human's free-text request
+    };
+    void set_agent_request_sink(std::function<void(const AgentRequestEdit&)> sink) {
+        agent_request_sink_ = std::move(sink);
+    }
+    bool has_agent_request_sink() const { return static_cast<bool>(agent_request_sink_); }
+
+    /// One knob control's on-screen hit-rect from the last paint. Exposed for
+    /// host/test drivers to click a specific segment (bounds center) without
+    /// replicating the panel's layout arithmetic; `value` is the string the
+    /// selection emits.
+    struct KnobHit {
+        std::string knob_id;
+        std::string value;
+        Rect bounds;  ///< root coords
+    };
+    const std::vector<KnobHit>& knob_hits() const { return knob_hits_; }
+    Rect agent_field_bounds() const { return agent_field_bounds_; }
+    Rect agent_send_bounds() const { return agent_send_bounds_; }
+    const std::string& agent_text_buffer() const { return agent_text_buffer_; }
+    bool agent_field_active() const { return agent_field_active_; }
 
     /// Clear the attached EditHistory.
     ///
@@ -912,6 +971,24 @@ private:
     };
     std::vector<TweakRow> tweak_rows_;
 
+    // ── Semantic knobs + send-to-agent (tweaks-panel top region) ──────
+    // The knob schema the panel renders; the current selection per knob id
+    // (display only — the host owns authoritative state); and this frame's
+    // knob hit-rects, stashed like tweak_rows_ so the SAME-frame mouse handler
+    // can resolve a click to a (knob_id, value). The agent text field is a
+    // single-line free-text buffer whose bounds + Send-button rect are captured
+    // each paint for hit-testing.
+    pulp::design::KnobSchema knob_schema_;
+    std::function<void(const KnobApplyEdit&)> knob_apply_sink_ = nullptr;
+    std::function<void(const AgentRequestEdit&)> agent_request_sink_ = nullptr;
+    std::unordered_map<std::string, std::string> knob_selection_;
+    std::vector<KnobHit> knob_hits_;
+    bool agent_field_active_ = false;
+    std::string agent_text_buffer_;
+    std::size_t agent_caret_ = 0;
+    Rect agent_field_bounds_{};
+    Rect agent_send_bounds_{};
+
     // Tree expansion: collapsed nodes
     std::unordered_set<const View*> collapsed_;
 
@@ -1367,6 +1444,22 @@ private:
     // Render the tweak management panel into the given
     // rect. Repopulates tweak_rows_ with this frame's hit-rects.
     void paint_tweaks_section(Canvas& canvas, float x, float y, float w, float h);
+
+    // Render the semantic-knob controls + send-to-agent text field at the top of
+    // the tweaks panel. Repopulates knob_hits_ and the agent field/send rects
+    // with this frame's hit-rects. Returns the vertical space used so the tweak
+    // list below can start beneath it. Paints nothing (returns 0) when there are
+    // no knobs and no agent sink.
+    float paint_knob_controls(Canvas& canvas, float x, float y, float w, float h);
+
+    // Resolve a click in the tweaks panel against this frame's knob controls /
+    // agent field. Returns true when the click was consumed (a knob was set, the
+    // field focused, or Send pressed). Fires the relevant sink.
+    bool handle_knob_panel_click(Point p);
+
+    // Submit the current agent text buffer through the agent-request sink (when
+    // non-empty and a sink is attached), then clear + defocus the field.
+    void submit_agent_request();
 
     /// Render the reconciliation tab into the panel region
     /// normally occupied by the property section. Each stored tweak
