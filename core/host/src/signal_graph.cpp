@@ -633,7 +633,7 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
     // is not the prepare/release thread, so without the guard a concurrent
     // prepare()/release()/invalidate could retire+free `cg` mid-use.
     ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -656,7 +656,7 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
     // Pin the live snapshot for the whole dereference (see inject_midi). const
     // method: ProcessReadGuard only touches the mutable atomic counter.
     ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -777,7 +777,7 @@ float SignalGraph::get_node_parameter(NodeId id, uint32_t param_id) const {
 int SignalGraph::node_latency_samples(NodeId id) const {
     // Pin the live snapshot for the whole dereference (see inject_midi).
     ProcessReadGuard read_guard{*this};
-    const auto* cg = live_raw_.load(std::memory_order_acquire);
+    const auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (!cg) return 0;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return 0;
@@ -2342,7 +2342,7 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // guard a concurrent prepare()/release() could retire+free `cg` between the
     // load and the store (use-after-free).
     ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
     if (cg) {
         auto it = cg->runtime.find(id);
         if (it != cg->runtime.end() && it->second.gain) {
