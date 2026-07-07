@@ -23,6 +23,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <cstring>
+#include <cassert>
 #include <thread>
 #include <utility>
 
@@ -1070,6 +1071,20 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
     cg->max_block_size = max_block_size;
     cg->sample_rate = sample_rate;
     cg->connections = connections_;
+
+#ifndef NDEBUG
+    // 2.2b (H2): every plugin node MUST have captured metadata. A cache miss
+    // silently yields 0 latency / empty param-bounds / inert transport (wrong
+    // PDC, wrong automation bounds, transport plugin wrongly ahead-rendered) —
+    // exactly what this cache prevents. Impossible in prepare()->compile_(), but
+    // a future off-thread swap-recompile that added a plugin without re-capturing
+    // would fail SILENTLY; assert loudly instead.
+    for (const auto& dbg_n : nodes_) {
+        assert((!dbg_n.plugin || prepared_plugin_meta_.count(dbg_n.id) == 1) &&
+               "compile_: plugin node missing from prepared_plugin_meta_ — a swap "
+               "recompiled without re-capturing plugin metadata (2.2b H2)");
+    }
+#endif
     cg->order = processing_order();
 
     for (auto& n : nodes_) {

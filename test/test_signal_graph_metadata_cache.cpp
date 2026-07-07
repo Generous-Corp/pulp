@@ -16,9 +16,12 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -121,6 +124,10 @@ TEST_CASE("compile_() after prepare() reads cached plugin metadata, not the live
         REQUIRE(g.connect(in, c, plug, c));
         REQUIRE(g.connect(plug, c, out, c));
     }
+    // Automate the plugin's param id 1 so the routing param-bounds path
+    // (plugin_params_for accessor) is exercised too — else params_calls==0 would
+    // only prove compile_'s param path, not the routing accessor.
+    REQUIRE(g.connect_automation(in, 0, plug, /*dest_param_id=*/1, 0.0f, 1.0f));
     g.set_canonical_executor_routing_enabled(true);
     REQUIRE(g.prepare(kSr, kFrames));
 
