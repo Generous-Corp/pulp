@@ -68,8 +68,14 @@ TEST_CASE("a px literal matching a dimension token is an info finding", "[design
     REQUIRE(fs[0].message.find("radius.md") != std::string::npos);
     // A px value the system does NOT define is not flagged (avoids noise).
     REQUIRE(lint_adherence("el.style.margin = '13px';\n", test_manifest()).empty());
-    // 8.0px normalizes to the token's "8".
+    // Trailing-zero variants all normalize to the token's "8" and are flagged.
+    // This exercises the locale-independent numeric parse (strtod under an
+    // explicit C locale) that backs normalize_number.
     REQUIRE_FALSE(lint_adherence("el.style.padding = '8.0px';\n", test_manifest()).empty());
+    REQUIRE_FALSE(lint_adherence("el.style.padding = '8.00px';\n", test_manifest()).empty());
+    REQUIRE_FALSE(lint_adherence("el.style.padding = '08px';\n", test_manifest()).empty());
+    // A non-integer px value that does not match the "8" token stays clean.
+    REQUIRE(lint_adherence("el.style.padding = '8.5px';\n", test_manifest()).empty());
 }
 
 TEST_CASE("comment content is ignored; string content is scanned", "[design-adherence]") {
