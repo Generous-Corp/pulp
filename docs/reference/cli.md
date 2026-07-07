@@ -363,7 +363,7 @@ Set `PULP_HOME` to relocate the cache, SDK, and config root.
 
 **Status**: usable
 
-Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, external SDKs (VST3, AudioUnit), platform-specific dependencies, and the expected project mode.
+Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, generated WidgetBridge API artifacts, external SDKs (VST3, AudioUnit), platform-specific dependencies, and the expected project mode.
 
 ```bash
 pulp doctor                          # show all checks
@@ -383,6 +383,7 @@ pulp doctor --caches --json          # emit the cache report as stable JSON
 pulp doctor --host-quirks            # show the runtime DAW host-quirks policy + enforced accommodations
 pulp doctor quirks                   # synonym for --host-quirks
 pulp doctor --au-cache --dry-run     # preview macOS AudioComponentRegistrar refresh
+pulp doctor --only WidgetBridge      # check generated WidgetBridge .d.ts/docs staleness
 ```
 
 `pulp doctor --host-quirks` reports whether Pulp is enforcing DAW
@@ -408,6 +409,16 @@ story and the precedence rules.
 
 `pulp doctor --au-cache` refreshes macOS Audio Unit registration metadata by
 stopping `AudioComponentRegistrar` so macOS respawns it on the next AU host scan.
+
+In source-tree mode, the default doctor includes `WidgetBridge generated API`.
+It verifies that `packages/pulp-react/src/bridge-globals.generated.d.ts`,
+`packages/pulp-react/src/bridge-mock-functions.generated.ts`,
+`packages/pulp-react/src/bridge-mock-safe-functions.generated.ts`, and
+`docs/reference/js-bridge.md` exist and carry the current embedded input
+fingerprint for the bridge manifest, generator, and capability inputs. Run
+`python3 tools/scripts/generate_widget_bridge_api.py --check` for the exact
+content check, or run `python3 tools/scripts/generate_widget_bridge_api.py --write`
+manually to refresh stale outputs.
 Use it after changing AU `Info.plist` metadata such as type, manufacturer, or
 description when `auval` or a DAW still sees stale values. `--dry-run` prints
 the command instead of running it. On non-macOS hosts the flag is accepted as a

@@ -7,7 +7,7 @@
 // bridge fn + widget slot that no JSX prop could reach.
 //
 // This test closes the loop for the manifest's `jsx`-tagged rows: every fn
-// tagged `prop:Type.name` must be reachable from JSX (bridge.ts allowlist +
+// tagged `prop:Type.name` must be reachable from JSX (generated mock allowlist +
 // a prop-applier `call('<fn>')` dispatch + a typed prop in types.ts), and
 // every `factory:`/`geometry:` fn must at least be on the allowlist. The
 // reverse is checked too: every `call('setSvg…' | 'createSvg…')` the
@@ -27,7 +27,7 @@ const read = (rel: string) => readFileSync(resolve(repoRoot, rel), 'utf8');
 
 const manifestText = read('core/view/src/widget_bridge_api_manifest.tsv');
 const propApplier = read('packages/pulp-react/src/prop-applier.ts');
-const bridge = read('packages/pulp-react/src/bridge.ts');
+const bridgeMockFunctions = read('packages/pulp-react/src/bridge-mock-functions.generated.ts');
 const types = read('packages/pulp-react/src/types.ts');
 
 interface Row { name: string; category: string; jsx: string; }
@@ -43,7 +43,7 @@ const rows: Row[] = manifestText
 const tagged = rows.filter((r) => r.jsx.length > 0);
 
 // Quote either spelling: call('fn' ... or call("fn" ...
-const allowlisted = (fn: string) => bridge.includes(`'${fn}'`) || bridge.includes(`"${fn}"`);
+const allowlisted = (fn: string) => bridgeMockFunctions.includes(`'${fn}'`) || bridgeMockFunctions.includes(`"${fn}"`);
 const dispatched = (fn: string) => propApplier.includes(`'${fn}'`) || propApplier.includes(`"${fn}"`);
 
 describe('WidgetBridge ↔ @pulp/react JSX-reachability contract', () => {
@@ -54,8 +54,8 @@ describe('WidgetBridge ↔ @pulp/react JSX-reachability contract', () => {
     describe('prop: tags are fully reachable from JSX', () => {
         for (const r of tagged.filter((t) => t.jsx.startsWith('prop:'))) {
             it(`${r.name} (${r.jsx})`, () => {
-                // bridge.ts mock-allowlist must expose the fn
-                expect(allowlisted(r.name), `${r.name} missing from bridge.ts allowlist`).toBe(true);
+                // The generated mock-allowlist must expose the fn.
+                expect(allowlisted(r.name), `${r.name} missing from generated mock allowlist`).toBe(true);
                 // prop-applier must dispatch to it
                 expect(dispatched(r.name), `${r.name} has no prop-applier call()`).toBe(true);
                 // types.ts must declare the prop on a Props interface
@@ -72,7 +72,7 @@ describe('WidgetBridge ↔ @pulp/react JSX-reachability contract', () => {
     describe('factory:/geometry: tags are on the bridge allowlist', () => {
         for (const r of tagged.filter((t) => t.jsx.startsWith('factory:') || t.jsx.startsWith('geometry:'))) {
             it(`${r.name} (${r.jsx})`, () => {
-                expect(allowlisted(r.name), `${r.name} missing from bridge.ts allowlist`).toBe(true);
+                expect(allowlisted(r.name), `${r.name} missing from generated mock allowlist`).toBe(true);
             });
         }
     });

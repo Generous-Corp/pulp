@@ -10,11 +10,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -50,6 +53,62 @@ std::string first_line(std::string text) {
         text.erase(text.begin());
     }
     return text;
+}
+
+void fnv1a64_update(std::uint64_t& value, const char* data, std::size_t size) {
+    constexpr std::uint64_t prime = 0x100000001b3ULL;
+    for (std::size_t i = 0; i < size; ++i) {
+        value ^= static_cast<unsigned char>(data[i]);
+        value *= prime;
+    }
+}
+
+void fnv1a64_update(std::uint64_t& value, const std::string& data) {
+    fnv1a64_update(value, data.data(), data.size());
+}
+
+std::vector<char> normalized_text_bytes(const std::vector<char>& data) {
+    std::vector<char> normalized;
+    normalized.reserve(data.size());
+    for (std::size_t i = 0; i < data.size(); ++i) {
+        if (data[i] == '\r') {
+            normalized.push_back('\n');
+            if (i + 1 < data.size() && data[i + 1] == '\n') ++i;
+        } else {
+            normalized.push_back(data[i]);
+        }
+    }
+    return normalized;
+}
+
+std::string widget_bridge_input_fingerprint(const fs::path& repo_root,
+                                            const std::vector<fs::path>& input_rels) {
+    constexpr std::uint64_t offset = 0xcbf29ce484222325ULL;
+    std::uint64_t value = offset;
+    const char separator = '\0';
+
+    for (const auto& rel : input_rels) {
+        auto label = rel.generic_string();
+        fnv1a64_update(value, label);
+        fnv1a64_update(value, &separator, 1);
+
+        std::ifstream stream(repo_root / rel, std::ios::binary);
+        std::vector<char> data((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        auto normalized = normalized_text_bytes(data);
+        fnv1a64_update(value, normalized.data(), normalized.size());
+        fnv1a64_update(value, &separator, 1);
+    }
+
+    std::ostringstream out;
+    out << "fnv1a64:" << std::hex << std::setfill('0') << std::setw(16) << value;
+    return out.str();
+}
+
+bool file_contains_text(const fs::path& path, const std::string& needle) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) return false;
+    std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    return text.find(needle) != std::string::npos;
 }
 }  // namespace
 
@@ -309,6 +368,62 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             } else {
                 c.passed = true;
                 c.detail = "No LFS-tracked binaries found (OK if Skia not needed)";
+            }
+            checks.push_back(c);
+        }
+
+        if (doctor_check_matches_only_filter(only_filter, "WidgetBridge generated API")) {
+            DoctorCheck c{"WidgetBridge generated API", false, {}, {}};
+            const std::vector<fs::path> input_rels{
+                fs::path("tools") / "scripts" / "generate_widget_bridge_api.py",
+                fs::path("core") / "view" / "src" / "widget_bridge_api_manifest.tsv",
+                fs::path("core") / "view" / "include" / "pulp" / "view" / "reload_autocaps.hpp",
+                fs::path("core") / "view" / "include" / "pulp" / "view" / "reload_capabilities.hpp",
+            };
+            const std::vector<fs::path> output_rels{
+                fs::path("packages") / "pulp-react" / "src" / "bridge-globals.generated.d.ts",
+                fs::path("packages") / "pulp-react" / "src" / "bridge-mock-functions.generated.ts",
+                fs::path("packages") / "pulp-react" / "src" / "bridge-mock-safe-functions.generated.ts",
+                fs::path("docs") / "reference" / "js-bridge.md",
+            };
+
+            fs::path missing;
+            for (const auto& rel : input_rels) {
+                if (!fs::exists(repo_root / rel)) {
+                    missing = rel;
+                    break;
+                }
+            }
+            if (missing.empty()) {
+                for (const auto& rel : output_rels) {
+                    if (!fs::exists(repo_root / rel)) {
+                        missing = rel;
+                        break;
+                    }
+                }
+            }
+
+            if (!missing.empty()) {
+                c.detail = "required generated API input/output missing: " + missing.generic_string();
+            } else {
+                const auto expected = widget_bridge_input_fingerprint(repo_root, input_rels);
+                const auto marker = std::string("Pulp-WidgetBridge-Input-Fingerprint: ") + expected;
+                std::vector<std::string> stale_outputs;
+                for (const auto& rel : output_rels) {
+                    if (!file_contains_text(repo_root / rel, marker)) {
+                        stale_outputs.push_back(rel.generic_string());
+                    }
+                }
+                if (stale_outputs.empty()) {
+                    c.passed = true;
+                    c.detail = "generated WidgetBridge declarations, mock lists, and docs input fingerprint matches";
+                } else {
+                    c.detail = "generated bridge declarations, mock lists, or docs have stale input fingerprints: ";
+                    for (std::size_t i = 0; i < stale_outputs.size(); ++i) {
+                        if (i != 0) c.detail += ", ";
+                        c.detail += stale_outputs[i];
+                    }
+                }
             }
             checks.push_back(c);
         }

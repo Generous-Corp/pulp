@@ -682,7 +682,7 @@ commands:
 
   - name: doctor
     status: usable
-    summary: Diagnose environment issues. Default mode checks compiler, CMake, git-lfs, platform deps, and either the active checkout or the installed SDK workflow. Optional `android` and `ios` subcommands check mobile dev environments and emit per-host install hints. `--versions` surfaces CLI/SDK/Plugin version skew. `--validators` surfaces plugin-format validator install + signature integrity, with `--fix` healing user-owned breakage. `--caches` audits the FetchContent shared-source cache for dangling symlinks, stale-commit entries, and root-owned dirs; `--caches --fix` auto-heals user-owned drift without sudo.
+    summary: Diagnose environment issues. Default mode checks compiler, CMake, git-lfs, generated WidgetBridge API artifacts in source-tree mode, platform deps, and either the active checkout or the installed SDK workflow. Optional `android` and `ios` subcommands check mobile dev environments and emit per-host install hints. `--versions` surfaces CLI/SDK/Plugin version skew. `--validators` surfaces plugin-format validator install + signature integrity, with `--fix` healing user-owned breakage. `--caches` audits the FetchContent shared-source cache for dangling symlinks, stale-commit entries, and root-owned dirs; `--caches --fix` auto-heals user-owned drift without sudo.
     args:
       - name: target
         kind: positional

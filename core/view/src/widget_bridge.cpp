@@ -1207,7 +1207,8 @@ void WidgetBridge::register_api() {
 
     register_drop_event_api();
 
-    register_font_assets_api();
+    if (granted_capabilities_.has(ReloadCapability::Filesystem))
+        register_font_assets_api();
 
     register_shader_canvas_api();
 
