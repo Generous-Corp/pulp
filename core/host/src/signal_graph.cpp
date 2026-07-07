@@ -23,6 +23,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <cstring>
+#include <cassert>
 #include <thread>
 #include <utility>
 
@@ -989,7 +990,9 @@ void SignalGraph::wait_for_retired_snapshots_() {
 }
 
 void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
-                                         const std::vector<Connection>& /*conns*/) {
+                                         const std::vector<Connection>& /*conns*/,
+                                         const std::unordered_map<NodeId, PreparedPluginMetadata>&
+                                             plugin_meta) {
     for (NodeId id : cg.order) {
         auto rt_it = cg.runtime.find(id);
         if (rt_it == cg.runtime.end()) continue;
@@ -1010,9 +1013,12 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         rt.input_latency = has_upstream ? max_upstream : 0;
 
         int64_t added = 0;
-        auto pit = cg.plugins.find(id);
-        if (pit != cg.plugins.end() && pit->second) {
-            added = std::max(0, pit->second->latency_samples());
+        // 2.2b (H2): read cached latency, never the live slot — latency_samples()
+        // reaches into the live plugin (e.g. VST3 getLatencySamples()) and is
+        // unsafe concurrent with process() during a swap-time recompile.
+        auto mit = plugin_meta.find(id);
+        if (mit != plugin_meta.end()) {
+            added = std::max<int64_t>(0, mit->second.latency_samples);
         }
         rt.output_latency = rt.input_latency + added;
     }
@@ -1067,6 +1073,20 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
     cg->max_block_size = max_block_size;
     cg->sample_rate = sample_rate;
     cg->connections = connections_;
+
+#ifndef NDEBUG
+    // 2.2b (H2): every plugin node MUST have captured metadata. A cache miss
+    // silently yields 0 latency / empty param-bounds / inert transport (wrong
+    // PDC, wrong automation bounds, transport plugin wrongly ahead-rendered) —
+    // exactly what this cache prevents. Impossible in prepare()->compile_(), but
+    // a future off-thread swap-recompile that added a plugin without re-capturing
+    // would fail SILENTLY; assert loudly instead.
+    for (const auto& dbg_n : nodes_) {
+        assert((!dbg_n.plugin || prepared_plugin_meta_.count(dbg_n.id) == 1) &&
+               "compile_: plugin node missing from prepared_plugin_meta_ — a swap "
+               "recompiled without re-capturing plugin metadata (2.2b H2)");
+    }
+#endif
     cg->order = processing_order();
 
     for (auto& n : nodes_) {
@@ -1098,12 +1118,16 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         }
         rt.gain = std::make_unique<std::atomic<float>>(n.gain);
         if (n.plugin) {
-            for (const auto& p : n.plugin->parameters()) {
-                rt.param_bounds.push_back({
-                    p.id,
-                    p.min_value,
-                    p.max_value,
-                });
+            // 2.2b (H2): read cached parameter bounds, not the live slot.
+            auto mit = prepared_plugin_meta_.find(n.id);
+            if (mit != prepared_plugin_meta_.end()) {
+                for (const auto& p : mit->second.parameters) {
+                    rt.param_bounds.push_back({
+                        p.id,
+                        p.min_value,
+                        p.max_value,
+                    });
+                }
             }
         }
         auto [runtime_it, inserted] = cg->runtime.emplace(n.id, std::move(rt));
@@ -1135,7 +1159,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         // re-prepare to be observed.
         n.transport_sensitive = false;
         if (n.type == NodeType::Plugin) {
-            n.transport_sensitive = n.plugin && n.plugin->wants_transport();
+            // 2.2b (H2): read cached transport-sensitivity, not the live slot.
+            auto mit = prepared_plugin_meta_.find(n.id);
+            n.transport_sensitive =
+                (mit != prepared_plugin_meta_.end()) && mit->second.wants_transport;
         }
         if (n.type == NodeType::Custom) {
             if (const auto* type = custom_node_type(n.custom_type_id,
@@ -1236,7 +1263,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         });
     }
 
-    compute_latencies_for_(*cg, connections_);
+    compute_latencies_for_(*cg, connections_, prepared_plugin_meta_);
 
     // Build the canonical-executor routing for this snapshot when the topology
     // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
@@ -1276,6 +1303,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 auto it = cgr.custom_transport_processors.find(id);
                 return it == cgr.custom_transport_processors.end() ? nullptr
                                                                    : &it->second;
+            },
+            // 2.2b (H2): feed cached plugin metadata so the routing build makes
+            // no live PluginSlot metadata call (safe for a swap-time recompile).
+            [this](NodeId id) -> int {
+                auto it = prepared_plugin_meta_.find(id);
+                return it == prepared_plugin_meta_.end()
+                           ? 0 : it->second.latency_samples;
+            },
+            [this](NodeId id) -> const std::vector<HostParamInfo>* {
+                auto it = prepared_plugin_meta_.find(id);
+                return it == prepared_plugin_meta_.end()
+                           ? nullptr : &it->second.parameters;
             });
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
@@ -1353,6 +1392,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                     auto it = cgr.custom_transport_processors.find(id);
                     return it == cgr.custom_transport_processors.end() ? nullptr
                                                                        : &it->second;
+                },
+                // 2.2b (H2): cached plugin metadata (anticipation is swap-excluded
+                // by H4, but keep the whole compile path off live PluginSlot calls).
+                [this](NodeId id) -> int {
+                    auto it = prepared_plugin_meta_.find(id);
+                    return it == prepared_plugin_meta_.end()
+                               ? 0 : it->second.latency_samples;
+                },
+                [this](NodeId id) -> const std::vector<HostParamInfo>* {
+                    auto it = prepared_plugin_meta_.find(id);
+                    return it == prepared_plugin_meta_.end()
+                               ? nullptr : &it->second.parameters;
                 });
             if (ok) {
                 cg->routing_levelization = graph::build_graph_runtime_levelization(
@@ -1607,13 +1658,23 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
         }
     }
 
-    // Prepare each plugin slot first (pre-compile step).
+    // Prepare each plugin slot first (pre-compile step). Immediately capture
+    // each slot's metadata (params/latency/transport) into prepared_plugin_meta_
+    // so compile_() and the executor-routing build read the cache instead of
+    // calling live PluginSlot metadata methods — the contract the no-silence
+    // swap (2.2b) relies on (H2). Safe to read here: null-first prepare, mutation
+    // lock held, no concurrent process() on these instances.
+    prepared_plugin_meta_.clear();
     for (auto& n : nodes_) {
         if (n.plugin) {
             if (!n.plugin->prepare(sample_rate, max_block_size)) {
                 runtime::log_error("SignalGraph: failed to prepare plugin '{}'", n.name);
                 return false;
             }
+            prepared_plugin_meta_[n.id] = PreparedPluginMetadata{
+                n.plugin->parameters(),
+                std::max(0, n.plugin->latency_samples()),
+                n.plugin->wants_transport()};
         }
     }
 

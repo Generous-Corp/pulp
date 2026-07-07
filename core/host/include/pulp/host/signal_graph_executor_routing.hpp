@@ -210,7 +210,14 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              // result is transport-sensitive (consistent with
                              // GraphNode::transport_sensitive resolved at compile).
                              const std::function<const CustomNodeTransportProcessFn*(NodeId)>&
-                                 custom_transport_for = {});
+                                 custom_transport_for = {},
+                             // 2.2b (H2): cached plugin-metadata accessors so a
+                             // swap-time build makes NO live PluginSlot metadata
+                             // call. Empty → fall back to plugin_for's live slot
+                             // (baked / anticipation callers, not on the swap path).
+                             const std::function<int(NodeId)>& plugin_latency_for = {},
+                             const std::function<const std::vector<HostParamInfo>*(NodeId)>&
+                                 plugin_params_for = {});
 
 // Translate a prepared, eligible `graph` into `out` (snapshot + sized pool +
 // keepalive). Returns false (out.valid == false) when ineligible/unprepared. On

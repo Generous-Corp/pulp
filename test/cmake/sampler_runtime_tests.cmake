@@ -136,6 +136,12 @@ pulp_add_test_suite(pulp-test-signal-graph-anticipation
 pulp_add_test_suite(pulp-test-signal-graph-prepared-swap
     SOURCES test_signal_graph_prepared_swap.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# 2.2b prerequisite (H2): compile_()/routing read cached plugin metadata, never
+# the live PluginSlot — a CountingSlot asserts zero metadata calls after prepare()
+# + a compile-vs-process race check on a plugin-bearing graph.
+pulp_add_test_suite(pulp-test-signal-graph-metadata-cache
+    SOURCES test_signal_graph_metadata_cache.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Transport plumbing for SignalGraph::process: the transport-aware overload is
 # bit-identical for transport-inert routed nodes, populates the routed block so a
 # ProcessorNode consumer receives the host transport / process_mode / render-speed

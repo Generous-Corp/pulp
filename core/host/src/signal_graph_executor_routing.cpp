@@ -284,7 +284,10 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              const std::function<const CustomNodeProcessFn*(NodeId)>&
                                  custom_for,
                              const std::function<const CustomNodeTransportProcessFn*(NodeId)>&
-                                 custom_transport_for) {
+                                 custom_transport_for,
+                             const std::function<int(NodeId)>& plugin_latency_for,
+                             const std::function<const std::vector<HostParamInfo>*(NodeId)>&
+                                 plugin_params_for) {
     out.clear();
     plugin_ctx.clear();
     if (custom_ctx != nullptr) custom_ctx->clear();
@@ -353,8 +356,11 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
         if (node.type == NodeType::Plugin) {
             PluginSlot* slot = plugin_for ? plugin_for(node.id) : nullptr;
             if (slot != nullptr) {
-                spec.latency_samples =
-                    static_cast<std::uint32_t>(std::max(0, slot->latency_samples()));
+                // 2.2b (H2): prefer cached latency; latency_samples() is a live
+                // plugin call unsafe concurrent with process() during a swap.
+                const int lat = plugin_latency_for ? plugin_latency_for(node.id)
+                                                    : slot->latency_samples();
+                spec.latency_samples = static_cast<std::uint32_t>(std::max(0, lat));
             }
         }
         node_specs.push_back(spec);
@@ -394,7 +400,15 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             spec.automation.bounds_hi = c.automation_range_hi;
             PluginSlot* dest_slot = plugin_for ? plugin_for(c.dest_node) : nullptr;
             if (dest_slot != nullptr) {
-                for (const auto& p : dest_slot->parameters()) {
+                // 2.2b (H2): prefer cached params; parameters() is a live plugin
+                // call. Cache returns a stable pointer; fall back to a by-value
+                // copy of the live list when no cache accessor is provided.
+                const std::vector<HostParamInfo>* cached =
+                    plugin_params_for ? plugin_params_for(c.dest_node) : nullptr;
+                std::vector<HostParamInfo> live;
+                if (cached == nullptr) live = dest_slot->parameters();
+                const std::vector<HostParamInfo>& params = cached ? *cached : live;
+                for (const auto& p : params) {
                     if (p.id != c.automation_param_id) continue;
                     spec.automation.bounds_lo = p.min_value;
                     spec.automation.bounds_hi = p.max_value;
