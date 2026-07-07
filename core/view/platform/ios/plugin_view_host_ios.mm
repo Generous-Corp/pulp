@@ -385,6 +385,42 @@ static void detach_child_view_from_host(UIView* container, void* child_view_hand
     }
 }
 
+// Mask an attached child view to a visible sub-rectangle expressed in the
+// child's OWN top-left [0,0,frame_w,frame_h] box (Pulp convention), so a native
+// child inside a scroll region is clipped to its scroll ancestor's viewport
+// without resizing (and reflowing) the child. UIView layers are top-left
+// origin, so the local clip maps directly. has_clip=false removes any mask.
+static bool clip_child_view_in_host(UIView* container,
+                                    void* child_view_handle,
+                                    bool has_clip,
+                                    float x,
+                                    float y,
+                                    float width,
+                                    float height) {
+    if (!container || !child_view_handle) {
+        return false;
+    }
+    UIView* child = (__bridge UIView*)child_view_handle;
+    if (!child || child.superview != container) {
+        return false;
+    }
+
+    if (!has_clip) {
+        child.layer.mask = nil;
+        return true;
+    }
+
+    CALayer* mask = child.layer.mask;
+    if (!mask) {
+        mask = [CALayer layer];
+        mask.backgroundColor = [UIColor blackColor].CGColor;  // opaque = visible
+    }
+    mask.frame = CGRectMake(x, y, std::max<CGFloat>(0.0, width),
+                            std::max<CGFloat>(0.0, height));
+    child.layer.mask = mask;
+    return true;
+}
+
 // ── iOSPluginViewHost ─────────────────────────────────────────────────────────
 
 namespace pulp::view {
@@ -487,6 +523,16 @@ public:
 
     void detach_native_child_view(NativeViewHandle child_view) override {
         detach_child_view_from_host(view_, child_view);
+    }
+
+    bool set_native_child_view_clip(NativeViewHandle child_view,
+                                    bool has_clip,
+                                    float x,
+                                    float y,
+                                    float width,
+                                    float height) override {
+        return clip_child_view_in_host(view_, child_view, has_clip, x, y, width,
+                                       height);
     }
 
 private:
@@ -1017,6 +1063,16 @@ public:
 
     void detach_native_child_view(NativeViewHandle child_view) override {
         detach_child_view_from_host(metal_view_, child_view);
+    }
+
+    bool set_native_child_view_clip(NativeViewHandle child_view,
+                                    bool has_clip,
+                                    float x,
+                                    float y,
+                                    float width,
+                                    float height) override {
+        return clip_child_view_in_host(metal_view_, child_view, has_clip, x, y,
+                                       width, height);
     }
 
 private:

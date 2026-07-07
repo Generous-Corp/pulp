@@ -45,5 +45,6 @@ std::string handle_audio_probe_json(const std::string& params_json);
 std::string handle_audio_scope(const std::string& params_json);
 std::string handle_audio_render(const std::string& params_json);
 std::string handle_audio_compare(const std::string& params_json);
+std::string handle_inspect_pending_requests(const std::string& params_json);
 
 }  // namespace pulp_mcp

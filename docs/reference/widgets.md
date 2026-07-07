@@ -113,6 +113,7 @@ interactive version of this set (dark + light), build and run
 | `ConcertinaPanel` | Accordion sections | sections (title+content), expand/collapse/toggle, exclusive mode | `concertina_panel.hpp` |
 | `ModalOverlay` | Modal overlay | backdrop opacity, dismiss-on-backdrop, focus trap, Esc close | `modal.hpp` |
 | `CanvasWidget` | Replays recorded Canvas2D | clear/add command, 50+ draw-command types, NaN-sanitized | `canvas_widget.hpp` |
+| `NativeViewHost` | Embeds a platform-native child view | wraps host attach/bounds/clip/detach (WebView / native text field / video layer), scroll-tracking, clip-to-ancestor, fixed z-order (native above GPU), headless snapshot forwarding; mac/iOS-only | `native_view_host.hpp` |
 | `MultiDocumentPanel` | Multi-document container | tabbed/tiled documents, active tracking | `file_browser.hpp` |
 
 ## Overlays

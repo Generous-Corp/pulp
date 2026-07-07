@@ -105,6 +105,15 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    queue independently is the **GitHub-hosted advisory lanes** (Linux, Windows,
    sanitizers, coverage, android) on GitHub's shared pool; those are advisory, not
    the required gate, so a long queue there does not block merge.
+4. **Is `shipyard run/ship` failing at `stage=configure` with `D
+   external/skia-build/build`?** That's the Skia symlink loop (a tracked
+   machine-specific absolute symlink autofetch deletes at configure → tree-drift),
+   not capacity or a code failure — the local mac validation dies before posting
+   its `macos` status, so the PR stays BLOCKED with the required check absent.
+   Fixed at the repo level by PR #5588 (untracked + `.gitignore`d), but a
+   pre-#5588 checkout keeps the stale looped symlink until it pulls main. Recovery
+   + full mechanics: the **`skia-gpu-build`** skill's Gotchas section
+   (`ln -sfn ~/.cache/pulp/skia-build/build <primary>/external/skia-build/build`).
 
 **If you don't use Shipyard + the self-hosted Mac pool:** steps 1 and 3 are
 specific to that setup (App-dispatched workflows; local runners) — skip them. The

@@ -344,3 +344,8 @@ target_include_directories(pulp-test-xcode-developer-path PRIVATE
 )
 target_link_libraries(pulp-test-xcode-developer-path PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-xcode-developer-path)
+
+# StepSequencer end-to-end proof: a StepGridView (UI) submits a cell edit through
+# a SequencerStateChannel, the Processor drains it and republishes state, and the
+# view reflects it — the synth-class non-param control path without APVTS.
+pulp_add_test_suite(pulp-test-step-sequencer-roundtrip LIBRARIES pulp::view pulp::state pulp::format pulp::midi pulp::audio)

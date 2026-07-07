@@ -49,7 +49,7 @@ pulp audio compare $ARGUMENTS --profile tonal-balance --json /tmp/compare.json
   - `regression_suspected` also requires the change to be in that axis's bad direction — a
     brighter candidate on `tonal-balance`, or an HF-reduced one on `added-hf`, stays a neutral
     `material_change_detected`. New axes auto-appear in `--profile`; time-warp axes are deferred.
-- **`--align <none|latency|varispeed:R|stretch:R>`** — time-align first. `latency` trims a constant delay/offset before
+- **`--align <none|latency|varispeed:R|stretch:R|pitch:S|ratio:auto>`** — time-align first. `latency` trims a constant delay/offset before
   measuring, so a pure shift (delay plugin, tempo-sampler offset) reads as the tone change it is
   (corroborated) instead of a false `not_corroborated`; it **refuses** and measures unaligned when
   the difference isn't a reliable pure delay. Default `none`.

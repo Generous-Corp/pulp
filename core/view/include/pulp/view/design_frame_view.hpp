@@ -163,13 +163,52 @@ struct DesignControlContext {
     std::string factory_id;
     std::string props;            ///< opaque (typically JSON); Pulp does not parse it
     std::string source_node_id;
-    float default_value = 0.5f;
+    float default_value = 0.5f;   ///< opening value. A DesignControl also receives
+                                  ///< this via set_control_value() right after build
+                                  ///< (that seed is authoritative), so a factory that
+                                  ///< reads default_value in its ctor need not — it
+                                  ///< will be seeded regardless.
 };
 
 // Builds a native overlay View for a Kind::custom element. Returns the View
 // (ownership moves to the DesignFrameView) or nullptr to render inert.
 using DesignControlFactory =
     std::function<std::unique_ptr<View>(const DesignControlContext&)>;
+
+// Opt-in value conduit for a custom-control overlay. A factory-built View MAY
+// also inherit DesignControl to join DesignFrameView's normalized-value channel
+// — exactly as the built-in kinds do, so a custom knob behaves like a knob to
+// the host: set_element_value() pushes host->view, element_value() reads back,
+// and user edits route through on_element_changed + host-param binding. A View
+// that does NOT inherit DesignControl is still built and rendered; it simply has
+// no value channel (element_value() stays -1, set_element_value() is a no-op),
+// which is the pre-conduit behavior. Retrieved via dynamic_cast, mirroring the
+// DropReceiver mixin idiom used elsewhere in core/view.
+class DesignControl {
+public:
+    virtual ~DesignControl() = default;
+    // Host -> view: adopt the normalized value (0..1). SILENT — implementations
+    // MUST NOT re-emit through on_control_changed (this is the host pushing a
+    // value in, not the user editing), matching the silent host->view push the
+    // other kinds do in DesignFrameView::set_element_value.
+    virtual void set_control_value(float value) = 0;
+    // View -> host: the control's current normalized value (0..1).
+    virtual float control_value() const = 0;
+    // Installed by DesignFrameView when the overlay is built. Implementations
+    // call it on a USER-driven value change so the edit funnels through the
+    // frame's single change path (on_element_changed, param_key host routing).
+    // Never call it from set_control_value.
+    std::function<void(float)> on_control_changed;
+    // Optional undo / touch-automation bracketing for a CONTINUOUS control (a
+    // knob/fader): call on_gesture_begin at the start of a drag and on_gesture_end
+    // at its end so the host groups one undo step and latches automation write —
+    // exactly what the built-in knob does. A momentary/discrete control may leave
+    // these unset. DesignFrameView wires them to its own gesture callbacks
+    // (→ host begin_gesture / end_gesture). Both are installed AFTER the initial
+    // seed, so they never fire during construction.
+    std::function<void()> on_gesture_begin;
+    std::function<void()> on_gesture_end;
+};
 
 // Register / query a custom-control factory by id. UI-THREAD-ONLY: registration
 // happens at host startup and lookup at overlay build, both on the UI thread, so
@@ -187,6 +226,16 @@ void register_design_control_factory(std::string factory_id,
 bool has_design_control_factory(const std::string& factory_id);
 // Test/teardown helper: drop all registered factories.
 void clear_design_control_factories();
+
+// A Kind::custom element whose `factory_id` had no registered factory when the
+// overlay was built, so it rendered inert (the baked SVG still shows). Surfaced
+// via DesignFrameView's opt-in diagnostic so a developer learns which ids were
+// referenced-but-unregistered (a forgotten register_design_control_factory or a
+// typo'd id) instead of getting a silently missing control.
+struct UnregisteredCustomControl {
+    std::string factory_id;      ///< the id that had no factory
+    std::string source_node_id;  ///< the design-source node id (e.g. Figma), if any
+};
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
 // the given box, returning true if one was erased. Used to suppress a design's
@@ -346,6 +395,30 @@ public:
     // The native-overlay child widget for element `i`, or nullptr (e.g. for a
     // knob, or out of range). For tests/bindings.
     View* overlay_widget(int i) const;
+
+    // ── Unregistered-custom-control diagnostic (opt-in, default off) ──────
+    // A Kind::custom element whose factory_id has NO registered factory renders
+    // inert (the baked SVG still shows) — by design a custom control never
+    // blanks. But that means a forgotten register_design_control_factory or a
+    // typo'd id is otherwise silent. Set this callback to be told which ids were
+    // referenced-but-unregistered so a developer / a --validate check can flag
+    // them. Fires once per inert Kind::custom element during overlay build, on
+    // the UI thread. Because the constructor builds the initial frame before a
+    // caller can attach this, setting the callback also REPLAYS the unregistered
+    // controls seen in the most recent build — so a callback attached right after
+    // construction still learns about them. Default (no callback set) is EXACTLY
+    // the old behavior: silent inert render, SVG intact. It never changes what
+    // renders — only ADDS the diagnostic signal.
+    void set_on_unregistered_custom_control(
+        std::function<void(const UnregisteredCustomControl&)> cb);
+    // The set of unregistered custom-control factory_ids seen during the last
+    // overlay build (rebuilt on every frame activation), in first-seen order and
+    // de-duplicated. Empty when every Kind::custom element resolved to a factory.
+    // Queryable without a callback — handy for a `--validate` style assertion.
+    const std::vector<UnregisteredCustomControl>&
+    unregistered_custom_controls() const {
+        return unregistered_custom_;
+    }
 
     // Fired when the USER changes an element (knob drag, dropdown/tab/stepper
     // select) — index + the new normalized value. NOT fired by set_element_value
@@ -559,6 +632,10 @@ private:
     int drag_ = -1;
     float drag_start_x_ = 0.0f, drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
     int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
+    // Opt-in diagnostic for referenced-but-unregistered Kind::custom controls,
+    // plus the accumulator rebuilt on every overlay build. UI-thread-only.
+    std::function<void(const UnregisteredCustomControl&)> on_unregistered_custom_;
+    std::vector<UnregisteredCustomControl> unregistered_custom_;
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered
     bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()

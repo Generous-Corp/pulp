@@ -495,9 +495,34 @@ harness or `ctest`.
   ≤ 15 ms with coverage ≥ 0.5; sustained: ratio-mapped `smooth_energy_env` correlation ≥ floor — else
   REFUSE (`not_aligned`, "non-uniformly warped"). The `_WARP_MODES` set gates the capability
   short-circuit (a warp is applied/routed for onset/stereo axes, not skipped like a constant lag);
-  `_MEASURE_UNWARPED_MODES` = {stretch} drives the graininess hop-scale + corroborator swap (varispeed
-  is NOT in it — it resamples back, so the standard pipeline applies verbatim). **Pitch**-shift +
-  `ratio:auto` are later Tier 3 slices; a non-constant warp / DTW stays on the engine path, not compare.
+  `_MEASURE_UNWARPED_MODES` = {stretch, pitch} drives the per-axis warp normalization + corroborator
+  swap (varispeed is NOT in it — it resamples back, so the standard pipeline applies verbatim).
+
+  **`--align pitch:S`** (Tier 3 / T3.3) — a declared DURATION-PRESERVING pitch shift (S semitones,
+  parsed with an optional `st`/`semitones` suffix; `spec.param` is the signed semitones). Time base
+  unchanged, so the axes measure the pair directly; **tonal-balance** (also `warp_aware`) compensates
+  the LTAS centroid via `dsp.pitch_compensated_centroid_shift` (a perfect shift moves the centroid by
+  the pitch ratio → the axis reports deviation-from-expected, `spectral_centroid.v2-pitch`), and the
+  corroborator shifts the reference LTAS to its expected position first (`dsp.ltas_logfreq_shift`, via
+  the `ref_shift_ratio` arg on `ltas_log_spectral_distance_db`). `_align_pitch` verifies `|S| ≤ 24 st`
+  + duration preserved (a length change ⇒ not a pure pitch shift) and refuses otherwise. The warp-aware
+  kernels take the accepted `AlignSpec` (`spec=`) and each reads only its own class off `spec.mode`/
+  `spec.param` — the generalized threading that replaced T3.2's single `flux_hop_scale` param. Known
+  advisory imperfection: the log-frequency LTAS compensation carries bin-interpolation error on
+  discrete partials, so a clean shift can read `not_corroborated` (advisory only, never the verdict).
+  a non-constant warp / DTW stays on the engine path, not compare.
+
+  **`--align ratio:auto`** (Tier 3 / T3.4) — ESTIMATE a uniform stretch ratio, double-gated (§6.2):
+  two independent estimators — the duration ratio and the onset-time slope (`dsp.theil_sen_slope` over
+  `map_onsets` pairs, ≥ 6) — must agree within 2%, else REFUSE (`not_aligned`, "ratio estimators
+  disagree" / "needs ≥ 6 matched onsets"). On agreement `_align_ratio_auto` delegates to
+  `_align_stretch` with the onset-slope estimate (interior evidence) and tags the record
+  `estimated=True` + both estimator values. The estimated ratio reaches the warp-aware axes via
+  `alignment.effective_spec(spec, record)`, which resolves a `ratio:auto` spec to `stretch:<estimated>`
+  so graininess hop-scales off the ACCEPTED transform, not the "auto" request string. Reliable on
+  onset-bearing uniform EXPANSIONS; compressions (map_onsets drift) + non-uniform + sustained refuse
+  (conservative — declare stretch:R). This is the last declared-warp class; a non-constant warp / DTW
+  stays on the engine path, not compare.
 
   **Honesty disclosures (what compare admits it can't see).** Every axis EXCEPT `stereo-width`
   mean-**downmixes** to mono, so on those a stereo/spatial change (widener, panner, M/S) is

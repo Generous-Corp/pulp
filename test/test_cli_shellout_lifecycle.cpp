@@ -170,6 +170,7 @@ TEST_CASE("pulp dev validates value options before build or watch",
         {{"dev", "--design", "--validate"}, "--design requires a value"},
         {{"dev", "--target"}, "--target requires a value"},
         {{"dev", "--target", "--run", "app"}, "--target requires a value"},
+        {{"dev", "--hot-dsp"}, "--hot-dsp requires --run"},
     };
 
     const auto bin = fs::absolute(pulp_binary());

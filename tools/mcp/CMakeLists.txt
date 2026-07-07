@@ -17,6 +17,16 @@ target_compile_features(pulp-mcp PRIVATE cxx_std_20)
 target_include_directories(pulp-mcp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(pulp-mcp PRIVATE pulp::tool-audio)
 
+# The agent-request queue is a light, choc-only unit that lives in inspect/. The
+# MCP server reads it in-process, so compile just that translation unit into
+# pulp-mcp rather than linking all of pulp::inspect: pulp::inspect PUBLIC-links
+# pulp::view / pulp::render, which would drag the whole GPU/Skia chain into the
+# MCP server just to read a JSON queue file.
+target_sources(pulp-mcp PRIVATE
+    "${PROJECT_SOURCE_DIR}/inspect/src/agent_request_queue.cpp")
+target_include_directories(pulp-mcp PRIVATE
+    "${PROJECT_SOURCE_DIR}/inspect/include")
+
 # Ship pulp-mcp via `cmake --install` too — same lane the SDK tarball
 # uses to deliver pulp-scan-worker. The release-CLI tarball still gets
 # it via tools/scripts/package_cli.py --mcp-binary; this install rule

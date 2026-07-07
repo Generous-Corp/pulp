@@ -287,6 +287,50 @@ void detach_child_view_from_host(NSView* container, void* child_view_handle) {
     }
 }
 
+bool clip_child_view_in_host(NSView* container,
+                             void* child_view_handle,
+                             bool has_clip,
+                             float x,
+                             float y,
+                             float width,
+                             float height) {
+    if (!container || !child_view_handle) {
+        return false;
+    }
+
+    NSView* child = (__bridge NSView*) child_view_handle;
+    if (!child || child.superview != container) {
+        return false;
+    }
+
+    child.wantsLayer = YES;
+    CALayer* layer = child.layer;
+    if (!layer) {
+        return false;
+    }
+
+    if (!has_clip) {
+        layer.mask = nil;
+        return true;
+    }
+
+    // Mask geometry lives in the child layer's coordinate space. A non-flipped
+    // NSView's layer is bottom-left origin, so convert the top-left local clip;
+    // a flipped view (e.g. WKWebView) already matches top-left.
+    const CGFloat child_h = child.bounds.size.height;
+    const CGFloat mask_y = child.isFlipped ? y : (child_h - (y + height));
+
+    CALayer* mask = layer.mask;
+    if (!mask) {
+        mask = [CALayer layer];
+        mask.backgroundColor = [NSColor blackColor].CGColor;  // opaque = visible
+    }
+    mask.frame = NSMakeRect(x, mask_y, std::max<CGFloat>(0.0, width),
+                            std::max<CGFloat>(0.0, height));
+    layer.mask = mask;
+    return true;
+}
+
 }  // namespace pulp::view::mac_geometry
 
 #endif  // TARGET_OS_OSX

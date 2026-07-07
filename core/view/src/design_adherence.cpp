@@ -8,10 +8,18 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
+#include <cstdlib>
 #include <regex>
 #include <unordered_map>
 #include <unordered_set>
+
+#if defined(_WIN32)
+#include <clocale>
+#else
+#include <locale.h>
+#endif
 
 namespace pulp::design {
 
@@ -74,14 +82,34 @@ std::string expand_hex(const std::string& body) {
 
 // Shortest round-trip decimal of a numeric string, so "8.0"/"8.00"/"8" all
 // compare equal to a dimension token's stored "8".
+//
+// std::from_chars' floating-point overload is still a =deleted placeholder in
+// the libc++ shipped with some toolchains Pulp builds on (the github-hosted
+// macOS image behind the release sign lane), so parse against an explicit "C"
+// locale via strtod instead. That keeps parsing locale-independent — a
+// comma-decimal global locale cannot misparse "8.0" — without the fragile float
+// overload. to_chars(float) is universally available and gives the shortest
+// round-trip. (pulp::format::detail::parse_double_c_locale is the same idea in
+// the format layer; kept local here to avoid a view→format detail dependency.)
 std::string normalize_number(const std::string& num) {
-    float v = 0.0f;
-    auto [ptr, ec] = std::from_chars(num.data(), num.data() + num.size(), v);
-    if (ec != std::errc{}) return num;
+    if (num.empty()) return num;
+    errno = 0;
+    char* end = nullptr;
+#if defined(_WIN32)
+    static _locale_t c_locale = ::_create_locale(LC_ALL, "C");
+    double parsed = ::_strtod_l(num.c_str(), &end, c_locale);
+#else
+    static ::locale_t c_locale = ::newlocale(LC_ALL_MASK, "C", static_cast<::locale_t>(0));
+    const ::locale_t prev = ::uselocale(c_locale);
+    double parsed = std::strtod(num.c_str(), &end);
+    ::uselocale(prev);
+#endif
+    if (end == num.c_str() || errno == ERANGE) return num;  // no number / out of range
+    float v = static_cast<float>(parsed);
     char buf[32];
-    auto [end, ec2] = std::to_chars(buf, buf + sizeof(buf), v);
+    auto [out_end, ec2] = std::to_chars(buf, buf + sizeof(buf), v);
     if (ec2 != std::errc{}) return num;
-    return std::string(buf, end);
+    return std::string(buf, out_end);
 }
 
 }  // namespace

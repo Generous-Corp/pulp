@@ -307,9 +307,12 @@ def main(argv: list[str] | None = None) -> int:
                            "the difference isn't a reliable pure delay), or varispeed:R (undo a declared "
                            "tape-style speed change by resampling the candidate back to the reference "
                            "time base), or stretch:R (a declared pitch-preserving time-stretch — measure "
-                           "warp-invariant axes directly, warp-normalize graininess + corroboration; "
-                           "refuses if the audio doesn't support the declaration). Validated by "
-                           "alignment.parse — an unknown mode errors")
+                           "warp-invariant axes directly, warp-normalize graininess + corroboration), or "
+                           "pitch:S (a declared duration-preserving pitch shift in semitones — "
+                           "compensate tonal-balance for the expected centroid move), or ratio:auto "
+                           "(estimate a uniform stretch ratio, double-gated; refuses if the audio "
+                           "doesn't support the declaration). Validated by alignment.parse — an "
+                           "unknown mode errors")
     cmp_.add_argument("--threshold", type=float, default=None,
                       help="materiality threshold override (defaults to the axis's own default)")
     cmp_.add_argument("--json", default="", help="write the full report JSON to this path")

@@ -1810,6 +1810,15 @@ public:
     void detach_native_child_view(void* child_view) override {
         detach_child_view_from_host(view_, child_view);
     }
+    bool set_native_child_view_clip(void* child_view,
+                                    bool has_clip,
+                                    float x,
+                                    float y,
+                                    float width,
+                                    float height) override {
+        return clip_child_view_in_host(view_, child_view, has_clip, x, y, width,
+                                       height);
+    }
     std::vector<uint8_t> capture_png() override {
         auto live = pulp::view::mac_capture::capture_window_screencapture_png(window_);
         return !live.empty() ? live : pulp::view::mac_capture::capture_window_content_png(window_, view_);
@@ -2094,6 +2103,15 @@ public:
     }
     void detach_native_child_view(void* child_view) override {
         detach_child_view_from_host(metal_view_, child_view);
+    }
+    bool set_native_child_view_clip(void* child_view,
+                                    bool has_clip,
+                                    float x,
+                                    float y,
+                                    float width,
+                                    float height) override {
+        return clip_child_view_in_host(metal_view_, child_view, has_clip, x, y,
+                                       width, height);
     }
 
     void repaint() override {
