@@ -1020,6 +1020,14 @@ private:
         int latency_samples = 0;
         bool wants_transport = false;
     };
+    // Captured once per prepare() (cleared + rebuilt); read by compile_ / the
+    // routing build / edit-time param validation instead of the live PluginSlot.
+    // STALENESS INVARIANT: an entry is valid ONLY while the node set and per-node
+    // slot identities are unchanged since the last prepare(). A 2.2b swap never
+    // recaptures it — the reinit-free predicate (snapshot_is_plugin_reinit_free_)
+    // enforces exactly that invariant, and a non-reinit-free edit falls back to a
+    // full prepare() which rebuilds this map. Do NOT read it after a mutation that
+    // could add/remove/re-instantiate a node without a matching re-prepare.
     std::unordered_map<NodeId, PreparedPluginMetadata> prepared_plugin_meta_;
 
     // Audio-thread snapshot, published by prepare() / mutators. The audio
