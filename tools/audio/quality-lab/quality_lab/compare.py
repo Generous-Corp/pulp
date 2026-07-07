@@ -836,7 +836,9 @@ def compare_arrays(
         # is invalid across a warp). Only when the declaration was accepted (applied); else the axes see
         # the raw pair and the spec is withheld so no half-trusted normalization is applied.
         measures_unwarped = bool(alignment.measures_unwarped(align_spec) and align_rec.get("applied"))
-        warp_spec = align_spec if measures_unwarped else None
+        # `ratio:auto` resolves to a concrete stretch — the axes normalize against the ESTIMATED ratio
+        # in the record, not the "auto" request string.
+        warp_spec = alignment.effective_spec(align_spec, align_rec) if measures_unwarped else None
         env = _measure(axis, aref, acand, sr, threshold, stereo=stereo, spec=warp_spec)
         env["alignment"] = align_rec
         # A needs_stereo axis measures the stereo image; the null-residual + corroboration run on the
