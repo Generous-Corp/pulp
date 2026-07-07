@@ -678,7 +678,11 @@ foreach(_pulp_view_target pulp-view-core pulp-view-script)
 endforeach()
 unset(_pulp_view_target)
 
-target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio)
+target_link_libraries(pulp-view-core PUBLIC
+    pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio
+    # Public because virtual_list.hpp exposes render::DirtyTracker for dirty-strip tests/inspection.
+    pulp::render
+)
 # pulp::host is iOS-restricted: iOS sandbox disallows dlopen of arbitrary
 # third-party plugins (no VST3 / CLAP / LV2 hosting), and pulling host into
 # the link line on iOS surfaces a `long double to_chars` libc++ availability
