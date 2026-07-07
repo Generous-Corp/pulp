@@ -40,11 +40,17 @@ std::string js_string_array_literal(const std::vector<std::string>& ids) {
     return out;
 }
 
-void forget_js_widget_subtree(ScriptEngine& engine, const std::vector<std::string>& ids) {
+void forget_js_widget_subtree(ScriptEngine& engine,
+                              const std::vector<std::string>& ids,
+                              bool preserve_js_dom_state) {
     try {
         if (!static_cast<bool>(engine)) return;
+        const char* options = preserve_js_dom_state
+            ? ", { preserveDomElementState: true }"
+            : "";
         engine.evaluate("if (typeof __forgetWidgetCallbacks__ === 'function') "
-                        "__forgetWidgetCallbacks__(" + js_string_array_literal(ids) + "); void 0;");
+                        "__forgetWidgetCallbacks__(" + js_string_array_literal(ids) +
+                        options + "); void 0;");
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge subtree callback cleanup error: " << e.what() << "\n";
     } catch (...) {
@@ -54,12 +60,12 @@ void forget_js_widget_subtree(ScriptEngine& engine, const std::vector<std::strin
 
 } // namespace
 
-void WidgetBridge::forget_widget_subtree(View* node) {
+void WidgetBridge::forget_widget_subtree(View* node, bool preserve_js_dom_state) {
     std::vector<std::string> ids;
     collect_widget_subtree_ids(node, ids);
     if (ids.empty()) return;
 
-    forget_js_widget_subtree(engine_, ids);
+    forget_js_widget_subtree(engine_, ids, preserve_js_dom_state);
     for (const auto& id : ids) {
         widgets_.erase(id);
         pointer_registered_.erase(id);
@@ -70,7 +76,7 @@ void WidgetBridge::forget_widget_subtree(View* node) {
 
 void WidgetBridge::forget_widget_event_state(View& view) {
     if (!view.id().empty()) {
-        forget_js_widget_subtree(engine_, std::vector<std::string>{view.id()});
+        forget_js_widget_subtree(engine_, std::vector<std::string>{view.id()}, false);
         pointer_registered_.erase(view.id());
         wheel_registered_.erase(view.id());
     }

@@ -781,6 +781,56 @@ TEST_CASE("WidgetBridge on() native registration is idempotent", "[view][bridge]
     REQUIRE(count == 1);
 }
 
+TEST_CASE("WidgetBridge reinserted DOM elements re-arm native event routing",
+          "[view][bridge][events][dom]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        globalThis.__reuseParent = document.createElement('div');
+        globalThis.__reuseChild = document.createElement('div');
+        globalThis.__reuseWheelHits = 0;
+        __reuseChild.addEventListener('wheel', function() { __reuseWheelHits += 1; });
+        document.body.appendChild(__reuseParent);
+        __reuseParent.appendChild(__reuseChild);
+    )");
+
+    const auto native_id = std::string(
+        engine.evaluate("__reuseChild._id").getWithDefault<std::string_view>(""));
+    REQUIRE(!native_id.empty());
+
+    auto* first = bridge.widget(native_id);
+    REQUIRE(first != nullptr);
+    REQUIRE(first->on_pointer_event);
+
+    MouseEvent wheel;
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = 7.0f;
+    first->on_pointer_event(wheel);
+    REQUIRE(engine.evaluate("__reuseWheelHits").getWithDefault<int>(0) > 0);
+
+    bridge.load_script(R"(
+        __reuseParent.removeChild(__reuseChild);
+        __reuseParent.appendChild(__reuseChild);
+    )");
+
+    REQUIRE(engine.evaluate("__nativeElements__[__reuseChild._id] === __reuseChild")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("__eventListeners__[__reuseChild._id].wheel.length")
+                .getWithDefault<int>(0) == 1);
+
+    auto* second = bridge.widget(native_id);
+    REQUIRE(second != nullptr);
+    REQUIRE(second->on_pointer_event);
+
+    const int before = engine.evaluate("__reuseWheelHits").getWithDefault<int>(0);
+    second->on_pointer_event(wheel);
+    REQUIRE(engine.evaluate("__reuseWheelHits").getWithDefault<int>(0) > before);
+}
+
 // Touch orbit requires a widget's pointer move/up to reach DOCUMENT-level
 // listeners, not just the widget's own. Three.js OrbitControls
 // registers its drag/pinch move+up handlers on `domElement.ownerDocument`

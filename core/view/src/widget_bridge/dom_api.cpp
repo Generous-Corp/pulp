@@ -152,11 +152,12 @@ void WidgetBridge::register_dom_api() {
     // __domRemove(childId) - native removeChild implementation.
     register_bridge_function(api, "__domRemove", [this](choc::javascript::ArgumentList args) {
         auto childId = args.get<std::string>(0, "");
+        const bool preserve_js_dom_state = args.get<int>(1, 0) != 0;
         auto* w = widget(childId);
         if (w) {
             if (auto* p = w->parent()) {
                 auto removed = p->remove_child(w);
-                forget_widget_subtree(removed.get());
+                forget_widget_subtree(removed.get(), preserve_js_dom_state);
             }
         }
         return choc::value::Value();
