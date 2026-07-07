@@ -1052,6 +1052,15 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
     }
 }
 
+void SignalGraph::compile_snapshot_for_test(double sample_rate, int max_block_size) {
+    // Runs the full compilation path and DROPS the result — no null-first
+    // prologue, no publish. See the header: this exercises compile_() concurrently
+    // with a live process() for the 2.2a no-silence-swap race contract. Discarding
+    // the snapshot frees it here (no reader ever pins it), so this leaks nothing.
+    auto snapshot = compile_(sample_rate, max_block_size);
+    (void)snapshot;
+}
+
 std::shared_ptr<SignalGraph::CompiledGraph>
 SignalGraph::compile_(double sample_rate, int max_block_size) {
     auto cg = std::make_shared<CompiledGraph>();
