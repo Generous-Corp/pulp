@@ -1010,9 +1010,12 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         rt.input_latency = has_upstream ? max_upstream : 0;
 
         int64_t added = 0;
-        auto pit = cg.plugins.find(id);
-        if (pit != cg.plugins.end() && pit->second) {
-            added = std::max(0, pit->second->latency_samples());
+        // 2.2b (H2): read cached latency, never the live slot — latency_samples()
+        // reaches into the live plugin (e.g. VST3 getLatencySamples()) and is
+        // unsafe concurrent with process() during a swap-time recompile.
+        auto mit = prepared_plugin_meta_.find(id);
+        if (mit != prepared_plugin_meta_.end()) {
+            added = std::max<int64_t>(0, mit->second.latency_samples);
         }
         rt.output_latency = rt.input_latency + added;
     }
@@ -1098,12 +1101,16 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         }
         rt.gain = std::make_unique<std::atomic<float>>(n.gain);
         if (n.plugin) {
-            for (const auto& p : n.plugin->parameters()) {
-                rt.param_bounds.push_back({
-                    p.id,
-                    p.min_value,
-                    p.max_value,
-                });
+            // 2.2b (H2): read cached parameter bounds, not the live slot.
+            auto mit = prepared_plugin_meta_.find(n.id);
+            if (mit != prepared_plugin_meta_.end()) {
+                for (const auto& p : mit->second.parameters) {
+                    rt.param_bounds.push_back({
+                        p.id,
+                        p.min_value,
+                        p.max_value,
+                    });
+                }
             }
         }
         auto [runtime_it, inserted] = cg->runtime.emplace(n.id, std::move(rt));
@@ -1135,7 +1142,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         // re-prepare to be observed.
         n.transport_sensitive = false;
         if (n.type == NodeType::Plugin) {
-            n.transport_sensitive = n.plugin && n.plugin->wants_transport();
+            // 2.2b (H2): read cached transport-sensitivity, not the live slot.
+            auto mit = prepared_plugin_meta_.find(n.id);
+            n.transport_sensitive =
+                (mit != prepared_plugin_meta_.end()) && mit->second.wants_transport;
         }
         if (n.type == NodeType::Custom) {
             if (const auto* type = custom_node_type(n.custom_type_id,
