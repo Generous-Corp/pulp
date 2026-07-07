@@ -346,10 +346,34 @@ DIFF_COVER_SH="$ROOT/tools/scripts/local_diff_cover.sh"
 if [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
     if changed=$(git diff --name-only "$BASE...HEAD" 2>/dev/null); then
         if echo "$changed" | grep -qE '^(core/|tools/cli/|tools/scripts/)'; then
-            echo "[pre-push] running local diff-coverage check (set PULP_SKIP_DIFF_COVER=1 to bypass)…" >&2
+            # LOUD banner + heartbeat: this step runs a full local configure +
+            # compile, which can take several MINUTES with little output. That
+            # silence is a BUILD, NOT a network/SSH hang — the #1 mistake here is
+            # killing a "stuck push" that is actually this build. The heartbeat
+            # below makes the running build unmistakable so nobody (human or
+            # agent) misdiagnoses it as a transport problem again.
+            echo "" >&2
+            echo "┌──────────────────────────────────────────────────────────────────────┐" >&2
+            echo "│ pre-push: DIFF-COVERAGE BUILD running (configure + compile).           │" >&2
+            echo "│ Expect SEVERAL MINUTES of near-silence — this is a LOCAL BUILD, not a  │" >&2
+            echo "│ network/SSH hang. Do NOT kill it as a 'stuck push'.                    │" >&2
+            echo "│ Already validated (e.g. via 'shipyard pr')? Skip it:                   │" >&2
+            echo "│     PULP_SKIP_DIFF_COVER=1 git push                                    │" >&2
+            echo "└──────────────────────────────────────────────────────────────────────┘" >&2
+            # Heartbeat every 30s so the running build never looks like a dead
+            # socket. Guarded so it always dies with the hook.
+            ( _hb_t=0
+              while true; do
+                  sleep 30
+                  _hb_t=$((_hb_t + 30))
+                  echo "[pre-push] …diff-coverage build still running (${_hb_t}s elapsed) — this is a BUILD, not a network hang." >&2
+              done ) &
+            _hb_pid=$!
             if ! bash "$DIFF_COVER_SH"; then
                 diff_cover_failed=1
             fi
+            kill "$_hb_pid" 2>/dev/null || true
+            wait "$_hb_pid" 2>/dev/null || true
         fi
     fi
 fi
