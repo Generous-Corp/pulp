@@ -113,9 +113,11 @@ optional integrations and preserve the original priority policy:
   matching `MtsEspFallbackPolicy` instead of baking the priority into voice code.
 
 `.tun` files are not parsed directly by this provider. Importers should copy
-detected `.tun` assets into the scaffold, mark them for manual review, and
-direct the port to MTS-ESP Mini session tuning or a conversion to `.scl` /
-`.kbm` before loading it into `ScalaTuningProvider`.
+detected `.tun` assets into the scaffold, request the `mts-esp` package, and
+enable `pulp_enable_midi_tuning_provider(... MTS_ESP)` so MTS-ESP Mini or
+another session master can load the `.tun` file for the imported plugin.
+Projects that want direct local file loading can still convert those assets to
+`.scl` / `.kbm` and load them through `ScalaTuningProvider`.
 
 ## License
 

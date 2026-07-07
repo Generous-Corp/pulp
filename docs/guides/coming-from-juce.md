@@ -172,9 +172,10 @@ Pulp maps those to the provider-neutral `pulp::midi::TuningProvider` API:
 
 The project-import flow records this as `integration_requirements`: detected
 MTS calls request `mts-esp`, detected `.scl` / `.kbm` assets request
-`sst-tuning-library` and are copied into the scaffold, and `.tun` assets are
-copied into the scaffold but marked for review because direct `.tun` parsing is
-not part of the Scala provider.
+`sst-tuning-library` and are copied into the scaffold, and `.tun` assets request
+`mts-esp`, are copied into the scaffold, and are represented through the
+MTS-ESP Mini/session tuning path because direct `.tun` parsing is not part of
+the Scala provider.
 
 Imported scaffolds should include `cmake/pulp-packages.cmake`, call
 `pulp_add_plugin(...)`, and then call:

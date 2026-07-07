@@ -116,6 +116,9 @@ include, `MTS_*` calls, or bundled `Client/libMTSClient.cpp`, declare the
 `mts-esp` package plus `PULP_ENABLE_MTS_ESP` in ProjectIR
 `integration_requirements`, emit `pulp_enable_midi_tuning_provider(... MTS_ESP)`
 for installed-SDK scaffolds, and rewrite the call sites toward `TuningProvider`.
+Importers should also treat copied `.tun` assets as an MTS-ESP session-tuning
+path: preserve the file in the scaffold, request `mts-esp`, and let MTS-ESP Mini
+or another session master load the tuning for the imported plugin.
 
 | Existing client call | Pulp mapping |
 |---|---|

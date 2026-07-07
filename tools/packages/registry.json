@@ -1797,7 +1797,7 @@
       "migration_notes": {
         "JUCE": "Projects that already include ODDSound's libMTSClient.h should map MTS_RegisterClient/MTS_NoteToFrequency/MTS_ParseMIDIData call sites to pulp::midi::MtsEspTuningProvider behind the provider-neutral TuningProvider API.",
         "iPlug2": "Projects with direct libMTSClient.h usage should map ProcessMidiMsg/ProcessSysEx MTS parsing and note-frequency lookups to MtsEspTuningProvider while preserving the original note-on versus continuous-retuning policy.",
-        "importer": "Importers should detect libMTSClient.h, Client/libMTSClient.cpp, or MTS_* symbols, add the optional mts-esp package, emit pulp_enable_midi_tuning_provider(<target> MTS_ESP), and avoid hard-coding MTS-specific calls into processor voice code."
+        "importer": "Importers should detect libMTSClient.h, Client/libMTSClient.cpp, MTS_* symbols, or .tun assets that need an MTS-ESP Mini/session path, add the optional mts-esp package, emit pulp_enable_midi_tuning_provider(<target> MTS_ESP), and avoid hard-coding MTS-specific calls into processor voice code."
       },
       "verification": {
         "last_verified": "2026-07-07",
@@ -2846,7 +2846,7 @@
       "migration_notes": {
         "JUCE": "Projects that load Scala files directly should map .scl/.kbm parsing and note-frequency lookups to pulp::midi::ScalaTuningProvider behind the provider-neutral TuningProvider API.",
         "iPlug2": "Projects with direct SCL/KBM tuning tables should keep file loading on the non-audio side and hand voices a TuningProvider reference for note frequency lookup.",
-        "importer": "Importers should detect .scl/.kbm file-loading helpers or direct Surge tuning-library usage, add sst-tuning-library, emit pulp_enable_midi_tuning_provider(<target> SCALA), and preserve MTS-ESP session priority when both local files and MTS are present."
+        "importer": "Importers should detect .scl/.kbm file-loading helpers or direct Surge tuning-library usage, add sst-tuning-library, emit pulp_enable_midi_tuning_provider(<target> SCALA), and preserve MTS-ESP session priority when both local files, .tun assets, and MTS are present."
       },
       "verification": {
         "last_verified": "2026-07-07",
