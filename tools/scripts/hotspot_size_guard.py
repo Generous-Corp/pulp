@@ -243,9 +243,50 @@ def matches_any(path: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
 
-def check_hotspots(root: Path, config: Config) -> tuple[list[str], list[str]]:
+def hotspot_grow_overrides(base: str, head: str) -> frozenset[str]:
+    """Paths authorized to grow via a `Hotspot-Grow: <path|all>` trailer.
+
+    Deliberate hotspot growth declares itself per-PR with a trailer instead of
+    bumping the shared `max_loc` counter in the config (which every growing PR
+    would edit → the same O(N^2) conflict as the version line). Collected across
+    the whole range so a trailer on any commit counts.
+    """
+    result = subprocess.run(
+        ["git", "log", "--format=%B%x00", f"{base}..{head}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return frozenset()
+    paths: set[str] = set()
+    for line in result.stdout.splitlines():
+        m = re.match(r"\s*Hotspot-Grow:\s*(\S+)", line)
+        if m:
+            paths.add(m.group(1))
+    return frozenset(paths)
+
+
+def check_hotspots(
+    root: Path,
+    config: Config,
+    base: str | None = None,
+    head: str | None = None,
+    grow_overrides: frozenset[str] = frozenset(),
+) -> tuple[list[str], list[str]]:
+    """Fail a PR that grows a frozen hotspot past its reference size.
+
+    Rebase-stable: `max_loc` is a *reference* floor, not a shared counter every
+    growing PR must bump. A file over its reference is a violation only when
+    THIS PR grew it there — measured as ``head_loc > merge_base_loc`` — and no
+    `Hotspot-Grow:` trailer authorizes it. So a net-neutral change passes even
+    while main grows the same file (killing the ceiling-bump race), and
+    deliberate growth uses a per-PR trailer instead of editing the config.
+
+    When ``base``/``head`` are not given (or no merge-base resolves) the check
+    falls back to the pre-net-delta absolute behavior for backward compatibility.
+    """
     failures: list[str] = []
     notes: list[str] = []
+    mb = merge_base(base, head) if base and head else None
     for hotspot in config.hotspots:
         full_path = root / hotspot.path
         if not full_path.exists():
@@ -255,10 +296,31 @@ def check_hotspots(root: Path, config: Config) -> tuple[list[str], list[str]]:
             failures.append(f"{hotspot.path}: tracked hotspot is not a regular file")
             continue
         loc = count_lines(full_path)
-        if loc > hotspot.max_loc:
+        if loc <= hotspot.max_loc:
+            continue
+        if mb is None:
             failures.append(
                 f"{hotspot.path}: {loc} LOC exceeds frozen ceiling {hotspot.max_loc}"
             )
+            continue
+        mb_bytes = git_show_bytes(mb, hotspot.path)
+        mb_loc = count_blob_lines(mb_bytes) if mb_bytes is not None else 0
+        if loc <= mb_loc:
+            notes.append(
+                f"{hotspot.path}: {loc} LOC over reference {hotspot.max_loc}, but this "
+                f"PR did not grow it (merge-base {mb_loc}); not a violation"
+            )
+            continue
+        if hotspot.path in grow_overrides or "all" in grow_overrides:
+            notes.append(
+                f"{hotspot.path}: grows {mb_loc} -> {loc} LOC, authorized by Hotspot-Grow"
+            )
+            continue
+        failures.append(
+            f"{hotspot.path}: this PR grows a frozen hotspot {mb_loc} -> {loc} LOC "
+            f"(> reference {hotspot.max_loc}); make the change net-neutral or add a "
+            f"`Hotspot-Grow: {hotspot.path} reason=\"...\"` trailer"
+        )
     return failures, notes
 
 
@@ -446,7 +508,10 @@ def main(argv: list[str] | None = None) -> int:
         if config_rel_path is None:
             raise ValueError("config path must be inside the repository for shrink checks")
         config = load_config(config_path)
-        failures, notes = check_hotspots(root, config)
+        failures, notes = check_hotspots(
+            root, config, args.base, args.head,
+            hotspot_grow_overrides(args.base, args.head),
+        )
         warnings = check_new_file_warnings(root, config, args.base, args.head)
         shrinks, removals, shrink_notes = hotspot_shrinks(
             config, args.base, args.head, config_rel_path
@@ -510,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {warning}", file=sys.stderr)
 
     if failures:
-        print("hotspot_size_guard: hotspot ceiling violation(s):", file=sys.stderr)
+        print("hotspot_size_guard: hotspot growth violation(s):", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 0 if args.mode == "hint" else 1
