@@ -123,6 +123,20 @@ builds" either way. Coordinated versions are tracked in `pulp-view-embed`'s
   walkthrough (decision tree, 5-step recipe, the Debug/Release trap,
   troubleshooting).
 
+## Structured state for importers
+
+Importers should use the same provider-neutral shape regardless of source
+framework:
+
+- owned node records → `StateTree` nodes and children;
+- array/dictionary/custom leaf payloads → `PropertyValue` Array/Object;
+- primitive leaves → scalar `PropertyValue` alternatives.
+
+This covers JUCE-style var arrays/objects, ValueTree-like record hierarchies,
+and iPlug2/custom structured state without baking source-framework names into
+Pulp. Node-as-PropertyValue is intentionally staged as an ownership/cycle design
+choice; importer support should represent nodes with `StateTree` children today.
+
 ## iPlug2
 
 The same model exists for iPlug2:

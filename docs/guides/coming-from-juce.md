@@ -150,19 +150,39 @@ That covers parameter learn. It is separate from "learn the next MIDI note and
 store it as a setting" workflows, which should use a small note-listener helper
 or project-local state until Pulp grows a generic note/control learn utility.
 
-### Structured ValueTree State
+## Migrating structured state
 
-JUCE `ValueTree` maps naturally to Pulp `StateTree`: tree children become
-`StateTree` children, and scalar `var` values map to `PropertyValue` scalars
-(`bool`, integer, `double`, `string`, or null). Be careful with richer `var`
-payloads. JUCE arrays, dynamic objects, binary data, and object-like state
-should not be flattened into accidental strings by an importer.
+Pulp separates owned tree structure from structured leaf values:
 
-Today, represent arrays-of-records as child `StateTree` nodes and preserve
-opaque binary/project-specific state as explicit bytes or a project-local
-decoder. A first-class `PropertyValue` Array/Object/Node extension is the right
-Pulp-native target for importing JUCE `var` arrays/objects directly, but that is
-a state-system feature rather than an MTS-ESP dependency.
+- ValueTree-like records with children map to `StateTree` nodes plus
+  `add_child()` for owned child records.
+- var-style arrays/objects map to `PropertyValue` arrays and string-keyed
+  objects via `make_property_array()` and `make_property_object()`.
+- Scalars keep the existing `std::variant` shape: `bool`, `int64_t`, `double`,
+  and `std::string` still work with `tree->set("key", value)` and typed getters.
+
+```cpp
+auto root = StateTree::create("PluginState");
+root->set("ui", make_property_object({
+    {"theme", std::string("dark")},
+    {"recent", make_property_array({std::string("Init"), std::string("Wide")})},
+}));
+
+auto osc = StateTree::create("Oscillator");
+osc->set("id", std::string("osc1"));
+osc->set("extra", make_property_object({
+    {"wave", std::string("saw")},
+    {"weights", make_property_array({1.0, 0.5, 0.25})},
+}));
+root->add_child(osc);
+```
+
+That mapping preserves arrays, objects, and nested primitive data during JSON
+serialization and StateTree sync without importing framework-specific names into
+the Pulp API. Direct node-as-property storage is intentionally staged rather
+than omitted: embedding node references in `PropertyValue` would make ownership
+ambiguous and could create hidden aliasing/cycles across `deep_copy()`,
+`clone_synced()`, and cross-process sync.
 
 ## Audio thread: snapshot, don't atomic-load-per-sample
 

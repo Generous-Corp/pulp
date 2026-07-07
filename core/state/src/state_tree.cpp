@@ -3,11 +3,41 @@
 
 namespace pulp::state {
 
+namespace {
+
+PropertyValue clone_property_value(const PropertyValue& value);
+
+PropertyValue clone_property_array(const PropertyArray& array) {
+    std::vector<PropertyValue> values;
+    values.reserve(array.values.size());
+    for (const auto& element : array.values)
+        values.push_back(clone_property_value(element));
+    return make_property_array(std::move(values));
+}
+
+PropertyValue clone_property_object(const PropertyObject& object) {
+    std::map<std::string, PropertyValue, std::less<>> values;
+    for (const auto& [key, member] : object.values)
+        values.emplace(key, clone_property_value(member));
+    return make_property_object(std::move(values));
+}
+
+PropertyValue clone_property_value(const PropertyValue& value) {
+    if (const auto* array = get_property_array(value))
+        return clone_property_array(*array);
+    if (const auto* object = get_property_object(value))
+        return clone_property_object(*object);
+    return value;
+}
+
+}  // namespace
+
 void StateTree::set(std::string_view name, PropertyValue value) {
     std::string key(name);
     auto old = properties_.count(key) ? properties_[key] : PropertyValue{};
-    properties_[key] = value;
-    notify_property_changed(name, old, value);
+    auto stored = clone_property_value(value);
+    properties_[key] = stored;
+    notify_property_changed(name, old, stored);
 }
 
 PropertyValue StateTree::get(std::string_view name) const {
@@ -236,24 +266,80 @@ void StateTree::notify_child_removed(StateTree& child, int index) {
     }
 }
 
+static choc::value::Value property_to_choc(const PropertyValue& value) {
+    if (auto* b = std::get_if<bool>(&value))
+        return choc::value::Value(*b);
+    if (auto* i = std::get_if<int64_t>(&value))
+        return choc::value::Value(*i);
+    if (auto* d = std::get_if<double>(&value))
+        return choc::value::Value(*d);
+    if (auto* str = std::get_if<std::string>(&value))
+        return choc::value::Value(*str);
+    if (const auto* array = get_property_array(value)) {
+        auto arr = choc::value::createEmptyArray();
+        for (const auto& element : array->values)
+            arr.addArrayElement(property_to_choc(element));
+        return arr;
+    }
+    if (const auto* object = get_property_object(value)) {
+        auto obj = choc::value::createObject("PropertyObject");
+        for (const auto& [key, member] : object->values)
+            obj.addMember(key, property_to_choc(member));
+        return obj;
+    }
+    return choc::value::Value();
+}
+
+static std::optional<PropertyValue> choc_to_property(const choc::value::ValueView& value,
+                                                     bool allow_null) {
+    if (value.isVoid())
+        return allow_null ? std::optional<PropertyValue>(PropertyValue{}) : std::nullopt;
+    if (value.isBool()) return PropertyValue(value.getBool());
+    if (value.isFloat64()) return PropertyValue(value.getFloat64());
+    if (value.isInt64()) return PropertyValue(value.getInt64());
+    if (value.isInt32()) return PropertyValue(static_cast<int64_t>(value.getInt32()));
+    if (value.isString()) return PropertyValue(std::string(value.getString()));
+    if (value.isArray()) {
+        std::vector<PropertyValue> values;
+        values.reserve(value.size());
+        for (uint32_t i = 0; i < value.size(); ++i) {
+            auto element = choc_to_property(value[i], true);
+            if (!element) return std::nullopt;
+            values.push_back(std::move(*element));
+        }
+        return make_property_array(std::move(values));
+    }
+    if (value.isObject()) {
+        std::map<std::string, PropertyValue, std::less<>> values;
+        for (uint32_t i = 0; i < value.size(); ++i) {
+            auto member = value.getObjectMemberAt(i);
+            auto member_value = choc_to_property(member.value, true);
+            if (!member_value) return std::nullopt;
+            values.emplace(std::string(member.name), std::move(*member_value));
+        }
+        return make_property_object(std::move(values));
+    }
+    return std::nullopt;
+}
+
 static choc::value::Value tree_to_choc(const StateTree& node) {
     auto obj = choc::value::createObject("StateTreeNode");
     obj.addMember("type", node.type_name());
 
     // Properties
     auto props = choc::value::createObject("properties");
+    bool has_props = false;
     for (auto& name : node.property_names()) {
         auto val = node.get(name);
-        if (auto* b = std::get_if<bool>(&val))
-            props.addMember(name, *b);
-        else if (auto* i = std::get_if<int64_t>(&val))
-            props.addMember(name, *i);
-        else if (auto* d = std::get_if<double>(&val))
-            props.addMember(name, *d);
-        else if (auto* s = std::get_if<std::string>(&val))
-            props.addMember(name, *s);
+        // Preserve existing scalar behavior: an explicit top-level property
+        // monostate serializes as absent, while nested arrays/objects may still
+        // contain JSON null values.
+        if (std::holds_alternative<std::monostate>(val))
+            continue;
+        props.addMember(name, property_to_choc(val));
+        has_props = true;
     }
-    if (node.property_names().size() > 0)
+    if (has_props)
         obj.addMember("properties", props);
 
     // Children
@@ -281,17 +367,8 @@ static StateTree::Ptr choc_to_tree(const choc::value::ValueView& val) {
         auto props = val["properties"];
         for (uint32_t i = 0; i < props.size(); ++i) {
             auto member = props.getObjectMemberAt(i);
-            std::string key(member.name);
-            if (member.value.isBool())
-                node->set(key, member.value.getBool());
-            else if (member.value.isFloat64())
-                node->set(key, member.value.getFloat64());
-            else if (member.value.isInt64())
-                node->set(key, member.value.getInt64());
-            else if (member.value.isInt32())
-                node->set(key, static_cast<int64_t>(member.value.getInt32()));
-            else if (member.value.isString())
-                node->set(key, std::string(member.value.getString()));
+            if (auto property = choc_to_property(member.value, false))
+                node->set(std::string(member.name), std::move(*property));
         }
     }
 
@@ -323,7 +400,8 @@ StateTree::Ptr StateTree::from_json(std::string_view json) {
 
 StateTree::Ptr StateTree::deep_copy() const {
     auto copy = create(type_name_);
-    copy->properties_ = properties_;
+    for (const auto& [key, value] : properties_)
+        copy->properties_.emplace(key, clone_property_value(value));
     for (auto& child : children_)
         copy->add_child(child->deep_copy());
     return copy;
