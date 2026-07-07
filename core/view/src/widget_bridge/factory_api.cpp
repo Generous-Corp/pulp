@@ -6,6 +6,7 @@
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/virtual_list.hpp>
 
 #include <atomic>
 #include <iostream>
@@ -369,6 +370,15 @@ void WidgetBridge::register_widget_factory_composite_api() {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'activate', " + std::to_string(idx) + ")", "list activate");
         };
         resolve_parent(pid)->add_child(std::move(lb));
+        return choc::value::createString(id);
+    });
+
+    register_bridge_function(api, "createVirtualList", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
+        auto list = std::make_unique<VirtualList>(); list->set_id(id);
+        auto* ptr = list.get(); widgets_[id] = ptr;
+        wire_callbacks(id, ptr);
+        resolve_parent(pid)->add_child(std::move(list));
         return choc::value::createString(id);
     });
 

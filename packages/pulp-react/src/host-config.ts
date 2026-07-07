@@ -18,6 +18,7 @@ import type {
     PulpContainer,
     IntrinsicElementName,
 } from './types.js';
+import { requestLayoutFlush } from './layout-flush.js';
 import { applyAllProps, applyChangedProps, normalizeHostProps } from './prop-applier.js';
 
 type Type = IntrinsicElementName;
@@ -100,6 +101,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'Stepper':     call('createStepper', id, parentId); return;
         case 'Pan':         call('createPan', id, parentId); return;
         case 'ListBox':     call('createListBox', id, parentId); return;
+        case 'VirtualList': call('createVirtualList', id, parentId); return;
         case 'Canvas':      call('createCanvas', id, parentId); return;
         case 'Image':       call('createImage', id, parentId); return;
         case 'Icon':        call('createIcon', id, (props.name as string) ?? 'image_upload', parentId); return;
@@ -194,6 +196,8 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'meter':    call('createMeter', id, (props.orientation as 'vertical' | 'horizontal') ?? 'vertical', parentId); return;
                 case 'xypad':    call('createXYPad', id, parentId); return;
                 case 'listbox':  call('createListBox', id, parentId); return;
+                case 'virtuallist':
+                case 'virtual-list': call('createVirtualList', id, parentId); return;
                 case 'native-view': call('createNativeView', id, parentId); return;
                 case 'badge':    call('createBadge', id, asText(props.children) ?? (props.text as string ?? ''), (props.tone as string) ?? 'neutral', parentId); return;
                 case 'stepper':  call('createStepper', id, parentId); return;
@@ -577,7 +581,9 @@ export const PulpHostConfig: HostConfig<
         // Own commit-time layout/repaint flush. The bridge's individual
         // setX calls don't all self-flush layout, so we trigger one
         // explicit pass per React commit. Mirrors Ink's resetAfterCommit.
-        if (typeof g.layout === 'function') call('layout');
+        requestLayoutFlush(() => {
+            if (typeof g.layout === 'function') call('layout');
+        });
     },
 
     // ── Misc required no-ops / passthroughs ────────────────────────
@@ -701,7 +707,7 @@ function detach(parent: Instance, child: Instance): void {
 // ── Auto-ID generation ─────────────────────────────────────────────
 function autoId(container: Container): string {
     const n = ++container.nextId;
-    return `pr_${n.toString(36)}`;
+    return `${container.idPrefix ?? 'pr_'}${n.toString(36)}`;
 }
 
 // ── Shallow diff (used by prepareUpdate) ───────────────────────────

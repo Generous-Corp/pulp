@@ -148,6 +148,7 @@ report are `SUPPORTED-NO-EVIDENCE` evidence-anchor refresh work.
 | `progress` | `createProgress` | |
 | `hr` | `createCol` + 1px height + grey background | Visual divider. |
 | `img` | `createImage` / `ImageView` | `src` routes to `setImageSource`; HTML `width` / `height` attrs reserve flex space. |
+| `virtual-list`, `virtuallist` | `createVirtualList` | Recycling fixed-height rich-row list. Use `@pulp/react`'s `<VirtualList>` intrinsic for typed row props. |
 | `svg` | `createCol` | Layout-leaf placeholder; HTML width/height reserve space; child shapes do NOT render. For rendered SVG paths, use `<SvgPath>` from `@pulp/react`. |
 | `details` | `createCol` | Toggle / summary semantics not modeled. |
 | `dialog` | `createPanel` + hidden | `showModal()` / `close()` not wired. |

@@ -63,6 +63,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_up(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     std::vector<Band> bands_;

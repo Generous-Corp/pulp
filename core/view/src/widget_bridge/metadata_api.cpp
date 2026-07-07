@@ -4,28 +4,9 @@
 #include "api_registry.hpp"
 
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 namespace pulp::view {
-
-namespace {
-
-void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View* node) {
-    if (node == nullptr) {
-        return;
-    }
-
-    for (size_t i = 0; i < node->child_count(); ++i) {
-        erase_widget_subtree(widgets, node->child_at(i));
-    }
-
-    if (!node->id().empty()) {
-        widgets.erase(node->id());
-    }
-}
-
-} // namespace
 
 void WidgetBridge::register_metadata_removal_api() {
     BridgeApiContext api{engine_};
@@ -37,10 +18,7 @@ void WidgetBridge::register_metadata_removal_api() {
             View* parent = w->parent();
             if (parent) {
                 auto removed = parent->remove_child(w);
-                erase_widget_subtree(widgets_, removed.get());
-                // Drop param/meter bindings for any id in the removed subtree so
-                // a later widget reusing an id is not silently re-bound.
-                prune_dangling_bindings();
+                forget_widget_subtree(removed.get());
             }
         }
         return choc::value::Value();

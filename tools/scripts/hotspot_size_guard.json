@@ -12,8 +12,8 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1218,
-      "note": "WidgetBridge shell after registrar split; lowered after comment-hygiene cleanup. +3 for the native-view make_widget_for_tag branch (R1 NativeViewHost)."
+      "max_loc": 1141,
+      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp and cleanup in widget_bridge/subtree_cleanup.cpp"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
@@ -117,8 +117,8 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1735,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates)"
+      "max_loc": 1742,
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates; +7 for generalized virtual-list layout/input routing hooks)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",

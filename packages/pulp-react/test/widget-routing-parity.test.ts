@@ -29,6 +29,7 @@ const WIDGET_ROUTING: ReadonlyArray<readonly [capitalized: string, expectedCreat
     ['Meter', 'createMeter'],
     ['XYPad', 'createXYPad'],
     ['ListBox', 'createListBox'],
+    ['VirtualList', 'createVirtualList'],
     ['Icon', 'createIcon'],
     // Ink & Signal design-system widgets.
     ['Badge', 'createBadge'],

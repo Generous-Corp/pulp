@@ -148,6 +148,7 @@ public:
 
     // Perform flex layout on children (virtual so ScrollView can override)
     virtual void layout_children();
+    virtual bool owns_child_layout() const { return false; }
 
     /// Intrinsic content size (override in widgets that know their natural size).
     /// Returns 0 if no intrinsic size (use preferred_width/height instead).
@@ -200,7 +201,7 @@ public:
     }
     /// True if this widget adjusts its VALUE on a scroll-wheel over it (knobs,
     /// faders, sliders, steppers, pan). The host routes the wheel to such a
-    /// widget under the cursor instead of scrolling an enclosing ScrollView.
+    /// widget under the cursor instead of scrolling an enclosing scroll view.
     virtual bool wants_wheel_value() const { return false; }
     /// Adjust the widget's value by a scroll-wheel delta (`delta_y` positive =
     /// scrolled down). Only called when wants_wheel_value() is true.
@@ -211,6 +212,12 @@ public:
     /// native→widget binding (WidgetBridge::bindWidgetToParam) yields to an
     /// active gesture so a live param push never fights the user mid-drag.
     virtual bool is_gesture_active() const { return false; }
+    /// True if this widget is itself a scroll container that should consume
+    /// wheel input before an ancestor scroll view.
+    virtual bool wants_wheel_scroll() const { return false; }
+    /// True if this widget handles mouse down/drag through virtual methods even
+    /// when it does not expose JS pointer callbacks or focus.
+    virtual bool wants_mouse_input() const { return false; }
     /// Key event with modifiers and up/down state.
     /// Return true if handled (prevents propagation to parent).
     virtual bool on_key_event(const KeyEvent& event) { (void)event; return false; }

@@ -44,6 +44,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    bool wants_mouse_input() const override { return true; }
 
     float intrinsic_height() const override { return 36.0f; }
 
@@ -76,6 +77,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     std::string text_;
@@ -100,6 +102,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     ArrowDirection direction_ = ArrowDirection::right;
@@ -122,6 +125,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     ShapeDrawFn draw_fn_;
@@ -146,6 +150,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     std::string normal_path_;
@@ -168,6 +173,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     float intrinsic_height() const override { return 16.0f; }
 

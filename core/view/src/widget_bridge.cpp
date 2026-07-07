@@ -10,6 +10,7 @@
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/view/virtual_list.hpp>
 #include <web_compat_preludes_gen.hpp>
 #include <thread>
 #include <chrono>
@@ -52,20 +53,6 @@ bool subtree_contains_view(View& node, const View* target) {
     return false;
 }
 
-void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View* node) {
-    if (node == nullptr) {
-        return;
-    }
-
-    for (size_t i = 0; i < node->child_count(); ++i) {
-        erase_widget_subtree(widgets, node->child_at(i));
-    }
-
-    if (!node->id().empty()) {
-        widgets.erase(node->id());
-    }
-}
-
 } // namespace
 
 // `on(id, eventName, fn)` is the JS-side hook callers use to register event
@@ -77,8 +64,8 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
 // __dispatch__('click'), so the JS handler never runs.
 //
 // The fix: when JS subscribes to a known event name, transparently
-// invoke the matching native registrar (idempotent per (id, group)
-// via __nativeRegistered__). This mirrors what
+// invoke the matching native registrar. The native side owns idempotency,
+// because recycled subtrees can legally reuse ids after removal. This mirrors what
 // Element.prototype._registerNativeEvent does for addEventListener
 // callers, but on the lower-level `on()` channel that @pulp/react and
 // other native bridges use directly.
@@ -224,7 +211,6 @@ function __dispatch__(id, eventName) {
 }
 function __ensureNativeRegistered__(id, group) {
     var key = id + ':' + group;
-    if (__nativeRegistered__[key]) return;
     __nativeRegistered__[key] = true;
     if (group === 'click' && typeof registerClick === 'function') {
         registerClick(id);
@@ -308,26 +294,6 @@ static void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, cons
         // event arrives. Without this, drag-style interactions see stale state
         // on the immediately-following pointermove and silently bail.
         engine.pump_message_loop();
-    } catch (const std::exception& e) {
-        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
-    } catch (...) {
-        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
-    }
-}
-
-static void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
-                               ScriptEngine* engine,
-                               const std::string& js,
-                               const char* context) {
-    if (!alive || !alive->load(std::memory_order_acquire) || engine == nullptr) return;
-    try {
-        if (!static_cast<bool>(*engine)) return;
-        engine->evaluate(js);
-        // Pump microtasks so React setState commits (and any queueMicrotask /
-        // Promise.then continuations scheduled by the handler) before the next
-        // event arrives. Without this, drag-style interactions see stale state
-        // on the immediately-following pointermove and silently bail.
-        engine->pump_message_loop();
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
     } catch (...) {
@@ -675,51 +641,6 @@ View* WidgetBridge::resolve_parent(const std::string& parent_id) {
     return it != widgets_.end() ? it->second : &root_;
 }
 
-void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
-    auto alive = callback_alive_;
-    auto* engine = &engine_;
-    if (auto* k = dynamic_cast<Knob*>(w)) {
-        k->on_change = [alive, engine, id](float v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "knob change");
-        };
-    } else if (auto* f = dynamic_cast<Fader*>(w)) {
-        f->on_change = [alive, engine, id](float v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "fader change");
-        };
-    } else if (auto* t = dynamic_cast<Toggle*>(w)) {
-        t->on_toggle = [alive, engine, id](bool v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'toggle', " + std::string(v?"1":"0") + ")", "toggle");
-        };
-    } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
-        // HTML <input type="range"> change event. The payload is the
-        // post-quantisation value, not normalized, so JS callers see the same
-        // number they handed us via setValue/setMin/setMax/setStep.
-        r->on_change = [alive, engine, id](float v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "range slider change");
-        };
-    } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
-        // Mirror createCombo's inline wiring so a `<combo>`/`<select>` tag
-        // routed through __domAppend dispatches the same `select` event as the
-        // factory path.
-        c->on_change = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "combo select");
-        };
-    } else if (auto* cb = dynamic_cast<Checkbox*>(w)) {
-        // Mirror createCheckbox's inline `change` wiring.
-        cb->on_change = [alive, engine, id](bool v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::string(v?"1":"0") + ")", "checkbox change");
-        };
-    } else if (auto* lb = dynamic_cast<ListBox*>(w)) {
-        // Mirror createListBox's inline select/activate wiring.
-        lb->on_select = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "list select");
-        };
-        lb->on_activate = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'activate', " + std::to_string(idx) + ")", "list activate");
-        };
-    }
-}
-
 std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
                                                         const std::string& id) {
     // Shared lowercase widget-tag → native widget table. Keep in lockstep with
@@ -752,6 +673,8 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<XYPad>();
     } else if (tag == "listbox") {
         w = std::make_unique<ListBox>();
+    } else if (tag == "virtuallist" || tag == "virtual-list") {
+        w = std::make_unique<VirtualList>();
     } else if (tag == "icon") {
         w = std::make_unique<Icon>();
     } else if (tag == "progress") {
@@ -777,7 +700,7 @@ void WidgetBridge::clear() {
     while (root_.child_count() > 0) {
         auto* child = root_.child_at(root_.child_count() - 1);
         auto removed = root_.remove_child(child);
-        erase_widget_subtree(widgets_, removed.get());
+        forget_widget_subtree(removed.get());
     }
     widgets_.clear();
 }

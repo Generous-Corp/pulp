@@ -25,6 +25,9 @@ pulp_add_test_suite(pulp-test-image-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 # Accessibility tree snapshot
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
+# Recycling virtualized list primitive
+pulp_add_test_suite(pulp-test-virtual-list LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-virtual-list-sample-manager LIBRARIES pulp::view)
 # Text-accessibility scaffold
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
 # macOS NSAccessibility backend for TextAccessibilityNode

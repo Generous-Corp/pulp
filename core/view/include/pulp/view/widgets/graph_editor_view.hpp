@@ -57,6 +57,7 @@ public:
     // (which fires before the dispatch to legacy handlers) and consume
     // them in on_mouse_up to pick the connect variant.
     void on_mouse_event(const MouseEvent& ev) override;
+    bool wants_mouse_input() const override { return true; }
 
     enum class EdgeKind { Audio, Midi, Automation, Feedback };
 

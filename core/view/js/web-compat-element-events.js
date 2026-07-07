@@ -22,6 +22,30 @@
 
 // ── Events ───────────────────────────────────────────────────────────────────
 
+function __forgetWidgetCallbacks__(ids, options) {
+    if (!ids || typeof ids.length !== "number") return;
+    var preserveDomElementState = !!(options && options.preserveDomElementState);
+    for (var i = 0; i < ids.length; i++) {
+        var id = String(ids[i]);
+        var prefix = id + ":";
+        var element = (typeof __nativeElements__ !== "undefined") ? __nativeElements__[id] : null;
+        for (var key in __callbacks__) {
+            if (key.indexOf(prefix) === 0) delete __callbacks__[key];
+        }
+        for (var nativeKey in __nativeRegistered__) {
+            if (nativeKey.indexOf(prefix) === 0) delete __nativeRegistered__[nativeKey];
+        }
+        if (preserveDomElementState && element) {
+            element._autoEventsRegistered = false;
+            element._nativeCreated = false;
+            __nativeElements__[id] = element;
+        } else {
+            delete __eventListeners__[id];
+            delete __nativeElements__[id];
+        }
+    }
+}
+
 Element.prototype.addEventListener = function(type, fn, opts) {
     var capture = false;
     if (opts === true) capture = true;

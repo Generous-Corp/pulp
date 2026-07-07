@@ -77,6 +77,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     float row_height_ = 28.0f;

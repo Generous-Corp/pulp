@@ -8,6 +8,84 @@
 // was dead code that the build still included. Now the file is the only
 // copy.
 //
+function __pulpRememberNativeElement__(element) {
+    if (typeof __nativeElements__ !== "undefined") __nativeElements__[element._id] = element;
+}
+
+function __pulpReplayNativeEventListeners__(element) {
+    if (typeof __eventListeners__ === "undefined" ||
+            !element || !element._registerNativeEvent) {
+        return;
+    }
+    var listeners = __eventListeners__[element._id];
+    if (!listeners) return;
+    for (var type in listeners) {
+        if (listeners[type] && listeners[type].length > 0) {
+            element._registerNativeEvent(type);
+        }
+    }
+}
+
+function __pulpRegisterAutoDomEvents__(child) {
+    if (child._autoEventsRegistered) return;
+    child._autoEventsRegistered = true;
+    if (typeof on === "function") {
+        on(child._id, "click", function (d) {
+            var ev = _makeEvent
+                ? _makeEvent("click", child, d)
+                : { type: "click", target: child, bubbles: true, currentTarget: child,
+                    clientX: (d && d.x) || 0, clientY: (d && d.y) || 0,
+                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+            if (child.dispatchEvent) child.dispatchEvent(ev);
+        });
+        on(child._id, "pointerdown", function (d) {
+            var ev = _makeEvent
+                ? _makeEvent("pointerdown", child, d)
+                : { type: "pointerdown", target: child, bubbles: true, currentTarget: child,
+                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                    button: (d && d.button) || 0, buttons: 1,
+                    pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
+                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+            if (child.dispatchEvent) child.dispatchEvent(ev);
+            // Also synthesize 'mousedown' which is what React's
+            // mousedown delegate listens for in legacy mode.
+            var me = _makeEvent
+                ? _makeEvent("mousedown", child, d)
+                : { type: "mousedown", target: child, bubbles: true, currentTarget: child,
+                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                    button: (d && d.button) || 0, buttons: 1,
+                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+            if (child.dispatchEvent) child.dispatchEvent(me);
+        });
+        on(child._id, "pointermove", function (d) {
+            var ev = _makeEvent
+                ? _makeEvent("pointermove", child, d)
+                : { type: "pointermove", target: child, bubbles: true, currentTarget: child,
+                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                    pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
+                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+            if (child.dispatchEvent) child.dispatchEvent(ev);
+        });
+        on(child._id, "pointerup", function (d) {
+            var ev = _makeEvent
+                ? _makeEvent("pointerup", child, d)
+                : { type: "pointerup", target: child, bubbles: true, currentTarget: child,
+                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                    button: (d && d.button) || 0, buttons: 0,
+                    pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
+                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+            if (child.dispatchEvent) child.dispatchEvent(ev);
+            var me = _makeEvent
+                ? _makeEvent("mouseup", child, d)
+                : { type: "mouseup", target: child, bubbles: true, currentTarget: child,
+                    clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                    button: (d && d.button) || 0, buttons: 0,
+                    preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+            if (child.dispatchEvent) child.dispatchEvent(me);
+        });
+    }
+}
+
 // Idempotency guard: callers may eval this script more than once
 // (constructor + manual reload, or a deferred-init transition). The
 // flag-on-prototype check makes a second eval a no-op
@@ -34,6 +112,7 @@ if (!Element.prototype.appendChild ||
         child._parentElement = this;
         this._children.push(child);
         this._ensureNative();
+        __pulpRememberNativeElement__(child);
         // Pass an optional widget-type hint to the C++ __domAppend fast
         // path so it can route `<input>` to the right native widget
         // (Fader for type=range, Checkbox for type=checkbox). Computing
@@ -118,64 +197,8 @@ if (!Element.prototype.appendChild ||
         // walk delivers to React's root.
         //
         // Idempotent via _autoEventsRegistered flag.
-        if (!child._autoEventsRegistered) {
-            child._autoEventsRegistered = true;
-            if (typeof on === "function") {
-                on(child._id, "click", function (d) {
-                    var ev = _makeEvent
-                        ? _makeEvent("click", child, d)
-                        : { type: "click", target: child, bubbles: true, currentTarget: child,
-                            clientX: (d && d.x) || 0, clientY: (d && d.y) || 0,
-                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-                    if (child.dispatchEvent) child.dispatchEvent(ev);
-                });
-                on(child._id, "pointerdown", function (d) {
-                    var ev = _makeEvent
-                        ? _makeEvent("pointerdown", child, d)
-                        : { type: "pointerdown", target: child, bubbles: true, currentTarget: child,
-                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                            button: (d && d.button) || 0, buttons: 1,
-                            pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
-                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-                    if (child.dispatchEvent) child.dispatchEvent(ev);
-                    // Also synthesize 'mousedown' which is what React's
-                    // mousedown delegate listens for in legacy mode.
-                    var me = _makeEvent
-                        ? _makeEvent("mousedown", child, d)
-                        : { type: "mousedown", target: child, bubbles: true, currentTarget: child,
-                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                            button: (d && d.button) || 0, buttons: 1,
-                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-                    if (child.dispatchEvent) child.dispatchEvent(me);
-                });
-                on(child._id, "pointermove", function (d) {
-                    var ev = _makeEvent
-                        ? _makeEvent("pointermove", child, d)
-                        : { type: "pointermove", target: child, bubbles: true, currentTarget: child,
-                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                            pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
-                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-                    if (child.dispatchEvent) child.dispatchEvent(ev);
-                });
-                on(child._id, "pointerup", function (d) {
-                    var ev = _makeEvent
-                        ? _makeEvent("pointerup", child, d)
-                        : { type: "pointerup", target: child, bubbles: true, currentTarget: child,
-                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                            button: (d && d.button) || 0, buttons: 0,
-                            pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
-                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-                    if (child.dispatchEvent) child.dispatchEvent(ev);
-                    var me = _makeEvent
-                        ? _makeEvent("mouseup", child, d)
-                        : { type: "mouseup", target: child, bubbles: true, currentTarget: child,
-                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
-                            button: (d && d.button) || 0, buttons: 0,
-                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
-                    if (child.dispatchEvent) child.dispatchEvent(me);
-                });
-            }
-        }
+        __pulpRegisterAutoDomEvents__(child);
+        __pulpReplayNativeEventListeners__(child);
         // `<style>` elements receive CSS via either direct textContent
         // assignment or child Text nodes; React's reconciler takes the
         // second path. When a Text-bearing child lands under a `<style>`
@@ -199,7 +222,7 @@ if (!Element.prototype.appendChild ||
         if (idx < 0) return child;
         this._children.splice(idx, 1);
         child._parentElement = null;
-        if (child._nativeCreated) __domRemove(child._id);
+        if (child._nativeCreated) __domRemove(child._id, 1);
         child._nativeCreated = false;
         return child;
     };
@@ -226,6 +249,7 @@ if (!Element.prototype.appendChild ||
         newChild._parentElement = this;
         this._children.splice(idx, 0, newChild);
         this._ensureNative();
+        __pulpRememberNativeElement__(newChild);
         __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase());
         newChild._nativeCreated = true;
         if (newChild._textContent) setText(newChild._id, newChild._textContent);
@@ -253,6 +277,8 @@ if (!Element.prototype.appendChild ||
         }
         newChild.style._flushAll();
         newChild._reapplyStylesheets();
+        __pulpRegisterAutoDomEvents__(newChild);
+        __pulpReplayNativeEventListeners__(newChild);
         return newChild;
     };
     Element.prototype.insertBefore.__pulp_dom_ops__ = true;

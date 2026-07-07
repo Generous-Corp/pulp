@@ -2733,6 +2733,11 @@ The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a r
 
 **Hotspot-size guard (P0.1 refactor roadmap):** `tools/scripts/hotspot_size_guard.py` hard-fails when a tracked monolith exceeds the frozen LOC ceiling in `tools/scripts/hotspot_size_guard.json`. It also warns, without blocking, when a newly added `core/**`, `tools/**`, or `inspect/**` file is already over the configured warning threshold. Lower a ceiling in the same PR that shrinks a hotspot; only raise one when the PR explains why the growth is intentional and still reviewable.
 
+After rebasing a branch that touches tracked hotspots, re-run the guard against
+the rebased tree and set each edited ceiling to the exact current LOC. Adjacent
+core/view work can legitimately change the post-rebase line count by a few
+lines; do not leave a stale pre-rebase ceiling or add headroom.
+
 `tools/cli/kit_commands.cpp` is frozen at its pre-split 3,927-line baseline.
 When extracting kit-command modules, follow `tools/cli/KIT_COMMANDS_MODULE_MAP.md`
 and lower that ceiling to the new exact LOC in the same PR that moves code out.

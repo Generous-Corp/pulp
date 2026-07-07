@@ -71,6 +71,7 @@ public:
     void on_hover_move(Point local_pos) override;  // track hovered dropdown row
     bool on_key_event(const KeyEvent& event) override;
     View* hit_test(Point local_point) override;  // extend hit area over the open dropdown
+    bool wants_mouse_input() const override { return true; }
 
     void on_text_input(const TextInputEvent& event) override;
 
@@ -183,6 +184,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_event(const MouseEvent& event) override;  // hover tracking
+    bool wants_mouse_input() const override { return true; }
     float intrinsic_height() const override { return 28.0f; }
 private:
     int segment_at_(Point pos) const;  // 0=system,1=light,2=dark, -1 outside
@@ -309,6 +311,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     std::vector<Tab> tabs_;
@@ -363,6 +366,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
+    bool wants_mouse_input() const override { return true; }
     float intrinsic_height() const override { return 28.0f; }
 
 private:
@@ -384,6 +388,10 @@ public:
     void set_direction(Direction d) { direction_ = d; }
     void set_content_size(Size size) { content_size_ = size; }
     Size content_size() const { return content_size_; }
+    bool wants_wheel_scroll() const override {
+        const auto b = local_bounds();
+        return content_size_.height > b.height || content_size_.width > b.width;
+    }
 
     float scroll_x() const { return smooth_scroll_x_.value(); }
     float scroll_y() const { return smooth_scroll_y_.value(); }
@@ -425,6 +433,7 @@ public:
     // Scroll via mouse wheel, touch drag, or scrollbar drag
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     // Animation accessors for testing
     float bar_opacity() const { return bar_opacity_.value(); }
@@ -459,6 +468,9 @@ private:
 /// over even when hovering blank space inside it — no click required.
 /// Returns nullptr if the point is over no ScrollView.
 ScrollView* find_scroll_view_at(View& root, Point root_point);
+
+/// Find the deepest view that participates in native wheel scrolling.
+View* find_wheel_scroll_view_at(View& root, Point root_point);
 
 // ── ListBox ──────────────────────────────────────────────────────────────
 
@@ -508,6 +520,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
+    bool wants_mouse_input() const override { return true; }
 
     /// Scroll to make the given item index visible in the viewport.
     void ensure_visible(int index);

@@ -74,6 +74,7 @@ public:
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
     void on_frame_clock_changed() override;
+    bool wants_mouse_input() const override { return true; }
 
     // Geometry (public for tests / layout).
     struct Cell { std::uint8_t lane; std::uint8_t step; };

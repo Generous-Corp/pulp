@@ -240,6 +240,8 @@ public:
         return false;
     }
 
+    bool wants_mouse_input() const override { return true; }
+
 private:
     state::PresetManager& manager_;
     std::vector<state::PresetInfo> all_presets_;

@@ -66,6 +66,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_cancel(Point pos) override { (void)pos; pending_source_ = -1; }
+    bool wants_mouse_input() const override { return true; }
 
 private:
     ModulationMatrix* matrix_ = nullptr;

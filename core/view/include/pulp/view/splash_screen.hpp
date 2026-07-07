@@ -44,6 +44,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     /// Advance the animation by dt seconds. Returns false when done.
     bool advance(float dt);

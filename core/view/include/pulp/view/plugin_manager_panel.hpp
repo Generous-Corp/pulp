@@ -554,6 +554,7 @@ public:
         drag_started_ = false;
         drag_row_.reset();
     }
+    bool wants_mouse_input() const override { return true; }
 
     /// Programmatic drag — bypasses the per-frame mouse plumbing so a
     /// host or test can fire the drag-add callback for a specific row

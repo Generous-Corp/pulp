@@ -195,6 +195,8 @@ public:
         return false;
     }
 
+    bool wants_mouse_input() const override { return true; }
+
 private:
     TreeNode root_;
     TreeNode* selected_ = nullptr;

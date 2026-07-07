@@ -64,6 +64,7 @@ public:
     std::function<void()> on_action;
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
     float intrinsic_height() const override { return 64.0f; }
 private:
     std::string title_ = "Saved";
@@ -80,6 +81,7 @@ public:
     std::function<void()> on_action;
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 private:
     std::string message_ = "Nothing here yet";
     std::string action_;
@@ -114,6 +116,7 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;
     bool wants_wheel_value() const override { return true; }
+    bool wants_mouse_input() const override { return true; }
     void on_wheel(float delta_y) override {
         // Nudge by the typed decimal precision (wheel_step_) when set, else step_.
         double s = wheel_step_ > 0.0 ? wheel_step_ : step_;
@@ -150,6 +153,7 @@ public:
     void advance_animations(float dt) { hover_scale_.advance(dt); }
     float hover_scale() const { return hover_scale_.value(); }
     bool wants_wheel_value() const override { return true; }
+    bool wants_mouse_input() const override { return true; }
     void on_wheel(float delta_y) override { set_value(value_ + (-delta_y) * 0.005f); }
     float intrinsic_height() const override { return 18.0f; }
 private:
@@ -183,6 +187,7 @@ public:
     std::function<void()> on_cancel;
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 private:
     std::string title_ = "Are you sure?";
     std::string message_;
@@ -211,6 +216,7 @@ public:
     void on_mouse_drag(Point pos) override;
     // Scroll-wheel over the strip nudges the level (the most common gesture).
     bool wants_wheel_value() const override { return true; }
+    bool wants_mouse_input() const override { return true; }
     void on_wheel(float delta_y) override;
 private:
     // Map a pointer position to whichever zone it falls in (fader column or
@@ -269,6 +275,7 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;
     bool wants_wheel_value() const override { return true; }
+    bool wants_mouse_input() const override { return true; }
     void on_wheel(float delta_y) override { set_value(value_ + (delta_y > 0 ? -step_ : step_)); }
     float intrinsic_height() const override { return 32.0f; }
 private:

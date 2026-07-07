@@ -427,6 +427,7 @@ target_sources(pulp-view-core PRIVATE
     src/ui_components.cpp
     src/context_menu.cpp
     src/scroll_bar.cpp
+    src/virtual_list.cpp
     src/relative_point.cpp
     src/css_gradient.cpp
     src/w3c_tokens.cpp
@@ -525,6 +526,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/style_storage_api.cpp
     src/widget_bridge/style_visual_api.cpp
     src/widget_bridge/style_visibility_api.cpp
+    src/widget_bridge/subtree_cleanup.cpp
     src/widget_bridge/layout_api.cpp
     src/widget_bridge/list_style_api.cpp
     src/widget_bridge/metadata_api.cpp
@@ -537,6 +539,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/theme_api.cpp
     src/widget_bridge/tokens_api.cpp
     src/widget_bridge/widget_assets_api.cpp
+    src/widget_bridge/widget_callbacks.cpp
     src/widget_bridge/widget_schema_api.cpp
     src/widget_bridge/factory_api.cpp
     src/widget_bridge/widget_value_controls_api.cpp
@@ -675,7 +678,9 @@ foreach(_pulp_view_target pulp-view-core pulp-view-script)
 endforeach()
 unset(_pulp_view_target)
 
-target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio)
+target_link_libraries(pulp-view-core PUBLIC
+    pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio
+)
 # pulp::host is iOS-restricted: iOS sandbox disallows dlopen of arbitrary
 # third-party plugins (no VST3 / CLAP / LV2 hosting), and pulling host into
 # the link line on iOS surfaces a `long double to_chars` libc++ availability

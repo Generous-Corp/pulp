@@ -113,6 +113,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     TableModel* model_ = nullptr;

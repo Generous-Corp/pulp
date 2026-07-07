@@ -10,28 +10,9 @@
 #include <cstddef>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 namespace pulp::view {
-
-namespace {
-
-void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View* node) {
-    if (node == nullptr) {
-        return;
-    }
-
-    for (size_t i = 0; i < node->child_count(); ++i) {
-        erase_widget_subtree(widgets, node->child_at(i));
-    }
-
-    if (!node->id().empty()) {
-        widgets.erase(node->id());
-    }
-}
-
-} // namespace
 
 void WidgetBridge::register_dom_api() {
     BridgeApiContext api{engine_};
@@ -138,7 +119,7 @@ void WidgetBridge::register_dom_api() {
         } else if (auto widget_for_tag = make_widget_for_tag(tag, childId)) {
             // Route lowercase `@pulp/react` widget intrinsics
             // (knob/fader/toggle/combo/
-            // checkbox/spectrum/waveform/meter/xypad/listbox/icon, plus the
+            // checkbox/spectrum/waveform/meter/xypad/listbox/virtuallist/icon, plus the
             // select/progress/img HTML aliases) to native widgets here in the
             // React-commit fast path. `<Knob>` etc. lower to lowercase DOM
             // tags in the live-JSX path (`pulp import-design --from jsx --mode
@@ -171,11 +152,12 @@ void WidgetBridge::register_dom_api() {
     // __domRemove(childId) - native removeChild implementation.
     register_bridge_function(api, "__domRemove", [this](choc::javascript::ArgumentList args) {
         auto childId = args.get<std::string>(0, "");
+        const bool preserve_js_dom_state = args.get<int>(1, 0) != 0;
         auto* w = widget(childId);
         if (w) {
             if (auto* p = w->parent()) {
                 auto removed = p->remove_child(w);
-                erase_widget_subtree(widgets_, removed.get());
+                forget_widget_subtree(removed.get(), preserve_js_dom_state);
             }
         }
         return choc::value::Value();

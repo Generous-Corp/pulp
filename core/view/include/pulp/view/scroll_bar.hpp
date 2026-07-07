@@ -88,6 +88,7 @@ public:
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
     bool on_key_event(const KeyEvent& event) override;
+    bool wants_mouse_input() const override { return true; }
 
     // ── Paint ────────────────────────────────────────────────────────────
 

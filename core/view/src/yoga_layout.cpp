@@ -532,7 +532,8 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
     YGNodeSetContext(node, &view);
 
     auto children = ordered_visible_children(view);
-    bool has_managed_children = !children.empty() && view.layout_mode() != LayoutMode::grid;
+    bool has_managed_children = !children.empty() && view.layout_mode() != LayoutMode::grid &&
+                                !view.owns_child_layout();
 
     if (!has_managed_children && (view.intrinsic_width() > 0 || view.intrinsic_height() > 0)) {
         YGNodeSetMeasureFunc(node, yoga_measure);
@@ -572,6 +573,11 @@ static void apply_yoga_results(View& parent, YGNodeRef node) {
         });
 
         if (child->layout_mode() == LayoutMode::grid) {
+            child->layout_children();
+            continue;
+        }
+
+        if (child->owns_child_layout()) {
             child->layout_children();
             continue;
         }

@@ -405,6 +405,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_up(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     // Animation accessors for testing
     float hover_glow() const { return hover_glow_.value(); }
@@ -637,6 +638,7 @@ public:
     void on_mouse_up(Point pos) override;
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     // Animation accessors for testing
     float hover_scale() const { return hover_thumb_scale_.value(); }
@@ -862,6 +864,7 @@ public:
     void on_mouse_drag(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    bool wants_mouse_input() const override { return true; }
     void advance_animations(float dt) { hover_scale_.advance(dt); }
     float hover_scale() const { return hover_scale_.value(); }
 
@@ -922,6 +925,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    bool wants_mouse_input() const override { return true; }
 
     // Animation accessors for testing
     float thumb_position() const { return thumb_position_.value(); }
@@ -971,6 +975,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     bool checked_ = false;
@@ -1029,6 +1034,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     float intrinsic_height() const override { return 36.0f; }
 
@@ -1298,6 +1304,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     // True while the puck is being dragged so a param binding yields mid-drag.
     bool is_gesture_active() const override { return dragging_; }
@@ -1492,6 +1499,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     void apply_child_visibility();
@@ -1530,6 +1538,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     void clamp_();
@@ -1576,6 +1585,7 @@ public:
     void on_text_input(const TextInputEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     std::string display_() const;     // value + suffix
@@ -1742,6 +1752,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     /// Bottom level-meter strip (the draggable threshold track).

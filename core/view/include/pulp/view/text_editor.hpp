@@ -192,6 +192,7 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_text_input(const TextInputEvent& event) override;
     void on_focus_changed(bool gained) override;
+    bool wants_mouse_input() const override { return true; }
     void on_attached() override;
     void on_resized() override { invalidate_layout_cache(); }
 

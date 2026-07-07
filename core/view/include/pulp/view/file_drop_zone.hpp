@@ -53,6 +53,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
+    bool wants_mouse_input() const override { return true; }
 
     // Called by the platform drag-drop system
     void drag_enter(const std::vector<std::string>& paths);

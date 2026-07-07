@@ -303,17 +303,33 @@ void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* ev
                 me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
             })) return;
     auto* target = root->hit_test(pt);
-    if (!target) return;
+    if (!target) {
+        if (auto* scroll = pulp::view::find_wheel_scroll_view_at(*root, pt)) {
+            pulp::view::MouseEvent me;
+            me.position = pt;
+            me.window_position = pt;
+            me.is_wheel = true;
+            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+            scroll->on_mouse_event(me);
+            scroll->layout_children();
+        }
+        return;
+    }
     pulp::view::MouseEvent me;
     me.position = pt;
     me.window_position = pt;
     me.is_wheel = true;
     me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
     me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+    if (target->wants_wheel_value()) {
+        target->on_wheel(me.scroll_delta_y);
+        return;
+    }
     for (auto* v = target; v; v = v->parent()) {
-        if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(v)) {
-            sv->on_mouse_event(me);
-            sv->layout_children();
+        if (v->wants_wheel_scroll()) {
+            v->on_mouse_event(me);
+            v->layout_children();
             return;
         }
         if (v->on_pointer_event) v->on_mouse_event(me);
