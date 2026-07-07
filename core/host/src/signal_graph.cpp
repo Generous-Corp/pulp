@@ -1286,6 +1286,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                 auto it = cgr.custom_transport_processors.find(id);
                 return it == cgr.custom_transport_processors.end() ? nullptr
                                                                    : &it->second;
+            },
+            // 2.2b (H2): feed cached plugin metadata so the routing build makes
+            // no live PluginSlot metadata call (safe for a swap-time recompile).
+            [this](NodeId id) -> int {
+                auto it = prepared_plugin_meta_.find(id);
+                return it == prepared_plugin_meta_.end()
+                           ? 0 : it->second.latency_samples;
+            },
+            [this](NodeId id) -> const std::vector<HostParamInfo>* {
+                auto it = prepared_plugin_meta_.find(id);
+                return it == prepared_plugin_meta_.end()
+                           ? nullptr : &it->second.parameters;
             });
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
