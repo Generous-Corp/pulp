@@ -204,10 +204,15 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     // process-global; never touch another open editor's focus).
     {
         auto* prev = pulp_focus_under_root(root);
+        if (auto* te = dynamic_cast<pulp::view::TextEditor*>(prev); te && te->has_marked_text()) {
+            prev = pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
+            *drag_target = root->hit_test(pt);
+            if (!*drag_target) return;
+            local = to_local(pt, *drag_target, root);
+            if (!prev) prev = pulp_focus_under_root(root);
+        }
         if ((*drag_target)->focusable()) {
             if (prev && prev != *drag_target) {
-                prev = pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
-                if (!prev) prev = pulp_focus_under_root(root);
                 if (!view_is_in_tree(*drag_target, root)) {
                     *drag_target = nullptr;
                     return;
@@ -221,8 +226,6 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
             (*drag_target)->claim_input_focus();
         } else if (prev) {
             // A click on a non-focusable target commits/closes any open type-in.
-            prev = pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
-            if (!prev) prev = pulp_focus_under_root(root);
             if (!view_is_in_tree(*drag_target, root)) {
                 *drag_target = nullptr;
                 return;

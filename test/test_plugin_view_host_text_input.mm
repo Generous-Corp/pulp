@@ -645,6 +645,80 @@ TEST_CASE("PluginViewHost (mac CPU) — focus transfer cancels old active IME "
     }
 }
 
+TEST_CASE("PluginViewHost (mac CPU) — mouse down refreshes targets after IME "
+          "cancellation",
+          "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME mouse refresh test skipped.");
+            return;
+        }
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_bounds({16, 20, 200, 40});
+        editor->set_text("abc");
+        root.add_child(std::move(editor_owned));
+        editor->on_focus_changed(true);
+        editor->claim_input_focus();
+        editor->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+
+        constexpr const char kNi[] = "\xE3\x81\xAB";
+        NSString* ni = [NSString stringWithUTF8String:kNi];
+        [pulp_view setMarkedText:ni
+                   selectedRange:NSMakeRange(1, 0)
+                replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE(editor->has_marked_text());
+
+        SECTION("same editor click clears composition before selection") {
+            [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(30, 170))];
+            REQUIRE_FALSE(editor->has_marked_text());
+            REQUIRE(editor->text() == "abc");
+        }
+
+        SECTION("rerendered target is re-hit-tested before dispatch") {
+            auto stale_owned = std::make_unique<RecordingMouseView>();
+            RecordingMouseView* stale = stale_owned.get();
+            stale->set_bounds({16, 90, 200, 40});
+            root.add_child(std::move(stale_owned));
+            RecordingMouseView* refreshed = nullptr;
+            editor->on_change = [&](const std::string&) {
+                stale->set_bounds({260, 90, 80, 40});
+                auto refreshed_owned = std::make_unique<RecordingMouseView>();
+                refreshed = refreshed_owned.get();
+                refreshed->set_bounds({16, 90, 200, 40});
+                root.add_child(std::move(refreshed_owned));
+            };
+            [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(30, 110))];
+            REQUIRE(refreshed != nullptr);
+            REQUIRE(stale->mouse_events == 0);
+            REQUIRE(stale->mouse_downs == 0);
+            REQUIRE(refreshed->mouse_events > 0);
+            REQUIRE(refreshed->mouse_downs > 0);
+        }
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
 TEST_CASE("PluginViewHost (mac CPU) — mouse focus changes clear replacement "
           "focus from IME cancellation callbacks",
           "[plugin-view-host][text-input][ime][focus][lifetime][mac][cpu]") {
