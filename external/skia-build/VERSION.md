@@ -2,24 +2,25 @@
 
 ## Source
 - **Repository:** https://github.com/danielraffel/skia-builder (fork of olilarkin/skia-builder)
-- **Release:** chrome/m150
-- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm150
-- **Downloaded:** 2026-06-05
-- **Skia branch:** chrome/m150 (Skia Graphite + Dawn)
+- **Release:** chrome/m151
+- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm151
+- **Downloaded:** 2026-07-07
+- **Skia branch:** chrome/m151 (Skia Graphite + Dawn)
 
 The fork tracks `olilarkin/skia-builder`'s tag pattern and additionally
 publishes iOS device, iOS simulator, visionOS device, visionOS simulator,
 mac-x86_64, and `Skia.xcframework` slices that upstream does not. While
 upstream stays on m144, this fork is the active dependency.
 
-The chrome/m150 release does NOT ship a `linux-arm64` slice (m149 did).
-Linux arm64 stays on the m149 asset or rebuilds from source via
-`tools/build-skia.sh` until the fork republishes that slice.
+The chrome/m151 release ships all platform slices, including `linux-arm64`.
+The bundled build reports Dawn SHA1
+`7807dcbdca245e462617c04d544706394db245ba` (`include/dawn/dawn_version.h`).
 
 ## Bundled Text and GPU Pins
 
-These revisions are read from Skia's `DEPS` file at the chrome/m150 tip
-the build was cut from. Pulp ports against the m150 API surface:
+These revisions are read from Skia's `DEPS` file at the chrome/m151 tip
+the build was cut from. Pulp ports against the m150 API surface (unchanged
+through m151):
 
 - Gradient construction migrated from `SkGradientShader::Make*` to the
   `SkShaders::*` namespace with the `SkGradient` data class.
@@ -54,7 +55,7 @@ a fresh worktree.
 |-----------|----------|--------------|-------|
 | `mac-gpu/` | macOS | arm64, x86_64, universal | mac-x86_64 only in the fork |
 | `win-gpu/` | Windows | x64 | |
-| `linux-gpu/` | Linux | x64 | arm64 not published on the chrome/m150 release; rebuild from source or stay on the m149 slice |
+| `linux-gpu/` | Linux | x64, arm64 | both slices published on the chrome/m151 release |
 | `ios-gpu/` | iOS device + simulator | arm64, arm64+x86_64 | fork-only slices |
 | `visionos-gpu/` | visionOS device + simulator | arm64 | fork-only slices |
 | `wasm-gpu/` | WebAssembly | wasm32 | |
@@ -86,11 +87,12 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 
 | Asset | SHA-256 |
 |-------|---------|
-| `skia-build-ios-device-arm64-gpu-release.zip` | `0b0a0dbb0224e94ea61d0f9d0107afb7ae063eae3ddb3ea0590bcd0f05fd0c44` |
-| `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `86a60cf963b41da8d30a46e98bb69d24a8bc7f102d8c0908087c9a8be3aa6a75` |
-| `skia-build-linux-x64-gpu-release.zip` | `bb4d3a868a72560b25e467952bb7792d4af2bc9dcab1f77afca208b7b1f0d07b` |
-| `skia-build-mac-arm64-gpu-release.zip` | `13b0e9818c3b05db661af85cb1e2bf2ef10e30d468b81351dd90295237d17734` |
-| `skia-build-mac-universal-gpu-release.zip` | `f27908b847a6a130828073f65a02d052bb1672c999bc9d26384348719c315035` |
+| `skia-build-ios-device-arm64-gpu-release.zip` | `d82341a075cf63ce70c659828017a928b3b5cc41bed74795dde61edce9c8f29b` |
+| `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `2c98b79b4f4c20282ce665ba79bb040124ee6424f16b087c2c6c01c1acb177a2` |
+| `skia-build-linux-arm64-gpu-release.zip` | `2420eed074e041384973338f9d8a41364b9ff444ffa0eb1857cb1ebdbd8781e9` |
+| `skia-build-linux-x64-gpu-release.zip` | `68315e29a8fd3848ab05225b18355b5fe8c85f6e7df3575087ff02d8ce17a56a` |
+| `skia-build-mac-arm64-gpu-release.zip` | `229a0822c1bd9103abbf51eb7baf5fd22141ed7b023199fd9417d8f6d13b0b0e` |
+| `skia-build-mac-universal-gpu-release.zip` | `2f8caa1cb805b8af6cd6a712d59a8b845f6bf981a35063608de7be8e955bc302` |
 
 ## Libraries Per Platform
 

@@ -406,6 +406,18 @@ public:
     /// See `WidgetBridge::set_repaint_callback` for the override path.
     void request_repaint();
 
+    /// Bounded repaint: invalidate only `local_dirty` (this view's local
+    /// coordinates), mapped to root space, so a live sub-view (meter, grid,
+    /// overlay) does not force the whole surface to re-composite. Escalates to a
+    /// full request_repaint() when the mapping cannot be trusted (render
+    /// transform, pixel-spreading filter, a scrolled ScrollView ancestor, or no
+    /// window host) — see the implementation for the exact conditions. Safe by
+    /// construction: it only ever repaints the same or a larger region than the
+    /// change touched, never smaller. Caller contract: `local_dirty` must cover
+    /// out-of-bounds decorations (shadow, glow, focus ring) — pass the padded
+    /// rect, not `local_bounds()`, or the overspill is left stale.
+    void request_repaint(const Rect& local_dirty);
+
     /// Drag existing on-disk files out of this view to another app (e.g. drop a
     /// rendered .wav onto a DAW timeline). Routes through the attached host's
     /// native view to the platform backend; call from a pointer handler. False
@@ -1016,6 +1028,31 @@ public:
     }
     void clear_transform_matrix() { has_transform_matrix_ = false; }
     bool has_transform_matrix() const { return has_transform_matrix_; }
+
+    /// True when this view paints under any non-identity render transform
+    /// (scale / rotation / translate / skew / explicit matrix). Bounded
+    /// invalidation escalates to a full repaint when this holds, since the plain
+    /// parent-offset mapping to root space is only correct untransformed.
+    bool has_render_transform() const {
+        return has_transform_matrix_ || scale_ != 1.0f || rotation_deg_ != 0.0f ||
+               translate_x_ != 0.0f || translate_y_ != 0.0f ||
+               skew_x_ != 0.0f || skew_y_ != 0.0f;
+    }
+
+    /// True when this view paints under a pixel-spreading filter (blur or a
+    /// filter-chain op) — it re-samples neighbors, so a child's changed region
+    /// spreads past its mapped box. Bounded invalidation escalates to a full
+    /// repaint when this holds on the view or an ancestor (no stale halo).
+    bool has_filter_effect() const {
+        return has_filter_chain() || filter_blur_ > 0.0f;
+    }
+
+    /// True when this container translates its CHILDREN's paint in a way a plain
+    /// bounds-offset walk cannot model — e.g. a scrolled ScrollView. Bounded
+    /// invalidation escalates to full when any ancestor reports true, so a
+    /// scrolled sub-view never targets the wrong root rect. Default false: a
+    /// flex/grid container positions children at their bounds origin.
+    virtual bool applies_child_paint_offset() const { return false; }
     /// Returns the six affine components in (a,b,c,d,e,f) order; meaningful
     /// only when has_transform_matrix() is true.
     void get_transform_matrix(float& a, float& b, float& c,

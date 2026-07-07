@@ -405,6 +405,15 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void paint_all(canvas::Canvas& canvas) override;
+
+    /// paint_all() translates children by (-scroll_x, -scroll_y), so once
+    /// scrolled the content no longer sits at a plain bounds offset. Reporting
+    /// true here makes a descendant's bounded request_repaint(Rect) escalate to
+    /// a full repaint instead of invalidating the wrong (unscrolled) root rect.
+    bool applies_child_paint_offset() const override {
+        return scroll_x() != 0.0f || scroll_y() != 0.0f;
+    }
+
     View* hit_test(Point local_point) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;

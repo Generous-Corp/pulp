@@ -10,6 +10,8 @@
 #include <pulp/view/inspector.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/inspector_window.hpp>
+#include <pulp/inspect/agent_request_queue.hpp>  // --knob-panel: enqueue agent requests
+#include <pulp/design/design_knobs.hpp>           // --knob-panel: schema + apply_knob
 #include <pulp/view/lock_to_source.hpp>  // reparent -> source rewrite
 #include <pulp/render/render_pass.hpp>
 #include <pulp/runtime/system.hpp>
@@ -453,6 +455,7 @@ int main(int argc, char* argv[]) {
     std::string screenshot_path = "/tmp/pulp-animation-preview.png";
     std::string view_tree_path;
     std::string script_path;
+    bool knob_panel = false;  // --knob-panel: surface the semantic-knob overlay panel
     int render_w = 360, render_h = 480;
     bool label_audit_enabled = false;
     std::string label_audit_path;
@@ -474,6 +477,8 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc && argv[i + 1][0] != '-') screenshot_path = argv[++i];
         } else if (std::strcmp(argv[i], "--script") == 0 && i + 1 < argc) {
             script_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--knob-panel") == 0) {
+            knob_panel = true;
         } else if (std::strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
             std::string sz = argv[++i];
             auto x = sz.find('x');
@@ -1112,6 +1117,92 @@ int main(int argc, char* argv[]) {
     // capture-and-clear requirement; see InspectorOverlay::clear_edit_history.
     if (pulp::runtime::get_env("PULP_INSPECTOR")) {
         inspector.set_active(true);
+    }
+
+    // --knob-panel: surface the semantic-knob overlay panel as a runnable host
+    // surface. Off by default (the OFF path above is untouched). When on, the
+    // in-canvas overlay switches from the bare manipulation layer to the full
+    // inspector panel and installs live sinks: a knob click persists its local
+    // writes into the --script artifact's EDITMODE block via
+    // pulp::design::apply_knob, and a sent request is enqueued to the project's
+    // agent queue. A knob's theme-token writes are handed back for the theme
+    // layer; a preview host has no manifest-bound theme to re-tint, so it logs
+    // them. The demo schema (a minimalism slider + theme flip + layout variant)
+    // populates the panel because generated artifacts don't yet declare knobs.
+    if (knob_panel) {
+        static constexpr const char* kDemoKnobJson = R"({
+          "knobs": [
+            {"id":"minimalism","label":"Minimalism","kind":"slider","positions":[
+              {"label":"airy","at":0,"writes":[
+                {"key":"accent.saturation","value":1.0},
+                {"key":"decoration.density","value":"rich"}]},
+              {"label":"dense","at":1,"writes":[
+                {"key":"accent.saturation","value":0.35},
+                {"key":"decoration.density","value":"sparse"}]}
+            ]},
+            {"id":"theme","label":"Theme","kind":"enum","positions":[
+              {"label":"light","writes":[{"key":"appearance","value":"light"}]},
+              {"label":"dark","writes":[{"key":"appearance","value":"dark"}]}
+            ]},
+            {"id":"layout","label":"Layout","kind":"enum","positions":[
+              {"label":"stacked","writes":[{"key":"layout.mode","value":"stacked"}]},
+              {"label":"split","writes":[{"key":"layout.mode","value":"split"}]}
+            ]}
+          ]
+        })";
+        if (auto schema = pulp::design::parse_knob_schema(kDemoKnobJson)) {
+            inspector.set_manipulate_only(false);   // full panel, not the bare layer
+            inspector.set_tweaks_panel_visible(true);
+            inspector.set_active(true);
+            inspector.set_knob_schema(*schema);
+
+            const std::string knob_script_path = script_path;
+            const pulp::design::KnobSchema knob_schema = *schema;  // owned by the sink
+            inspector.set_knob_apply_sink(
+                [knob_script_path, knob_schema](
+                    const pulp::inspect::InspectorOverlay::KnobApplyEdit& e) {
+                    const auto* knob = pulp::design::find_knob(knob_schema, e.knob_id);
+                    if (!knob || knob_script_path.empty()) return;
+                    std::ifstream in(knob_script_path, std::ios::binary);
+                    if (!in) return;
+                    std::string src((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+                    in.close();
+                    const std::vector<std::string> theme_tokens = {"accent.saturation"};
+                    auto result = pulp::design::apply_knob(src, *knob, e.value, theme_tokens);
+                    if (!result) return;
+                    std::ofstream out(knob_script_path,
+                                      std::ios::binary | std::ios::trunc);
+                    if (out) out << result->text;
+                    for (const auto& w : result->token_writes)
+                        std::cout << "[knob] token write: " << w.key << " = "
+                                  << w.json_value << "\n";
+                });
+
+            std::string project_dir =
+                script_path.empty()
+                    ? std::string(".")
+                    : std::filesystem::path(script_path).parent_path().string();
+            if (project_dir.empty()) project_dir = ".";
+            inspector.set_agent_request_sink(
+                [project_dir](
+                    const pulp::inspect::InspectorOverlay::AgentRequestEdit& e) {
+                    pulp::inspect::AgentRequest r;
+                    r.text = e.text;
+                    r.design = "ui-preview";
+                    pulp::inspect::enqueue_to_file(
+                        pulp::inspect::queue_path(project_dir), r);
+                    std::cout << "[knob] agent request queued: " << e.text << "\n";
+                });
+
+            // Install the overlay paint/input hooks so the panel composites in
+            // headless --screenshot mode too (the live-window path below installs
+            // its own composing hooks, which also route paint/input to this same
+            // overlay, so the live panel renders and stays interactive).
+            pulp::inspect::install_inspector_hooks(inspector);
+        } else {
+            std::cerr << "[ui-preview] --knob-panel: demo schema failed to parse\n";
+        }
     }
 
     // pulp #2163 — run label-fit audit BEFORE screenshot_only short-
