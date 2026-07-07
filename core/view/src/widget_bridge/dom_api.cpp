@@ -10,28 +10,9 @@
 #include <cstddef>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 namespace pulp::view {
-
-namespace {
-
-void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View* node) {
-    if (node == nullptr) {
-        return;
-    }
-
-    for (size_t i = 0; i < node->child_count(); ++i) {
-        erase_widget_subtree(widgets, node->child_at(i));
-    }
-
-    if (!node->id().empty()) {
-        widgets.erase(node->id());
-    }
-}
-
-} // namespace
 
 void WidgetBridge::register_dom_api() {
     BridgeApiContext api{engine_};
@@ -175,8 +156,7 @@ void WidgetBridge::register_dom_api() {
         if (w) {
             if (auto* p = w->parent()) {
                 auto removed = p->remove_child(w);
-                erase_widget_subtree(widgets_, removed.get());
-                prune_dangling_bindings();
+                forget_widget_subtree(removed.get());
             }
         }
         return choc::value::Value();

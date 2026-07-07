@@ -500,6 +500,7 @@ export interface VirtualListProps extends BaseProps {
     scrollToRow?: number;
     renderRow: (index: number) => ReactNode;
     onBindRow?: (event: unknown) => void;
+    onReleaseRow?: (event: unknown) => void;
     onChange?: (selection: number[]) => void;
     onActivate?: (index: number) => void;
 }

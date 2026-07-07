@@ -1007,6 +1007,59 @@ TEST_CASE("WidgetBridge prunes bindings for released virtual list row widgets",
     REQUIRE_THAT(rebound_knob->value(), WithinAbs(0.0, 0.001));
 }
 
+TEST_CASE("WidgetBridge rewires native events when a recycled subtree reuses ids",
+          "[view][bridge][virtual-list][events]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var pointer_hits = 0;
+        var wheel_hits = 0;
+        createRow('row', '');
+        __domAppend('row', 'row__control', 'div');
+        on('row__control', 'pointerdown', function() { pointer_hits += 1; });
+        on('row__control', 'wheel', function() { wheel_hits += 1; });
+    )");
+
+    auto* first = bridge.widget("row__control");
+    REQUIRE(first != nullptr);
+    REQUIRE(first->on_pointer_event);
+
+    MouseEvent down;
+    down.is_down = true;
+    down.position = {4, 5};
+    down.window_position = {14, 15};
+    first->on_mouse_event(down);
+
+    MouseEvent wheel;
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = 12.0f;
+    first->on_mouse_event(wheel);
+
+    REQUIRE(engine.evaluate("pointer_hits").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("wheel_hits").getWithDefault<int>(0) == 1);
+
+    bridge.load_script(R"(
+        removeWidget('row__control');
+        __domAppend('row', 'row__control', 'div');
+        on('row__control', 'pointerdown', function() { pointer_hits += 10; });
+        on('row__control', 'wheel', function() { wheel_hits += 10; });
+    )");
+
+    auto* second = bridge.widget("row__control");
+    REQUIRE(second != nullptr);
+    REQUIRE(second->on_pointer_event);
+
+    second->on_mouse_event(down);
+    second->on_mouse_event(wheel);
+
+    REQUIRE(engine.evaluate("pointer_hits").getWithDefault<int>(0) == 11);
+    REQUIRE(engine.evaluate("wheel_hits").getWithDefault<int>(0) == 11);
+}
+
 TEST_CASE("WidgetBridge virtual list row release tolerates bridge teardown from JS",
           "[view][bridge][virtual-list]") {
     ScriptEngine engine;

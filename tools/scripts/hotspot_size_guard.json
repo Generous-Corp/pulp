@@ -12,8 +12,8 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1156,
-      "note": "WidgetBridge shell after callback wiring extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp"
+      "max_loc": 1141,
+      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp and cleanup in widget_bridge/subtree_cleanup.cpp"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",

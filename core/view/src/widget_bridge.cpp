@@ -53,20 +53,6 @@ bool subtree_contains_view(View& node, const View* target) {
     return false;
 }
 
-void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View* node) {
-    if (node == nullptr) {
-        return;
-    }
-
-    for (size_t i = 0; i < node->child_count(); ++i) {
-        erase_widget_subtree(widgets, node->child_at(i));
-    }
-
-    if (!node->id().empty()) {
-        widgets.erase(node->id());
-    }
-}
-
 } // namespace
 
 // `on(id, eventName, fn)` is the JS-side hook callers use to register event
@@ -78,8 +64,8 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
 // __dispatch__('click'), so the JS handler never runs.
 //
 // The fix: when JS subscribes to a known event name, transparently
-// invoke the matching native registrar (idempotent per (id, group)
-// via __nativeRegistered__). This mirrors what
+// invoke the matching native registrar. The native side owns idempotency,
+// because recycled subtrees can legally reuse ids after removal. This mirrors what
 // Element.prototype._registerNativeEvent does for addEventListener
 // callers, but on the lower-level `on()` channel that @pulp/react and
 // other native bridges use directly.
@@ -225,7 +211,6 @@ function __dispatch__(id, eventName) {
 }
 function __ensureNativeRegistered__(id, group) {
     var key = id + ':' + group;
-    if (__nativeRegistered__[key]) return;
     __nativeRegistered__[key] = true;
     if (group === 'click' && typeof registerClick === 'function') {
         registerClick(id);
@@ -715,7 +700,7 @@ void WidgetBridge::clear() {
     while (root_.child_count() > 0) {
         auto* child = root_.child_at(root_.child_count() - 1);
         auto removed = root_.remove_child(child);
-        erase_widget_subtree(widgets_, removed.get());
+        forget_widget_subtree(removed.get());
     }
     widgets_.clear();
 }

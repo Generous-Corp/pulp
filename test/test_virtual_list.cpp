@@ -157,6 +157,35 @@ TEST_CASE("VirtualList recycles stable row identities while rebinding indices",
     }
 }
 
+TEST_CASE("VirtualList keeps child traversal order sorted after recycling",
+          "[view][virtual-list][accessibility]") {
+    VirtualList list;
+    list.set_bounds({0, 0, 300, 50});
+    list.set_row_height(10);
+    list.set_overscan(0);
+    list.set_row_count(100);
+
+    list.set_scroll_y(10);
+
+    REQUIRE(list.realized_row_count() == 5);
+    for (std::size_t i = 0; i < list.realized_row_count(); ++i) {
+        REQUIRE(list.bound_index_for_slot(i) == i + 1);
+        REQUIRE(list.child_at(i) == list.realized_row_at_slot(i));
+    }
+
+    std::vector<std::string> values;
+    for (const auto& node : snapshot_accessibility_tree(list)) {
+        if (node.value.rfind("row ", 0) == 0) values.push_back(node.value);
+    }
+    REQUIRE(values == std::vector<std::string>({
+        "row 2 of 100",
+        "row 3 of 100",
+        "row 4 of 100",
+        "row 5 of 100",
+        "row 6 of 100",
+    }));
+}
+
 TEST_CASE("VirtualList realizes trailing partial rows for pixel scroll offsets",
           "[view][virtual-list]") {
     VirtualList list;

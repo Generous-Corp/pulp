@@ -239,6 +239,38 @@ describe('@pulp/react VirtualList intrinsic', () => {
         }
     });
 
+    it('runs user release callbacks without shadowing internal row cleanup', () => {
+        const onReleaseRow = vi.fn();
+        const { bridge, root } = renderWithBridge(createElement(VirtualList, {
+            id: 'vl_release_user',
+            rowCount: 10,
+            rowHeight: 24,
+            renderRow: () => null,
+            onReleaseRow,
+        }));
+        try {
+            const bindRow = bridgeEvent(bridge, 'vl_release_user', 'bindrow');
+            const releaseRow = bridgeEvent(bridge, 'vl_release_user', 'releaserow');
+
+            bridge.reset();
+            bindRow({ rowId: 'vl_release_user__row_0', index: 3 });
+            expect(bridge.calls).toContainEqual({
+                fn: 'createRow',
+                args: ['vl_release_user__row_0__pr_1', 'vl_release_user__row_0'],
+            });
+
+            bridge.reset();
+            releaseRow({ rowId: 'vl_release_user__row_0' });
+            expect(onReleaseRow).toHaveBeenCalledTimes(1);
+            expect(bridge.calls).toContainEqual({
+                fn: 'removeWidget',
+                args: ['vl_release_user__row_0__pr_1'],
+            });
+        } finally {
+            cleanupBridge(bridge, root);
+        }
+    });
+
     it('does not flush global layout synchronously while binding row roots', () => {
         const { bridge, root } = renderWithBridge(createElement(VirtualList, {
             id: 'vl_layout',

@@ -66,7 +66,7 @@ interface BoundVirtualRow {
 }
 
 export const VirtualList = (props: VirtualListProps): ReactElement => {
-    const { renderRow, onBindRow, onChange, onActivate, ...hostProps } = props;
+    const { renderRow, onBindRow, onReleaseRow, onChange, onActivate, ...hostProps } = props;
     const [boundRows, setBoundRows] = useState<ReadonlyMap<string, BoundVirtualRow>>(() => new Map());
     const host = createElement('VirtualList' as unknown as 'div', {
         key: '__virtual_list_host',
@@ -102,6 +102,7 @@ export const VirtualList = (props: VirtualListProps): ReactElement => {
             });
         },
         onReleaseRow(event: unknown) {
+            onReleaseRow?.(event);
             const raw = firstRawArg(event) as { rowId?: unknown } | undefined;
             const rowId = typeof raw?.rowId === 'string' ? raw.rowId : '';
             if (!rowId) return;

@@ -12,7 +12,6 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
@@ -33,14 +32,6 @@ void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
     } catch (...) {
         std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
     }
-}
-
-void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View* node) {
-    if (node == nullptr) return;
-    for (std::size_t i = 0; i < node->child_count(); ++i) {
-        erase_widget_subtree(widgets, node->child_at(i));
-    }
-    if (!node->id().empty()) widgets.erase(node->id());
 }
 
 std::string js_string_literal(std::string_view text) {
@@ -94,15 +85,14 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
     } else if (auto* vl = dynamic_cast<VirtualList*>(w)) {
         const auto id_literal = js_string_literal(id);
         auto* widgets = &widgets_;
-        vl->set_row_releaser([this, widgets, alive, engine, id_literal](View& row) {
+        vl->set_row_releaser([this, alive, engine, id_literal](View& row) {
             if (!alive || !alive->load(std::memory_order_acquire)) return;
             safe_dispatch_eval(alive, engine,
                 "__dispatch__(" + id_literal + ", 'releaserow', { rowId: " +
                 js_string_literal(row.id()) + " })",
                 "virtual list releaserow");
             if (!alive || !alive->load(std::memory_order_acquire)) return;
-            erase_widget_subtree(*widgets, &row);
-            if (alive->load(std::memory_order_acquire)) prune_dangling_bindings();
+            forget_widget_subtree(&row);
         });
         vl->set_row_factory([widgets, alive, id](std::size_t slot) {
             auto row = std::make_unique<View>();

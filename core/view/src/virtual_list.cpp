@@ -479,33 +479,11 @@ bool VirtualList::update_window(bool force_rebind) {
     first_realized_index_ = std::min(max_first, visible_start > before ? visible_start - before : 0);
     const std::size_t last = std::min(row_count_, first_realized_index_ + desired);
 
-    std::vector<bool> covered(last - first_realized_index_, false);
-    for (const auto& slot : row_slots_) {
-        if (!slot.index) continue;
-        if (*slot.index >= first_realized_index_ && *slot.index < last) {
-            covered[*slot.index - first_realized_index_] = true;
-        }
-    }
-
-    auto next_missing = [&]() -> std::optional<std::size_t> {
-        for (std::size_t i = 0; i < covered.size(); ++i) {
-            if (!covered[i]) {
-                covered[i] = true;
-                return first_realized_index_ + i;
-            }
-        }
-        return std::nullopt;
-    };
-
-    for (auto& slot : row_slots_) {
-        const bool in_window = slot.index && *slot.index >= first_realized_index_ && *slot.index < last;
-        if (!in_window) {
-            if (auto index = next_missing()) {
-                if (!bind_slot(slot, *index, true, update_generation)) return false;
-            }
-        } else {
-            if (!bind_slot(slot, *slot.index, force_rebind, update_generation)) return false;
-        }
+    for (std::size_t slot_index = 0; slot_index < row_slots_.size(); ++slot_index) {
+        const auto index = first_realized_index_ + slot_index;
+        if (index >= last) break;
+        auto& slot = row_slots_[slot_index];
+        if (!bind_slot(slot, index, force_rebind, update_generation)) return false;
         position_slot(slot);
     }
     return true;

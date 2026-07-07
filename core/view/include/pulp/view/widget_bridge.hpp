@@ -379,6 +379,10 @@ private:
     // removeWidget subtree teardown) so a later widget reusing that id is not
     // silently re-bound.
     void prune_dangling_bindings();
+    // Forget every native bridge reference to the removed subtree. This is
+    // stronger than erasing widgets_: native event-registration guards are also
+    // keyed by id and must be cleared before recycled ids can be rewired.
+    void forget_widget_subtree(View* node);
     // Push one binding's transformed source value onto the resolved widget.
     // Writes the widget only when the transformed value changed since the last
     // frame; returns true on a change so the caller schedules one repaint.
