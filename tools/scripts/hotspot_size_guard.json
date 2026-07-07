@@ -137,18 +137,18 @@
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",
-      "max_loc": 2587,
-      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md"
+      "max_loc": 2645,
+      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md; grew for the semantic-knob tweaks panel + send-to-agent field"
     },
     {
       "path": "inspect/src/inspector_overlay_paint.cpp",
-      "max_loc": 1530,
-      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation"
+      "max_loc": 1541,
+      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation; grew for the semantic-knob tweaks panel + send-to-agent field"
     },
     {
       "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
-      "max_loc": 1491,
-      "note": "Inspector overlay public header hotspot; reduce private state deliberately"
+      "max_loc": 1584,
+      "note": "Inspector overlay public header hotspot; reduce private state deliberately; grew for the semantic-knob tweaks panel + send-to-agent field"
     },
     {
       "path": "inspect/src/inspector_window.cpp",

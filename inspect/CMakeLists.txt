@@ -10,6 +10,7 @@ target_include_directories(pulp-inspect
 target_sources(pulp-inspect PRIVATE
     src/inspector_overlay.cpp
     src/inspector_overlay_field_edit.cpp
+    src/inspector_overlay_knobs.cpp
     src/inspector_overlay_zoom.cpp
     src/inspector_overlay_pass_viewer.cpp
     src/inspector_overlay_paint.cpp
