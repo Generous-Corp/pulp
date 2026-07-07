@@ -538,6 +538,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/theme_api.cpp
     src/widget_bridge/tokens_api.cpp
     src/widget_bridge/widget_assets_api.cpp
+    src/widget_bridge/widget_callbacks.cpp
     src/widget_bridge/widget_schema_api.cpp
     src/widget_bridge/factory_api.cpp
     src/widget_bridge/widget_value_controls_api.cpp

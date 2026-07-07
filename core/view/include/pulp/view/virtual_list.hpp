@@ -10,77 +10,10 @@
 #include <string_view>
 #include <vector>
 
+#include <pulp/render/dirty_tracker.hpp>
 #include <pulp/view/view.hpp>
 
 namespace pulp::view {
-
-class VirtualListDirtyTracker {
-public:
-    struct Rect {
-        float x = 0;
-        float y = 0;
-        float w = 0;
-        float h = 0;
-
-        float area() const { return w * h; }
-        Rect merged(const Rect& other) const {
-            const float nx = std::min(x, other.x);
-            const float ny = std::min(y, other.y);
-            return {nx, ny,
-                    std::max(x + w, other.x + other.w) - nx,
-                    std::max(y + h, other.y + other.h) - ny};
-        }
-    };
-
-    void set_viewport(float width, float height) {
-        viewport_w_ = width;
-        viewport_h_ = height;
-    }
-
-    void invalidate(float x, float y, float w, float h) {
-        if (w <= 0.0f || h <= 0.0f) return;
-        dirty_rects_.push_back({x, y, w, h});
-        if (viewport_w_ > 0.0f && viewport_h_ > 0.0f) {
-            float total = 0.0f;
-            for (const auto& r : dirty_rects_) total += r.area();
-            if (total > viewport_w_ * viewport_h_ * full_repaint_threshold_) {
-                invalidate_all();
-            }
-        }
-    }
-
-    void invalidate_all() {
-        full_repaint_ = true;
-        dirty_rects_.clear();
-    }
-
-    void clear() {
-        full_repaint_ = false;
-        dirty_rects_.clear();
-        ++frame_count_;
-    }
-
-    bool is_dirty() const { return full_repaint_ || !dirty_rects_.empty(); }
-    bool needs_full_repaint() const { return full_repaint_; }
-
-    Rect bounds() const {
-        if (dirty_rects_.empty()) return {};
-        Rect out = dirty_rects_.front();
-        for (std::size_t i = 1; i < dirty_rects_.size(); ++i)
-            out = out.merged(dirty_rects_[i]);
-        return out;
-    }
-
-    std::uint64_t frame_count() const { return frame_count_; }
-
-private:
-    std::vector<Rect> dirty_rects_;
-    bool full_repaint_ = true;
-    float viewport_w_ = 0.0f;
-    float viewport_h_ = 0.0f;
-    float full_repaint_threshold_ = 0.6f;
-    std::uint64_t frame_count_ = 0;
-};
 
 /// Recycling virtualized list for large, scrolling, rich row views.
 ///
@@ -150,7 +83,7 @@ public:
     std::size_t first_realized_index() const { return first_realized_index_; }
     std::vector<std::size_t> realized_indices() const;
 
-    const VirtualListDirtyTracker& dirty_tracker() const { return dirty_tracker_; }
+    const render::DirtyTracker& dirty_tracker() const { return dirty_tracker_; }
     void clear_dirty();
 
     void on_resized() override;
@@ -229,7 +162,7 @@ private:
     TypeToSearchHandler type_to_search_;
     std::string type_buffer_;
 
-    VirtualListDirtyTracker dirty_tracker_;
+    render::DirtyTracker dirty_tracker_;
     bool dragging_scrollbar_ = false;
     float scrollbar_drag_offset_ = 0.0f;
     bool pool_resize_in_progress_ = false;

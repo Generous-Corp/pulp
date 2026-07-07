@@ -401,19 +401,19 @@ static void install_app_menu(NSString* appName) {
     if (!target) {
         // Hovering over empty background inside a scroll pane returns no hit
         // because there is no hit-testable child under the point. Route it to
-            // the scroll container the cursor is over so scrolling works anywhere in
-            // the pane without a click first.
-            if (auto* scroll = pulp::view::find_wheel_scroll_view_at(*self.rootView, pt)) {
-                pulp::view::MouseEvent me;
-                me.position = pt;
-                me.window_position = pt;
-                me.is_wheel = true;
-                me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-                me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-                scroll->on_mouse_event(me);
-                scroll->layout_children();
-                [self setNeedsDisplay:YES];
-            }
+        // the scroll container the cursor is over so scrolling works anywhere in
+        // the pane without a click first.
+        if (auto* scroll = pulp::view::find_wheel_scroll_view_at(*self.rootView, pt)) {
+            pulp::view::MouseEvent me;
+            me.position = pt;
+            me.window_position = pt;
+            me.is_wheel = true;
+            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+            scroll->on_mouse_event(me);
+            scroll->layout_children();
+            [self setNeedsDisplay:YES];
+        }
         return;
     }
 
