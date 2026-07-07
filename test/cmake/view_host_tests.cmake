@@ -64,6 +64,12 @@ pulp_add_test_suite(pulp-test-view-design-viewport LIBRARIES pulp::view)
 # plugin-view hosts and a foreign-host embed tick gate repaint on.
 pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 
+# Sub-view rect-level partial invalidation: View::request_repaint(Rect) →
+# WindowHost dirty-region accumulation. Pins the local->root mapping, the
+# bounding-box union, and the full-repaint escalations (no-arg, transform,
+# empty rect, sticky-full).
+pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
+
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the
 # PluginViewHost virtuals + CPU-host inverse mouse mapping (GPU section

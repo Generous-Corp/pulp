@@ -64,6 +64,36 @@ void WindowHost::set_resize_callback(ResizeCallback cb) {
 // render_loop_ can never be non-null there and mark_dirty() is always a
 // plain repaint(); the PULP_VIEW_HAS_RENDER_LOOP guard keeps it buildable.
 void WindowHost::mark_dirty() {
+    dirty_full_ = true;
+    schedule_repaint();
+}
+
+// Bounded dirty mark. A dirty region only shrinks a full repaint on a frame
+// that started clean (clear_pending_dirty() ran); dirty_full_ is sticky within
+// a frame, so a bounded mark after a full mark (or on the first frame) leaves
+// the repaint full — never widening coverage is what keeps this always safe.
+void WindowHost::mark_dirty(const Rect& root_rect) {
+    if (root_rect.width <= 0 || root_rect.height <= 0) {
+        mark_dirty();  // empty region → be conservative, repaint in full
+        return;
+    }
+    if (!dirty_full_) {
+        if (!have_dirty_bounds_) {
+            dirty_bounds_ = root_rect;
+            have_dirty_bounds_ = true;
+        } else {
+            // Union into the running bounding box.
+            const float nx = std::min(dirty_bounds_.x, root_rect.x);
+            const float ny = std::min(dirty_bounds_.y, root_rect.y);
+            dirty_bounds_ = {nx, ny,
+                             std::max(dirty_bounds_.right(), root_rect.right()) - nx,
+                             std::max(dirty_bounds_.bottom(), root_rect.bottom()) - ny};
+        }
+    }
+    schedule_repaint();
+}
+
+void WindowHost::schedule_repaint() {
 #if defined(PULP_VIEW_HAS_RENDER_LOOP)
     if (render_loop_ && render_loop_->is_running()) {
         render_loop_->request_frame();
