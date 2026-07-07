@@ -34,6 +34,12 @@ CmakeParallelPlan cap_cmake_build_parallel_args(const std::vector<std::string>& 
 // RAM). Always returns >= 1.
 int tier0_default_build_jobs(unsigned hw_threads, unsigned long long mem_budget_bytes);
 int tier0_default_build_jobs();
+
+// The bounded job count to use for a local build when no host lease grants one:
+// an explicit PULP_BUILD_JOBS wins (a user's lower cap is respected), otherwise
+// the tier-0 host default. Single source of truth for every no-lease build path
+// (the CLI SDK install and the lease-acquisition fallbacks).
+int resolve_local_build_jobs();
 std::string tartci_agent_lease_id(const TartciAgentLeaseRequest& req);
 std::string apply_agent_build_qos(const std::string& command, const std::string& qos);
 std::string apply_agent_build_watchdog(const std::string& command,

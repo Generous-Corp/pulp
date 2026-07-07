@@ -9,11 +9,13 @@ build command Pulp ships must therefore pass an explicit, bounded job count
 (a literal, a ``$(…)``/``${…}`` shell expansion, or — in C++ — a concatenated
 job expression).
 
-This guard scans the build-command surfaces (Shipyard validation config, the
-CLI/MCP command builders, shell build scripts, CI workflows) and fails when it
-finds a ``--parallel`` or ``-j`` with no following count. It is a static,
-low-false-positive scan: comment lines are ignored, and the bounded forms
-below are recognised explicitly.
+This is a *bare-flag ratchet*, not a proof that every generated build command
+is bounded: it statically scans the build-command surfaces (Shipyard validation
+config, the CLI/MCP command builders, shell build scripts, CI workflows) and
+fails on a ``--parallel`` / ``-j`` with no following count. Commands assembled
+at runtime (e.g. the CLI's lease-derived job count) are bounded by their own
+code + unit tests, not by this scan. Deliberately low-false-positive: comment
+lines are ignored and the bounded forms below are recognised explicitly.
 
 Usage:
     build_parallelism_guard.py                 # scan the default surfaces

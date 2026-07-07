@@ -193,6 +193,11 @@ int tier0_default_build_jobs() {
     return tier0_default_build_jobs(threads, budget);
 }
 
+int resolve_local_build_jobs() {
+    const int env_jobs = env_positive_int("PULP_BUILD_JOBS");
+    return env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
+}
+
 CmakeParallelPlan cap_cmake_build_parallel_args(const std::vector<std::string>& args,
                                                 int max_jobs) {
     CmakeParallelPlan plan;
@@ -467,7 +472,7 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         // bound. Either way we do NOT acquire a lease — but Tier 0 still caps:
         // fall back to the host default so a no-lease build can't fan out
         // unbounded. A parent lease exports PULP_BUILD_JOBS, so env_jobs wins there.
-        lease.jobs_ = env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 
@@ -478,7 +483,7 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
     if (tartci.empty()) {
         // No tartci installed — the casual single-machine case (Tier 0). No lease
         // store to consult, but the build is still bounded to a safe host default.
-        lease.jobs_ = env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 
@@ -488,7 +493,7 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         // incompatible build without the subcommand, or a transient failure. A
         // usable lease is an optimization, not a prerequisite for a safe build:
         // degrade to the bounded host default rather than failing the build.
-        lease.jobs_ = env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 
@@ -496,7 +501,7 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
     if (profile_jobs <= 0 && env_jobs <= 0) {
         // host-profile ran but advertised no build budget — same degrade-to-safe
         // path: bound the build, don't fail it.
-        lease.jobs_ = tier0_default_build_jobs();
+        lease.jobs_ = resolve_local_build_jobs();
         return lease;
     }
 
