@@ -1221,6 +1221,45 @@ TEST_CASE("WidgetBridge virtual list row release tolerates bridge teardown from 
     REQUIRE(bridge == nullptr);
 }
 
+TEST_CASE("WidgetBridge virtual list row bind is inert after bridge teardown",
+          "[view][bridge][virtual-list][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    StateStore store;
+    auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+    bridge->load_script(R"(
+        var bind_hits = 0;
+        createVirtualList('vl', '');
+        setListRowHeight('vl', 10);
+        setVirtualListOverscan('vl', 0);
+        on('vl', 'bindrow', function(ev) {
+            bind_hits += 1;
+            __domAppend(ev.rowId, ev.rowId + '__label_' + ev.index, 'label');
+        });
+    )");
+
+    auto* list = dynamic_cast<VirtualList*>(bridge->widget("vl"));
+    REQUIRE(list != nullptr);
+    list->set_bounds({0, 0, 120, 20});
+    list->set_row_count(100);
+    REQUIRE(list->realized_row_count() >= 3);
+
+    const auto bind_hits_before = engine.evaluate("bind_hits").getWithDefault<int>(0);
+    REQUIRE(bind_hits_before > 0);
+    auto* row = list->realized_row_at_slot(0);
+    REQUIRE(row != nullptr);
+    REQUIRE(row->child_count() == 1);
+
+    bridge.reset();
+    list->set_scroll_y(50);
+
+    REQUIRE(engine.evaluate("bind_hits").getWithDefault<int>(-1) == bind_hits_before);
+    REQUIRE(list->realized_row_at_slot(0) == row);
+    REQUIRE(row->child_count() == 1);
+}
+
 TEST_CASE("WidgetBridge complete UI script", "[view][bridge]") {
     ScriptEngine engine;
     View root;

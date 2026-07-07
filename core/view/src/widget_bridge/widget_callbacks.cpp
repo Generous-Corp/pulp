@@ -114,6 +114,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             return row;
         });
         vl->set_row_binder([this, alive, engine, id_literal, row_bindings](View& row, std::size_t index) {
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
             const auto row_id = row.id();
             if (row_bindings->find(row_id) != row_bindings->end()) {
                 forget_widget_event_state(row);
