@@ -121,6 +121,7 @@ public:
     void on_mouse_up(Point pos) override;
     void on_hover_move(Point pos) override;
     void on_mouse_leave() override;
+    bool wants_mouse_input() const override { return true; }
 
     // MIDI note an element maps to: in the typing frame, base+octave+semitone; in
     // the piano frame, the windowed note (frame-low-note 48 offset onto the live

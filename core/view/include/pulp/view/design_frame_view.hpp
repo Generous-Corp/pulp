@@ -548,6 +548,7 @@ public:
     void on_mouse_up(Point pos) override;
     void on_hover_move(Point pos) override;  // hover-track the element under the pointer
     void on_mouse_leave() override;          // clear hover on exit
+    bool wants_mouse_input() const override { return true; }
 
 protected:
     // Called after the active frame changes (set_active_frame or the initial
@@ -672,6 +673,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     std::vector<std::string> labels_;
@@ -698,6 +700,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     std::vector<std::string> options_;

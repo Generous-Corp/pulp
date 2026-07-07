@@ -66,6 +66,7 @@ public:
     void on_mouse_event(const MouseEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
     View* hit_test(Point local_point) override;  // whole overlay is hit (catch outside clicks)
+    bool wants_mouse_input() const override { return true; }
 
 private:
     // Computed menu-box geometry in this view's LOCAL coords. Shared by paint,

@@ -75,6 +75,7 @@ public:
     void on_mouse_down(Point pos) override;
     bool on_key_event(const KeyEvent& event) override;
     bool accepts_text_input() const override { return is_capturing(); }
+    bool wants_mouse_input() const override { return true; }
 
     /// Row height in points. Public for parent-shell layout math.
     float row_height() const { return row_height_; }

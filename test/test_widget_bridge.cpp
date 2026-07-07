@@ -14,6 +14,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/virtual_list.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #if __has_include(<pulp/render/gpu_surface.hpp>)
@@ -575,6 +576,8 @@ inline std::vector<WidgetTagCase> widget_tag_cases() {
         {"meter",    [](View* w){ return dynamic_cast<Meter*>(w) != nullptr; },        "Meter"},
         {"xypad",    [](View* w){ return dynamic_cast<XYPad*>(w) != nullptr; },        "XYPad"},
         {"listbox",  [](View* w){ return dynamic_cast<ListBox*>(w) != nullptr; },      "ListBox"},
+        {"virtuallist", [](View* w){ return dynamic_cast<VirtualList*>(w) != nullptr; }, "VirtualList"},
+        {"virtual-list", [](View* w){ return dynamic_cast<VirtualList*>(w) != nullptr; }, "VirtualList"},
         {"icon",     [](View* w){ return dynamic_cast<Icon*>(w) != nullptr; },         "Icon"},
         // HTML aliases that must ALSO route on both surfaces (these were the
         // tags missing specifically from __domAppend before the sweep):
@@ -948,6 +951,97 @@ TEST_CASE("WidgetBridge parameter binding", "[view][bridge]") {
     // Read param from JS
     auto result = engine.evaluate("getParam('gain')");
     REQUIRE_THAT(result.getWithDefault<double>(0), WithinAbs(0.8, 0.01));
+}
+
+TEST_CASE("WidgetBridge prunes bindings for released virtual list row widgets",
+          "[view][bridge][virtual-list]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    StateStore store;
+    ParamInfo gain_info;
+    gain_info.id = 1;
+    gain_info.name = "gain";
+    gain_info.range = {0.0f, 1.0f, 0.0f};
+    store.add_parameter(gain_info);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var bind_rows = true;
+        createVirtualList('vl', '');
+        setListRowHeight('vl', 10);
+        setVirtualListOverscan('vl', 0);
+        on('vl', 'bindrow', function(ev) {
+            var knobId = ev.rowId + '__gain';
+            __domAppend(ev.rowId, knobId, 'knob');
+            if (bind_rows) bindWidgetToParam(knobId, 'gain');
+        });
+        on('vl', 'releaserow', function(ev) {
+            // The bridge performs the native subtree erase after this callback.
+        });
+    )");
+
+    auto* list = dynamic_cast<VirtualList*>(bridge.widget("vl"));
+    REQUIRE(list != nullptr);
+    list->set_bounds({0, 0, 120, 50});
+    list->set_row_count(100);
+    REQUIRE(list->realized_row_count() > 1);
+
+    const auto released_row_id =
+        list->realized_row_at_slot(list->realized_row_count() - 1)->id();
+    const auto released_knob_id = released_row_id + "__gain";
+    REQUIRE(dynamic_cast<Knob*>(bridge.widget(released_knob_id)) != nullptr);
+
+    list->set_bounds({0, 0, 120, 10});
+    REQUIRE(bridge.widget(released_knob_id) == nullptr);
+
+    engine.evaluate("bind_rows = false");
+    list->set_bounds({0, 0, 120, 50});
+    auto* rebound_knob = dynamic_cast<Knob*>(bridge.widget(released_knob_id));
+    REQUIRE(rebound_knob != nullptr);
+    REQUIRE_THAT(rebound_knob->value(), WithinAbs(0.0, 0.001));
+
+    store.set_normalized(1, 0.75f);
+    bridge.service_frame_callbacks();
+    REQUIRE_THAT(rebound_knob->value(), WithinAbs(0.0, 0.001));
+}
+
+TEST_CASE("WidgetBridge virtual list row release tolerates bridge teardown from JS",
+          "[view][bridge][virtual-list]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    StateStore store;
+    std::unique_ptr<WidgetBridge> bridge;
+    engine.register_function("__destroyBridgeFromRelease",
+        [&](const choc::value::Value*, size_t) {
+            bridge.reset();
+            return choc::value::createInt32(1);
+        });
+
+    bridge = std::make_unique<WidgetBridge>(engine, root, store);
+    bridge->load_script(R"(
+        createVirtualList('vl', '');
+        setListRowHeight('vl', 10);
+        setVirtualListOverscan('vl', 0);
+        on('vl', 'bindrow', function(ev) {
+            __domAppend(ev.rowId, ev.rowId + '__label', 'label');
+        });
+        on('vl', 'releaserow', function() {
+            __destroyBridgeFromRelease();
+        });
+    )");
+
+    auto* list = dynamic_cast<VirtualList*>(bridge->widget("vl"));
+    REQUIRE(list != nullptr);
+    list->set_bounds({0, 0, 120, 50});
+    list->set_row_count(100);
+    REQUIRE(list->realized_row_count() > 1);
+
+    list->set_bounds({0, 0, 120, 10});
+    REQUIRE(bridge == nullptr);
 }
 
 TEST_CASE("WidgetBridge complete UI script", "[view][bridge]") {

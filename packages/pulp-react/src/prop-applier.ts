@@ -56,6 +56,33 @@ function isEventHandler(key: string): boolean {
     return key.startsWith('on') && key.length > 2 && key[2] === key[2]?.toUpperCase();
 }
 
+function virtualListPropRank(key: string): number {
+    if (isEventHandler(key)) return -1;
+    switch (key) {
+        case 'rowCount': return 0;
+        case 'rowHeight': return 1;
+        case 'overscan': return 2;
+        case 'selectionMode': return 3;
+        case 'selected': return 4;
+        case 'renderRow': return 5;
+        case 'scrollToRow': return 6;
+        default: return 100;
+    }
+}
+
+function orderedPropKeys(type: string, props: Record<string, unknown>): string[] {
+    const keys = Object.keys(props);
+    if (type !== 'VirtualList' && type !== 'virtuallist' && type !== 'virtual-list') return keys;
+    return keys
+        .map((key, index) => ({ key, index }))
+        .sort((a, b) => virtualListPropRank(a.key) - virtualListPropRank(b.key) || a.index - b.index)
+        .map((item) => item.key);
+}
+
+function isVirtualListType(type: string): boolean {
+    return type === 'VirtualList' || type === 'virtuallist' || type === 'virtual-list';
+}
+
 /// Map a React-style on* prop to the bridge event name. The bridge
 /// dispatches:
 ///   on_click → 'click'        (Button, Panel, etc.)
@@ -191,6 +218,10 @@ function emitSvgLineGeometry(id: string, props: Record<string, unknown>): void {
 /// do not fit the layout/paint/typography/transform/events taxonomy.
 function applyOne(id: string, type: string, key: string, value: unknown, props?: Record<string, unknown>): void {
     if (value === undefined || value === null) {
+        if (isVirtualListType(type)) {
+            if (key === 'selectionMode') call('setVirtualListSelectionMode', id, 'single');
+            if (key === 'selected') call('setVirtualListSelected', id, -1);
+        }
         // No-op — Pulp has no "unset" for most setters; rely on React
         // unmount + recreate for full clears. Selective resets can be
         // added per-prop here if a regression appears.
@@ -238,6 +269,18 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     if ((type === 'img' || type === 'Image') && key === 'src') {
         call('setImageSource', id, String(value));
         return;
+    }
+
+    if (isVirtualListType(type)) {
+        switch (key) {
+            case 'rowCount':      return call('setVirtualListRowCount', id, value as number);
+            case 'rowHeight':     return call('setListRowHeight', id, value as number);
+            case 'overscan':      return call('setVirtualListOverscan', id, value as number);
+            case 'selectionMode': return call('setVirtualListSelectionMode', id, value as string);
+            case 'selected':      return call('setVirtualListSelected', id, value as number);
+            case 'scrollToRow':   return call('scrollVirtualListToRow', id, value as number);
+            case 'renderRow':     return call('refreshVirtualListRows', id);
+        }
     }
 
     // Type-dispatched widget / SVG props — these route on the widget
@@ -402,7 +445,7 @@ export function applyAllProps(instance: PulpInstance): void {
             svgGeometryEmitted = true;
         }
     }
-    for (const key of Object.keys(props)) {
+    for (const key of orderedPropKeys(type, props)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;  // text children handled by caller
         if (isEventHandler(key)) {
@@ -426,6 +469,8 @@ export function applyChangedProps(
 ): boolean {
     const { id, type } = instance;
     let mutated = false;
+    const selectionModeChanged = isVirtualListType(type) &&
+        oldProps.selectionMode !== newProps.selectionMode;
 
     // Coalesce SvgRect / SvgLine geometry changes into a single
     // setSvgRect / setSvgLine call sourced from the post-update props
@@ -453,7 +498,7 @@ export function applyChangedProps(
     }
 
     // Walk new props — set anything that changed value
-    for (const key of Object.keys(newProps)) {
+    for (const key of orderedPropKeys(type, newProps)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;
         // SvgRect / SvgLine geometry already emitted above; skip the
@@ -529,8 +574,21 @@ export function applyChangedProps(
                 call('setImageSource', id, '');
                 mutated = true;
             }
+            if (isVirtualListType(type) && key === 'selectionMode') {
+                call('setVirtualListSelectionMode', id, 'single');
+                mutated = true;
+            }
+            if (isVirtualListType(type) && key === 'selected') {
+                call('setVirtualListSelected', id, -1);
+                mutated = true;
+            }
             // Other setters: no-op — let the next mount cycle handle it
         }
+    }
+
+    if (selectionModeChanged && Object.prototype.hasOwnProperty.call(newProps, 'selected')) {
+        applyOne(id, type, 'selected', newProps.selected, newProps);
+        mutated = true;
     }
 
     return mutated;

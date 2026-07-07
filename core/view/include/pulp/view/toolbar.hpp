@@ -82,6 +82,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
     float intrinsic_height() const override {
         return orientation_ == Orientation::horizontal ? item_size_ + 8.0f : 0;

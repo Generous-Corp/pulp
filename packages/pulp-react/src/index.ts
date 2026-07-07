@@ -10,7 +10,7 @@
 
 import createReactReconciler from 'react-reconciler';
 import { LegacyRoot } from 'react-reconciler/constants.js';
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode, ReactPortal } from 'react';
 import type { OpaqueRoot } from 'react-reconciler';
 
 import { PulpHostConfig } from './host-config.js';
@@ -42,8 +42,8 @@ const rootsByContainer = new WeakMap<PulpContainer, RootRecord>();
 /// Plugin authors call this once at startup with the id of the
 /// outermost widget Pulp gives them ('' is the convention for the
 /// implicit root — see widget_bridge.cpp's root_ handling).
-export function createRoot(rootId: string = ''): PulpContainer {
-    return { rootId, nextId: 0 };
+export function createRoot(rootId: string = '', idPrefix?: string): PulpContainer {
+    return { rootId, idPrefix, nextId: 0 };
 }
 
 /// Render a React element into the given container.
@@ -77,6 +77,10 @@ export function render(element: ReactElement, container?: PulpContainer): PulpCo
     return c;
 }
 
+export function createPortal(children: ReactNode, container: PulpContainer, key?: string | null): ReactPortal {
+    return reconciler.createPortal(children, container, null, key) as unknown as ReactPortal;
+}
+
 /// Unmount and clear the container.
 export function unmount(container: PulpContainer): void {
     const rec = rootsByContainer.get(container);
@@ -93,7 +97,7 @@ export type {
     LabelProps, ButtonProps, TextEditorProps,
     KnobProps, FaderProps, SpectrumProps, WaveformProps, MeterProps,
     ProgressProps, XYPadProps, CheckboxProps, ToggleProps, ComboProps,
-    ListBoxProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
+    ListBoxProps, VirtualListProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
     SvgRectProps, SvgLineProps, BadgeProps, StepperProps, PanProps,
     FlexDirection, FlexAlign, FlexAlignSelf, FlexJustify,
     FlexProps, StyleProps, BaseProps,

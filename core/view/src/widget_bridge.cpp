@@ -10,7 +10,9 @@
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/view/virtual_list.hpp>
 #include <web_compat_preludes_gen.hpp>
+#include <choc/text/choc_JSON.h>
 #include <thread>
 #include <chrono>
 #include <algorithm>
@@ -64,6 +66,10 @@ void erase_widget_subtree(std::unordered_map<std::string, View*>& widgets, View*
     if (!node->id().empty()) {
         widgets.erase(node->id());
     }
+}
+
+std::string js_string_literal(std::string_view text) {
+    return choc::json::toString(choc::value::createString(std::string(text)), false);
 }
 
 } // namespace
@@ -717,6 +723,48 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         lb->on_activate = [alive, engine, id](int idx) {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'activate', " + std::to_string(idx) + ")", "list activate");
         };
+    } else if (auto* vl = dynamic_cast<VirtualList*>(w)) {
+        const auto id_literal = js_string_literal(id);
+        auto* widgets = &widgets_;
+        vl->set_row_releaser([this, widgets, alive, engine, id_literal](View& row) {
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
+            safe_dispatch_eval(alive, engine,
+                "__dispatch__(" + id_literal + ", 'releaserow', { rowId: " +
+                js_string_literal(row.id()) + " })",
+                "virtual list releaserow");
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
+            erase_widget_subtree(*widgets, &row);
+            if (alive->load(std::memory_order_acquire)) prune_dangling_bindings();
+        });
+        vl->set_row_factory([widgets, alive, id](std::size_t slot) {
+            auto row = std::make_unique<View>();
+            row->set_id(id + "__row_" + std::to_string(slot));
+            if (alive && alive->load(std::memory_order_acquire)) {
+                auto* row_ptr = row.get();
+                (*widgets)[row->id()] = row_ptr;
+            }
+            return row;
+        });
+        vl->set_row_binder([alive, engine, id_literal](View& row, std::size_t index) {
+            safe_dispatch_eval(alive, engine,
+                "__dispatch__(" + id_literal + ", 'bindrow', { rowId: " +
+                js_string_literal(row.id()) + ", index: " + std::to_string(index) + " })",
+                "virtual list bindrow");
+        });
+        vl->on_selection_changed([alive, engine, id_literal](const std::vector<std::size_t>& selection) {
+            std::string payload = "[";
+            for (std::size_t i = 0; i < selection.size(); ++i) {
+                if (i > 0) payload += ",";
+                payload += std::to_string(selection[i]);
+            }
+            payload += "]";
+            safe_dispatch_eval(alive, engine, "__dispatch__(" + id_literal + ", 'change', " + payload + ")",
+                               "virtual list change");
+        });
+        vl->on_row_activated([alive, engine, id_literal](std::size_t index) {
+            safe_dispatch_eval(alive, engine, "__dispatch__(" + id_literal + ", 'activate', " +
+                               std::to_string(index) + ")", "virtual list activate");
+        });
     }
 }
 
@@ -752,6 +800,8 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<XYPad>();
     } else if (tag == "listbox") {
         w = std::make_unique<ListBox>();
+    } else if (tag == "virtuallist" || tag == "virtual-list") {
+        w = std::make_unique<VirtualList>();
     } else if (tag == "icon") {
         w = std::make_unique<Icon>();
     } else if (tag == "progress") {

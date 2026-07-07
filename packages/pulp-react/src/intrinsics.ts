@@ -5,16 +5,19 @@
 // component that React forwards to the host config; the type strings
 // match what host-config.ts's createWidget switch dispatches on.
 
-import { createElement } from 'react';
+import { Fragment, createElement, useState } from 'react';
 import type { ReactElement } from 'react';
+import { createPortal, createRoot } from './index.js';
+import { withSuppressedLayoutFlush } from './layout-flush.js';
 import type {
     ViewProps, RowProps, ColProps, PanelProps, ScrollViewProps, ModalProps,
     LabelProps, ButtonProps, TextEditorProps,
     KnobProps, FaderProps, SpectrumProps, WaveformProps, MeterProps,
     ProgressProps, XYPadProps, CheckboxProps, ToggleProps, ComboProps,
-    ListBoxProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
+    ListBoxProps, VirtualListProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
     SvgRectProps, SvgLineProps,
     BadgeProps, StepperProps, PanProps,
+    PulpContainer,
 } from './types.js';
 
 // Each intrinsic is a function component that emits a host element with
@@ -52,6 +55,79 @@ export const Badge = (props: BadgeProps): ReactElement => createElement('Badge' 
 export const Stepper = (props: StepperProps): ReactElement => createElement('Stepper' as unknown as 'div', props as unknown as object);
 export const Pan = (props: PanProps): ReactElement => createElement('Pan' as unknown as 'div', props as unknown as object);
 export const ListBox = (props: ListBoxProps): ReactElement => createElement('ListBox' as unknown as 'div', props as unknown as object);
+
+function firstRawArg(event: unknown): unknown {
+    return (event as { nativeEvent?: { rawArgs?: unknown[] } })?.nativeEvent?.rawArgs?.[0];
+}
+
+interface BoundVirtualRow {
+    index: number;
+    container: PulpContainer;
+}
+
+export const VirtualList = (props: VirtualListProps): ReactElement => {
+    const { renderRow, onBindRow, onChange, onActivate, ...hostProps } = props;
+    const [boundRows, setBoundRows] = useState<ReadonlyMap<string, BoundVirtualRow>>(() => new Map());
+    const host = createElement('VirtualList' as unknown as 'div', {
+        key: '__virtual_list_host',
+        ...(onChange ? {
+            onChange(event: unknown) {
+                const raw = firstRawArg(event);
+                if (Array.isArray(raw)) onChange(raw.filter((item): item is number => typeof item === 'number'));
+            },
+        } : {}),
+        ...(onActivate ? {
+            onActivate(event: unknown) {
+                const raw = firstRawArg(event);
+                if (typeof raw === 'number') onActivate(raw);
+            },
+        } : {}),
+        onBindRow(event: unknown) {
+            onBindRow?.(event);
+            const raw = firstRawArg(event) as { rowId?: unknown; index?: unknown } | undefined;
+            const rowId = typeof raw?.rowId === 'string' ? raw.rowId : '';
+            const index = typeof raw?.index === 'number' ? raw.index : -1;
+            if (!rowId || index < 0) return;
+            withSuppressedLayoutFlush(() => {
+                setBoundRows((previous) => {
+                    const existing = previous.get(rowId);
+                    if (existing?.index === index) return previous;
+                    const next = new Map(previous);
+                    next.set(rowId, {
+                        index,
+                        container: createRoot(rowId, rowId + '__pr_'),
+                    });
+                    return next;
+                });
+            });
+        },
+        onReleaseRow(event: unknown) {
+            const raw = firstRawArg(event) as { rowId?: unknown } | undefined;
+            const rowId = typeof raw?.rowId === 'string' ? raw.rowId : '';
+            if (!rowId) return;
+            withSuppressedLayoutFlush(() => {
+                setBoundRows((previous) => {
+                    if (!previous.has(rowId)) return previous;
+                    const next = new Map(previous);
+                    next.delete(rowId);
+                    return next;
+                });
+            });
+        },
+        ...hostProps,
+        renderRow,
+    } as unknown as object);
+    return createElement(
+        Fragment,
+        null,
+        host,
+        ...Array.from(boundRows, ([rowId, entry]) => createPortal(
+            createElement(Row, { key: entry.index, width: '100%', height: '100%' }, renderRow(entry.index)),
+            entry.container,
+            rowId + ':' + entry.index,
+        )),
+    );
+};
 export const Canvas = (props: CanvasProps): ReactElement => createElement('Canvas' as unknown as 'div', props as unknown as object);
 export const Image = (props: ImageProps): ReactElement => createElement('Image' as unknown as 'div', props as unknown as object);
 export const Icon = (props: IconProps): ReactElement => createElement('Icon' as unknown as 'div', props as unknown as object);

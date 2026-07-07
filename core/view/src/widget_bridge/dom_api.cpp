@@ -138,7 +138,7 @@ void WidgetBridge::register_dom_api() {
         } else if (auto widget_for_tag = make_widget_for_tag(tag, childId)) {
             // Route lowercase `@pulp/react` widget intrinsics
             // (knob/fader/toggle/combo/
-            // checkbox/spectrum/waveform/meter/xypad/listbox/icon, plus the
+            // checkbox/spectrum/waveform/meter/xypad/listbox/virtuallist/icon, plus the
             // select/progress/img HTML aliases) to native widgets here in the
             // React-commit fast path. `<Knob>` etc. lower to lowercase DOM
             // tags in the live-JSX path (`pulp import-design --from jsx --mode
@@ -176,6 +176,7 @@ void WidgetBridge::register_dom_api() {
             if (auto* p = w->parent()) {
                 auto removed = p->remove_child(w);
                 erase_widget_subtree(widgets_, removed.get());
+                prune_dangling_bindings();
             }
         }
         return choc::value::Value();

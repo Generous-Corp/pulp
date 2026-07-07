@@ -77,6 +77,8 @@ var __widgetTagFactory__ = {
     meter:    function(id) { createMeter(id, "vertical", ""); },
     xypad:    function(id) { createXYPad(id, ""); },
     listbox:  function(id) { createListBox(id, ""); },
+    virtuallist: function(id) { createVirtualList(id, ""); },
+    "virtual-list": function(id) { createVirtualList(id, ""); },
     icon:     function(id) { createIcon(id, "image_upload", ""); },
     'native-view': function(id) { createNativeView(id, ""); }
 };
@@ -202,7 +204,7 @@ Element.prototype._ensureNative = function() {
     } else if (Object.prototype.hasOwnProperty.call(__widgetTagFactory__, tag)) {
         // Lowercase `@pulp/react` widget intrinsics
         // (<Knob>/<Fader>/<Toggle>/<Combo>/<Checkbox>/
-        // <Spectrum>/<Waveform>/<Meter>/<XYPad>/<ListBox>/<Icon>) lower to
+        // <Spectrum>/<Waveform>/<Meter>/<XYPad>/<ListBox>/<VirtualList>/<Icon>) lower to
         // lowercase DOM tags in the live-JSX path. Route them to native
         // widgets via the shared __widgetTagFactory__ table (defined above),
         // whose new-API createX(id, …) forms wire callbacks. Routing through

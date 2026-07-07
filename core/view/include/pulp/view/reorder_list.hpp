@@ -76,6 +76,7 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+    bool wants_mouse_input() const override { return true; }
 
 private:
     // Main-axis coordinate of a point in this view's local space.

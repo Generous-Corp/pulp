@@ -401,19 +401,19 @@ static void install_app_menu(NSString* appName) {
     if (!target) {
         // Hovering over empty background inside a scroll pane returns no hit
         // because there is no hit-testable child under the point. Route it to
-        // the ScrollView the cursor is over so scrolling works anywhere in
-        // the pane without a click first.
-        if (auto* sv = pulp::view::find_scroll_view_at(*self.rootView, pt)) {
-            pulp::view::MouseEvent me;
-            me.position = pt;
-            me.window_position = pt;
-            me.is_wheel = true;
-            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-            sv->on_mouse_event(me);
-            sv->layout_children();
-            [self setNeedsDisplay:YES];
-        }
+            // the scroll container the cursor is over so scrolling works anywhere in
+            // the pane without a click first.
+            if (auto* scroll = pulp::view::find_wheel_scroll_view_at(*self.rootView, pt)) {
+                pulp::view::MouseEvent me;
+                me.position = pt;
+                me.window_position = pt;
+                me.is_wheel = true;
+                me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+                me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
+                scroll->on_mouse_event(me);
+                scroll->layout_children();
+                [self setNeedsDisplay:YES];
+            }
         return;
     }
 
@@ -438,7 +438,7 @@ static void install_app_menu(NSString* appName) {
         return;
     }
 
-    // Walk up from target to find nearest ScrollView ancestor
+    // Walk up from target to find nearest native scroll container.
     // W3C wheel bubble: dispatch to every ancestor with on_pointer_event
     // set. Each handler self-filters on me.is_wheel:
     //   - registerPointer's lambda short-circuits when is_wheel == true
@@ -453,9 +453,9 @@ static void install_app_menu(NSString* appName) {
     // ancestor still takes precedence.
     auto* v = target;
     while (v) {
-        if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(v)) {
-            sv->on_mouse_event(me);
-            sv->layout_children();
+        if (v->wants_wheel_scroll()) {
+            v->on_mouse_event(me);
+            v->layout_children();
             [self setNeedsDisplay:YES];
             return;
         }

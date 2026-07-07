@@ -238,6 +238,8 @@ public:
         return false;
     }
 
+    bool wants_mouse_input() const override { return true; }
+
 private:
     std::vector<float> audio_data_;
     float sample_rate_ = 44100.0f;

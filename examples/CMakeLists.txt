@@ -73,6 +73,7 @@ add_subdirectory(mpe-synth)
 
 # PulpSampler: sample-buffer sampler with MIDI + ADSR
 add_subdirectory(PulpSampler)
+add_subdirectory(virtual-list-sample-manager)
 
 # OfflineStretch dev harness: stretchcli (file in -> render -> file out, --analyze)
 add_subdirectory(offline-stretch)

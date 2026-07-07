@@ -1185,6 +1185,27 @@ ScrollView* find_scroll_view_at(View& root, Point root_point) {
     return best;
 }
 
+View* find_wheel_scroll_view_at(View& root, Point root_point) {
+    View* best = nullptr;
+    std::function<void(View&, Point)> walk = [&](View& v, Point local) {
+        if (!v.visible() || !v.enabled() || !v.hit_testable()) return;
+        if (!v.local_bounds().contains(local)) return;
+        if (v.pointer_events() == View::PointerEvents::none) return;
+        if (v.wants_wheel_scroll() && v.pointer_events() != View::PointerEvents::box_none)
+            best = &v;
+        if (v.pointer_events() == View::PointerEvents::box_only) return;
+        for (size_t i = 0; i < v.child_count(); ++i) {
+            View* child = v.child_at(i);
+            if (!child) continue;
+            Point child_local{local.x - child->bounds().x,
+                              local.y - child->bounds().y};
+            walk(*child, child_local);
+        }
+    };
+    walk(root, root_point);
+    return best;
+}
+
 void ScrollView::on_mouse_event(const MouseEvent& event) {
     if (event.is_wheel) {
         // macOS trackpad provides pixel-level deltas

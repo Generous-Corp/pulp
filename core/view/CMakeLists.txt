@@ -427,6 +427,7 @@ target_sources(pulp-view-core PRIVATE
     src/ui_components.cpp
     src/context_menu.cpp
     src/scroll_bar.cpp
+    src/virtual_list.cpp
     src/relative_point.cpp
     src/css_gradient.cpp
     src/w3c_tokens.cpp

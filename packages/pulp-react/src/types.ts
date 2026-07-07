@@ -486,6 +486,24 @@ export interface ListBoxProps extends BaseProps {
     onChange?: (index: number) => void;
 }
 
+export interface VirtualListBindEvent {
+    rowId: string;
+    index: number;
+}
+
+export interface VirtualListProps extends BaseProps {
+    rowCount: number;
+    rowHeight: number;
+    overscan?: number;
+    selectionMode?: 'none' | 'single' | 'multi';
+    selected?: number;
+    scrollToRow?: number;
+    renderRow: (index: number) => ReactNode;
+    onBindRow?: (event: unknown) => void;
+    onChange?: (selection: number[]) => void;
+    onActivate?: (index: number) => void;
+}
+
 export interface CanvasProps extends BaseProps {
     /// Drawing happens via the canvas* bridge ops in render callbacks.
     /// Wire your draw function via a ref, not via children.
@@ -617,6 +635,7 @@ export interface IntrinsicElementMap {
     Stepper: StepperProps;
     Pan: PanProps;
     ListBox: ListBoxProps;
+    VirtualList: VirtualListProps;
     Canvas: CanvasProps;
     Image: ImageProps;
     Icon: IconProps;
@@ -668,6 +687,7 @@ export interface PulpInstance {
 // convention the bridge uses for "no parent".
 export interface PulpContainer {
     rootId: string;
+    idPrefix?: string;
     /// Auto-incrementing counter for generating widget IDs. Per-container
     /// so multiple roots in the same engine don't collide.
     nextId: number;

@@ -114,6 +114,8 @@ public:
         end_selection();
     }
 
+    bool wants_mouse_input() const override { return true; }
+
 private:
     bool active_ = false;
     float start_x_ = 0, start_y_ = 0;
