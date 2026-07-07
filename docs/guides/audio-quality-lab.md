@@ -18,6 +18,16 @@ the core, with optional perceptual models and an optional review model layered o
 > **tuning Pulp's own DSP** (and the agents doing it) and for **developers building on
 > Pulp** who want the same “did this get worse?” guardrail on their own sounds.
 
+> **How proven is this? (read this first.)** Honest answer: the **core artifact detectors**
+> (dulling, fizz, roughness, smeared attacks, stereo collapse, graininess) are validated and
+> trusted enough to fail a build. **Everything else is earlier and lightly tested** — the
+> perceptual models, the plain-language review model, the timing-drift detector, and the
+> auto-tuning loop are all explicitly marked *advisory* or *experimental*, and **none of them
+> can fail anything**. So: trust a clean result from the stable detectors; treat anything
+> labeled advisory/experimental as a hint to go listen, not a verdict. The
+> [Maturity](#maturity--how-a-feature-earns-the-right-to-gate) section spells out exactly which
+> is which and how something graduates.
+
 ## Install (opt-in)
 
 Managed install — provisions an isolated venv under `~/.pulp/tools/`, the same
@@ -88,9 +98,11 @@ agent tuning DSP can weigh in on a change with cited evidence instead of a bare 
 
 ### Golden-render regression net (the daily-driver loop)
 
-Once you have `compare`, the highest-value thing to stand up is a **golden-render regression net**:
-keep a known-good ("golden") render per plugin/preset, render the candidate after a DSP change, and
-`compare` across every wired axis — attaching a cited, multi-axis verdict to the change.
+Once you have `compare`, the highest-value thing to stand up is a **golden-render regression net**.
+The **net** is a *safety net*: a batch of before/after checks you run automatically on every DSP
+change (the CLI command is literally `regression-net`). You keep a known-good ("golden") render per
+plugin/preset, render the candidate after a DSP change, and `compare` across every wired axis — so
+each change arrives with a cited, multi-axis "did anything get worse?" verdict already attached.
 
 ```bash
 # 1. render the candidate from the changed plugin (shipped CLI; any format/backend)
@@ -337,8 +349,9 @@ recall vs the synthetic answer key) and a real-audio spot-check clear a bar.
 edits the corpus ground truth and never auto-promotes. A **Goodhart guard** refuses any
 candidate that games one detector while regressing another (normalized Pareto across a
 working + held-out slice); low-confidence wins are held `NEEDS-EAR` for a human listen. The
-loop proposes; you decide. *State:* first slice — wiring it to the full engine matrix is the
-next step.
+loop proposes; you decide. *Honest state:* early and unproven — it runs and writes proposals
+today, but it isn't wired across the full engine matrix yet, so treat its output as a starting
+point for your own listening, not an answer.
 
 ## How to trust a verdict
 
