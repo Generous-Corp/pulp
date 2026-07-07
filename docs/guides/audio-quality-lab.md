@@ -203,14 +203,32 @@ across a stretch (the null residual is still emitted, marked not-a-corroborator)
 pulp audio compare source.wav stretched_1.5x.wav --reference-role golden --align stretch:1.5
 ```
 
-The declaration is verified twice and **refused** on failure: §6.1 duration (candidate within ±3% of
-R× the reference, `R ∈ [0.25, 4.0]`) and §6.3 that a **single uniform ratio actually fits** — for
-onset material the per-onset residual from the uniform-ratio prediction must have a small
-median-absolute-deviation (a non-uniformly warped render reads
-`"onset lags inconsistent with a uniform ratio"`), for sustained material a ratio-mapped envelope
-correlation must clear a floor. So a clean stretch reads `no_material_change` + corroborated, a grainy
-or fizzy stretch still flags its defect (anti-masking), and a non-uniform warp declared uniform
-refuses rather than measure a bad map.
+The declaration is verified and **refused** on failure: the candidate must be within ±3% of R× the
+reference duration (`R ∈ [0.25, 4.0]`), and on onset-bearing material a **single uniform ratio must
+actually fit** — each reference onset is matched to the nearest actual candidate onset around its
+`ref_t·R` prediction, and if those residuals scatter, the render is non-uniformly warped and reads
+`"onset lags inconsistent with a uniform ratio"`. (Sustained material has no onset landmarks to check
+and is unaffected by non-uniformity on the time-average axes, so it is accepted.) So a clean stretch
+reads `no_material_change` + corroborated, a grainy or fizzy stretch still flags its defect
+(anti-masking), and a non-uniform warp declared uniform refuses rather than measure a bad map.
+
+#### Declared pitch shift (`--align pitch:S`)
+
+A **pitch shift** (`S` semitones, duration unchanged) leaves the time base alone, so the axes measure
+the pair directly — but a shift moves the whole spectrum, so **tonal-balance** compensates: a perfect
+`S`-semitone shift moves the spectral centroid by exactly the pitch ratio, and the axis reports the
+candidate's deviation from that expected move (the shifter's added dulling or damage), not the shift
+itself. The corroborator compares the candidate against the shift-compensated reference spectrum.
+
+```bash
+pulp audio compare source.wav shifted_up3.wav --reference-role golden --align pitch:+3
+```
+
+It's verified (`|S| ≤ 24` semitones, duration preserved — a length change means it isn't a pure pitch
+shift) and refused otherwise. A clean shift reads `no_material_change`; a shift that also dulls flags
+the dulling. **Only `tonal-balance` is valid under `--align pitch`** — the other axes are pitch-variant
+(a shift genuinely moves the HF band, the harmonic-to-noise lag, and the attack high band, so they
+would false-flag a clean shift), and each declines with `not_applicable` under a pitch alignment.
 
 `engine` / `engine-baseline` validate the real product DSP, so they need its `stretchcli`
 harness built once (`cmake -S . -B build -DPULP_ENABLE_GPU=OFF && cmake --build build

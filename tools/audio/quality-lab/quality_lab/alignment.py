@@ -94,7 +94,18 @@ def parse(align: str) -> AlignSpec:
         if not math.isfinite(ratio) or ratio <= 0.0:
             raise ValueError(f"{mode} ratio must be a positive finite number, got {ratio}")
         return AlignSpec(raw=align, mode=mode, param=ratio)
-    # unreachable while _HANDLERS is none/latency/varispeed — a guard for a mis-registered handler.
+    if mode == "pitch":
+        if not param_str:
+            raise ValueError("align 'pitch' needs semitones, e.g. pitch:+3 or pitch:-5st")
+        raw_s = param_str.removesuffix("st").removesuffix("semitones").strip()
+        try:
+            semitones = float(raw_s)
+        except ValueError:
+            raise ValueError(f"pitch shift must be a number of semitones, got {param_str!r}")
+        if not math.isfinite(semitones):
+            raise ValueError(f"pitch semitones must be finite, got {semitones}")
+        return AlignSpec(raw=align, mode=mode, param=semitones)
+    # unreachable while every mode above has a param branch — a guard for a mis-registered handler.
     raise ValueError(f"align {mode!r} has no parameter grammar defined")
 
 
@@ -208,24 +219,61 @@ def _align_stretch(reference, candidate, sr, param, extra):
         declared_ratio=ratio, observed_ratio=round(observed, 4), **evidence)
 
 
-# Mode → handler. A new declared-warp class (pitch/ratio) is ONE entry here plus one handler function
-# (and, if it needs a new policy string, one constant in schema.py).
+_PITCH_MAX_SEMITONES = 24.0
+_PITCH_DUR_TOL = 0.03   # pitch is duration-preserving: the candidate must keep the reference length
+
+
+def _align_pitch(reference, candidate, sr, param, extra):
+    """A declared `pitch:S` (duration-preserving pitch shift, S semitones). The time base is unchanged,
+    so the axes measure the pair directly — tonal-balance compensates the centroid for the EXPECTED
+    log-frequency move and the corroboration binds to the shift-compensated LTAS distance. Verify §6.1:
+    |S| ≤ 24 st and the duration is preserved (a length change means it is not a pure pitch shift) —
+    REFUSE otherwise."""
+    semitones = float(param)
+    requested = extra.get("requested")
+    if semitones == 0.0:
+        # A declared zero-semitone shift is a no-op — behave exactly like `none` (measure the raw pair
+        # with the sample-domain corroborator), not a pitch class that would swap in the delay-blind
+        # LTAS corroborator and suppress a genuine offset/material residual.
+        return reference, candidate, schema.compare_alignment_not_required()
+    if abs(semitones) > _PITCH_MAX_SEMITONES:
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested=requested, applied=False,
+            reason=f"pitch shift {semitones} st outside the supported range ±{_PITCH_MAX_SEMITONES} st")
+    if reference.size == 0 or candidate.size == 0:
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested=requested, applied=False,
+            reason="cannot verify a pitch shift against an empty signal")
+    dur_rel = abs(candidate.size - reference.size) / reference.size
+    if dur_rel > _PITCH_DUR_TOL:
+        return reference, candidate, schema.compare_alignment(
+            schema.COMPARE_ALIGN_NOT_ALIGNED, requested=requested, applied=False,
+            declared_semitones=semitones, observed_duration_ratio=round(candidate.size / reference.size, 4),
+            reason=(f"declared pitch:{semitones:+g}st is duration-preserving but the candidate is "
+                    f"{candidate.size / reference.size:.3f}× the reference length — not a pure pitch shift"))
+    return reference, candidate, schema.compare_alignment(
+        schema.COMPARE_ALIGN_PITCH, applied=True, requested=requested, declared_semitones=semitones)
+
+
+# Mode → handler. A new declared-warp class (ratio) is ONE entry here plus one handler function (and,
+# if it needs a new policy string, one constant in schema.py).
 _HANDLERS: dict[str, AlignHandler] = {
     "none": _align_none,
     "latency": _align_latency,
     "varispeed": _align_varispeed,
     "stretch": _align_stretch,
+    "pitch": _align_pitch,
 }
 
-# Modes that change the TIME BASE (a warp), not just a constant offset. The capability axes that skip
-# a constant-lag alignment (stereo image, per-onset self-alignment) are NOT invariant to a warp — a
-# time-stretch stretches the attacks themselves — so a warp mode is still applied/routed for them.
-# New warp classes (pitch/ratio) join this set.
-_WARP_MODES = frozenset({"varispeed", "stretch"})
+# Modes that change the TIME BASE or SPECTRUM (a warp), not just a constant offset. The capability axes
+# that skip a constant-lag alignment (stereo image, per-onset self-alignment) are NOT invariant to a
+# warp, so a warp mode is still applied/routed for them. New warp classes (ratio) join this set.
+_WARP_MODES = frozenset({"varispeed", "stretch", "pitch"})
 # Warp modes whose axes measure the UNWARPED pair (no resample) and therefore need per-axis warp
-# normalization downstream: graininess hop-scaling + the LTAS-residual corroborator. `varispeed` is
-# NOT here — it resamples back, so the standard pipeline applies verbatim.
-_MEASURE_UNWARPED_MODES = frozenset({"stretch"})
+# normalization downstream (graininess hop-scaling / tonal-balance pitch compensation + the
+# LTAS-residual corroborator). `varispeed` is NOT here — it resamples back, so the standard pipeline
+# applies verbatim.
+_MEASURE_UNWARPED_MODES = frozenset({"stretch", "pitch"})
 
 
 # ── entry point (called by compare.compare_arrays) ─────────────────────────────────────────────────
@@ -261,22 +309,28 @@ def apply(
     return _HANDLERS[spec.mode](reference, candidate, sr, spec.param, extra)
 
 
-# ── warp-normalization hooks (compare.py routes graininess + corroboration through these) ───────────
+def unsupported_axis(spec: AlignSpec, profile: str) -> str | None:
+    """A reason string if `profile` is NOT valid under the declared warp (so `compare` declines it as
+    not_applicable rather than emit a misleading verdict), else None. Under `pitch:S` only tonal-balance
+    is compensated for the shift; every other axis is pitch-VARIANT (a shift legitimately moves the HF
+    fraction, the HNR pitch-lag window, and the attack high band) and would false-flag a clean shift as
+    a regression. Other modes support all axes (stretch: warp-invariant time-averages, graininess
+    warp-normalized; varispeed: resampled back; none/latency: no warp)."""
+    if spec.mode == "pitch" and profile != "tonal-balance":
+        return ("axis is not pitch-invariant — only tonal-balance is compensated under --align pitch:S; "
+                "measure this axis without --align pitch (or on a same-pitch pair)")
+    return None
+
+
+# ── warp-normalization hook (compare.py routes graininess + tonal-balance + corroboration off this) ──
 def measures_unwarped(spec: AlignSpec) -> bool:
-    """True when the axes measure the UNWARPED pair (a `stretch`/later `pitch` class): the phase- and
-    time-sensitive sample residual is invalid for corroboration and must be replaced by the phase-blind
-    LTAS residual, and the graininess flux must be warp-normalized. False for none/latency/varispeed
-    (varispeed resamples back, so the standard pipeline applies verbatim)."""
+    """True when the axes measure the UNWARPED pair (a `stretch` or `pitch` class): the phase- and
+    time-sensitive sample residual is invalid for corroboration and is replaced by the phase-blind LTAS
+    distance, and the warp-aware axes normalize for the declared class (graininess hop-scales under
+    stretch, tonal-balance pitch-compensates under pitch). False for none/latency/varispeed (varispeed
+    resamples back, so the standard pipeline applies verbatim). compare.py reads the class + parameter
+    off the `AlignSpec` directly for the per-axis normalization."""
     return spec.mode in _MEASURE_UNWARPED_MODES
-
-
-def flux_hop_scale(spec: AlignSpec) -> float:
-    """The hop-scale the graininess flux should apply to the candidate: the declared ratio for a
-    measure-unwarped stretch (so both flux series step through the same source-content interval),
-    else 1.0 (no warp, or already resampled back)."""
-    if spec.mode in _MEASURE_UNWARPED_MODES and spec.param:
-        return float(spec.param)
-    return 1.0
 
 
 # ── presentation (owns the alignment prose, so a new policy adds its clause in one file) ────────────
@@ -294,6 +348,10 @@ def describe(record: dict[str, Any]) -> str | None:
         return (f"Declared {record['declared_ratio']}× pitch-preserving stretch (observed "
                 f"{record['observed_ratio']}×): measured warp-invariant axes directly; graininess + "
                 "corroboration warp-normalized.")
+    if policy == schema.COMPARE_ALIGN_PITCH and record.get("applied"):
+        return (f"Declared {record['declared_semitones']:+g}-semitone pitch shift (duration preserved): "
+                "tonal-balance compensated for the expected centroid move; corroboration uses the "
+                "shift-compensated spectral distance.")
     if policy == schema.COMPARE_ALIGN_NOT_ALIGNED:
         return f"Alignment refused ({record.get('reason', 'low confidence')}) — measured unaligned."
     return None

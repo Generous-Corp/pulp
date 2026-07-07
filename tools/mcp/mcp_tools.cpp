@@ -1122,8 +1122,8 @@ std::string handle_audio_compare(const std::string& params_json) {
         // Validate the MODE prefix here for a fast, helpful error; the full `mode[:param]` grammar
         // (e.g. varispeed:1.5) is owned + re-validated by the Python alignment.parse layer.
         auto mode = align.substr(0, align.find(':'));
-        if (mode != "none" && mode != "latency" && mode != "varispeed" && mode != "stretch")
-            return arg_error("Error: align must be none, latency, varispeed:<ratio>, or stretch:<ratio>");
+        if (mode != "none" && mode != "latency" && mode != "varispeed" && mode != "stretch" && mode != "pitch")
+            return arg_error("Error: align must be none, latency, varispeed:<ratio>, stretch:<ratio>, or pitch:<semitones>");
         flags += " --align " + shell_quote(align);
     }
     if (auto raw = extract_raw(params_json, "threshold"); !raw.empty() && raw != "null") {
