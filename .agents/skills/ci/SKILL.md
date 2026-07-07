@@ -94,7 +94,10 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,
    re-dispatch the checks. (Longer-term fix for this whole class:
-   planning/2026-07-07-parallel-merge-land-coordination.md.)
+   planning/2026-07-07-parallel-merge-land-coordination.md. In progress: the
+   `version-at-land.yml` bot — currently DRY-RUN — will make a single writer
+   assign the version from `Version-Bump:` intent trailers post-merge, removing
+   the per-PR race. Until it flips to `--apply`, keep hand-bumping as today.)
 2b. **Did a gate reject the push?** Besides skill-sync / version-bump, the
    pre-push + CI `planning-gitlink` gate (`tools/scripts/planning_gitlink_guard.py`)
    fails if the PR moved the `planning` submodule pointer without a
