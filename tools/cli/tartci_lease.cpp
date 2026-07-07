@@ -10,14 +10,23 @@
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
 #include <process.h>
+#include <windows.h>
 #define popen _popen
 #define pclose _pclose
 #define getpid _getpid
 #else
+#include <unistd.h>
+#endif
+
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#elif defined(__linux__)
 #include <unistd.h>
 #endif
 
@@ -146,6 +155,71 @@ std::string parse_shell_assignment(const std::string& text, const std::string& k
 
 int parse_shell_assignment_int(const std::string& text, const std::string& key) {
     return parse_positive_int(parse_shell_assignment(text, key));
+}
+
+namespace {
+
+// Physical RAM in bytes, 0 if it cannot be determined (callers fall back to a
+// core-only bound). Kept local to the Tier-0 default so the pure job-math stays
+// host-agnostic and unit-testable.
+unsigned long long host_physical_ram_bytes() {
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    uint64_t mem = 0;
+    size_t len = sizeof(mem);
+    int mib[2] = {CTL_HW, HW_MEMSIZE};
+    if (sysctl(mib, 2, &mem, &len, nullptr, 0) == 0) {
+        return static_cast<unsigned long long>(mem);
+    }
+    return 0;
+#elif defined(_WIN32)
+    MEMORYSTATUSEX status;
+    status.dwLength = sizeof(status);
+    if (GlobalMemoryStatusEx(&status)) {
+        return static_cast<unsigned long long>(status.ullTotalPhys);
+    }
+    return 0;
+#elif defined(__linux__)
+    const long pages = sysconf(_SC_PHYS_PAGES);
+    const long page_size = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && page_size > 0) {
+        return static_cast<unsigned long long>(pages) * static_cast<unsigned long long>(page_size);
+    }
+    return 0;
+#else
+    return 0;
+#endif
+}
+
+}  // namespace
+
+int tier0_default_build_jobs(unsigned hw_threads, unsigned long long mem_budget_bytes) {
+    int cores = hw_threads > 0 ? static_cast<int>(hw_threads) : 1;
+    // Budget ~1.5 GiB of resident memory per concurrent C++ compile job. This is
+    // a deliberately conservative compile-average estimate whose only job is to
+    // keep a wide `--parallel` from exhausting RAM on a memory-constrained host;
+    // when a tartci lease is present its per-host budget supersedes this.
+    const unsigned long long per_job = 1536ULL * 1024ULL * 1024ULL;
+    int mem_jobs = cores;
+    if (mem_budget_bytes > 0) {
+        mem_jobs = static_cast<int>(mem_budget_bytes / per_job);
+    }
+    if (mem_jobs < 1) mem_jobs = 1;
+    int jobs = std::min(cores, mem_jobs);
+    return jobs < 1 ? 1 : jobs;
+}
+
+int tier0_default_build_jobs() {
+    const unsigned threads = std::thread::hardware_concurrency();
+    unsigned long long budget = 0;
+    // Explicit override wins (deterministic tests + a user escape hatch).
+    if (const int mb = env_positive_int("PULP_BUILD_MEM_BUDGET_MB"); mb > 0) {
+        budget = static_cast<unsigned long long>(mb) * 1024ULL * 1024ULL;
+    } else if (const unsigned long long total = host_physical_ram_bytes(); total > 0) {
+        // Reserve ~25% for the OS and window server so a wide build cannot starve
+        // the UI / remote-desktop path on a shared desktop machine.
+        budget = total / 4ULL * 3ULL;
+    }
+    return tier0_default_build_jobs(threads, budget);
 }
 
 CmakeParallelPlan cap_cmake_build_parallel_args(const std::vector<std::string>& args,
@@ -418,7 +492,11 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
 
     const int env_jobs = env_positive_int("PULP_BUILD_JOBS");
     if (env_false("PULP_TARTCI_LEASES") || env_value("PULP_TARTCI_LEASE_HELD") == "1") {
-        lease.jobs_ = env_jobs;
+        // Leases explicitly off, or a parent already holds one and exported the
+        // bound. Either way we do NOT acquire a lease — but Tier 0 still caps:
+        // fall back to the host default so a no-lease build can't fan out
+        // unbounded. A parent lease exports PULP_BUILD_JOBS, so env_jobs wins there.
+        lease.jobs_ = env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
         return lease;
     }
 
@@ -427,7 +505,9 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         tartci = find_executable_in_path("tartci");
     }
     if (tartci.empty()) {
-        lease.jobs_ = env_jobs;
+        // No tartci installed — the casual single-machine case (Tier 0). No lease
+        // store to consult, but the build is still bounded to a safe host default.
+        lease.jobs_ = env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
         return lease;
     }
 

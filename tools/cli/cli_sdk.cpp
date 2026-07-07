@@ -9,6 +9,7 @@
 
 #include "cli_common.hpp"
 #include "fetchcontent_cache.hpp"
+#include "tartci_lease.hpp"
 #include "version_diag.hpp"
 #include "update_check.hpp"
 
@@ -362,7 +363,8 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         return {};
     }
 
-    std::string install_cmd = "cmake --build " + build_dir.string() + " --target install --parallel";
+    std::string install_cmd = "cmake --build " + build_dir.string()
+        + " --target install --parallel " + std::to_string(tier0_default_build_jobs());
     if (run_with_spinner(install_cmd, "Installing local SDK") != 0) {
         return {};
     }

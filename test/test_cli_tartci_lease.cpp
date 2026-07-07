@@ -138,6 +138,44 @@ TEST_CASE("non-positive caps leave cmake build args unchanged") {
     REQUIRE(plan.args == args);
 }
 
+TEST_CASE("tier-0 default is core-bound when memory is plentiful") {
+    // 16 GiB budget / 1.5 GiB per job = 10 memory-jobs, so 8 cores is the bind.
+    REQUIRE(tier0_default_build_jobs(8, 16ULL * 1024 * 1024 * 1024) == 8);
+}
+
+TEST_CASE("tier-0 default is memory-bound on a constrained host") {
+    // 8 cores but only 6 GiB of budget → 6/1.5 = 4 jobs is the bind.
+    REQUIRE(tier0_default_build_jobs(8, 6ULL * 1024 * 1024 * 1024) == 4);
+}
+
+TEST_CASE("tier-0 default never drops below one job") {
+    REQUIRE(tier0_default_build_jobs(0, 0) == 1);
+    REQUIRE(tier0_default_build_jobs(4, 256ULL * 1024 * 1024) == 1);  // <1.5 GiB budget
+}
+
+TEST_CASE("tier-0 default falls back to cores when RAM is unknown") {
+    // A zero budget means "could not read RAM" — bound by cores alone, not by 1.
+    REQUIRE(tier0_default_build_jobs(6, 0) == 6);
+}
+
+TEST_CASE("tier-0 default honors the memory-budget override env") {
+    ScopedEnvVar budget("PULP_BUILD_MEM_BUDGET_MB", "3072");  // 3 GiB → 2 jobs
+    const int jobs = tier0_default_build_jobs();
+    REQUIRE(jobs >= 1);
+    REQUIRE(jobs <= 2);
+}
+
+TEST_CASE("no-tartci build acquisition falls back to a bounded tier-0 cap") {
+    ScopedEnvVar no_jobs("PULP_BUILD_JOBS", std::nullopt);
+    ScopedEnvVar no_bin("PULP_TARTCI_BIN", std::string{"/nonexistent/tartci-does-not-exist"});
+    ScopedEnvVar leases_off("PULP_TARTCI_LEASES", std::string{"0"});
+
+    auto lease = TartciAgentBuildLease::acquire({fs::current_path(), "pulp-build", false});
+    REQUIRE(lease.ok());
+    REQUIRE_FALSE(lease.active());   // no store → not a real lease…
+    REQUIRE(lease.jobs() >= 1);      // …but still a bounded cap, never 0/unbounded.
+}
+
 TEST_CASE("scoped build parallel env injects build and test caps") {
     ScopedEnvVar no_pulp_jobs("PULP_BUILD_JOBS", std::nullopt);
     ScopedEnvVar no_cmake_jobs("CMAKE_BUILD_PARALLEL_LEVEL", std::nullopt);

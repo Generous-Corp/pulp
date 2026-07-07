@@ -22,6 +22,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
 
+    # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
+    # in any tracked build command. Bare `--parallel` maps to unbounded `make
+    # -j`, which can exhaust memory / oversubscribe cores on a shared machine.
+    add_test(NAME build-parallelism-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
+    add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest
