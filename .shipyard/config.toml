@@ -39,20 +39,24 @@ versioning_config   = "tools/scripts/versioning.json"
 # fold those steps into the canonical four for now and revisit when
 # Shipyard supports arbitrary stage lists end-to-end.
 #
-# The build command bounds `--parallel` to the host CPU count. A bare
-# `--parallel` (no count) delegates to the generator's default, which for
-# Unix Makefiles is `make -j` with NO limit — that fans out one compile per
-# ready translation unit and can exhaust memory / oversubscribe cores on a
-# shared machine. The POSIX backends (mac `local`, ssh-linux) compute the
-# count with `getconf _NPROCESSORS_ONLN`; the ssh-windows overrides below use
-# a fixed cap instead, because they run under PowerShell (no `$(...)`) and
-# because unlimited MSBuild link parallelism triggers LNK1104 on ARM64.
+# Build parallelism must never be unbounded. A bare `--parallel` (no count)
+# delegates to the generator's default, which for Unix Makefiles is `make -j`
+# with NO limit — it fans out one compile per ready translation unit and can
+# exhaust memory / oversubscribe cores on a shared machine.
+#
+# The POSIX backends (mac `local`, ssh-linux) run through
+# `tools/ci/governed-build.sh`, which acquires a tartci host build-lease when
+# one is available (so a validation build shares the host's core/memory budget
+# with concurrent agent builds instead of racing them) and otherwise falls back
+# to a bounded local `-j`. The ssh-windows overrides below use a fixed cap
+# instead: they run under PowerShell (no `$(...)` or wrapper path assumptions)
+# and unlimited MSBuild link parallelism triggers LNK1104 on ARM64.
 
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
-build     = "cmake --build build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
+build     = "tools/ci/governed-build.sh cmake --build build"
 # `--label-exclude slow` skips ctest entries tagged LABELS slow — currently
 # `cmake-ios-auv3-configure` (test/CMakeLists.txt:23, ~25-30 min fresh-cache
 # Xcode/iOS try-compile + FetchContent bootstrap). #1589 added the label
@@ -124,7 +128,7 @@ setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
-build     = "cmake --build build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
+build     = "tools/ci/governed-build.sh cmake --build build"
 test      = "ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
 
 [validation.parser.overrides.windows]

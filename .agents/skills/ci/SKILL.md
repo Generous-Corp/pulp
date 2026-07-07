@@ -3474,3 +3474,15 @@ explicit `--parallel`/`-j` count — a literal, or `$(getconf _NPROCESSORS_ONLN
 there, and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
 `tools/scripts/build_parallelism_guard.py` enforces this in the `validation.gates`
 setup chain and as a ctest; a bare `--parallel`/`-j` fails the gate.
+
+The mac `local` and ssh-linux `build` strings run through
+`tools/ci/governed-build.sh`, NOT a bare `cmake --build`. Shipyard's `local`
+backend executes the config string directly on the host (bypassing the pulp
+CLI's lease integration), so the wrapper is what puts a host-native validation
+build under a tartci host lease: it sizes `-j` from `tartci host-profile`,
+holds a `build`-priority lease for the build's duration (released via an EXIT
+trap — it runs the build as a child, never `exec`, so the trap fires), and
+falls back to a bounded local `-j` when tartci is absent (build VM / plain
+checkout) or the lease is denied (it never fails the build and never piles onto
+a saturated host). Keep new POSIX build strings routed through it; don't add a
+bare `cmake --build … --parallel` back to the `local`/ssh-linux lanes.

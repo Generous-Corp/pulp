@@ -238,6 +238,14 @@ if(UNIX)
     add_test(NAME inject-claude-prefs-hook
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_claude_prefs_hook.sh)
     set_tests_properties(inject-claude-prefs-hook PROPERTIES TIMEOUT 15)
+
+    # governed-build.sh — the shipyard local-backend build wrapper. Hermetic
+    # (stub tartci): asserts bounded parallelism with no tartci, lease
+    # acquire+release when granted, and a non-failing leaseless fallback when
+    # the lease is denied.
+    add_test(NAME governed-build-wrapper
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_governed_build.sh)
+    set_tests_properties(governed-build-wrapper PROPERTIES TIMEOUT 30)
 endif()
 
 # install.sh contract: install CLI + matching SDK in one
