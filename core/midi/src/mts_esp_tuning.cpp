@@ -29,6 +29,14 @@ int from_mts_channel(signed char midi_channel) noexcept {
     return is_valid_midi_channel(midi_channel) ? static_cast<int>(midi_channel) : kUnknownMidiChannel;
 }
 
+bool is_positive_finite(double value) noexcept {
+    return value > 0.0 && std::isfinite(value);
+}
+
+double finite_or_default(double value, double fallback) noexcept {
+    return std::isfinite(value) ? value : fallback;
+}
+
 }  // namespace
 
 struct MtsEspTuningProvider::Impl {
@@ -57,12 +65,18 @@ TuningQueryResult MtsEspTuningProvider::note_to_frequency(
 
     const auto note = to_mts_note(midi_note);
     const auto channel = to_mts_channel(midi_channel);
+    const double frequency_hz = MTS_NoteToFrequency(impl_->client, note, channel);
+    if (!is_positive_finite(frequency_hz))
+        return {};
+    const double retuning_ratio = MTS_RetuningAsRatio(impl_->client, note, channel);
 
     return {
         .valid = true,
-        .frequency_hz = MTS_NoteToFrequency(impl_->client, note, channel),
-        .retuning_semitones = MTS_RetuningInSemitones(impl_->client, note, channel),
-        .retuning_ratio = MTS_RetuningAsRatio(impl_->client, note, channel),
+        .frequency_hz = frequency_hz,
+        .retuning_semitones = finite_or_default(
+            MTS_RetuningInSemitones(impl_->client, note, channel),
+            0.0),
+        .retuning_ratio = is_positive_finite(retuning_ratio) ? retuning_ratio : 1.0,
         .should_filter_note = MTS_ShouldFilterNote(impl_->client, note, channel),
     };
 }
@@ -106,8 +120,12 @@ TuningStatus MtsEspTuningProvider::status() const {
     result.library_update_recommended = MTS_Client_ShouldUpdateLibrary(impl_->client);
     if (const char* scale_name = MTS_GetScaleName(impl_->client))
         result.scale_name = scale_name;
-    result.period_ratio = MTS_GetPeriodRatio(impl_->client);
-    result.period_semitones = MTS_GetPeriodSemitones(impl_->client);
+    const double period_ratio = MTS_GetPeriodRatio(impl_->client);
+    const double period_semitones = MTS_GetPeriodSemitones(impl_->client);
+    if (is_positive_finite(period_ratio))
+        result.period_ratio = period_ratio;
+    if (is_positive_finite(period_semitones))
+        result.period_semitones = period_semitones;
     result.map_size = static_cast<int>(MTS_GetMapSize(impl_->client));
     result.map_start_key = static_cast<int>(MTS_GetMapStartKey(impl_->client));
     result.reference_key = static_cast<int>(MTS_GetRefKey(impl_->client));
