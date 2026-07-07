@@ -124,6 +124,11 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-knobs-host-integration
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    add_executable(pulp-test-inspector-knob-panel-screenshot test_inspector_knob_panel_screenshot.cpp)
+    target_link_libraries(pulp-test-inspector-knob-panel-screenshot PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-knob-panel-screenshot
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
     # TweakStore + Inspector.applyTweak protocol surface.
     add_executable(pulp-test-tweak-store test_tweak_store.cpp)
     target_link_libraries(pulp-test-tweak-store PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
