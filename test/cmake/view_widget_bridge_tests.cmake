@@ -127,6 +127,13 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     target_link_libraries(pulp-test-editor-url PRIVATE pulp::inspect Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-editor-url
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    # Agent-request queue: pure serialize/parse/append/ack + atomic file I/O.
+    # No overlay / GPU surface, but links pulp::inspect so it shares the guard.
+    add_executable(pulp-test-agent-request-queue test_agent_request_queue.cpp)
+    target_link_libraries(pulp-test-agent-request-queue PRIVATE pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-agent-request-queue
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 endif()
 
 # Widget bridge tests
