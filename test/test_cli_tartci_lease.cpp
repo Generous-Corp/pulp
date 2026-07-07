@@ -381,4 +381,37 @@ esac
 
     fs::remove_all(root);
 }
+
+TEST_CASE("build acquisition degrades to a bounded cap when host-profile fails") {
+    // A tartci that cannot answer `host-profile` (an older/incompatible deploy
+    // without the subcommand) must NOT fail the build — it degrades to the
+    // bounded tier-0 default. This is the on-pool reality that would otherwise
+    // make `pulp build` exit non-zero.
+    auto root = fs::temp_directory_path()
+        / ("pulp-tartci-lease-hp-"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    const auto script = root / "tartci";
+    {
+        std::ofstream out(script);
+        out << "#!/usr/bin/env bash\n"
+               "echo \"unknown command: ${1:-}\" >&2\n"
+               "exit 2\n";
+    }
+    fs::permissions(script,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                    fs::perm_options::replace);
+
+    ScopedEnvVar fake_bin("PULP_TARTCI_BIN", script.string());
+    ScopedEnvVar leases_enabled("PULP_TARTCI_LEASES", std::string{"1"});
+    ScopedEnvVar no_held("PULP_TARTCI_LEASE_HELD", std::nullopt);
+    ScopedEnvVar no_user_cap("PULP_BUILD_JOBS", std::nullopt);
+
+    auto lease = TartciAgentBuildLease::acquire({root, "pulp-build", false});
+    REQUIRE(lease.ok());            // must not fail the build
+    REQUIRE_FALSE(lease.active());  // no usable lease store
+    REQUIRE(lease.jobs() >= 1);     // …but a bounded tier-0 fallback
+
+    fs::remove_all(root);
+}
 #endif

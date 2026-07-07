@@ -484,17 +484,19 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
 
     auto profile = capture_command(shell_quote(tartci) + " host-profile");
     if (profile.exit_code != 0) {
-        lease.ok_ = false;
-        lease.exit_code_ = profile.exit_code;
-        lease.error_ = "tartci host-profile failed: " + trim(profile.output);
+        // tartci is present but cannot supply a host profile — an older or
+        // incompatible build without the subcommand, or a transient failure. A
+        // usable lease is an optimization, not a prerequisite for a safe build:
+        // degrade to the bounded host default rather than failing the build.
+        lease.jobs_ = env_jobs > 0 ? env_jobs : tier0_default_build_jobs();
         return lease;
     }
 
     const int profile_jobs = parse_shell_assignment_int(profile.output, "PULP_BUILD_JOBS");
     if (profile_jobs <= 0 && env_jobs <= 0) {
-        lease.ok_ = false;
-        lease.exit_code_ = 75;
-        lease.error_ = "tartci host-profile did not provide PULP_BUILD_JOBS";
+        // host-profile ran but advertised no build budget — same degrade-to-safe
+        // path: bound the build, don't fail it.
+        lease.jobs_ = tier0_default_build_jobs();
         return lease;
     }
 
