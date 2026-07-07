@@ -30,6 +30,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
 #if defined(__APPLE__)
@@ -661,6 +662,71 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
         [pulp_view unmarkText];
         REQUIRE_FALSE(editor->has_marked_text());
         REQUIRE(editor->text() == std::string("abc") + kNi);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — IME candidate rect follows ScrollView "
+          "offset",
+          "[plugin-view-host][text-input][ime][scroll][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted IME scroll rect test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        auto scroll_owned = std::make_unique<ScrollView>();
+        ScrollView* scroll = scroll_owned.get();
+        scroll->set_bounds({0, 0, 400, 200});
+        scroll->set_content_size({400, 600});
+
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_bounds({20, 160, 200, 40});
+        editor->set_text("abc");
+        scroll->add_child(std::move(editor_owned));
+        root.add_child(std::move(scroll_owned));
+
+        editor->on_focus_changed(true);
+        editor->claim_input_focus();
+        editor->set_caret_pos(3);
+        [pulp_view syncKeyFocus];
+        REQUIRE(View::focused_input_ == editor);
+
+        NSRange actual = NSMakeRange(NSNotFound, 0);
+        scroll->set_scroll(0, 20);
+        NSRect less_scrolled =
+            [pulp_view firstRectForCharacterRange:NSMakeRange(0, 0)
+                                      actualRange:&actual];
+
+        scroll->set_scroll(0, 80);
+        NSRect more_scrolled =
+            [pulp_view firstRectForCharacterRange:NSMakeRange(0, 0)
+                                      actualRange:&actual];
+
+        REQUIRE(more_scrolled.origin.y > less_scrolled.origin.y + 50.0);
+        REQUIRE(more_scrolled.size.height == less_scrolled.size.height);
 
         host->detach();
         host.reset();

@@ -6,6 +6,7 @@
 #include <pulp/canvas/text_utf8.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -215,6 +216,10 @@ NSRect pulp_plugin_first_rect_for_character_range(NSView* host,
     for (auto* v = static_cast<pulp::view::View*>(te); v; v = v->parent()) {
         root_x += v->bounds().x;
         root_y += v->bounds().y;
+        if (auto* scroll = dynamic_cast<pulp::view::ScrollView*>(v->parent())) {
+            root_x -= scroll->scroll_x();
+            root_y -= scroll->scroll_y();
+        }
     }
 
     float host_x = root_x;
