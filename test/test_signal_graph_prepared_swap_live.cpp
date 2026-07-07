@@ -20,7 +20,9 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -44,6 +46,62 @@ void build_gain_graph(SignalGraph& g, NodeId& gain_out) {
     REQUIRE(g.set_node_gain(gain, 0.5f));
     gain_out = gain;
 }
+
+// 2-in/2-out passthrough plugin with a configurable reported latency and one
+// automatable parameter — used to exercise the M3 (PDC) and CX3 (smoothed
+// automation) rejection gates.
+class LatencySlot final : public PluginSlot {
+public:
+    explicit LatencySlot(int latency) : latency_(latency) {
+        info_.name = "Lat";
+        info_.format = PluginFormat::CLAP;
+        info_.num_inputs = 2;
+        info_.num_outputs = 2;
+        info_.category = "Effect";
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int n) override {
+        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t c = 0; c < chs; ++c) {
+            const float* i = in.channel_ptr(c);
+            float* o = out.channel_ptr(c);
+            for (int k = 0; k < n; ++k) o[static_cast<std::size_t>(k)] = i[static_cast<std::size_t>(k)];
+        }
+        for (std::size_t c = chs; c < out.num_channels(); ++c)
+            std::fill_n(out.channel_ptr(c), n, 0.0f);
+    }
+    std::vector<pulp::host::HostParamInfo> parameters() const override {
+        pulp::host::HostParamInfo p;
+        p.id = 1;
+        p.name = "gain";
+        p.min_value = 0.0f;
+        p.max_value = 1.0f;
+        p.default_value = 1.0f;
+        p.flags.automatable = true;
+        return {p};
+    }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    int latency_samples() const override { return latency_; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    PluginInfo info_;
+    int latency_;
+};
 
 // Render one block of non-zero input; return the output peak (0 == silent block).
 float render_peak(SignalGraph& g) {
@@ -150,5 +208,64 @@ TEST_CASE("prepare_swap rejects non-reinit-free edits -> NeedsEagerPrepare (2.2b
         g.begin_swap_edit();
         CHECK(g.prepare_swap(kSr, kFrames)
               == SignalGraph::SwapResult::NeedsEagerPrepare);
+    }
+    SECTION("MIDI edge in the graph -> NeedsEagerPrepare (M4 stuck-note gate)") {
+        SignalGraph g;
+        NodeId gain{};
+        build_gain_graph(g, gain);
+        const auto mi = g.add_midi_input_node("MI");
+        const auto mo = g.add_midi_output_node("MO");
+        REQUIRE(g.connect_midi(mi, mo));
+        REQUIRE(g.prepare(kSr, kFrames));
+        g.begin_swap_edit();
+        g.set_node_gain(gain, 0.7f);  // a would-be reinit-free edit
+        CHECK(g.prepare_swap(kSr, kFrames)
+              == SignalGraph::SwapResult::NeedsEagerPrepare);
+    }
+    SECTION("plugin PDC delay ring -> NeedsEagerPrepare (M3 latency gate)") {
+        // Parallel merge: a latent plugin path (128) + a direct path (0) into the
+        // same output ports → the direct branch gets a compensating delay ring, so
+        // has_pdc(live_) is true and any swap must fall back to eager.
+        SignalGraph g;
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(std::make_unique<LatencySlot>(128), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+            REQUIRE(g.connect(in, c, out, c));  // direct parallel path (latency 0)
+        }
+        REQUIRE(g.prepare(kSr, kFrames));
+        g.begin_swap_edit();
+        CHECK(g.prepare_swap(kSr, kFrames)
+              == SignalGraph::SwapResult::NeedsEagerPrepare);
+    }
+    SECTION("smoothed automation edge -> NeedsEagerPrepare (CX3)") {
+        SignalGraph g;
+        const auto in = g.add_input_node(2, "In");
+        const auto p = g.add_plugin_node(std::make_unique<LatencySlot>(0), 2, 2, "P");
+        const auto out = g.add_output_node(2, "Out");
+        for (int c = 0; c < 2; ++c) {
+            REQUIRE(g.connect(in, c, p, c));
+            REQUIRE(g.connect(p, c, out, c));
+        }
+        // Automate param 1 from input port 0 with a non-zero smoothing time.
+        REQUIRE(g.connect_automation(in, 0, p, /*dest_param_id=*/1, 0.0f, 1.0f,
+                                     /*smoothing_ms=*/5.0f));
+        REQUIRE(g.prepare(kSr, kFrames));
+        g.begin_swap_edit();
+        CHECK(g.prepare_swap(kSr, kFrames)
+              == SignalGraph::SwapResult::NeedsEagerPrepare);
+    }
+    SECTION("clear() during a swap-edit closes the transaction (review #1)") {
+        // A non-allow-set mutator must force-abort: after clear(), prepare_swap
+        // sees no open transaction (NotInSwapEdit), not a stale one.
+        SignalGraph g;
+        NodeId gain{};
+        build_gain_graph(g, gain);
+        REQUIRE(g.prepare(kSr, kFrames));
+        g.begin_swap_edit();
+        g.clear();
+        CHECK(g.prepare_swap(kSr, kFrames) == SignalGraph::SwapResult::NotInSwapEdit);
     }
 }
