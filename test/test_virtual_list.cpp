@@ -941,3 +941,24 @@ TEST_CASE("VirtualList closes open combo boxes before scroll recycling",
     list.set_scroll_y(80);
     REQUIRE_FALSE(combo->is_open());
 }
+
+TEST_CASE("VirtualList scroll preserves combo boxes outside the list subtree",
+          "[view][virtual-list]") {
+    ComboBox::close_active_popup();
+
+    VirtualList list;
+    list.set_bounds({0, 0, 240, 60});
+    list.set_row_height(20);
+    list.set_row_count(100);
+
+    ComboBox external;
+    external.set_items({"A", "B", "C"});
+    external.set_bounds({0, 0, 80, 18});
+    external.on_mouse_event(click_at(2, 2));
+    REQUIRE(external.is_open());
+
+    list.set_scroll_y(80);
+    REQUIRE(external.is_open());
+
+    ComboBox::close_active_popup();
+}

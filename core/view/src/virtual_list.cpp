@@ -25,6 +25,19 @@ bool is_interactive_target(View& view) {
            view.on_context_menu || view.focusable() || view.wants_wheel_value() ||
            view.wants_mouse_input();
 }
+
+bool is_descendant_of(const View& ancestor, const View* view) {
+    while (view != nullptr) {
+        if (view == &ancestor) return true;
+        view = view->parent();
+    }
+    return false;
+}
+
+void close_active_combo_popup_in_subtree(View& root) {
+    auto* active = ComboBox::active_popup_;
+    if (active != nullptr && is_descendant_of(root, active)) ComboBox::close_active_popup();
+}
 } // namespace
 
 VirtualList::VirtualList() {
@@ -540,7 +553,7 @@ void VirtualList::update_row_accessibility(RowSlot& slot) {
 VirtualList::UpdateResult VirtualList::set_scroll_y_internal(float y, bool request) {
     const float next = std::clamp(y, 0.0f, max_scroll_y());
     if (next == scroll_y_) return UpdateResult::unchanged;
-    ComboBox::close_active_popup();
+    close_active_combo_popup_in_subtree(*this);
     const float old = scroll_y_;
     scroll_y_ = next;
     mark_scroll_dirty(old, next);
