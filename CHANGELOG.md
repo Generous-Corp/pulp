@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v05840"></a>
+## [0.584.0] - 2026-07-06
+
+- feat(quality-lab): Tier 3 T3.3 — pitch:S (duration-preserving pitch shift) ([#5590](https://github.com/danielraffel/pulp/pull/5590))
+- phase/tartci lease governor p3b ([#5569](https://github.com/danielraffel/pulp/pull/5569))
+
+<a id="v05830"></a>
+## [0.583.0] - 2026-07-06
+
+- phase/tartci lease governor p3a ([#5566](https://github.com/danielraffel/pulp/pull/5566))
+- feat(quality-lab): Tier 3 T3.2 — stretch:R (pitch-preserving time-stretch) ([#5546](https://github.com/danielraffel/pulp/pull/5546))
+
 <a id="v05820"></a>
 ## [0.582.0] - 2026-07-06
 
@@ -5927,6 +5939,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.584.0]: https://github.com/danielraffel/pulp/releases/tag/v0.584.0
+[0.583.0]: https://github.com/danielraffel/pulp/releases/tag/v0.583.0
 [0.582.0]: https://github.com/danielraffel/pulp/releases/tag/v0.582.0
 [0.580.0]: https://github.com/danielraffel/pulp/releases/tag/v0.580.0
 [0.579.0]: https://github.com/danielraffel/pulp/releases/tag/v0.579.0
