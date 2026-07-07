@@ -10,6 +10,9 @@
 
 #include <pulp/view/window_host.hpp>
 
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/view/view.hpp>
+
 #if defined(PULP_VIEW_HAS_RENDER_LOOP)
 #include <pulp/render/render_loop.hpp>
 #endif
@@ -101,6 +104,28 @@ void WindowHost::schedule_repaint() {
     }
 #endif
     repaint();
+}
+
+void WindowHost::paint_root(canvas::Canvas& canvas, View& root,
+                            bool surface_preserves_outside_clip) {
+    // Only clip when the caller affirms its surface preserves content outside the
+    // clip AND a bounded (non-full) region is pending. Otherwise paint the whole
+    // tree — the safe default that can never blank static chrome. (width/height
+    // are already positive here: mark_dirty() escalates empty/zero rects to full,
+    // so the size checks are belt-and-suspenders.)
+    const bool bounded = surface_preserves_outside_clip &&
+                         !dirty_full_ && have_dirty_bounds_ &&
+                         dirty_bounds_.width > 0.0f && dirty_bounds_.height > 0.0f;
+    if (bounded) {
+        canvas.save();
+        canvas.clip_rect(dirty_bounds_.x, dirty_bounds_.y,
+                         dirty_bounds_.width, dirty_bounds_.height);
+    }
+    root.paint_all(canvas);
+    if (bounded) canvas.restore();
+    // The frame is composed; the next frame starts clean (a fresh full mark
+    // until bounded marks arrive).
+    clear_pending_dirty();
 }
 
 #if !defined(__APPLE__)

@@ -12,6 +12,10 @@ class GpuSurface;
 class RenderLoop;
 }
 
+namespace pulp::canvas {
+class Canvas;
+}
+
 namespace pulp::view {
 
 enum class WindowType;  // Forward-declared from window_manager.hpp
@@ -144,6 +148,29 @@ public:
         have_dirty_bounds_ = false;
         dirty_bounds_ = {};
     }
+
+    // Consume the accumulated dirty region and paint `root`, then clear the
+    // pending region. This is the reference consumer for the bounded-invalidation
+    // path (invalidate → accumulate → consume).
+    //
+    // SAFE BY DEFAULT: with `surface_preserves_outside_clip == false` (the
+    // default) this always paints the whole tree — identical to
+    // `root.paint_all(canvas)` plus the clear. Only when the caller AFFIRMS that
+    // its surface preserves the previous frame's content outside the clip does a
+    // bounded (non-full) pending region clip the canvas to pending_dirty_bounds()
+    // so a clip-honoring backend (Skia) skips re-rasterizing static chrome. The
+    // opt-in is a hard requirement, not just advice: clipping a frame whose
+    // surface does NOT preserve outside content (a swapchain that clears each
+    // frame, or any frame invalidated with a full `setNeedsDisplay:YES`) would
+    // leave the static chrome blank. A host earns `true` by invalidating only the
+    // dirty region through the platform's native damage path (AppKit
+    // `setNeedsDisplayInRect:`, an X/Win damage rect, a content-preserving
+    // swapchain) — and by escalating any relayout that MOVES a live sub-view to a
+    // full repaint, so the accumulated bounds can't clip away the sub-view's new
+    // position. `root`'s own background/border fill happens inside paint_all(),
+    // so it is clipped too. Backends that ignore clips still paint correctly.
+    void paint_root(canvas::Canvas& canvas, View& root,
+                    bool surface_preserves_outside_clip = false);
 
     // Attach (or detach, with nullptr) a vblank-paced RenderLoop that
     // mark_dirty() should drive. Ownership stays with the caller; the loop
