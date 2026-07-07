@@ -10,6 +10,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <functional>
@@ -231,6 +232,86 @@ TEST_CASE("a pixel-spreading filter on an ancestor escalates to full repaint",
     meter->request_repaint(meter->local_bounds());
 
     REQUIRE(host.pending_repaint_is_full());
+}
+
+TEST_CASE("a live Meter level update invalidates only the meter's own rect",
+          "[view][partial-render]") {
+    // The canonical per-frame case: a meter driven from an audio source repaints
+    // every tick. With bounded invalidation it dirties only its own rect, so a
+    // plugin's static chrome is not re-composited on every level change.
+    TestWindowHost host;
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 400, 300});
+    auto meter_o = std::make_unique<Meter>();
+    meter_o->set_bounds({40, 30, 20, 120});
+    Meter* meter = meter_o.get();
+    root->add_child(std::move(meter_o));
+    root->set_window_host(&host);
+    host.clear_pending_dirty();
+
+    meter->set_level(0.6f, 0.85f);
+
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    const Rect d = host.pending_dirty_bounds();
+    // Must fully CONTAIN the meter's mapped rect [40,30]-[60,150] (a small
+    // peak-line overscan past the box is allowed — the meter strokes its peak
+    // line centered on the extreme edge), and must stay a small fraction of the
+    // 400x300 surface (bounded, not full).
+    REQUIRE(d.x <= 40.0f);
+    REQUIRE(d.y <= 30.0f);
+    REQUIRE(d.x + d.width >= 60.0f);
+    REQUIRE(d.y + d.height >= 150.0f);
+    REQUIRE(d.width * d.height < 400.0f * 300.0f * 0.1f);
+}
+
+TEST_CASE("a Meter ballistic update also stays bounded to its own rect",
+          "[view][partial-render]") {
+    TestWindowHost host;
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 400, 300});
+    auto meter_o = std::make_unique<Meter>();
+    meter_o->set_bounds({10, 10, 30, 200});
+    Meter* meter = meter_o.get();
+    root->add_child(std::move(meter_o));
+    root->set_window_host(&host);
+    host.clear_pending_dirty();
+
+    meter->update(0.9f, 0.5f, 0.016f);
+
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    const Rect d = host.pending_dirty_bounds();
+    // Contains the meter's mapped rect [10,10]-[40,210] (peak-line overscan
+    // allowed), still bounded well under the full surface.
+    REQUIRE(d.x <= 10.0f);
+    REQUIRE(d.y <= 10.0f);
+    REQUIRE(d.x + d.width >= 40.0f);
+    REQUIRE(d.y + d.height >= 210.0f);
+    REQUIRE(d.width * d.height < 400.0f * 300.0f * 0.1f);
+}
+
+TEST_CASE("a Meter's bounded invalidation overscans its peak-line edge bleed",
+          "[view][partial-render]") {
+    // The peak line is stroked centered on the extreme edge, bleeding ~1px past
+    // local_bounds() at full scale. The invalidation must extend past every edge
+    // so the fringe is re-cleared when the peak decays (no stale line on chrome).
+    TestWindowHost host;
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 400, 300});
+    auto meter_o = std::make_unique<Meter>();
+    meter_o->set_bounds({40, 30, 20, 120});
+    Meter* meter = meter_o.get();
+    root->add_child(std::move(meter_o));
+    root->set_window_host(&host);
+    host.clear_pending_dirty();
+
+    meter->set_level(1.0f, 1.0f);  // peak at the very top edge → 1px spill
+
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    const Rect d = host.pending_dirty_bounds();
+    REQUIRE(d.x < 40.0f);            // past the left edge
+    REQUIRE(d.y < 30.0f);            // past the top edge (the peak-line bleed)
+    REQUIRE(d.x + d.width > 60.0f);  // past the right edge
+    REQUIRE(d.y + d.height > 150.0f);// past the bottom edge
 }
 
 TEST_CASE("bounded request_repaint with no host attached is a safe no-op",

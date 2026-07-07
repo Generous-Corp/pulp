@@ -80,6 +80,7 @@ int StepGridView::rebuild_region(const AppliedEdit& e) {
             std::uint8_t step = static_cast<std::uint8_t>(sr.first_step + i);
             if (step >= kStepCount) break;
             visible_cache_[sr.lane][step] = visual_for(lane[step], step);
+            pump_dirty_cells_.push_back(Cell{sr.lane, step});  // bounded-invalidate just this cell
             ++n;
         }
         return n;
@@ -90,6 +91,7 @@ int StepGridView::rebuild_region(const AppliedEdit& e) {
         render_.patterns[pl.pattern].length = pl.length;
         // Length changes the muted flag across every step of the shown pattern.
         if (pl.pattern != displayed_pattern_) return 0;
+        pump_full_ = true;  // every cell's muted flag may flip → repaint the grid
         return rebuild_all_visible();
     }
     case AppliedEditKind::ActivePatternChanged:
@@ -106,6 +108,11 @@ int StepGridView::rebuild_region(const AppliedEdit& e) {
 StepGridView::PumpResult StepGridView::pump() {
     PumpResult r;
     if (!channel_) return r;
+
+    // Reset per-pump dirty accounting; rebuild_region()/rebuild_all_visible()
+    // repopulate it as they replay this tick's echoes.
+    pump_dirty_cells_.clear();
+    pump_full_ = false;
 
     // 1. Initial or resync-bar-driven resync (full rebuild of the shown pattern).
     if (needs_initial_resync_ || channel_->ui_resync_required_epoch() > local_epoch_) {
@@ -139,7 +146,11 @@ StepGridView::PumpResult StepGridView::pump() {
     }
 
     // 5. Read the playhead LAST — after any ActivePatternChanged echo — so the
-    // overlay reflects the current active pattern, not a stale one.
+    // overlay reflects the current active pattern, not a stale one. Capture the
+    // outgoing overlay position first so a bounded repaint can invalidate the
+    // column the playhead is LEAVING as well as the one it is entering.
+    const bool was_visible = playhead_visible_;
+    const std::uint8_t prev_step = playhead_step_;
     const PlayheadState ph = channel_->ui_read_playhead();
     const bool now_visible = ph.playing != 0 && ph.active_pattern == displayed_pattern_;
     const bool playhead_changed =
@@ -150,9 +161,26 @@ StepGridView::PumpResult StepGridView::pump() {
     playhead_pattern_ = ph.active_pattern;
 
     // 6. Repaint iff something *visible* changed (an echo on an off-screen pattern
-    // updates the render copy but rebuilds no visible cell -> no repaint).
-    r.requested_repaint = r.full_rebuild || r.rebuilt_cells > 0 || playhead_changed;
-    if (r.requested_repaint) request_repaint();
+    // updates the render copy but rebuilds no visible cell -> no repaint). Prefer
+    // bounded invalidation: only the recomputed cells and the two playhead
+    // columns, so the static grid chrome does not re-composite every tick. A full
+    // rebuild (resync / pattern-length change) escalates to a whole-view repaint.
+    const bool full = r.full_rebuild || pump_full_;
+    r.requested_repaint = full || !pump_dirty_cells_.empty() || playhead_changed;
+    if (r.requested_repaint) {
+        if (full) {
+            request_repaint();
+        } else {
+            for (const Cell& c : pump_dirty_cells_)
+                request_repaint(cell_rect(c.lane, c.step));
+            if (playhead_changed) {
+                if (was_visible && prev_step < kStepCount)
+                    request_repaint(playhead_column_rect(prev_step));
+                if (playhead_visible_ && playhead_step_ < kStepCount)
+                    request_repaint(playhead_column_rect(playhead_step_));
+            }
+        }
+    }
     return r;
 }
 
@@ -166,6 +194,14 @@ Rect StepGridView::cell_rect(std::uint8_t lane, std::uint8_t step) const {
                 static_cast<float>(lane) * ch + gap,
                 std::max(0.0f, cw - 2 * gap),
                 std::max(0.0f, ch - 2 * gap)};
+}
+
+Rect StepGridView::playhead_column_rect(std::uint8_t step) const {
+    // Matches paint()'s overlay: a vertical strip spanning lane 0's top to the
+    // last lane's bottom at this step's column.
+    const Rect top = cell_rect(0, step);
+    const Rect bot = cell_rect(static_cast<std::uint8_t>(kLaneCount - 1), step);
+    return Rect{top.x, top.y, top.width, (bot.y + bot.height) - top.y};
 }
 
 std::optional<StepGridView::Cell> StepGridView::cell_at(Point pos) const {
@@ -210,12 +246,11 @@ void StepGridView::paint(canvas::Canvas& canvas) {
     // the previous pattern's playhead over the new one.
     if (playhead_visible_ && playhead_pattern_ == displayed_pattern_ &&
         playhead_step_ < kStepCount) {
-        const Rect top = cell_rect(0, playhead_step_);
-        const Rect bot = cell_rect(static_cast<std::uint8_t>(kLaneCount - 1), playhead_step_);
+        const Rect col = playhead_column_rect(playhead_step_);
         Color ph = resolve_color("overlay.bg", Color::rgba8(255, 255, 255));
         ph.a = 0.14f;
         canvas.set_fill_color(ph);
-        canvas.fill_rect(top.x, top.y, top.width, (bot.y + bot.height) - top.y);
+        canvas.fill_rect(col.x, col.y, col.width, col.height);
     }
 }
 
