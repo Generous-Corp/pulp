@@ -406,6 +406,19 @@ public:
     /// See `WidgetBridge::set_repaint_callback` for the override path.
     void request_repaint();
 
+    /// Bounded repaint: invalidate only `local_dirty` (this view's local
+    /// coordinates, origin at this view's top-left), mapped to root/window
+    /// space, so a live sub-view (meter, grid, custom overlay) does not force
+    /// the whole surface to re-composite. `request_repaint(local_bounds())`
+    /// invalidates just this view's own area. Falls back to a full
+    /// request_repaint() when this view or any ancestor carries a render
+    /// transform (scale/rotate/skew/translate/matrix — the plain offset mapping
+    /// to root space would be wrong), or when there is no window host attached
+    /// (the plugin-view-host path has no bounded invalidator). Safe by
+    /// construction: it can only ever repaint the same or a larger region than
+    /// the change actually touched, never a smaller one.
+    void request_repaint(const Rect& local_dirty);
+
     /// Drag existing on-disk files out of this view to another app (e.g. drop a
     /// rendered .wav onto a DAW timeline). Routes through the attached host's
     /// native view to the platform backend; call from a pointer handler. False
@@ -1016,6 +1029,17 @@ public:
     }
     void clear_transform_matrix() { has_transform_matrix_ = false; }
     bool has_transform_matrix() const { return has_transform_matrix_; }
+
+    /// True when this view paints under any non-identity render transform
+    /// (scale / rotation / translate / skew / explicit matrix). Bounded
+    /// invalidation (request_repaint(Rect)) uses this to fall back to a full
+    /// repaint, because a plain parent-offset mapping to root space is only
+    /// correct for the untransformed case.
+    bool has_render_transform() const {
+        return has_transform_matrix_ || scale_ != 1.0f || rotation_deg_ != 0.0f ||
+               translate_x_ != 0.0f || translate_y_ != 0.0f ||
+               skew_x_ != 0.0f || skew_y_ != 0.0f;
+    }
     /// Returns the six affine components in (a,b,c,d,e,f) order; meaningful
     /// only when has_transform_matrix() is true.
     void get_transform_matrix(float& a, float& b, float& c,

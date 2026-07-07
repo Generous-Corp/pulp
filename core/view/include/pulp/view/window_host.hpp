@@ -115,6 +115,36 @@ public:
     // and lives here so every platform host shares one implementation.
     void mark_dirty();
 
+    // Bounded variant: accumulate a dirty region (in root/window coordinates)
+    // so a host's paint path can invalidate + composite only the changed area
+    // instead of the whole surface — the "static chrome doesn't re-composite"
+    // win when a single live sub-view (meter, grid, custom overlay) updates.
+    // Schedules a repaint exactly like the no-arg mark_dirty(). A zero/negative
+    // rect, or any call after a full mark_dirty() in the same frame, escalates
+    // to a full repaint. A host that never consults pending_dirty_bounds()
+    // simply repaints in full, so bounded marks are always safe to ignore.
+    void mark_dirty(const Rect& root_rect);
+
+    // True when the pending repaint covers the whole surface. Defaults true
+    // (the first frame is always full) and after any no-arg mark_dirty();
+    // becomes false once clear_pending_dirty() runs and only bounded
+    // mark_dirty(rect) calls have arrived since.
+    bool pending_repaint_is_full() const { return dirty_full_; }
+
+    // Bounding box (root coords) of the bounded mark_dirty(rect) calls since the
+    // last clear_pending_dirty(). Only meaningful when pending_repaint_is_full()
+    // is false and has_pending_dirty_bounds() is true.
+    bool has_pending_dirty_bounds() const { return have_dirty_bounds_; }
+    Rect pending_dirty_bounds() const { return dirty_bounds_; }
+
+    // Reset the accumulated dirty region. A host calls this after it has
+    // painted and submitted the frame (mirrors DirtyTracker::clear()).
+    void clear_pending_dirty() {
+        dirty_full_ = false;
+        have_dirty_bounds_ = false;
+        dirty_bounds_ = {};
+    }
+
     // Attach (or detach, with nullptr) a vblank-paced RenderLoop that
     // mark_dirty() should drive. Ownership stays with the caller; the loop
     // must outlive the host or be detached first. Optional — hosts that
@@ -397,8 +427,18 @@ public:
     virtual void set_mouse_relative_mode(bool enabled) { (void)enabled; }
 
 private:
+    // Shared vblank-paced-or-direct repaint scheduling for mark_dirty() and
+    // mark_dirty(Rect).
+    void schedule_repaint();
+
     // Optional vblank-paced RenderLoop driven by mark_dirty().
     render::RenderLoop* render_loop_ = nullptr;
+
+    // Accumulated dirty region for the pending frame (root/window coords).
+    // dirty_full_ starts true so the first frame is always a full repaint.
+    bool dirty_full_ = true;
+    bool have_dirty_bounds_ = false;
+    Rect dirty_bounds_{};
 };
 
 } // namespace pulp::view
