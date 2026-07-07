@@ -258,11 +258,13 @@ void VirtualList::paint(canvas::Canvas& canvas) {
     const float thumb_h = scrollbar_thumb_length();
     const float thumb_y = scrollbar_thumb_y();
 
-    canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, 28));
+    canvas.set_fill_color(
+        resolve_color("control.track", canvas::Color::rgba8(255, 255, 255, 28)));
     canvas.fill_rounded_rect(b.width - width - kScrollbarPad, kScrollbarPad,
                              width, std::max(0.0f, b.height - 2.0f * kScrollbarPad),
                              width * 0.5f);
-    canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, 96));
+    canvas.set_fill_color(
+        resolve_color("control.thumb", canvas::Color::rgba8(255, 255, 255, 96)));
     canvas.fill_rounded_rect(b.width - width - kScrollbarPad, thumb_y,
                              width, thumb_h, width * 0.5f);
 }
