@@ -22,6 +22,26 @@ If you are building Pulp itself and want the provider available through
 cmake -S . -B build -DPULP_ENABLE_SCALA_TUNING=ON
 ```
 
+If your project consumes an installed Pulp SDK, keep the tuning library
+project-local and attach Pulp's wrapper to your plugin target:
+
+```cmake
+include(cmake/pulp-packages.cmake OPTIONAL)
+
+pulp_add_plugin(MySynth
+    FORMATS CLAP Standalone
+    CATEGORY Instrument
+    ACCEPTS_MIDI
+    SOURCES src/PluginProcessor.cpp)
+
+pulp_enable_midi_tuning_provider(MySynth SCALA)
+```
+
+The helper uses the SDK's built-in provider when available. If the SDK was built
+without Scala tuning support, it compiles Pulp's small wrapper source into
+`MySynth` and links the `sst::tuning-library` target from
+`pulp add sst-tuning-library`.
+
 Then use the provider-neutral tuning API:
 
 ```cpp
@@ -75,8 +95,10 @@ Importers should map existing Scala/SCL/KBM file loading to
 scaffold as source assets, and keep file I/O off the audio callback. The
 ProjectIR `integration_requirements` section carries the required
 `sst-tuning-library` package, the `PULP_ENABLE_SCALA_TUNING` provider option,
-and the copied tuning assets so the shared emitter can surface one actionable
-setup path.
+and the copied tuning assets. The shared emitter turns those requirements into
+the `pulp_enable_midi_tuning_provider(... SCALA)` CMake helper call so one
+actionable setup path works for both source-built Pulp and installed-SDK
+projects.
 
 If the source project also used ODDSound's `libMTSClient.h`, enable both
 optional integrations and preserve the original priority policy:
@@ -98,4 +120,5 @@ direct the port to MTS-ESP Mini session tuning or a conversion to `.scl` /
 Surge Synth Team `tuning-library` is MIT licensed. It is fetched only when
 explicitly enabled with `PULP_ENABLE_SCALA_TUNING=ON` or
 `pulp add sst-tuning-library`, so it is not part of Pulp's default dependency
-chain.
+chain. Installed SDKs ship only the Pulp-owned wrapper source needed by
+`pulp_enable_midi_tuning_provider()`, not Surge's tuning-library source itself.

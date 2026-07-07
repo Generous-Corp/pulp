@@ -55,7 +55,12 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
   local tuning files: SCL/KBM assets can be copied into the scaffold as
   `copied-user-file`, while unsupported-but-relevant assets such as direct
   `.tun` files should also be copied and flagged for manual review without
-  hiding them in prose.
+  hiding them in prose. When those requirements map to Pulp's provider-neutral
+  MIDI tuning wrappers, emitted CMake should include `cmake/pulp-packages.cmake`,
+  then call `pulp_enable_midi_tuning_provider()` after `pulp_add_plugin()`. The
+  helper attaches the Pulp wrapper source and links the package target when the
+  installed SDK was not already built with that provider, so imported projects
+  do not need to rebuild Pulp for MTS-ESP or Scala SCL/KBM support.
 
 ## Roadmap
 

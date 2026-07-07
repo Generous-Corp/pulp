@@ -623,7 +623,7 @@
       "upstream": { "kind": "git-commit", "ref": "f214739b8832e7f297cb9970d0c0efbf783f1462" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Optional, opt-in microtuning client integration. Fetched via FetchContent only when PULP_ENABLE_MTS_ESP=ON or when a developer runs `pulp add mts-esp`. Pulp compiles the upstream Client/libMTSClient.cpp source and exposes a provider-neutral tuning API; the client dynamically loads an installed libMTS shared library at runtime when present and falls back to local 12-TET or MTS SysEx data when no master is installed. Not part of the default dependency chain.",
+      "notes": "Optional, opt-in microtuning client integration. Fetched via FetchContent only when PULP_ENABLE_MTS_ESP=ON or when a developer runs `pulp add mts-esp`. Pulp exposes it through the provider-neutral TuningProvider API; installed SDKs may ship Pulp-owned wrapper glue for pulp_enable_midi_tuning_provider(), but the ODDSound Client/libMTSClient.cpp source is fetched only on opt-in. The client dynamically loads an installed libMTS shared library at runtime when present and falls back to local 12-TET or MTS SysEx data when no master is installed. Not part of the default dependency chain.",
       "source_files": [
         "CMakeLists.txt",
         "tools/cmake/PulpDependencies.cmake",
@@ -648,7 +648,7 @@
       "upstream": { "kind": "git-commit", "ref": "64a939111891cb698f37d6ca9ecfc4b8c260053d" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Optional, opt-in Scala .scl/.kbm parser and tuning-table lookup. Fetched source-only via FetchContent only when PULP_ENABLE_SCALA_TUNING=ON or when a developer runs `pulp add sst-tuning-library`; Pulp exposes it through `pulp::midi::ScalaTuningProvider` behind the provider-neutral TuningProvider API. The upstream CMake tools/tests are intentionally not added to Pulp or consumer builds. Not part of the default dependency chain.",
+      "notes": "Optional, opt-in Scala .scl/.kbm parser and tuning-table lookup. Fetched source-only via FetchContent only when PULP_ENABLE_SCALA_TUNING=ON or when a developer runs `pulp add sst-tuning-library`; Pulp exposes it through `pulp::midi::ScalaTuningProvider` behind the provider-neutral TuningProvider API. Installed SDKs may ship Pulp-owned wrapper glue for pulp_enable_midi_tuning_provider(), but Surge's tuning-library source is fetched only on opt-in. The upstream CMake tools/tests are intentionally not added to Pulp or consumer builds. Not part of the default dependency chain.",
       "source_files": [
         "CMakeLists.txt",
         "tools/cmake/PulpDependencies.cmake",

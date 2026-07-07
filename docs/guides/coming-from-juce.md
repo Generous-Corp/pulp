@@ -157,9 +157,13 @@ their own Scala loader, tuning table, or direct ODDSound MTS-ESP client calls.
 Pulp maps those to the provider-neutral `pulp::midi::TuningProvider` API:
 
 - Direct `.scl` / `.kbm` file loading maps to `ScalaTuningProvider`, enabled
-  with `PULP_ENABLE_SCALA_TUNING=ON` or `pulp add sst-tuning-library`.
+  with `PULP_ENABLE_SCALA_TUNING=ON` in a Pulp source build, or
+  `pulp add sst-tuning-library` plus `pulp_enable_midi_tuning_provider(... SCALA)`
+  in a project that consumes an installed Pulp SDK.
 - Direct ODDSound `libMTSClient.h` calls map to `MtsEspTuningProvider`, enabled
-  with `PULP_ENABLE_MTS_ESP=ON` or `pulp add mts-esp`.
+  with `PULP_ENABLE_MTS_ESP=ON` in a Pulp source build, or `pulp add mts-esp`
+  plus `pulp_enable_midi_tuning_provider(... MTS_ESP)` in a project that
+  consumes an installed Pulp SDK.
 - Products that support both local tuning files and a DAW/session-wide MTS-ESP
   master should use `MtsEspFallbackTuningProvider` so an active MTS source wins
   while the local Scala provider remains the fallback.
@@ -169,6 +173,17 @@ MTS calls request `mts-esp`, detected `.scl` / `.kbm` assets request
 `sst-tuning-library` and are copied into the scaffold, and `.tun` assets are
 copied into the scaffold but marked for review because direct `.tun` parsing is
 not part of the Scala provider.
+
+Imported scaffolds should include `cmake/pulp-packages.cmake`, call
+`pulp_add_plugin(...)`, and then call:
+
+```cmake
+pulp_enable_midi_tuning_provider(MySynth MTS_ESP SCALA)
+```
+
+That works with either an installed SDK or a source-tree Pulp checkout. The
+third-party sources are still fetched only when the project opts in with
+`pulp add`.
 
 Keep file parsing and MTS SysEx parsing off the audio callback. Voice code should
 query `TuningProvider::note_to_frequency()` at note-on or at the same retuning

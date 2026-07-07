@@ -26,6 +26,25 @@ If you are building Pulp itself and want the provider available through
 cmake -S . -B build -DPULP_ENABLE_MTS_ESP=ON
 ```
 
+If your project consumes an installed Pulp SDK, keep the third-party client
+project-local and attach Pulp's wrapper to your plugin target:
+
+```cmake
+include(cmake/pulp-packages.cmake OPTIONAL)
+
+pulp_add_plugin(MySynth
+    FORMATS CLAP Standalone
+    CATEGORY Instrument
+    ACCEPTS_MIDI
+    SOURCES src/PluginProcessor.cpp)
+
+pulp_enable_midi_tuning_provider(MySynth MTS_ESP)
+```
+
+The helper uses the SDK's built-in provider when available. If the SDK was built
+without MTS-ESP, it compiles Pulp's small wrapper source into `MySynth` and
+links the `mts_esp_client` target from `pulp add mts-esp`.
+
 Then use the provider-neutral tuning API:
 
 ```cpp
@@ -87,8 +106,8 @@ JUCE and iPlug2 do not ship MTS-ESP as a framework feature, but many projects
 include ODDSound's `libMTSClient.h` directly. Importers should detect that
 include, `MTS_*` calls, or bundled `Client/libMTSClient.cpp`, declare the
 `mts-esp` package plus `PULP_ENABLE_MTS_ESP` in ProjectIR
-`integration_requirements`, and rewrite the call sites toward
-`TuningProvider`.
+`integration_requirements`, emit `pulp_enable_midi_tuning_provider(... MTS_ESP)`
+for installed-SDK scaffolds, and rewrite the call sites toward `TuningProvider`.
 
 | Existing client call | Pulp mapping |
 |---|---|
@@ -131,4 +150,6 @@ for products that want MTS-ESP support.
 
 MTS-ESP is 0BSD. It is fetched only when explicitly enabled with
 `PULP_ENABLE_MTS_ESP=ON` or `pulp add mts-esp`, so it is not part of Pulp's
-default dependency chain.
+default dependency chain. Installed SDKs ship only the Pulp-owned wrapper
+source needed by `pulp_enable_midi_tuning_provider()`, not the ODDSound client
+source itself.
