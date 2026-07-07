@@ -1563,30 +1563,14 @@ int SignalGraph::pump_anticipation(int max_blocks) {
     return rendered;
 }
 
-bool SignalGraph::prepare(double sample_rate, int max_block_size) {
-    // Serialize the ENTIRE prepare against concurrent control-thread mutators
-    // (set_node_gain / add_*/remove_node, which all run on the UI thread). The
-    // lock covers two distinct shared surfaces:
-    //   1. The source topology — nodes_ iteration + GraphNode plain-field reads,
-    //      including GraphNode::gain in compile_() — vs the mutators' writes.
-    //   2. The snapshot-publication state (live_ / live_raw_ / retired_snapshots_)
-    //      mutated by the prologue's retire_snapshot_ + the epilogue's
-    //      publish/prune, which a concurrent mutator's invalidate_live_() also
-    //      touches. Those were previously single-control-thread-owned; with a
-    //      second control thread editing the graph they must be serialized too.
-    //
-    // Deadlock-free: prepare() only ever drives the NON-blocking
-    // prune_retired_snapshots_() (never the blocking wait_for_retired_snapshots_),
-    // and the one place a thread holds a ProcessReadGuard reader pin AND wants this
-    // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
-    // never invert order with the reader-drain handshake.
-    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
-
-    live_raw_.store(nullptr, std::memory_order_seq_cst);
-    retire_snapshot_(std::move(live_));
-    total_latency_samples_.store(0, std::memory_order_relaxed);
-    clear_prepared_stats_();
-
+// Shared preflight for prepare() and (2.2b) prepare_swap(): PURE validation over
+// the current nodes_/connections_/limits — the generated-graph limit checks plus
+// the audio-rate automation event-capacity gate. Mutates no live state, so
+// prepare_swap() can run it before its reinit-free predicate WITHOUT silencing the
+// live snapshot (unlike prepare()'s destructive null-first prologue, which stays in
+// prepare()). Caller holds graph_mutation_mutex_. Returns false (with a logged
+// reason) on any rejection; true if the graph passes every gate.
+bool SignalGraph::preflight_locked_(int max_block_size) {
     const auto generated_validation = validate_generated_graph(max_block_size);
     switch (generated_validation.reason) {
     case GeneratedGraphValidationRejectReason::None:
@@ -1657,6 +1641,38 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
             return false;
         }
     }
+    return true;
+}
+
+bool SignalGraph::prepare(double sample_rate, int max_block_size) {
+    // Serialize the ENTIRE prepare against concurrent control-thread mutators
+    // (set_node_gain / add_*/remove_node, which all run on the UI thread). The
+    // lock covers two distinct shared surfaces:
+    //   1. The source topology — nodes_ iteration + GraphNode plain-field reads,
+    //      including GraphNode::gain in compile_() — vs the mutators' writes.
+    //   2. The snapshot-publication state (live_ / live_raw_ / retired_snapshots_)
+    //      mutated by the prologue's retire_snapshot_ + the epilogue's
+    //      publish/prune, which a concurrent mutator's invalidate_live_() also
+    //      touches. Those were previously single-control-thread-owned; with a
+    //      second control thread editing the graph they must be serialized too.
+    //
+    // Deadlock-free: prepare() only ever drives the NON-blocking
+    // prune_retired_snapshots_() (never the blocking wait_for_retired_snapshots_),
+    // and the one place a thread holds a ProcessReadGuard reader pin AND wants this
+    // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
+    // never invert order with the reader-drain handshake.
+    std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
+
+    live_raw_.store(nullptr, std::memory_order_seq_cst);
+    retire_snapshot_(std::move(live_));
+    total_latency_samples_.store(0, std::memory_order_relaxed);
+    clear_prepared_stats_();
+
+    // Generated-graph limits + audio-rate automation event-capacity gate (H3 —
+    // shared with prepare_swap()). prepare() has already nulled the live snapshot
+    // above, so a preflight failure here leaves the graph silent (existing
+    // behavior); prepare_swap() runs the same preflight BEFORE any mutation.
+    if (!preflight_locked_(max_block_size)) return false;
 
     // Prepare each plugin slot first (pre-compile step). Immediately capture
     // each slot's metadata (params/latency/transport) into prepared_plugin_meta_

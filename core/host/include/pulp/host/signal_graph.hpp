@@ -1154,6 +1154,11 @@ private:
                              int num_samples,
                              CompiledGraph* cg);
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
+    // Shared preflight (generated-graph limits + audio-rate automation
+    // event-capacity gate) for prepare() and (2.2b) prepare_swap(). PURE — mutates
+    // no live state. Caller holds graph_mutation_mutex_. Returns false (logged) on
+    // any rejection.
+    bool preflight_locked_(int max_block_size);
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
     void invalidate_live_();
