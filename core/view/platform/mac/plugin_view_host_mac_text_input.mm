@@ -193,6 +193,10 @@ NSAttributedString* pulp_plugin_attributed_substring(pulp::view::View* root,
                                                     NSRangePointer actual_range) {
     auto* te = pulp_plugin_focused_text_editor(root);
     if (!te || range.location == NSNotFound) return nil;
+    if (te->password_mode) {
+        if (actual_range) *actual_range = NSMakeRange(NSNotFound, 0);
+        return nil;
+    }
     const auto& text = te->text();
     const auto start8 = pulp::canvas::utf8_offset_for_utf16_offset(
         text, nsrange_location_or_zero(range));

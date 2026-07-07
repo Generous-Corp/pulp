@@ -640,6 +640,26 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
         REQUIRE(actual.location == static_cast<NSUInteger>(3));
         REQUIRE(actual.length == static_cast<NSUInteger>(1));
 
+        editor->password_mode = true;
+        actual = NSMakeRange(0, 0);
+        NSAttributedString* hidden =
+            [pulp_view attributedSubstringForProposedRange:NSMakeRange(0, 3)
+                                               actualRange:&actual];
+        REQUIRE(hidden == nil);
+        REQUIRE(actual.location == NSNotFound);
+        REQUIRE(actual.length == static_cast<NSUInteger>(0));
+
+        editor->clipboard_policy = TextEditor::ClipboardPolicy::allow_password_contents;
+        actual = NSMakeRange(NSNotFound, 0);
+        NSAttributedString* still_hidden =
+            [pulp_view attributedSubstringForProposedRange:NSMakeRange(0, 3)
+                                               actualRange:&actual];
+        REQUIRE(still_hidden == nil);
+        REQUIRE(actual.location == NSNotFound);
+        REQUIRE(actual.length == static_cast<NSUInteger>(0));
+        editor->password_mode = false;
+        editor->clipboard_policy = TextEditor::ClipboardPolicy::standard;
+
         [pulp_view setMarkedText:@""
                    selectedRange:NSMakeRange(0, 0)
                 replacementRange:marked];
