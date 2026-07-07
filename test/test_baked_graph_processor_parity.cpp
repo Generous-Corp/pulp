@@ -411,9 +411,9 @@ TEST_CASE("Bake refuses an unprepared graph loudly",
     REQUIRE(r.reason == LowerRejectReason::NotPrepared);
 }
 
-// Slice 1: the extracted lowerability_of() gate — the single proof bake() (and, in
-// a later slice, the on-disk load path) consult. Direct unit coverage of accept +
-// each refusal reason, independent of bake()'s is_prepared() precondition.
+// Direct unit coverage of lowerability_of() — the shared gate bake() consults to
+// prove a topology is bakeable — asserting the accept case and each refusal reason
+// independently of bake()'s is_prepared() precondition.
 TEST_CASE("lowerability_of proves the bakeable subset and refuses with a reason",
           "[host][bake][lowerability]") {
     SECTION("audio I/O + Gain + plain-audio connections are lowerable") {
