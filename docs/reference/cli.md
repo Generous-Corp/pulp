@@ -217,12 +217,20 @@ Flags:
 - `--json` — emit a machine-readable JSON report to stdout (conforms to `validation-report-v1.schema.json`)
 - `--report <path>` — write the JSON report to a file
 - `--strict` — treat skipped-because-missing-tool as a hard failure
-- `--screenshot` — capture plugin editor PNGs under `artifacts/screenshots/`
+- `--screenshot` — capture plugin editor PNGs under `artifacts/screenshots/` through `pulp::view::capture_view()`
 - `--target <standalone|auv3|macho|all> <bundle...>` — run macOS runtime validators on explicit bundle paths instead of walking `build/{CLAP,VST3,AU,AAX}`
 
 When a validator tool is not installed, the check is reported as SKIPPED with a clear message.
 The JSON report conforms to `docs/contracts/validation-report-v1.schema.json`.
 On Linux and Ubuntu, AAX validation is never attempted because AAX is unsupported there.
+
+`--screenshot` is the project-facing batch capture path for built plugin
+editors. It uses `capture_view()` so GPU-required views route through the GPU
+capture backend, native-overlay-only views fail with an explicit reason instead
+of producing a misleading blank PNG, and clear-only frames are rejected by the
+screenshot content floor. This flag is best for validation artifacts; use
+`pulp run --headless --screenshot <file>` when you need a one-shot standalone
+capture.
 
 Prints a summary with pass/fail/skip counts.
 

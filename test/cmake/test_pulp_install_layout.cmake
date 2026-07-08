@@ -10,9 +10,9 @@ under `lib/cmake/Pulp/scripts/`. If the install rule omits the encoder,
 downstream `find_package(Pulp)` consumers see asset targets fail at
 build time with a missing-script error.
 
-This test runs `cmake --install` against a pre-configured Pulp build
-into a temporary prefix, then asserts the bundled SDK contains both
-`PulpUtils.cmake` and its sibling `scripts/encode_binary_data.py`.
+This test runs `cmake --install` against a pre-configured Pulp build into a
+temporary prefix, then asserts the bundled SDK contains `PulpUtils.cmake`,
+helper modules it includes, and its sibling `scripts/encode_binary_data.py`.
 
 Inputs (passed via -D):
   PULP_BUILD_DIR — path to a configured Pulp build directory.
@@ -66,6 +66,20 @@ if(NOT _pulp_utils)
 endif()
 list(GET _pulp_utils 0 _pulp_utils)
 get_filename_component(_pulp_cmake_dir "${_pulp_utils}" DIRECTORY)
+
+set(_installed_metadata "${_pulp_cmake_dir}/PulpPluginMetadata.cmake")
+if(NOT EXISTS "${_installed_metadata}")
+    message(FATAL_ERROR
+        "PulpPluginMetadata.cmake not bundled with the installed Pulp SDK.\n"
+        "Expected: ${_installed_metadata}\n"
+        "PulpUtils.cmake includes this helper, so find_package(Pulp) consumers "
+        "would fail before they can call pulp_add_plugin().")
+endif()
+file(READ "${_pulp_utils}" _installed_utils_text)
+if(NOT _installed_utils_text MATCHES "PulpPluginMetadata\\.cmake")
+    message(FATAL_ERROR
+        "Installed PulpUtils.cmake no longer includes PulpPluginMetadata.cmake.")
+endif()
 
 # The encoder MUST live next to PulpUtils.cmake — this is the path
 # pulp_add_binary_data computes via CMAKE_CURRENT_FUNCTION_LIST_DIR.

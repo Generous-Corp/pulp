@@ -101,8 +101,8 @@ clients) can drive them in one turn instead of multiple shell calls.
 
 | Category | Tools |
 |---|---|
-| Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate`, `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
-| UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
+| Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
+| UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot` (currently returns the inspector unavailable error until host-capture wiring lands), `pulp_inspect_evaluate` (currently returns the inspector unavailable error until ScriptEngine wiring lands), `pulp_inspect_performance`, `pulp_inspect_audio` |
 | Motion tracing + fixture replay | `pulp_motion_start_trace`, `pulp_motion_stop_trace`, `pulp_motion_snapshot`, `pulp_motion_list_traces`, `pulp_motion_load_fixture`, `pulp_motion_scrub_to`, `pulp_motion_play`, `pulp_motion_pause`, `pulp_motion_enable_cost`, `pulp_motion_disable_cost` |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_render`, `pulp_audio_compare` |
