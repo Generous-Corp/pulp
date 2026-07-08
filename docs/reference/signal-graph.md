@@ -242,8 +242,55 @@ silently interpreted as current data.
 - **Load** (`PluginSlot::load`) runs on a worker thread; the returned
   slot is handed to the graph only after it's fully loaded.
 
+## Baking a graph to a shippable artifact
+
+A live `SignalGraph` is editable and carries per-node overhead. Once a graph is
+final you can **bake** it — freeze the topology into a single optimized
+`Processor` that drives the routed executor directly (bit-identical output to the
+live graph, no graph bookkeeping).
+
+There are two trust boundaries:
+
+- **In-process bake — trusted.** `bake(graph)` returns a `BakedGraphProcessor`
+  for a prepared, lowerable graph. Nothing is serialized; this is the fast path
+  for "compile my graph to max performance at release." Non-lowerable graphs
+  (a hosted `Plugin` node, a MIDI/automation/sidechain edge, a non-opted-in
+  `Custom` type) are refused loudly with a `LowerRejectReason`.
+
+- **On-disk `.pulpbake` — untrusted, signature-gated.** To ship or hot-update a
+  baked graph as a *file*, sign it and verify on load:
+
+  ```cpp
+  // Write path (publisher):
+  auto plan = bake_to_plan(graph);                       // std::optional<BakedPlan>
+  auto bytes = write_baked_signed(*plan, signer_priv64); // Ed25519-signed .pulpbake
+
+  // Load path (consumer):
+  BakedTrust trust; trust.trusted_public_keys.push_back(publisher_pub32);
+  LowerResult r = load_baked(bytes, trust, host_custom_types);
+  if (r.accepted) use(std::move(r.processor));
+  ```
+
+  `load_baked` verifies the Ed25519 signature over a domain-separated message
+  (tag + versions + plan length + plan hash) **before** it parses any plan byte,
+  then bounded-parses the plan under fixed caps, rebuilds it into a graph, and
+  runs it back through `bake()` — so the file's implicit claim is never trusted
+  and the full lowerability proof re-runs on the reconstructed topology. There is
+  **no unsigned load path**; revoke a publisher by dropping its key from `trust`.
+
+### The `lowerable` author contract
+
+A `Custom` node type is bakeable only if it opts in with `lowerable = true` and
+its process is a pure function of its input block (no transport, no external
+state a frozen topology can't capture). Custom process code is **never** stored
+in the artifact — a `Custom` record carries only `{type_id, version, state}` and
+the code is re-resolved from the host's registered types at load, exactly like a
+node pack. v1 of the on-disk codec supports **stateless** custom nodes; a record
+carrying opaque state is refused (`StatefulCustomNotYetLoadable`).
+
 ## See also
 
 - [Hosting guide](../guides/hosting.md) — end-to-end example.
 - [`pulp::host::PluginSlot`](../../core/host/include/pulp/host/plugin_slot.hpp)
 - [`pulp::host::SignalGraph`](../../core/host/include/pulp/host/signal_graph.hpp)
+- [`pulp::host::bake` / `load_baked`](../../core/host/include/pulp/host/baked_graph_processor.hpp)
