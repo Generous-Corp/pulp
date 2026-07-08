@@ -15,7 +15,7 @@
 
 #include <pulp/format/process_block.hpp>
 #include <pulp/host/plugin_slot.hpp>
-#include <pulp/midi/midi_buffer.hpp>
+#include <pulp/midi/buffer.hpp>
 #include <pulp/signal/transition_mixer.hpp>
 
 #include <algorithm>
