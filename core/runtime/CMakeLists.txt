@@ -172,6 +172,14 @@ unset(_pulp_ubsan_enabled)
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 target_link_libraries(pulp-runtime PRIVATE hwy)
 
+# Tracing (Perfetto, dev-only). pulp::tracing is an empty INTERFACE target when
+# PULP_TRACING=OFF (the default), so this adds zero cost / zero symbols to a
+# normal build; ON exposes <pulp/runtime/trace.hpp>'s Perfetto-backed macros and
+# propagates PULP_TRACING_ENABLED to in-build consumers. Wrapped in
+# BUILD_INTERFACE (same pattern as pulp-cpp-httplib above) so this dev-only
+# target is not required by the installed PulpTargets export set.
+target_link_libraries(pulp-runtime PUBLIC $<BUILD_INTERFACE:pulp-tracing>)
+
 # Mbed TLS for cryptographic operations (SHA-256, RSA, AES — used directly by
 # crypto.cpp, independent of HTTP).
 if(TARGET mbedcrypto)

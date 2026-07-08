@@ -4,6 +4,19 @@
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
+# Tracing subsystem guard (Perfetto, dev-only). Asserts a default build has
+# tracing OFF. When PULP_TRACING=OFF, also nm-scan the binary to prove no
+# Perfetto symbols leaked (best-effort; mirrors the AssertNoJsSymbols guard).
+pulp_add_test_suite(pulp-test-tracing LIBRARIES pulp::runtime)
+if(NOT PULP_TRACING AND NOT WIN32)
+    add_custom_command(TARGET pulp-test-tracing POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DBIN=$<TARGET_FILE:pulp-test-tracing>
+            -P ${CMAKE_SOURCE_DIR}/tools/cmake/AssertNoTracingSymbols.cmake
+        VERBATIM
+        COMMENT "Verifying default build has no Perfetto symbols")
+endif()
+
 # Crypto tests (SHA-256, MD5, AES, machine ID)
 pulp_add_test_suite(pulp-test-crypto LIBRARIES pulp::runtime)
 

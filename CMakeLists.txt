@@ -231,6 +231,12 @@ if(ANDROID)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAndroid.cmake)
 endif()
 
+# ── Tracing (Perfetto, dev-only, OFF by default) ────────────────────────────
+# Defines the pulp::tracing INTERFACE target consumed by core/runtime. When
+# PULP_TRACING=OFF (default/shipping) it adds nothing; ON fetches + builds the
+# pinned Perfetto amalgamation. Must precede the core subsystems that link it.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
+
 # ── Core Subsystems ─────────────────────────────────────────────────────────
 # Order matters: dependencies first
 add_subdirectory(core/platform)
