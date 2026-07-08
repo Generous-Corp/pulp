@@ -10,8 +10,9 @@ The test:
   1. structurally loads + sanity-checks the schema itself;
   2. validates the committed vendor-NEUTRAL example fixture against it;
   3. proves the validator REJECTS missing-required / bad-enum / wrong-type docs;
-  4. enforces the vendor-agnostic rule: no vendor names appear in the schema or
-     the mainline fixtures (vendor identity is runtime DATA only — plan §16.2).
+  4. enforces the vendor-agnostic rule: no vendor names appear in the schema,
+     importer README, or mainline fixtures (vendor identity is runtime DATA only
+     — plan §16.2).
 
 stdlib only — no `jsonschema` dependency (it is not vendored). A compact
 recursive validator interprets the subset of draft-2020-12 keywords the schema
@@ -24,6 +25,7 @@ import pathlib
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
+README_PATH = HERE / "README.md"
 SCHEMA_PATH = HERE / "schemas" / "project-import-ir-v0.schema.json"
 FIXTURE_DIR = HERE / "fixtures" / "project-import-ir-v0"
 SPI_SCHEMA_PATH = HERE / "schemas" / "import-spi-v0.schema.json"
@@ -37,9 +39,26 @@ SPI_FIXTURE_DEFS = {
     "compat": "compat_matrix",
 }
 
-# Vendor names must never appear in SDK schema/fixtures — identity is runtime
-# data only. This guard list is the mainline tripwire for plan §16.2.
+# Vendor names must never appear in SDK schema, fixtures, or importer README —
+# identity is runtime data only. This guard list is the mainline tripwire for
+# plan §16.2.
 FORBIDDEN_VENDOR_TOKENS = ("juce", "iplug", "steinberg", "projucer", "wdl")
+FORBIDDEN_NEUTRAL_IMPL_TOKENS = (
+    "<pulp/",
+    "statetree",
+    "propertyvalue",
+    "statestore",
+    "hostparamsurface",
+    "modulationlane",
+    "listenertoken",
+    "syncedclone",
+)
+NEUTRAL_SCHEMA_DEFS = (
+    "neutral_state_channel",
+    "parameter_capabilities",
+    "parameter_value_semantics",
+    "parameter_binding",
+)
 
 
 # --- compact stdlib validator (subset of draft-2020-12) --------------------
@@ -114,6 +133,22 @@ def errors_against_def(doc, schema, def_name: str) -> list[str]:
     return errs
 
 
+def _json_blob(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).lower()
+
+
+def _neutral_contract_blobs(doc: dict) -> list[tuple[str, str]]:
+    blobs: list[tuple[str, str]] = []
+    channel = doc.get("state_model", {}).get("neutral_state_channel")
+    if channel is not None:
+        blobs.append(("state_model.neutral_state_channel", _json_blob(channel)))
+    for i, param in enumerate(doc.get("parameters", [])):
+        for key in ("capabilities", "value_semantics", "binding"):
+            if key in param:
+                blobs.append((f"parameters[{i}].{key}", _json_blob(param[key])))
+    return blobs
+
+
 # --- tests -----------------------------------------------------------------
 
 class ProjectImportIRSchemaTest(unittest.TestCase):
@@ -151,6 +186,60 @@ class ProjectImportIRSchemaTest(unittest.TestCase):
         errs = errors_for(doc, self.schema)
         self.assertTrue(any("parameters" in e for e in errs), errs)
 
+    def test_neutral_binding_fixture_covers_state_and_param_semantics(self):
+        doc = json.loads((FIXTURE_DIR / "example-effect.json").read_text())
+        channel = doc["state_model"]["neutral_state_channel"]
+        self.assertEqual(doc["state_model"]["classification"], "tree-like")
+        self.assertEqual(channel["snapshot"], "supported")
+        self.assertEqual(channel["per_key_subscription"], "supported")
+        self.assertFalse(channel["implementation_type_leak"])
+
+        params = {p["id"]: p for p in doc["parameters"]}
+        gain = params["gain"]
+        self.assertFalse(gain["capabilities"]["modulatable"])
+        self.assertEqual(gain["value_semantics"]["base_effective_split"],
+                         "synthesized-zero-modulation")
+        self.assertEqual(gain["value_semantics"]["effective_read"],
+                         "base-plus-modulation-sum")
+        self.assertEqual(gain["binding"]["stable_source_key"], "gain")
+
+        cutoff = params["filter_cutoff"]
+        self.assertTrue(cutoff["capabilities"]["modulatable"])
+        self.assertEqual(cutoff["value_semantics"]["base_effective_split"], "native")
+        self.assertIn("internal-modulator",
+                      cutoff["value_semantics"]["modulation_write_sources"])
+
+    def test_neutral_binding_bad_enums_are_rejected(self):
+        doc = json.loads((FIXTURE_DIR / "example-effect.json").read_text())
+        doc["state_model"]["neutral_state_channel"]["deltas"] = "yes"
+        errs = errors_for(doc, self.schema)
+        self.assertTrue(any("neutral_state_channel.deltas" in e and "enum" in e
+                            for e in errs), errs)
+
+        doc = json.loads((FIXTURE_DIR / "example-effect.json").read_text())
+        doc["state_model"]["neutral_state_channel"]["implementation_type_leak"] = True
+        errs = errors_for(doc, self.schema)
+        self.assertTrue(any("implementation_type_leak" in e and "enum" in e
+                            for e in errs), errs)
+
+        doc = json.loads((FIXTURE_DIR / "example-effect.json").read_text())
+        doc["parameters"][0]["value_semantics"]["base_effective_split"] = "collapsed"
+        errs = errors_for(doc, self.schema)
+        self.assertTrue(any("base_effective_split" in e and "enum" in e
+                            for e in errs), errs)
+
+        doc = json.loads((FIXTURE_DIR / "example-effect.json").read_text())
+        doc["parameters"][0]["capabilities"]["modulatable"] = "sometimes"
+        errs = errors_for(doc, self.schema)
+        self.assertTrue(any("capabilities.modulatable" in e and "expected type" in e
+                            for e in errs), errs)
+
+    def test_legacy_state_classifier_still_validates(self):
+        doc = json.loads((FIXTURE_DIR / "example-effect.json").read_text())
+        doc["state_model"]["classification"] = "apvts-like"
+        errs = errors_for(doc, self.schema)
+        self.assertEqual(errs, [], errs)
+
     def test_spi_schema_loads_and_is_shaped(self):
         spi = json.loads(SPI_SCHEMA_PATH.read_text(encoding="utf-8"))
         self.assertEqual(spi["$defs"]["request"]["properties"]["verb"]["enum"],
@@ -176,14 +265,32 @@ class ProjectImportIRSchemaTest(unittest.TestCase):
         errs = errors_against_def(doc, spi, "compat_matrix")
         self.assertTrue(any("enum" in e for e in errs), errs)
 
-    def test_no_vendor_names_in_schema_or_fixtures(self):
-        files = [SCHEMA_PATH, SPI_SCHEMA_PATH]
+    def test_no_vendor_names_in_schema_fixtures_or_readme(self):
+        files = [README_PATH, SCHEMA_PATH, SPI_SCHEMA_PATH]
         files += sorted(FIXTURE_DIR.glob("*.json")) + sorted(SPI_FIXTURE_DIR.glob("*.json"))
         for f in files:
             blob = f.read_text(encoding="utf-8").lower()
             for tok in FORBIDDEN_VENDOR_TOKENS:
                 self.assertNotIn(tok, blob,
                                  f"vendor token {tok!r} leaked into {f.name} — SDK must stay vendor-agnostic (plan §16.2)")
+
+    def test_neutral_contract_does_not_leak_pulp_runtime_types(self):
+        for def_name in NEUTRAL_SCHEMA_DEFS:
+            blob = _json_blob(self.schema["$defs"][def_name])
+            for tok in FORBIDDEN_NEUTRAL_IMPL_TOKENS:
+                self.assertNotIn(
+                    tok, blob,
+                    f"implementation type token {tok!r} leaked into schema $defs/{def_name}"
+                )
+
+        for fixture in sorted(FIXTURE_DIR.glob("*.json")):
+            doc = json.loads(fixture.read_text(encoding="utf-8"))
+            for path, blob in _neutral_contract_blobs(doc):
+                for tok in FORBIDDEN_NEUTRAL_IMPL_TOKENS:
+                    self.assertNotIn(
+                        tok, blob,
+                        f"implementation type token {tok!r} leaked into {fixture.name}:{path}"
+                    )
 
 
 if __name__ == "__main__":
