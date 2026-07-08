@@ -16,6 +16,17 @@ The chrome/m151 release ships all platform slices, including `linux-arm64`.
 The bundled build reports Dawn SHA1
 `7807dcbdca245e462617c04d544706394db245ba` (`include/dawn/dawn_version.h`).
 
+The **macOS** slices (`mac-arm64`, `mac-universal`) are pinned to the
+`chrome/m151-minos13` re-cut, which stamps `LC_BUILD_VERSION minos 13.0`
+(macOS 13 Ventura) on both Skia and Dawn. The original `chrome/m151` macOS
+zips accidentally leaked the CI runner's macOS 15 SDK as the deployment
+target through Dawn's separate CMake sub-build; the re-cut pins Google's
+`mac_deployment_target` (13.0 at m151) explicitly. These 13.0 stamps are
+recorded in `tools/deps/min_os.json`; Pulp's own floor lands slightly higher
+(macOS 13.3) because Apple's libc++ gates `std::to_chars(float)` — reached via
+`std::format` in the logging path — at 13.3. The non-macOS slices remain the
+original `chrome/m151` assets (digests below unchanged).
+
 ## Bundled Text and GPU Pins
 
 These revisions are read from Skia's `DEPS` file at the chrome/m151 tip
@@ -91,8 +102,8 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `2c98b79b4f4c20282ce665ba79bb040124ee6424f16b087c2c6c01c1acb177a2` |
 | `skia-build-linux-arm64-gpu-release.zip` | `2420eed074e041384973338f9d8a41364b9ff444ffa0eb1857cb1ebdbd8781e9` |
 | `skia-build-linux-x64-gpu-release.zip` | `68315e29a8fd3848ab05225b18355b5fe8c85f6e7df3575087ff02d8ce17a56a` |
-| `skia-build-mac-arm64-gpu-release.zip` | `229a0822c1bd9103abbf51eb7baf5fd22141ed7b023199fd9417d8f6d13b0b0e` |
-| `skia-build-mac-universal-gpu-release.zip` | `2f8caa1cb805b8af6cd6a712d59a8b845f6bf981a35063608de7be8e955bc302` |
+| `skia-build-mac-arm64-gpu-release.zip` | `648250f9ee625f0c6c73c521b5a2de7cf46812b06aa2300e4bec8b2bb6d4081b` |
+| `skia-build-mac-universal-gpu-release.zip` | `284964fda380a2cc5ff4f885ae557ef04dab5987ebd94fc01354b95878ad85cf` |
 
 ## Libraries Per Platform
 

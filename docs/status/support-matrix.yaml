@@ -5,7 +5,13 @@ schema_version: 2
 platforms:
   macos:
     status: usable
-    notes: Primary development platform. ARM64 (Apple Silicon) only.
+    notes: Primary development platform. ARM64 (Apple Silicon) only. Minimum macOS 13.3
+      (Ventura). Skia/Dawn allow macOS 13.0 (Google's Chromium mac_deployment_target at
+      the pinned milestone), but Apple's libc++ gates std::to_chars(float) — reached via
+      std::format in Pulp's logging — at macOS 13.3, which sets the real floor. The
+      per-dependency floor is tracked in tools/deps/min_os.json (Pulp targets the max of
+      every linked dependency's minimum, libc++ included) and pinned into the build by
+      tools/cmake/PulpMinOs.cmake.
   windows:
     status: experimental
     notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
