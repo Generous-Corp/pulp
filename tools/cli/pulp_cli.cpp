@@ -39,6 +39,7 @@ static const Command commands[] = {
     {"validate", "Run plugin format validators",          cmd_validate},
     {"doctor",   "Diagnose environment issues",           cmd_doctor},
     {"ship",     "Sign, package, and distribute",         cmd_ship},
+    {"bake",     "Freeze a graph into a signed .pulpbake", cmd_bake},
     {"design",   "Launch the AI design tool",             cmd_design},
     {"docs",     "Browse local documentation",            cmd_docs},
     {"clean",    "Remove build directory",                cmd_clean},
