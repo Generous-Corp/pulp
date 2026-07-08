@@ -160,6 +160,100 @@
         "symmetric": { "type": "boolean" }
       }
     },
+    "support_status": {
+      "type": "string",
+      "enum": ["supported", "partial", "unsupported", "unknown"],
+      "description": "Importer confidence that a neutral migration surface can represent a source behaviour. `partial` must be paired with diagnostics explaining the manual work."
+    },
+    "state_threading_model": {
+      "type": "string",
+      "enum": ["main-thread", "audio-thread-callbacks", "mixed", "unknown"],
+      "description": "Thread context in which the source state or parameter callbacks may fire. Consumers use this to decide whether a binder-owned copy and main-thread reconciliation are required."
+    },
+    "neutral_state_channel": {
+      "type": "object",
+      "description": "Framework-neutral state observation contract. Importers describe snapshots, deltas, and subscription support without exposing implementation tree/listener types from the source or target SDK.",
+      "required": ["snapshot", "deltas", "per_key_subscription", "per_subtree_subscription", "threading", "implementation_type_leak"],
+      "additionalProperties": true,
+      "properties": {
+        "snapshot": { "$ref": "#/$defs/support_status" },
+        "deltas": { "$ref": "#/$defs/support_status" },
+        "per_key_subscription": { "$ref": "#/$defs/support_status" },
+        "per_subtree_subscription": { "$ref": "#/$defs/support_status" },
+        "threading": { "$ref": "#/$defs/state_threading_model" },
+        "producer_ownership": {
+          "type": "string",
+          "enum": ["producer-owned", "binder-owned-copy", "shared-read-only", "unknown"],
+          "description": "Who owns the canonical state. Non-Pulp producers should normally be producer-owned with a binder-owned mirror."
+        },
+        "binder_strategy": {
+          "type": "string",
+          "enum": ["reconcile-copy", "listener-backed-mirror", "poll-snapshot", "manual", "none", "unknown"],
+          "description": "How the generated or handwritten binder should bridge the neutral channel to the target runtime."
+        },
+        "implementation_type_leak": {
+          "type": "boolean",
+          "enum": [false],
+          "description": "False means the neutral core can compile without source- or target-framework state/tree/listener types in its public API."
+        },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "param_write_source": {
+      "type": "string",
+      "enum": ["ui", "automation", "preset", "state-load", "motion", "host", "processor", "internal-modulator", "unknown"]
+    },
+    "parameter_capabilities": {
+      "type": "object",
+      "description": "Neutral parameter capability flags used by generated binders and migration reports. They describe what the source exposes, not what Pulp wishes it exposed.",
+      "required": ["writable", "automatable", "stepped", "modulatable", "audio_rate_capable"],
+      "additionalProperties": true,
+      "properties": {
+        "writable": { "type": "boolean" },
+        "automatable": { "type": "boolean" },
+        "stepped": { "type": "boolean" },
+        "modulatable": { "type": "boolean", "description": "True only when a non-destructive modulation lane can target this parameter." },
+        "audio_rate_capable": { "type": "boolean" },
+        "hidden": { "type": "boolean" },
+        "read_only": { "type": "boolean" }
+      }
+    },
+    "parameter_value_semantics": {
+      "type": "object",
+      "description": "How base value, modulation sum, and effective value relate for this parameter. This lets migrated UIs bind mod rings/meters uniformly while route creation still respects per-target capabilities.",
+      "required": ["base_effective_split", "effective_read", "migration_required"],
+      "additionalProperties": true,
+      "properties": {
+        "base_effective_split": {
+          "type": "string",
+          "enum": ["native", "synthesized-zero-modulation", "destructive-source", "unknown"],
+          "description": "`native` means the source already preserves base + modulation separately. `synthesized-zero-modulation` means no source modulation was found, so effective == base. `destructive-source` means a source behaviour overwrites base where Pulp needs a modulation offset."
+        },
+        "base_write_sources": { "type": "array", "items": { "$ref": "#/$defs/param_write_source" } },
+        "modulation_write_sources": { "type": "array", "items": { "$ref": "#/$defs/param_write_source" } },
+        "destructive_write_sources": { "type": "array", "items": { "$ref": "#/$defs/param_write_source" } },
+        "effective_read": {
+          "type": "string",
+          "enum": ["base-plus-modulation-sum", "base-only", "source-effective", "unknown"],
+          "description": "Formula a migrated view should use when it needs the visible/effective parameter value."
+        },
+        "migration_required": { "type": "boolean" },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "parameter_binding": {
+      "type": "object",
+      "description": "Neutral binding identity for generated controls and migrated state. Importers preserve source identity while proposing stable Pulp-facing keys.",
+      "required": ["stable_source_key", "proposed_pulp_key", "identity_confidence"],
+      "additionalProperties": true,
+      "properties": {
+        "stable_source_key": { "type": "string" },
+        "source_identity_kind": { "type": "string", "enum": ["string-id", "index", "path", "computed", "unknown"] },
+        "proposed_pulp_key": { "type": "string" },
+        "identity_confidence": { "$ref": "#/$defs/confidence" },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "parameter": {
       "type": "object",
       "description": "Maps onto pulp::state::ParamInfo. Identity is preserved as the source string id + version hint AND a stable proposed uint32 id so preset/state migration survives id assignment.",
@@ -184,6 +278,9 @@
         "source_ref": { "$ref": "#/$defs/source_ref" },
         "confidence": { "$ref": "#/$defs/confidence" },
         "computed": { "type": "boolean", "description": "True if any constructor argument depends on a runtime value; such params also appear in `constructs`." },
+        "capabilities": { "$ref": "#/$defs/parameter_capabilities" },
+        "value_semantics": { "$ref": "#/$defs/parameter_value_semantics" },
+        "binding": { "$ref": "#/$defs/parameter_binding" },
         "diagnostics": { "type": "array", "items": { "type": "string" } }
       }
     },
@@ -236,7 +333,8 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "classification": { "type": "string", "enum": ["opaque-custom", "apvts-like", "default-params", "unknown"] },
+        "classification": { "type": "string", "enum": ["tree-like", "param-only", "opaque-custom", "custom", "apvts-like", "default-params", "unknown"] },
+        "neutral_state_channel": { "$ref": "#/$defs/neutral_state_channel" },
         "confidence": { "$ref": "#/$defs/confidence" },
         "diagnostics": { "type": "array", "items": { "type": "string" } }
       }

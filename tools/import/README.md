@@ -41,6 +41,14 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
   skewed params emit linear + flagged PARTIAL until SDK shaped-range lands.
 - **Param identity** keeps the source string id + version hint AND a stable
   `proposed_pulp_id` (Pulp ids are `uint32`), so preset/state migration survives.
+- **Neutral state channels** describe snapshot, delta, per-key subscription, and
+  per-subtree subscription support without exposing source- or target-framework
+  tree/listener types. If the source producer is outside Pulp, the generated
+  binder owns reconciliation into the Pulp runtime on the correct thread.
+- **Base/effective parameter semantics** are explicit. Importers record whether
+  a parameter has a native base + modulation split, a synthesized zero-modulation
+  split (`effective == base`), or a destructive source behaviour that requires
+  manual migration before mod rings/meters can bind faithfully.
 - **`extraction_context`** records the parse environment (compile-db source,
   includes, parser version) so format-conditional or build-conditional
   extractions are explainable.

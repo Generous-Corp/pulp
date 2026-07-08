@@ -63,9 +63,79 @@
       "source_ref": { "file": "PluginProcessor.cpp", "line": 8 },
       "confidence": 0.92,
       "computed": false,
+      "capabilities": {
+        "writable": true,
+        "automatable": true,
+        "stepped": false,
+        "modulatable": false,
+        "audio_rate_capable": false,
+        "hidden": false,
+        "read_only": false
+      },
+      "value_semantics": {
+        "base_effective_split": "synthesized-zero-modulation",
+        "base_write_sources": ["ui", "automation", "preset", "state-load"],
+        "modulation_write_sources": [],
+        "destructive_write_sources": [],
+        "effective_read": "base-plus-modulation-sum",
+        "migration_required": false,
+        "diagnostics": [
+          "No source modulation path was found; generated binders should publish effective == base with a zero modulation sum."
+        ]
+      },
+      "binding": {
+        "stable_source_key": "gain",
+        "source_identity_kind": "string-id",
+        "proposed_pulp_key": "gain",
+        "identity_confidence": 0.98,
+        "diagnostics": []
+      },
       "diagnostics": [
         "Source uses a non-linear (skewed) range; emitted linear + flagged PARTIAL until SDK shaped-range lands."
       ]
+    },
+    {
+      "source_type": "float",
+      "id": "filter_cutoff",
+      "source_id_string": "filter.cutoff",
+      "source_version_hint": 1,
+      "proposed_pulp_id": 1283985271,
+      "name": "Filter Cutoff",
+      "unit": "Hz",
+      "pulp_range": { "min": 20.0, "max": 20000.0, "step": 0.0 },
+      "default": 1200.0,
+      "source_curve": { "skew": 0.35, "symmetric": false },
+      "choices": null,
+      "display_conversion": "default",
+      "source_ref": { "file": "PluginProcessor.cpp", "line": 18 },
+      "confidence": 0.88,
+      "computed": false,
+      "capabilities": {
+        "writable": true,
+        "automatable": true,
+        "stepped": false,
+        "modulatable": true,
+        "audio_rate_capable": false,
+        "hidden": false,
+        "read_only": false
+      },
+      "value_semantics": {
+        "base_effective_split": "native",
+        "base_write_sources": ["ui", "automation", "preset", "state-load"],
+        "modulation_write_sources": ["internal-modulator"],
+        "destructive_write_sources": [],
+        "effective_read": "base-plus-modulation-sum",
+        "migration_required": false,
+        "diagnostics": []
+      },
+      "binding": {
+        "stable_source_key": "filter.cutoff",
+        "source_identity_kind": "string-id",
+        "proposed_pulp_key": "filter.cutoff",
+        "identity_confidence": 0.95,
+        "diagnostics": []
+      },
+      "diagnostics": []
     }
   ],
   "constructs": [
@@ -80,7 +150,24 @@
       "confidence": 0.2
     }
   ],
-  "state_model": { "classification": "apvts-like", "confidence": 0.8, "diagnostics": [] },
+  "state_model": {
+    "classification": "tree-like",
+    "neutral_state_channel": {
+      "snapshot": "supported",
+      "deltas": "partial",
+      "per_key_subscription": "supported",
+      "per_subtree_subscription": "partial",
+      "threading": "main-thread",
+      "producer_ownership": "producer-owned",
+      "binder_strategy": "reconcile-copy",
+      "implementation_type_leak": false,
+      "diagnostics": [
+        "Subtree changes require recursive binder wiring; a root-only listener is not sufficient."
+      ]
+    },
+    "confidence": 0.8,
+    "diagnostics": []
+  },
   "dsp": {
     "classification": "portable-core",
     "reachability_scope": "direct_body",
