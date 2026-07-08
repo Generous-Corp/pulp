@@ -47,6 +47,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | node-addon-api | 8.x | MIT | Node.js bindings via Node-API (optional, npm install) | bindings/nodejs | 2026-03-25 |
 | Noto Color Emoji | noto-emoji main @ 2026-05-17 | SIL OFL 1.1 | Embedded color-emoji typeface (NotoColorEmoji.ttf, SHA-256 `0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a28d2`). Bundled only when `PULP_BUNDLE_NOTO_COLOR_EMOJI=ON` (defaults ON for Linux/Android/headless, OFF on macOS/Windows where the platform color-emoji typeface is preferred). Provides the cross-platform fallback for emoji clusters in Canvas2D text. | pulp-canvas | 2026-05-17 |
 | Oboe | 1.9.0 | Apache-2.0 | Android audio backend (AAudio/OpenSL ES abstraction) | pulp-audio | 2026-04-07 |
+| Perfetto | v57.2 | Apache-2.0 | Tracing SDK (amalgamated `perfetto.cc`/`perfetto.h`, shipped as the `perfetto-cpp-sdk-src.zip` release artifact) for the dev-only Perfetto tracing subsystem. Fetched by pinned URL + SHA-256 in `tools/cmake/PulpTracing.cmake` ONLY when `PULP_TRACING=ON`; OFF by default, never linked into a shipping build, never exported by `cmake --install`. | pulp-tracing (dev-only) | 2026-07-08 |
 | pugixml | 1.14 | MIT | XML parsing and generation | pulp-runtime | 2026-04-07 |
 | pybind11 | 2.13.6 | BSD-3-Clause | Python bindings for HeadlessHost (optional, FetchContent) | bindings/python | 2026-03-25 |
 | Pygments | transitive | BSD-2-Clause | Syntax highlighter used by mkdocs + pymdownx.highlight; redistributed as inline HTML/CSS in the generated docs site | docs | 2026-04-22 |

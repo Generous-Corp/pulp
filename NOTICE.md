@@ -689,6 +689,30 @@ https://github.com/google/oboe
 
 ---
 
+## Perfetto
+
+Copyright The Perfetto Authors
+
+Used only by Pulp's dev-only tracing subsystem (`PULP_TRACING`, OFF by default;
+never linked into a shipping build). The amalgamated C++ SDK (`perfetto.cc` /
+`perfetto.h`) is fetched by pinned URL + SHA-256 when tracing is enabled.
+
+Apache License, Version 2.0
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+https://github.com/google/perfetto
+
+---
+
 ## pugixml
 
 Copyright (c) 2006-2024 Arseny Kapoulkine
