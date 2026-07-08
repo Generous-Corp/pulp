@@ -5,6 +5,7 @@
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/render/gpu_render_time.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 
 // Dawn C++ API (from Skia's bundled Dawn)
 #include "webgpu/webgpu_cpp.h"
@@ -160,6 +161,9 @@ public:
     }
 
     void end_frame() override {
+        // Graphite recording snap + insert + submit — the GPU-submit stage of
+        // the frame pipeline.
+        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");
         canvas_.reset();
 
         if (!recorder_ || !context_) return;
