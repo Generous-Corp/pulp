@@ -139,7 +139,11 @@ LowerResult bake(const SignalGraph& graph) {
     // Topology lowerability — the shared gate (see lowerability_of). bake()'s only
     // extra precondition is is_prepared() above; the node-kind / lane / executor-
     // eligibility proof is identical to what the on-disk load path will re-run.
-    if (const auto proof = lowerability_of(graph.nodes(), graph.connections());
+    if (const auto proof = lowerability_of(
+            graph.nodes(), graph.connections(),
+            [&graph](std::string_view type_id, int version) {
+                return graph.custom_node_type(type_id, version);
+            });
         !proof.accepted) {
         result.reason = proof.reason;
         result.offending_node = proof.offending_node;
@@ -154,6 +158,11 @@ LowerResult bake(const SignalGraph& graph) {
     // AudioInput/AudioOutput nodes.
     std::vector<GraphNode> nodes;
     nodes.reserve(graph.nodes().size());
+    // For each lowerable Custom node, capture a COPY of the live resolved process
+    // callback — it captured the custom instance shared_ptr by value, so the copy
+    // carries the instance keepalive into the baked Processor (self-contained, no
+    // reference back into the source graph).
+    std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
     int input_channels = 0;
     int output_channels = 0;
     for (const auto& src : graph.nodes()) {
@@ -169,6 +178,10 @@ LowerResult bake(const SignalGraph& graph) {
             input_channels = std::max(input_channels, src.num_output_ports);
         } else if (src.type == NodeType::AudioOutput) {
             output_channels = std::max(output_channels, src.num_input_ports);
+        } else if (src.type == NodeType::Custom) {
+            if (const CustomNodeProcessFn* fn = graph.live_custom_processor(src.id)) {
+                custom_processors[src.id] = *fn;
+            }
         }
         nodes.push_back(std::move(n));
     }
@@ -178,24 +191,27 @@ LowerResult bake(const SignalGraph& graph) {
         std::move(nodes), std::move(conns),
         input_channels > 0 ? input_channels : 2,
         output_channels > 0 ? output_channels : 2,
-        "Baked Graph", "com.pulp.baked-graph");
+        "Baked Graph", "com.pulp.baked-graph", std::move(custom_processors));
     result.accepted = true;
     result.reason = LowerRejectReason::None;
     return result;
 }
 
-BakedGraphProcessor::BakedGraphProcessor(std::vector<GraphNode> nodes,
-                                         std::vector<Connection> connections,
-                                         int input_channels,
-                                         int output_channels,
-                                         std::string name,
-                                         std::string bundle_id)
+BakedGraphProcessor::BakedGraphProcessor(
+    std::vector<GraphNode> nodes,
+    std::vector<Connection> connections,
+    int input_channels,
+    int output_channels,
+    std::string name,
+    std::string bundle_id,
+    std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors)
     : nodes_(std::move(nodes)),
       conns_(std::move(connections)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
       input_channels_(input_channels),
-      output_channels_(output_channels) {}
+      output_channels_(output_channels),
+      custom_processors_(std::move(custom_processors)) {}
 
 fmt::PluginDescriptor BakedGraphProcessor::descriptor() const {
     fmt::PluginDescriptor desc;
@@ -229,8 +245,9 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     }
 
     // Build the canonical executor's serialized routing snapshot for the frozen
-    // plan, resolving each Gain node to its owned atomic. No Plugin nodes exist
-    // in the lowerable subset, so plugin_for always yields nullptr.
+    // plan, resolving each Gain node to its owned atomic and each lowerable Custom
+    // node to its captured process callback. No Plugin nodes exist in the lowerable
+    // subset, so plugin_for always yields nullptr.
     if (!build_executor_snapshot(
             nodes_, conns_,
             [this](NodeId id) -> std::atomic<float>* {
@@ -238,7 +255,12 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
                 return it == gain_index_.end() ? nullptr : gains_[it->second].get();
             },
             [](NodeId) -> PluginSlot* { return nullptr; },
-            plugin_ctx_, plugin_scratch_, snapshot_, /*parallel_safe=*/false)) {
+            plugin_ctx_, plugin_scratch_, snapshot_, /*parallel_safe=*/false,
+            /*load_for=*/{}, &custom_ctx_,
+            [this](NodeId id) -> const CustomNodeProcessFn* {
+                auto it = custom_processors_.find(id);
+                return it == custom_processors_.end() ? nullptr : &it->second;
+            })) {
         return;
     }
 

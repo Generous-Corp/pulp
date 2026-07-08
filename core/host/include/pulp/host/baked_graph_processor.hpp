@@ -101,7 +101,14 @@ public:
                         int input_channels,
                         int output_channels,
                         std::string name,
-                        std::string bundle_id);
+                        std::string bundle_id,
+                        // Resolved Custom-node process callbacks captured from the
+                        // live graph at bake() (NodeId → fn). Each fn is a COPY that
+                        // captured the custom instance shared_ptr by value, so the
+                        // baked Processor OWNS the instance keepalive — no external
+                        // state. Empty for a custom-free graph.
+                        std::unordered_map<NodeId, CustomNodeProcessFn>
+                            custom_processors = {});
 
     pulp::format::PluginDescriptor descriptor() const override;
     void define_parameters(pulp::state::StateStore& store) override;
@@ -133,6 +140,11 @@ private:
     // snapshot builder requires the storage to exist.
     std::vector<PluginBindingContext> plugin_ctx_;
     PluginRoutingScratch plugin_scratch_;
+    // Resolved Custom-node process callbacks (NodeId → fn, each holding its
+    // instance keepalive) + the executor's Custom binding storage. Empty for a
+    // custom-free graph; prepare() binds custom_ctx_ from custom_processors_.
+    std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors_;
+    std::vector<CustomBindingContext> custom_ctx_;
 
     std::string name_;
     std::string bundle_id_;
