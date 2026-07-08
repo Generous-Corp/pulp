@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06140"></a>
+## [0.614.0] - 2026-07-08
+
+- cli: pulp bake / pulp bake verify (#5728) ([#5741](https://github.com/danielraffel/pulp/pull/5741))
+- docs/reload lifecycle info main ([#5714](https://github.com/danielraffel/pulp/pull/5714))
+
 <a id="v06130"></a>
 ## [0.613.0] - 2026-07-08
 
@@ -6099,6 +6105,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.614.0]: https://github.com/danielraffel/pulp/releases/tag/v0.614.0
 [0.613.0]: https://github.com/danielraffel/pulp/releases/tag/v0.613.0
 [0.612.0]: https://github.com/danielraffel/pulp/releases/tag/v0.612.0
 [0.611.0]: https://github.com/danielraffel/pulp/releases/tag/v0.611.0

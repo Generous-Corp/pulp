@@ -96,8 +96,37 @@ function(_pulp_min_os_pin_macos)
   endif()
 endfunction()
 
+function(_pulp_min_os_pin_windows)
+  # Windows has no "deployment target"; the floor is the compile-time
+  # _WIN32_WINNT / WINVER API level. Pulp does not set it, so it otherwise
+  # inherits the Windows SDK default — a newer SDK can silently raise the floor
+  # (the Windows analog of the macOS Dawn-minos leak). Pin it to min_os.json's
+  # windows-x64 floor (Windows 10 = 0x0A00 at the current Skia/Dawn milestone).
+  if(NOT EXISTS "${PULP_MIN_OS_JSON}")
+    return()
+  endif()
+  file(READ "${PULP_MIN_OS_JSON}" _json)
+  string(JSON _winnt ERROR_VARIABLE _err GET "${_json}" platforms windows-x64 win32_winnt)
+  if(NOT _err STREQUAL "NOTFOUND" OR _winnt STREQUAL "" OR _winnt STREQUAL "null")
+    return()
+  endif()
+
+  # Respect a _WIN32_WINNT the developer (or a toolchain file) already set, and
+  # stay idempotent on a warm reconfigure — both show up as an existing match in
+  # the flags. -D is accepted by MSVC (cl), clang-cl, and MinGW alike.
+  if(CMAKE_CXX_FLAGS MATCHES "_WIN32_WINNT")
+    return()
+  endif()
+
+  set(_defs "-D_WIN32_WINNT=${_winnt} -DWINVER=${_winnt}")
+  set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} ${_defs}"   CACHE STRING "Pulp min-OS: Windows API floor" FORCE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_defs}" CACHE STRING "Pulp min-OS: Windows API floor" FORCE)
+  message(STATUS "Pulp min-OS: Windows _WIN32_WINNT/WINVER pinned to ${_winnt} (min_os.json windows-x64 floor)")
+endfunction()
+
 # Detect the host robustly before project() (APPLE / CMAKE_HOST_APPLE are not yet
-# reliably set at this point; uname is). uname is absent on Windows → empty → skip.
+# reliably set at this point; uname is). uname is absent on Windows → empty, so
+# CMAKE_HOST_WIN32 (set before project()) is the Windows signal.
 if(NOT DEFINED PULP_HOST_UNAME)
   execute_process(COMMAND uname -s
                   OUTPUT_VARIABLE PULP_HOST_UNAME
@@ -107,4 +136,6 @@ endif()
 
 if(PULP_HOST_UNAME STREQUAL "Darwin")
   _pulp_min_os_pin_macos()
+elseif(CMAKE_HOST_WIN32)
+  _pulp_min_os_pin_windows()
 endif()

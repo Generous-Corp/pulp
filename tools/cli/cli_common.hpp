@@ -327,6 +327,7 @@ int cmd_fmt(const std::vector<std::string>& args);
 int cmd_run(const std::vector<std::string>& args);
 int cmd_validate(const std::vector<std::string>& args);
 int cmd_ship(const std::vector<std::string>& args);
+int cmd_bake(const std::vector<std::string>& args);
 int cmd_doctor(const std::vector<std::string>& args);
 int cmd_create(const std::vector<std::string>& args);
 int cmd_docs(const std::vector<std::string>& args);

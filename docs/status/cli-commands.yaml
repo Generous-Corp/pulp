@@ -312,6 +312,41 @@ commands:
             required: false
     docs: reference/cli.md#ship
 
+  - name: bake
+    status: usable
+    summary: "Freeze a .pulpgraph into a signed, distributable .pulpbake artifact, and verify one. Loads the graph, prepares it, freezes it via the bake lowering, and signs it with Ed25519; a non-bakeable graph (a hosted plugin node, a MIDI/automation/sidechain lane, or a non-opted-in Custom type) is refused with the specific reason and a non-zero exit. Key handling reuses the reload-trust key file, the same path `ship swap-pack` uses."
+    args:
+      - name: input
+        required: true
+        description: The .pulpgraph to bake (positional).
+      - name: -o / --out
+        required: true
+        description: Output .pulpbake path. Refuses to overwrite an existing file without --force.
+      - name: --sign-key
+        required: true
+        description: Ed25519 key file (KeyMaterial). Loaded if present, else minted + written with a loud notice.
+      - name: --sr
+        required: false
+        description: Nominal sample rate for the prepare/bake pass (default 48000). The baked Processor re-prepares at the host rate.
+      - name: --block
+        required: false
+        description: Nominal max block for the prepare/bake pass (default 512).
+      - name: --force
+        required: false
+        description: Overwrite an existing output file.
+      - name: --no-mint
+        required: false
+        description: "For CI / non-interactive use: refuse to mint a new signing identity if the --sign-key path is absent (exit 2 instead of silently signing under a new key).
+    subcommands:
+      - name: verify
+        summary: "Verify a signed .pulpbake against a trust set and print ACCEPTED/REJECTED. Checks the Ed25519 signature and runs the bounded parse only; never executes the plan or loads custom state."
+        args:
+          - name: artifact
+            required: true
+            description: The .pulpbake file to verify (positional).
+          - name: --trust
+            required: false
+            description: A trusted signer public-key file (repeatable). No trusted key that matches the signer => REJECTED.
   - name: pr
     status: usable
     summary: Compatibility wrapper for the Shipyard-managed PR flow. Defaults to `shipyard pr`, with explicit `github` and `manual` workflows for users who opt out of Shipyard tracking.
