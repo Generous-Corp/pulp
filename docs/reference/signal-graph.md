@@ -4,6 +4,14 @@
 instances (and built-in nodes: input, output, gain, MIDI in/out) into a
 routable audio topology.
 
+In plain terms: this is how one Pulp plugin can **host several other plugins
+and wire them into a chain** (e.g. an EQ → a compressor → a reverb) and process
+audio through them as a unit. Each box in that chain is a *node*. Editing the
+chain while it plays — re-wiring nodes, adjusting them — is done without an audio
+gap. This is distinct from [DSP hot-reload](../guides/dsp-hot-reload.md), which
+swaps a plugin's **own** compiled DSP; live graph editing re-arranges **already-
+installed, already-trusted** hosted plugins and loads no new code.
+
 ## Nodes
 
 | NodeType       | Role                                      | Ports |

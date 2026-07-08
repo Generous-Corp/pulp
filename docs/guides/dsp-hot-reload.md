@@ -10,6 +10,30 @@ scripted widgets: edit, rebuild, hear the change in well under a second.
 > mechanism applies to every format adapter (see [Format & platform
 > coverage](#format--platform-coverage)).
 
+## Is this the swap you want?
+
+Pulp has two different "change the audio without a dropout" tools. They sound
+similar but do different jobs — pick by *what is being swapped*:
+
+- **DSP hot-reload (this page)** swaps a plugin's **own DSP** — the code *you*
+  wrote and compiled. You rebuild your DSP (or push a signed update to a plugin
+  already in the field) and the running plugin adopts it without the host
+  reloading it. This is the one that needs signing/trust, because it is *loading
+  new code*.
+
+- **Live graph editing** is for the other case: when your Pulp plugin isn't a
+  single effect but a **chain that hosts other, already-installed plugins**
+  (say a VST3 EQ → an AU compressor → a CLAP reverb) wired together inside one
+  Pulp plugin. Pulp can change that chain *while it plays* — re-wire the
+  connections, adjust a block — without a gap. That's a separate feature; see
+  the [Signal graph](../reference/signal-graph.md) and
+  [Hosting](hosting.md) guides. It does **not** need the signing/trust model,
+  because it only re-arranges plugins the machine already trusts — no new code
+  is loaded.
+
+Rule of thumb: swapping *your own* DSP → hot-reload (here). Re-arranging or
+replacing *hosted third-party* plugins in a chain → live graph editing.
+
 ## How it works
 
 A reloadable plugin is split into two halves:
