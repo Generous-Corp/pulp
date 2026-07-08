@@ -57,6 +57,9 @@ pulp_add_test_suite(pulp-test-graph-executor-routing
     LIBRARIES pulp::host pulp::format pulp::graph)
 # A SignalGraph translated to the executor produces bit-identical output to its
 # own walk for the eligible node/connection subset.
+pulp_add_test_suite(pulp-test-crossfade-plugin-slot
+    SOURCES test_crossfade_plugin_slot.cpp
+    LIBRARIES pulp::host pulp::signal pulp::audio)
 pulp_add_test_suite(pulp-test-live-swap-admission
     SOURCES test_live_swap_admission.cpp
     LIBRARIES pulp::host pulp::audio)
