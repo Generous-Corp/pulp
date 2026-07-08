@@ -105,6 +105,7 @@ target_sources(pulp-runtime PRIVATE
     src/stream.cpp
     src/async_stream.cpp
     src/background_job.cpp
+    src/search_index.cpp
     src/network_stream.cpp
     src/memory_message_channel.cpp
     src/websocket_channel.cpp

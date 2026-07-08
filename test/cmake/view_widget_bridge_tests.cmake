@@ -364,3 +364,7 @@ add_test(NAME visual-harness-self-test COMMAND pulp-test-visual --self-test)
 set_tests_properties(visual-harness-self-test PROPERTIES
     LABELS "visual;harness;yoga"
     TIMEOUT 30)
+
+# Off-UI-thread query service (R7): worker + marshal-back, and the JS bridge API.
+pulp_add_test_suite(pulp-test-query-service LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-query LIBRARIES pulp::view pulp::state)

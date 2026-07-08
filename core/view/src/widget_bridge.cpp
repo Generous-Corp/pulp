@@ -1114,7 +1114,7 @@ void WidgetBridge::register_api() {
         register_platform_services_dialog_api();
 
     register_runtime_api();
-
+    register_query_service_api();  // R7 off-thread index/search (non-effectful, no cap)
     if (granted_capabilities_.has(ReloadCapability::Clipboard))
         register_platform_services_clipboard_api();
 

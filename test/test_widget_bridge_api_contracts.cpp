@@ -75,6 +75,7 @@ const std::set<std::string>& allowed_categories() {
         "layout",
         "metadata",
         "platform_services",
+        "query",
         "runtime",
         "runtime_import",
         "shader",
