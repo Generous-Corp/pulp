@@ -58,6 +58,47 @@ TYPE_TO_SECTION = {
     "tests": "chore",
 }
 
+# Sections a non-expert reader actually cares about, shown up front in plain
+# language. Everything else (refactors, docs, deps, CI, chores, unclassifiable
+# churn) is real but inside-baseball, so it collapses into one folded "Under the
+# hood" summary instead of a wall of bullets.
+TOP_TIER_SECTIONS = ("features", "fixes", "performance")
+UNDER_HOOD_SECTIONS = ("refactors", "docs", "other", "chore")
+
+# Human, restrained section labels (not a marketing changelog — just readable).
+HUMAN_SECTION_LABELS = {
+    "features": "### ✨ New",
+    "fixes": "### 🐛 Fixed",
+    "performance": "### ⚡ Faster",
+}
+
+# Strips a conventional-commit prefix (`feat(view):`, `refactor:`, `fix!:`) and a
+# trailing PR number so the bullet reads like a sentence, not a commit subject.
+_CONVENTIONAL_PREFIX_RE = re.compile(r"^[a-zA-Z]+(\([^)]*\))?!?:\s*")
+_TRAILING_PR_RE = re.compile(r"\s*\(#\d+\)\s*$")
+# Coalesce a run of near-identical entries (e.g. eight "split WidgetBridge X
+# registrar" PRs) into one line once at least this many share a lead phrase.
+_COALESCE_MIN = 3
+_COALESCE_LEAD_WORDS = 2
+
+
+def humanize(text: str) -> str:
+    """Turn a commit subject / PR title into a plain-language sentence.
+
+    Drops the `type(scope):` prefix and any trailing `(#123)`, then capitalizes.
+    A `Release-Note:` override is already human, so this is a near no-op on it.
+    """
+    cleaned = _CONVENTIONAL_PREFIX_RE.sub("", text.strip())
+    cleaned = _TRAILING_PR_RE.sub("", cleaned).strip()
+    if cleaned and cleaned[0].islower():
+        cleaned = cleaned[0].upper() + cleaned[1:]
+    return cleaned
+
+
+def _lead_phrase(entry: "ReleaseEntry") -> str:
+    words = humanize(entry.display).lower().split()
+    return " ".join(words[:_COALESCE_LEAD_WORDS])
+
 
 @dataclasses.dataclass(frozen=True)
 class CommitMessage:
@@ -322,6 +363,34 @@ def bullet_for_entry(entry: ReleaseEntry, repo_url: str) -> str:
     return f"- {entry.display} ({entry_link(entry, repo_url)})"
 
 
+def human_bullet(entry: ReleaseEntry, repo_url: str) -> str:
+    return f"- {humanize(entry.display)} ({entry_link(entry, repo_url)})"
+
+
+def coalesce_bullets(entries: list[ReleaseEntry], repo_url: str) -> list[str]:
+    """Render entries as bullets, collapsing runs that share a lead phrase.
+
+    A release often carries many mechanical PRs with near-identical titles
+    (e.g. eight "split WidgetBridge X registrar"). Once ``_COALESCE_MIN`` of them
+    share the same first ``_COALESCE_LEAD_WORDS`` words, fold them into a single
+    line — the first title plus "and N more", with every PR linked — so the
+    section stays scannable instead of repeating the same phrase eight times.
+    """
+    groups: OrderedDict[str, list[ReleaseEntry]] = OrderedDict()
+    for entry in entries:
+        groups.setdefault(_lead_phrase(entry), []).append(entry)
+
+    lines: list[str] = []
+    for group in groups.values():
+        if len(group) >= _COALESCE_MIN:
+            links = ", ".join(entry_link(e, repo_url) for e in group)
+            lead = humanize(group[0].display)
+            lines.append(f"- {lead} — and {len(group) - 1} more ({links})")
+        else:
+            lines.extend(human_bullet(e, repo_url) for e in group)
+    return lines
+
+
 def render(
     entries: list[ReleaseEntry],
     *,
@@ -347,41 +416,44 @@ def render(
         grouped.setdefault(entry.section, []).append(entry)
 
     parts: list[str] = []
+
+    # ⚠️ Breaking changes always render first, on every tier — the one thing a
+    # reader must never miss.
     if breaking:
-        parts.append("## ⚠️ Breaking Changes")
+        parts.append("### ⚠️ Breaking changes")
         parts.append("")
-        parts.extend(bullet_for_entry(entry, repo_url) for entry in breaking)
+        parts.extend(human_bullet(entry, repo_url) for entry in breaking)
         parts.append("")
 
-    nonbreaking_count = sum(len(items) for items in grouped.values())
-    if nonbreaking_count:
-        if not light:
-            parts.append("## Highlights")
-            parts.append("")
-        for section, items in grouped.items():
-            if not items:
-                continue
-            if section == "chore":
-                parts.append(f"<details><summary>{SECTION_TITLES[section]}</summary>")
-                parts.append("")
-                parts.extend(bullet_for_entry(entry, repo_url) for entry in items)
-                parts.append("")
-                parts.append("</details>")
-                parts.append("")
-                continue
-            parts.append(SECTION_TITLES[section])
-            parts.append("")
-            parts.extend(bullet_for_entry(entry, repo_url) for entry in items)
-            parts.append("")
-    elif breaking:
-        if not light:
-            parts.append("## Highlights")
-            parts.append("")
-        parts.append("No non-breaking highlights were detected for this tag.")
+    # Top tier: only the sections a non-expert cares about (New / Fixed /
+    # Faster), in plain language with jargon and PR-number noise stripped.
+    for section in TOP_TIER_SECTIONS:
+        items = grouped.get(section) or []
+        if not items:
+            continue
+        parts.append(HUMAN_SECTION_LABELS[section])
+        parts.append("")
+        parts.extend(coalesce_bullets(items, repo_url))
+        parts.append("")
+
+    # Everything else — refactors, docs, dependency/CI/build/test chores, and
+    # unclassifiable churn — is real but inside-baseball. Collapse it into one
+    # folded "Under the hood" summary (coalescing near-identical runs) so it is
+    # present for the curious without burying the highlights. Patch releases
+    # drop it entirely to stay light.
+    hood: list[ReleaseEntry] = []
+    for section in UNDER_HOOD_SECTIONS:
+        hood.extend(grouped.get(section) or [])
+    if hood and not light:
+        parts.append("<details><summary>🔧 Under the hood</summary>")
+        parts.append("")
+        parts.extend(coalesce_bullets(hood, repo_url))
+        parts.append("")
+        parts.append("</details>")
         parts.append("")
 
     if not parts:
-        return "## Highlights\n\nNo release-note highlights were detected for this tag."
+        return "No user-facing changes in this release."
 
     return "\n".join(parts).rstrip()
 
