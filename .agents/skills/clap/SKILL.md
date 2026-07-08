@@ -686,3 +686,14 @@ and skips the Processor when the param value is >= 0.5 — mirroring the VST3
 processBlockBypassed path. `PULP_HOST_QUIRKS=off` synthesizes nothing
 (bypass_param_id stays 0). The pass-through MUST null-check each destination
 channel pointer because a bus can report channels with null buffers.
+
+## Sample-accurate parameter output
+
+CLAP's `out_events` requires **globally ascending time across ALL event types**.
+The param-output drain (`clap_adapter.cpp`) therefore does a **three-cursor
+merge** of output param events + MIDI shorts + sysex by ascending sample offset,
+not "params then MIDI". Snapshot-diff fallback params (all at offset 0) emit
+first; a per-param skip-set stops them double-reporting a param that pushed
+explicit `push_output_param_event()` events. CLAP param values are **plain
+domain** (`double`), unlike VST3 which normalizes. `test_clap_midi_events.cpp`
+asserts the `param@0, midi@8, param@16` interleave stays non-decreasing in time.
