@@ -91,6 +91,7 @@ createScrollView	widget_factory	function	core/view/src/widget_bridge/factory_api
 createNativeView	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createListBox	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createVirtualList	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
+createVirtualGrid	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 setListItems	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
 setListSelected	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
 setListRowHeight	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
@@ -100,6 +101,14 @@ setVirtualListSelectionMode	widget_value	function	core/view/src/widget_bridge/wi
 setVirtualListSelected	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
 scrollVirtualListToRow	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
 refreshVirtualListRows	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setVirtualGridItemCount	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setVirtualGridCellSize	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setVirtualGridColumnCount	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setVirtualGridOverscan	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setVirtualGridSelectionMode	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+setVirtualGridSelected	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+scrollVirtualGridToItem	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
+refreshVirtualGridCells	widget_value	function	core/view/src/widget_bridge/widget_value_list_api.cpp
 createTextEditor	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createCanvas	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 setLabel	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp

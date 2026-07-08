@@ -7,6 +7,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/virtual_list.hpp>
+#include <pulp/view/virtual_grid.hpp>
 
 #include <atomic>
 #include <iostream>
@@ -379,6 +380,15 @@ void WidgetBridge::register_widget_factory_composite_api() {
         auto* ptr = list.get(); widgets_[id] = ptr;
         wire_callbacks(id, ptr);
         resolve_parent(pid)->add_child(std::move(list));
+        return choc::value::createString(id);
+    });
+
+    register_bridge_function(api, "createVirtualGrid", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
+        auto grid = std::make_unique<VirtualGrid>(); grid->set_id(id);
+        auto* ptr = grid.get(); widgets_[id] = ptr;
+        wire_callbacks(id, ptr);
+        resolve_parent(pid)->add_child(std::move(grid));
         return choc::value::createString(id);
     });
 
