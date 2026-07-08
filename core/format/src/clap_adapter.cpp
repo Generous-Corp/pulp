@@ -1288,10 +1288,9 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
         }
     }
 
-    // ARA companion factory. Lazily instantiate the controller the first time
-    // an ARA-aware host asks for it, then hand back the factory pointer.
-    // Returns nullptr if the plugin did not override
-    // create_ara_document_controller().
+    // ARA companion factory. Only ask for it in builds that actually link the
+    // ARA implementation; WebCLAP/WASI intentionally excludes that native TU.
+#ifdef PULP_HAS_ARA
     if (std::strcmp(id, kClapAraFactoryExtension) == 0) {
         // Guard: hosts may query extensions before clap_init populated
         // self->processor. The factory is process-global so we can still
@@ -1302,6 +1301,9 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
         }
         return ara_companion_factory_for(self->ara_controller.get());
     }
+#else
+    if (std::strcmp(id, kClapAraFactoryExtension) == 0) return nullptr;
+#endif
 
     return nullptr;
 }
