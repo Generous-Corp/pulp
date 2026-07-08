@@ -111,6 +111,10 @@ jobs:
 
     runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
     name: CLI ${{ matrix.platform }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v5
@@ -574,6 +578,13 @@ jobs:
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk
         shell: pwsh
+
+      - name: Attest CLI and SDK artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            pulp-${{ matrix.platform }}.*
+            pulp-sdk-${{ matrix.platform }}.*
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v6

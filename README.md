@@ -13,6 +13,40 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
 
+### Verification
+
+As an additional layer of security, download the shell installer and verify its
+SHA-256 checksum before running it:
+
+```bash
+curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
+curl -fsSL https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS \
+  | shasum -a 256 -c --ignore-missing
+sh install.sh
+```
+
+This matters because `curl | sh` is convenient but trust-heavy. The verified
+path lets you download the script, prove it matches Pulp's published checksum,
+inspect it if you want, then run it.
+
+GitHub's release verification can also check immutable releases and downloaded
+release assets:
+
+```bash
+version=0.614.0
+asset=pulp-darwin-arm64.tar.gz
+gh release download "v${version}" -R danielraffel/pulp -p "$asset"
+gh release verify "v${version}" -R danielraffel/pulp
+gh release verify-asset "v${version}" "$asset" -R danielraffel/pulp
+```
+
+These layers answer different questions. A verified commit or tag means GitHub
+verified a signature from a configured maintainer or release-bot signing key for
+the source ref. A SHA-256 check means the bytes you downloaded match the bytes
+Pulp published. Neither replaces reading code you are about to execute, but
+together they make the source identity and downloaded artifact integrity much
+clearer.
+
 Then:
 
 ```bash
@@ -231,7 +265,7 @@ Pulp uses [Shipyard](https://github.com/danielraffel/Shipyard) for cross-platfor
 ### Security & CI policy
 
 - Pulp's `main` branch is protected: every change must go through a PR, and a PR cannot merge until macOS, Linux, and Windows builds + tests are all green.
-- Release tags (`v*`) are immutable — once published they cannot be force-pushed, deleted, or updated.
+- Release tags (`v*`) are signed by the release bot and protected from force-push, deletion, or update. Published GitHub Releases are immutable after publication.
 - The repository default for the CI workflow token is read-only. Workflows that need write access (the release workflow's `contents: write`, `auto-label-issues.yml`'s `issues: write`, `freshness-check.yml`'s `issues: write`, and `docs-deploy.yml`'s `pages: write` + `id-token: write`) declare those scopes explicitly per job rather than inheriting a broad default.
 - Pulp is currently a **single-maintainer project**, so the governance settings are tuned to a "solo profile". Settings will be revisited if/when Pulp gains co-maintainers — see [CONTRIBUTING.md](CONTRIBUTING.md) for the current contract.
 

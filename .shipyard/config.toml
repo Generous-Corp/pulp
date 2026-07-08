@@ -247,4 +247,4 @@ max_push_attempts    = 5
 
 [release.post_tag_hook.bot_identity]
 name  = "pulp-release-bot"
-email = "pulp-release-bot@users.noreply.github.com"
+email = "25807+danielraffel@users.noreply.github.com"

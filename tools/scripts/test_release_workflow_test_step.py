@@ -51,8 +51,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SIGN_AND_RELEASE = REPO_ROOT / ".github" / "workflows" / "sign-and-release.yml"
 RELEASE_CLI = REPO_ROOT / ".github" / "workflows" / "release-cli.yml"
+RELEASE_PUBLISH = REPO_ROOT / ".github" / "workflows" / "release-publish.yml"
 RELEASE_PATH_PR_GATE = REPO_ROOT / ".github" / "workflows" / "release-path-pr-gate.yml"
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+AUTO_RELEASE = REPO_ROOT / ".github" / "workflows" / "auto-release.yml"
+INTENT_BUMP_ON_MERGE = REPO_ROOT / ".github" / "workflows" / "intent-bump-on-merge.yml"
+POST_TAG_SYNC = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
+RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bot_ssh_signing.sh"
 
 
 class SignAndReleaseNoTestGate(unittest.TestCase):
@@ -413,6 +418,122 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("_PULP_CLI_FONTCONFIG", run_block)
         self.assertIn("path.write_text(text", run_block)
         self.assertNotIn("package_analyzer_descriptors.cpp", run_block)
+
+
+class ReleasePublishChecksumGate(unittest.TestCase):
+    """release-publish.yml must generate SHA256SUMS before publishing."""
+
+    REQUIRED_RELEASE_ASSETS = [
+        "appcast.xml",
+        "pulp-darwin-arm64.tar.gz",
+        "pulp-linux-arm64.tar.gz",
+        "pulp-linux-x64.tar.gz",
+        "pulp-windows-arm64.zip",
+        "pulp-windows-x64.zip",
+        "pulp-sdk-darwin-arm64.tar.gz",
+        "pulp-sdk-linux-arm64.tar.gz",
+        "pulp-sdk-linux-x64.tar.gz",
+        "pulp-sdk-windows-arm64.tar.gz",
+        "pulp-sdk-windows-x64.tar.gz",
+    ]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = RELEASE_PUBLISH.read_text(encoding="utf-8")
+
+    def test_publish_coordinator_generates_and_uploads_sha256sums(self) -> None:
+        generate = "release_checksum_manifest.py generate"
+        verify = "release_checksum_manifest.py verify"
+        upload = "gh release upload \"${TAG}\" release-assets/SHA256SUMS"
+        publish = "gh release edit \"${TAG}\""
+
+        self.assertIn(generate, self.text)
+        self.assertIn(verify, self.text)
+        self.assertIn(upload, self.text)
+        self.assertIn(publish, self.text)
+        self.assertLess(self.text.index(generate), self.text.index(publish))
+        self.assertLess(self.text.index(verify), self.text.index(publish))
+        self.assertLess(self.text.index(upload), self.text.index(publish))
+        self.assertIn("--exact-required", self.text)
+
+    def test_publish_coordinator_requires_every_user_facing_release_asset(self) -> None:
+        for asset in self.REQUIRED_RELEASE_ASSETS:
+            self.assertIn(asset, self.text)
+
+    def test_publish_coordinator_downloads_existing_draft_assets(self) -> None:
+        self.assertIn("actions/checkout@v5", self.text)
+        self.assertNotIn("ref: ${{ github.event.workflow_run.head_sha }}", self.text)
+        self.assertIn("gh release download \"${TAG}\"", self.text)
+        self.assertIn("--dir release-assets", self.text)
+
+
+class ReleaseArtifactAttestations(unittest.TestCase):
+    """Release workflows should emit build provenance attestations."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.release_cli = RELEASE_CLI.read_text(encoding="utf-8")
+        cls.sign_and_release = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+
+    def test_release_cli_attests_cli_and_sdk_archives(self) -> None:
+        self.assertIn("id-token: write", self.release_cli)
+        self.assertIn("attestations: write", self.release_cli)
+        self.assertIn("name: Attest CLI and SDK artifacts", self.release_cli)
+        self.assertIn("uses: actions/attest@v4", self.release_cli)
+        self.assertIn("pulp-${{ matrix.platform }}.*", self.release_cli)
+        self.assertIn("pulp-sdk-${{ matrix.platform }}.*", self.release_cli)
+
+    def test_sign_and_release_attests_appcast(self) -> None:
+        self.assertIn("id-token: write", self.sign_and_release)
+        self.assertIn("attestations: write", self.sign_and_release)
+        self.assertIn("name: Attest appcast", self.sign_and_release)
+        self.assertIn("uses: actions/attest@v4", self.sign_and_release)
+        self.assertIn("subject-path: artifacts/appcast.xml", self.sign_and_release)
+
+
+class ReleaseBotSshSigning(unittest.TestCase):
+    """Automation-created release refs must be signed by the release bot."""
+
+    BOT_EMAIL = "25807+danielraffel@users.noreply.github.com"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.auto_release = AUTO_RELEASE.read_text(encoding="utf-8")
+        cls.intent_bump = INTENT_BUMP_ON_MERGE.read_text(encoding="utf-8")
+        cls.post_tag_sync = POST_TAG_SYNC.read_text(encoding="utf-8")
+        cls.helper = RELEASE_SIGNING_HELPER.read_text(encoding="utf-8")
+
+    def test_signing_helper_requires_release_bot_private_key_secret(self) -> None:
+        self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY:?RELEASE_BOT_SSH_SIGNING_KEY", self.helper)
+        self.assertIn("git config --global gpg.format ssh", self.helper)
+        self.assertIn("git config --global user.signingkey", self.helper)
+        self.assertIn("git config --global commit.gpgsign true", self.helper)
+        self.assertIn("git config --global tag.gpgSign true", self.helper)
+        self.assertIn(self.BOT_EMAIL, self.helper)
+
+    def test_auto_release_signs_version_tags(self) -> None:
+        self.assertIn("name: Configure release bot SSH signing", self.auto_release)
+        self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.auto_release)
+        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.auto_release)
+        self.assertIn(f'git config user.email "{self.BOT_EMAIL}"', self.auto_release)
+        self.assertIn('git tag -s "$tag"', self.auto_release)
+        self.assertNotIn('git tag -a "$tag"', self.auto_release)
+        self.assertLess(
+            self.auto_release.index("name: Configure release bot SSH signing"),
+            self.auto_release.index("name: Create tags for moved surfaces"),
+        )
+
+    def test_intent_bump_commits_are_signed(self) -> None:
+        self.assertIn("name: Configure release bot SSH signing", self.intent_bump)
+        self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.intent_bump)
+        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.intent_bump)
+        self.assertIn(f'git config user.email "{self.BOT_EMAIL}"', self.intent_bump)
+        self.assertIn('git commit -S -m "chore: bump versions"', self.intent_bump)
+
+    def test_post_tag_sync_commits_use_signed_bot_identity(self) -> None:
+        self.assertIn("name: Configure release bot SSH signing", self.post_tag_sync)
+        self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.post_tag_sync)
+        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
 
 
 class ReleaseCliLatestPointer(unittest.TestCase):

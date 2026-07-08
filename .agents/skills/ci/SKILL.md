@@ -440,6 +440,15 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   build/packaging/appcast-generation regression surfaces BEFORE a real tag.
   Keep it credential-free (notarize/sign stay in the real path) so it can run
   on a schedule without secrets.
+- **Release-bot source refs must be SSH-signed.** `auto-release.yml` creates
+  signed annotated `v*` tags with `git tag -s`, and the bot commit workflows
+  (`intent-bump-on-merge.yml`, `post-tag-sync.yml`) configure the same SSH
+  signing helper before committing. The required Actions secret is
+  `RELEASE_BOT_SSH_SIGNING_KEY`; it is a file-backed OpenSSH private key backed
+  up outside the repo. The workflow uses `25807+danielraffel@users.noreply.github.com`
+  because GitHub verifies SSH signatures against the account that owns the
+  uploaded signing key. If this secret is absent, the signing setup must fail
+  closed rather than create unsigned release tags or bot commits.
 - **Release-runner Xcode must be pinned (C++20 parity).** `sign-and-release.yml`
   runs on GitHub-hosted `macos-14`, whose DEFAULT Xcode is 15.4 — its Apple clang
   lacks C++20 **P0960** (parenthesized aggregate init, `Type p(arg)` for a
