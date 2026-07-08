@@ -70,9 +70,12 @@ pulp_add_test_suite(pulp-test-signal-graph-offline-parity
 # frozen plan through the SAME GraphRuntimeExecutor::process_routed as the live
 # graph, so its output is bit-identical for the lowerable subset; non-lowerable
 # graphs are refused loudly.
+pulp_add_test_suite(pulp-test-baked-codec
+    SOURCES test_baked_codec.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::runtime)
 pulp_add_test_suite(pulp-test-baked-graph-processor-parity
     SOURCES test_baked_graph_processor_parity.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph)
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::runtime)
 # Parallel SignalGraph plugin bindings must not share fallback MIDI/parameter
 # scratch when the routed executor runs same-level Plugin nodes concurrently.
 pulp_add_test_suite(pulp-test-signal-graph-parallel-plugin-scratch

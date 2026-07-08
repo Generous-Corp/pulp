@@ -20,6 +20,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
 #include <array>
@@ -549,4 +550,102 @@ TEST_CASE("bake refuses a non-lowerable or transport-sensitive Custom node",
         REQUIRE_FALSE(r.accepted);
         REQUIRE(r.reason == LowerRejectReason::CustomTransportNotLowerable);
     }
+}
+
+TEST_CASE("A signed .pulpbake round-trips to a bit-identical baked Processor",
+          "[host][graph][bake][codec][parity]") {
+    // Full on-disk round-trip: live graph -> bake_to_plan -> write_baked_signed ->
+    // load_baked (verify + rebuild + re-bake) must reproduce the live graph exactly,
+    // and an untrusted signer must be refused at load.
+    SignalGraph g;
+    CustomNodeType t;
+    t.type_id = "bakegain";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.lowerable = true;
+    t.process = [](pulp::audio::BufferView<float>& out,
+                   const pulp::audio::BufferView<const float>& in, int n) {
+        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t c = 0; c < chs; ++c) {
+            const float* i = in.channel_ptr(c);
+            float* o = out.channel_ptr(c);
+            for (int k = 0; k < n; ++k)
+                o[static_cast<std::size_t>(k)] = 0.5f * i[static_cast<std::size_t>(k)];
+        }
+    };
+    REQUIRE(g.register_custom_node_type(t));
+    const auto in = g.add_input_node(1, "In");
+    const auto cn = g.add_custom_node("bakegain", 1, "C");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(in, 0, cn, 0));
+    REQUIRE(g.connect(cn, 0, out, 0));
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+
+    const auto plan = pulp::host::bake_to_plan(g);
+    REQUIRE(plan.accepted);
+    REQUIRE(plan.plan.has_value());
+
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(i + 7);
+    const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(kp.has_value());
+    const auto bytes = pulp::host::write_baked_signed(*plan.plan, kp->private_key);
+    REQUIRE_FALSE(bytes.empty());
+
+    pulp::host::BakedTrust trust;
+    trust.trusted_public_keys.push_back(kp->public_key);
+    auto r = pulp::host::load_baked(bytes, trust, {t});
+    REQUIRE(r.accepted);
+    REQUIRE(r.processor);
+    r.processor->prepare(make_prepare_ctx(1));
+
+    float peak = 0.0f;
+    for (int blk = 0; blk < 4; ++blk) {
+        INFO("block " << blk);
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.6f + 0.05f * static_cast<float>(blk))};
+        const auto live = run_graph(g, kFrames, input, 1);
+        const auto baked = run_baked(*r.processor, kFrames, input, 1);
+        expect_equal(live, baked);
+        for (float s : baked[0]) peak = std::max(peak, std::fabs(s));
+    }
+    CHECK(peak > 0.1f);
+
+    // Untrusted signer (empty trust set) is refused at the envelope stage.
+    const auto rejected = pulp::host::load_baked(bytes, pulp::host::BakedTrust{}, {t});
+    CHECK_FALSE(rejected.accepted);
+    CHECK(rejected.reason == LowerRejectReason::CodecRejected);
+}
+
+TEST_CASE("load_baked refuses a signed plan whose Custom node carries state",
+          "[host][graph][bake][codec]") {
+    // The stateless-only v1 restriction: even a validly-signed plan with a small,
+    // in-cap custom_state must be refused at the LOAD path, never silently loaded.
+    pulp::host::BakedPlan plan;
+    plan.input_channels = 1;
+    plan.output_channels = 1;
+    pulp::host::BakedPlan::Node cn;
+    cn.id = 1;
+    cn.type = pulp::host::NodeType::Custom;
+    cn.num_input_ports = 1;
+    cn.num_output_ports = 1;
+    cn.custom_type_id = "x";
+    cn.custom_version = 1;
+    cn.custom_state = {0xDE, 0xAD, 0xBE, 0xEF};  // small, in-cap, non-empty
+    plan.nodes.push_back(std::move(cn));
+
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(i + 11);
+    const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(kp.has_value());
+    const auto bytes = pulp::host::write_baked_signed(plan, kp->private_key);
+    REQUIRE_FALSE(bytes.empty());
+    pulp::host::BakedTrust trust;
+    trust.trusted_public_keys.push_back(kp->public_key);
+
+    const auto r = pulp::host::load_baked(bytes, trust, {});
+    CHECK_FALSE(r.accepted);
+    CHECK(r.reason == LowerRejectReason::StatefulCustomNotYetLoadable);
 }
