@@ -121,10 +121,10 @@ TEST_CASE("VirtualList keeps out-of-range scroll target pending while row count 
 
 TEST_CASE("VirtualList recycles stable row identities while rebinding indices",
           "[view][virtual-list]") {
-    VirtualList list;
     int destructs = 0;
     int creates = 0;
     std::map<const View*, std::size_t> bound;
+    VirtualList list;
     list.set_bounds({0, 0, 300, 100});
     list.set_row_height(10);
     list.set_overscan(2);
