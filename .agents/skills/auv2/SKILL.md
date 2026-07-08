@@ -510,3 +510,16 @@ channel pointer (a bus can report channels with null buffers).
   before returning. Without it, MIDI received while bypassed accumulated and
   flooded the processor with stale notes/CCs the instant bypass turned off.
   A bypassed plugin is a wire — inbound MIDI is dropped with the block.
+
+## Driving PulpAUInstrument::Render in a headless RT test
+
+`test/test_au_v2_instrument_rt.mm` proves the instrument render path is
+allocation/lock-free (`pulp::test::ScopedRtProcessProbe`, trap build). Gotcha: a
+directly-constructed `AUBase` never runs the SDK dispatch's
+`PostConstructorInternal()`, so a test must, in order: `CreateElements()`, set the
+output element's `SetStreamFormat` + `MaximumFramesPerSlice`, then **`DoInitialize()`
+— NOT the bare virtual `Initialize()`** (`DoInitialize` is what allocates the IO
+buffer and flips the initialized flag). The FIRST `Render` is warm-up (one-time
+IO-buffer alloc) and must run OUTSIDE the probe; measure a steady-state block. The
+`ScopedNoAlloc` around the instrument `process()` is a no-op in Release (NDEBUG) —
+it only traps in the test/sanitizer build, same as every other placement.

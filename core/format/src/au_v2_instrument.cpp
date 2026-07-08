@@ -13,6 +13,7 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <array>
@@ -347,7 +348,14 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
         ProcessBusBufferSet<float>{std::span(output_buses)},
     };
 
-    processor_->process(process_buffers, midi_in, midi_out, ctx);
+    // Audio-thread render: the Processor's process() must neither allocate nor
+    // take a blocking lock. Bracket it in ScopedNoAlloc so the RT interposition
+    // guard (test/native_components/rt_intercept_test_support.cpp) traps any
+    // regression in test builds. Mirrors the AU-v2 effect adapter.
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        processor_->process(process_buffers, midi_in, midi_out, ctx);
+    }
 
     return noErr;
 }

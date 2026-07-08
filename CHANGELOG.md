@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06100"></a>
+## [0.610.0] - 2026-07-07
+
+- feat/test: RT-guard AU-v2 instrument + standalone render ([#5715](https://github.com/danielraffel/pulp/pull/5715))
+- feat(release): human, high-level release notes (strip jargon, fold noise, coalesce) ([#5709](https://github.com/danielraffel/pulp/pull/5709))
+
 <a id="v06091"></a>
 ## [0.609.1] - 2026-07-07
 
@@ -6075,6 +6081,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.610.0]: https://github.com/danielraffel/pulp/releases/tag/v0.610.0
 [0.609.1]: https://github.com/danielraffel/pulp/releases/tag/v0.609.1
 [0.609.0]: https://github.com/danielraffel/pulp/releases/tag/v0.609.0
 [0.608.0]: https://github.com/danielraffel/pulp/releases/tag/v0.608.0

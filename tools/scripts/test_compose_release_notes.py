@@ -95,8 +95,8 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         notes = self.compose("v0.2.0")
 
-        self.assertIn("## Highlights", notes)
-        self.assertIn("### ✨ Features", notes)
+        self.assertIn("### ✨ New", notes)
+        self.assertNotIn("## Highlights", notes)  # no wrapper heading anymore
         self.assertIn(
             "- Add mixer controls to the editor. "
             "([#12](https://github.com/example/repo/pull/12))",
@@ -123,13 +123,14 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         notes = self.compose("v0.2.0")
 
-        self.assertLess(notes.index("## ⚠️ Breaking Changes"), notes.index("## Highlights"))
+        self.assertIn("### ⚠️ Breaking changes", notes)
         self.assertIn(
             "- Move custom presets into the project store. "
             "([#13](https://github.com/example/repo/pull/13))",
             notes,
         )
-        self.assertNotIn("### 🐛 Fixes", notes)
+        # A breaking fix! lives in the breaking section, not under Fixed.
+        self.assertNotIn("### 🐛 Fixed", notes)
 
     def test_chore_entries_are_folded_and_bump_commits_are_skipped(self) -> None:
         git(self.repo, "checkout", "-q", "-b", "ci")
@@ -140,8 +141,9 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         notes = self.compose("v0.2.0")
 
-        self.assertIn("<details><summary>🔧 Chore & CI</summary>", notes)
-        self.assertIn("- ci: retry release upload", notes)
+        self.assertIn("<details><summary>🔧 Under the hood</summary>", notes)
+        self.assertIn("- Retry release upload", notes)  # jargon-stripped
+        self.assertNotIn("- ci: retry release upload", notes)
         self.assertNotIn("chore: bump versions", notes)
 
     def test_post_tag_changelog_regen_commits_are_skipped(self) -> None:
@@ -153,8 +155,9 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         notes = self.compose("v0.2.0")
 
-        self.assertIn("### 🐛 Fixes", notes)
-        self.assertIn("- fix(ui): keep toolbar visible", notes)
+        self.assertIn("### 🐛 Fixed", notes)
+        self.assertIn("- Keep toolbar visible", notes)  # jargon-stripped
+        self.assertNotIn("- fix(ui): keep toolbar visible", notes)
         self.assertNotIn("regenerate changelog", notes)
 
     def test_squash_style_subject_keeps_pr_link(self) -> None:
@@ -163,12 +166,13 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         notes = self.compose("v0.2.0")
 
-        self.assertIn("### ✨ Features", notes)
+        self.assertIn("### ✨ New", notes)
         self.assertIn(
-            "- feat(api): expose transport sync "
+            "- Expose transport sync "
             "([#16](https://github.com/example/repo/pull/16))",
             notes,
         )
+        self.assertNotIn("feat(api):", notes)  # prefix stripped
         self.assertNotIn("`", notes)
 
     def test_github_repo_slug_and_breaking_label_detection(self) -> None:
@@ -203,9 +207,9 @@ class ComposeReleaseNotesTests(unittest.TestCase):
         )
         return result.stdout
 
-    def test_patch_tier_emits_light_grouped_body_without_highlights_heading(self) -> None:
-        # v0.1.0 -> v0.1.1 is a patch delta; auto tier must drop the Highlights H2
-        # wrapper while keeping the grouped section headers + bullets.
+    def test_patch_tier_emits_light_body_and_strips_jargon(self) -> None:
+        # v0.1.0 -> v0.1.1 is a patch delta; auto tier keeps only the user-facing
+        # sections (no folded "Under the hood") and strips the commit prefix.
         git(self.repo, "checkout", "-q", "-b", "fixbranch")
         commit(self.repo, "fix(audio): correct gain ramp")
         merge_pr(self.repo, "fixbranch", 21, "fix(audio): correct gain ramp")
@@ -214,10 +218,11 @@ class ComposeReleaseNotesTests(unittest.TestCase):
         notes = self.compose("v0.1.1")
 
         self.assertNotIn("## Highlights", notes)
-        self.assertIn("### 🐛 Fixes", notes)
-        self.assertIn("fix(audio): correct gain ramp", notes)
+        self.assertIn("### 🐛 Fixed", notes)
+        self.assertIn("- Correct gain ramp", notes)  # jargon-stripped
+        self.assertNotIn("fix(audio):", notes)
 
-    def test_minor_tier_emits_full_highlights_heading(self) -> None:
+    def test_minor_tier_emits_user_facing_section(self) -> None:
         # v0.1.0 -> v0.2.0 is a minor delta; auto tier keeps the full shape.
         git(self.repo, "checkout", "-q", "-b", "featbranch")
         commit(self.repo, "feat(view): add scope")
@@ -226,8 +231,8 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         notes = self.compose("v0.2.0")
 
-        self.assertIn("## Highlights", notes)
-        self.assertIn("### ✨ Features", notes)
+        self.assertIn("### ✨ New", notes)
+        self.assertIn("- Add scope", notes)
 
     def test_patch_tier_still_renders_breaking_section(self) -> None:
         # A breaking change on a patch tag must still surface the ⚠️ section first.
@@ -242,18 +247,51 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         notes = self.compose_tier("v0.1.1", "patch")
 
-        self.assertIn("## ⚠️ Breaking Changes", notes)
+        self.assertIn("### ⚠️ Breaking changes", notes)
         self.assertNotIn("## Highlights", notes)
 
-    def test_explicit_tier_override_forces_full_body_on_patch_tag(self) -> None:
+    def test_explicit_tier_override_forces_under_the_hood_fold_on_patch_tag(self) -> None:
+        # A patch tag rendered as `minor` keeps the folded "Under the hood"
+        # section (patch would have dropped it).
         git(self.repo, "checkout", "-q", "-b", "ovr")
         commit(self.repo, "fix(ui): tweak spacing")
         merge_pr(self.repo, "ovr", 24, "fix(ui): tweak spacing")
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "checkout", "-q", "-b", "ovr-chore")
+        commit(self.repo, "ci: bump runner image")
+        merge_pr(self.repo, "ovr-chore", 25, "ci: bump runner image")
         git(self.repo, "tag", "v0.1.1")
 
         notes = self.compose_tier("v0.1.1", "minor")
 
-        self.assertIn("## Highlights", notes)
+        self.assertIn("### 🐛 Fixed", notes)
+        self.assertIn("<details><summary>🔧 Under the hood</summary>", notes)
+
+    def test_repeated_titles_coalesce_into_one_line(self) -> None:
+        # Many near-identical mechanical PRs fold into a single line.
+        for i, n in enumerate((30, 31, 32, 33)):
+            git(self.repo, "checkout", "-q", "main")
+            git(self.repo, "checkout", "-q", "-b", f"reg{n}")
+            commit(self.repo, f"refactor: split WidgetBridge registrar part {i}")
+            merge_pr(self.repo, f"reg{n}", n, f"refactor: split WidgetBridge registrar part {i}")
+        git(self.repo, "tag", "v0.2.0")
+
+        notes = self.compose("v0.2.0")
+
+        # One coalesced line, not four; and it names the shared lead phrase.
+        self.assertIn("— and 3 more", notes)
+        self.assertIn("Split WidgetBridge", notes)
+        self.assertEqual(notes.count("Split WidgetBridge"), 1)
+
+    def test_humanize_strips_prefix_and_pr_number(self) -> None:
+        self.assertEqual(crn.humanize("feat(view): add scope"), "Add scope")
+        self.assertEqual(crn.humanize("fix!: drop legacy path"), "Drop legacy path")
+        self.assertEqual(crn.humanize("refactor: split bridge (#123)"), "Split bridge")
+        # An already-human Release-Note line is left essentially intact.
+        self.assertEqual(
+            crn.humanize("Add mixer controls to the editor."),
+            "Add mixer controls to the editor.",
+        )
 
     def test_bump_level_classifies_semver_deltas(self) -> None:
         self.assertEqual(crn.bump_level("v0.1.1", "v0.1.0"), "patch")

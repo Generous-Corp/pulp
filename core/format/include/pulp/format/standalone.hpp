@@ -211,6 +211,25 @@ private:
     // Processor out from under an editor ViewBridge holding a Processor&.
     void stop_audio_keep_processor();
 
+    // Device-independent render-state preparation: sizes the processor and every
+    // audio-thread scratch buffer / probe to `max_callback_block_`. Factored out
+    // of start() (which calls it after the device refreshes config_) so a test
+    // can prepare a StandaloneApp for a render without opening real hardware.
+    void prepare_render_state();
+
+    // The body of the audio device callback, hoisted verbatim out of the start()
+    // lambda so it is reachable off the device thread. Drives one block: MIDI
+    // drain, transport derivation, and the ScopedNoAlloc-guarded
+    // Processor::process(). RT-safe once prepare_render_state() has run.
+    void render_audio_block(const audio::BufferView<const float>& input,
+                            audio::BufferView<float>& output,
+                            const audio::CallbackContext& ctx);
+
+    // Test-only accessor (defined in test/test_standalone_rt.cpp) that drives
+    // prepare_render_state() + render_audio_block() headlessly to assert the
+    // render path is allocation/lock-free. Mirrors the @internal hook precedent.
+    friend struct StandaloneRenderTestAccess;
+
     ProcessorFactory factory_;
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;

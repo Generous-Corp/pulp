@@ -2209,3 +2209,15 @@ present, else the tier-0 default `tier0_default_build_jobs()` =
 `make -j`): honor an explicit `PULP_BUILD_JOBS` if set, else fall back to
 `tier0_default_build_jobs()`. `build_parallelism_guard.py` fails CI on a bare
 `--parallel`/`-j` anywhere under `tools/cli/`.
+
+## Standalone render seam for headless RT / audio tests
+
+`StandaloneApp`'s device-callback body lives in a private
+`render_audio_block(input, output, ctx)` (the device lambda is a one-line
+wrapper), and the device-independent buffer/probe prep is split into
+`prepare_render_state()`. A test can therefore drive the exact render path
+WITHOUT opening a real audio device — `prepare_render_state()` then
+`render_audio_block(...)` via `friend struct StandaloneRenderTestAccess` (see
+`test/test_standalone_rt.cpp`, which asserts the path is allocation/lock-free
+under the RT trap build). Keep the extraction behavior-preserving — the full
+standalone suite (start/apply-config/transport) is the regression gate.
