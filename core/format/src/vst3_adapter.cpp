@@ -1722,10 +1722,14 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // plugin-side changes and report them to the host for automation recording
     auto all_params = store_.all_params();
     param_snapshot_.resize(all_params.size());
+    output_param_has_event_.assign(all_params.size(), 0);
+    output_param_queue_cache_.assign(all_params.size(), nullptr);
     for (std::size_t i = 0; i < all_params.size(); ++i) {
         param_snapshot_[i] = store_.get_value(all_params[i].id);
     }
     processor_->set_param_events(&param_events_);
+    output_param_events_.clear();
+    processor_->set_output_param_events(&output_param_events_);
 
     // MPE sidecar: run the (sorted) inbound MIDI — note on/off plus the
     // channel-wide messages synthesized from kNoteExpressionValueEvent above —
@@ -1785,10 +1789,54 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // output-change scan below so the host records the auto-reset as automation.
     store_.reset_triggers_rt();
 
-    // Write parameter output changes — lets the host record automation
-    // from parameter changes made by the plugin during process()
+    // Write parameter output changes — lets the host record automation from
+    // parameter changes the plugin made during process(). Two sources, drained
+    // in this order:
+    //   1. Sample-accurate explicit events the processor pushed via
+    //      push_output_param_event(), emitted at their exact sample offset.
+    //   2. A before/after snapshot diff — the coarse fallback for plugins that
+    //      change a param through the store without pushing explicit events.
+    // A parameter that emitted explicit events (1) is skipped in (2) so it is
+    // not double-reported with a stale offset-0 point. Both passes are
+    // allocation-free: the skip-set, the per-parameter VST3 queue cache, and the
+    // event queue are all pre-sized off the audio thread at block start.
     if (data.outputParameterChanges) {
+        // (1) Sample-accurate explicit output events. Global-sort by offset so a
+        // parameter's multiple points land in ascending order in its VST3 queue
+        // (VST3 requires per-queue ascending sample offsets).
+        output_param_events_.sort();
+        const int32 last_frame = data.numSamples > 0 ? data.numSamples - 1 : 0;
+        for (const auto& ev : output_param_events_) {
+            std::size_t idx = all_params.size();
+            for (std::size_t i = 0; i < all_params.size(); ++i) {
+                if (all_params[i].id == ev.param_id) { idx = i; break; }
+            }
+            if (idx == all_params.size()) continue;  // unknown param — drop
+            int32 offset = ev.sample_offset;
+            if (offset < 0) offset = 0;
+            if (offset > last_frame) offset = last_frame;  // clamp into the block
+            auto*& queue = output_param_queue_cache_[idx];
+            if (!queue) {
+                int32 qi = 0;
+                queue = data.outputParameterChanges->addParameterData(
+                    static_cast<ParamID>(ev.param_id), qi);
+            }
+            if (queue) {
+                int32 pt_index = 0;
+                float normalized = all_params[idx].range.normalize(ev.value);
+                queue->addPoint(offset, static_cast<ParamValue>(normalized), pt_index);
+            }
+            output_param_has_event_[idx] = 1;
+        }
+        // (2) Snapshot-diff fallback, skipping params already reported in (1).
         for (std::size_t i = 0; i < all_params.size(); ++i) {
+            if (output_param_has_event_[i]) {
+                // Keep the VST3 parameter system synced to the final value even
+                // though we reported the sample-accurate points above.
+                setParamNormalized(static_cast<ParamID>(all_params[i].id),
+                                   static_cast<ParamValue>(store_.get_normalized(all_params[i].id)));
+                continue;
+            }
             float current = store_.get_value(all_params[i].id);
             if (std::memcmp(&current, &param_snapshot_[i], sizeof(float)) != 0) {
                 int32 index = 0;
