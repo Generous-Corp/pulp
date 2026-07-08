@@ -13,10 +13,11 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
 
-### Verification
+<details>
+<summary><strong>Verification</strong> (optional checks, click to expand)</summary>
 
-As an additional layer of security, download the shell installer and verify its
-SHA-256 checksum before running it:
+As an additional layer of security, you can download the shell installer and
+verify its SHA-256 checksum before running it:
 
 ```bash
 curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
@@ -25,12 +26,13 @@ curl -fsSL https://raw.githubusercontent.com/danielraffel/pulp/main/tools/instal
 sh install.sh
 ```
 
-This matters because `curl | sh` is convenient but trust-heavy. The verified
-path lets you download the script, prove it matches Pulp's published checksum,
-inspect it if you want, then run it.
+The checksum confirms that the `install.sh` you downloaded matches the script
+Pulp publishes in source control. It does not replace reading a network script
+before running it, but it avoids executing bytes that differ from the published
+checksum.
 
 GitHub's release verification can also check immutable releases and downloaded
-release assets:
+release assets. This path requires the GitHub CLI:
 
 ```bash
 version=0.614.0
@@ -47,7 +49,9 @@ Pulp published. Neither replaces reading code you are about to execute, but
 together they make the source identity and downloaded artifact integrity much
 clearer.
 
-Then:
+</details>
+
+## Create your first plugin
 
 ```bash
 pulp create my-plugin && cd my-plugin && pulp run
@@ -55,7 +59,13 @@ pulp create my-plugin && cd my-plugin && pulp run
 
 Three commands from zero to a working native plugin for your platform.
 
-The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use **Claude Code**, you can additionally install the [Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin) for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP server:
+### Optional: install the Claude Code plugin
+
+The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use
+**Claude Code**, you can additionally install the
+[Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin)
+for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP
+server:
 
 ```bash
 claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
