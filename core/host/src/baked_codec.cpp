@@ -1,6 +1,10 @@
 #include <pulp/host/baked_codec.hpp>
 
+#include <pulp/runtime/crypto.hpp>
+
+#include <algorithm>
 #include <cstring>
+#include <string_view>
 #include <unordered_map>
 
 namespace pulp::host {
@@ -183,6 +187,132 @@ std::optional<BakedPlan> parse_plan_bounded(std::span<const std::uint8_t> bytes)
 
     if (!r.at_end()) return std::nullopt;  // trailing garbage
     return plan;
+}
+
+namespace {
+
+constexpr std::string_view kBakedMagic = "PULPBAKE";           // 8 bytes
+constexpr std::string_view kBakedSigDomain = "PULPBAKE-sig-v1";  // domain separation
+
+// The domain-separated message the Ed25519 signature covers. Binding the tag +
+// versions + ext_len + plan_len + plan_sha256 means a tampered plan (hash), an
+// altered version, or a changed length all break verification — not just a swapped
+// plan body. The hash stands in for the plan bytes (checked separately at load).
+std::vector<std::uint8_t> build_canonical_message(std::uint32_t format_version,
+                                                  std::uint32_t schema_version,
+                                                  std::uint32_t ext_len,
+                                                  std::uint32_t plan_len,
+                                                  const std::vector<std::uint8_t>& plan_sha256) {
+    std::vector<std::uint8_t> m;
+    m.insert(m.end(), kBakedSigDomain.begin(), kBakedSigDomain.end());
+    put_u32(m, format_version);
+    put_u32(m, schema_version);
+    put_u32(m, ext_len);
+    put_u32(m, plan_len);
+    m.insert(m.end(), plan_sha256.begin(), plan_sha256.end());
+    return m;
+}
+
+}  // namespace
+
+std::vector<std::uint8_t> write_baked_signed(const BakedPlan& plan,
+                                             std::span<const std::uint8_t> private_key_64) {
+    if (private_key_64.size() != runtime::ed25519_private_key_size) return {};
+    const auto plan_bytes = serialize_plan(plan);
+    if (plan_bytes.size() > kBakedMaxPlanBytes) return {};
+
+    const auto plan_sha = runtime::sha256(plan_bytes.data(), plan_bytes.size());
+    if (plan_sha.size() != 32) return {};
+    const std::uint32_t ext_len = 0;  // reserved for v1
+    const auto canonical = build_canonical_message(
+        static_cast<std::uint32_t>(kBakedPlanFormatVersion),
+        static_cast<std::uint32_t>(kBakedManifestSchemaVersion), ext_len,
+        static_cast<std::uint32_t>(plan_bytes.size()), plan_sha);
+    const auto sig = runtime::ed25519_sign(private_key_64.data(), private_key_64.size(),
+                                           canonical.data(), canonical.size());
+    if (!sig || sig->size() != runtime::ed25519_signature_size) return {};
+    // NaCl secret key is seed(32) || public_key(32); the public half is embedded.
+    const std::uint8_t* public_key = private_key_64.data() + runtime::ed25519_seed_size;
+
+    std::vector<std::uint8_t> manifest;
+    put_u32(manifest, static_cast<std::uint32_t>(kBakedPlanFormatVersion));
+    put_u32(manifest, static_cast<std::uint32_t>(kBakedManifestSchemaVersion));
+    put_u32(manifest, ext_len);
+    put_u32(manifest, static_cast<std::uint32_t>(plan_bytes.size()));
+    put_bytes(manifest, plan_sha.data(), plan_sha.size());
+    put_bytes(manifest, public_key, runtime::ed25519_public_key_size);
+    put_bytes(manifest, sig->data(), sig->size());
+
+    std::vector<std::uint8_t> out;
+    put_bytes(out, reinterpret_cast<const std::uint8_t*>(kBakedMagic.data()), kBakedMagic.size());
+    put_u32(out, static_cast<std::uint32_t>(manifest.size()));
+    put_u32(out, static_cast<std::uint32_t>(plan_bytes.size()));
+    put_bytes(out, manifest.data(), manifest.size());
+    put_bytes(out, plan_bytes.data(), plan_bytes.size());
+    return out;
+}
+
+std::optional<BakedPlan> verify_and_extract_plan(std::span<const std::uint8_t> bytes,
+                                                 const BakedTrust& trust) {
+    Reader r{bytes.data(), bytes.size()};
+    for (char c : kBakedMagic) {
+        if (r.u8() != static_cast<std::uint8_t>(c)) return std::nullopt;
+    }
+    const std::uint32_t manifest_len = r.u32();
+    const std::uint32_t plan_len = r.u32();
+    if (!r.ok || manifest_len > kBakedManifestMaxBytes || plan_len > kBakedMaxPlanBytes) {
+        return std::nullopt;
+    }
+    if (!r.have(manifest_len)) return std::nullopt;
+
+    // Parse the fixed v1 manifest through a sub-reader bounded to manifest_len, so a
+    // short/oversized manifest can never read into the plan region.
+    Reader m{bytes.data() + r.pos, manifest_len};
+    r.pos += manifest_len;
+    const std::uint32_t fmt = m.u32();
+    const std::uint32_t schema = m.u32();
+    const std::uint32_t ext_len = m.u32();
+    const std::uint32_t m_plan_len = m.u32();
+    if (!m.ok || fmt < 1 || fmt > static_cast<std::uint32_t>(kBakedPlanFormatVersion) ||
+        schema != static_cast<std::uint32_t>(kBakedManifestSchemaVersion) || ext_len != 0 ||
+        m_plan_len != plan_len) {
+        return std::nullopt;
+    }
+    std::vector<std::uint8_t> plan_sha(32), public_key(32), signature(64);
+    for (auto& b : plan_sha) b = m.u8();
+    for (auto& b : public_key) b = m.u8();
+    for (auto& b : signature) b = m.u8();
+    if (!m.ok || !m.at_end()) return std::nullopt;  // manifest must be exactly consumed
+
+    // Signer must be trusted BEFORE we spend a verify on attacker-chosen bytes.
+    const bool trusted = std::any_of(
+        trust.trusted_public_keys.begin(), trust.trusted_public_keys.end(),
+        [&](const std::vector<std::uint8_t>& k) {
+            return k.size() == public_key.size() &&
+                   std::equal(k.begin(), k.end(), public_key.begin());
+        });
+    if (!trusted) return std::nullopt;
+
+    const auto canonical =
+        build_canonical_message(fmt, schema, ext_len, plan_len, plan_sha);
+    if (!runtime::ed25519_verify(public_key.data(), public_key.size(), signature.data(),
+                                 signature.size(), canonical.data(), canonical.size())) {
+        return std::nullopt;
+    }
+
+    if (!r.have(plan_len)) return std::nullopt;
+    std::span<const std::uint8_t> plan_span(bytes.data() + r.pos, plan_len);
+    r.pos += plan_len;
+    if (!r.at_end()) return std::nullopt;  // trailing garbage past the plan
+
+    // Signature is authentic and binds this hash; confirm the bytes match it, THEN
+    // parse. No plan byte has been interpreted before this point.
+    const auto actual_sha = runtime::sha256(plan_span.data(), plan_span.size());
+    if (actual_sha.size() != plan_sha.size() ||
+        !std::equal(actual_sha.begin(), actual_sha.end(), plan_sha.begin())) {
+        return std::nullopt;
+    }
+    return parse_plan_bounded(plan_span);
 }
 
 }  // namespace pulp::host

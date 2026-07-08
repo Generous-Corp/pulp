@@ -5,7 +5,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/host/baked_codec.hpp>
+#include <pulp/runtime/crypto.hpp>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -75,5 +77,50 @@ TEST_CASE("parse_plan_bounded rejects malformed / over-cap plan bytes",
         BakedPlan p = sample_plan();
         p.connections.push_back({999, 0, 4, 0, false});
         CHECK_FALSE(parse_plan_bounded(serialize_plan(p)).has_value());
+    }
+}
+
+TEST_CASE("signed .pulpbake round-trips under trust and rejects every tamper",
+          "[host][bake][codec][security]") {
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(i + 1);
+    const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(kp.has_value());
+
+    const BakedPlan plan = sample_plan();
+    const auto bytes = pulp::host::write_baked_signed(plan, kp->private_key);
+    REQUIRE_FALSE(bytes.empty());
+
+    pulp::host::BakedTrust trust;
+    trust.trusted_public_keys.push_back(kp->public_key);
+
+    SECTION("trusted round-trip is bit-identical") {
+        const auto got = pulp::host::verify_and_extract_plan(bytes, trust);
+        REQUIRE(got.has_value());
+        CHECK(*got == plan);
+    }
+    SECTION("untrusted signer (empty trust) -> nullopt") {
+        CHECK_FALSE(pulp::host::verify_and_extract_plan(bytes, pulp::host::BakedTrust{}).has_value());
+    }
+    SECTION("tampered plan byte -> nullopt (hash mismatch, before parse)") {
+        auto b = bytes;
+        b.back() ^= 0xFF;  // last byte is in the plan region
+        CHECK_FALSE(pulp::host::verify_and_extract_plan(b, trust).has_value());
+    }
+    SECTION("tampered signature -> nullopt") {
+        auto b = bytes;
+        // Prelude is 16 bytes (magic8 + manifest_len4 + plan_len4); the v1 manifest is
+        // 144 bytes and ends with the 64-byte signature.
+        b[16 + 144 - 1] ^= 0xFF;
+        CHECK_FALSE(pulp::host::verify_and_extract_plan(b, trust).has_value());
+    }
+    SECTION("truncated envelope -> nullopt") {
+        std::vector<std::uint8_t> t(bytes.begin(), bytes.begin() + bytes.size() / 2);
+        CHECK_FALSE(pulp::host::verify_and_extract_plan(t, trust).has_value());
+    }
+    SECTION("bad magic -> nullopt") {
+        auto b = bytes;
+        b[0] ^= 0xFF;
+        CHECK_FALSE(pulp::host::verify_and_extract_plan(b, trust).has_value());
     }
 }
