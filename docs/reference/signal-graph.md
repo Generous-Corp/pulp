@@ -238,6 +238,13 @@ replacement is fully ready does the graph publish the new arrangement in a
 single atomic step, so the audio callback always reads either the complete
 old arrangement or the complete new one, never a half-built or empty one.
 
+The swap is also **click-free**: for a short window (`fade_ms`) after the
+change the node briefly runs both the old and the new instance and
+crossfades one into the other along `curve`, so even when the two produce
+different output the listener hears a smooth blend rather than a step at the
+boundary. (`fade_ms = 0` disables the fade for an instant switch.) The old
+instance is released on a non-audio thread once the fade has finished.
+
 This is not the same as [DSP hot-reload](../guides/dsp-hot-reload.md). Live
 swap loads no new code: it only rearranges plugins the machine already
 installed and already trusts, so it needs no signing or trust model.
@@ -253,8 +260,8 @@ installed and already trusts, so it needs no signing or trust model.
    `NodeLiveSwapPolicy::allow_live_instance_swap = true`. Opt-in is **off by
    default** — a node never swaps unless the host asks for it. The policy
    also carries a CPU-headroom limit (`headroom_threshold`), a cap on how
-   much plugin state may be carried across (`max_state_bytes`), the intended
-   fade length and shape (`fade_ms`, `curve`), and an optional
+   much plugin state may be carried across (`max_state_bytes`), the crossfade
+   length and shape (`fade_ms`, `curve`), and an optional
    `on_instance_swapped` observer the graph calls after a successful swap so
    the host can retire the old instance.
 3. **Stage and publish.** Open a transaction with `begin_swap_edit()`, stage
