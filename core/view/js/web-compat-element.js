@@ -79,6 +79,8 @@ var __widgetTagFactory__ = {
     listbox:  function(id) { createListBox(id, ""); },
     virtuallist: function(id) { createVirtualList(id, ""); },
     "virtual-list": function(id) { createVirtualList(id, ""); },
+    virtualgrid: function(id) { createVirtualGrid(id, ""); },
+    "virtual-grid": function(id) { createVirtualGrid(id, ""); },
     icon:     function(id) { createIcon(id, "image_upload", ""); },
     'native-view': function(id) { createNativeView(id, ""); }
 };

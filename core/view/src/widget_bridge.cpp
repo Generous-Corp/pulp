@@ -11,6 +11,7 @@
 #include <pulp/view/modal.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/virtual_list.hpp>
+#include <pulp/view/virtual_grid.hpp>
 #include <web_compat_preludes_gen.hpp>
 #include <thread>
 #include <chrono>
@@ -675,6 +676,8 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<ListBox>();
     } else if (tag == "virtuallist" || tag == "virtual-list") {
         w = std::make_unique<VirtualList>();
+    } else if (tag == "virtualgrid" || tag == "virtual-grid") {
+        w = std::make_unique<VirtualGrid>();
     } else if (tag == "icon") {
         w = std::make_unique<Icon>();
     } else if (tag == "progress") {

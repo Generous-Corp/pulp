@@ -15,6 +15,7 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/virtual_list.hpp>
+#include <pulp/view/virtual_grid.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #if __has_include(<pulp/render/gpu_surface.hpp>)
@@ -604,6 +605,8 @@ inline std::vector<WidgetTagCase> widget_tag_cases() {
         {"listbox",  [](View* w){ return dynamic_cast<ListBox*>(w) != nullptr; },      "ListBox"},
         {"virtuallist", [](View* w){ return dynamic_cast<VirtualList*>(w) != nullptr; }, "VirtualList"},
         {"virtual-list", [](View* w){ return dynamic_cast<VirtualList*>(w) != nullptr; }, "VirtualList"},
+        {"virtualgrid", [](View* w){ return dynamic_cast<VirtualGrid*>(w) != nullptr; }, "VirtualGrid"},
+        {"virtual-grid", [](View* w){ return dynamic_cast<VirtualGrid*>(w) != nullptr; }, "VirtualGrid"},
         {"icon",     [](View* w){ return dynamic_cast<Icon*>(w) != nullptr; },         "Icon"},
         // HTML aliases that must ALSO route on both surfaces (these were the
         // tags missing specifically from __domAppend before the sweep):
