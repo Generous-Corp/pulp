@@ -154,6 +154,12 @@ ignore:
   - "**/gpu_surface_dawn.cpp"
   - "**/skia_surface.cpp"
   - "**/widget_bridge.cpp"
+  # Perfetto tracing (dev-only, PULP_TRACING). The ON implementation +
+  # span macros/prettifier are not compiled in the default (OFF) coverage
+  # build, so their changed lines can't be instrumented there; they are
+  # exercised by the ON tracing smoke test instead.
+  - "**/trace.cpp"
+  - "**/trace.hpp"
   # C++ test harnesses sometimes live beside tool sources (for example
   # tools/scan-worker/test_scan_worker.cpp) instead of under top-level
   # test/. They are tests, not product coverage surface.
