@@ -365,6 +365,49 @@ target_link_libraries(MyPlugin_Core PRIVATE MyGain_Core)
   `${CMAKE_DL_LIBS}`, `m`); macOS resolves these through `libSystem`
   automatically.
 
+## pulp_faust_generate
+
+Generate a checked-in C++ header from a FAUST `.dsp` source file. This helper is
+optional: when the `faust` compiler is not installed, the build keeps using the
+pre-generated file already in the source tree.
+
+```cmake
+include(${PULP_ROOT}/tools/cmake/PulpFaust.cmake)
+
+pulp_faust_generate(
+    ${CMAKE_CURRENT_SOURCE_DIR}/generated_gain.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gain.dsp
+    FaustGainDsp
+)
+```
+
+### Parameters
+
+| Parameter | Required | Description |
+|---|---|---|
+| `output_hpp` | Yes | Header path to generate, normally under the source tree so it can be committed |
+| `input_dsp` | Yes | FAUST `.dsp` source file |
+| `class_name` | Yes | C++ class name passed to FAUST via `-cn` |
+
+## pulp_add_faust_test
+
+Add a Catch2 test target for a FAUST-backed processor.
+
+```cmake
+pulp_add_faust_test(faust-gain-test
+    test_faust_gain.cpp
+    SOURCES faust_gain.hpp
+)
+```
+
+### Parameters
+
+| Parameter | Required | Description |
+|---|---|---|
+| `target` | Yes | Test executable target name |
+| `test_source` | Yes | Main test source file |
+| `SOURCES` | No | Additional source/header files needed by the test target |
+
 ## pulp_add_wam_plugin
 
 Build a Pulp `Processor` into a [WAMv2](https://www.webaudiomodules.com)

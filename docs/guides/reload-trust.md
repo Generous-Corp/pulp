@@ -125,5 +125,5 @@ regenerates** one (a new key is a new identity consumers reject).
   the old key stays importable during a transition.
 
 See also: [dsp-hot-reload.md](dsp-hot-reload.md) and
-[live-swap-cpu-gpu.md](live-swap-cpu-gpu.md) for the reload engine itself, and
+[live-swap-cpu-gpu.md](../reference/live-swap-cpu-gpu.md) for the reload engine itself, and
 [shipping.md](shipping.md) for platform signing/notarization.

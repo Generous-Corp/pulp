@@ -4,7 +4,8 @@ Pulp's scripted UIs (JS via `@pulp/react` on QuickJS / JavaScriptCore / V8) can
 be inspected at runtime over the existing inspector protocol: evaluate
 expressions against the live engine, read honest debug capabilities, tail device
 logs, and abort a runaway evaluation. This is a **runtime inspector / debug
-console**, not a step debugger — see [Capabilities](#capabilities) for why.
+console**, not a step debugger — see [runtime capabilities](#runtimegetcapabilities)
+for why.
 
 ## Why not a step debugger (yet)
 

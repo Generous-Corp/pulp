@@ -9,6 +9,23 @@ target_link_libraries(my_plugin PRIVATE pulp::format pulp::signal pulp::view)
 
 ---
 
+## platform
+
+Platform detection and operating-system services that higher-level subsystems
+use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
+
+**Link:** `pulp::platform` · **Include prefix:** `<pulp/platform/...>`
+
+| Feature | Header | What It Does |
+|---------|--------|--------------|
+| Platform detection | `detect.hpp` | Compile-time and runtime platform checks |
+| Native handles | `native_handle.hpp` | Typed OS window/device handles for adapters |
+| Clipboard | `clipboard.hpp` | Cross-platform text clipboard access where implemented |
+| File dialogs | `file_dialog.hpp` | Native open/save panels where implemented |
+| Popup menus | `popup_menu.hpp` | Native menu affordances for UI surfaces |
+
+---
+
 ## runtime
 
 Core utilities — the foundation everything else builds on.
@@ -519,6 +536,25 @@ conv.process(input, output, block_size);
 | SIMD Buffer | `simd_buffer.hpp` | Aligned memory buffer for SIMD-safe block processing |
 | Smoothed Value | `smoothed_value.hpp` | Linear parameter ramps for zipper-noise reduction; use `log_ramped_value.hpp` for multiplicative/log smoothing |
 | Special Functions | `special_functions.hpp` | sinc, Bessel, dB↔linear, MIDI note↔frequency conversions |
+
+---
+
+## dsl
+
+External DSP language lanes that generate or adapt source into ordinary Pulp
+processors while keeping the third-party toolchain developer-supplied.
+
+**Link:** `pulp::dsl` · **Include prefix:** `<pulp/dsl/...>`
+
+| Lane | What It Does | Guide |
+|------|--------------|-------|
+| FAUST | Offline code generation into checked-in C++ headers | [FAUST guide](../guides/faust.md) |
+| Cmajor | External Cmajor toolchain validation and generation | [Cmajor guide](../guides/cmajor.md) |
+| JSFX | Bounded source-only JSFX subset parsing and validation | [JSFX guide](../guides/jsfx.md) |
+
+All DSL lanes use the same contract: Pulp owns the processor wrapper and build
+integration; the external compiler/runtime remains opt-in and outside the
+public repository unless its license allows redistribution.
 
 ---
 

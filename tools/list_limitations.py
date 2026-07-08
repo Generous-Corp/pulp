@@ -113,8 +113,9 @@ def main() -> int:
         for item in items:
             tracked = item.get("tracked_in", "")
             if tracked.startswith("planning/"):
-                tracked = f"../../{tracked}"
-            link = f"[link]({tracked})" if tracked else "—"
+                link = f"`{tracked}`"
+            else:
+                link = f"[link]({tracked})" if tracked else "—"
             print(f"| `{path}` | {item['text']} | {link} |")
     return 0
 

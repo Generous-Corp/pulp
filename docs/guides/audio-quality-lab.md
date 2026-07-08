@@ -25,8 +25,36 @@ the core, with optional perceptual models and an optional review model layered o
 > auto-tuning loop are all explicitly marked *advisory* or *experimental*, and **none of them
 > can fail anything**. So: trust a clean result from the stable detectors; treat anything
 > labeled advisory/experimental as a hint to go listen, not a verdict. The
-> [Maturity](#maturity--how-a-feature-earns-the-right-to-gate) section spells out exactly which
+> [Maturity](#maturity) section spells out exactly which
 > is which and how something graduates.
+
+## Common plugin-development scenarios
+
+Use the lab when a change is easy to hear in an A/B test but hard to catch with
+peak/RMS/clip assertions:
+
+| Scenario | What you run | What it helps catch |
+|----------|--------------|---------------------|
+| **Retuning tone** — EQ, filters, saturation, amp/NAM tone, reverb damping, compressor color | `compare golden.wav candidate.wav --profile tonal-balance --reference-role golden`; add `added-hf`, `noise-roughness`, or `graininess` for the artifact you care about | duller output, added fizz, rough/noisy harmonic damage, grainy sustain |
+| **Protecting attacks** — dynamics, transient designers, phase-vocoder changes, stretch algorithms | `compare before.wav after.wav --profile transient-integrity --reference-role golden` on onset-bearing material | softened or smeared attacks that peak/RMS checks miss |
+| **Checking stereo/imaging changes** — wideners, M-S processors, panners, chorus/flanger families | `compare before.wav after.wav --profile stereo-width`; use the regression net for repeated presets | image collapse, phase damage, negative interchannel correlation |
+| **Validating time-domain DSP** — fixed-latency processors, varispeed, pitch shift, or pitch-preserving stretch | `compare ... --align latency`, `--align varispeed:R`, `--align pitch:S`, or `--align stretch:R` | real tonal/roughness defects without false alarms from expected time or pitch movement |
+| **Getting a coarse second opinion** | set `PULP_VISQOL_BIN`, `PULP_PEAQ_BIN`, `PULP_AQUATK_BIN`, or `PULP_AUBIO_BIN` for local opt-in tools | advisory perceptual or structural cross-checks when the built-in detector says "maybe" |
+
+## What powers the lab
+
+The lab is a small, local orchestrator around Pulp's own detectors plus optional
+third-party tools. The stable built-in detectors are the only layer that can gate;
+everything license-fenced is opt-in, developer-local, and advisory unless promoted
+through the [maturity process](#maturity).
+
+| Layer | Software | How enabled | What it contributes |
+|-------|----------|-------------|---------------------|
+| Built-in artifact detectors | Pulp Quality Lab Python package | installed with `pulp tool install audio-quality-lab` | localized verdicts for dulling, added HF, roughness, graininess, stereo collapse, and transient smear; stable detectors can participate in gates |
+| Product render/engine hooks | `pulp audio render`, `stretchcli` | built from the checkout; `PULP_STRETCHCLI` can point at `stretchcli` | real-plugin and real-engine candidate renders, baselines, and regression-net runs |
+| Perceptual models | [ViSQOL](https://github.com/google/visqol), [PEAQ](https://en.wikipedia.org/wiki/PEAQ), [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) | `PULP_VISQOL_BIN`, `PULP_PEAQ_BIN`, `PULP_AQUATK_BIN` | coarse full-reference "is it perceptually worse overall?" checks; advisory, skipped when absent |
+| MIR structural oracle | [aubio](https://github.com/aubio/aubio) | `PULP_AUBIO_BIN` | independent onset/timing feature extraction for checking timing structure; advisory, not a quality metric |
+| Review model | any developer-supplied subprocess | `PULP_QLAB_REVIEWER_CMD` | plain-language review of reports and clips; advisory only, never a gate |
 
 ## Install (opt-in)
 
@@ -141,10 +169,12 @@ specific plugin suite (e.g. `pulp-classic-effects`) lives with the plugins; `qua
 is the reusable reference the suite wires its renders into.
 
 **Per-plugin applicability** — read the change class, not the backend (`compare` measures any render
-identically, CPU or GPU):
+identically, CPU or GPU). "Regression-net use" means whether a golden/candidate
+pair is appropriate for `regression-net`, and which profile or alignment mode to
+declare when it is not the default timbral case:
 
-| Change under test | Through the net? | Notes |
-|-------------------|------------------|-------|
+| Change under test | Regression-net use | Notes |
+|-------------------|--------------------|-------|
 | Timbral (EQ / filter / saturation / amp-NAM / reverb tone / comp tone) | ✅ directly valid | the validated sweet spot — all four axes apply |
 | Modulated (chorus / phaser / flanger / tremolo / ring-mod) | ✅ valid; corroboration will read `not_corroborated` (expected, informational) | time-variant; the axis verdict is what matters |
 | bendr time-stretch — **fixed-ratio** A/B ("did my stretch *algorithm* get worse?") | ✅ valid | same ratio, so the renders are time-aligned |
@@ -283,6 +313,8 @@ They're validated **non-circularly** — against synthetic degradations, an inde
 textbook phase vocoder, *and* the real Pulp stretch engine — which is why they're trusted
 to gate. (`stereo_width` operates on `(N,2)` arrays directly; the rest run through the mono
 pipeline. Full list + module map: [`README.md`](https://github.com/danielraffel/pulp/blob/main/tools/audio/quality-lab/README.md).)
+
+<a id="maturity"></a>
 
 ## Maturity — how a feature earns the right to gate
 

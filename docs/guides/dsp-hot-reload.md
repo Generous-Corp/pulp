@@ -106,6 +106,10 @@ The **parameter contract and reported latency are frozen at load** — the host 
 already cached them. Only the DSP behind a stable contract hot-swaps; changing the
 parameter set or latency needs a full plugin reload.
 
+These are runtime compatibility gates. For the shipping trust model — signed
+packs, revocation, capability grants, and "signed only" watcher policy — see
+[Reload Trust & Safety](reload-trust.md).
+
 ## Building a reloadable plugin
 
 ### 1. The logic (the DSP you edit)
@@ -190,6 +194,41 @@ the default static model is fine there — use thin whenever the logic builds UI
 > in-DAW hot-reload today, use the **DSP-only static** model
 > (`examples/hot-reload-demo`, REAPER-validated); UI hot-reload is a standalone
 > capability until the in-bundle symbol path is proven.
+
+## Runtime lifecycle and cleanup
+
+Hot reload cleans up the objects that can be proven inactive. It deliberately
+does **not** try to unload every native code image the moment that image stops
+producing audio.
+
+- **DSP processors are reclaimed.** `ProcessorHotSwapSlot` owns the active
+  `Processor` behind a shared/unique lock. The audio thread takes a non-blocking
+  shared lock for the whole `process()` call; the swap thread takes the unique
+  lock before installing the replacement. When that writer lock is acquired, the
+  old processor is not inside an audio callback, so it can be destroyed on the
+  control thread. With crossfade enabled, the old processor stays in the
+  fade-out slot until the audio thread marks the fade complete; the watcher then
+  calls `reclaim()` and destroys it off the audio thread.
+- **Native logic images are retained by policy.** Once a logic dylib has
+  constructed a `Processor`, code pointers, vtables, RTTI, thread-locals, static
+  destructors, exceptions, or callbacks can still point into that mapped image.
+  `dlclose`/`FreeLibrary` would turn a reload into a use-after-free risk, so
+  `ReloadLibrary` keeps successful logic images mapped for the life of the host
+  process. A long dev session can therefore grow by one retained code image per
+  successful unique reload; restarting the host releases them. Candidates that
+  fail before constructing a processor are rejected before the swap and do not
+  become the live DSP.
+- **Staged files are cleaned up separately.** Each logic build is copied to a
+  unique staged path before load, because loaders cache by path and Linux can
+  corrupt a live mapping if the watched file is overwritten in place. The
+  controller removes this instance's previous staged copy best-effort and reaps
+  dead-process staged files on startup; on Windows a loaded file may remain
+  locked, so failed cleanup is treated as harmless dev-loop litter.
+- **UX follows the same rule when it is native.** A thin logic reload that also
+  supplies `create_view()` brings the editor along with the DSP, and the old
+  native image is retained for the same reason as DSP logic. Scripted JS/theme UI
+  reload is different: it rebuilds the `ScriptedUiSession`/bridge tree with
+  last-good semantics and does not add a native code image.
 
 ## Worked examples
 
