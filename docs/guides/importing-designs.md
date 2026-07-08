@@ -90,7 +90,7 @@ Raw MCP responses are acquisition data, not a separate CLI source. Translate or 
 > uses no MCP quota at all. When you do call the MCP, use a single
 > `get_design_context` (code + screenshot + metadata together) over separate
 > calls. Full seat/plan limits:
-> [The Figma plugin — avoiding Figma's limits](figma-plugin.md#two-ways-to-get-a-design-into-pulp--and-which-one-avoids-figmas-limits);
+> [The Figma plugin — avoiding Figma's limits](figma-plugin.md#two-ways-to-get-a-design-into-pulp-and-which-one-avoids-figmas-limits);
 > the authoritative numbers are in
 > [Figma's MCP rate-limit docs](https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/).
 

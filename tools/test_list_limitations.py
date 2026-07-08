@@ -156,6 +156,29 @@ class MainTests(unittest.TestCase):
             stdout,
         )
 
+    def test_main_renders_planning_tracking_as_literal_path(self) -> None:
+        matrix = """
+runtime:
+  midi:
+    status: stable
+
+limitations:
+  runtime.midi:
+    - text: "Private tracking doc."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.6"
+"""
+
+        rc, stdout, stderr = self._run_main(matrix)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn(
+            "| `runtime.midi` | Private tracking doc. | "
+            "`planning/production-readiness/02-audio-midi-io.md#2.6` |",
+            stdout,
+        )
+        self.assertNotIn("../../planning/", stdout)
+
     def test_main_reports_no_limitations_block(self) -> None:
         rc, stdout, stderr = self._run_main("runtime:\n  midi:\n    status: stable\n")
 

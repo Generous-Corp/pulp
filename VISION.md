@@ -11,7 +11,7 @@ It provides GPU-rendered UIs with hot reload, an extensible DSP layer supporting
 1. **Permissive licensing** — MIT. No royalties, no revenue thresholds, no copyleft.
 2. **Modular architecture** — use what you need, ignore the rest.
 3. **Native platform experiences** — Swift on Apple, C++ everywhere, GPU rendering on every platform.
-4. **Flexible rendering** — GPU-native UI without a browser, but WebView is there if you want it. Layout is **Flexbox + Grid via Yoga** — the same primitives React Native and modern design tools use. Block flow, tables, multi-column, floats, and print pagination are deliberately out of scope; that's what makes the framework coherent and the design-import contract clean. (Details: [`docs/reference/layout-model.md`](docs/reference/layout-model.md).)
+4. **Flexible rendering** — GPU-native UI without a browser, but WebView is there if you want it. Layout is **Flexbox + Grid via Yoga** — the same primitives React Native and modern design tools use. Block flow, tables, multi-column, floats, and print pagination are deliberately out of scope; that's what makes the framework coherent and the design-import contract clean. (Details: [Layout Model](https://generouscorp.com/pulp/layout-model.html).)
 5. **Modern workflows** — AI agents, design tools, hot-reload, and fast iteration from the start.
 
 ---
@@ -24,13 +24,13 @@ Write C++20. The core gives you a `Processor` base class, a thread-safe paramete
 
 If you prefer writing DSP in a dedicated language, Pulp integrates with Faust (offline codegen into native `Processor` instances), Cmajor (external toolchain with validation and generation), and JSFX (bounded subset parsing and validation).
 
-Pulp also supports **language-neutral native components**: opt-in audio cores written in Rust, C, or Zig behind a stable C ABI, owned by a thin C++ `Processor` adapter. The feature is OFF by default — a default build needs no Rust toolchain — and is desktop-first; on iOS native components are static-bundled and signed only. (Details: [`docs/reference/native-components.md`](docs/reference/native-components.md).)
+Pulp also supports **language-neutral native components**: opt-in audio cores written in Rust, C, or Zig behind a stable C ABI, owned by a thin C++ `Processor` adapter. The feature is OFF by default — a default build needs no Rust toolchain — and is desktop-first; on iOS native components are static-bundled and signed only. (Details: [Native Components](https://generouscorp.com/pulp/native-components.html).)
 
 ### Start from design
 
 Import from Figma, Pencil.dev, Google Stich and more. Define your visual identity as a design token system — colors, typography, widget geometry, knob styles, button shapes, shadows, gradients. Apply one design language across many plugins. Change a token, and changes appear live in the standalone host via hot-reload.
 
-The Figma import is **semantic, not visual**. A Pulp library component — "Pulp / Knob", "Pulp / Fader", "Pulp / Meter" — tells Pulp *what a control is* (its parameter binding, label, range, and units), not just what it looks like. Recognition keys off component identity, so you can restyle freely without breaking the binding. The library is **additive fidelity**: a design that uses none of it still imports, and every Pulp component you add upgrades exactly the control it sits on. Author once in Figma, then flow the same design into a **live JavaScript UI**, a **native app**, or a **fully compiled C++ plugin** — no rebuilding the UI by hand. (Details: [`docs/reference/design-import-model.md`](docs/reference/design-import-model.md).)
+The Figma import is **semantic, not visual**. A Pulp library component — "Pulp / Knob", "Pulp / Fader", "Pulp / Meter" — tells Pulp *what a control is* (its parameter binding, label, range, and units), not just what it looks like. Recognition keys off component identity, so you can restyle freely without breaking the binding. The library is **additive fidelity**: a design that uses none of it still imports, and every Pulp component you add upgrades exactly the control it sits on. Author once in Figma, then flow the same design into a **live JavaScript UI**, a **native app**, or a **fully compiled C++ plugin** — no rebuilding the UI by hand. (Details: [Design Import Model](https://generouscorp.com/pulp/design-import-model.html).)
 
 Describe a look in natural language — "80s Macintosh", "neon cyberpunk", "minimal Dieter Rams" — and watch the entire interface transform. The design system is structured data, not compiled C++, so any AI tool that can read JSON can modify your theme.
 

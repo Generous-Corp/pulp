@@ -750,7 +750,7 @@ pulp overflow threshold 1
 
 `enable` sets the overflow target, `disable` removes it for future dispatches,
 and `threshold` gets or sets the busy-run count that trips overflow. See
-[local-ci.md](../guides/local-ci.md#pulp-overflow--operator-surface) for the
+[local-ci.md](../guides/local-ci.md#pulp-overflow-operator-surface) for the
 exact repository variables and rollback notes.
 
 ### ci-local
