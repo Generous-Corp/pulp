@@ -15,6 +15,10 @@ platforms:
   windows:
     status: experimental
     notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
+      Minimum Windows 10 (_WIN32_WINNT/WINVER = 0x0A00, subsystem 10.0), inherited from
+      Google's Chromium default at the pinned Skia/Dawn milestone. Tracked in
+      tools/deps/min_os.json (windows-x64) and pinned into the build by tools/cmake/PulpMinOs.cmake;
+      the artifact-measured value and a min-OS VM runtime smoke are still pending a Windows host.
   linux:
     status: experimental
     notes: ALSA audio, ALSA MIDI (monotonic input timestamps), JACK (build fixed; smoke/hotplug pending), LV2, .deb/.tar.gz plugin packaging, standalone AppImage packaging. CI enabled.
