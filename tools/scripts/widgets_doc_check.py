@@ -36,7 +36,6 @@ EXCLUDE = {
     "LiveConstantEditor": "developer live-tweak tooling",
     "ModelManagerView": "audio-model management tooling",
     "PluginManagerPanel": "plugin-host management tooling",
-    "StepGridView": "experimental sequencer-grid prototype; API not frozen",
     "ThemeEditor": "in-app theme authoring tooling",
 }
 
