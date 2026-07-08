@@ -5,7 +5,9 @@ on:
     paths:
       - 'android/**'
       - 'core/**'
+      - 'tools/deps/manifest.json'
       - 'tools/cmake/PulpAndroid.cmake'
+      - 'tools/cmake/PulpDependencies.cmake'
       - 'CMakeLists.txt'
       - '.github/workflows/android.yml'
   push:
@@ -13,7 +15,9 @@ on:
     paths:
       - 'android/**'
       - 'core/**'
+      - 'tools/deps/manifest.json'
       - 'tools/cmake/PulpAndroid.cmake'
+      - 'tools/cmake/PulpDependencies.cmake'
       - 'CMakeLists.txt'
 
 # Cancel superseded PR runs when a new commit lands on the same ref.
@@ -87,9 +91,14 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            android/app/.cxx
           key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle.kts') }}
           restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Cache Android native CMake
+        uses: actions/cache@v5
+        with:
+          path: android/app/.cxx
+          key: ${{ runner.os }}-android-cxx-${{ hashFiles('android/**/*.gradle.kts', 'CMakeLists.txt', 'tools/cmake/PulpAndroid.cmake', 'tools/cmake/PulpDependencies.cmake', 'tools/deps/manifest.json') }}
 
       - name: Build Android APK (arm64-v8a + x86_64)
         working-directory: android
@@ -205,7 +214,7 @@ jobs:
       - name: Create AVD and boot emulator
         run: |
           echo "no" | avdmanager create avd -n pulp-ci -k "system-images;android-34;google_apis;arm64-v8a" --force
-          $ANDROID_HOME/emulator/emulator -avd pulp-ci -no-window -no-audio -no-boot-anim &
+          "$ANDROID_HOME/emulator/emulator" -avd pulp-ci -no-window -no-audio -no-boot-anim &
           adb wait-for-device
           # Wait for boot (up to 120s across 60 × 2s checks).
           for _ in $(seq 1 60); do
