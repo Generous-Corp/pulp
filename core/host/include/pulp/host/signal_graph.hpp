@@ -123,6 +123,17 @@ struct CustomNodeType {
                        const audio::BufferView<const float>& /*input*/,
                        int /*num_samples*/, const format::ProcessContext& /*transport*/)>
         process_instance_transport;
+
+    // Bake opt-in: whether this type may be LOWERED into a baked artifact.
+    // Default false → bake refuses (a custom instance holds opaque state a frozen
+    // topology cannot otherwise capture). Setting true is a registrar assertion
+    // that the type is deterministic given (state, input), holds no ambient mutable
+    // global state (only the per-instance void*), round-trips completely through
+    // save_state/load_state, is real-time-safe, and is NOT transport-sensitive.
+    // This is a trusted-binary / developer boundary only — NOT a shipped-artifact
+    // security boundary (the framework cannot verify these properties), so the
+    // on-disk load path must additionally require a signature before honoring it.
+    bool lowerable = false;
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
