@@ -74,6 +74,32 @@ public:
     virtual bool save_reload_state(std::string& /*out_blob*/) const { return false; }
     virtual bool restore_reload_state(std::string_view /*blob*/) { return false; }
 
+    // ── View recycling (ViewPool, planning 2.3) ──────────────────────────
+    // A recyclable View can be parked in a ViewPool when it scrolls out of a
+    // virtualized list/grid (or is torn down by a hot reload) and handed back
+    // later instead of being destroyed and rebuilt. Recycling is OPT-IN: a
+    // subclass must override supports_reuse() to return true, otherwise
+    // ViewPool::release() destroys it and adoption stays behavior-neutral.
+    //
+    // supports_reuse() advertises that prepare_for_reuse() leaves the instance
+    // in a safe, blank-slate state — no live callbacks into freed state, no
+    // stale bounds/selection/focus. Only override it once that contract holds.
+    virtual bool supports_reuse() const { return false; }
+
+    // Scrub every piece of per-instance state that must NOT survive into the
+    // next user of a recycled View. The ViewPool calls this on the acquire
+    // path, so a pooled view carries no live state while parked. Subclasses
+    // that add their own callbacks / cached state MUST override this, reset
+    // their own members, then call View::prepare_for_reuse() to run the base
+    // reset below. The base impl clears bounds/visibility/opacity/access
+    // labels/pointer+hover+focus state AND EVERY base-class callback — a
+    // recycled view firing a stale on_click/on_drag/etc. into a torn-down
+    // closure is the exact use-after-free this guards against.
+    //
+    // Precondition: the view must be detached (no parent) — a pooled view is
+    // never part of a live tree.
+    virtual void prepare_for_reuse();
+
     // ── Hit testing ──────────────────────────────────────────────────────
 
     // Find the deepest child that contains the given point (in local coords)

@@ -94,6 +94,11 @@ void VirtualList::set_overscan(int rows) {
 
 void VirtualList::set_row_factory(RowFactory factory) {
     if (!clear_pool()) return;
+    // Parked rows belong to the OLD factory — a new factory may build a
+    // different row type/shape, so drop the recycle pool and forget the tracked
+    // row type rather than hand stale rows to the new binder.
+    row_pool_.clear();
+    row_type_.reset();
     row_factory_ = std::move(factory);
     dirty_tracker_.invalidate_all();
     if (!update_window(true)) return;
@@ -437,11 +442,21 @@ bool VirtualList::ensure_pool_size(std::size_t desired) {
     while (row_slots_.size() < desired) {
         const std::size_t slot = row_slots_.size();
         const auto generation = window_generation_;
-        auto factory = row_factory_;
-        auto row = factory ? factory(slot) : std::make_unique<View>();
-        if (!alive->load(std::memory_order_acquire)) return false;
-        if (!destroying_ && generation != window_generation_) return finish(false);
-        if (!row) row = std::make_unique<View>();
+        // Prefer a recycled row of the known row type before building a fresh
+        // one. Acquiring from the pool is a pure, side-effect-free pop (no user
+        // callback), so it needs no alive/generation re-check. Falls through to
+        // the factory when the pool is empty or the row type never opts in.
+        std::unique_ptr<View> row;
+        if (row_type_) row = row_pool_.acquire(*row_type_);
+        if (!row) {
+            auto factory = row_factory_;
+            row = factory ? factory(slot) : std::make_unique<View>();
+            if (!alive->load(std::memory_order_acquire)) return false;
+            if (!destroying_ && generation != window_generation_) return finish(false);
+            if (!row) row = std::make_unique<View>();
+            // Remember the concrete row type so later growth can query the pool.
+            row_type_ = std::type_index(typeid(*row));
+        }
         row->set_overflow(Overflow::hidden);
         row->set_position(View::Position::absolute);
         row->set_left(0.0f);
@@ -467,7 +482,10 @@ bool VirtualList::release_row(RowSlot& slot) {
         if (!alive->load(std::memory_order_acquire)) return false;
         if (!destroying_ && generation != window_generation_) return false;
     }
-    (void)removed;
+    // Park the detached row for recycling. release() stores it only when the row
+    // type opts in (View::supports_reuse()); otherwise it is destroyed here, so
+    // the default-View rows behave exactly as before.
+    if (removed) row_pool_.release(std::move(removed));
     return true;
 }
 

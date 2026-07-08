@@ -429,6 +429,7 @@ target_sources(pulp-view-core PRIVATE
     src/ui_components.cpp
     src/context_menu.cpp
     src/scroll_bar.cpp
+    src/view_pool.cpp
     src/virtual_list.cpp
     src/virtual_grid.cpp
     src/relative_point.cpp
