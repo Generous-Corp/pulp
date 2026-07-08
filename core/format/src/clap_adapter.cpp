@@ -171,6 +171,10 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->mpe_buffer.set_realtime_capacity_limit(true);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
+    // Sized here, not on the audio thread: process() calls assign()/resize() to
+    // all_params().size() at block start, which would grow-and-allocate on the
+    // first block without this reserve (param_snapshot mirrors it above).
+    self->output_param_has_event.reserve(self->store.all_params().size());
 
     auto desc = self->processor->descriptor();
     PrepareContext ctx;
@@ -890,7 +894,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Stateful; updates `self->playhead_prev` in place.
     pulp::format::detail::compute_playhead_changes(ctx, self->playhead_prev);
 
-    // Snapshot parameter values to detect plugin-side changes
+    // Snapshot parameter values to detect plugin-side changes.
+    // INVARIANT: every scratch vector sized to all_params().size() here runs on
+    // the audio thread, so each must be reserve()d to that size in
+    // clap_activate() or the first block grow-and-allocates. Adding a new
+    // per-param scratch below requires a matching reserve there; the
+    // `ClapSlot::process is allocation-free` rt-safety test guards this.
     auto all_params = self->store.all_params();
     self->param_snapshot.resize(all_params.size());
     self->output_param_has_event.assign(all_params.size(), 0);
