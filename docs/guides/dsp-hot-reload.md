@@ -27,12 +27,32 @@ similar but do different jobs — pick by *what is being swapped*:
   Pulp plugin. Pulp can change that chain *while it plays* — re-wire the
   connections, adjust a block — without a gap. That's a separate feature; see
   the [Signal graph](../reference/signal-graph.md) and
-  [Hosting](hosting.md) guides. It does **not** need the signing/trust model,
-  because it only re-arranges plugins the machine already trusts — no new code
-  is loaded.
+  [Hosting](hosting.md) guides.
 
 Rule of thumb: swapping *your own* DSP → hot-reload (here). Re-arranging or
 replacing *hosted third-party* plugins in a chain → live graph editing.
+
+### Why only hot-reload carries signing/trust
+
+The signing, capability, and revocation machinery exists on **this** page's
+feature and **not** on live graph editing — on purpose, and the reason is simple:
+
+- **Hot-reload loads new code.** It replaces a plugin's own DSP (and scripted UI)
+  with a freshly compiled build, or a build pushed to a plugin already in the
+  field. New code arriving into a running plugin is exactly what has to be
+  verified, so it is gated by signing (opt-in `require_signed`), capabilities,
+  and a revocation list.
+- **Live graph editing loads no new code.** It only re-arranges, or substitutes,
+  plugins the machine **already installed and already trusts** — the same trust
+  boundary that let Pulp host them in the first place. Nothing new is fetched or
+  verified because nothing new arrives.
+
+And the two never cross in a rack: a **hosted** third-party plugin has no Pulp
+reload path — it is not built from Pulp's reloadable shell, so it has no watcher
+and nothing (a host, a rack, a script) can reload *its* DSP or UI through Pulp.
+The reload mechanism only ever touches a Pulp plugin that opted into the
+reloadable shell, and there it stays behind that plugin's own `require_signed`
+gate. Hosting a plugin in a chain does not open a door to reloading it.
 
 ## How it works
 
