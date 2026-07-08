@@ -166,6 +166,13 @@ pulp_add_test_suite(pulp-test-signal-graph-transport
     SOURCES test_signal_graph_transport.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::state)
 
+# Live plugin-instance swap produces no dropout/xrun and a sample-continuous
+# output across the swap block, for every hosted format. CI-runnable mirror of
+# the local-only REAPER live-plugin-swap smoke.
+pulp_add_test_suite(pulp-test-signal-graph-live-swap-continuity
+    SOURCES test_signal_graph_live_swap_continuity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
 pulp_add_test_suite(pulp-test-planar-audio-ring-buffer LIBRARIES pulp::audio)

@@ -12,6 +12,28 @@ actually works **inside a host**, beyond what `auval` / `pluginval` /
 Harness: `tools/testing/daw-smoke/reaper_smoke.py` (+ `insert_and_float.lua`).
 Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
 
+## Modes (`--mode`, default `reload`)
+- **`reload`** — the original flow. Seed watched DSP variant A, insert+float the
+  FX, copy variant B over the watched path, scrape `swapped DSP` / `reload
+  rejected`.
+- **`live-plugin-swap`** — a live plugin-INSTANCE swap inside a Pulp host that
+  hosts another plugin in a `SignalGraph`. Insert+float the host FX, write a swap
+  request to `--watched-swap-request`, then scrape `[live-swap] committed` (PASS)
+  vs `live plugin swap refused` (FAIL). The success marker is NOT logged by the
+  core swap path — `SignalGraph::prepare_swap` logs ONLY refusals. The host plugin
+  must emit `[live-swap] committed` itself from its
+  `NodeLiveSwapPolicy::on_instance_swapped` observer (that is the seam the smoke
+  scrapes and the headless test exercises). The DAW-free, CI-runnable mirror is
+  `test/test_signal_graph_live_swap_continuity.cpp`, which drives the same
+  stage + `prepare_swap` commit through `process()` and asserts sample continuity
+  (no dropout/xrun) across the swap block for every hosted format (VST3/AU/CLAP/
+  LV2). Use the REAPER mode as the local-only in-host confirmation.
+- All modes share the same REAPER lifecycle (`ReaperSession`): fresh portable
+  dir, temp scan path, pre-warm scan, scripted insert+float, guaranteed teardown.
+  They differ only in what they SEED, the TRIGGER they fire once the FX is shown,
+  and how they VERIFY the captured log. Add a mode by writing seed/trigger/verify
+  around `ReaperSession`, not by duplicating the launch plumbing.
+
 ## When to reach for it
 - A headless / standalone / `render_to_png` capture PASSES but you're not sure it
   works in a host. It usually doesn't tell the whole story — see the gotcha below.
