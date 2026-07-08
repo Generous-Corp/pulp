@@ -14,8 +14,8 @@
 
 using pulp::host::BakedPlan;
 using pulp::host::NodeType;
-using pulp::host::parse_plan_bounded;
-using pulp::host::serialize_plan;
+using pulp::host::detail::parse_plan_bounded;
+using pulp::host::detail::serialize_plan;
 
 namespace {
 

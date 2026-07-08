@@ -87,6 +87,8 @@ bool node_type_from_code(std::uint8_t code, NodeType& out) {
 
 }  // namespace
 
+namespace detail {
+
 std::vector<std::uint8_t> serialize_plan(const BakedPlan& plan) {
     std::vector<std::uint8_t> out;
     put_u32(out, static_cast<std::uint32_t>(plan.format_version));
@@ -137,7 +139,10 @@ std::optional<BakedPlan> parse_plan_bounded(std::span<const std::uint8_t> bytes)
     const std::uint32_t node_count = r.u32();
     if (!r.ok || node_count > kBakedMaxNodes) return std::nullopt;
     plan.nodes.reserve(node_count);
-    std::unordered_map<NodeId, BakedPlan::Node*> by_id;
+    // Store arity by value (not a Node* into the growing vector) so the port-OOB
+    // check below can't be broken by a future edit to the reserve/growth policy.
+    struct Arity { int in; int out; };
+    std::unordered_map<NodeId, Arity> by_id;
     std::size_t total_ports = 0;
     for (std::uint32_t i = 0; i < node_count; ++i) {
         BakedPlan::Node n;
@@ -160,8 +165,8 @@ std::optional<BakedPlan> parse_plan_bounded(std::span<const std::uint8_t> bytes)
         total_ports += static_cast<std::size_t>(n.num_input_ports) +
                        static_cast<std::size_t>(n.num_output_ports);
         if (total_ports > kBakedMaxTotalPorts) return std::nullopt;
+        by_id[n.id] = {n.num_input_ports, n.num_output_ports};
         plan.nodes.push_back(std::move(n));
-        by_id[plan.nodes.back().id] = &plan.nodes.back();
     }
 
     const std::uint32_t conn_count = r.u32();
@@ -180,14 +185,16 @@ std::optional<BakedPlan> parse_plan_bounded(std::span<const std::uint8_t> bytes)
         const auto sit = by_id.find(c.src_node);
         const auto dit = by_id.find(c.dst_node);
         if (sit == by_id.end() || dit == by_id.end()) return std::nullopt;
-        if (c.src_port < 0 || c.src_port >= sit->second->num_output_ports) return std::nullopt;
-        if (c.dst_port < 0 || c.dst_port >= dit->second->num_input_ports) return std::nullopt;
+        if (c.src_port < 0 || c.src_port >= sit->second.out) return std::nullopt;
+        if (c.dst_port < 0 || c.dst_port >= dit->second.in) return std::nullopt;
         plan.connections.push_back(c);
     }
 
     if (!r.at_end()) return std::nullopt;  // trailing garbage
     return plan;
 }
+
+}  // namespace detail
 
 namespace {
 
@@ -218,7 +225,7 @@ std::vector<std::uint8_t> build_canonical_message(std::uint32_t format_version,
 std::vector<std::uint8_t> write_baked_signed(const BakedPlan& plan,
                                              std::span<const std::uint8_t> private_key_64) {
     if (private_key_64.size() != runtime::ed25519_private_key_size) return {};
-    const auto plan_bytes = serialize_plan(plan);
+    const auto plan_bytes = detail::serialize_plan(plan);
     if (plan_bytes.size() > kBakedMaxPlanBytes) return {};
 
     const auto plan_sha = runtime::sha256(plan_bytes.data(), plan_bytes.size());
@@ -312,7 +319,11 @@ std::optional<BakedPlan> verify_and_extract_plan(std::span<const std::uint8_t> b
         !std::equal(actual_sha.begin(), actual_sha.end(), plan_sha.begin())) {
         return std::nullopt;
     }
-    return parse_plan_bounded(plan_span);
+    auto plan = detail::parse_plan_bounded(plan_span);
+    // Cross-check the plan's own format_version against the (signed) manifest fmt so a
+    // future v2 body cannot ride inside a v1-declared envelope, or vice versa.
+    if (plan && static_cast<std::uint32_t>(plan->format_version) != fmt) return std::nullopt;
+    return plan;
 }
 
 }  // namespace pulp::host

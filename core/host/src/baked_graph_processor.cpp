@@ -313,9 +313,13 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
         }
     }
 
-    // Nominal prepare to satisfy bake()'s prepared-graph precondition; the returned
-    // Processor re-prepares at the host's real sample rate + block size.
-    if (!graph.prepare(48000.0, 512)) {
+    // Nominal prepare only to satisfy bake()'s prepared-graph precondition (bake reads
+    // topology, not buffer sizing). The returned Processor re-prepares at the host's
+    // real rate/block, so these values never reach the audio path — routing the plan
+    // back through bake() is what re-proves lowerability on the reconstructed graph.
+    constexpr double kNominalPrepareSampleRate = 48000.0;
+    constexpr int kNominalPrepareBlock = 512;
+    if (!graph.prepare(kNominalPrepareSampleRate, kNominalPrepareBlock)) {
         result.reason = LowerRejectReason::NotPrepared;
         result.message = "reconstructed graph failed to prepare";
         return result;

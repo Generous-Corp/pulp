@@ -617,3 +617,34 @@ TEST_CASE("A signed .pulpbake round-trips to a bit-identical baked Processor",
     CHECK_FALSE(rejected.accepted);
     CHECK(rejected.reason == LowerRejectReason::CodecRejected);
 }
+
+TEST_CASE("load_baked refuses a signed plan whose Custom node carries state",
+          "[host][graph][bake][codec]") {
+    // The stateless-only v1 restriction: even a validly-signed plan with a small,
+    // in-cap custom_state must be refused at the LOAD path, never silently loaded.
+    pulp::host::BakedPlan plan;
+    plan.input_channels = 1;
+    plan.output_channels = 1;
+    pulp::host::BakedPlan::Node cn;
+    cn.id = 1;
+    cn.type = pulp::host::NodeType::Custom;
+    cn.num_input_ports = 1;
+    cn.num_output_ports = 1;
+    cn.custom_type_id = "x";
+    cn.custom_version = 1;
+    cn.custom_state = {0xDE, 0xAD, 0xBE, 0xEF};  // small, in-cap, non-empty
+    plan.nodes.push_back(std::move(cn));
+
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(i + 11);
+    const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(kp.has_value());
+    const auto bytes = pulp::host::write_baked_signed(plan, kp->private_key);
+    REQUIRE_FALSE(bytes.empty());
+    pulp::host::BakedTrust trust;
+    trust.trusted_public_keys.push_back(kp->public_key);
+
+    const auto r = pulp::host::load_baked(bytes, trust, {});
+    CHECK_FALSE(r.accepted);
+    CHECK(r.reason == LowerRejectReason::StatefulCustomNotYetLoadable);
+}

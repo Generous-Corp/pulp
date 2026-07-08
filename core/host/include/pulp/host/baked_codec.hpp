@@ -69,6 +69,13 @@ struct BakedPlan {
     bool operator==(const BakedPlan&) const = default;
 };
 
+// The raw plan payload codec. These are in `detail` — NOT the public surface —
+// precisely because parse_plan_bounded is unsafe on unverified bytes: its contract
+// is the INVERSE of the public verify_and_extract_plan (verification must precede
+// it). Only verify_and_extract_plan (after the Ed25519 envelope check) and the codec
+// tests may call them.
+namespace detail {
+
 // Serialize a plan to its canonical little-endian binary form (the bytes the
 // Ed25519 signature covers, minus the domain-separated header the signer prepends).
 // Deterministic: the same plan always yields the same bytes.
@@ -82,6 +89,8 @@ std::vector<std::uint8_t> serialize_plan(const BakedPlan& plan);
 // the verified plan in the public loader). Safe to call on attacker bytes ONLY
 // after the signature envelope has been verified.
 std::optional<BakedPlan> parse_plan_bounded(std::span<const std::uint8_t> bytes);
+
+}  // namespace detail
 
 // ── signed .pulpbake envelope ────────────────────────────────────────────
 // File layout: magic "PULPBAKE"(8) | manifest_len u32 | plan_len u32 | manifest |
