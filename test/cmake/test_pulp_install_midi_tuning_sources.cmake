@@ -124,6 +124,7 @@ execute_process(
     COMMAND "${CMAKE_COMMAND}"
             -S "${_consumer_src}"
             -B "${_consumer_build}"
+            -DPULP_ALLOW_DEBUG_SDK=ON
     RESULT_VARIABLE _consumer_rc
     OUTPUT_VARIABLE _consumer_stdout
     ERROR_VARIABLE  _consumer_stderr)
