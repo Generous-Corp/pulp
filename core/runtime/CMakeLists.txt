@@ -84,6 +84,7 @@ target_include_directories(pulp-runtime
 
 target_sources(pulp-runtime PRIVATE
     src/runtime.cpp
+    src/trace.cpp
     src/identity.cpp
     src/scoped_no_alloc.cpp
     src/simd.cpp

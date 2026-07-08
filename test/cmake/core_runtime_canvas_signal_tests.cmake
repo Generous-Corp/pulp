@@ -8,6 +8,9 @@ pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 # tracing OFF. When PULP_TRACING=OFF, also nm-scan the binary to prove no
 # Perfetto symbols leaked (best-effort; mirrors the AssertNoJsSymbols guard).
 pulp_add_test_suite(pulp-test-tracing LIBRARIES pulp::runtime)
+# Session lifecycle + macro smoke. Config-agnostic: OFF verifies the no-op
+# contract; ON emits spans from two threads and byte-checks the flushed trace.
+pulp_add_test_suite(pulp-test-tracing-session LIBRARIES pulp::runtime)
 if(NOT PULP_TRACING AND NOT WIN32)
     add_custom_command(TARGET pulp-test-tracing POST_BUILD
         COMMAND ${CMAKE_COMMAND}

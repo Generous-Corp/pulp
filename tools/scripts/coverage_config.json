@@ -27,6 +27,8 @@
     "**/gpu_surface_dawn.cpp",
     "**/skia_surface.cpp",
     "**/widget_bridge.cpp",
+    "**/trace.cpp",
+    "**/trace.hpp",
     "**/test_*.cpp",
     "**/reload_probe.cpp"
   ],
