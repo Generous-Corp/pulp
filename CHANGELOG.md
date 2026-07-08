@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06070"></a>
+## [0.607.0] - 2026-07-07
+
+- feat(view): VirtualGrid recycling 2D grid widget ([#5700](https://github.com/danielraffel/pulp/pull/5700))
+- feat(release): tier release-note weight by semver bump level ([#5697](https://github.com/danielraffel/pulp/pull/5697))
+- docs: acknowledge Truce inspiration ([#5698](https://github.com/danielraffel/pulp/pull/5698))
+
 <a id="v06060"></a>
 ## [0.606.0] - 2026-07-07
 
@@ -6052,6 +6059,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.607.0]: https://github.com/danielraffel/pulp/releases/tag/v0.607.0
 [0.606.0]: https://github.com/danielraffel/pulp/releases/tag/v0.606.0
 [0.605.0]: https://github.com/danielraffel/pulp/releases/tag/v0.605.0
 [0.604.0]: https://github.com/danielraffel/pulp/releases/tag/v0.604.0

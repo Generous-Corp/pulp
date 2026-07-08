@@ -250,7 +250,11 @@ Update this doc whenever you change any of these files:
 - `.github/workflows/auto-release-watchdog.yml`
 - `.github/workflows/release-cadence-check.yml`
 - `tools/scripts/package_cli.py`
-- `tools/scripts/compose_release_notes.py`
+- `tools/scripts/compose_release_notes.py` — groups commits into ✨/🐛/⚡ sections
+  with breaking changes first. Its `--tier` flag (default `auto`) weights the body
+  by semver bump level: a **patch** release gets a light grouped-only body (no
+  `## Highlights` wrapper), while **minor/major** get the full treatment. The
+  ⚠️ Breaking Changes section renders on every tier.
 
 These files form the release pipeline. The `ci` skill (`.agents/skills/ci/SKILL.md`)
 maps `.github/workflows/**` so the existing skill-sync check already requires `ci`

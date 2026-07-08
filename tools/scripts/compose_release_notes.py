@@ -113,6 +113,40 @@ def previous_tag(tag: str) -> str | None:
     return out.strip() or None
 
 
+_SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
+
+
+def parse_semver(tag: str | None) -> tuple[int, int, int] | None:
+    """Parse a leading ``vMAJOR.MINOR.PATCH`` from a tag; None if unparseable."""
+    if not tag:
+        return None
+    match = _SEMVER_RE.match(tag.strip())
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def bump_level(tag: str, base: str | None) -> str:
+    """Classify the semver delta from ``base`` to ``tag``.
+
+    Returns ``"major"``, ``"minor"``, ``"patch"``, or ``"unknown"`` when either
+    tag is unparseable or there is no previous tag (first-ever release). Unknown
+    deliberately falls back to the full (minor/major) treatment so a first tag or
+    an odd tag name never silently degrades to the light patch body.
+    """
+    cur = parse_semver(tag)
+    prev = parse_semver(base)
+    if cur is None or prev is None:
+        return "unknown"
+    if cur[0] != prev[0]:
+        return "major"
+    if cur[1] != prev[1]:
+        return "minor"
+    if cur[2] != prev[2]:
+        return "patch"
+    return "unknown"
+
+
 def first_nonempty_line(text: str) -> str | None:
     for line in text.splitlines():
         stripped = line.strip()
@@ -288,7 +322,21 @@ def bullet_for_entry(entry: ReleaseEntry, repo_url: str) -> str:
     return f"- {entry.display} ({entry_link(entry, repo_url)})"
 
 
-def render(entries: list[ReleaseEntry], *, repo_url: str = DEFAULT_REPO_URL) -> str:
+def render(
+    entries: list[ReleaseEntry],
+    *,
+    repo_url: str = DEFAULT_REPO_URL,
+    tier: str = "minor",
+) -> str:
+    """Render the grouped release-note body.
+
+    ``tier`` (``"patch" | "minor" | "major" | "unknown"``) controls weight: a
+    ``patch`` release emits a light grouped-only body (no ``## Highlights``
+    wrapper heading); ``minor``/``major``/``unknown`` emit the full treatment.
+    The ``## ⚠️ Breaking Changes`` section renders on **every** tier — a breaking
+    change on a patch tag is exactly the case that must not be hidden.
+    """
+    light = tier == "patch"
     breaking = [entry for entry in entries if entry.breaking]
     grouped: OrderedDict[str, list[ReleaseEntry]] = OrderedDict(
         (section, []) for section in SECTION_ORDER
@@ -307,8 +355,9 @@ def render(entries: list[ReleaseEntry], *, repo_url: str = DEFAULT_REPO_URL) -> 
 
     nonbreaking_count = sum(len(items) for items in grouped.values())
     if nonbreaking_count:
-        parts.append("## Highlights")
-        parts.append("")
+        if not light:
+            parts.append("## Highlights")
+            parts.append("")
         for section, items in grouped.items():
             if not items:
                 continue
@@ -325,8 +374,9 @@ def render(entries: list[ReleaseEntry], *, repo_url: str = DEFAULT_REPO_URL) -> 
             parts.extend(bullet_for_entry(entry, repo_url) for entry in items)
             parts.append("")
     elif breaking:
-        parts.append("## Highlights")
-        parts.append("")
+        if not light:
+            parts.append("## Highlights")
+            parts.append("")
         parts.append("No non-breaking highlights were detected for this tag.")
         parts.append("")
 
@@ -355,6 +405,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Best-effort detection of a PR label named 'breaking'.",
     )
+    parser.add_argument(
+        "--tier",
+        choices=["auto", "patch", "minor", "major"],
+        default="auto",
+        help=(
+            "Release weight. 'auto' (default) derives it from the semver delta "
+            "between this tag and the previous v* tag: patch => light "
+            "grouped-only body, minor/major => full Highlights treatment. "
+            "Breaking changes always render first regardless of tier."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -367,7 +428,10 @@ def main(argv: list[str]) -> int:
             detect_github_labels=args.detect_github_labels,
             github_repo=github_repo,
         )
-        print(render(entries, repo_url=args.repo_url))
+        tier = args.tier
+        if tier == "auto":
+            tier = bump_level(args.tag, previous_tag(args.tag))
+        print(render(entries, repo_url=args.repo_url, tier=tier))
     except Exception as exc:
         print(f"compose_release_notes.py: {exc}", file=sys.stderr)
         return 1

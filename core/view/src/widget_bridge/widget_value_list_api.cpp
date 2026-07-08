@@ -5,6 +5,7 @@
 
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/virtual_list.hpp>
+#include <pulp/view/virtual_grid.hpp>
 
 #include <string>
 #include <utility>
@@ -102,6 +103,78 @@ void WidgetBridge::register_widget_value_list_api() {
         auto* v = widget(id); if (!v) return choc::value::Value{};
         if (auto* vl = dynamic_cast<VirtualList*>(v))
             vl->refresh_rows();
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "setVirtualGridItemCount", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v))
+            vg->set_item_count(static_cast<std::size_t>(std::max(0, args.get<int>(1, 0))));
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "setVirtualGridCellSize", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v))
+            vg->set_cell_size(static_cast<float>(args.get<double>(1, 80.0)),
+                              static_cast<float>(args.get<double>(2, 60.0)));
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "setVirtualGridColumnCount", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v))
+            vg->set_column_count(args.get<int>(1, 0));
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "setVirtualGridOverscan", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v))
+            vg->set_overscan(args.get<int>(1, 2));
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "setVirtualGridSelectionMode", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto mode = args.get<std::string>(1, "single");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v)) {
+            if (mode == "none") vg->set_selection_mode(VirtualGrid::SelectionMode::none);
+            else if (mode == "multi") vg->set_selection_mode(VirtualGrid::SelectionMode::multi);
+            else vg->set_selection_mode(VirtualGrid::SelectionMode::single);
+        }
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "setVirtualGridSelected", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v)) {
+            const auto index = args.get<int>(1, -1);
+            if (index < 0) vg->clear_selection();
+            else vg->select_cell(static_cast<std::size_t>(index));
+        }
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "scrollVirtualGridToItem", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v))
+            vg->scroll_to_item(static_cast<std::size_t>(std::max(0, args.get<int>(1, 0))));
+        return choc::value::Value{};
+    });
+
+    register_bridge_function(api, "refreshVirtualGridCells", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id); if (!v) return choc::value::Value{};
+        if (auto* vg = dynamic_cast<VirtualGrid*>(v))
+            vg->refresh_cells();
         return choc::value::Value{};
     });
 }
