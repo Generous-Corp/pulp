@@ -33,28 +33,13 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
         return()
     endif()
 
-    # Map category + accepts_midi to AU type and tag. Same routing logic as
-    # _pulp_add_au — AU v3 hosts also require aumf for effects that want MIDI.
-    if(category STREQUAL "Instrument")
-        set(au_type "aumu")
-        set(au_tag "Synthesizer")
-    elseif(category STREQUAL "MidiEffect")
-        set(au_type "aumi")
-        set(au_tag "MIDI")
-    elseif(accepts_midi)
-        set(au_type "aumf")
-        set(au_tag "Effects")
-    else()
-        set(au_type "aufx")
-        set(au_tag "Effects")
-    endif()
-
-    # Compute integer version (major * 65536 + minor * 256 + patch).
-    string(REPLACE "." ";" _ver_parts "${version}")
-    list(GET _ver_parts 0 _ver_major)
-    list(GET _ver_parts 1 _ver_minor)
-    list(GET _ver_parts 2 _ver_patch)
-    math(EXPR _au_version_int "${_ver_major} * 65536 + ${_ver_minor} * 256 + ${_ver_patch}")
+    _pulp_metadata_resolve_au(_pulp_auv3_meta
+        "pulp_add_plugin(${target}) AUv3"
+        "${category}" "${accepts_midi}" "${version}"
+        "${plugin_code}" "${manufacturer_code}")
+    set(au_type "${_pulp_auv3_meta_TYPE}")
+    set(au_tag "${_pulp_auv3_meta_TAG}")
+    set(_au_version_int "${_pulp_auv3_meta_VERSION_INT}")
 
     # Find per-plugin AU v3 entry (convention: au_v3_entry.cpp in plugin
     # source dir). Uses PULP_AUV3_PLUGIN to register the processor factory
@@ -548,18 +533,10 @@ function(pulp_add_ios_auv3)
         endif()
     endforeach()
 
-    string(LENGTH "${AUV3_MANUFACTURER_CODE}" _mfr_len)
-    if(NOT _mfr_len EQUAL 4)
-        message(FATAL_ERROR
-            "pulp_add_ios_auv3(${AUV3_NAME}): MANUFACTURER_CODE must be exactly "
-            "4 characters (got '${AUV3_MANUFACTURER_CODE}', length ${_mfr_len}).")
-    endif()
-    string(LENGTH "${AUV3_SUBTYPE_CODE}" _sub_len)
-    if(NOT _sub_len EQUAL 4)
-        message(FATAL_ERROR
-            "pulp_add_ios_auv3(${AUV3_NAME}): SUBTYPE_CODE must be exactly "
-            "4 characters (got '${AUV3_SUBTYPE_CODE}', length ${_sub_len}).")
-    endif()
+    _pulp_metadata_require_fourcc(
+        "pulp_add_ios_auv3(${AUV3_NAME})" "MANUFACTURER_CODE" "${AUV3_MANUFACTURER_CODE}")
+    _pulp_metadata_require_fourcc(
+        "pulp_add_ios_auv3(${AUV3_NAME})" "SUBTYPE_CODE" "${AUV3_SUBTYPE_CODE}")
 
     if(NOT AUV3_AU_TYPE)
         set(AUV3_AU_TYPE "aufx")

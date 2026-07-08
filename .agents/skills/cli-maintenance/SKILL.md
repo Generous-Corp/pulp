@@ -1193,7 +1193,7 @@ Modes:
 - `--json` / `--report <path>` — emit structured report
   (`validation-report-v1.schema.json`).
 - `--screenshot` — capture plugin editor PNGs under
-  `artifacts/screenshots/`.
+  `artifacts/screenshots/` through `pulp::view::capture_view()`.
 - `--target {standalone|auv3|macho|all} <bundle...>` — run macOS runtime
   validators on explicit bundle paths instead of walking `build/`.
 
@@ -1227,6 +1227,12 @@ Gotchas:
   Do not describe `pulp validate` as only `auval` / `clap-validator` /
   `pluginval`; AAX, optional `vstvalidator`, reports, screenshots, strict
   mode, and `--target` are part of the current surface.
+- **MCP mirrors project screenshot capture through `pulp_validate`.**
+  `pulp_validate` accepts `screenshot=true` and forwards `--screenshot` to
+  `cmd_validate.cpp`. Keep `tools/mcp/mcp_tools.cpp`, `tools/mcp/pulp_mcp.cpp`,
+  `test/test_mcp_server.cpp`, `docs/guides/claude-code-plugin.md`, and the
+  `pulp_screenshot` wording aligned so agents do not treat the demo/script
+  fixture renderer as the project plugin capture API.
 
 ### `pulp doctor --validators`
 

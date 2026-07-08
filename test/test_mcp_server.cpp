@@ -1828,12 +1828,25 @@ TEST_CASE("MCP validate only passes --all for the explicit all flag",
     require_contains(false_with_other_true, R"JSON("id":52)JSON");
     require_contains(false_with_other_true, "fake-pulp [validate] [--json]");
     REQUIRE(false_with_other_true.find("[--all]") == std::string::npos);
+    REQUIRE(false_with_other_true.find("[--screenshot]") == std::string::npos);
 
     auto string_true = handle_request(tool_call(
         "53", "pulp_validate", R"JSON({"all":"true"})JSON"));
     require_contains(string_true, R"JSON("id":53)JSON");
     require_contains(string_true, "fake-pulp [validate] [--json]");
     REQUIRE(string_true.find("[--all]") == std::string::npos);
+
+    auto screenshot_response = handle_request(tool_call(
+        "54", "pulp_validate", R"JSON({"screenshot":true})JSON"));
+    require_contains(screenshot_response, R"JSON("id":54)JSON");
+    require_contains(screenshot_response, "fake-pulp [validate] [--json] [--screenshot]");
+    REQUIRE(screenshot_response.find("[--all]") == std::string::npos);
+
+    auto screenshot_false = handle_request(tool_call(
+        "55", "pulp_validate", R"JSON({"screenshot":false})JSON"));
+    require_contains(screenshot_false, R"JSON("id":55)JSON");
+    require_contains(screenshot_false, "fake-pulp [validate] [--json]");
+    REQUIRE(screenshot_false.find("[--screenshot]") == std::string::npos);
 #endif
 }
 

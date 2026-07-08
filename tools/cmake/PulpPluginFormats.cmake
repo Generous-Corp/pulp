@@ -376,46 +376,14 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         set(PULP_MANUFACTURER "${manufacturer}")
         set(PULP_MANUFACTURER_CODE "${manufacturer_code}")
         set(PULP_PLUGIN_CODE "${plugin_code}")
-        # Determine AU component type from category + accepts_midi flag.
-        #   aumu — kAudioUnitType_MusicDevice   (instrument that accepts MIDI)
-        #   aumf — kAudioUnitType_MusicEffect   (effect that accepts MIDI;
-        #                                       hosts only route MIDI here)
-        #   aumi — kAudioUnitType_MIDIProcessor (MIDI in, MIDI out, no audio)
-        #   aufx — kAudioUnitType_Effect        (audio-only effect)
-        #
-        # AU hosts (Logic, MainStage, GarageBand, etc.) never deliver MIDI
-        # to an aufx-typed plug-in. When a descriptor declares
-        # ``accepts_midi = true`` but we still emitted aufx, the adapter
-        # would silently never receive HandleMIDIEvent callbacks — a
-        # packaging bug, not a code bug. Flip to aumf so the host wires
-        # the MIDI lane. See the auv2 skill for the full rationale and
-        # the user-facing DAW cache note.
-        if("${category}" STREQUAL "Instrument")
-            set(PULP_AU_TYPE "aumu")
-        elseif("${category}" STREQUAL "MidiEffect")
-            set(PULP_AU_TYPE "aumi")
-        elseif(accepts_midi)
-            set(PULP_AU_TYPE "aumf")
-        else()
-            set(PULP_AU_TYPE "aufx")
-        endif()
+        _pulp_metadata_resolve_au(_pulp_au_meta
+            "pulp_add_plugin(${target}) AU"
+            "${category}" "${accepts_midi}" "${version}"
+            "${plugin_code}" "${manufacturer_code}")
+        set(PULP_AU_TYPE "${_pulp_au_meta_TYPE}")
         # Factory function name follows the AUSDK_COMPONENT_ENTRY convention
         set(PULP_AU_FACTORY_NAME "${target}AUFactory")
-        # Compute integer version (major * 65536 + minor * 256 + patch)
-        string(REPLACE "." ";" _au_ver_parts "${version}")
-        list(LENGTH _au_ver_parts _au_ver_len)
-        list(GET _au_ver_parts 0 _au_ver_major)
-        if(_au_ver_len GREATER 1)
-            list(GET _au_ver_parts 1 _au_ver_minor)
-        else()
-            set(_au_ver_minor 0)
-        endif()
-        if(_au_ver_len GREATER 2)
-            list(GET _au_ver_parts 2 _au_ver_patch)
-        else()
-            set(_au_ver_patch 0)
-        endif()
-        math(EXPR PULP_AU_VERSION_INT "${_au_ver_major} * 65536 + ${_au_ver_minor} * 256 + ${_au_ver_patch}")
+        set(PULP_AU_VERSION_INT "${_pulp_au_meta_VERSION_INT}")
         configure_file(
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.au.in"
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au"

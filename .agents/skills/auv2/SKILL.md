@@ -36,7 +36,9 @@ Pulp's `pulp_add_plugin()` automates the choice from two inputs:
 1. `CATEGORY` — `Effect` | `Instrument` | `MidiEffect`
 2. `ACCEPTS_MIDI` — bool option that mirrors `PluginDescriptor::accepts_midi`
 
-The resulting mapping (`_pulp_add_au` / `_pulp_add_auv3` in `tools/cmake/PulpUtils.cmake`):
+The resulting mapping is resolved centrally by
+`tools/cmake/PulpPluginMetadata.cmake` and consumed by both `_pulp_add_au`
+and `_pulp_add_auv3`:
 
 ```
 (Instrument,  *)     -> aumu
@@ -52,6 +54,11 @@ declared by `PluginDescriptor::produces_midi` in processor code and consumed
 by the format/runtime layer where supported; it is not a CMake packaging flag.
 If a caller passes `PRODUCES_MIDI` anyway, CMake warns and ignores it so stale
 docs/tests cannot imply a fake packaging effect.
+
+The metadata resolver also owns AU/AUv3 four-character code validation and AU
+integer version parsing. Keep it packaging-only: it must not absorb
+`pulp_add_plugin()` content reload metadata or the DSP/UI hot-reload helpers
+(`pulp_add_reload_logic`, `pulp_reload_host`, `pulp_reload_host_ui`).
 
 ## MIDI Input Wiring
 

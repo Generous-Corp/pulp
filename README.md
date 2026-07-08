@@ -84,7 +84,7 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - SkSL runtime shaders for custom GPU effects
 - SDF shape primitives for resolution-independent drawing
 - Waveform and spectrum visualization widgets
-- Headless screenshot capture for CI and validation
+- Headless screenshot capture for CI and validation via `capture_view()`
 
 **Shipping**
 - Code signing and notarization on macOS
@@ -172,6 +172,10 @@ pulp_add_plugin(MyGain
     MANUFACTURER "Example"  PLUGIN_CODE "MyGn"  MANUFACTURER_CODE "Exmp"
 )
 ```
+
+`pulp_add_plugin()` resolves the format-specific bundle metadata from that one
+declaration, including AU/AUv3 component type, four-character codes, and plist
+version values.
 
 ## Agent integrations
 
