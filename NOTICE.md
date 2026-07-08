@@ -246,6 +246,33 @@ Optional native no-JS glTF/GLB parser, fetched only when
 
 ---
 
+## Google android skills (perfetto-trace-analysis, perfetto-sql)
+
+Copyright Google LLC
+
+Apache License, Version 2.0
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Pulp's `trace-analysis` and `trace-sql` skills adapt the trace-investigation
+methodology and SQL discipline from Google LLC's `android/skills` project
+(the `perfetto-trace-analysis` and `perfetto-sql` skills). Methodology
+adapted; Android domain content not used — the Pulp domain hints and queries
+are authored against Pulp's own subsystems. No upstream source is
+redistributed.
+
+---
+
 ## Highway
 
 Copyright 2019 Google LLC
@@ -433,14 +460,15 @@ limitations under the License.
 
 ## melatonin_perfetto
 
-Copyright (c) Sudara (melatonin_perfetto contributors)
+Copyright (c) 2022 Sudara (melatonin_perfetto contributors)
 
 Pulp's dev-only tracing subsystem adapts the compile-time `PRETTY_FUNCTION`
 trimmer (`compileTimePrettierFunction`) from melatonin_perfetto v1.4.0 into
-`pulp::runtime::trace_detail::prettify_function` (core/runtime/include/pulp/runtime/trace.hpp).
-That trimmer is the only component used; no other melatonin_perfetto code is
-copied, and it is compiled only under PULP_TRACING (OFF by default; never
-shipped).
+`pulp::runtime::trace_detail::prettify_function` (core/runtime/include/pulp/runtime/trace.hpp),
+and re-expresses its "did I leave tracing on?" guard patterns as a Catch2
+default-off guard plus a `pulp ship` symbol check. That trimmer is the only
+code component used; no other melatonin_perfetto source is copied, and it is
+compiled only under PULP_TRACING (OFF by default; never shipped).
 
 MIT License
 
@@ -461,6 +489,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Acknowledgements — upstream authorship and contributions this adaptation
+draws on:
+
+- **Sudara** — author of melatonin_perfetto
+  (https://github.com/sudara/melatonin_perfetto), the project our Perfetto
+  integration patterns and the function-name prettifier are adapted from.
+- **@benthevining** — CMake build wiring and tests upstream.
+- **@dikadk** and **stephenk** — cross-platform build support (macOS and
+  Windows) upstream.
 
 https://github.com/sudara/melatonin_perfetto
 

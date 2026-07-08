@@ -435,6 +435,24 @@
         "tools/testing/daw-smoke/**",
         "docs/guides/daw-smoke.md"
       ]
+    },
+    "trace-analysis": {
+      "paths": [
+        ".agents/skills/trace-analysis/**",
+        "core/runtime/**/*trace*",
+        "tools/cmake/PulpTracing.cmake",
+        "experimental/pulp-rs/src/cmd/trace.rs",
+        "docs/guides/tracing.md"
+      ]
+    },
+    "trace-sql": {
+      "paths": [
+        ".agents/skills/trace-sql/**",
+        "core/runtime/**/*trace*",
+        "tools/cmake/PulpTracing.cmake",
+        "experimental/pulp-rs/src/cmd/trace.rs",
+        "docs/guides/tracing.md"
+      ]
     }
   }
 }
