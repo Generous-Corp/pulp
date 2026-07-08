@@ -140,6 +140,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Agent-facing wrappers around inspector Motion protocol",
     },
     Entry {
+        name: "trace",
+        summary: "Agent-facing wrappers around inspector Trace (Perfetto) protocol",
+    },
+    Entry {
         name: "scan",
         summary: "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins",
     },

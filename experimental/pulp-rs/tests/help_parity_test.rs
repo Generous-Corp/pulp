@@ -4,7 +4,8 @@
 //! The reference file is `tests/fixtures/help/expected_cpp.txt`,
 //! captured from the C++ delegate by running `./pulp-cpp help`.
 //! The installed Rust front end intentionally adds Rust-native
-//! commands (`motion`, `identity`) to that shared command surface.
+//! commands (`motion`, `trace`, `identity`) to that shared command
+//! surface.
 //!
 //! The "Examples" section uses literal `pulp create ...` lines on
 //! both sides — those aren't the banner name, they're example
@@ -39,7 +40,7 @@ fn expected_installed_banner() -> String {
     expected
         .replace(
             "  inspect        Connect to a running plugin inspector\n",
-            "  inspect        Connect to a running plugin inspector\n  motion         Agent-facing wrappers around inspector Motion protocol\n",
+            "  inspect        Connect to a running plugin inspector\n  motion         Agent-facing wrappers around inspector Motion protocol\n  trace          Agent-facing wrappers around inspector Trace (Perfetto) protocol\n",
         )
         .replace(
             "  import         Detect a framework project and emit a Pulp migration scaffold\n",

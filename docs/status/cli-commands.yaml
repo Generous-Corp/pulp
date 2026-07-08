@@ -1122,6 +1122,70 @@ commands:
             description: enable or disable
     docs: reference/cli.md#motion
 
+  - name: trace
+    status: experimental
+    summary: Agent-facing wrappers around the inspector `Trace.*` Perfetto-tracing protocol. Requires a running inspector with the tracing server enabled, then starts/stops a session, runs SQL over the captured `.pftrace`, runs L0 preset queries, and asks for a one-shot narrated root cause from a terminal.
+    args:
+      - name: --port
+        kind: option
+        required: false
+        description: Inspector port; defaults to 9147 or `$PULP_INSPECTOR_PORT`
+      - name: --json
+        kind: flag
+        required: false
+        description: Emit the raw inspector JSON response instead of the pretty form
+    subcommands:
+      - name: start
+        summary: Begin a `Trace.startSession` recording the selected span categories into an in-process ring.
+        args:
+          - name: --categories
+            kind: option
+            required: false
+            description: Comma-separated span categories (dsp, render, layout, canvas, text, js, gpu, …)
+          - name: --out
+            kind: option
+            required: false
+            description: Output path for the flushed `.pftrace`
+          - name: --ring-mb
+            kind: option
+            required: false
+            description: In-process ring size in mebibytes (default 80)
+      - name: stop
+        summary: Flush the session and print the `.pftrace` path via `Trace.stopSession`
+      - name: query
+        summary: Run SQL over the captured trace via `Trace.query`; JSON by default. Pass a SQL string or `--preset <name>`.
+        args:
+          - name: sql
+            kind: positional
+            required: false
+            description: SQL query string (omit when using --preset)
+          - name: --preset
+            kind: option
+            required: false
+            description: Named trace-stdlib preset to run instead of raw SQL
+          - name: --format
+            kind: option
+            required: false
+            description: Output format json|table|csv (default json)
+      - name: slowest-frames
+        summary: L0 preset (`Trace.query`) — frames over the vsync budget, worst first
+      - name: xruns
+        summary: L0 preset (`Trace.query`) — audio xrun / deadline-miss events
+      - name: dsp-hotspots
+        summary: L0 preset (`Trace.query`) — per-node DSP cost, most expensive first
+      - name: layout-vs-paint
+        summary: L0 preset (`Trace.query`) — one-row-per-category frame cost split
+      - name: snapshot
+        summary: Print `{tracing_active, categories, ring_bytes, out_path}` via `Trace.snapshot`
+      - name: explain
+        summary: One-shot narrated root cause + chain of evidence + fix via `Trace.explain`
+        args:
+          - name: question
+            kind: positional
+            required: true
+            description: Plain-English question to investigate
+    docs: reference/cli.md#trace
+
   - name: tweaks
     status: experimental
     summary: Inspect the `pulp-tweaks.json` sidecar written by the inspector overlay. `tweaks diff` classifies stored tweaks against a design snapshot as clean, drifted (anchor survives, property gone), or orphaned (anchor gone) — the CLI mirror of the inspector drift drawer.

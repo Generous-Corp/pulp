@@ -28,5 +28,6 @@ pub mod run_parse;
 pub mod scan;
 pub mod sdk;
 pub mod tool;
+pub mod trace;
 pub mod upgrade;
 pub mod version;

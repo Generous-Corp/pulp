@@ -153,6 +153,15 @@ enum Command {
     #[command(name = "motion")]
     Motion(PkgTailArgs),
 
+    /// Agent-facing wrappers around the inspector `Trace.*` Perfetto
+    /// protocol — start / stop / query / snapshot / explain plus the
+    /// L0 preset verbs (slowest-frames / xruns / dsp-hotspots /
+    /// layout-vs-paint). Pairs with the `/trace` slash command and the
+    /// `pulp_trace_*` MCP tools. Off by default — requires a running
+    /// inspector with tracing enabled (PULP_TRACE_SERVER=1).
+    #[command(name = "trace")]
+    Trace(PkgTailArgs),
+
     /// Manage `.pulp/identity.lock` — the committed pin of each
     /// plugin's AU 4CC, manufacturer code, AAX product code,
     /// optional VST3 FUID, and optional CLAP plugin id. See
@@ -731,6 +740,28 @@ fn real_main() -> Result<(), ExitCode> {
             })?;
             let talker = cmd::motion::SystemInspector;
             cmd::motion::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
+        }
+        Command::Trace(args) => {
+            let (sub, flags) = cmd::trace::parse(&args.tail).map_err(|e| match e {
+                CliError::UnknownSubcommand => {
+                    eprintln!("pulp trace: unknown subcommand");
+                    eprintln!(
+                        "  supported: start, stop, query, snapshot, explain, \
+                         slowest-frames, xruns, dsp-hotspots, layout-vs-paint"
+                    );
+                    ExitCode::from(2)
+                }
+                CliError::BadUsage(msg) => {
+                    eprintln!("{msg}");
+                    ExitCode::from(2)
+                }
+                other => {
+                    eprintln!("pulp trace: {other}");
+                    ExitCode::from(2)
+                }
+            })?;
+            let talker = cmd::trace::SystemInspector;
+            cmd::trace::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
         }
     }
 }
