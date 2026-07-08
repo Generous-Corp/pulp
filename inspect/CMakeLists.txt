@@ -26,6 +26,7 @@ target_sources(pulp-inspect PRIVATE
     src/source_jump.cpp
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
+    src/trace_inspector.cpp
     src/tweak_store.cpp
     src/agent_request_queue.cpp
 )

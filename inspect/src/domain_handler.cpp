@@ -9,6 +9,7 @@
 #include <pulp/inspect/audio_inspector.hpp>
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/motion_scrubber.hpp>
+#include <pulp/inspect/trace_inspector.hpp>
 #include <pulp/inspect/tweak_store.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/view.hpp>
@@ -59,6 +60,7 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     if (domain == "Audio")       return handle_audio(req);
     if (domain == "Capture")     return handle_capture(req);
     if (domain == "Motion")      return handle_motion(req);
+    if (domain == "Trace")       return handle_trace(req);
     if (domain == "LiveConstant") return handle_live_constant(req);
 
     return make_error(req.id, "Unknown domain: " + domain);
@@ -78,6 +80,11 @@ InspectorMessage DomainHandler::handle_motion(const InspectorMessage& req) {
     }
     if (!motion_) return make_error(req.id, "No motion inspector attached");
     return motion_->handle(req);
+}
+
+InspectorMessage DomainHandler::handle_trace(const InspectorMessage& req) {
+    if (!trace_) return make_error(req.id, "No trace inspector attached");
+    return trace_->handle(req);
 }
 
 // ── Inspector domain ────────────────────────────────────────────────────────
