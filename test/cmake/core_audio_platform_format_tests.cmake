@@ -77,6 +77,10 @@ pulp_add_test_suite(pulp-test-external-binding LIBRARIES pulp::state)
 # Structured non-param state channel (sequencer/mod-matrix transport)
 pulp_add_test_suite(pulp-test-sequencer-state-channel LIBRARIES pulp::state)
 
+# Freeze coverage: parametric SequencerConfig (second/non-square/custom-cell
+# configs), the shared step_edit_reducer, and the neutral non-Processor producer.
+pulp_add_test_suite(pulp-test-sequencer-freeze LIBRARIES pulp::state)
+
 # StepGridView — the UI consumer of the sequencer state channel
 pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 

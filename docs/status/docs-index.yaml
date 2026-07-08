@@ -313,6 +313,16 @@ docs:
     kind: reference
     summary: Catalog of every developer-facing core/view UI primitive
 
+  - slug: sequencer-state-channel
+    path: reference/sequencer-state-channel.md
+    kind: reference
+    summary: Audio-safe engine→view transport for bulk non-parameter state (step grids, mod matrices); parametric SequencerConfig, neutral-producer contract, StepGridView
+
+  - slug: base-vs-modulated
+    path: reference/base-vs-modulated.md
+    kind: reference
+    summary: How base value and modulation offset combine into an effective value; uniform get_modulated read vs per-target modulation_lane routing
+
   - slug: design-system-naming
     path: reference/design-system-naming.md
     kind: reference

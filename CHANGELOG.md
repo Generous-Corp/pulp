@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06130"></a>
+## [0.613.0] - 2026-07-08
+
+- feat(state): freeze SequencerStateChannel as a parametric public primitive ([#5740](https://github.com/danielraffel/pulp/pull/5740))
+- docs: explain why only hot-reload carries signing/trust + the rack-reload boundary ([#5738](https://github.com/danielraffel/pulp/pull/5738))
+- docs: clarify DSP hot-reload vs live graph editing (which swap, and why trust differs) ([#5737](https://github.com/danielraffel/pulp/pull/5737))
+
 <a id="v06120"></a>
 ## [0.612.0] - 2026-07-08
 
@@ -6092,6 +6099,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.613.0]: https://github.com/danielraffel/pulp/releases/tag/v0.613.0
 [0.612.0]: https://github.com/danielraffel/pulp/releases/tag/v0.612.0
 [0.611.0]: https://github.com/danielraffel/pulp/releases/tag/v0.611.0
 [0.610.0]: https://github.com/danielraffel/pulp/releases/tag/v0.610.0
