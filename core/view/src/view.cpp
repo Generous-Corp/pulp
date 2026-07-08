@@ -10,6 +10,7 @@
 #include <memory>
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -923,6 +924,55 @@ void View::set_bounds(Rect r) {
     if (bounds_ == r) return;
     bounds_ = r;
     on_resized();
+}
+
+void View::prepare_for_reuse() {
+    // A pooled view is never attached to a live tree. Firing this on a parented
+    // view would mean the pool is recycling something still wired into a paint /
+    // hit-test path — a logic error, not a recoverable state.
+    assert(parent_ == nullptr && "prepare_for_reuse() on a view that still has a parent");
+
+    // Geometry / visibility / compositing — reset directly (not via setters) to
+    // avoid on_resized()/request_repaint() side effects on a detached view.
+    bounds_ = Rect{};
+    visible_ = true;
+    opacity_ = 1.0f;
+
+    // Accessibility identity from the previous binding must not leak into the
+    // next occupant of this slot.
+    access_role_ = AccessRole::none;
+    access_label_.clear();
+    access_value_.clear();
+    access_pressed_.clear();
+    access_checked_.clear();
+    access_disabled_.clear();
+    access_hidden_.clear();
+
+    // Pointer / hover / focus interaction state.
+    hovered_ = false;
+    has_focus_ = false;
+    captured_pointers_.clear();
+
+    // A recycled view must not remain the process-global overlay owner; the
+    // static back-pointer would otherwise dangle at a parked instance.
+    release_overlay();
+
+    // Clear EVERY base-class callback. A recycled view that keeps a stale
+    // std::function fires it into freed/torn-down closure state on the next
+    // interaction — the exact use-after-free this reset exists to prevent
+    // (Codex must-fix #5). Subclass callbacks are the subclass override's job.
+    on_click = nullptr;
+    on_pointer_event = nullptr;
+    on_drag = nullptr;
+    on_pointer_move = nullptr;
+    on_gesture_cb = nullptr;
+    on_context_menu = nullptr;
+    on_drop = nullptr;
+    on_hover_enter = nullptr;
+    on_hover_leave = nullptr;
+    on_overlay_dismissed = nullptr;
+    on_global_click = nullptr;
+    on_global_key = nullptr;
 }
 
 void View::set_window_host(WindowHost* host) {

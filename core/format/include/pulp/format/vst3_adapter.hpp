@@ -212,6 +212,18 @@ private:
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
     state::ParameterEventQueue param_events_;
+    // Sample-accurate parameter OUTPUT: the processor pushes offset-tagged events
+    // via push_output_param_event(); we drain them into per-parameter VST3 output
+    // queues after process(). All three vectors are sized off the audio thread
+    // (at prepare / block start alongside param_snapshot_) so the per-block drain
+    // stays allocation-free. output_param_has_event_ is the skip-set that keeps
+    // the offset-0 snapshot fallback from double-reporting a param that already
+    // emitted explicit events; output_param_queue_cache_ caches one VST3 queue
+    // per parameter index so a param with multiple offsets reuses one queue in
+    // ascending-offset order.
+    state::ParameterEventQueue output_param_events_;
+    std::vector<std::uint8_t> output_param_has_event_;
+    std::vector<Steinberg::Vst::IParamValueQueue*> output_param_queue_cache_;
 
     // ── Per-note expression (MPE) sidecar ───────────────────────────────────
     //

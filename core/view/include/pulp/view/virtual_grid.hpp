@@ -7,9 +7,11 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <typeindex>
 #include <vector>
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/view_pool.hpp>
 #include <pulp/view/virtual_list.hpp>
 
 namespace pulp::view {
@@ -164,6 +166,13 @@ private:
     CellReleaser cell_releaser_;
     std::vector<CellSlot> cell_slots_;
     std::size_t first_realized_index_ = 0;
+
+    // Per-class recycling pool for released cells (planning 2.3). Mirrors
+    // VirtualList's row_pool_: opt-in cells (View::supports_reuse()) are parked
+    // on release and re-acquired before the user factory. Behavior-neutral for
+    // the default View cells the built-in grid uses.
+    ViewPool cell_pool_;
+    std::optional<std::type_index> cell_type_;
 
     SelectionMode selection_mode_ = SelectionMode::single;
     std::vector<std::size_t> selection_;

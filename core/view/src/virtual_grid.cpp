@@ -7,13 +7,15 @@
 #include <string>
 #include <utility>
 
-// NOTE (intentional duplication): VirtualGrid mirrors VirtualList's recycling
-// pool and reentrancy discipline (alive token, window generation, pool-resize
-// guard, destroying flag) verbatim-shaped rather than sharing a base. The shared
-// per-class ViewPool (planning 2.3) is the de-duplication step; keeping the two
-// independent until then means a hard-won VirtualList reentrancy fix and its
-// VirtualGrid twin can be reviewed side-by-side, not hidden behind an early
-// abstraction. See virtual_grid.hpp for the full rationale.
+// NOTE (intentional duplication): VirtualGrid mirrors VirtualList's slot-
+// windowing and reentrancy discipline (alive token, window generation, pool-
+// resize guard, destroying flag) verbatim-shaped rather than sharing a base.
+// Both now share the per-class recycling ViewPool (planning 2.3) — released
+// cells/rows that opt in via View::supports_reuse() are parked and re-acquired
+// instead of destroyed — but the windowing classes themselves stay independent
+// so a hard-won VirtualList reentrancy fix and its VirtualGrid twin can be
+// reviewed side-by-side, not hidden behind an early abstraction. See
+// virtual_grid.hpp for the full rationale.
 
 namespace pulp::view {
 
@@ -128,6 +130,11 @@ void VirtualGrid::set_overscan(int rows) {
 
 void VirtualGrid::set_cell_factory(CellFactory factory) {
     if (!clear_pool()) return;
+    // Parked cells belong to the OLD factory — drop the recycle pool and forget
+    // the tracked cell type so a new factory's cells are never bound onto stale
+    // recycled instances.
+    cell_pool_.clear();
+    cell_type_.reset();
     cell_factory_ = std::move(factory);
     dirty_tracker_.invalidate_all();
     if (!update_window(true)) return;
@@ -475,11 +482,20 @@ bool VirtualGrid::ensure_pool_size(std::size_t desired) {
     while (cell_slots_.size() < desired) {
         const std::size_t slot = cell_slots_.size();
         const auto generation = window_generation_;
-        auto factory = cell_factory_;
-        auto cell = factory ? factory(slot) : std::make_unique<View>();
-        if (!alive->load(std::memory_order_acquire)) return false;
-        if (!destroying_ && generation != window_generation_) return finish(false);
-        if (!cell) cell = std::make_unique<View>();
+        // Prefer a recycled cell of the known cell type before building a fresh
+        // one. The pool pop is side-effect-free (no user callback), so it needs
+        // no alive/generation re-check; falls through to the factory when the
+        // pool is empty or the cell type never opts in.
+        std::unique_ptr<View> cell;
+        if (cell_type_) cell = cell_pool_.acquire(*cell_type_);
+        if (!cell) {
+            auto factory = cell_factory_;
+            cell = factory ? factory(slot) : std::make_unique<View>();
+            if (!alive->load(std::memory_order_acquire)) return false;
+            if (!destroying_ && generation != window_generation_) return finish(false);
+            if (!cell) cell = std::make_unique<View>();
+            cell_type_ = std::type_index(typeid(*cell));
+        }
         cell->set_overflow(Overflow::hidden);
         cell->set_position(View::Position::absolute);
         cell->set_left(0.0f);
@@ -505,7 +521,10 @@ bool VirtualGrid::release_cell(CellSlot& slot) {
         if (!alive->load(std::memory_order_acquire)) return false;
         if (!destroying_ && generation != window_generation_) return false;
     }
-    (void)removed;
+    // Park the detached cell for recycling. release() keeps it only when the
+    // cell type opts in (View::supports_reuse()); otherwise destroys it here, so
+    // the default-View cells behave exactly as before.
+    if (removed) cell_pool_.release(std::move(removed));
     return true;
 }
 

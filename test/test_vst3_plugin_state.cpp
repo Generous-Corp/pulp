@@ -153,6 +153,15 @@ struct TestVst3Config {
     bool add_bypass_param = false;
     bool mutate_gain_in_process = false;
     bool emit_midi_out = false;
+    // When set, the test processor calls push_output_param_event() twice from
+    // process() — at output_offset_1 and output_offset_2 — exercising the
+    // sample-accurate output-parameter drain path.
+    bool push_output_param_events = false;
+    pulp::state::ParamID output_param_id = kGainParamId;
+    float output_value_1 = -12.0f;
+    float output_value_2 = 6.0f;
+    std::uint32_t output_offset_1 = 16;
+    std::uint32_t output_offset_2 = 48;
     // When set, the test processor flags a latency / tail change from inside
     // process() (the audio-thread render callback), exercising the adapter's
     // RT-safe restart-publisher path. It flags once on the first block so the
@@ -381,6 +390,15 @@ void TestVst3Processor::process(
 
     if (config_.mutate_gain_in_process) {
         state().set_value(kGainParamId, -6.0f);
+    }
+    if (config_.push_output_param_events) {
+        // Two explicit sample-accurate output events for the same param, pushed
+        // out of ascending order to prove the adapter globally sorts them into
+        // one ascending-offset VST3 queue.
+        push_output_param_event(config_.output_param_id, config_.output_value_2,
+                                config_.output_offset_2);
+        push_output_param_event(config_.output_param_id, config_.output_value_1,
+                                config_.output_offset_1);
     }
     // Flag a latency / tail change from the audio thread exactly once, on the
     // first block. The adapter must marshal the resulting restartComponent call
@@ -1500,6 +1518,143 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(out_event.noteOn.pitch == 64);
     REQUIRE_THAT(out_event.noteOn.velocity, WithinAbs(100.0f / 127.0f, 1e-6f));
 
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 push_output_param_event emits two sample-accurate offset points",
+          "[vst3][params][out-events][sample-accurate]") {
+    // The processor pushes two explicit output events for the same param (out of
+    // order: offset 48 then 16). The adapter must sort them and drain them into
+    // ONE IParamValueQueue with two points in ascending sample-offset order, and
+    // the snapshot-diff fallback must NOT add a third offset-0 point for a param
+    // that already emitted explicit events.
+    TestVst3Config config;              // Gain-only processor
+    config.push_output_param_events = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+    // Gain + the adapter's synthesized Bypass (the synthesized Bypass is
+    // controller-side only and is not in the StateStore the output drain walks).
+    REQUIRE(processor.getParameterCount() == 2);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* ins[2] = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2;
+    ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2;
+    ab_out[0].channelBuffers32 = outs;
+
+    Steinberg::Vst::ParameterChanges output_params(4);
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = ab_in;
+    data.outputs = ab_out;
+    data.outputParameterChanges = &output_params;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    // Exactly ONE output queue for the Gain param.
+    REQUIRE(output_params.getParameterCount() == 1);
+    auto* queue = output_params.getParameterData(0);
+    REQUIRE(queue != nullptr);
+    REQUIRE(queue->getParameterId() == kGainParamId);
+    // TWO sample-accurate points — and no spurious offset-0 fallback point
+    // (a third point would fail this count).
+    REQUIRE(queue->getPointCount() == 2);
+
+    Steinberg::int32 off0 = -1, off1 = -1;
+    Steinberg::Vst::ParamValue val0 = 0.0, val1 = 0.0;
+    REQUIRE(queue->getPoint(0, off0, val0) == Steinberg::kResultTrue);
+    REQUIRE(queue->getPoint(1, off1, val1) == Steinberg::kResultTrue);
+    // Points land at the exact pushed offsets, in ascending order (the adapter
+    // sorted the out-of-order pushes).
+    REQUIRE(off0 == 16);
+    REQUIRE(off1 == 48);
+    REQUIRE(off0 < off1);
+    // VST3 output uses NORMALIZED values: range.normalize(plain).
+    // Gain range = [-60, 24] (span 84); normalize(v) = (v + 60) / 84.
+    REQUIRE_THAT(val0, WithinAbs((-12.0 + 60.0) / 84.0, 1e-5));  // offset 16
+    REQUIRE_THAT(val1, WithinAbs((6.0 + 60.0) / 84.0, 1e-5));    // offset 48
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 store-only param change still yields a single offset-0 point",
+          "[vst3][params][out-events][regression]") {
+    // Regression for the legacy fallback: a plugin that changes a param through
+    // the store WITHOUT pushing an explicit event must still be reported once, at
+    // offset 0, via the before/after snapshot diff.
+    TestVst3Config config;
+    config.mutate_gain_in_process = true;   // sets Gain to -6 dB in process()
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    // Gain + the adapter's synthesized (controller-side) Bypass.
+    REQUIRE(processor.getParameterCount() == 2);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* ins[2] = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2;
+    ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2;
+    ab_out[0].channelBuffers32 = outs;
+
+    Steinberg::Vst::ParameterChanges output_params(4);
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = ab_in;
+    data.outputs = ab_out;
+    data.outputParameterChanges = &output_params;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    REQUIRE(output_params.getParameterCount() == 1);
+    auto* queue = output_params.getParameterData(0);
+    REQUIRE(queue != nullptr);
+    REQUIRE(queue->getParameterId() == kGainParamId);
+    REQUIRE(queue->getPointCount() == 1);
+    Steinberg::int32 offset = -1;
+    Steinberg::Vst::ParamValue value = 0.0;
+    REQUIRE(queue->getPoint(0, offset, value) == Steinberg::kResultTrue);
+    REQUIRE(offset == 0);
+    REQUIRE_THAT(value, WithinAbs((-6.0 + 60.0) / 84.0, 1e-5));  // 54/84
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 

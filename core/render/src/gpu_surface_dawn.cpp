@@ -243,20 +243,7 @@ public:
     }
 
     void resize(uint32_t width, uint32_t height) override {
-        width_ = width;
-        height_ = height;
-        if (surface_ && device_) {
-            // Reconfigure with the format/mode selected during initial configure
-            wgpu::SurfaceConfiguration surface_config{};
-            surface_config.device = device_;
-            surface_config.format = preferred_format_;
-            surface_config.width = width_;
-            surface_config.height = height_;
-            surface_config.presentMode = preferred_mode_;
-            surface_config.usage = wgpu::TextureUsage::RenderAttachment
-                | wgpu::TextureUsage::TextureBinding;
-            surface_.Configure(&surface_config);
-        }
+        reconfigure(width, height);
     }
 
     bool begin_frame() override {
@@ -265,6 +252,27 @@ public:
         if (surface_) {
             wgpu::SurfaceTexture surface_texture;
             surface_.GetCurrentTexture(&surface_texture);
+
+            // SuccessSuboptimal means the swapchain still yields a usable texture
+            // but no longer optimally matches the surface — the window was
+            // resized (e.g. a DAW dragged the editor container; see the Windows
+            // WM_SIZE reconcile path) or the DPI/format changed under us.
+            // Reconfigure to the current size and re-acquire the texture EXACTLY
+            // ONCE. If it is still merely suboptimal we render with this texture
+            // for the frame rather than dropping it — we must never loop, or a
+            // surface that stays suboptimal (a format Dawn can only approximate)
+            // would spin begin_frame() forever.
+            if (surface_texture.status ==
+                wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal) {
+                // Release the stale texture's ref before re-acquiring. Dawn's
+                // C++ GetCurrentTexture reinterpret-casts to the C struct and
+                // overwrites the .texture handle in place (bypassing C++
+                // move-assignment), so a second acquire into the same struct
+                // would otherwise leak the first texture's reference each frame.
+                surface_texture.texture = nullptr;
+                reconfigure(width_, height_);
+                surface_.GetCurrentTexture(&surface_texture);
+            }
 
             if (surface_texture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal &&
                 surface_texture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal) {
@@ -330,6 +338,26 @@ public:
     }
 
 private:
+    // Reconfigure the surface's swapchain to (width, height) using the format /
+    // present mode chosen at initial configure. Shared by resize() (host-driven)
+    // and the begin_frame() suboptimal-recovery path, so both go through one
+    // definition of the SurfaceConfiguration.
+    void reconfigure(uint32_t width, uint32_t height) {
+        width_ = width;
+        height_ = height;
+        if (surface_ && device_) {
+            wgpu::SurfaceConfiguration surface_config{};
+            surface_config.device = device_;
+            surface_config.format = preferred_format_;
+            surface_config.width = width_;
+            surface_config.height = height_;
+            surface_config.presentMode = preferred_mode_;
+            surface_config.usage = wgpu::TextureUsage::RenderAttachment
+                | wgpu::TextureUsage::TextureBinding;
+            surface_.Configure(&surface_config);
+        }
+    }
+
     // ── Texture lifetime contract ──────────────────────────────────────
     //
     // The current surface texture acquired in begin_frame() is per-frame only.

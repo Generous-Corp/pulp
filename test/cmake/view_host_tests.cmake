@@ -25,6 +25,8 @@ pulp_add_test_suite(pulp-test-image-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 # Accessibility tree snapshot
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
+# Per-class recycling ViewPool + View::prepare_for_reuse
+pulp_add_test_suite(pulp-test-view-pool LIBRARIES pulp::view)
 # Recycling virtualized list primitive
 pulp_add_test_suite(pulp-test-virtual-list LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-virtual-list-sample-manager LIBRARIES pulp::view)
