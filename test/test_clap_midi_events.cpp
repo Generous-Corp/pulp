@@ -548,6 +548,60 @@ public:
     }
 };
 
+// Exercises the sample-accurate parameter OUTPUT merge. Pushes two explicit
+// output param events via push_output_param_event() and (optionally) emits a
+// MIDI short BETWEEN their offsets, so the adapter must interleave params +
+// shorts into out_events in one globally ascending-time stream. The
+// store-only path (no explicit event) is exercised via mutate_store_only.
+class OutputParamProcessor : public Processor {
+public:
+    static constexpr state::ParamID kParamId = 7100;
+
+    // Configured per-instance before a run (via the g_output_param pointer).
+    bool push_events = false;         // push param@0 and param@16
+    bool emit_midi_between = false;    // note-on @8, between the two params
+    bool mutate_store_only = false;    // store change with no explicit event
+    float store_only_value = 0.0f;
+    float value_0 = 0.25f;             // exactly representable in float+double
+    float value_1 = 0.75f;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "OutputParamCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.outparam";
+        d.version = "1.0.0";
+        d.produces_midi = true;
+        return d;
+    }
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter({
+            .id = kParamId,
+            .name = "Out Param",
+            .range = {0.0f, 1.0f, 0.0f, 0.0f},
+        });
+    }
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer& midi_out,
+                 const ProcessContext&) override {
+        if (push_events) {
+            push_output_param_event(kParamId, value_0, 0);
+            push_output_param_event(kParamId, value_1, 16);
+        }
+        if (emit_midi_between) {
+            auto note = midi::MidiEvent::note_on(1, 64, 100);
+            note.sample_offset = 8;
+            midi_out.add(note);
+        }
+        if (mutate_store_only) {
+            state().set_value_rt(kParamId, store_only_value);
+        }
+    }
+};
+
 class ObservingMidiInProcessor : public Processor {
 public:
     std::size_t observed_event_count = 0;
@@ -860,6 +914,7 @@ OverflowingMidiOutProcessor* g_overflowing_midi_out = nullptr;
 ForwardingSysexProcessor* g_forwarding_sysex = nullptr;
 UnityCopyProcessor* g_unity_copy = nullptr;
 NativeF64CopyProcessor* g_native_f64_copy = nullptr;
+OutputParamProcessor* g_output_param = nullptr;
 int g_pending_latency_samples = 0;
 int g_pending_tail_samples = 0;
 bool g_pending_opts_mpe = false;
@@ -896,6 +951,12 @@ std::unique_ptr<Processor> make_process_buffers_capturing() {
     g_pending_opts_ump = false;
     g_pending_opts_node_mpe = false;
     g_pending_opts_node_ump = false;
+    return up;
+}
+
+std::unique_ptr<Processor> make_output_param() {
+    auto up = std::make_unique<OutputParamProcessor>();
+    g_output_param = up.get();
     return up;
 }
 
@@ -2067,6 +2128,80 @@ TEST_CASE("CLAP emits parameter event when processor changes automatable state",
     REQUIRE(params[0]->port_index == -1);
     REQUIRE(params[0]->channel == -1);
     REQUIRE(params[0]->key == -1);
+    REQUIRE(params[0]->value == 0.625);
+}
+
+TEST_CASE("CLAP interleaves sample-accurate output params with MIDI in ascending "
+          "time order",
+          "[clap][params][out-events][sample-accurate]") {
+    // The processor pushes two output param events (time 0 and 16) and emits a
+    // MIDI note-on at time 8 — BETWEEN them. CLAP requires out_events to be
+    // globally non-decreasing in header.time, so the adapter's three-cursor
+    // merge must produce exactly: param@0, midi@8, param@16.
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+    g_output_param->push_events = true;
+    g_output_param->emit_midi_between = true;
+
+    InputEventList events;
+    OutputEventList out;
+    REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+
+    // Three events total: two params + one MIDI short.
+    REQUIRE(out.size() == 3);
+
+    // (a) Global ordering: header.time must be non-decreasing across ALL events.
+    uint32_t prev_time = 0;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        REQUIRE(out.at(i)->time >= prev_time);
+        prev_time = out.at(i)->time;
+    }
+
+    // (b) Exact interleave: param@0, midi@8, param@16.
+    REQUIRE(out.at(0)->type == CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(out.at(0)->time == 0);
+    REQUIRE(out.at(1)->type == CLAP_EVENT_MIDI);
+    REQUIRE(out.at(1)->time == 8);
+    REQUIRE(out.at(2)->type == CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(out.at(2)->time == 16);
+
+    // (c) The param events carry the right PLAIN-domain values at the right times.
+    auto params = out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(params.size() == 2);
+    REQUIRE(params[0]->param_id == OutputParamProcessor::kParamId);
+    REQUIRE(params[0]->header.time == 0);
+    REQUIRE(params[0]->value == 0.25);   // CLAP param values are plain domain
+    REQUIRE(params[1]->param_id == OutputParamProcessor::kParamId);
+    REQUIRE(params[1]->header.time == 16);
+    REQUIRE(params[1]->value == 0.75);
+
+    auto midis = out.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+    REQUIRE(midis.size() == 1);
+    REQUIRE(midis[0]->header.time == 8);
+}
+
+TEST_CASE("CLAP store-only param change still emits a single event at time 0",
+          "[clap][params][out-events][regression]") {
+    // Regression for the snapshot-diff fallback: a plugin that changes a param
+    // through the store WITHOUT pushing an explicit output event must still be
+    // reported once, at time 0.
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+    g_output_param->mutate_store_only = true;
+    g_output_param->store_only_value = 0.625f;
+
+    InputEventList events;
+    OutputEventList out;
+    REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+
+    auto params = out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(params.size() == 1);
+    REQUIRE(params[0]->header.time == 0);
+    REQUIRE(params[0]->param_id == OutputParamProcessor::kParamId);
     REQUIRE(params[0]->value == 0.625);
 }
 

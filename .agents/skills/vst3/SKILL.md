@@ -820,3 +820,17 @@ to silence, so `setBusArrangements` HONORS the veto (returns kResultFalse)
 even with the quirk on — matching the baseline behavior. Regression:
 `pulp-test-vst3-plugin-state` `veto_bus_layout` config + the
 "honors a processor mono/stereo bus-layout veto" case.
+
+## Sample-accurate parameter output
+
+The plugin→host param-output drain (`vst3_adapter.cpp`, after `process()`) emits
+**one `IParamValueQueue` per `ParamID`, with points in ascending sample offset**
+— VST3 requires per-queue ascending offsets. Explicit events the processor
+pushed via `Processor::push_output_param_event()` are drained first (globally
+sorted by offset, each offset **clamped to `[0, numSamples-1]`**), and a
+per-parameter **skip-set** stops the legacy before/after snapshot diff from also
+emitting a stale offset-0 point for a param that already reported explicit
+events. The queue cache and skip-set are pre-sized at block start (alongside
+`param_snapshot_`), so the drain is allocation-free. Values are **normalized**
+(`ParamInfo::range.normalize`). `test_vst3_plugin_state.cpp` asserts two distinct
+offset points (16, 48) with no offset-0 duplicate.

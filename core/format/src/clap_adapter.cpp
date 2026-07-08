@@ -891,6 +891,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Snapshot parameter values to detect plugin-side changes
     auto all_params = self->store.all_params();
     self->param_snapshot.resize(all_params.size());
+    self->output_param_has_event.assign(all_params.size(), 0);
     for (std::size_t i = 0; i < all_params.size(); ++i) {
         self->param_snapshot[i] = self->store.get_value(all_params[i].id);
     }
@@ -940,6 +941,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->processor->set_ump_input(nullptr);
     }
     self->processor->set_param_events(&self->param_events);
+    self->output_param_events.clear();
+    self->processor->set_output_param_events(&self->output_param_events);
 
     // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
     // hooks (operator new override, sanitizer integration) can flag
@@ -1081,7 +1084,28 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // so the host can record automation
     auto* out_events = process->out_events;
     if (out_events) {
+        // Sort the sample-accurate explicit output events (offset ascending) and
+        // mark the skip-set so the offset-0 snapshot fallback below does not
+        // double-report a param that already emitted explicit events. Both the
+        // queue and the skip-set were sized at block start — no allocation here.
+        self->output_param_events.sort();
+        const int32_t out_frames = static_cast<int32_t>(process->frames_count);
+        const int32_t out_last_frame = out_frames > 0 ? out_frames - 1 : 0;
+        for (auto it = self->output_param_events.begin();
+             it != self->output_param_events.end(); ++it) {
+            for (std::size_t i = 0; i < all_params.size(); ++i) {
+                if (all_params[i].id == it->param_id) {
+                    self->output_param_has_event[i] = 1;
+                    break;
+                }
+            }
+        }
+        // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
+        // events. These are all at offset 0 (the earliest time), so emitting
+        // them before the offset-ordered merge below preserves CLAP's global
+        // ascending-time contract.
         for (std::size_t i = 0; i < all_params.size(); ++i) {
+            if (self->output_param_has_event[i]) continue;
             float current = self->store.get_value(all_params[i].id);
             if (std::memcmp(&current, &self->param_snapshot[i], sizeof(float)) != 0) {
                 clap_event_param_value_t ev{};
@@ -1119,15 +1143,43 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         // push as we go. midi_out's short and sysex vectors are each
         // already sorted (sort() runs below for shorts; sysex entries
         // are appended in source-sample order by the processor); we
-        // walk them with a two-cursor merge.
+        // walk them with a three-cursor merge that ALSO interleaves the
+        // sample-accurate output parameter events (self->output_param_events,
+        // already sorted above), so params, shorts, and sysex all emit in one
+        // globally ascending sample-offset stream.
         midi_out.sort();
         const auto& shorts = midi_out;
         const auto& sysexes = midi_out.sysex();
+        std::size_t pi = 0;        // output-param cursor
         std::size_t si = 0;        // short cursor
         std::size_t xi = 0;        // sysex cursor
+        const std::size_t p_end = self->output_param_events.size();
         const std::size_t s_end = shorts.size();
         const std::size_t x_end = sysexes.size();
         auto sample_at = [](int32_t off) -> int32_t { return off < 0 ? 0 : off; };
+        auto param_at = [&](std::size_t i) -> int32_t {
+            int32_t off = self->output_param_events.begin()[i].sample_offset;
+            if (off < 0) return 0;
+            if (off > out_last_frame) return out_last_frame;  // clamp into block
+            return off;
+        };
+
+        auto emit_param = [&](const state::ParameterEvent& pe, int32_t off) {
+            clap_event_param_value_t ev{};
+            ev.header.size = sizeof(ev);
+            ev.header.type = CLAP_EVENT_PARAM_VALUE;
+            ev.header.time = static_cast<uint32_t>(off);
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.flags = 0;
+            ev.param_id = pe.param_id;
+            ev.cookie = nullptr;
+            ev.note_id = -1;
+            ev.port_index = -1;
+            ev.channel = -1;
+            ev.key = -1;
+            ev.value = static_cast<double>(pe.value);  // CLAP param values are plain domain
+            out_events->try_push(out_events, &ev.header);
+        };
 
         auto emit_short = [&](const midi::MidiEvent& me) {
             clap_event_midi_t ev{};
@@ -1157,12 +1209,19 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             out_events->try_push(out_events, &ev.header);
         };
 
-        while (si < s_end || xi < x_end) {
-            const bool take_short =
-                xi >= x_end ||
-                (si < s_end && sample_at(shorts.begin()[si].sample_offset) <=
-                                 sample_at(sysexes[xi].sample_offset));
-            if (take_short) {
+        while (pi < p_end || si < s_end || xi < x_end) {
+            // Peek the next offset of each stream (INT32_MAX = exhausted), then
+            // emit the earliest. Params win ties (params <= shorts <= sysex),
+            // which is a valid non-decreasing order for equal offsets.
+            const int32_t po = pi < p_end ? param_at(pi) : INT32_MAX;
+            const int32_t so =
+                si < s_end ? sample_at(shorts.begin()[si].sample_offset) : INT32_MAX;
+            const int32_t xo =
+                xi < x_end ? sample_at(sysexes[xi].sample_offset) : INT32_MAX;
+            if (pi < p_end && po <= so && po <= xo) {
+                emit_param(self->output_param_events.begin()[pi], po);
+                ++pi;
+            } else if (si < s_end && so <= xo) {
                 emit_short(shorts.begin()[si]);
                 ++si;
             } else {

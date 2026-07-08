@@ -108,6 +108,15 @@ struct PulpClapPlugin {
     // Parameter snapshot for detecting plugin-side changes during process
     std::vector<float> param_snapshot;
     state::ParameterEventQueue param_events;
+    // Sample-accurate parameter OUTPUT: the processor pushes offset-tagged events
+    // via push_output_param_event(); we merge them (by ascending sample offset)
+    // with the plugin's MIDI-out shorts and sysex into out_events, which CLAP
+    // requires to be globally time-ordered. output_param_has_event is the
+    // skip-set that keeps the offset-0 snapshot fallback from double-reporting a
+    // param that already emitted explicit events. Both are sized off the audio
+    // thread at block start so the drain stays allocation-free.
+    state::ParameterEventQueue output_param_events;
+    std::vector<std::uint8_t> output_param_has_event;
 
     // Reused per-block MIDI buffers. Reserved and capacity-limited during
     // activate() so capacity survives warmup and processors can append

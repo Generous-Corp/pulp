@@ -1036,6 +1036,33 @@ public:
     /// no parameter events.
     const state::ParameterEventQueue* param_events() const { return param_events_; }
 
+    /// Emit a sample-accurate parameter change to the host from `process()`.
+    ///
+    /// Call this when the plugin itself changes a parameter mid-block (e.g. an
+    /// LFO-driven macro, a modeled control) and you want the host to record the
+    /// change at its exact sample offset rather than as a single coalesced
+    /// value at block start. `value` is in the plain parameter domain;
+    /// `sample_offset` is relative to the start of the current block. The host
+    /// adapter drains these events after `process()` and clamps the offset to
+    /// the block length. Returns false when no output queue is wired (the
+    /// current format/host path does not carry sample-accurate output) or the
+    /// per-block queue is full — in either case the adapter's end-of-block
+    /// snapshot still reports the parameter's final value, so no change is lost.
+    ///
+    /// Realtime-safe: pushes into a fixed-capacity queue, never allocates or
+    /// locks. Only valid to call from within `process()`.
+    bool push_output_param_event(state::ParamID id, float value,
+                                 std::uint32_t sample_offset) noexcept {
+        if (output_param_events_ == nullptr) return false;
+        return output_param_events_->push(state::ParameterEvent{
+            id, static_cast<int32_t>(sample_offset), value, 0});
+    }
+
+    /// Access the output parameter-event queue, if the adapter wired one.
+    const state::ParameterEventQueue* output_param_events() const {
+        return output_param_events_;
+    }
+
     /// @internal Framework sets these during initialization / processing.
     void set_state_store(state::StateStore* store) { state_store_ = store; }
     /// @internal
@@ -1046,6 +1073,11 @@ public:
     void set_ump_input(const midi::UmpBuffer* ump) { ump_input_ = ump; }
     /// @internal Called by format adapters before process().
     void set_param_events(const state::ParameterEventQueue* events) { param_events_ = events; }
+    /// @internal Called by format adapters before process() to receive
+    /// sample-accurate output parameter events pushed via
+    /// push_output_param_event(). The adapter owns the queue, clears it before
+    /// each block, and drains it after process().
+    void set_output_param_events(state::ParameterEventQueue* events) { output_param_events_ = events; }
 
 private:
     static constexpr std::size_t kF64FallbackMaxBuses = 16;
@@ -1081,6 +1113,7 @@ private:
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
+    state::ParameterEventQueue* output_param_events_ = nullptr;
     audio::Buffer<float> f64_fallback_input_scratch_;
     audio::Buffer<float> f64_fallback_output_scratch_;
     std::array<audio::Buffer<float>, kF64FallbackMaxBuses> f64_fallback_input_bus_scratch_{};
