@@ -118,6 +118,11 @@ enum Command {
     #[command(disable_help_flag = true)]
     Content(PkgTailArgs),
 
+    /// Freeze a graph into a signed `.pulpbake` artifact, and verify one
+    /// (`bake verify`). Delegates to the C++ `pulp-cpp` binary.
+    #[command(disable_help_flag = true)]
+    Bake(PkgTailArgs),
+
     /// Unified development loop: delegates live-watch workflows to
     /// `pulp-cpp`, with a Rust one-shot fallback.
     Dev(PkgTailArgs),
@@ -614,6 +619,14 @@ fn real_main() -> Result<(), ExitCode> {
             map_exit(pulp_rs::fallthrough::delegate_or_stub(
                 &argv,
                 "pulp content is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
+            ))
+        }
+        Command::Bake(args) => {
+            let mut argv = vec!["bake".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp bake is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
             ))
         }
         Command::Dev(args) => {
