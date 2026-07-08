@@ -55,6 +55,7 @@ interactive version of this set (dark + light), build and run
 | `ComboBox` | Drop-down selector | items, separators, label fit, keyboard nav, scroll-aware flip, close-on-scroll | `ui_components.hpp` |
 | `ListBox` | Scrollable selectable list | items, selection, double-click activate, keyboard nav, ensure-visible | `ui_components.hpp` |
 | `VirtualList` | Recycling list for large rich row sets | fixed row height, overscan, bounded row pool, row bind/release callbacks, selection/focus, type-to-search | `virtual_list.hpp` |
+| `VirtualGrid` | Recycling 2D grid for large cell sets | fixed cell size / column count, overscan, bounded cell pool, cell bind/release callbacks, selection/focus, 2D keyboard nav | `virtual_grid.hpp` |
 | `TableListBox` (`Table`) | Sortable column table | columns (header/width/sortable/align), `TableModel`/`SimpleTableModel`, click-to-sort, themed rows | `table.hpp` |
 | `TreeView` | Hierarchical tree | expand/collapse, selection, toggle/select/activate callbacks, keyboard nav | `tree_view.hpp` |
 | `PresetBrowser` | Factory/user preset browser | show-mode filter, search filter, selection | `preset_browser.hpp` |

@@ -8,9 +8,11 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <typeindex>
 #include <vector>
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/view_pool.hpp>
 
 namespace pulp::view {
 
@@ -262,6 +264,16 @@ private:
     RowReleaser row_releaser_;
     std::vector<RowSlot> row_slots_;
     std::size_t first_realized_index_ = 0;
+
+    // Per-class recycling pool for released rows (planning 2.3). Rows that opt
+    // in via View::supports_reuse() are parked here on release and re-acquired
+    // (in place of a fresh factory() call) when the pool grows. Behavior-neutral
+    // for the default View rows the built-in list uses: they never opt in, so
+    // release() destroys them and acquire() always falls through to the factory.
+    // `row_type_` remembers the concrete row type the factory produces so the
+    // type-keyed pool can be queried before the type is otherwise known.
+    ViewPool row_pool_;
+    std::optional<std::type_index> row_type_;
 
     SelectionMode selection_mode_ = SelectionMode::single;
     std::vector<std::size_t> selection_;
