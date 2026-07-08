@@ -250,11 +250,16 @@ Update this doc whenever you change any of these files:
 - `.github/workflows/auto-release-watchdog.yml`
 - `.github/workflows/release-cadence-check.yml`
 - `tools/scripts/package_cli.py`
-- `tools/scripts/compose_release_notes.py` — groups commits into ✨/🐛/⚡ sections
-  with breaking changes first. Its `--tier` flag (default `auto`) weights the body
-  by semver bump level: a **patch** release gets a light grouped-only body (no
-  `## Highlights` wrapper), while **minor/major** get the full treatment. The
-  ⚠️ Breaking Changes section renders on every tier.
+- `tools/scripts/compose_release_notes.py` — writes plain-language, high-level
+  release notes for non-experts. It strips the `type(scope):` jargon and PR-number
+  noise from each title, surfaces only the sections a reader cares about
+  (**⚠️ Breaking changes** first, then **✨ New / 🐛 Fixed / ⚡ Faster**), and folds
+  everything inside-baseball (refactors, docs, deps/CI/build/test chores, churn)
+  into one collapsed **🔧 Under the hood** summary — coalescing runs of
+  near-identical PRs into a single line. A `Release-Note:` commit trailer overrides
+  a title with a human sentence when an author wants one. The `--tier` flag
+  (default `auto`) weights the body by semver bump level: a **patch** release drops
+  the "Under the hood" fold to stay light; **minor/major** keep the full body.
 
 These files form the release pipeline. The `ci` skill (`.agents/skills/ci/SKILL.md`)
 maps `.github/workflows/**` so the existing skill-sync check already requires `ci`
