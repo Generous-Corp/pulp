@@ -197,6 +197,132 @@ LowerResult bake(const SignalGraph& graph) {
     return result;
 }
 
+std::optional<BakedPlan> bake_to_plan(const SignalGraph& graph) {
+    if (!graph.is_prepared()) return std::nullopt;
+    if (const auto proof = lowerability_of(
+            graph.nodes(), graph.connections(),
+            [&graph](std::string_view type_id, int version) {
+                return graph.custom_node_type(type_id, version);
+            });
+        !proof.accepted) {
+        return std::nullopt;
+    }
+    BakedPlan plan;
+    plan.format_version = kBakedPlanFormatVersion;
+    for (const auto& src : graph.nodes()) {
+        BakedPlan::Node n;
+        n.id = src.id;
+        n.type = src.type;
+        n.num_input_ports = src.num_input_ports;
+        n.num_output_ports = src.num_output_ports;
+        if (src.type == NodeType::Gain) {
+            n.gain = graph.node_gain(src.id);
+        } else if (src.type == NodeType::AudioInput) {
+            plan.input_channels = std::max(plan.input_channels, src.num_output_ports);
+        } else if (src.type == NodeType::AudioOutput) {
+            plan.output_channels = std::max(plan.output_channels, src.num_input_ports);
+        } else if (src.type == NodeType::Custom) {
+            n.custom_type_id = src.custom_type_id;
+            n.custom_version = src.custom_type_version;
+            n.custom_state = src.custom_state_blob;
+        }
+        plan.nodes.push_back(std::move(n));
+    }
+    for (const auto& c : graph.connections()) {
+        // Lowerability already refused MIDI/automation/sidechain lanes; guard anyway
+        // so only audio + feedback edges reach the plan.
+        if (c.midi || c.automation || c.sidechain || c.audio_rate_modulation) continue;
+        BakedPlan::Conn cc;
+        cc.src_node = c.source_node;
+        cc.src_port = static_cast<int>(c.source_port);
+        cc.dst_node = c.dest_node;
+        cc.dst_port = static_cast<int>(c.dest_port);
+        cc.feedback = c.feedback;
+        plan.connections.push_back(cc);
+    }
+    return plan;
+}
+
+LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                       const std::vector<CustomNodeType>& custom_types) {
+    LowerResult result;
+    const auto plan = verify_and_extract_plan(bytes, trust);
+    if (!plan) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message = "signed .pulpbake envelope or bounded plan parse failed";
+        return result;
+    }
+
+    // Rebuild the verified plan into a fresh SignalGraph and lower it through bake(),
+    // so bake()'s full lowerability re-proof + custom resolution run on the
+    // reconstructed topology. The file's implicit claim is never trusted.
+    SignalGraph graph;
+    for (const auto& type : custom_types) graph.register_custom_node_type(type);
+
+    std::unordered_map<NodeId, NodeId> id_map;
+    for (const auto& n : plan->nodes) {
+        NodeId gid = 0;
+        switch (n.type) {
+            case NodeType::AudioInput:
+                gid = graph.add_input_node(n.num_output_ports, "in");
+                break;
+            case NodeType::AudioOutput:
+                gid = graph.add_output_node(n.num_input_ports, "out");
+                break;
+            case NodeType::Gain:
+                gid = graph.add_gain_node("gain");
+                if (gid != 0) graph.set_node_gain(gid, n.gain);
+                break;
+            case NodeType::Custom:
+                if (!n.custom_state.empty()) {
+                    result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                    result.offending_node = n.id;
+                    result.message = "on-disk stateful custom node not supported in v1";
+                    return result;
+                }
+                gid = graph.add_custom_node(n.custom_type_id, n.custom_version, "custom");
+                break;
+            default:  // Plugin / MIDI — never lowerable; refuse loudly.
+                result.reason = LowerRejectReason::NonAudioLaneNotLowerable;
+                result.offending_node = n.id;
+                return result;
+        }
+        if (gid == 0) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = n.id;
+            result.message = "could not reconstruct a plan node";
+            return result;
+        }
+        id_map[n.id] = gid;
+    }
+    for (const auto& c : plan->connections) {
+        const auto s = id_map.find(c.src_node);
+        const auto d = id_map.find(c.dst_node);
+        if (s == id_map.end() || d == id_map.end()) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "connection references an unknown node";
+            return result;
+        }
+        const bool ok = c.feedback
+                            ? graph.connect_feedback(s->second, c.src_port, d->second, c.dst_port)
+                            : graph.connect(s->second, c.src_port, d->second, c.dst_port);
+        if (!ok) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "could not reconstruct a connection";
+            return result;
+        }
+    }
+
+    // Nominal prepare to satisfy bake()'s prepared-graph precondition; the returned
+    // Processor re-prepares at the host's real sample rate + block size.
+    if (!graph.prepare(48000.0, 512)) {
+        result.reason = LowerRejectReason::NotPrepared;
+        result.message = "reconstructed graph failed to prepare";
+        return result;
+    }
+    return bake(graph);
+}
+
 BakedGraphProcessor::BakedGraphProcessor(
     std::vector<GraphNode> nodes,
     std::vector<Connection> connections,

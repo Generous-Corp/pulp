@@ -23,11 +23,13 @@
 
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/host/baked_codec.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 
 #include <atomic>
 #include <cstddef>
+#include <span>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -50,6 +52,11 @@ enum class LowerRejectReason {
     CustomTransportNotLowerable,   // a transport-sensitive Custom node (baked process
                                    // drops the transport, so it would diverge)
     NonAudioLaneNotLowerable,      // a MIDI node, or a MIDI/automation/sidechain edge
+    CodecRejected,                 // load_baked: the .pulpbake bytes failed the signed
+                                   // envelope (bad magic/length/manifest/trust/signature/
+                                   // hash) or the bounded plan parse
+    StatefulCustomNotYetLoadable,  // load_baked v1: a Custom node carries opaque state; the
+                                   // on-disk stateful-custom path is not supported yet
 };
 
 // Result of bake(): on success `processor` is non-null and `accepted` is true;
@@ -158,5 +165,23 @@ private:
 // Returns LowerResult{accepted=true, processor=...} on success, or a loud
 // refusal (processor=nullptr) with a reason for any non-lowerable graph.
 LowerResult bake(const SignalGraph& graph);
+
+// Verify + load a signed .pulpbake artifact into a BakedGraphProcessor. `trust` is
+// the set of accepted signer keys; `custom_types` are the host's registered custom
+// node types (a Custom record's process code is re-resolved from these, never from
+// the file). The bytes go through verify_and_extract_plan (signature-before-parse),
+// then the plan is rebuilt into a SignalGraph and run through bake() — so bake()'s
+// full lowerability re-proof applies to the reconstructed topology; the file's
+// implicit claim is never trusted. Returns CodecRejected if the envelope/parse fails,
+// or bake()'s refusal reason if the reconstructed graph is not lowerable. v1 supports
+// stateless custom nodes; a Custom record carrying opaque state is refused
+// (StatefulCustomNotYetLoadable).
+LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                       const std::vector<CustomNodeType>& custom_types);
+
+// Extract a serializable BakedPlan from a prepared, lowerable graph — the write-path
+// front door: bake_to_plan(graph) -> write_baked_signed(plan, key) -> bytes. Returns
+// std::nullopt if the graph is not prepared or not lowerable (same proof as bake()).
+std::optional<BakedPlan> bake_to_plan(const SignalGraph& graph);
 
 } // namespace pulp::host
