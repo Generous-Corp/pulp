@@ -115,25 +115,30 @@
       }
     },
     "windows-x64": {
-      "unit": "windows_build",
-      "floor": null,
-      "binding": null,
-      "note": "Not yet measured. Governed by Skia GN WINVER/_WIN32_WINNT defaults, not a runner leak (no analogous bug found). Measure via dumpbin /headers subsystem + /imports.",
+      "unit": "windows_version",
+      "floor": "10.0",
+      "os_name": "Windows 10",
+      "win32_winnt": "0x0A00",
+      "binding": "skia,dawn",
+      "note": "Floor = Windows 10 (subsystem version 10.0; API level _WIN32_WINNT/WINVER = 0x0A00), Google's Chromium default at the pinned Skia/Dawn milestone (build/config/win/BUILD.gn, verified 2026-07-08 against Chromium source). Unlike macOS+libc++ there is no std::format availability bump: Pulp's Windows build uses MSVC's header-only STL. Pulp does not define _WIN32_WINNT itself, so it otherwise inherits the Windows SDK default (a newer SDK could silently raise the floor — the Windows analog of the macOS Dawn leak). PulpMinOs.cmake pins _WIN32_WINNT/WINVER to 'win32_winnt'. The comparable 'floor'/'expected'/'measured' fields use the OS/subsystem version (10.0); _WIN32_WINNT is a compile-time define not recorded in the shipped static .libs, so 'measured' stays null until a Windows host runs measure_min_os.py --write over a built Pulp PE (subsystem version via dumpbin /headers or llvm-readobj).",
       "deps": {
         "skia": {
           "measured": null,
-          "expected": null,
-          "always_linked": true
+          "expected": "10.0",
+          "always_linked": true,
+          "source": "Chromium _WIN32_WINNT/WINVER 0x0A00 (Windows 10) default (build/config/win/BUILD.gn); skia-builder win path sets no override"
         },
         "dawn": {
           "measured": null,
-          "expected": null,
-          "always_linked": true
+          "expected": "10.0",
+          "always_linked": true,
+          "source": "Chromium _WIN32_WINNT 0x0A00 (Windows 10) default"
         },
         "v8": {
           "measured": null,
-          "expected": null,
-          "always_linked": false
+          "expected": "10.0",
+          "always_linked": false,
+          "source": "v8-builder Windows target (Chromium Windows 10 default)"
         }
       }
     }

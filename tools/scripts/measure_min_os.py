@@ -70,6 +70,32 @@ def _glibc_floor(lib: Path) -> str | None:
     return None
 
 
+def _win_os_version(pe: Path) -> str | None:
+    """Subsystem (loader-enforced) OS version of a Windows PE — the measurable
+    proxy for the Windows floor. `_WIN32_WINNT` is a compile-time define that is
+    NOT recorded in the shipped static .libs, so the honest artifact measurement
+    is the final binary's subsystem version. Cross-platform via llvm-readobj;
+    native via dumpbin."""
+    try:
+        out = subprocess.run(["llvm-readobj", "--file-headers", str(pe)],
+                             capture_output=True, text=True, check=True).stdout
+        maj = re.search(r"MajorSubsystemVersion:\s*(\d+)", out)
+        minr = re.search(r"MinorSubsystemVersion:\s*(\d+)", out)
+        if maj and minr:
+            return f"{int(maj.group(1))}.{int(minr.group(1))}"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    try:
+        out = subprocess.run(["dumpbin", "/headers", str(pe)],
+                             capture_output=True, text=True, check=True).stdout
+        m = re.search(r"([0-9]+)\.([0-9]+)\s+subsystem version", out)
+        if m:
+            return f"{int(m.group(1))}.{int(m.group(2))}"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    return None
+
+
 def _find(root: Path, name: str) -> Path | None:
     if not root.exists():
         return None
@@ -104,6 +130,15 @@ def measure() -> dict[str, dict[str, str]]:
         lin["v8"] = v
     if lin:
         result["linux-x64"] = lin
+    # Windows (subsystem OS version of a built Pulp binary, if this is a Windows
+    # host that has built one — the .libs don't carry _WIN32_WINNT).
+    build = REPO / "build"
+    if build.exists():
+        pe = next((p for p in build.rglob("*.exe")
+                   if "_deps" not in p.parts and "CMakeFiles" not in p.parts), None)
+        if pe and (v := _win_os_version(pe)):
+            # Report against skia/dawn: both share the one build-config floor.
+            result["windows-x64"] = {"skia": v, "dawn": v}
     return result
 
 
