@@ -1,21 +1,20 @@
 #pragma once
 
-/// EXPERIMENTAL — API not yet frozen.
-///
 /// StepSequencerProcessor is the audio-thread half of a synth-class step
 /// sequencer: it OWNS a SequencerStateChannel and the authoritative Snapshot,
-/// drains UI edit commands off the channel, echoes each applied edit back to the
-/// UI, and — while the transport plays — emits sample-accurate MIDI note-ons for
-/// every enabled cell of the active pattern. It is the reference consumer that
-/// proves the full StepGridView (UI) <-> SequencerStateChannel (transport) <->
-/// Processor (audio) round-trip end to end.
+/// drains UI edit commands off the channel via the shared step_edit_reducer
+/// (drain_and_apply), echoes each applied edit back to the UI, and — while the
+/// transport plays — emits sample-accurate MIDI note-ons for every enabled cell
+/// of the active pattern. It is the reference consumer that proves the full
+/// StepGridView (UI) <-> SequencerStateChannel (transport) <-> Processor (audio)
+/// round-trip end to end.
 ///
-/// The apply() switch is the authoritative audio-side edit logic: it mutates the
-/// owned Snapshot and returns the exact AppliedEdit echo the UI replays, so the
-/// UI never diffs the grid or re-runs an engine algorithm.
+/// The edit logic (apply + overflow recovery) lives in step_edit_reducer.hpp so a
+/// producer — including a NON-Pulp engine — never hand-rolls the protocol.
 
 #include <pulp/format/processor.hpp>
 #include <pulp/state/sequencer_state_channel.hpp>
+#include <pulp/state/step_edit_reducer.hpp>
 
 #include <array>
 #include <cstdint>
@@ -85,8 +84,9 @@ public:
             for (float& s : output.channel(ch)) s = 0.0f;
         }
 
-        // 1. Drain the ordered UI edit stream, apply each, echo the result.
-        drain_commands();
+        // 1. Drain the ordered UI edit stream, apply each, echo the result. The
+        // shared reducer owns the apply logic + the echo-overflow recovery.
+        state::drain_and_apply(channel_, snapshot_, epoch_, engine_seq_);
 
         // 2. Sequence: emit note-ons for the active pattern's enabled cells.
         const int num_samples = static_cast<int>(output.num_samples());
@@ -107,128 +107,6 @@ public:
     }
 
 private:
-    void drain_commands() {
-        while (auto cmd = channel_.audio_try_pop_command()) {
-            auto echo = apply(*cmd);
-            if (!echo) continue;
-            if (!channel_.audio_try_publish_applied(*echo)) {
-                // Echo FIFO overflowed: the UI would miss incremental edits, so
-                // republish the authoritative snapshot and raise the resync bar.
-                snapshot_.epoch = ++epoch_;
-                snapshot_.engine_sequence = engine_seq_;
-                channel_.audio_publish_snapshot(snapshot_);
-                channel_.audio_mark_resync_required(snapshot_.epoch);
-            }
-        }
-    }
-
-    // Authoritative audio-side edit logic. Mutates the owned snapshot and returns
-    // the exact echo the UI replays. Returns nullopt only for a no-op command.
-    std::optional<state::AppliedEdit> apply(const state::StepEditCommand& cmd) {
-        using namespace state;
-        AppliedEdit echo{};
-        echo.engine_sequence = ++engine_seq_;
-        echo.snapshot_epoch = snapshot_.epoch;
-        echo.client_sequence = cmd.client_sequence;
-        echo.transaction_id = cmd.transaction_id;
-
-        switch (cmd.kind) {
-        case StepEditKind::SetCell: {
-            const auto& e = cmd.payload.set_cell;
-            if (e.pattern >= kPatternCount || e.lane >= kLaneCount ||
-                e.step >= kStepCount) {
-                echo.kind = AppliedEditKind::CommandRejected;
-                echo.payload.reject_reason = 1;
-                return echo;
-            }
-            snapshot_.patterns[e.pattern].lanes[e.lane][e.step] = e.cell;
-            echo.kind = AppliedEditKind::StepRangeChanged;
-            echo.dirty = {DirtyKind::Cell, e.pattern, e.lane, e.step, 1};
-            StepRangeApplied sr{};
-            sr.pattern = e.pattern; sr.lane = e.lane; sr.first_step = e.step;
-            sr.step_count = 1; sr.cells[0] = e.cell;
-            echo.payload.step_range = sr;
-            return echo;
-        }
-        case StepEditKind::Clear: {
-            const auto& e = cmd.payload.clear;
-            if (e.pattern >= kPatternCount || e.lane >= kLaneCount ||
-                e.step >= kStepCount) {
-                echo.kind = AppliedEditKind::CommandRejected;
-                echo.payload.reject_reason = 1;
-                return echo;
-            }
-            snapshot_.patterns[e.pattern].lanes[e.lane][e.step] = StepCell{};
-            echo.kind = AppliedEditKind::StepRangeChanged;
-            echo.dirty = {DirtyKind::Cell, e.pattern, e.lane, e.step, 1};
-            StepRangeApplied sr{};
-            sr.pattern = e.pattern; sr.lane = e.lane; sr.first_step = e.step;
-            sr.step_count = 1; sr.cells[0] = StepCell{};
-            echo.payload.step_range = sr;
-            return echo;
-        }
-        case StepEditKind::RandomizeLane: {
-            const auto& e = cmd.payload.randomize_lane;
-            if (e.pattern >= kPatternCount || e.lane >= kLaneCount) {
-                echo.kind = AppliedEditKind::CommandRejected;
-                echo.payload.reject_reason = 1;
-                return echo;
-            }
-            // Deterministic PRNG so the echo carries the exact cells the UI
-            // replays — it never re-runs this algorithm.
-            std::uint32_t s = e.seed ? e.seed : 1u;
-            auto next = [&s]() { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return s; };
-            StepRangeApplied sr{};
-            sr.pattern = e.pattern; sr.lane = e.lane; sr.first_step = 0;
-            sr.step_count = kStepCount;
-            const std::uint8_t span =
-                static_cast<std::uint8_t>(1u + e.max_velocity - e.min_velocity);
-            for (std::uint8_t st = 0; st < kStepCount; ++st) {
-                StepCell c{};
-                const bool on = (next() % 128u) < e.density;
-                c.flags = on ? StepCell::kEnabledBit : 0;
-                c.velocity = static_cast<std::uint8_t>(
-                    e.min_velocity + (span ? next() % span : 0u));
-                snapshot_.patterns[e.pattern].lanes[e.lane][st] = c;
-                sr.cells[st] = c;
-            }
-            echo.kind = AppliedEditKind::StepRangeChanged;
-            echo.dirty = {DirtyKind::Lane, e.pattern, e.lane, 0, kStepCount};
-            echo.payload.step_range = sr;
-            return echo;
-        }
-        case StepEditKind::SetPatternLength: {
-            const auto& e = cmd.payload.set_pattern_length;
-            if (e.pattern >= kPatternCount) {
-                echo.kind = AppliedEditKind::CommandRejected;
-                echo.payload.reject_reason = 1;
-                return echo;
-            }
-            snapshot_.patterns[e.pattern].length =
-                e.length > kStepCount ? kStepCount : e.length;
-            echo.kind = AppliedEditKind::PatternLengthChanged;
-            echo.dirty = {DirtyKind::Pattern, e.pattern, 0, 0, 0};
-            echo.payload.pattern_length = {e.pattern,
-                                           snapshot_.patterns[e.pattern].length};
-            return echo;
-        }
-        case StepEditKind::SwitchPattern: {
-            const auto& e = cmd.payload.switch_pattern;
-            if (e.pattern >= kPatternCount) {
-                echo.kind = AppliedEditKind::CommandRejected;
-                echo.payload.reject_reason = 1;
-                return echo;
-            }
-            snapshot_.active_pattern = e.pattern;
-            echo.kind = AppliedEditKind::ActivePatternChanged;
-            echo.dirty = {DirtyKind::FullSnapshot, 0, 0, 0, 0};
-            echo.payload.active_pattern = e;
-            return echo;
-        }
-        }
-        return std::nullopt;
-    }
-
     void emit_playing_block(midi::MidiBuffer& midi_out,
                             const format::ProcessContext& ctx, int num_samples) {
         const double tempo = ctx.tempo_bpm > 0 ? ctx.tempo_bpm : 120.0;

@@ -103,6 +103,7 @@ interactive version of this set (dark + light), build and run
 | `ChannelStrip` | Mixer strip | label, level + pan (draggable), meter, wheel, callbacks | `gap_widgets.hpp` |
 | `WaveformRecorder` | Three-state record/preview widget | armed / recording / captured states, live level, captured-waveform preview | `widgets.hpp` |
 | `ModulationMatrixWidget` | Mod source→dest matrix | sources/dests, route lines, selected-route depth/curve | `modulation_matrix_widget.hpp` |
+| `StepGridView` | Step-sequencer grid | backed by a `SequencerStateChannel` (audio-safe non-param state); submit-only editing with engine-echo replay, playhead overlay, bounded invalidation. `StepGridView` is the reference 12×32×32 alias of `StepGridViewT<Config, CellPolicy>`; `StepGridViewBase` is its non-template base. See [sequencer-state-channel](sequencer-state-channel.md). | `step_grid_view.hpp` |
 
 ## Containers & layout
 
