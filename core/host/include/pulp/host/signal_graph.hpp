@@ -488,6 +488,11 @@ public:
     };
     std::vector<NodeLoadReport> node_loads() const;
 
+    // Whole-graph process-load snapshot (load == callback-budget fullness; 1.0 == a
+    // full buffer). callback_count == 0 means no measurement yet. Safe to poll while
+    // the audio thread runs. Feeds the live-swap admission gate.
+    audio::AudioProcessLoadSnapshot graph_load() const;
+
     // Test-only: run compile_() once and DISCARD the result, WITHOUT prepare()'s
     // null-first prologue. Exists so a TSan/ASan test can run compile_() on one
     // thread while process() runs the live snapshot on another — proving compile_()
@@ -1145,6 +1150,13 @@ private:
     // it (it touches measurer OBJECTS via NodeRuntime::load, not the map).
     mutable std::mutex node_load_mu_;
 
+    // Whole-graph process load — one measurer that PERSISTS across snapshots (like
+    // node_load_). process_impl brackets each block with begin()/end() via an RAII
+    // scope; the control thread reads graph_load() for the live-swap admission gate.
+    // Heap-stable behind unique_ptr; snapshot() is concurrency-safe.
+    std::unique_ptr<audio::AudioProcessLoadMeasurer> graph_load_ =
+        std::make_unique<audio::AudioProcessLoadMeasurer>();
+
     // Serializes CONTROL-THREAD access to the source-of-truth topology — the
     // nodes_ / connections_ vectors and the plain (non-atomic) GraphNode fields
     // they own (gain, ports, plugin/custom identity, custom state) — AND the
@@ -1287,5 +1299,24 @@ private:
 NodeId add_plugin_node_from_drop(SignalGraph& graph,
                                  const PluginInfo& info,
                                  bool* loaded_out = nullptr);
+
+// Live-swap admission decision: whether a live plugin-instance swap can proceed
+// without risking an xrun, plus a stable reason for diagnostics.
+struct LiveSwapAdmission {
+    bool admit = false;
+    const char* reason = "no history";
+};
+
+// Decide whether a live plugin-instance swap is admissible under the current audio
+// load. CONSERVATIVE (deny on uncertainty): if the whole-graph OR any staged node has
+// fewer than min_callbacks of measured history, deny with "no history" — an unmeasured
+// path could xrun and the eager-silence fallback is the safe outcome. Otherwise admit
+// iff max(graph.load, graph.last_load) + the sum over staged nodes of
+// max(node.load, node.last_load) (the fade's added second-render cost) is within
+// headroom_threshold. Pure — no graph state, so it is unit-testable in isolation.
+LiveSwapAdmission evaluate_live_swap_admission(
+    const audio::AudioProcessLoadSnapshot& graph,
+    const std::vector<audio::AudioProcessLoadSnapshot>& staged_nodes,
+    float headroom_threshold, std::uint64_t min_callbacks);
 
 } // namespace pulp::host

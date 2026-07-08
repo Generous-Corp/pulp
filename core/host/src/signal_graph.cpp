@@ -845,6 +845,28 @@ std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
     return live_;  // aliases the live CompiledGraph as an opaque keepalive
 }
 
+pulp::audio::AudioProcessLoadSnapshot SignalGraph::graph_load() const {
+    return graph_load_ ? graph_load_->snapshot() : pulp::audio::AudioProcessLoadSnapshot{};
+}
+
+LiveSwapAdmission evaluate_live_swap_admission(
+    const pulp::audio::AudioProcessLoadSnapshot& graph,
+    const std::vector<pulp::audio::AudioProcessLoadSnapshot>& staged_nodes,
+    float headroom_threshold, std::uint64_t min_callbacks) {
+    // Deny on uncertainty: an unmeasured graph or node could xrun under a doubled
+    // fade render, and eager-silence is the safe fallback.
+    if (graph.callback_count < min_callbacks) return {false, "no history"};
+    for (const auto& n : staged_nodes) {
+        if (n.callback_count < min_callbacks) return {false, "no history"};
+    }
+    // Projected peak = current worst-case graph load + the fade's added second render
+    // of each staged node (its own worst-case load), all as callback-budget fractions.
+    float projected = std::max(graph.load, graph.last_load);
+    for (const auto& n : staged_nodes) projected += std::max(n.load, n.last_load);
+    if (projected > headroom_threshold) return {false, "over budget"};
+    return {true, "ok"};
+}
+
 std::vector<SignalGraph::NodeLoadReport> SignalGraph::node_loads() const {
     // Control/UI-thread read of the persistent per-node measurers. node_load_
     // is only mutated on the control thread (compile_), so this is race-free
@@ -2094,6 +2116,17 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         sizeof(float) * static_cast<size_t>(num_samples));
         return;
     }
+
+    // Bracket the whole block with the graph-level load measurer (RT-safe: begin()/
+    // end() are relaxed-atomic timestamps, no alloc/lock). The RAII guard's end()
+    // covers every return path below. graph_load() reads this for live-swap admission.
+    if (graph_load_) graph_load_->begin(num_samples, static_cast<float>(cg->sample_rate));
+    struct GraphLoadEndGuard {
+        audio::AudioProcessLoadMeasurer* m;
+        ~GraphLoadEndGuard() {
+            if (m) m->end();
+        }
+    } graph_load_end_guard{graph_load_.get()};
 
     // Routed dispatch (opt-in): try the levelized PARALLEL executor first (if
     // enabled), then the SERIAL executor, then fall through to the legacy walk.
