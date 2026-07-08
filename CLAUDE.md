@@ -744,6 +744,7 @@ Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scr
 | Skill update   | `Skill-Update: skip skill=<name> reason="..."`                  |
 | Auto-release   | `Release: skip reason="..."`                                     |
 | Planning bump  | `Planning-Bump: reason="..."` (authorize a deliberate `planning` submodule pointer re-pin) |
+| Hotspot grow   | `Hotspot-Grow: <path\|all> reason="..."` (authorize this PR to grow a frozen hotspot past its reference size) |
 
 **Reference-Lineage trailer** (required on any commit touching
 `core/format/host_quirks.cpp` or `core/format/include/pulp/format/host_quirks/`):

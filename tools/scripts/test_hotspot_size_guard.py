@@ -177,7 +177,33 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
         result = self.run_guard()
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn("4 LOC exceeds frozen ceiling 3", result.stderr)
+        # Net-delta message: THIS PR grew the hotspot past its reference.
+        self.assertIn("grows a frozen hotspot 3 -> 4 LOC", result.stderr)
+        self.assertIn("Hotspot-Grow", result.stderr)
+
+    def test_net_neutral_passes_even_when_file_is_over_reference(self) -> None:
+        # The race-killer: main grew the hotspot past its (now stale) reference
+        # via Hotspot-Grow trailers, not a max_loc bump. A PR that does NOT grow
+        # the file must pass, even though its absolute size exceeds max_loc.
+        self.commit_baseline(max_loc=3, contents="a\nb\nc\nd\ne\n")  # 5 LOC, ref 3
+
+        result = self.run_guard()
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("did not grow it", result.stderr)
+
+    def test_hotspot_grow_trailer_authorizes_growth(self) -> None:
+        self.commit_baseline()  # 3 LOC, ref 3
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\nc\nd\n", encoding="utf-8")  # grow to 4
+        git(self.tmp, "add", ".")
+        git(self.tmp, "commit", "-q", "-m",
+            "grow hotspot\n\nHotspot-Grow: core/view/src/widget_bridge.cpp reason=\"needed\"")
+
+        result = self.run_guard()
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("authorized by Hotspot-Grow", result.stderr)
 
     def test_hotspot_shrink_reports_without_failing_by_default(self) -> None:
         self.commit_baseline()

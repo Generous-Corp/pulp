@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "_comment": "P0.1 refactor-roadmap guard. Hard ceilings freeze known hotspot line counts at the current baseline. Lower a ceiling only in the same PR that shrinks the file.",
+  "_comment": "P0.1 refactor-roadmap guard. `max_loc` is a REFERENCE floor per hotspot, not a shared counter every growing PR must bump. Rebase-stable gate (T1.1/T1.2, planning/2026-07-07-parallel-merge-land-coordination.md): a hotspot over its reference is a violation only when THIS PR grew it there (net-delta vs merge-base) and no `Hotspot-Grow: <path>` trailer authorizes it. A net-neutral change passes even while main grows the same file; deliberate growth declares `Hotspot-Grow:` per-PR instead of editing max_loc (which raced like the version line). Lowering a ceiling still documents a shrink.",
   "new_file_warning": {
     "max_loc": 1000,
     "paths": [

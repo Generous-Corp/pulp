@@ -105,6 +105,12 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    + `git add -A`. Drop it with
    `git restore --staged --worktree planning && git submodule update planning`,
    or add `Planning-Bump: reason="..."` for a deliberate re-pin.
+2b2. **Hotspot growth?** The `hotspot-size` gate is now net-delta vs merge-base:
+   it fails only if THIS PR grows a frozen hotspot past its reference size (main
+   growing the same file is NOT your fault and passes). If you must grow one,
+   make the change net-neutral (extract to a sibling file) or add
+   `Hotspot-Grow: <path> reason="..."` — do NOT bump `max_loc` in
+   `hotspot_size_guard.json` (that counter no longer gates and editing it races).
 2c. **Is a RED check even your fault?** Before investigating a failing check,
    run `python3 tools/scripts/pr_check_triage.py <PR#>` — it labels each red
    check REQUIRED vs advisory and PRE-EXISTING (also red / not run on main —
