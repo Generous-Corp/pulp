@@ -17,6 +17,7 @@
 #include <pulp/runtime/log.hpp>
 #include "signal_graph_internal.hpp"
 #include <algorithm>
+#include <array>
 #include <queue>
 #include <cmath>
 #include <limits>
@@ -36,6 +37,8 @@ constexpr std::size_t kGraphMidiEventCapacity =
 constexpr std::size_t kGraphMidiSysexCapacity = 128;
 constexpr std::size_t kGraphMidiSysexPayloadCapacity = 4096;
 constexpr std::uint64_t kLiveSwapMinAdmissionCallbacks = 8;
+constexpr std::uint64_t kLiveSwapWarmBlocks = 16;
+static_assert(kLiveSwapWarmBlocks >= kLiveSwapMinAdmissionCallbacks);
 constexpr int kLiveSwapMinFadeMs = 5;
 constexpr int kLiveSwapMaxFadeMs = 200;
 
@@ -1149,11 +1152,6 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
                                       id,
                                       "saved plugin state exceeds the policy limit");
     }
-    if (!loaded->restore_state(old_state)) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::StateRestoreFailed,
-                                      id,
-                                      "replacement plugin rejected the live state");
-    }
 
     const PluginInfo loaded_info = loaded->info();
     const auto& live_shape = live_shape_it->second;
@@ -1171,6 +1169,14 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
                                       id,
                                       "replacement latency differs from the live node");
     }
+    const bool wants_transport = loaded->wants_transport();
+
+    auto warmed_load = warm_staged_slot_locked_(*loaded, id);
+    if (!loaded->restore_state(old_state)) {
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::StateRestoreFailed,
+                                      id,
+                                      "replacement plugin rejected the live state");
+    }
 
     StagedReplacement staged;
     staged.id = id;
@@ -1178,8 +1184,9 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     staged.metadata = PreparedPluginMetadata{
         std::move(new_params),
         new_latency,
-        loaded->wants_transport(),
+        wants_transport,
     };
+    staged.warmed_load = warmed_load;
     staged.same_identity = same_identity;
     staged.slot = std::shared_ptr<PluginSlot>(std::move(loaded));
     staged_replacements_[id] = std::move(staged);
@@ -1193,6 +1200,99 @@ SignalGraph::load_live_swap_plugin_(const PluginInfo& info) const {
         return live_swap_plugin_loader_for_test_(info);
     }
     return PluginSlot::load(info);
+}
+
+pulp::audio::AudioProcessLoadSnapshot
+SignalGraph::warm_staged_slot_locked_(PluginSlot& slot, NodeId id) const {
+    if (!live_) {
+        return pulp::audio::AudioProcessLoadSnapshot{};
+    }
+    const auto shape_it = live_->shapes.find(id);
+    if (shape_it == live_->shapes.end()) {
+        return pulp::audio::AudioProcessLoadSnapshot{};
+    }
+
+    const auto& shape = shape_it->second;
+    const int block_size = live_->max_block_size;
+    const float sample_rate = static_cast<float>(live_->sample_rate);
+    if (block_size <= 0 || !(sample_rate > 0.0f)) {
+        return pulp::audio::AudioProcessLoadSnapshot{};
+    }
+
+    pulp::audio::Buffer<float> input(
+        static_cast<std::size_t>(std::max(0, shape.num_input_ports)),
+        static_cast<std::size_t>(block_size));
+    pulp::audio::Buffer<float> output(
+        static_cast<std::size_t>(std::max(0, shape.num_output_ports)),
+        static_cast<std::size_t>(block_size));
+
+    std::uint32_t noise = 0x9e3779b9u ^ static_cast<std::uint32_t>(id);
+    for (std::size_t ch = 0; ch < input.num_channels(); ++ch) {
+        auto channel = input.channel(ch);
+        for (auto& sample : channel) {
+            noise = noise * 1664525u + 1013904223u;
+            const auto bits = static_cast<std::uint16_t>((noise >> 8) & 0xffffu);
+            const float centered =
+                (static_cast<float>(bits) / 32767.5f) - 1.0f;
+            sample = centered * 0.25f;
+        }
+    }
+
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    midi::UmpBuffer ump_in;
+    midi::UmpBuffer ump_out;
+    prepare_midi_block_storage(midi_in, ump_in);
+    prepare_midi_block_storage(midi_out, ump_out);
+    ParameterEventQueue param_events;
+    pulp::audio::AudioProcessLoadMeasurer warm;
+
+    auto output_view = output.view();
+    const auto& const_input = input;
+    auto input_view = const_input.view();
+    std::array<format::ProcessBusBufferView<const float>, 1> input_buses{{
+        {
+            .info = {
+                .name = "Plugin Node In",
+                .index = 0,
+                .direction = format::BusDirection::Input,
+                .role = format::BusRole::Main,
+                .declared_channels = static_cast<int>(input_view.num_channels()),
+                .optional = input_view.num_channels() == 0,
+                .active = input_view.num_channels() > 0,
+            },
+            .buffer = input_view,
+        },
+    }};
+    std::array<format::ProcessBusBufferView<float>, 1> output_buses{{
+        {
+            .info = {
+                .name = "Plugin Node Out",
+                .index = 0,
+                .direction = format::BusDirection::Output,
+                .role = format::BusRole::Main,
+                .declared_channels = static_cast<int>(output_view.num_channels()),
+                .optional = false,
+                .active = output_view.num_channels() > 0,
+            },
+            .buffer = output_view,
+        },
+    }};
+    format::ProcessBuffers process_buffers{
+        format::ProcessBusBufferSet<const float>{std::span(input_buses)},
+        format::ProcessBusBufferSet<float>{std::span(output_buses)},
+    };
+
+    for (std::uint64_t i = 0; i < kLiveSwapWarmBlocks; ++i) {
+        output.clear();
+        midi_out.clear();
+        midi_out.clear_sysex();
+        if (auto* ump = midi_out.ump()) ump->clear();
+        warm.begin(block_size, sample_rate);
+        slot.process(process_buffers, midi_in, midi_out, param_events, block_size);
+        warm.end();
+    }
+    return warm.snapshot();
 }
 
 bool SignalGraph::node_has_feedback_edge_locked_(NodeId id) const {
@@ -1257,12 +1357,8 @@ std::vector<pulp::audio::AudioProcessLoadSnapshot>
 SignalGraph::staged_node_loads_locked_() const {
     std::vector<pulp::audio::AudioProcessLoadSnapshot> loads;
     loads.reserve(staged_replacements_.size());
-    std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
-    for (const auto& [id, _] : staged_replacements_) {
-        auto it = node_load_.find(id);
-        loads.push_back(it == node_load_.end() || !it->second
-                            ? pulp::audio::AudioProcessLoadSnapshot{}
-                            : it->second->snapshot());
+    for (const auto& [_, staged] : staged_replacements_) {
+        loads.push_back(staged.warmed_load);
     }
     return loads;
 }
@@ -1356,13 +1452,6 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
     }
 
     if (!staged_replacements_.empty()) {
-        for (const auto& [id, staged] : staged_replacements_) {
-            if (!staged.same_identity) {
-                return fail(LiveSwapFallbackReason::NoLoadHistory,
-                            id,
-                            "replacement cost is unknown for a different plugin identity");
-            }
-        }
         float headroom_threshold = 1.0f;
         for (const auto& [id, _] : staged_replacements_) {
             if (const auto* n = node(id)) {
@@ -2835,6 +2924,7 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
             if (routed_eligible_dispatch_failed) {
                 const std::uint64_t prev =
                     routed_walk_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+                (void)prev;
 #ifndef NDEBUG
                 // Warn ONCE per graph (the counter carries the full tally) — the
                 // log path is not RT-safe, so don't repeat it every block.

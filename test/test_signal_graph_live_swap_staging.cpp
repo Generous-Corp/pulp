@@ -51,8 +51,11 @@ struct SlotStats {
     mutable std::mutex mu;
     int destroyed = 0;
     int restore_calls = 0;
+    int process_calls = 0;
     std::vector<uint8_t> restored_state;
+    std::vector<std::thread::id> process_threads;
     std::thread::id destroy_thread;
+    std::atomic<bool> block_process{false};
     std::atomic<bool> process_entered{false};
     std::atomic<bool> release_process{false};
 };
@@ -66,6 +69,7 @@ struct SlotBehavior {
     int latency = 0;
     bool block_process = false;
     std::chrono::microseconds process_sleep{0};
+    std::vector<uint8_t> process_state_tag;
 };
 
 class StagingSlot final : public PluginSlot {
@@ -73,6 +77,7 @@ public:
     StagingSlot(SlotBehavior behavior, std::shared_ptr<SlotStats> stats)
         : behavior_(std::move(behavior)), stats_(std::move(stats)) {
         for (const auto& p : behavior_.params) params_[p.id] = p.default_value;
+        current_state_ = behavior_.state;
     }
 
     ~StagingSlot() override {
@@ -92,11 +97,21 @@ public:
                  pulp::midi::MidiBuffer&,
                  const pulp::host::ParameterEventQueue&,
                  int n) override {
-        if (behavior_.block_process) {
+        {
+            std::lock_guard<std::mutex> lock(stats_->mu);
+            ++stats_->process_calls;
+            stats_->process_threads.push_back(std::this_thread::get_id());
+        }
+        if (behavior_.block_process ||
+            stats_->block_process.load(std::memory_order_acquire)) {
             stats_->process_entered.store(true, std::memory_order_release);
             while (!stats_->release_process.load(std::memory_order_acquire)) {
                 std::this_thread::yield();
             }
+        }
+        if (!behavior_.process_state_tag.empty()) {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            current_state_ = behavior_.process_state_tag;
         }
         if (behavior_.process_sleep.count() > 0) {
             std::this_thread::sleep_for(behavior_.process_sleep);
@@ -139,13 +154,20 @@ public:
     bool is_bypassed() const override { return false; }
 
     std::vector<std::uint8_t> save_state() const override {
-        return behavior_.state;
+        std::lock_guard<std::mutex> lock(state_mu_);
+        return current_state_;
     }
 
     bool restore_state(const std::vector<std::uint8_t>& data) override {
-        std::lock_guard<std::mutex> lock(stats_->mu);
-        ++stats_->restore_calls;
-        stats_->restored_state = data;
+        {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            current_state_ = data;
+        }
+        {
+            std::lock_guard<std::mutex> lock(stats_->mu);
+            ++stats_->restore_calls;
+            stats_->restored_state = data;
+        }
         return behavior_.restore_ok;
     }
 
@@ -160,6 +182,8 @@ private:
     std::shared_ptr<SlotStats> stats_;
     mutable std::mutex param_mu_;
     std::unordered_map<std::uint32_t, float> params_;
+    mutable std::mutex state_mu_;
+    std::vector<std::uint8_t> current_state_;
 };
 
 void render_blocks(SignalGraph& graph, int blocks) {
@@ -238,6 +262,20 @@ int destroyed_count(const std::shared_ptr<SlotStats>& stats) {
     return stats->destroyed;
 }
 
+int process_call_count(const std::shared_ptr<SlotStats>& stats) {
+    std::lock_guard<std::mutex> lock(stats->mu);
+    return stats->process_calls;
+}
+
+bool all_process_calls_on_thread(const std::shared_ptr<SlotStats>& stats,
+                                 std::thread::id thread) {
+    std::lock_guard<std::mutex> lock(stats->mu);
+    return !stats->process_threads.empty() &&
+        std::all_of(stats->process_threads.begin(),
+                    stats->process_threads.end(),
+                    [&](std::thread::id seen) { return seen == thread; });
+}
+
 }  // namespace
 
 TEST_CASE("live plugin swap staging restores state and resyncs parameters",
@@ -281,6 +319,120 @@ TEST_CASE("live plugin swap staging restores state and resyncs parameters",
     }
     CHECK(s->graph.last_swap_diagnostics().reason
           == LiveSwapFallbackReason::None);
+}
+
+TEST_CASE("live plugin swap staging commits a warmed different identity",
+          "[host][graph][live-swap]") {
+    SlotBehavior old_behavior{.info = make_info("old")};
+    SlotBehavior replacement_behavior{.info = make_info("new")};
+    auto s = make_stage_setup(std::move(old_behavior),
+                              std::move(replacement_behavior));
+    render_blocks(s->graph, 10);
+
+    std::shared_ptr<PluginSlot> observed_new;
+    NodeLiveSwapPolicy policy = allowing_policy();
+    policy.on_instance_swapped =
+        [&](NodeId,
+            std::shared_ptr<PluginSlot>,
+            std::shared_ptr<PluginSlot> new_slot) {
+            observed_new = std::move(new_slot);
+        };
+    REQUIRE(s->graph.set_node_live_swap_policy(s->plugin, policy));
+
+    s->graph.begin_swap_edit();
+    REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token)
+            == SignalGraph::SwapResult::Staged);
+    CHECK(s->graph.prepare_swap(kSr, kFrames)
+          == SignalGraph::SwapResult::Swapped);
+    REQUIRE(observed_new);
+    CHECK(observed_new->info().unique_id == "new");
+    CHECK(s->graph.last_swap_diagnostics().reason
+          == LiveSwapFallbackReason::None);
+}
+
+TEST_CASE("live plugin swap staging rejects warmed different identity over budget",
+          "[host][graph][live-swap]") {
+    SlotBehavior old_behavior{.info = make_info("old")};
+    SlotBehavior replacement_behavior{
+        .info = make_info("new"),
+        .process_sleep = std::chrono::milliseconds(3),
+    };
+    NodeLiveSwapPolicy policy = allowing_policy();
+    policy.headroom_threshold = 0.05f;
+    auto s = make_stage_setup(std::move(old_behavior),
+                              std::move(replacement_behavior),
+                              policy);
+    render_blocks(s->graph, 10);
+
+    s->graph.begin_swap_edit();
+    REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token)
+            == SignalGraph::SwapResult::Staged);
+    CHECK(process_call_count(s->replacement_stats) >= 8);
+    CHECK(s->graph.prepare_swap(kSr, kFrames)
+          == SignalGraph::SwapResult::NeedsEagerPrepare);
+    expect_reason(s->graph,
+                  LiveSwapFallbackReason::OverBudget,
+                  s->plugin);
+    CHECK(destroyed_count(s->replacement_stats) == 1);
+}
+
+TEST_CASE("live plugin swap staging restores state after warm residue",
+          "[host][graph][live-swap]") {
+    const std::vector<std::uint8_t> restored_state{42, 7, 3};
+    const std::vector<std::uint8_t> warm_residue{9, 9, 9};
+    SlotBehavior old_behavior{.info = make_info("old"),
+                              .state = restored_state};
+    SlotBehavior replacement_behavior{.info = make_info("new"),
+                                      .process_state_tag = warm_residue};
+    auto s = make_stage_setup(std::move(old_behavior),
+                              std::move(replacement_behavior));
+    render_blocks(s->graph, 10);
+
+    std::shared_ptr<PluginSlot> observed_new;
+    NodeLiveSwapPolicy policy = allowing_policy();
+    policy.on_instance_swapped =
+        [&](NodeId,
+            std::shared_ptr<PluginSlot>,
+            std::shared_ptr<PluginSlot> new_slot) {
+            observed_new = std::move(new_slot);
+        };
+    REQUIRE(s->graph.set_node_live_swap_policy(s->plugin, policy));
+
+    s->graph.begin_swap_edit();
+    REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token)
+            == SignalGraph::SwapResult::Staged);
+    CHECK(process_call_count(s->replacement_stats) >= 8);
+    CHECK(s->graph.prepare_swap(kSr, kFrames)
+          == SignalGraph::SwapResult::Swapped);
+    REQUIRE(observed_new);
+    CHECK(observed_new->save_state() == restored_state);
+    CHECK(observed_new->save_state() != warm_residue);
+    {
+        std::lock_guard<std::mutex> lock(s->replacement_stats->mu);
+        CHECK(s->replacement_stats->restore_calls == 1);
+        CHECK(s->replacement_stats->restored_state == restored_state);
+    }
+}
+
+TEST_CASE("live plugin swap staging pre-warms enough callbacks on the control thread",
+          "[host][graph][live-swap][rt-safety]") {
+    SlotBehavior old_behavior{.info = make_info("old")};
+    SlotBehavior replacement_behavior{.info = make_info("new")};
+    auto s = make_stage_setup(std::move(old_behavior),
+                              std::move(replacement_behavior));
+    render_blocks(s->graph, 10);
+
+    const auto staging_thread = std::this_thread::get_id();
+    s->graph.begin_swap_edit();
+    REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token)
+            == SignalGraph::SwapResult::Staged);
+
+    // Stage runs on this control thread; candidate warm-up is not dispatched
+    // through graph.process().
+    CHECK(process_call_count(s->replacement_stats) >= 8);
+    CHECK(all_process_calls_on_thread(s->replacement_stats, staging_thread));
+    CHECK(s->graph.prepare_swap(kSr, kFrames)
+          == SignalGraph::SwapResult::Swapped);
 }
 
 TEST_CASE("live plugin swap staging rejects default-off nodes",
@@ -536,8 +688,7 @@ TEST_CASE("live plugin swap abort releases staged replacements",
 TEST_CASE("live plugin swap retires the old slot only after reader drain",
           "[host][graph][live-swap][rt-safety]") {
     auto old_stats = std::make_shared<SlotStats>();
-    SlotBehavior old_behavior{.info = make_info("same"),
-                              .block_process = true};
+    SlotBehavior old_behavior{.info = make_info("same")};
     SlotBehavior replacement_behavior{.info = make_info("same")};
 
     SignalGraph graph;
@@ -553,6 +704,7 @@ TEST_CASE("live plugin swap retires the old slot only after reader drain",
         REQUIRE(graph.connect(plugin, c, out, c));
     }
     REQUIRE(graph.prepare(kSr, kFrames));
+    render_blocks(graph, 10);
 
     auto replacement_stats = std::make_shared<SlotStats>();
     const auto token = graph.register_scanned_plugin(replacement_behavior.info);
@@ -563,6 +715,7 @@ TEST_CASE("live plugin swap retires the old slot only after reader drain",
         });
     REQUIRE(graph.set_node_live_swap_policy(plugin, allowing_policy()));
 
+    old_stats->block_process.store(true, std::memory_order_release);
     std::thread audio([&] { render_blocks(graph, 1); });
     while (!old_stats->process_entered.load(std::memory_order_acquire)) {
         std::this_thread::yield();

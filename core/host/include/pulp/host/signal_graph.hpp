@@ -1113,6 +1113,7 @@ private:
         PluginInfo info;
         std::shared_ptr<PluginSlot> slot;
         PreparedPluginMetadata metadata;
+        pulp::audio::AudioProcessLoadSnapshot warmed_load;
         bool same_identity = false;
     };
     std::unordered_map<NodeId, StagedReplacement> staged_replacements_;
@@ -1344,6 +1345,8 @@ private:
     // node. Edit-path only (not real-time), so the by-value copy is fine.
     std::vector<HostParamInfo> cached_or_live_params_(const GraphNode& n) const;
     std::unique_ptr<PluginSlot> load_live_swap_plugin_(const PluginInfo& info) const;
+    pulp::audio::AudioProcessLoadSnapshot warm_staged_slot_locked_(PluginSlot& slot,
+                                                                   NodeId id) const;
     bool node_has_feedback_edge_locked_(NodeId id) const;
     bool node_has_parameter_or_automation_contract_locked_(NodeId id) const;
     bool staged_replacement_relaxes_identity_locked_(NodeId id) const;
