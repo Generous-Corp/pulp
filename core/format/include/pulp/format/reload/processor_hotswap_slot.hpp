@@ -297,21 +297,10 @@ private:
         fade_midi_out_.clear();
         fading_out_->process(sv, in, fade_midi_in_, fade_midi_out_, ctx);
 
-        // Blend gains come from the shared TransitionMixer: old→new
-        // over the mixer's curve, click-free at both ends. Position is shared
-        // across channels (advanced once, after the loop).
-        const std::size_t base = fade_mixer_.position();
-        for (std::size_t c = 0; c < ch; ++c) {
-            auto o = out.channel(c);
-            auto old_ch = sv.channel(c);                      // fading-out (old) DSP output
-            for (std::size_t n = 0; n < frames; ++n) {
-                float old_gain, new_gain;
-                fade_mixer_.gains_at(base + n, old_gain, new_gain);
-                o[n] = old_ch[n] * old_gain + o[n] * new_gain;  // old→new, click-free
-            }
-        }
-        fade_mixer_.advance(frames);
-        if (fade_mixer_.done())
+        // Blend the fading-out (old) render into the live output over the shared
+        // TransitionMixer's curve — click-free at both ends. The same primitive
+        // drives the SignalGraph live plugin swap so both share one crossfade law.
+        if (signal::blend_fade_out(fade_mixer_, out, sv))
             fade_done_.store(true, std::memory_order_release);
     }
 

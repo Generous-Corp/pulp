@@ -18,6 +18,7 @@
 ///     mid-fade level dip when old/new are decorrelated (a big DSP change).
 ///     Mirrors `DryWetMixer`'s EqualPower law.
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 
@@ -78,5 +79,34 @@ private:
 
 using TransitionMixer = TransitionMixerT<float>;
 using TransitionMixer64 = TransitionMixerT<double>;
+
+/// Blend an already-rendered fading-out buffer into the live output under a
+/// TransitionMixer's old->new gains, then advance the mixer by the block.
+/// Returns true when the fade has completed. Pure, RT-safe (no alloc/lock);
+/// the shared crossfade math for the reload hot-swap slot and the SignalGraph
+/// live plugin swap so both stay click-free by the same law. Templated on the
+/// mixer + buffer-view types to avoid a signal->audio header dependency; `out`
+/// holds the new render on entry and the blended result on return, `old_render`
+/// is the fading-out instance's render for this block. Channel/frame counts are
+/// the min of the two views. The mixer position is shared across channels
+/// (read before the loop, advanced once after).
+template <class Mixer, class OutView, class OldView>
+inline bool blend_fade_out(Mixer& mixer, OutView& out, const OldView& old_render) noexcept {
+    const std::size_t frames = std::min<std::size_t>(out.num_samples(), old_render.num_samples());
+    const std::size_t ch = std::min<std::size_t>(out.num_channels(), old_render.num_channels());
+    const std::size_t base = mixer.position();
+    for (std::size_t c = 0; c < ch; ++c) {
+        auto o = out.channel(c);
+        auto old_ch = old_render.channel(c);
+        for (std::size_t n = 0; n < frames; ++n) {
+            float old_gain = 0.0f;
+            float new_gain = 0.0f;
+            mixer.gains_at(base + n, old_gain, new_gain);
+            o[n] = old_ch[n] * old_gain + o[n] * new_gain;
+        }
+    }
+    mixer.advance(frames);
+    return mixer.done();
+}
 
 }  // namespace pulp::signal
