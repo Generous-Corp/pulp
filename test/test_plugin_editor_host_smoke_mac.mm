@@ -32,10 +32,12 @@
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <atomic>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -101,6 +103,24 @@ inline void clear_no_editor_env() {
 
 inline bool looks_like_png(const std::vector<uint8_t>& d) {
     return d.size() > 8 && d[0] == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G';
+}
+
+// Minimal non-blank CPU content tree — no Processor/ViewBridge needed since the
+// CPU reopen test below drives PluginViewHost directly. Mirrors
+// GpuEditorProcessor::create_view()'s look-and-feel (dark bg + a label) without
+// requires_gpu_host(), so PluginViewHost::create(..., {use_gpu=false}) takes
+// the deterministic CoreGraphics CPU path rather than falling back from a
+// failed GPU init.
+inline std::unique_ptr<view::View> make_cpu_content_view() {
+    auto root = std::make_unique<view::View>();
+    root->set_background_color(canvas::Color::rgba8(30, 30, 46));
+    root->flex().direction = view::FlexDirection::column;
+    root->flex().padding = 16;
+    auto l = std::make_unique<view::Label>("REOPEN");
+    l->set_font_size(20.0f);
+    l->flex().preferred_height = 28;
+    root->add_child(std::move(l));
+    return root;
 }
 
 } // namespace smoke
@@ -378,6 +398,120 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
         gui->destroy(plugin);
         plugin->destroy(plugin);
         clap_entry.deinit();
+        [window close];
+    }
+}
+
+TEST_CASE("mac CPU plugin host reopen survives a display-link teardown race",
+          "[gpu][skia][plugin-gpu-host][mac][display-link][reopen]") {
+    // Regression coverage for the reopen path around MacPluginViewHost's
+    // CVDisplayLink teardown (plugin_view_host_mac.mm ~L1138-1274): the
+    // destructor flips link_state_->alive BEFORE stop_render_link() so a
+    // main-queue block already dispatched from a vsync tick becomes a no-op
+    // instead of touching freed host state, and a fresh host reopened on the
+    // SAME native window/view keeps painting afterward. The production code
+    // is already UAF-safe (the shared FrameLink token); this test proves it
+    // stays that way and never post-teardown-fires the idle callback.
+    smoke::clear_no_editor_env();
+    @autoreleasepool {
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, smoke::kW, smoke::kH)
+                                        styleMask:NSWindowStyleMaskTitled
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window available — mac CPU reopen smoke skipped.");
+            return;
+        }
+
+        view::PluginViewHost::Options opts;
+        opts.size = {smoke::kW, smoke::kH};
+        opts.use_gpu = false;  // deterministic CoreGraphics CPU host — see create().
+
+        auto root1 = smoke::make_cpu_content_view();
+        auto host = view::PluginViewHost::create(*root1, opts);
+        REQUIRE(host != nullptr);
+        REQUIRE_FALSE(host->is_gpu_backed());
+
+        auto counter = std::make_shared<std::atomic<int>>(0);
+        // Capture the shared_ptr by value (production liveness style) — never
+        // a raw pointer into this test's stack, so the callback is safe to
+        // outlive the frame it was armed on.
+        host->set_idle_callback([counter]() {
+            counter->fetch_add(1, std::memory_order_relaxed);
+        });
+
+        REQUIRE_FALSE(host->is_attached());
+        REQUIRE(host->try_attach_to_parent((__bridge void*)window.contentView));
+        REQUIRE(host->is_attached());
+
+        // Bounded pump: on a headless runner without an active CGDisplay,
+        // CVDisplayLinkCreateWithActiveCGDisplays never produces a usable
+        // link and the idle callback never fires — soft-skip rather than
+        // spin. ~200 frames at pump_run_loop's 20ms wait is a ~4s budget,
+        // comfortably above one vsync interval (~16.7ms @ 60Hz) when a real
+        // display link is available.
+        constexpr int kMaxPumpFrames = 200;
+        int frames = 0;
+        while (counter->load(std::memory_order_relaxed) == 0 && frames < kMaxPumpFrames) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        if (counter->load(std::memory_order_relaxed) == 0) {
+            SUCCEED("No display link fired (headless runner, no active CGDisplay) — "
+                     "mac CPU reopen smoke skipped.");
+            host->detach();
+            host.reset();
+            [window close];
+            return;
+        }
+
+        const int count_before_teardown = counter->load(std::memory_order_relaxed);
+
+        // The race under test: destroy the host WITHOUT detaching first. A
+        // vsync tick may already have a main-queue block in flight; the
+        // destructor's alive.store(false) (before stop_render_link()) must
+        // make that block bail out instead of touching freed `this`.
+        host.reset();
+        smoke::pump_run_loop(10);
+        REQUIRE(counter->load(std::memory_order_relaxed) == count_before_teardown);
+
+        // Reopen: a fresh host attaches to the SAME native window content
+        // view and must resume driving idle callbacks + painting — proving
+        // the teardown race didn't leave the window/view hierarchy wedged
+        // against a subsequent open.
+        auto root2 = smoke::make_cpu_content_view();
+        auto host2 = view::PluginViewHost::create(*root2, opts);
+        REQUIRE(host2 != nullptr);
+
+        auto counter2 = std::make_shared<std::atomic<int>>(0);
+        host2->set_idle_callback([counter2]() {
+            counter2->fetch_add(1, std::memory_order_relaxed);
+        });
+
+        REQUIRE_FALSE(host2->is_attached());
+        REQUIRE(host2->try_attach_to_parent((__bridge void*)window.contentView));
+        REQUIRE(host2->is_attached());
+
+        frames = 0;
+        while (counter2->load(std::memory_order_relaxed) == 0 && frames < kMaxPumpFrames) {
+            smoke::pump_run_loop(1);
+            ++frames;
+        }
+        REQUIRE(counter2->load(std::memory_order_relaxed) > 0);
+
+        // Host-independent raster proof that the reopened view tree actually
+        // paints: capture_back_buffer_png() is a GPU-host-only override (the
+        // CPU host inherits the base class's empty-vector default), so use
+        // the offscreen Skia raster path over the same root view instead.
+        auto png = view::render_to_png(*root2, smoke::kW, smoke::kH, 2.0f,
+                                        view::ScreenshotBackend::skia);
+        INFO("reopened CPU host raster capture bytes: " << png.size());
+        REQUIRE_FALSE(png.empty());
+        REQUIRE(smoke::looks_like_png(png));
+
+        host2->detach();
+        host2.reset();
         [window close];
     }
 }
