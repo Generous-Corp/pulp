@@ -53,6 +53,7 @@ struct BakedPlan {
         std::string custom_type_id;              // Custom nodes
         int custom_version = 0;                  // Custom nodes
         std::vector<std::uint8_t> custom_state;  // Custom nodes
+        bool operator==(const Node&) const = default;
     };
     struct Conn {
         NodeId src_node = 0;
@@ -60,6 +61,7 @@ struct BakedPlan {
         NodeId dst_node = 0;
         int dst_port = 0;
         bool feedback = false;
+        bool operator==(const Conn&) const = default;
     };
     std::vector<Node> nodes;
     std::vector<Conn> connections;
