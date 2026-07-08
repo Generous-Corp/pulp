@@ -72,18 +72,14 @@ void WidgetBridge::register_platform_services_exec_api() {
         auto cbId = args.get<std::string>(1, "");
         if (cmd.empty() || cbId.empty()) return choc::value::Value();
         auto full_cmd = build_shell_command(cmd);
-        auto alive = callback_alive_;
-        auto async_results = async_exec_results_;
-        auto async_mutex = async_exec_mutex_;
-        std::thread([alive, async_results, async_mutex, full_cmd, cbId]() {
+        auto sink = make_async_result_sink();
+        std::thread([sink, full_cmd, cbId]() {
 #ifdef _WIN32
             auto result = pulp::platform::exec("cmd", {"/c", full_cmd}, 60000);
 #else
             auto result = pulp::platform::exec("/bin/sh", {"-c", full_cmd}, 60000);
 #endif
-            if (!alive || !alive->load(std::memory_order_acquire)) return;
-            std::lock_guard<std::mutex> lock(*async_mutex);
-            async_results->push_back({cbId, std::move(result.stdout_output)});
+            sink(cbId, std::move(result.stdout_output));
         }).detach();
         return choc::value::Value();
     });

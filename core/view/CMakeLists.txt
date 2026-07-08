@@ -390,6 +390,7 @@ endif()
 
 target_sources(pulp-view-core PRIVATE
     src/accessibility.cpp
+    src/query_service.cpp
     src/import_validation_bridge.cpp
     src/lottie_view.cpp
     ${PULP_TEXT_ACCESSIBILITY_SOURCE}
@@ -554,6 +555,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/canvas2d_api.cpp
     src/widget_bridge/widget_value_list_api.cpp
     src/widget_bridge/widget_value_content_api.cpp
+    src/widget_bridge/query_service_api.cpp
     src/widget_bridge_input.cpp
     src/hot_reload.cpp
     src/scripted_ui.cpp
