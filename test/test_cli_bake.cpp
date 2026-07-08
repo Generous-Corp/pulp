@@ -133,3 +133,64 @@ TEST_CASE("pulp bake fails cleanly on a missing input", "[cli][bake]") {
     INFO(out);
     REQUIRE(code != 0);
 }
+
+TEST_CASE("pulp bake enforces arg guards, --force, --no-mint, and empty-trust reject",
+          "[cli][bake]") {
+    const fs::path d = unique_dir();
+    const fs::path graph = write_gain_graph(d);
+    const fs::path out = d / "out.pulpbake";
+    const fs::path key = d / "signing.key";
+    int code = 0;
+
+    SECTION("malformed --sr / --block -> exit 2, no crash") {
+        const std::string a = run_capture(
+            std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
+                "' --sign-key '" + key.string() + "' --sr not-a-number",
+            code);
+        INFO(a);
+        REQUIRE(code == 2);
+        const std::string b = run_capture(
+            std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
+                "' --sign-key '" + key.string() + "' --block zero",
+            code);
+        INFO(b);
+        REQUIRE(code == 2);
+    }
+    SECTION("--no-mint with an absent key -> exit 2 (no silent identity mint)") {
+        const fs::path absent = d / "does-not-exist.key";
+        const std::string a = run_capture(
+            std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
+                "' --sign-key '" + absent.string() + "' --no-mint",
+            code);
+        INFO(a);
+        REQUIRE(code == 2);
+        REQUIRE_FALSE(fs::exists(absent));  // did NOT mint
+    }
+    SECTION("--force guard") {
+        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
+                        "' --sign-key '" + key.string() + "'",
+                    code);
+        REQUIRE(code == 0);
+        // Second bake without --force is refused.
+        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
+                        "' --sign-key '" + key.string() + "'",
+                    code);
+        REQUIRE(code != 0);
+        // With --force it succeeds.
+        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
+                        "' --sign-key '" + key.string() + "' --force",
+                    code);
+        REQUIRE(code == 0);
+    }
+    SECTION("verify with NO --trust -> REJECTED (no anchor = reject)") {
+        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
+                        "' --sign-key '" + key.string() + "'",
+                    code);
+        REQUIRE(code == 0);
+        const std::string v =
+            run_capture(std::string(kCliBin) + " bake verify '" + out.string() + "'", code);
+        INFO(v);
+        REQUIRE(code != 0);
+        REQUIRE(v.find("REJECTED") != std::string::npos);
+    }
+}

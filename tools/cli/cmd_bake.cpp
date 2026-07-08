@@ -13,6 +13,7 @@
 #include <pulp/runtime/base64.hpp>
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -114,6 +115,7 @@ int bake_write(const std::vector<std::string>& args) {
     double sr = 48000.0;
     int block = 512;
     bool force = false;
+    bool no_mint = false;
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string& a = args[i];
         if (a == "-o" || a == "--out") {
@@ -124,12 +126,26 @@ int bake_write(const std::vector<std::string>& args) {
             sign_key = args[++i];
         } else if (a == "--sr") {
             if (i + 1 >= args.size()) { std::cerr << "pulp bake: --sr needs a value\n"; return 2; }
-            sr = std::stod(args[++i]);
+            try {
+                sr = std::stod(args[++i]);
+            } catch (const std::exception&) {
+                std::cerr << "pulp bake: --sr expects a number, got '" << args[i] << "'\n";
+                return 2;
+            }
+            if (sr <= 0.0) { std::cerr << "pulp bake: --sr must be positive\n"; return 2; }
         } else if (a == "--block") {
             if (i + 1 >= args.size()) { std::cerr << "pulp bake: --block needs a value\n"; return 2; }
-            block = std::stoi(args[++i]);
+            try {
+                block = std::stoi(args[++i]);
+            } catch (const std::exception&) {
+                std::cerr << "pulp bake: --block expects an integer, got '" << args[i] << "'\n";
+                return 2;
+            }
+            if (block <= 0) { std::cerr << "pulp bake: --block must be positive\n"; return 2; }
         } else if (a == "--force") {
             force = true;
+        } else if (a == "--no-mint") {
+            no_mint = true;
         } else if (!a.empty() && a[0] != '-' && input.empty()) {
             input = a;
         } else {
@@ -139,12 +155,20 @@ int bake_write(const std::vector<std::string>& args) {
     }
     if (input.empty() || output.empty() || sign_key.empty()) {
         std::cerr << "usage: pulp bake <input.pulpgraph> -o <out.pulpbake> --sign-key <key-file> "
-                     "[--sr 48000] [--block 512] [--force]\n";
+                     "[--sr 48000] [--block 512] [--force] [--no-mint]\n";
         return 2;
     }
     if (fs::exists(output) && !force) {
         std::cerr << "pulp bake: '" << output << "' exists; pass --force to overwrite\n";
         return 1;
+    }
+    // --no-mint: for CI / non-interactive use, refuse to silently mint a NEW signing
+    // identity when the key is absent (which would otherwise exit 0 with only a stderr
+    // note — an automation footgun for a distributable, signed artifact).
+    if (no_mint && !fs::exists(sign_key)) {
+        std::cerr << "pulp bake: --no-mint set but no signing key at '" << sign_key
+                  << "'. Provide an existing key (or drop --no-mint to mint one).\n";
+        return 2;
     }
 
     auto json = read_text(input);
@@ -190,11 +214,32 @@ int bake_write(const std::vector<std::string>& args) {
         std::cerr << "pulp bake: signing failed (bad key or oversized plan)\n";
         return 1;
     }
-    std::ofstream out(output, std::ios::binary | std::ios::trunc);
-    if (!out) { std::cerr << "pulp bake: cannot write '" << output << "'\n"; return 1; }
-    out.write(reinterpret_cast<const char*>(bytes.data()),
-              static_cast<std::streamsize>(bytes.size()));
-    if (!out) { std::cerr << "pulp bake: write to '" << output << "' failed\n"; return 1; }
+    // Write to a temp path then atomically rename, so a mid-write failure never leaves
+    // a truncated .pulpbake behind the output name (which would then block the next
+    // non-force bake with a confusing "exists").
+    const fs::path final_out = output;
+    const fs::path tmp_out = fs::path(output + ".tmp");
+    {
+        std::ofstream out(tmp_out, std::ios::binary | std::ios::trunc);
+        if (!out) { std::cerr << "pulp bake: cannot write '" << tmp_out.string() << "'\n"; return 1; }
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+        out.flush();
+        if (!out) {
+            std::cerr << "pulp bake: write to '" << tmp_out.string() << "' failed\n";
+            std::error_code rmec;
+            fs::remove(tmp_out, rmec);
+            return 1;
+        }
+    }
+    std::error_code renec;
+    fs::rename(tmp_out, final_out, renec);
+    if (renec) {
+        std::cerr << "pulp bake: could not finalize '" << output << "': " << renec.message() << "\n";
+        std::error_code rmec;
+        fs::remove(tmp_out, rmec);
+        return 1;
+    }
 
     const std::string pub_b64 =
         pulp::runtime::base64_encode(km->public_key.data(), km->public_key.size());

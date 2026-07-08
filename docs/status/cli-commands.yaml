@@ -334,6 +334,9 @@ commands:
       - name: --force
         required: false
         description: Overwrite an existing output file.
+      - name: --no-mint
+        required: false
+        description: "For CI / non-interactive use: refuse to mint a new signing identity if the --sign-key path is absent (exit 2 instead of silently signing under a new key).
     subcommands:
       - name: verify
         summary: "Verify a signed .pulpbake against a trust set and print ACCEPTED/REJECTED. Checks the Ed25519 signature and runs the bounded parse only; never executes the plan or loads custom state."
