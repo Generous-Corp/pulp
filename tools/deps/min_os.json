@@ -1,0 +1,141 @@
+{
+  "_comment": [
+    "Single source of truth for Pulp's minimum supported OS per platform.",
+    "A consumer's floor = the MAX minimum among the prebuilt libraries it links.",
+    "'measured' is read from the shipped artifact (otool -l minos on Apple; objdump -T GLIBC max on Linux;",
+    "dumpbin on Windows). 'expected' is Google's upstream value for the pinned Skia/Dawn milestone",
+    "(Chromium build/config/mac/mac_sdk.gni mac_deployment_target, etc.). A measured != expected is drift.",
+    "'always_linked' deps always count toward the floor; V8 counts only when PULP_JS_ENGINE=v8.",
+    "A dep with 'toolchain_declared':true (e.g. libcxx) has no shippable artifact to otool — its floor is a",
+    "known toolchain constant (Apple SDK availability annotation), so measure_min_os.py leaves it untouched.",
+    "Regenerate with tools/scripts/measure_min_os.py after any Skia/Dawn/V8 pin bump.",
+    "CMake reads this before project() via tools/cmake/PulpMinOs.cmake to pin the deployment target."
+  ],
+  "skia_milestone": "chrome/m151",
+  "measured_on": "2026-07-08",
+  "platforms": {
+    "macos-arm64": {
+      "unit": "macos_version",
+      "floor": "13.3",
+      "binding": "skia,dawn,libcxx",
+      "note": "Floor is set by Apple's libc++, not Skia/Dawn: std::format instantiates std::formatter<float> through its type-erased make_format_args visitor for EVERY format call (even string-only ones), and std::to_chars(float) is marked unavailable before macOS 13.3 in the Xcode SDK's libc++. Pulp's logging (core/runtime/log.hpp) uses std::format pervasively, so 13.3 is a hard toolchain floor above Google's 13.0 deps target. Verified by compiling at deployment target 13.0 (fails) vs 13.3 (builds).",
+      "deps": {
+        "skia": {
+          "measured": "13.0",
+          "expected": "13.0",
+          "always_linked": true,
+          "source": "Chromium mac_deployment_target @ m151 (build/config/mac/mac_sdk.gni)"
+        },
+        "dawn": {
+          "measured": "13.0",
+          "expected": "13.0",
+          "always_linked": true,
+          "source": "Chromium mac_deployment_target @ m151"
+        },
+        "libcxx": {
+          "measured": "13.3",
+          "expected": "13.3",
+          "always_linked": true,
+          "toolchain_declared": true,
+          "source": "Apple libc++ std::to_chars(float) availability (Xcode SDK usr/include/c++/v1/__charconv/to_chars_floating_point.h), reached via std::format in core/runtime/log.hpp"
+        },
+        "v8": {
+          "measured": "11.0",
+          "expected": "11.0",
+          "always_linked": false,
+          "source": "v8-builder build-v8.py mac_deployment_target"
+        }
+      }
+    },
+    "ios-arm64": {
+      "unit": "ios_version",
+      "floor": "16.0",
+      "binding": "toolchain",
+      "note": "Deps allow iOS 14 (Skia/Dawn stamp 14.0); Pulp declares 16.0 via IOS_DEPLOYMENT_TARGET. Toolchain-declared, not leaked. V8 excluded (JSC-only on iOS).",
+      "deps": {
+        "skia": {
+          "measured": "14.0",
+          "expected": "14.0",
+          "always_linked": true,
+          "source": "skia-builder IOS_MIN_VERSION (Dawn needs iOS 14 for std::atomic wait)"
+        },
+        "dawn": {
+          "measured": "14.0",
+          "expected": "14.0",
+          "always_linked": true,
+          "source": "skia-builder IOS_MIN_VERSION"
+        }
+      }
+    },
+    "linux-x64": {
+      "unit": "glibc_version",
+      "floor": null,
+      "binding": null,
+      "note": "Not yet measured. Measure GLIBC max in the .so (objdump -T | grep GLIBC_ | sort -V | tail). skia-builder Linux path pins no sysroot; v8-builder enforces glibc <= 2.28 (Rocky 8).",
+      "deps": {
+        "skia": {
+          "measured": null,
+          "expected": null,
+          "always_linked": true
+        },
+        "dawn": {
+          "measured": null,
+          "expected": null,
+          "always_linked": true
+        },
+        "v8": {
+          "measured": "2.28",
+          "expected": "2.28",
+          "always_linked": false,
+          "source": "v8-builder tools/rhel8/check_glibc_floor.py --max 2.28"
+        }
+      }
+    },
+    "linux-arm64": {
+      "unit": "glibc_version",
+      "floor": null,
+      "binding": null,
+      "note": "Not yet measured (Linux replication pending).",
+      "deps": {
+        "skia": {
+          "measured": null,
+          "expected": null,
+          "always_linked": true
+        },
+        "dawn": {
+          "measured": null,
+          "expected": null,
+          "always_linked": true
+        },
+        "v8": {
+          "measured": null,
+          "expected": null,
+          "always_linked": false
+        }
+      }
+    },
+    "windows-x64": {
+      "unit": "windows_build",
+      "floor": null,
+      "binding": null,
+      "note": "Not yet measured. Governed by Skia GN WINVER/_WIN32_WINNT defaults, not a runner leak (no analogous bug found). Measure via dumpbin /headers subsystem + /imports.",
+      "deps": {
+        "skia": {
+          "measured": null,
+          "expected": null,
+          "always_linked": true
+        },
+        "dawn": {
+          "measured": null,
+          "expected": null,
+          "always_linked": true
+        },
+        "v8": {
+          "measured": null,
+          "expected": null,
+          "always_linked": false
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Pin the macOS deployment target from tools/deps/min_os.json BEFORE project(),
+# so Pulp's binaries target the max minimum of the prebuilt libs they link
+# (Skia/Dawn always; V8 only under PULP_JS_ENGINE=v8) instead of drifting with
+# the build machine's SDK. No-op when a toolchain/user already set it.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
+
 project(Pulp
     VERSION 0.612.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
