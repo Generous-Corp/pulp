@@ -137,6 +137,7 @@ endif()
 if(PULP_HAS_CLAP)
     target_sources(pulp-format PRIVATE
         src/clap_adapter.cpp
+        src/clap_remote_controls.cpp
     )
     target_link_libraries(pulp-format PUBLIC clap)
     # Keep PulpClapPlugin's layout identical between clap_adapter.cpp and the

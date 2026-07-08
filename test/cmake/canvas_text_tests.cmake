@@ -182,7 +182,8 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     if(PULP_HAS_CLAP)
         add_executable(pulp-test-plugin-editor-host-smoke-mac
             test_plugin_editor_host_smoke_mac.mm
-            ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp)
+            ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+            ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp)
         target_link_libraries(pulp-test-plugin-editor-host-smoke-mac PRIVATE
             pulp::format pulp::view pulp::state pulp::canvas pulp::render
             clap Catch2::Catch2WithMain skia::skia "-framework AppKit")

@@ -605,7 +605,8 @@ inline const clap_plugin_gui_t gui_ext = {
 #endif // PULP_CLAP_GUI
 
 // ── Extension dispatch ─────────────────────────────────────────────────
-inline const void* get_extension(const clap_plugin_t*, const char* id) {
+inline const void* get_static_extension(const clap_plugin_t*, const char* id) {
+    if (!id) return nullptr;
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     if (strcmp(id, CLAP_EXT_GUI) == 0) {
         if (pulp::format::detail::editor_launch_blocked_by_environment()) return nullptr;
@@ -619,6 +620,13 @@ inline const void* get_extension(const clap_plugin_t*, const char* id) {
     if (strcmp(id, CLAP_EXT_LATENCY) == 0) return &latency_ext;
     if (strcmp(id, CLAP_EXT_TAIL) == 0) return &tail_ext;
     return nullptr;
+}
+
+inline const void* get_extension(const clap_plugin_t* plugin, const char* id) {
+    if (const void* ext = get_static_extension(plugin, id)) {
+        return ext;
+    }
+    return clap_adapter::clap_get_extension(plugin, id);
 }
 
 // ── Plugin creation ────────────────────────────────────────────────────

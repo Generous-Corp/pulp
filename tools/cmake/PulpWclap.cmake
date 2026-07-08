@@ -69,13 +69,13 @@ if(NOT PULP_WCLAP_CHOC_INCLUDE)
     set(PULP_WCLAP_CHOC_INCLUDE "${choc_wclap_SOURCE_DIR}")
 endif()
 
-# CLAP headers (header-only, MIT). Fetched to match the native pin (1.2.2).
+# CLAP headers (header-only, MIT). Fetched to match the native pin (1.2.9).
 if(NOT PULP_WCLAP_CLAP_INCLUDE)
     include(FetchContent)
     FetchContent_Declare(
         clap_wclap
         GIT_REPOSITORY https://github.com/free-audio/clap.git
-        GIT_TAG 1.2.2
+        GIT_TAG 1.2.9
         GIT_SHALLOW TRUE)
     FetchContent_MakeAvailable(clap_wclap)
     set(PULP_WCLAP_CLAP_INCLUDE "${clap_wclap_SOURCE_DIR}/include")
@@ -98,6 +98,7 @@ set(_PULP_WCLAP_INCLUDES
 # shared across every WebCLAP plugin target.
 set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
+    ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/processor_f64.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/host_quirks.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/host_version.cpp

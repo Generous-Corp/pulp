@@ -387,11 +387,11 @@ else()
 endif()
 
 # CLAP (MIT license) — header-only plugin format
-pulp_register_fetchcontent_source(clap REF 1.2.2)
+pulp_register_fetchcontent_source(clap REF 1.2.9)
 FetchContent_Declare(
     clap
     GIT_REPOSITORY https://github.com/free-audio/clap.git
-    GIT_TAG 1.2.2
+    GIT_TAG 1.2.9
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(clap)

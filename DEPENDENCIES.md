@@ -19,7 +19,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | Babel parser | 7.29.7 | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`; npm-installed for import tooling, not bundled into the C++ runtime | import tooling | 2026-05-27 |
 | Catch2 | 3.7.1 | BSL-1.0 | Unit testing framework | test | 2026-03-24 |
 | CHOC | pulp-webview-dnd-poc1 (fork of f0f5cdf5a938) | ISC | JS engine abstraction, MIDI utilities, audio helpers, WebView drag-and-drop | multiple | 2026-03-24 |
-| CLAP | 1.2.2 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
+| CLAP | 1.2.9 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | cpp-httplib | vendored-snapshot | MIT | HTTP client (GET/POST/download) | pulp-runtime | 2026-04-07 |
 | css-tree | 3.2.1 | MIT | CSS value parsing and lexer validation for JSX source-contract extraction; npm-installed for import tooling, not bundled into the C++ runtime | import tooling | 2026-05-27 |
 | Dawn | chrome/m151 deps (bundled in Skia toolchain) | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-06-05 |

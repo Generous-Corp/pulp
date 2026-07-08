@@ -5,8 +5,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/ara.hpp>
 #include <pulp/format/clap_entry.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <clap/ext/preset-load.h>
+#include <clap/ext/remote-controls.h>
 #include <clocale>
 #include <cmath>
 #include <cstdio>
@@ -85,6 +88,48 @@ public:
 
 inline std::unique_ptr<pulp::format::Processor> create_test() {
     return std::make_unique<TestProcessor>();
+}
+
+class RemoteControlsProcessor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "RemoteControlsClap",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.clap.remote-controls",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Audio In", 2}},
+            .output_buses = {{"Audio Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_group({.id = 10, .name = "Oscillator"});
+        store.add_parameter({.id = 200, .name = "Input Gain",
+                             .range = {0.0f, 1.0f, 0.5f}});
+        store.add_parameter({.id = 201, .name = "Output Gain",
+                             .range = {0.0f, 1.0f, 0.5f}});
+
+        for (int i = 0; i < 9; ++i) {
+            pulp::state::ParamInfo info;
+            info.id = static_cast<pulp::state::ParamID>(100 + i);
+            info.name = "Osc " + std::to_string(i + 1);
+            info.range = {0.0f, 1.0f, 0.0f};
+            info.group_id = 10;
+            store.add_parameter(info);
+        }
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+};
+
+inline std::unique_ptr<pulp::format::Processor> create_remote_controls_test() {
+    return std::make_unique<RemoteControlsProcessor>();
 }
 
 } // namespace test_clap
@@ -180,6 +225,22 @@ public:
     ~ScopedHostQuirkPolicy() {
         pulp::format::set_host_quirk_policy(std::nullopt);
     }
+};
+
+class ScopedClapFactory {
+public:
+    explicit ScopedClapFactory(pulp::format::ProcessorFactory factory)
+        : previous_(pulp::format::clap_generic::g_factory) {
+        pulp::format::clap_generic::g_factory = factory;
+        pulp::format::clap_generic::init_descriptor();
+    }
+    ~ScopedClapFactory() {
+        pulp::format::clap_generic::g_factory = previous_;
+        pulp::format::clap_generic::init_descriptor();
+    }
+
+private:
+    pulp::format::ProcessorFactory previous_ = nullptr;
 };
 
 struct MemoryStream {
@@ -314,6 +375,97 @@ TEST_CASE("CLAP entry exposes port, note, latency and tail extensions",
 
     REQUIRE(latency->get(plugin) == 128);
     REQUIRE(tail->get(plugin) == std::numeric_limits<uint32_t>::max());
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+}
+
+TEST_CASE("CLAP entry routes adapter-owned dynamic extensions through host callback",
+          "[clap][entry][extensions][preset][ara]") {
+    ScopedHostQuirkPolicy quirk_policy(pulp::format::kQuirkFilterOff);
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    REQUIRE(factory != nullptr);
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    REQUIRE(desc != nullptr);
+
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* preset = static_cast<const clap_plugin_preset_load_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_PRESET_LOAD));
+    REQUIRE(preset != nullptr);
+    REQUIRE(plugin->get_extension(plugin, CLAP_EXT_PRESET_LOAD_COMPAT) == preset);
+
+    const void* ara = plugin->get_extension(plugin, pulp::format::kClapAraFactoryExtension);
+#ifdef PULP_HAS_ARA
+    auto* self = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(
+        plugin->plugin_data);
+    REQUIRE(ara != nullptr);
+    REQUIRE(ara == pulp::format::ara_companion_factory_for(
+                       self->ara_controller.get()));
+#else
+    REQUIRE(ara == nullptr);
+#endif
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+}
+
+TEST_CASE("CLAP remote-controls extension exposes grouped parameter pages",
+          "[clap][entry][remote-controls]") {
+    ScopedClapFactory factory_scope(test_clap::create_remote_controls_test);
+    ScopedHostQuirkPolicy quirk_policy(pulp::format::kQuirkFilterOff);
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    REQUIRE(factory != nullptr);
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    REQUIRE(desc != nullptr);
+
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* remote = static_cast<const clap_plugin_remote_controls_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_REMOTE_CONTROLS));
+    REQUIRE(remote != nullptr);
+    REQUIRE(plugin->get_extension(plugin, CLAP_EXT_REMOTE_CONTROLS_COMPAT) == remote);
+    REQUIRE(remote->count(plugin) == 3);
+
+    clap_remote_controls_page_t page{};
+    REQUIRE(remote->get(plugin, 0, &page));
+    REQUIRE(std::string(page.section_name) == "Main");
+    REQUIRE(std::string(page.page_name) == "Main");
+    REQUIRE(page.page_id == 1);
+    REQUIRE_FALSE(page.is_for_preset);
+    REQUIRE(page.param_ids[0] == 200);
+    REQUIRE(page.param_ids[1] == 201);
+    for (std::size_t i = 2; i < CLAP_REMOTE_CONTROLS_COUNT; ++i) {
+        REQUIRE(page.param_ids[i] == CLAP_INVALID_ID);
+    }
+
+    REQUIRE(remote->get(plugin, 1, &page));
+    REQUIRE(std::string(page.section_name) == "Oscillator");
+    REQUIRE(std::string(page.page_name) == "Oscillator 1");
+    REQUIRE(page.page_id == 2);
+    for (std::size_t i = 0; i < CLAP_REMOTE_CONTROLS_COUNT; ++i) {
+        REQUIRE(page.param_ids[i] == static_cast<clap_id>(100 + i));
+    }
+
+    REQUIRE(remote->get(plugin, 2, &page));
+    REQUIRE(std::string(page.section_name) == "Oscillator");
+    REQUIRE(std::string(page.page_name) == "Oscillator 2");
+    REQUIRE(page.page_id == 3);
+    REQUIRE(page.param_ids[0] == 108);
+    for (std::size_t i = 1; i < CLAP_REMOTE_CONTROLS_COUNT; ++i) {
+        REQUIRE(page.param_ids[i] == CLAP_INVALID_ID);
+    }
+    REQUIRE_FALSE(remote->get(plugin, 3, &page));
 
     plugin->destroy(plugin);
     clap_entry.deinit();
