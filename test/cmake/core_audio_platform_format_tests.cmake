@@ -82,6 +82,21 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
+
+# Standalone host render-path RT-safety guard. Drives the extracted
+# StandaloneApp::render_audio_block() seam for one steady-state block under
+# ScopedRtProcessProbe. Links the RT interposition trap TU + sets
+# PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS (UNIX-only: strong operator-new +
+# pthread overrides) so an allocation / blocking lock on the render path ABORTS
+# the test. Mirrors the CLAP/AU-v2 RT-trap targets.
+add_executable(pulp-test-standalone-rt test_standalone_rt.cpp)
+target_sources(pulp-test-standalone-rt PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+target_link_libraries(pulp-test-standalone-rt PRIVATE
+    pulp::standalone Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+target_compile_definitions(pulp-test-standalone-rt PRIVATE
+    $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+catch_discover_tests(pulp-test-standalone-rt)
 pulp_add_test_suite(pulp-test-audio-inspector-demo-processor SOURCES test_audio_inspector_demo_processor.cpp LIBRARIES pulp::format pulp::audio pulp::midi)
 # .pulpset render/replay harness (G4)
 pulp_add_test_suite(pulp-test-pulpset-replay SOURCES test_pulpset_replay.cpp LIBRARIES pulp::format)
@@ -170,6 +185,34 @@ if(APPLE AND PULP_HAS_AUSDK)
         OBJCXX_STANDARD 23
     )
     catch_discover_tests(pulp-test-au-plugin-state)
+
+    # AU v2 instrument (aumu) render-path RT-safety guard. Drives
+    # PulpAUInstrument::Render for one steady-state block under
+    # ScopedRtProcessProbe. Links the RT interposition trap TU and sets
+    # PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS so an allocation / blocking lock on
+    # the render path ABORTS the test (mirrors the CLAP MIDI RT-trap target
+    # above). Trap TU is UNIX-only (strong operator-new + pthread overrides);
+    # APPLE satisfies ${UNIX}.
+    add_executable(pulp-test-au-v2-instrument-rt
+        test_au_v2_instrument_rt.mm
+    )
+    target_sources(pulp-test-au-v2-instrument-rt PRIVATE
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+    target_link_libraries(pulp-test-au-v2-instrument-rt PRIVATE
+        pulp::format
+        ausdk
+        Catch2::Catch2WithMain
+        ${CMAKE_DL_LIBS}
+        "-framework AudioToolbox"
+        "-framework Foundation"
+    )
+    target_compile_definitions(pulp-test-au-v2-instrument-rt PRIVATE
+        $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+    set_target_properties(pulp-test-au-v2-instrument-rt PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-v2-instrument-rt)
 endif()
 
 # LV2 adapter tests
