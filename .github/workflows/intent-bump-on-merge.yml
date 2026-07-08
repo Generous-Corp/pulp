@@ -78,12 +78,19 @@ jobs:
             echo "No intent trailer / nothing to bump."
           fi
 
+      - name: Configure release bot SSH signing
+        if: steps.guard.outputs.skip == 'false' && steps.apply.outputs.changed == 'true'
+        shell: bash
+        env:
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: bash tools/scripts/configure_release_bot_ssh_signing.sh
+
       - name: Commit and push the bump
         if: steps.guard.outputs.skip == 'false' && steps.apply.outputs.changed == 'true'
         run: |
           git config user.name  "pulp-release-bot"
-          git config user.email "release-bot@users.noreply.github.com"
+          git config user.email "25807+danielraffel@users.noreply.github.com"
           git add -- ${{ steps.apply.outputs.edited }}
-          git commit -m "chore: bump versions" \
+          git commit -S -m "chore: bump versions" \
             -m "Applied from Version-Bump intent trailer on $(git rev-parse --short HEAD)."
           git push origin HEAD:main

@@ -295,6 +295,16 @@ jobs:
           echo "sdk decision:    $sdk_decision"
           echo "plugin decision: $plugin_decision"
 
+      - name: Configure release bot SSH signing
+        if: >-
+          steps.guard.outputs.skip == '0' &&
+          (steps.versions.outputs.sdk_should_tag == '1' ||
+           steps.versions.outputs.plugin_should_tag == '1')
+        shell: bash
+        env:
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: bash tools/scripts/configure_release_bot_ssh_signing.sh
+
       - name: Create tags for moved surfaces
         if: steps.guard.outputs.skip == '0'
         shell: bash
@@ -308,7 +318,7 @@ jobs:
           set -euo pipefail
 
           git config user.name  "pulp-release-bot"
-          git config user.email "pulp-release-bot@users.noreply.github.com"
+          git config user.email "25807+danielraffel@users.noreply.github.com"
 
           create_tag() {
               local tag="$1"
@@ -320,7 +330,7 @@ jobs:
               #
               # `git ls-remote --tags origin <tag>` returns the TAG OBJECT SHA
               # for annotated tags (the default created by this workflow via
-              # `git tag -a`), not the commit SHA. Compare dereferenced
+              # `git tag -s`), not the commit SHA. Compare dereferenced
               # target commits instead — the `^{}` suffix peels the tag
               # object to its referenced commit.
               if git ls-remote --tags origin "$tag" | grep -q .; then
@@ -340,7 +350,7 @@ jobs:
                   exit 1
               fi
 
-              git tag -a "$tag" -m "Release $tag (automated by auto-release.yml)"
+              git tag -s "$tag" -m "Release $tag (automated by auto-release.yml)"
               git push origin "$tag"
               echo "created $tag"
           }

@@ -1,7 +1,7 @@
 # Release pipeline
 
 This doc explains end-to-end how a PR merge becomes a published SDK release —
-from the first commit on `main` to 11 downloadable assets on the Releases page.
+from the first commit on `main` to 12 downloadable assets on the Releases page.
 
 If you're hunting a specific layer:
 
@@ -25,10 +25,10 @@ PR merge to main
 │                                                          │
 │    a. Diff CMakeLists.txt `project(Pulp VERSION X.Y.Z)`  │
 │       between the previous push and HEAD.                │
-│    b. If VERSION moved, create tag `vX.Y.Z` pointing at  │
-│       the same commit and push it (using a PAT — the     │
-│       default GITHUB_TOKEN cannot trigger workflows from │
-│       its own pushes, that's GitHub's anti-recursion).   │
+│    b. If VERSION moved, create signed tag `vX.Y.Z`       │
+│       pointing at the same commit and push it (using a   │
+│       PAT because the default GITHUB_TOKEN cannot        │
+│       trigger workflows from its own pushes).            │
 │    c. If a `Release: skip reason="..."` trailer is on    │
 │       the tip commit, suppress tag creation.             │
 │    d. If the subject is `Revert "..."`, suppress.        │
@@ -78,7 +78,9 @@ PR merge to main
 │      runner and run `pulp help`, `pulp-cpp help`, and   │
 │      `pulp-mcp --version` to catch missing-symbol /     │
 │      bad-rpath bugs before publish                      │
-│   9. Upload as a GitHub Actions artifact                │
+│   9. Generate GitHub artifact attestations for the CLI   │
+│      and SDK archives                                   │
+│  10. Upload as a GitHub Actions artifact                │
 │                                                          │
 │ Final `release` job (runs once, after all 5 platforms): │
 │   - Downloads all 10 matrix artifacts                   │
@@ -111,6 +113,8 @@ PR merge to main
 │   - Code-signs those bundles with Developer ID and       │
 │     notarizes them with Apple, then staples.             │
 │   - Generates `appcast.xml` (Sparkle auto-update feed).  │
+│   - Generates a GitHub artifact attestation for          │
+│     `appcast.xml`.                                      │
 │   - Calls softprops/action-gh-release@v2 with            │
 │     `draft: true` to CREATE the GitHub Release as a      │
 │     draft, attaching only `appcast.xml`. The 10          │
@@ -143,9 +147,9 @@ PR merge to main
 └─────────────────────────────────────────────────────────┘
 ```
 
-## The 11 release assets
+## The 12 release assets
 
-A successful release publishes exactly **11 assets** to the GitHub Release page:
+A successful release publishes exactly **12 assets** to the GitHub Release page:
 
 | Asset | Purpose |
 |-------|---------|
@@ -160,8 +164,9 @@ A successful release publishes exactly **11 assets** to the GitHub Release page:
 | `pulp-sdk-linux-x64.tar.gz` | " |
 | `pulp-sdk-windows-arm64.tar.gz` | " |
 | `pulp-sdk-windows-x64.tar.gz` | " |
+| `SHA256SUMS` | SHA-256 manifest for the 11 user-facing release assets above |
 
-Anything less than 11 published assets means part of the pipeline didn't reach the
+Anything less than 12 published assets means part of the pipeline didn't reach the
 end. Triage by which assets are present:
 
 - **No `appcast.xml` on the release** (or no draft release at all):
@@ -179,12 +184,90 @@ end. Triage by which assets are present:
   `actions/download-artifact` finds; failed matrix legs simply don't
   contribute artifacts.
 - **All 11 assets present but the release stays in DRAFT**:
-  `release-publish.yml` did not reach its publish step after both release
-  legs produced their assets. Inspect the coordinator run and its upstream
-  workflow conclusions before rerunning either asset-producing workflow.
+  `release-publish.yml` either did not reach its publish step after both release
+  legs produced their assets, or failed while generating/uploading
+  `SHA256SUMS`. Inspect the coordinator run and its upstream workflow
+  conclusions before rerunning either asset-producing workflow.
 
-In all three cases the `release-draft-stuck-check` watchdog will eventually
-flag a stuck draft (see release-watchdog.md).
+## Verifying a published release
+
+The verification layers answer separate questions:
+
+- **Signed commit or tag:** GitHub verified a cryptographic signature from a
+  public signing key registered to a configured maintainer or release-bot
+  account. This says who signed the source ref.
+- **Protected tag:** the `refs/tags/v*` ruleset blocks force-push, deletion, and
+  update of release tags. This keeps a published source ref from being silently
+  moved.
+- **SHA-256 checksum:** the local file bytes match the checksum Pulp published
+  for that release asset. This says the downloaded file did not change between
+  publishing and install.
+- **Immutable GitHub Release plus release asset digest:** GitHub can verify that
+  the published release record and asset bytes match the immutable release
+  attestation.
+- **Artifact attestation:** GitHub can verify which workflow and source ref
+  produced the release artifact.
+
+For plain shell verification, download an asset plus `SHA256SUMS` from the same
+versioned release and check the exact basename. Use a release created after
+`SHA256SUMS` publishing landed:
+
+```bash
+# Replace with the first release created after this workflow landed.
+version=0.617.0
+asset=pulp-darwin-arm64.tar.gz
+base="https://github.com/danielraffel/pulp/releases/download/v${version}"
+
+curl -fsSLO "$base/$asset"
+curl -fsSLO "$base/SHA256SUMS"
+awk -v file="$asset" '$2 == file { print }' SHA256SUMS | shasum -a 256 -c -
+```
+
+For GitHub's immutable-release layer, use GitHub CLI:
+
+```bash
+gh release verify "v${version}" -R danielraffel/pulp
+gh release verify-asset "v${version}" "$asset" -R danielraffel/pulp
+```
+
+`gh release verify` proves the release exists and is immutable. `gh release
+verify-asset` proves the local artifact is an exact match for the release asset.
+These are useful confidence layers, but the README still keeps the plain
+`SHA256SUMS` path so users do not need GitHub CLI for checksum verification.
+
+For build provenance, verify the artifact attestation. This is a separate claim
+from checksum verification: it identifies the GitHub workflow and source ref
+that produced the asset.
+
+```bash
+gh attestation verify "$asset" \
+  -R danielraffel/pulp \
+  --signer-workflow github.com/danielraffel/pulp/.github/workflows/release-cli.yml
+```
+
+For `appcast.xml`, use `sign-and-release.yml` as the signer workflow. The
+provenance check is especially useful for traceability, but it does not by
+itself prove a self-hosted runner was uncompromised.
+
+## Release bot signing
+
+Automation-created release refs are signed with an SSH signing key dedicated to
+the release bot. The private key is stored in GitHub Actions as
+`RELEASE_BOT_SSH_SIGNING_KEY`; recovery copies live outside the repo. Workflows
+write the key to `$RUNNER_TEMP`, configure Git SSH signing, create signed tags or
+commits, and let the runner discard the temp file after the job.
+
+The public signing key is registered to the maintainer's GitHub account as a
+signing key, and the workflow uses that account's noreply email address. That
+pair is what lets GitHub mark the automation-created commit or tag as
+`Verified`.
+
+The signing secret is required only when automation is about to create a release
+tag or bot-maintained commit. If it is missing, that step fails closed instead
+of quietly publishing an unsigned source ref.
+
+Independently of manual verification, the `release-draft-stuck-check` watchdog
+will eventually flag a stuck draft (see release-watchdog.md).
 
 ## Manual release-cli backfills
 

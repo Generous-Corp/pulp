@@ -35,6 +35,11 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
     steps:
+      # Use the current default-branch coordinator code. A release tag may have
+      # been created before this helper existed, but the draft assets still need
+      # the current publish gate.
+      - uses: actions/checkout@v5
+
       - name: Publish draft once both release legs succeed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,10 +63,45 @@ jobs:
             exit 0
           fi
 
+          required_assets=(
+            appcast.xml
+            pulp-darwin-arm64.tar.gz
+            pulp-linux-arm64.tar.gz
+            pulp-linux-x64.tar.gz
+            pulp-windows-arm64.zip
+            pulp-windows-x64.zip
+            pulp-sdk-darwin-arm64.tar.gz
+            pulp-sdk-linux-arm64.tar.gz
+            pulp-sdk-linux-x64.tar.gz
+            pulp-sdk-windows-arm64.tar.gz
+            pulp-sdk-windows-x64.tar.gz
+          )
+
           # Publish the draft. Idempotent: if a prior coordinator run already
-          # published it, isDraft is false and we no-op.
+          # published it, isDraft is false and we no-op. The checksum manifest is
+          # generated immediately before publish because this is the one point
+          # where both release-producing workflows have uploaded their assets
+          # and the release is still mutable.
           state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
           if [ "${state}" = "true" ]; then
+            rm -rf release-assets
+            mkdir -p release-assets
+            gh release download "${TAG}" --repo "${REPO}" --dir release-assets --clobber
+
+            checksum_args=()
+            for asset in "${required_assets[@]}"; do
+              checksum_args+=(--required-name "${asset}")
+            done
+
+            python3 tools/scripts/release_checksum_manifest.py generate release-assets \
+              --output release-assets/SHA256SUMS \
+              --exact-required \
+              "${checksum_args[@]}"
+            python3 tools/scripts/release_checksum_manifest.py verify \
+              release-assets release-assets/SHA256SUMS
+
+            gh release upload "${TAG}" release-assets/SHA256SUMS --repo "${REPO}" --clobber
+
             gh release edit "${TAG}" --repo "${REPO}" --draft=false --latest
             echo "::notice::Published release ${TAG} (both CLI + sign-and-release legs succeeded)."
           elif [ "${state}" = "false" ]; then

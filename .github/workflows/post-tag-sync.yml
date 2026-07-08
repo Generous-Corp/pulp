@@ -49,6 +49,12 @@ jobs:
           curl -fsSL "https://generouscorp.com/Shipyard/install.sh" | SHIPYARD_VERSION="$SHIPYARD_VERSION" bash
           shipyard --version
 
+      - name: Configure release bot SSH signing
+        shell: bash
+        env:
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: bash tools/scripts/configure_release_bot_ssh_signing.sh
+
       - name: Run post-tag docs sync
         shell: bash
         env:
