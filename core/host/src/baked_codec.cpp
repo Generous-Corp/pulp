@@ -205,6 +205,18 @@ constexpr std::string_view kBakedSigDomain = "PULPBAKE-sig-v1";  // domain separ
 // versions + ext_len + plan_len + plan_sha256 means a tampered plan (hash), an
 // altered version, or a changed length all break verification — not just a swapped
 // plan body. The hash stands in for the plan bytes (checked separately at load).
+// Membership test for a signer key against the trust set. Mirrors node_pack's
+// key_is_trusted, including its refusal to ever trust an empty key (a misconfigured
+// empty entry must not match an empty/degenerate signer key).
+bool key_is_trusted(const BakedTrust& trust, const std::vector<std::uint8_t>& key) {
+    if (key.empty()) return false;
+    return std::any_of(trust.trusted_public_keys.begin(), trust.trusted_public_keys.end(),
+                       [&](const std::vector<std::uint8_t>& k) {
+                           return !k.empty() && k.size() == key.size() &&
+                                  std::equal(k.begin(), k.end(), key.begin());
+                       });
+}
+
 std::vector<std::uint8_t> build_canonical_message(std::uint32_t format_version,
                                                   std::uint32_t schema_version,
                                                   std::uint32_t ext_len,
@@ -292,13 +304,7 @@ std::optional<BakedPlan> verify_and_extract_plan(std::span<const std::uint8_t> b
     if (!m.ok || !m.at_end()) return std::nullopt;  // manifest must be exactly consumed
 
     // Signer must be trusted BEFORE we spend a verify on attacker-chosen bytes.
-    const bool trusted = std::any_of(
-        trust.trusted_public_keys.begin(), trust.trusted_public_keys.end(),
-        [&](const std::vector<std::uint8_t>& k) {
-            return k.size() == public_key.size() &&
-                   std::equal(k.begin(), k.end(), public_key.begin());
-        });
-    if (!trusted) return std::nullopt;
+    if (!key_is_trusted(trust, public_key)) return std::nullopt;
 
     const auto canonical =
         build_canonical_message(fmt, schema, ext_len, plan_len, plan_sha);

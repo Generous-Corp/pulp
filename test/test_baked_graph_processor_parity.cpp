@@ -584,13 +584,14 @@ TEST_CASE("A signed .pulpbake round-trips to a bit-identical baked Processor",
     REQUIRE(g.prepare(kSr, kFrames));
 
     const auto plan = pulp::host::bake_to_plan(g);
-    REQUIRE(plan.has_value());
+    REQUIRE(plan.accepted);
+    REQUIRE(plan.plan.has_value());
 
     std::array<std::uint8_t, 32> seed{};
     for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(i + 7);
     const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
     REQUIRE(kp.has_value());
-    const auto bytes = pulp::host::write_baked_signed(*plan, kp->private_key);
+    const auto bytes = pulp::host::write_baked_signed(*plan.plan, kp->private_key);
     REQUIRE_FALSE(bytes.empty());
 
     pulp::host::BakedTrust trust;

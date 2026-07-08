@@ -7,6 +7,21 @@
 namespace pulp::host {
 namespace {
 namespace fmt = pulp::format;
+
+// The plugin's bus arity, derived from the AudioInput/AudioOutput node ports. Shared
+// by bake() (in-memory) and bake_to_plan() (on-disk) so the derivation can't drift.
+std::pair<int, int> derive_bus_arity(const SignalGraph& graph) {
+    int input_channels = 0;
+    int output_channels = 0;
+    for (const auto& n : graph.nodes()) {
+        if (n.type == NodeType::AudioInput) {
+            input_channels = std::max(input_channels, n.num_output_ports);
+        } else if (n.type == NodeType::AudioOutput) {
+            output_channels = std::max(output_channels, n.num_input_ports);
+        }
+    }
+    return {input_channels, output_channels};
+}
 } // namespace
 
 LowerabilityProof lowerability_of(
@@ -163,8 +178,7 @@ LowerResult bake(const SignalGraph& graph) {
     // carries the instance keepalive into the baked Processor (self-contained, no
     // reference back into the source graph).
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
-    int input_channels = 0;
-    int output_channels = 0;
+    const auto [input_channels, output_channels] = derive_bus_arity(graph);
     for (const auto& src : graph.nodes()) {
         GraphNode n;
         n.id = src.id;
@@ -174,10 +188,6 @@ LowerResult bake(const SignalGraph& graph) {
         n.num_output_ports = src.num_output_ports;
         if (src.type == NodeType::Gain) {
             n.gain = graph.node_gain(src.id);
-        } else if (src.type == NodeType::AudioInput) {
-            input_channels = std::max(input_channels, src.num_output_ports);
-        } else if (src.type == NodeType::AudioOutput) {
-            output_channels = std::max(output_channels, src.num_input_ports);
         } else if (src.type == NodeType::Custom) {
             if (const CustomNodeProcessFn* fn = graph.live_custom_processor(src.id)) {
                 custom_processors[src.id] = *fn;
@@ -197,18 +207,29 @@ LowerResult bake(const SignalGraph& graph) {
     return result;
 }
 
-std::optional<BakedPlan> bake_to_plan(const SignalGraph& graph) {
-    if (!graph.is_prepared()) return std::nullopt;
+BakePlanResult bake_to_plan(const SignalGraph& graph) {
+    BakePlanResult result;
+    if (!graph.is_prepared()) {
+        result.reason = LowerRejectReason::NotPrepared;
+        result.message = "graph is not prepared; call prepare() before bake_to_plan()";
+        return result;
+    }
     if (const auto proof = lowerability_of(
             graph.nodes(), graph.connections(),
             [&graph](std::string_view type_id, int version) {
                 return graph.custom_node_type(type_id, version);
             });
         !proof.accepted) {
-        return std::nullopt;
+        result.reason = proof.reason;
+        result.offending_node = proof.offending_node;
+        result.message = proof.message;
+        return result;
     }
     BakedPlan plan;
     plan.format_version = kBakedPlanFormatVersion;
+    const auto [input_channels, output_channels] = derive_bus_arity(graph);
+    plan.input_channels = input_channels;
+    plan.output_channels = output_channels;
     for (const auto& src : graph.nodes()) {
         BakedPlan::Node n;
         n.id = src.id;
@@ -217,10 +238,6 @@ std::optional<BakedPlan> bake_to_plan(const SignalGraph& graph) {
         n.num_output_ports = src.num_output_ports;
         if (src.type == NodeType::Gain) {
             n.gain = graph.node_gain(src.id);
-        } else if (src.type == NodeType::AudioInput) {
-            plan.input_channels = std::max(plan.input_channels, src.num_output_ports);
-        } else if (src.type == NodeType::AudioOutput) {
-            plan.output_channels = std::max(plan.output_channels, src.num_input_ports);
         } else if (src.type == NodeType::Custom) {
             n.custom_type_id = src.custom_type_id;
             n.custom_version = src.custom_type_version;
@@ -240,7 +257,9 @@ std::optional<BakedPlan> bake_to_plan(const SignalGraph& graph) {
         cc.feedback = c.feedback;
         plan.connections.push_back(cc);
     }
-    return plan;
+    result.plan = std::move(plan);
+    result.accepted = true;
+    return result;
 }
 
 LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,

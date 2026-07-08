@@ -179,9 +179,21 @@ LowerResult bake(const SignalGraph& graph);
 LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
                        const std::vector<CustomNodeType>& custom_types);
 
+// Result of bake_to_plan(): `plan` is set iff `accepted`; on refusal the reason /
+// offending_node / message explain why (mirrors bake()'s LowerResult so the write
+// front door can report a non-shippable graph as precisely as the in-memory path).
+struct BakePlanResult {
+    std::optional<BakedPlan> plan;
+    bool accepted = false;
+    LowerRejectReason reason = LowerRejectReason::None;
+    NodeId offending_node = 0;
+    std::string message;
+};
+
 // Extract a serializable BakedPlan from a prepared, lowerable graph — the write-path
-// front door: bake_to_plan(graph) -> write_baked_signed(plan, key) -> bytes. Returns
-// std::nullopt if the graph is not prepared or not lowerable (same proof as bake()).
-std::optional<BakedPlan> bake_to_plan(const SignalGraph& graph);
+// front door: bake_to_plan(graph).plan -> write_baked_signed(*plan, key) -> bytes.
+// Refuses (accepted=false, plan=nullopt) with a reason if the graph is not prepared
+// or not lowerable (same proof as bake()).
+BakePlanResult bake_to_plan(const SignalGraph& graph);
 
 } // namespace pulp::host
