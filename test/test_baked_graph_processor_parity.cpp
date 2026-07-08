@@ -37,6 +37,7 @@ using pulp::host::SignalGraph;
 using pulp::host::bake;
 using pulp::host::lowerability_of;
 using pulp::host::PluginInfo;
+using pulp::host::CustomNodeType;
 
 constexpr double kSr = 48000.0;
 constexpr int kFrames = 128;
@@ -448,5 +449,104 @@ TEST_CASE("lowerability_of proves the bakeable subset and refuses with a reason"
         CHECK_FALSE(proof.accepted);
         CHECK(proof.reason == LowerRejectReason::NonAudioLaneNotLowerable);
         CHECK(proof.offending_node == mi);
+    }
+}
+
+TEST_CASE("Baked graph with a lowerable Custom node matches the live graph bit-exactly",
+          "[host][graph][bake][custom][parity]") {
+    // A stateless, transport-independent Custom type that opts into baking. bake()
+    // captures a copy of its resolved process callback; the baked Processor runs the
+    // same callback, so output must match the live graph sample-for-sample.
+    SignalGraph g;
+    CustomNodeType t;
+    t.type_id = "bakegain";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.lowerable = true;
+    t.process = [](pulp::audio::BufferView<float>& out,
+                   const pulp::audio::BufferView<const float>& in, int n) {
+        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t c = 0; c < chs; ++c) {
+            const float* i = in.channel_ptr(c);
+            float* o = out.channel_ptr(c);
+            for (int k = 0; k < n; ++k)
+                o[static_cast<std::size_t>(k)] = 0.5f * i[static_cast<std::size_t>(k)];
+        }
+    };
+    REQUIRE(g.register_custom_node_type(t));
+    const auto in = g.add_input_node(1, "In");
+    const auto cn = g.add_custom_node("bakegain", 1, "C");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(in, 0, cn, 0));
+    REQUIRE(g.connect(cn, 0, out, 0));
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+
+    auto r = bake(g);
+    REQUIRE(r.accepted);
+    REQUIRE(r.processor);
+    REQUIRE(r.reason == LowerRejectReason::None);
+    r.processor->prepare(make_prepare_ctx(1));
+
+    float peak = 0.0f;
+    for (int blk = 0; blk < 4; ++blk) {
+        INFO("block " << blk);
+        const std::vector<std::vector<float>> input{
+            ramp(kFrames, 0.6f + 0.05f * static_cast<float>(blk))};
+        const auto live = run_graph(g, kFrames, input, 1);
+        const auto baked = run_baked(*r.processor, kFrames, input, 1);
+        expect_equal(live, baked);
+        for (float s : baked[0]) peak = std::max(peak, std::fabs(s));
+    }
+    CHECK(peak > 0.1f);
+}
+
+TEST_CASE("bake refuses a non-lowerable or transport-sensitive Custom node",
+          "[host][graph][bake][custom]") {
+    SECTION("lowerable=false -> CustomNotLowerable") {
+        SignalGraph g;
+        CustomNodeType t;
+        t.type_id = "notlower";
+        t.version = 1;
+        t.num_input_ports = 1;
+        t.num_output_ports = 1;
+        t.lowerable = false;
+        t.process = [](pulp::audio::BufferView<float>&,
+                       const pulp::audio::BufferView<const float>&, int) {};
+        REQUIRE(g.register_custom_node_type(t));
+        const auto in = g.add_input_node(1, "In");
+        const auto cn = g.add_custom_node("notlower", 1, "C");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, cn, 0));
+        REQUIRE(g.connect(cn, 0, out, 0));
+        REQUIRE(g.prepare(kSr, kFrames));
+        auto r = bake(g);
+        REQUIRE_FALSE(r.accepted);
+        REQUIRE(r.reason == LowerRejectReason::CustomNotLowerable);
+    }
+    SECTION("transport-sensitive -> CustomTransportNotLowerable") {
+        SignalGraph g;
+        CustomNodeType t;
+        t.type_id = "xport";
+        t.version = 1;
+        t.num_input_ports = 1;
+        t.num_output_ports = 1;
+        t.lowerable = true;
+        t.process = [](pulp::audio::BufferView<float>&,
+                       const pulp::audio::BufferView<const float>&, int) {};
+        t.process_transport = [](pulp::audio::BufferView<float>&,
+                                 const pulp::audio::BufferView<const float>&, int,
+                                 const pulp::format::ProcessContext&) {};
+        REQUIRE(g.register_custom_node_type(t));
+        const auto in = g.add_input_node(1, "In");
+        const auto cn = g.add_custom_node("xport", 1, "C");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, cn, 0));
+        REQUIRE(g.connect(cn, 0, out, 0));
+        REQUIRE(g.prepare(kSr, kFrames));
+        auto r = bake(g);
+        REQUIRE_FALSE(r.accepted);
+        REQUIRE(r.reason == LowerRejectReason::CustomTransportNotLowerable);
     }
 }
