@@ -63,6 +63,20 @@ constexpr const wchar_t* kChildClassName = L"PulpPluginViewHostChild";
 
 class WinPluginViewHost;
 
+// RAII scope guard for a bool flag: sets it true for the scope and restores the
+// previous value on exit. Used to suppress the WM_SIZE reconcile while we drive
+// a SetWindowPos (which re-enters the wndproc synchronously). Restores (rather
+// than clears) so a nested guard can't clear the flag out from under an outer
+// one.
+struct ScopedFlag {
+    bool& flag;
+    bool prev;
+    explicit ScopedFlag(bool& f) : flag(f), prev(f) { flag = true; }
+    ~ScopedFlag() { flag = prev; }
+    ScopedFlag(const ScopedFlag&) = delete;
+    ScopedFlag& operator=(const ScopedFlag&) = delete;
+};
+
 // WndProc: routes WM_PAINT to the host's render path. `this` is stashed in
 // GWLP_USERDATA at WM_NCCREATE so ordinary host-driven invalidations
 // (InvalidateRect) actually render, not just the synchronous repaint() path.
@@ -287,9 +301,16 @@ public:
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
             return;  // attached_ stays false; try_attach_to_parent reports failure
         }
-        SetWindowPos(hwnd_, nullptr, 0, 0,
-                     static_cast<int>(size_.width), static_cast<int>(size_.height),
-                     SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        {
+            // Bracket our own sizing SetWindowPos: it synchronously re-enters the
+            // wndproc (WM_WINDOWPOSCHANGED -> WM_SIZE) on this thread, and we must
+            // not reconcile a resize we ourselves drove (would double-fire the
+            // resize callback / mis-scale on HiDPI). See handle_wm_size().
+            ScopedFlag g(in_set_size_);
+            SetWindowPos(hwnd_, nullptr, 0, 0,
+                         static_cast<int>(size_.width), static_cast<int>(size_.height),
+                         SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        }
         ShowWindow(hwnd_, SW_SHOW);
         attached_.store(true, std::memory_order_release);
         repaint();
@@ -340,6 +361,11 @@ public:
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
         if (hwnd_) {
+            // SetWindowPos re-enters the wndproc synchronously (WM_SIZE); the
+            // guard makes handle_wm_size() ignore that self-driven echo so we
+            // don't reconcile (and re-fire the resize callback for) a size WE
+            // just set.
+            ScopedFlag g(in_set_size_);
             SetWindowPos(hwnd_, nullptr, 0, 0, static_cast<int>(width),
                          static_cast<int>(height), SWP_NOZORDER | SWP_NOMOVE);
         }
@@ -350,6 +376,38 @@ public:
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
+        repaint();
+    }
+
+    // Reconcile a native (host-driven) resize of our child HWND. Called from the
+    // wndproc on WM_SIZE / WM_WINDOWPOSCHANGED when a DAW resizes the editor
+    // container. `physical_w/h` are the client area in PHYSICAL device pixels
+    // (Windows reports window/client sizes in device pixels). This is the
+    // Windows analogue of the macOS -setFrameSize: -> on_native_frame_changed
+    // path. It deliberately does NOT call SetWindowPos — the host already sized
+    // the window, and calling it here would recurse.
+    void handle_wm_size(uint32_t physical_w, uint32_t physical_h) {
+        // Ignore the WM_SIZE/WM_WINDOWPOSCHANGED echo of our own SetWindowPos.
+        if (in_set_size_) return;
+        if (physical_w == 0 || physical_h == 0) return;  // minimized / degenerate
+        // PHYSICAL → LOGICAL. size_ / the view tree live in logical units; the
+        // GPU swapchain lives at physical pixels. Round to nearest so fractional
+        // scales (1.5×) don't drift a pixel each resize.
+        const float s = scale_ > 0.0f ? scale_ : 1.0f;
+        const uint32_t logical_w =
+            static_cast<uint32_t>(static_cast<float>(physical_w) / s + 0.5f);
+        const uint32_t logical_h =
+            static_cast<uint32_t>(static_cast<float>(physical_h) / s + 0.5f);
+        if (logical_w == 0 || logical_h == 0) return;
+        if (logical_w == size_.width && logical_h == size_.height) return;  // no-op
+        size_ = {logical_w, logical_h};
+#ifdef PULP_HAS_SKIA
+        // Mirror set_size()'s surface sizing (GPU at physical, Skia at logical +
+        // scale) but WITHOUT the SetWindowPos.
+        if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_) skia_surface_->resize(logical_w, logical_h, scale_);
+#endif
+        if (resize_cb_) resize_cb_(logical_w, logical_h);
         repaint();
     }
 
@@ -452,6 +510,10 @@ private:
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
     float scale_ = 1.0f;  // HiDPI: logical→physical-pixel factor (DPI/96)
+    // True only while WE drive a SetWindowPos (set_size/attach). SetWindowPos
+    // re-enters the wndproc synchronously on this thread, so this flag lets
+    // handle_wm_size() distinguish a host-driven resize from our own echo.
+    bool in_set_size_ = false;
 
     // Physical pixel dimensions = logical × scale (min 1 to avoid 0-sized
     // surfaces). The GPU surface/swapchain is allocated at this resolution.
@@ -671,6 +733,31 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         // so we don't apply the suggested lParam RECT ourselves.
         host->handle_dpi_changed(LOWORD(wp));
         return 0;
+    }
+    if (host && msg == WM_SIZE) {
+        // lParam LOWORD = new client width, HIWORD = height, in PHYSICAL pixels.
+        // Skip minimize (a 0×0 client) — handle_wm_size() also no-ops on 0.
+        if (wp != SIZE_MINIMIZED)
+            host->handle_wm_size(LOWORD(lp), HIWORD(lp));
+        return 0;
+    }
+    if (host && msg == WM_WINDOWPOSCHANGED) {
+        // Belt-and-suspenders alongside WM_SIZE: a host that repositions/resizes
+        // via SetWindowPos delivers this. When the size actually changed, derive
+        // the client size and reconcile. GetClientRect gives the exact client
+        // area (WINDOWPOS.cx/cy are the full window size). The no-op-on-equal
+        // check in handle_wm_size() dedupes the paired WM_SIZE. We deliberately
+        // fall through to DefWindowProcW so the default handling still generates
+        // the WM_SIZE/WM_MOVE messages other code may rely on.
+        auto* wpos = reinterpret_cast<const WINDOWPOS*>(lp);
+        if (wpos && !(wpos->flags & SWP_NOSIZE)) {
+            RECT rc{};
+            if (GetClientRect(hwnd, &rc)) {
+                host->handle_wm_size(static_cast<uint32_t>(rc.right - rc.left),
+                                     static_cast<uint32_t>(rc.bottom - rc.top));
+            }
+        }
+        // fall through to DefWindowProcW
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }

@@ -27,6 +27,13 @@
 #include <vector>
 #endif
 
+#if defined(_WIN32)
+// WIN32_LEAN_AND_MEAN + NOMINMAX guarded before <windows.h> (SendMessageW,
+// WM_SIZE, MAKELPARAM, GetClientRect).
+#include <pulp/platform/win32_sane.hpp>
+#include <cstdint>
+#endif
+
 using namespace pulp::view;
 
 TEST_CASE("register_platform_plugin_view_host installs a factory",
@@ -280,3 +287,106 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
 }
 
 #endif  // PULP_TEST_HAS_X11
+
+#if defined(_WIN32)
+
+// ── Windows editor WM_SIZE reconcile (host-driven resize) ────────────────────
+//
+// A DAW resizes the editor container, which resizes our child HWND and posts
+// WM_SIZE. The host must convert the physical client size to logical units,
+// update get_size(), resize its surfaces, and fire the resize callback — the
+// Windows analogue of the macOS -setFrameSize: -> on_native_frame_changed path.
+// This test drives WM_SIZE directly via SendMessage (a synchronous, same-thread
+// wndproc call — no DAW needed) and asserts the reconcile happened, was
+// deduplicated, and did NOT recurse into a SetWindowPos on our own HWND.
+TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
+          "[view][plugin-view-host][resize][windows]") {
+    View root;
+    root.set_theme(Theme::dark());
+    auto knob = std::make_unique<Knob>();
+    knob->set_bounds({8, 8, 48, 48});
+    root.add_child(std::move(knob));
+
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true;  // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    REQUIRE(host->get_size().width == 64);
+    REQUIRE(host->get_size().height == 64);
+
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+
+    // Client rect of the freshly-created (unparented) window. handle_wm_size()
+    // must never SetWindowPos, so this must stay unchanged after the reconcile —
+    // the proof that the reconcile path doesn't recurse through set_size().
+    RECT rc_before{};
+    REQUIRE(GetClientRect(hwnd, &rc_before));
+
+    // Capture the resize callback: assert it fires once with the reconciled
+    // LOGICAL size.
+    uint32_t cb_w = 0, cb_h = 0;
+    int cb_count = 0;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) {
+        cb_w = w; cb_h = h; ++cb_count;
+    });
+
+    const float scale = host->scale_factor();
+    REQUIRE(scale > 0.0f);
+
+    // Target a LOGICAL size distinct from the initial 64x64, and send the
+    // matching PHYSICAL client size the way a host-driven resize would. Deriving
+    // physical from the live scale keeps the test correct at 100% / 125% / 150% /
+    // 200% DPI runners alike.
+    const uint32_t target_logical_w = 200;
+    const uint32_t target_logical_h = 150;
+    const auto phys_w =
+        static_cast<uint32_t>(target_logical_w * scale + 0.5f);
+    const auto phys_h =
+        static_cast<uint32_t>(target_logical_h * scale + 0.5f);
+
+    // SIZE_RESTORED (0) is a normal (non-minimize) resize; lParam packs width in
+    // the low word and height in the high word.
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED,
+                 static_cast<LPARAM>(MAKELPARAM(phys_w, phys_h)));
+
+    auto sz = host->get_size();
+    CHECK(sz.width == target_logical_w);
+    CHECK(sz.height == target_logical_h);
+    CHECK(cb_count == 1);
+    CHECK(cb_w == sz.width);
+    CHECK(cb_h == sz.height);
+
+    // A redundant WM_SIZE at the SAME size is a no-op (no second callback).
+    SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED,
+                 static_cast<LPARAM>(MAKELPARAM(phys_w, phys_h)));
+    CHECK(cb_count == 1);
+
+    // A minimize (SIZE_MINIMIZED / 0x0 client) is ignored, size unchanged.
+    SendMessageW(hwnd, WM_SIZE, SIZE_MINIMIZED, 0);
+    CHECK(cb_count == 1);
+    CHECK(host->get_size().width == target_logical_w);
+
+    // The reconcile did NOT resize our own HWND (no SetWindowPos recursion):
+    // the client rect is exactly what it was before the synthetic WM_SIZE.
+    RECT rc_after{};
+    REQUIRE(GetClientRect(hwnd, &rc_after));
+    CHECK((rc_after.right - rc_after.left) == (rc_before.right - rc_before.left));
+    CHECK((rc_after.bottom - rc_after.top) == (rc_before.bottom - rc_before.top));
+
+    // GPU portion — soft-skip when no Dawn adapter/device is available (a
+    // headless CI runner often lacks a usable D3D device). When the GPU path is
+    // live, the swapchain was reconfigured through the same set_size surface
+    // path; a non-null surface handle is the compile-safe assertion here (the
+    // exact dims live behind pulp::render, a PRIVATE dep not on this target's
+    // include path).
+    if (host->is_gpu_backed()) {
+        CHECK(host->gpu_surface() != nullptr);
+    } else {
+        WARN("no GPU adapter/device (headless CI) — GPU swapchain check skipped");
+    }
+}
+
+#endif  // _WIN32
