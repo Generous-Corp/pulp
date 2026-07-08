@@ -39,6 +39,13 @@ constexpr std::size_t kGraphMidiSysexPayloadCapacity = 4096;
 constexpr std::uint64_t kLiveSwapMinAdmissionCallbacks = 8;
 constexpr std::uint64_t kLiveSwapWarmBlocks = 16;
 static_assert(kLiveSwapWarmBlocks >= kLiveSwapMinAdmissionCallbacks);
+// The warm-up estimate is measured on the control thread with a fixed test signal,
+// so it can under-read the real audio-thread cost (scheduling, thermal, and
+// signal-dependent paths the probe noise doesn't hit). Scale it up before it faces
+// the admission headroom so a borderline replacement fail-closes to eager-prepare
+// rather than risk an xrun. Combined with admission's already-conservative
+// whole-graph-plus-full-new-node projection, this keeps different-instance swaps safe.
+constexpr float kLiveSwapWarmSafetyMargin = 1.5f;
 constexpr int kLiveSwapMinFadeMs = 5;
 constexpr int kLiveSwapMaxFadeMs = 200;
 
@@ -1171,7 +1178,26 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     }
     const bool wants_transport = loaded->wants_transport();
 
-    auto warmed_load = warm_staged_slot_locked_(*loaded, id);
+    // Estimate CPU cost on a THROWAWAY probe instance — never the instance that goes
+    // live. The warm-up render dirties internal DSP memory (filter/delay/reverb state)
+    // that save_state()/restore_state() do not round-trip, so warming `loaded` directly
+    // would commit an instance carrying warm-up residue. A fresh probe is loaded +
+    // prepared, measured, and discarded here on the control thread; `loaded` is only
+    // ever state-restored, so it goes live clean. If the probe can't load/prepare, the
+    // estimate stays empty (callback_count 0) and admission fail-closes to eager-prepare.
+    pulp::audio::AudioProcessLoadSnapshot warmed_load;
+    if (auto probe = load_live_swap_plugin_(replacement_info)) {
+        if (probe->prepare(live_->sample_rate, live_->max_block_size)) {
+            warmed_load = warm_staged_slot_locked_(*probe, id);
+        }
+    }
+    // Conservative margin over the control-thread noise proxy: the audio thread may run
+    // hotter (contention/thermal/signal-dependence the test noise doesn't exercise), so
+    // scale the estimate up before it faces the admission headroom.
+    warmed_load.load = std::min(1.0f, warmed_load.load * kLiveSwapWarmSafetyMargin);
+    warmed_load.last_load = std::min(1.0f, warmed_load.last_load * kLiveSwapWarmSafetyMargin);
+    warmed_load.peak_load = std::min(1.0f, warmed_load.peak_load * kLiveSwapWarmSafetyMargin);
+
     if (!loaded->restore_state(old_state)) {
         return fail_swap_edit_locked_(LiveSwapFallbackReason::StateRestoreFailed,
                                       id,

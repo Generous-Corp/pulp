@@ -214,6 +214,7 @@ struct StageSetup {
     PluginInfo info;
     std::shared_ptr<SlotStats> old_stats;
     std::shared_ptr<SlotStats> replacement_stats;
+    std::shared_ptr<SlotStats> probe_stats;
     SignalGraph::PluginCatalogToken token;
 };
 
@@ -238,11 +239,19 @@ make_stage_setup(SlotBehavior old_behavior,
     REQUIRE(s->graph.prepare(kSr, kFrames));
 
     s->replacement_stats = std::make_shared<SlotStats>();
+    s->probe_stats = std::make_shared<SlotStats>();
     s->token = s->graph.register_scanned_plugin(replacement_behavior.info);
     s->graph.set_live_swap_plugin_loader_for_test(
         [replacement_behavior = std::move(replacement_behavior),
-         stats = s->replacement_stats](const PluginInfo&) mutable {
-            return std::make_unique<StagingSlot>(replacement_behavior, stats);
+         stats = s->replacement_stats,
+         probe = s->probe_stats,
+         calls = std::make_shared<int>(0)](const PluginInfo&) mutable {
+            // The first load is the instance that actually goes live (tracked by
+            // replacement_stats); the later load is the throwaway cost-probe (its own
+            // stats), so warming it never pollutes the committed slot — the committed
+            // slot must show process_calls == 0.
+            auto st = (*calls)++ == 0 ? stats : probe;
+            return std::make_unique<StagingSlot>(replacement_behavior, st);
         });
     REQUIRE(s->graph.set_node_live_swap_policy(s->plugin, std::move(policy)));
     return s;
@@ -367,7 +376,8 @@ TEST_CASE("live plugin swap staging rejects warmed different identity over budge
     s->graph.begin_swap_edit();
     REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token)
             == SignalGraph::SwapResult::Staged);
-    CHECK(process_call_count(s->replacement_stats) >= 8);
+    CHECK(process_call_count(s->probe_stats) >= 8);          // the throwaway probe was warmed
+    CHECK(process_call_count(s->replacement_stats) == 0);    // the committed slot was not
     CHECK(s->graph.prepare_swap(kSr, kFrames)
           == SignalGraph::SwapResult::NeedsEagerPrepare);
     expect_reason(s->graph,
@@ -376,8 +386,13 @@ TEST_CASE("live plugin swap staging rejects warmed different identity over budge
     CHECK(destroyed_count(s->replacement_stats) == 1);
 }
 
-TEST_CASE("live plugin swap staging restores state after warm residue",
+TEST_CASE("live plugin swap commits a clean instance never touched by the cost probe",
           "[host][graph][live-swap]") {
+    // The cost estimate is warmed on a THROWAWAY probe, never the instance that goes
+    // live, so the committed instance carries no warm-up residue in DSP state that
+    // save/restore_state can't round-trip. The committed slot (replacement_stats) must
+    // therefore show zero process() calls during staging; only the probe (its own
+    // stats) is warmed.
     const std::vector<std::uint8_t> restored_state{42, 7, 3};
     const std::vector<std::uint8_t> warm_residue{9, 9, 9};
     SlotBehavior old_behavior{.info = make_info("old"),
@@ -401,7 +416,8 @@ TEST_CASE("live plugin swap staging restores state after warm residue",
     s->graph.begin_swap_edit();
     REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token)
             == SignalGraph::SwapResult::Staged);
-    CHECK(process_call_count(s->replacement_stats) >= 8);
+    // The committed instance is never warmed (only the throwaway probe is).
+    CHECK(process_call_count(s->replacement_stats) == 0);
     CHECK(s->graph.prepare_swap(kSr, kFrames)
           == SignalGraph::SwapResult::Swapped);
     REQUIRE(observed_new);
@@ -427,10 +443,12 @@ TEST_CASE("live plugin swap staging pre-warms enough callbacks on the control th
     REQUIRE(s->graph.stage_plugin_replacement(s->plugin, s->token)
             == SignalGraph::SwapResult::Staged);
 
-    // Stage runs on this control thread; candidate warm-up is not dispatched
-    // through graph.process().
-    CHECK(process_call_count(s->replacement_stats) >= 8);
-    CHECK(all_process_calls_on_thread(s->replacement_stats, staging_thread));
+    // Stage runs on this control thread; candidate warm-up is measured on the
+    // throwaway probe, on this control thread, never through graph.process() and
+    // never on the committed instance.
+    CHECK(process_call_count(s->probe_stats) >= 8);
+    CHECK(all_process_calls_on_thread(s->probe_stats, staging_thread));
+    CHECK(process_call_count(s->replacement_stats) == 0);
     CHECK(s->graph.prepare_swap(kSr, kFrames)
           == SignalGraph::SwapResult::Swapped);
 }

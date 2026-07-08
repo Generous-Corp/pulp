@@ -56,6 +56,12 @@ enum class LiveSwapCurve { Smoothstep, EqualPower };
 
 struct NodeLiveSwapPolicy {
     bool allow_live_instance_swap = false;
+    // fade_ms / curve are the intended crossfade shape. The committed swap is
+    // currently a clean atomic instance switch at a block boundary (no dropped or
+    // repeated samples); the per-sample crossfade that consumes these two fields is
+    // not yet wired into the graph process path, so a swap between instances whose
+    // output differs can step at the boundary. They are accepted + clamped now so the
+    // policy is forward-compatible when the fade lands; treat them as reserved.
     int fade_ms = 30;
     LiveSwapCurve curve = LiveSwapCurve::EqualPower;
     float headroom_threshold = 0.75f;
@@ -520,6 +526,16 @@ public:
     bool set_node_hosted_editor_open(NodeId id, bool open);
     PluginCatalogToken register_scanned_plugin(const PluginInfo& info);
     void clear_scanned_plugin_catalog();
+    // Stage a live instance replacement for a node, resolved through the scanned
+    // catalog (never an arbitrary path). To capture the outgoing instance's state
+    // without a silent block, this reads the OLD, still-live plugin's save_state()
+    // and get_parameter() on the control thread while the audio thread may be inside
+    // its process(). CONTRACT: a hosted plugin that opts into live swap must make
+    // save_state()/get_parameter() safe to call concurrently with process() (they are
+    // read-only snapshots for most plugins). Parameter capture goes through the cached
+    // contract + atomic get_parameter; full-state capture is best-effort — a plugin
+    // whose getState is strictly main-thread-only may capture a torn state, so keep it
+    // concurrency-tolerant or rely on parameter re-sync alone.
     SwapResult stage_plugin_replacement(NodeId id, PluginCatalogToken token);
     LiveSwapDiagnostics last_swap_diagnostics() const;
 
