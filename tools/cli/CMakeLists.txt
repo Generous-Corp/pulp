@@ -61,6 +61,7 @@ add_executable(pulp-cli
     cmd_run.cpp
     cmd_run_parse.cpp
     cmd_ship.cpp
+    cmd_bake.cpp
     notary_env.cpp
     cmd_upgrade.cpp
     cmd_validate.cpp
@@ -197,6 +198,16 @@ if(PULP_BUILD_TESTS)
         pulp::format pulp::view pulp::runtime Catch2::Catch2WithMain)
     add_dependencies(pulp-test-cli-swap-pack pulp-cli)
     add_test(NAME pulp-test-cli-swap-pack COMMAND pulp-test-cli-swap-pack)
+
+    add_executable(pulp-test-cli-bake ${CMAKE_SOURCE_DIR}/test/test_cli_bake.cpp)
+    target_include_directories(pulp-test-cli-bake PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(pulp-test-cli-bake PRIVATE
+        PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>"
+        PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(pulp-test-cli-bake PRIVATE
+        pulp::host pulp::format pulp::runtime Catch2::Catch2WithMain)
+    add_dependencies(pulp-test-cli-bake pulp-cli)
+    add_test(NAME pulp-test-cli-bake COMMAND pulp-test-cli-bake)
 
     set(_pulp_cli_doctor_ctest_env
         "PULP_UPDATE_CHECK_DISABLED=1"

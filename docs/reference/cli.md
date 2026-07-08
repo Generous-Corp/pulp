@@ -887,6 +887,23 @@ By default, coverage mode writes `build/harness-coverage-<sha>.json`, `build/har
 
 Visual mode requires the `pulp-test-visual` target to be built first. Use `--build-dir` or `--binary` when the binary is not under the default `build/` or `build-visual/` directories. Fixture metadata decides whether a golden is semantic JSON or raster PNG. JSON snapshots use tolerance-aware semantic diffs; PNG snapshots use exact-byte comparison on the canonical raster lane. When verification fails, pass `--actuals-dir build/visual-actuals` to write failed actual JSON/PNG captures under `build/visual-actuals/<surface>/<fixture>.<json|png>` for inspection or artifact upload.
 
+### bake
+
+Freeze a graph into a signed, distributable `.pulpbake` artifact, and verify one.
+
+```bash
+pulp bake myrack.pulpgraph -o myrack.pulpbake --sign-key signing.key
+pulp bake verify myrack.pulpbake --trust signing.key
+```
+
+`bake` loads the `.pulpgraph`, prepares it, freezes it through the bake lowering,
+and signs it with Ed25519. A graph that isn't self-contained (a hosted plugin
+node, a MIDI/automation/sidechain lane, or a non-opted-in Custom type) is refused
+with the specific reason and a non-zero exit. `verify` checks the signature and
+runs the bounded parse against a `--trust` key set — it never executes the plan
+or loads custom state. Key handling reuses the reload-trust key file, the same
+path `ship swap-pack` uses.
+
 ### ship
 
 **Status**: experimental
