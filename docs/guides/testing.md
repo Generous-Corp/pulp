@@ -94,6 +94,33 @@ Validation is separate from unit tests. Unit tests verify internal behavior; val
 Public CI does not build or validate AAX because the SDK and validator are
 developer-supplied and not bundled by Pulp.
 
+## Screenshot Capture
+
+Use one of the project-facing capture paths for agent or CI evidence:
+
+```bash
+pulp run --headless --screenshot artifacts/ui.png
+pulp validate --screenshot
+```
+
+`pulp run --headless --screenshot` captures a standalone target after the
+requested frame delay. `pulp validate --screenshot` batches built plugin editor
+screenshots into `artifacts/screenshots/`. Both are the public workflows to
+document in agent prompts and CI scripts.
+
+In C++ tests and tools, prefer `pulp::view::capture_view()` when the caller
+needs a trustworthy PNG. It selects the capture backend for the view tree,
+refuses native-overlay-only captures with a reason, routes GPU-required views
+through the GPU backend, and rejects clear-only frames. Use the lower-level
+`render_to_png()` / `render_to_file()` helpers only when the test is explicitly
+about a backend's raw raster behavior. `WindowHost::capture_back_buffer_png()`
+remains the live-host back-buffer path for host integration checks.
+
+The MCP `pulp_screenshot` tool is for demo/script fixtures. For project
+captures through MCP, call `pulp_validate` with `screenshot=true`, or run the
+CLI screenshot command through the normal shell surface. Live inspector
+screenshots stay unavailable until host capture wiring lands.
+
 ## Design Tool Debugging
 
 The design tool has its own headless harness:

@@ -360,6 +360,9 @@ std::string handle_validate(const std::string& params_json) {
     if (extract_bool(params_json, "all", false)) {
         cmd += " --all";
     }
+    if (extract_bool(params_json, "screenshot", false)) {
+        cmd += " --screenshot";
+    }
     cmd += " 2>&1";
 
     auto output = exec(cmd);

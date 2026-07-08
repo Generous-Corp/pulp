@@ -13,6 +13,21 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/editor_ui.hpp>
 
+namespace {
+
+const char* validate_capture_backend_name(pulp::view::ScreenshotBackend backend) {
+    switch (backend) {
+        case pulp::view::ScreenshotBackend::default_backend: return "default";
+        case pulp::view::ScreenshotBackend::coregraphics: return "coregraphics";
+        case pulp::view::ScreenshotBackend::skia: return "skia";
+        case pulp::view::ScreenshotBackend::gpu: return "gpu";
+        case pulp::view::ScreenshotBackend::auto_select: return "auto";
+    }
+    return "unknown";
+}
+
+} // namespace
+
 int cmd_validate(const std::vector<std::string>& args) {
     // Parse flags first so invalid flags fail loud before any project-root /
     // build-dir work. The shellout test must distinguish `--strict` from any
@@ -620,12 +635,35 @@ int cmd_validate(const std::vector<std::string>& args) {
                 }
 
                 uint32_t w = 400, h = 300;
-                bool ok = pulp::view::render_to_file(*editor_ui.root, w, h, png_path.string());
-                if (ok) {
-                    std::cout << "  Screenshot: " << png_path.filename().string() << "\n";
-                    ++captured;
+                auto capture = pulp::view::capture_view(*editor_ui.root, w, h);
+                if (capture.ok) {
+                    std::ofstream png_out(png_path.string(), std::ios::binary);
+                    png_out.write(reinterpret_cast<const char*>(capture.png.data()),
+                                  static_cast<std::streamsize>(capture.png.size()));
+                    if (png_out.good()) {
+                        std::cout << "  Screenshot: " << png_path.filename().string()
+                                  << " (capture_view/"
+                                  << validate_capture_backend_name(capture.used) << ")\n";
+                        ++captured;
+                    } else {
+                        std::cerr << "  Screenshot FAILED: " << name << " (" << dir_name
+                                  << ") — could not write " << png_path.string() << "\n";
+                    }
                 } else {
-                    std::cerr << "  Screenshot FAILED: " << name << " (" << dir_name << ")\n";
+                    std::cerr << "  Screenshot FAILED: " << name << " (" << dir_name << ")";
+                    if (!capture.reason.empty()) {
+                        std::cerr << " — " << capture.reason;
+                    }
+                    std::cerr << "\n";
+                    if (!capture.png.empty()) {
+                        std::ofstream png_out(png_path.string(), std::ios::binary);
+                        png_out.write(reinterpret_cast<const char*>(capture.png.data()),
+                                      static_cast<std::streamsize>(capture.png.size()));
+                        if (png_out.good()) {
+                            std::cerr << "  Debug capture saved to "
+                                      << png_path.filename().string() << "\n";
+                        }
+                    }
                 }
             }
         }

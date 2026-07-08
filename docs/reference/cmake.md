@@ -160,6 +160,28 @@ Info.plist files can be provided per-plugin or generated from templates:
 | AU | `Info.plist.au` | `tools/cmake/PulpInfoPlist.au.in` |
 | AAX | generated | `tools/cmake/PulpInfoPlist.aax.in` |
 
+### Metadata Resolution
+
+`pulp_add_plugin()` is the public entry point for plugin metadata. It resolves
+per-format bundle metadata from the same declaration instead of asking projects
+to include format-specific helper files directly. AU v2 and AUv3 share the same
+component-type rules:
+
+| Declaration | AU component type | Host tag |
+|-------------|-------------------|----------|
+| `CATEGORY Instrument` | `aumu` | Synthesizer |
+| `CATEGORY MidiEffect` | `aumi` | MIDI |
+| `CATEGORY Effect` plus `ACCEPTS_MIDI` | `aumf` | Effects |
+| `CATEGORY Effect` without `ACCEPTS_MIDI` | `aufx` | Effects |
+
+`PLUGIN_CODE` and `MANUFACTURER_CODE` must be exactly four characters for AU
+and AUv3 targets. `VERSION` is converted to the AU integer form from numeric
+`major[.minor[.patch]]` components with an optional `-` or `+` suffix, so
+`1.2.3-beta.1` keeps the same AU version number as `1.2.3`. Generated plist
+and entitlement templates consume these resolved values; downstream projects
+should keep using `pulp_add_plugin()` rather than calling the internal format
+helpers.
+
 ### Format Availability
 
 Format targets are only created when the corresponding SDK is available:

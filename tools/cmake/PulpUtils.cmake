@@ -37,6 +37,7 @@ if(NOT _PULP_FORMAT_TARGET)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpMidiTuning.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpPluginMetadata.cmake")
 
 # Resolve PulpUtils.cmake's sibling helper dirs without reaching into
 # CMAKE_SOURCE_DIR (which is the *consumer's* source tree when this

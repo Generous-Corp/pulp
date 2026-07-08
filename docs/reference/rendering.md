@@ -44,6 +44,27 @@ canvas.restore();
 
 Works on both Skia (SkCanvas::saveLayer) and CoreGraphics (CGContextBeginTransparencyLayer).
 
+## Effect, Mask, And Composite Vocabulary
+
+Pulp keeps three rendering concepts separate in importer output, view APIs, and
+paint backends:
+
+- **Effects** modify pixels produced by a view or by content behind it. CSS
+  `filter`, `filter: blur(...)`, and `backdrop-filter` live here.
+- **Masks and clips** constrain where pixels are visible. CSS `clip-path`,
+  `mask`, `mask-image`, and `mask-size` live here. Some mask values may be
+  stored before every backend can paint them.
+- **Composition** controls how a finished subtree is blended back into its
+  parent. CSS/RN `mix-blend-mode`, Canvas `globalCompositeOperation`, subtree
+  opacity, and layer restore behavior live here.
+
+This split matters for design import and renderer work. A blur should not be
+modeled as a mask, a mask should not be treated as a blend mode, and
+`mix-blend-mode` should remain a layer-composition decision rather than a
+per-draw color transform. When adding CSS or design-tool coverage, first decide
+which bucket the feature belongs to, then wire it through the matching view
+state and backend path.
+
 ## Post-Processing Effects
 
 ```cpp

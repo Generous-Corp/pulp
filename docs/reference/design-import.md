@@ -222,6 +222,13 @@ CSS-like visual properties on each node:
 | `minWidth`, `minHeight` | float | In px |
 | `maxWidth`, `maxHeight` | float | In px |
 
+For importer and backend planning, classify visual properties with the rendering
+reference's effect/mask/composite split: filters and backdrop filters are
+effects, `clip-path` and mask properties constrain visibility, and
+`mix-blend-mode` / Canvas `globalCompositeOperation` control how a completed
+subtree composites back into its parent. Keeping those categories distinct
+prevents a design import gap from becoming the wrong runtime abstraction.
+
 ### IRLayout
 
 Flexbox layout properties for container nodes:

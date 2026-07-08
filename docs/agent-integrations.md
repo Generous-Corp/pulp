@@ -55,6 +55,11 @@ The plugin extends Claude Code with:
   tool calls instead of shell-and-parse. Highest value for the
   inspector tools (`pulp_inspect_dom`, `pulp_inspect_params`,
   etc.) which wrap the running-plugin inspector socket protocol.
+  For project screenshot artifacts, call `pulp_validate` with
+  `screenshot=true` or run `pulp run --headless --screenshot <png>`;
+  both use the same capture contract documented for the CLI. The
+  `pulp_screenshot` MCP tool is a demo/script fixture renderer, not a
+  live plugin capture API.
   `pulp_inspect_evaluate` and `pulp_inspect_screenshot` currently
   return explicit unavailable errors until script-engine and
   host-capture wiring lands.
