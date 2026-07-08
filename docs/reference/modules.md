@@ -722,6 +722,8 @@ plug-ins, wire them into a DAG, and process audio through the chain.
 | Scanner | `pulp/host/scanner.hpp` | Walk system plug-in paths; return `PluginInfo` |
 | PluginSlot | `pulp/host/plugin_slot.hpp` | Uniform load/prepare/process interface over every format |
 | SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology + topological sort |
+| Bake | `pulp/host/baked_graph_processor.hpp` | Freeze a lowerable `SignalGraph` into an optimized `BakedGraphProcessor` (bit-identical to the live graph). `bake()` is the in-process (trusted) path |
+| Baked codec | `pulp/host/baked_codec.hpp` | Signed on-disk `.pulpbake` artifact: `write_baked_signed` + verify-before-parse `load_baked` (Ed25519 trust-set, bounded parse). See [signal-graph](signal-graph.md#baking-a-graph-to-a-shippable-artifact) |
 
 All four format loaders (CLAP, VST3, AU, LV2) are implemented in
 `core/host/src/plugin_slot_*`: each opens the bundle, resolves the

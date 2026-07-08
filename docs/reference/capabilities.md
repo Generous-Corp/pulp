@@ -205,6 +205,8 @@ and the iOS static-only limits.
 | Rust/C/Zig DSP behind a C++ `Processor` adapter via a private C-shaped FFI | experimental | [format](modules.md#format) | [native-components](native-components.md) | rust-gain (opt-in) |
 | Native non-RT domain logic behind `EditorBridge` | experimental | [view](modules.md#view) | [native-components](native-components.md), [editor-bridge](editor-bridge.md) | |
 | Source-built custom `SignalGraph` nodes (toward `pulp_node_v1` C ABI) | experimental | [host](modules.md#host) | [node-abi](node-abi.md), [signal-graph](signal-graph.md) | |
+| Bake a lowerable `SignalGraph` into an optimized `BakedGraphProcessor` (bit-identical to live) | usable | [host](modules.md#host) | [signal-graph](signal-graph.md#baking-a-graph-to-a-shippable-artifact) | in-process `bake()`, trusted |
+| Signed on-disk `.pulpbake` artifact (`write_baked_signed` / verify-before-parse `load_baked`) | usable | [host](modules.md#host) | [signal-graph](signal-graph.md#baking-a-graph-to-a-shippable-artifact) | Ed25519 trust-set; no unsigned load; v1 stateless custom |
 
 ---
 
