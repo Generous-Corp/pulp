@@ -67,6 +67,14 @@ struct. It owns:
   `process()`. After `processor->process()`, the adapter compares each
   param to its snapshot and emits `CLAP_EVENT_PARAM_VALUE` out-events
   so the host can record automation.
+  - **RT-safety invariant:** every scratch vector `process()` sizes to
+    `all_params().size()` (via `resize`/`assign`) runs on the audio thread,
+    so each MUST be `reserve()`d to that size in `clap_activate()` — otherwise
+    the first block grows-and-allocates. `param_snapshot` **and**
+    `output_param_has_event` (the sample-accurate-output skip-set) are both
+    reserved there. Adding a new per-param scratch means adding its reserve;
+    the `ClapSlot::process is allocation-free` rt-safety test catches a miss
+    (it measures the first block, where the missing reserve shows up).
 - `param_events` (`state::ParameterEventQueue`) for the current block's
   inbound `CLAP_EVENT_PARAM_VALUE` events. It preserves every host
   automation point with `header.time` before the StateStore dual-write
