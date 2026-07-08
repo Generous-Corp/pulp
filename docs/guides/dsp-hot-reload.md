@@ -25,9 +25,10 @@ similar but do different jobs — pick by *what is being swapped*:
   single effect but a **chain that hosts other, already-installed plugins**
   (say a VST3 EQ → an AU compressor → a CLAP reverb) wired together inside one
   Pulp plugin. Pulp can change that chain *while it plays* — re-wire the
-  connections, adjust a block — without a gap. That's a separate feature; see
-  the [Signal graph](../reference/signal-graph.md) and
-  [Hosting](hosting.md) guides.
+  connections, adjust a block, or **swap which already-installed plugin sits
+  in a node** — without a gap. That's a separate feature; see
+  [Live plugin swap](../reference/signal-graph.md#live-plugin-swap) and the
+  [Hosting](hosting.md) guide.
 
 Rule of thumb: swapping *your own* DSP → hot-reload (here). Re-arranging or
 replacing *hosted third-party* plugins in a chain → live graph editing.
@@ -44,13 +45,17 @@ feature and **not** on live graph editing — on purpose, and the reason is simp
   and a revocation list.
 - **Live graph editing loads no new code.** It only re-arranges, or substitutes,
   plugins the machine **already installed and already trusts** — the same trust
-  boundary that let Pulp host them in the first place. Nothing new is fetched or
-  verified because nothing new arrives.
+  boundary that let Pulp host them in the first place. Swapping a node changes
+  *which already-installed plugin instance sits in that node*; nothing new is
+  fetched, compiled, or verified, because nothing new arrives.
 
 And the two never cross in a rack: a **hosted** third-party plugin has no Pulp
 reload path — it is not built from Pulp's reloadable shell, so it has no watcher
 and nothing (a host, a rack, a script) can reload *its* DSP or UI through Pulp.
-The reload mechanism only ever touches a Pulp plugin that opted into the
+Loading a Pulp plugin into a rack therefore does **not** let anyone reload the
+DSP or UI of the plugins it hosts — live graph editing can only swap which
+already-installed instance occupies a node, which is why it needs no trust
+model. The reload mechanism only ever touches a Pulp plugin that opted into the
 reloadable shell, and there it stays behind that plugin's own `require_signed`
 gate. Hosting a plugin in a chain does not open a door to reloading it.
 

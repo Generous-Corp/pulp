@@ -219,6 +219,106 @@ from a lower-latency branch than the destination plugin's audio input, the
 graph delays the dense parameter-event stream by the same amount as an audio
 connection.
 
+## Live plugin swap
+
+A *node* here is one box in the audio chain — for a `Plugin` node, the box
+holds a single loaded hosted plugin (the *instance*). Live plugin swap
+replaces the instance inside a `Plugin` node **while audio is still
+flowing** — either with a fresh instance of the *same* plugin (for example
+to reset it or hand it different saved state) or, when it can't be done
+seamlessly, with a *different* plugin. The goal is a **gap-free** change:
+the audio stream never drops to silence and the listener hears no gap or
+click at the moment of the swap.
+
+The swap is gap-free because the graph does all the slow work — loading the
+replacement, preparing it at the current sample rate and block size, and
+copying the live plugin's saved state and parameter values into it —
+*before* anything the audio thread can see changes. Only once the
+replacement is fully ready does the graph publish the new arrangement in a
+single atomic step, so the audio callback always reads either the complete
+old arrangement or the complete new one, never a half-built or empty one.
+
+This is not the same as [DSP hot-reload](../guides/dsp-hot-reload.md). Live
+swap loads no new code: it only rearranges plugins the machine already
+installed and already trusts, so it needs no signing or trust model.
+
+### Using it
+
+1. **Publish the plugins that may be swapped in.** For each already-scanned
+   plugin the host is willing to swap in, call
+   `register_scanned_plugin(info)`; it returns an opaque
+   `PluginCatalogToken`. A swap can only target a plugin that has a token,
+   so nothing outside the host's own scan results can be substituted.
+2. **Opt the node in.** Call `set_node_live_swap_policy(node, policy)` with
+   `NodeLiveSwapPolicy::allow_live_instance_swap = true`. Opt-in is **off by
+   default** — a node never swaps unless the host asks for it. The policy
+   also carries a CPU-headroom limit (`headroom_threshold`), a cap on how
+   much plugin state may be carried across (`max_state_bytes`), the intended
+   fade length and shape (`fade_ms`, `curve`), and an optional
+   `on_instance_swapped` observer the graph calls after a successful swap so
+   the host can retire the old instance.
+3. **Stage and publish.** Open a transaction with `begin_swap_edit()`, stage
+   the replacement with `stage_plugin_replacement(node, token)`, then commit
+   with `prepare_swap(sample_rate, max_block_size)`. Between `begin_swap_edit`
+   and `prepare_swap` the live graph keeps playing the old arrangement, so
+   staging never interrupts audio. `abort_swap_edit()` abandons the attempt.
+
+`prepare_swap` returns `Swapped` when the change went live gap-free. It
+returns `NeedsEagerPrepare` when a gap-free swap isn't possible; the host
+then calls `prepare()` under the usual "no `process()` while preparing"
+rule, which rebuilds the graph with a brief silence instead of a seamless
+change. `last_swap_diagnostics()` reports which check refused and on which
+node.
+
+### The gates (fail-closed)
+
+Every swap is checked before it can affect audio, and **any** failing check
+refuses the seamless path entirely — the old instance keeps playing
+untouched and the host falls back to an eager re-prepare. The graph never
+takes a risk with the live stream to push a swap through:
+
+- **Not opted in** — the node's policy did not enable live swap. Prevents a
+  swap the host never asked for.
+- **Not a scanned plugin** — the replacement token isn't in the host's scan
+  catalog. This is the guarantee that no unknown code is introduced: only an
+  already-installed, already-scanned plugin can be swapped in.
+- **Feedback edge** — the node is part of a feedback loop, whose one-block
+  delay carries state a fresh instance would corrupt.
+- **Editor open** — the plugin's editor window is open; swapping the
+  instance out from under a live editor would break it.
+- **Load or prepare failed** — the replacement wouldn't load, or wouldn't
+  prepare at the current sample rate and block size.
+- **State too large / state rejected** — the live plugin's saved state
+  exceeds the policy's `max_state_bytes`, or the replacement refused to
+  restore it. Without carrying state across, the swap would jump audibly.
+- **Parameter contract differs** — the replacement exposes a different set
+  of automatable parameters while automation or parameter edges point at the
+  node, which would leave those connections addressing parameters that no
+  longer exist.
+- **Port shape changed** — the replacement has a different number of input
+  or output ports, so it can't drop into the same wiring.
+- **Latency changed** — the replacement reports a different processing
+  latency, which would shift delay compensation and produce an audible
+  splice. (A node that would add or remove a PDC delay line is refused for
+  the same reason.)
+- **Over budget** — the graph projects that running the replacement would push
+  CPU load past the node's `headroom_threshold`. To judge that for a *different*
+  plugin (which has never run, so has no measured cost), the graph **pre-warms**
+  the replacement before committing: it renders a short burst of a test signal
+  through the already-prepared instance off the audio thread to measure its real
+  CPU cost, then admits the swap only if that cost fits the budget. So swapping
+  in a genuinely different plugin can also go fully gap-free — it falls back to
+  an eager re-prepare only when the measured cost would actually risk an overload
+  on the audio thread, not merely because the plugin is different.
+
+When any gate refuses, the transaction is abandoned, the live snapshot is
+dropped, and `prepare_swap` returns `NeedsEagerPrepare` so the host
+re-prepares with a brief silence — the safe fallback, never a partial or
+racy swap.
+
+The staging, policy, catalog, and swap-transaction calls all run on the
+control/UI thread, never the audio thread.
+
 ## Parameters
 
 `set_node_parameter(node, id, value)` forwards a normalized value to the
