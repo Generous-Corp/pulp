@@ -9,8 +9,10 @@ namespace {
 namespace fmt = pulp::format;
 } // namespace
 
-LowerabilityProof lowerability_of(std::span<const GraphNode> nodes,
-                                  std::span<const Connection> connections) {
+LowerabilityProof lowerability_of(
+    std::span<const GraphNode> nodes,
+    std::span<const Connection> connections,
+    const std::function<const CustomNodeType*(std::string_view, int)>& resolve_custom) {
     LowerabilityProof proof;
     // Order matters: the Plugin/Custom node-kind refusals are checked BEFORE the
     // executor-eligibility predicate. A Plugin node with no live slot is executor-
@@ -31,12 +33,50 @@ LowerabilityProof lowerability_of(std::span<const GraphNode> nodes,
             return proof;
         }
         if (node.type == NodeType::Custom) {
-            // Custom-node lowering is a deliberate follow-up (see the header).
-            proof.reason = LowerRejectReason::CustomNotYetLowerable;
-            proof.offending_node = node.id;
-            proof.message =
-                "Custom node lowering is not yet implemented; refusing to bake";
-            return proof;
+            // A Custom node lowers only if its registered type opted in (lowerable),
+            // matches the node's shape, and is transport-independent (the baked
+            // process() drops the host transport). Without a resolver the type is
+            // unknown, so any Custom node is refused.
+            const CustomNodeType* type =
+                resolve_custom
+                    ? resolve_custom(node.custom_type_id, node.custom_type_version)
+                    : nullptr;
+            if (type == nullptr) {
+                proof.reason = LowerRejectReason::CustomNotYetLowerable;
+                proof.offending_node = node.id;
+                proof.message =
+                    resolve_custom
+                        ? "Custom node type is not registered/resolvable; refusing to bake"
+                        : "Custom node lowering requires a registered type; refusing to bake";
+                return proof;
+            }
+            if (node.num_input_ports != type->num_input_ports ||
+                node.num_output_ports != type->num_output_ports) {
+                proof.reason = LowerRejectReason::CustomNotYetLowerable;
+                proof.offending_node = node.id;
+                proof.message =
+                    "Custom node shape does not match its registered type; refusing to bake";
+                return proof;
+            }
+            if (!type->lowerable) {
+                proof.reason = LowerRejectReason::CustomNotLowerable;
+                proof.offending_node = node.id;
+                proof.message =
+                    "Custom node type is not opted into baking (lowerable=false); "
+                    "refusing to bake";
+                return proof;
+            }
+            if (type->process_transport || type->process_instance_transport) {
+                proof.reason = LowerRejectReason::CustomTransportNotLowerable;
+                proof.offending_node = node.id;
+                proof.message =
+                    "transport-sensitive Custom node is not lowerable (the baked "
+                    "process drops the host transport); refusing to bake";
+                return proof;
+            }
+            // Accepted — a lowerable, shape-matched, transport-independent Custom
+            // node. Skip the audio-only kind check below.
+            continue;
         }
         // The lowerable subset is audio-only. The routed executor also accepts
         // MidiInput/MidiOutput nodes, but a BakedGraphProcessor advertises no MIDI
