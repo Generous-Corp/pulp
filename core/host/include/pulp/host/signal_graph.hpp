@@ -52,6 +52,44 @@ enum class NodeType {
     Custom,        // String-keyed extension node
 };
 
+enum class LiveSwapCurve { Smoothstep, EqualPower };
+
+struct NodeLiveSwapPolicy {
+    bool allow_live_instance_swap = false;
+    int fade_ms = 30;
+    LiveSwapCurve curve = LiveSwapCurve::EqualPower;
+    float headroom_threshold = 0.75f;
+    std::size_t max_state_bytes = 64ull * 1024ull * 1024ull;
+    std::function<void(NodeId,
+                       std::shared_ptr<PluginSlot> /*old_slot*/,
+                       std::shared_ptr<PluginSlot> /*new_slot*/)>
+        on_instance_swapped;
+};
+
+enum class LiveSwapFallbackReason : uint8_t {
+    None,
+    NotOptedIn,
+    LoadFailed,
+    PrepareFailed,
+    StateRestoreFailed,
+    StateTooLarge,
+    ShapeMismatch,
+    LatencyChanged,
+    EditorOpen,
+    ParamContractMismatch,
+    FeedbackNotSwappable,
+    OverBudget,
+    NoLoadHistory,
+    PredicateExcluded,
+    UntrustedIdentity,
+};
+
+struct LiveSwapDiagnostics {
+    LiveSwapFallbackReason reason = LiveSwapFallbackReason::None;
+    NodeId offending_node = 0;
+    std::string message;
+};
+
 using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,
                                               int num_samples)>;
@@ -233,6 +271,9 @@ struct GraphNode {
     // change after compile, that requires a re-prepare for the graph to observe
     // it — process() never re-polls the live slot per block.
     bool transport_sensitive = false;
+
+    NodeLiveSwapPolicy live_swap_policy;
+    bool hosted_editor_open = false;
 };
 
 // ── Signal Graph ────────────────────────────────────────────────────────
@@ -289,6 +330,15 @@ public:
 
         bool should_run_optional_work() const noexcept {
             return decision.should_run();
+        }
+    };
+
+    struct PluginCatalogToken {
+        std::uint64_t value = 0;
+        explicit operator bool() const noexcept { return value != 0; }
+        friend bool operator==(PluginCatalogToken a,
+                               PluginCatalogToken b) noexcept {
+            return a.value == b.value;
         }
     };
 
@@ -439,9 +489,10 @@ public:
     // Lifecycle
     bool prepare(double sample_rate, int max_block_size);
 
-    // 2.2b no-silence live swap. Outcome of prepare_swap().
+    // Live swap transaction outcomes.
     enum class SwapResult {
         Swapped,           // the new topology was published with no silent block.
+        Staged,            // a replacement instance is staged for prepare_swap().
         NeedsEagerPrepare, // not reinit-free (or a latency change) — caller must
                            // call prepare() under the usual no-process/no-pump
                            // contract; the live snapshot has been invalidated.
@@ -464,6 +515,17 @@ public:
     // edits remain in the graph and take effect on the next prepare()).
     void abort_swap_edit();
     void release();
+
+    bool set_node_live_swap_policy(NodeId id, NodeLiveSwapPolicy policy);
+    bool set_node_hosted_editor_open(NodeId id, bool open);
+    PluginCatalogToken register_scanned_plugin(const PluginInfo& info);
+    void clear_scanned_plugin_catalog();
+    SwapResult stage_plugin_replacement(NodeId id, PluginCatalogToken token);
+    LiveSwapDiagnostics last_swap_diagnostics() const;
+
+    using PluginLoaderForTest =
+        std::function<std::unique_ptr<PluginSlot>(const PluginInfo&)>;
+    void set_live_swap_plugin_loader_for_test(PluginLoaderForTest loader);
 
     // Prepare-time topology bounds. Hosts that accept generated or user-built
     // graphs can lower these before prepare() so oversized graphs fail before
@@ -1046,6 +1108,21 @@ private:
     // could add/remove/re-instantiate a node without a matching re-prepare.
     std::unordered_map<NodeId, PreparedPluginMetadata> prepared_plugin_meta_;
 
+    struct StagedReplacement {
+        NodeId id = 0;
+        PluginInfo info;
+        std::shared_ptr<PluginSlot> slot;
+        PreparedPluginMetadata metadata;
+        bool same_identity = false;
+    };
+    std::unordered_map<NodeId, StagedReplacement> staged_replacements_;
+
+    std::unordered_map<std::uint64_t, PluginInfo> scanned_plugin_catalog_;
+    std::unordered_map<std::string, std::uint64_t> scanned_plugin_identity_to_token_;
+    std::uint64_t next_scanned_plugin_token_{1};
+    LiveSwapDiagnostics last_swap_diagnostics_;
+    PluginLoaderForTest live_swap_plugin_loader_for_test_;
+
     // Audio-thread snapshot, published by prepare() / mutators. The audio
     // thread reads live_raw_ only; live_ and retired_snapshots_ keep pointed-to
     // storage alive from the control thread until active process readers drain.
@@ -1266,6 +1343,19 @@ private:
     // on that slot (2.2b S4); falls back to the live slot for a not-yet-prepared
     // node. Edit-path only (not real-time), so the by-value copy is fine.
     std::vector<HostParamInfo> cached_or_live_params_(const GraphNode& n) const;
+    std::unique_ptr<PluginSlot> load_live_swap_plugin_(const PluginInfo& info) const;
+    bool node_has_feedback_edge_locked_(NodeId id) const;
+    bool node_has_parameter_or_automation_contract_locked_(NodeId id) const;
+    bool staged_replacement_relaxes_identity_locked_(NodeId id) const;
+    void set_live_swap_diagnostics_locked_(LiveSwapFallbackReason reason,
+                                           NodeId node,
+                                           std::string message);
+    SwapResult fail_swap_edit_locked_(LiveSwapFallbackReason reason,
+                                      NodeId node,
+                                      std::string message);
+    void cancel_swap_edit_locked_();
+    std::vector<audio::AudioProcessLoadSnapshot>
+    staged_node_loads_locked_() const;
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
     void invalidate_live_();
