@@ -8,6 +8,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/host/crossfade_plugin_slot.hpp>
+#include <pulp/midi/message.hpp>
 
 #include <cmath>
 #include <memory>
@@ -145,4 +146,63 @@ TEST_CASE("CrossfadePluginSlot with fade_ms 0 is done immediately (instant switc
     auto b = render(xf, 64);
     for (float v : b) CHECK_THAT(v, WithinAbs(0.0f, 1e-6));  // pure new from the first block
     CHECK(*old_count == 0);                                  // old never rendered
+}
+
+namespace {
+// A fading-out slot that floods MIDI-out every block. With the wrapper's capacity-
+// limited MIDI scratch this must not grow/allocate on the audio thread; before the
+// fix the default-constructed buffer would reallocate on the first emit.
+class MidiFloodSlot final : public PluginSlot {
+public:
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const ParameterEventQueue&,
+                 int n) override {
+        for (int i = 0; i < 512; ++i) {
+            midi_out.add(pulp::midi::MidiEvent::note_on(0, 60, 100));  // capped by reserve+limit
+        }
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            float* d = out.channel_ptr(c);
+            for (int i = 0; i < n; ++i) d[static_cast<std::size_t>(i)] = 1.0f;
+        }
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+private:
+    PluginInfo info_;
+};
+}  // namespace
+
+TEST_CASE("CrossfadePluginSlot bounds the fade-out instance's MIDI-out (no audio-thread growth)",
+          "[host][graph][live-swap][crossfade]") {
+    auto old_slot = std::make_shared<MidiFloodSlot>();
+    auto new_slot = std::make_shared<ConstSlot>(0.0f, "new", 0);
+    CrossfadePluginSlot xf(new_slot, old_slot, 128, pulp::signal::TransitionCurve::EqualPower, 1, 64);
+    // Rendering across the whole fade must stay bounded + click-free even though the
+    // fading-out instance floods MIDI every block; the wrapper's reserved, capacity-
+    // limited MIDI scratch absorbs it without growing.
+    for (int i = 0; i < 4; ++i) {
+        auto b = render(xf, 64);
+        for (float v : b) {
+            CHECK(v >= -0.01f);
+            CHECK(v <= 1.01f);
+        }
+    }
+    CHECK(xf.fade_done());
 }

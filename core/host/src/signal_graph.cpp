@@ -95,9 +95,13 @@ std::size_t saturating_mul(std::size_t a, std::size_t b) {
 }
 
 NodeLiveSwapPolicy clamp_live_swap_policy(NodeLiveSwapPolicy policy) {
-    policy.fade_ms = std::clamp(policy.fade_ms,
-                                kLiveSwapMinFadeMs,
-                                kLiveSwapMaxFadeMs);
+    // fade_ms == 0 is the explicit "instant switch, no crossfade" request and passes
+    // through unclamped; any positive value is clamped into the supported fade range.
+    if (policy.fade_ms != 0) {
+        policy.fade_ms = std::clamp(policy.fade_ms,
+                                    kLiveSwapMinFadeMs,
+                                    kLiveSwapMaxFadeMs);
+    }
     policy.headroom_threshold =
         std::clamp(policy.headroom_threshold, 0.0f, 1.0f);
     return policy;

@@ -53,6 +53,13 @@ public:
             scratch_ptrs_[static_cast<std::size_t>(c)] =
                 scratch_storage_.data() + static_cast<std::size_t>(c) * static_cast<std::size_t>(scratch_frames_);
         }
+        // Pre-size the fading-out instance's MIDI scratch and cap it to reserved
+        // capacity, so a fade-out slot that emits MIDI (arp, MIDI-FX, note-expression)
+        // never heap-allocates on the audio thread — mirrors the reload hot-swap slot.
+        old_midi_in_.reserve(64, 0);
+        old_midi_out_.reserve(64, 0);
+        old_midi_in_.set_realtime_capacity_limit(true);
+        old_midi_out_.set_realtime_capacity_limit(true);
     }
 
     // True once the crossfade has fully completed (output is the pure new render).
@@ -78,10 +85,19 @@ public:
                  midi::MidiBuffer& midi_out,
                  const ParameterEventQueue& param_events,
                  int num_samples) override {
-        new_slot_->process(audio, midi_in, midi_out, param_events, num_samples);
-        auto* main_out = audio.main_output();
-        auto* main_in = audio.main_input();
-        if (main_out && main_in) blend_old_into_(*main_out, *main_in, num_samples);
+        if (skip_blend_(audio, num_samples)) {
+            new_slot_->process(audio, midi_in, midi_out, param_events, num_samples);
+            return;
+        }
+        // Render OLD into the main output, snapshot it to scratch, then render NEW over
+        // the top and blend scratch(old) -> output(new). Rendering both through the real
+        // ProcessBuffers keeps the surviving instance's bus routing intact.
+        old_midi_in_.clear();
+        old_midi_out_.clear();
+        old_slot_->process(audio, old_midi_in_, old_midi_out_, empty_params_, num_samples);
+        blend_after_old_(audio, [&] {
+            new_slot_->process(audio, midi_in, midi_out, param_events, num_samples);
+        }, num_samples);
     }
 
     void process(format::ProcessBuffers& audio,
@@ -90,10 +106,18 @@ public:
                  const ParameterEventQueue& param_events,
                  int num_samples,
                  const format::ProcessContext& transport) override {
-        new_slot_->process(audio, midi_in, midi_out, param_events, num_samples, transport);
-        auto* main_out = audio.main_output();
-        auto* main_in = audio.main_input();
-        if (main_out && main_in) blend_old_into_(*main_out, *main_in, num_samples);
+        if (skip_blend_(audio, num_samples)) {
+            new_slot_->process(audio, midi_in, midi_out, param_events, num_samples, transport);
+            return;
+        }
+        // Both instances see transport: a transport-sensitive fading-out instance must
+        // keep its playhead/tempo across the swap or it would step at fade start.
+        old_midi_in_.clear();
+        old_midi_out_.clear();
+        old_slot_->process(audio, old_midi_in_, old_midi_out_, empty_params_, num_samples, transport);
+        blend_after_old_(audio, [&] {
+            new_slot_->process(audio, midi_in, midi_out, param_events, num_samples, transport);
+        }, num_samples);
     }
 
     // ── delegate everything else to the surviving instance ───────────────────
@@ -123,9 +147,46 @@ public:
     bool wants_transport() const override { return new_slot_->wants_transport(); }
 
 private:
+    // True when there is nothing to blend for this ProcessBuffers block (fade already
+    // done, no old instance, no main bus, or a block larger than the scratch — which
+    // snaps the fade to complete). The caller then just renders the new instance.
+    bool skip_blend_(format::ProcessBuffers& audio, int num_samples) {
+        if (done_.load(std::memory_order_relaxed) || !old_slot_) return true;
+        auto* main_out = audio.main_output();
+        if (main_out == nullptr) return true;
+        const int ch = std::min<int>(scratch_channels_, static_cast<int>(main_out->num_channels()));
+        if (num_samples > scratch_frames_ || ch <= 0) {
+            done_.store(true, std::memory_order_release);
+            return true;
+        }
+        return false;
+    }
+
+    // The old instance has already rendered into the main output; snapshot it to
+    // scratch, render the new instance over the top, then blend scratch(old) into the
+    // output(new) under the mixer. RT-safe: no alloc/lock. skip_blend_ has guaranteed a
+    // main bus, ch>0, and num_samples <= scratch_frames_.
+    template <class RenderNew>
+    void blend_after_old_(format::ProcessBuffers& audio, RenderNew&& render_new, int num_samples) {
+        auto* main_out = audio.main_output();
+        const int ch = std::min<int>(scratch_channels_, static_cast<int>(main_out->num_channels()));
+        for (int c = 0; c < ch; ++c) {
+            std::copy_n(main_out->channel_ptr(static_cast<std::size_t>(c)),
+                        static_cast<std::size_t>(num_samples),
+                        scratch_ptrs_[static_cast<std::size_t>(c)]);
+        }
+        render_new();
+        audio::BufferView<float> scratch(scratch_ptrs_.data(), static_cast<std::size_t>(ch),
+                                         static_cast<std::size_t>(num_samples));
+        if (signal::blend_fade_out(mixer_, *main_out, scratch)) {
+            done_.store(true, std::memory_order_release);
+        }
+    }
+
     // Render the fading-out instance into scratch (same input, no MIDI/param events —
     // it is on its way out) and blend it into `output` under the mixer. RT-safe: no
-    // alloc/lock (scratch + mixer are pre-sized at construction).
+    // alloc/lock (scratch + mixer are pre-sized at construction). Used by the
+    // transport-less BufferView overload.
     void blend_old_into_(audio::BufferView<float>& output,
                          const audio::BufferView<const float>& input,
                          int num_samples) {
