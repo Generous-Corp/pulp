@@ -154,6 +154,19 @@ namespace methods {
     /// Per-frame cost sample (active trace_ids + render stats).
     /// Broadcast only while cost attribution is enabled.
     constexpr auto kMotionCost   = "Motion.cost";
+
+    // Trace domain — process-global Perfetto session control (DEV ONLY).
+    // Wires the `pulp trace` CLI to pulp::runtime::Tracing. Session control
+    // (startSession / stopSession / snapshot) is always answerable — it reports
+    // honestly that tracing is not compiled in when PULP_TRACING=OFF. query and
+    // explain are recognized but degrade to pointing at the flushed .pftrace:
+    // running SQL over a trace happens offline via trace_processor, not in the
+    // in-process inspector.
+    constexpr auto kTraceStartSession = "Trace.startSession";
+    constexpr auto kTraceStopSession  = "Trace.stopSession";
+    constexpr auto kTraceSnapshot     = "Trace.snapshot";
+    constexpr auto kTraceQuery        = "Trace.query";
+    constexpr auto kTraceExplain      = "Trace.explain";
 }
 
 } // namespace pulp::inspect

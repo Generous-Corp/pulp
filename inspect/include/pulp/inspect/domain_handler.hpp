@@ -15,6 +15,7 @@ class ConsoleCapture;
 class AudioInspector;
 class MotionInspector;
 class MotionScrubber;
+class TraceInspector;
 class TweakStore;
 
 /// Handles inspector protocol requests by delegating to the appropriate
@@ -50,6 +51,10 @@ public:
     void set_audio_inspector(AudioInspector* audio) { audio_ = audio; }
     void set_motion_inspector(MotionInspector* motion) { motion_ = motion; }
     void set_motion_scrubber(MotionScrubber* scrubber) { motion_scrubber_ = scrubber; }
+    /// Wire the Perfetto tracing bridge so `Trace.*` (the `pulp trace` CLI)
+    /// can drive the process-global session. Optional: unset → Trace methods
+    /// return a targeted "no trace inspector attached" error.
+    void set_trace_inspector(TraceInspector* trace) { trace_ = trace; }
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
     void set_tweak_store(TweakStore* store) { tweak_store_ = store; }
 
@@ -83,6 +88,7 @@ private:
     AudioInspector* audio_ = nullptr;
     MotionInspector* motion_ = nullptr;
     MotionScrubber* motion_scrubber_ = nullptr;
+    TraceInspector* trace_ = nullptr;
     render::RenderPassManager* rpm_ = nullptr;
     render::DirtyTracker* dirty_ = nullptr;
     TweakStore* tweak_store_ = nullptr;
@@ -99,6 +105,7 @@ private:
     InspectorMessage handle_audio(const InspectorMessage& req);
     InspectorMessage handle_capture(const InspectorMessage& req);
     InspectorMessage handle_motion(const InspectorMessage& req);
+    InspectorMessage handle_trace(const InspectorMessage& req);
     InspectorMessage handle_live_constant(const InspectorMessage& req);
 };
 
