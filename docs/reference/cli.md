@@ -1310,6 +1310,52 @@ Subcommands:
 See [Motion Observability](../guides/motion-observability.md) for the full
 runtime trace, fixture replay, and cost-attribution workflow.
 
+### trace
+
+**Status**: experimental
+
+Agent-facing wrappers around the inspector `Trace.*` Perfetto-tracing
+protocol. Start the host with `PULP_TRACE_SERVER=1`, then use `pulp trace` to
+start/stop a tracing session, run SQL over the captured `.pftrace`, run L0
+preset queries, or ask for a one-shot narrated root cause. Motion tells you
+*what changed* on screen; tracing tells you *where the time went*.
+
+```bash
+pulp trace start --categories dsp,render --out /tmp/x.pftrace
+pulp trace stop                                   # → prints the .pftrace path
+pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
+pulp trace query --preset dsp-hotspots
+pulp trace slowest-frames
+pulp trace xruns
+pulp trace layout-vs-paint
+pulp trace snapshot
+pulp trace explain "why is my plugin slow to open?"
+```
+
+Options:
+
+- `--port PORT` - inspector port; defaults to `9147` / `$PULP_INSPECTOR_PORT`
+- `--json` - emit the raw inspector JSON response instead of the pretty form
+
+Subcommands:
+
+| Subcommand | Inspector method | Description |
+|------------|------------------|-------------|
+| `start [--categories LIST] [--out FILE.pftrace] [--ring-mb N]` | `Trace.startSession` | Begin a session recording the selected span categories into an in-process ring. |
+| `stop` | `Trace.stopSession` | Flush the session and print the `.pftrace` path. |
+| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the captured trace; JSON by default. |
+| `query --preset <name>` | `Trace.query` | Run a named trace-stdlib preset. |
+| `slowest-frames` | `Trace.query` | L0 preset: frames over the vsync budget, worst first. |
+| `xruns` | `Trace.query` | L0 preset: audio xrun / deadline-miss events. |
+| `dsp-hotspots` | `Trace.query` | L0 preset: per-node DSP cost, most expensive first. |
+| `layout-vs-paint` | `Trace.query` | L0 preset: one-row-per-category frame cost split. |
+| `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
+| `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
+
+The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,
+`text`, `js`, `gpu`, `state`, `io`. Tracing is a dev-only tool: never ship a
+plugin with `PULP_TRACING` enabled.
+
 ### tweaks
 
 **Status**: experimental
