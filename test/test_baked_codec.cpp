@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 using pulp::host::BakedPlan;
@@ -122,5 +123,44 @@ TEST_CASE("signed .pulpbake round-trips under trust and rejects every tamper",
         auto b = bytes;
         b[0] ^= 0xFF;
         CHECK_FALSE(pulp::host::verify_and_extract_plan(b, trust).has_value());
+    }
+}
+
+TEST_CASE("verify_and_extract_plan gates malicious envelopes even when otherwise well-formed",
+          "[host][bake][codec][security]") {
+    SECTION("prelude declares an over-cap manifest length -> nullopt before any parse") {
+        std::vector<std::uint8_t> bytes;
+        for (char c : std::string_view("PULPBAKE")) bytes.push_back(static_cast<std::uint8_t>(c));
+        // manifest_len = 0x00FFFFFF (>> the 4 KiB cap); plan_len = 0.
+        bytes.insert(bytes.end(), {0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00});
+        CHECK_FALSE(pulp::host::verify_and_extract_plan(bytes, pulp::host::BakedTrust{}).has_value());
+    }
+    SECTION("a validly-SIGNED plan whose custom state exceeds the cap is still rejected at parse") {
+        // The signature is authentic and the hash matches, so verification passes — but
+        // the bounded plan parse must STILL reject the over-cap state blob. Proves the
+        // caps gate independently of the signature (verify does not imply safe-to-parse).
+        std::array<std::uint8_t, 32> seed{};
+        for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(i + 3);
+        const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+        REQUIRE(kp.has_value());
+
+        BakedPlan p;
+        p.input_channels = 1;
+        p.output_channels = 1;
+        BakedPlan::Node cn;
+        cn.id = 1;
+        cn.type = NodeType::Custom;
+        cn.num_input_ports = 1;
+        cn.num_output_ports = 1;
+        cn.custom_type_id = "x";
+        cn.custom_version = 1;
+        cn.custom_state.assign(pulp::host::kBakedMaxCustomState + 1, 0xAB);  // just over cap
+        p.nodes.push_back(std::move(cn));
+
+        const auto bytes = pulp::host::write_baked_signed(p, kp->private_key);
+        REQUIRE_FALSE(bytes.empty());  // serialize+sign does not cap; the LOAD path does
+        pulp::host::BakedTrust trust;
+        trust.trusted_public_keys.push_back(kp->public_key);
+        CHECK_FALSE(pulp::host::verify_and_extract_plan(bytes, trust).has_value());
     }
 }
