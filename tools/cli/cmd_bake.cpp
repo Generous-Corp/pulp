@@ -169,12 +169,20 @@ int bake_write(const std::vector<std::string>& args) {
         return 1;
     }
 
-    // Reuse the reload-trust key file (KeyMaterial). load_or_generate_key_file loads an
-    // existing key or mints + writes one (loudly), exactly like ship swap-pack.
-    auto km = reload::load_or_generate_key_file(sign_key);
+    // Reuse the reload-trust key file (KeyMaterial): load an existing key or mint one
+    // at the path. `minted` guards the footgun — a typo'd --sign-key path would
+    // otherwise silently sign the artifact under a brand-new identity, so we say so
+    // loudly (mirrors ship swap-pack's "a fresh key screams" rule).
+    bool minted = false;
+    auto km = reload::load_or_generate_key_file(sign_key, minted);
     if (!km || !km->valid()) {
         std::cerr << "pulp bake: cannot load/create the signing key at '" << sign_key << "'\n";
         return 1;
+    }
+    if (minted) {
+        std::cerr << "pulp bake: NOTE — no key existed at '" << sign_key
+                  << "'; minted a NEW signing key there. If that path was a typo, delete it and "
+                     "re-run with your intended key — this artifact is signed under the new identity.\n";
     }
     const auto bytes = pulp::host::write_baked_signed(
         *plan.plan, {km->private_key.data(), km->private_key.size()});
