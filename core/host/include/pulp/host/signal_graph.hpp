@@ -52,6 +52,50 @@ enum class NodeType {
     Custom,        // String-keyed extension node
 };
 
+enum class LiveSwapCurve { Smoothstep, EqualPower };
+
+struct NodeLiveSwapPolicy {
+    bool allow_live_instance_swap = false;
+    // fade_ms / curve are the intended crossfade shape. The committed swap is
+    // currently a clean atomic instance switch at a block boundary (no dropped or
+    // repeated samples); the per-sample crossfade that consumes these two fields is
+    // not yet wired into the graph process path, so a swap between instances whose
+    // output differs can step at the boundary. They are accepted + clamped now so the
+    // policy is forward-compatible when the fade lands; treat them as reserved.
+    int fade_ms = 30;
+    LiveSwapCurve curve = LiveSwapCurve::EqualPower;
+    float headroom_threshold = 0.75f;
+    std::size_t max_state_bytes = 64ull * 1024ull * 1024ull;
+    std::function<void(NodeId,
+                       std::shared_ptr<PluginSlot> /*old_slot*/,
+                       std::shared_ptr<PluginSlot> /*new_slot*/)>
+        on_instance_swapped;
+};
+
+enum class LiveSwapFallbackReason : uint8_t {
+    None,
+    NotOptedIn,
+    LoadFailed,
+    PrepareFailed,
+    StateRestoreFailed,
+    StateTooLarge,
+    ShapeMismatch,
+    LatencyChanged,
+    EditorOpen,
+    ParamContractMismatch,
+    FeedbackNotSwappable,
+    OverBudget,
+    NoLoadHistory,
+    PredicateExcluded,
+    UntrustedIdentity,
+};
+
+struct LiveSwapDiagnostics {
+    LiveSwapFallbackReason reason = LiveSwapFallbackReason::None;
+    NodeId offending_node = 0;
+    std::string message;
+};
+
 using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,
                                               int num_samples)>;
@@ -233,6 +277,9 @@ struct GraphNode {
     // change after compile, that requires a re-prepare for the graph to observe
     // it — process() never re-polls the live slot per block.
     bool transport_sensitive = false;
+
+    NodeLiveSwapPolicy live_swap_policy;
+    bool hosted_editor_open = false;
 };
 
 // ── Signal Graph ────────────────────────────────────────────────────────
@@ -289,6 +336,15 @@ public:
 
         bool should_run_optional_work() const noexcept {
             return decision.should_run();
+        }
+    };
+
+    struct PluginCatalogToken {
+        std::uint64_t value = 0;
+        explicit operator bool() const noexcept { return value != 0; }
+        friend bool operator==(PluginCatalogToken a,
+                               PluginCatalogToken b) noexcept {
+            return a.value == b.value;
         }
     };
 
@@ -439,9 +495,10 @@ public:
     // Lifecycle
     bool prepare(double sample_rate, int max_block_size);
 
-    // 2.2b no-silence live swap. Outcome of prepare_swap().
+    // Live swap transaction outcomes.
     enum class SwapResult {
         Swapped,           // the new topology was published with no silent block.
+        Staged,            // a replacement instance is staged for prepare_swap().
         NeedsEagerPrepare, // not reinit-free (or a latency change) — caller must
                            // call prepare() under the usual no-process/no-pump
                            // contract; the live snapshot has been invalidated.
@@ -465,6 +522,27 @@ public:
     void abort_swap_edit();
     void release();
 
+    bool set_node_live_swap_policy(NodeId id, NodeLiveSwapPolicy policy);
+    bool set_node_hosted_editor_open(NodeId id, bool open);
+    PluginCatalogToken register_scanned_plugin(const PluginInfo& info);
+    void clear_scanned_plugin_catalog();
+    // Stage a live instance replacement for a node, resolved through the scanned
+    // catalog (never an arbitrary path). To capture the outgoing instance's state
+    // without a silent block, this reads the OLD, still-live plugin's save_state()
+    // and get_parameter() on the control thread while the audio thread may be inside
+    // its process(). CONTRACT: a hosted plugin that opts into live swap must make
+    // save_state()/get_parameter() safe to call concurrently with process() (they are
+    // read-only snapshots for most plugins). Parameter capture goes through the cached
+    // contract + atomic get_parameter; full-state capture is best-effort — a plugin
+    // whose getState is strictly main-thread-only may capture a torn state, so keep it
+    // concurrency-tolerant or rely on parameter re-sync alone.
+    SwapResult stage_plugin_replacement(NodeId id, PluginCatalogToken token);
+    LiveSwapDiagnostics last_swap_diagnostics() const;
+
+    using PluginLoaderForTest =
+        std::function<std::unique_ptr<PluginSlot>(const PluginInfo&)>;
+    void set_live_swap_plugin_loader_for_test(PluginLoaderForTest loader);
+
     // Prepare-time topology bounds. Hosts that accept generated or user-built
     // graphs can lower these before prepare() so oversized graphs fail before
     // snapshot allocation or plugin prepare.
@@ -487,6 +565,11 @@ public:
         audio::AudioProcessLoadSnapshot load;
     };
     std::vector<NodeLoadReport> node_loads() const;
+
+    // Whole-graph process-load snapshot (load == callback-budget fullness; 1.0 == a
+    // full buffer). callback_count == 0 means no measurement yet. Safe to poll while
+    // the audio thread runs. Feeds the live-swap admission gate.
+    audio::AudioProcessLoadSnapshot graph_load() const;
 
     // Test-only: run compile_() once and DISCARD the result, WITHOUT prepare()'s
     // null-first prologue. Exists so a TSan/ASan test can run compile_() on one
@@ -1041,6 +1124,22 @@ private:
     // could add/remove/re-instantiate a node without a matching re-prepare.
     std::unordered_map<NodeId, PreparedPluginMetadata> prepared_plugin_meta_;
 
+    struct StagedReplacement {
+        NodeId id = 0;
+        PluginInfo info;
+        std::shared_ptr<PluginSlot> slot;
+        PreparedPluginMetadata metadata;
+        pulp::audio::AudioProcessLoadSnapshot warmed_load;
+        bool same_identity = false;
+    };
+    std::unordered_map<NodeId, StagedReplacement> staged_replacements_;
+
+    std::unordered_map<std::uint64_t, PluginInfo> scanned_plugin_catalog_;
+    std::unordered_map<std::string, std::uint64_t> scanned_plugin_identity_to_token_;
+    std::uint64_t next_scanned_plugin_token_{1};
+    LiveSwapDiagnostics last_swap_diagnostics_;
+    PluginLoaderForTest live_swap_plugin_loader_for_test_;
+
     // Audio-thread snapshot, published by prepare() / mutators. The audio
     // thread reads live_raw_ only; live_ and retired_snapshots_ keep pointed-to
     // storage alive from the control thread until active process readers drain.
@@ -1144,6 +1243,13 @@ private:
     // prepare() vs UI poll). Control-side only; the audio thread never takes
     // it (it touches measurer OBJECTS via NodeRuntime::load, not the map).
     mutable std::mutex node_load_mu_;
+
+    // Whole-graph process load — one measurer that PERSISTS across snapshots (like
+    // node_load_). process_impl brackets each block with begin()/end() via an RAII
+    // scope; the control thread reads graph_load() for the live-swap admission gate.
+    // Heap-stable behind unique_ptr; snapshot() is concurrency-safe.
+    std::unique_ptr<audio::AudioProcessLoadMeasurer> graph_load_ =
+        std::make_unique<audio::AudioProcessLoadMeasurer>();
 
     // Serializes CONTROL-THREAD access to the source-of-truth topology — the
     // nodes_ / connections_ vectors and the plain (non-atomic) GraphNode fields
@@ -1254,6 +1360,21 @@ private:
     // on that slot (2.2b S4); falls back to the live slot for a not-yet-prepared
     // node. Edit-path only (not real-time), so the by-value copy is fine.
     std::vector<HostParamInfo> cached_or_live_params_(const GraphNode& n) const;
+    std::unique_ptr<PluginSlot> load_live_swap_plugin_(const PluginInfo& info) const;
+    pulp::audio::AudioProcessLoadSnapshot warm_staged_slot_locked_(PluginSlot& slot,
+                                                                   NodeId id) const;
+    bool node_has_feedback_edge_locked_(NodeId id) const;
+    bool node_has_parameter_or_automation_contract_locked_(NodeId id) const;
+    bool staged_replacement_relaxes_identity_locked_(NodeId id) const;
+    void set_live_swap_diagnostics_locked_(LiveSwapFallbackReason reason,
+                                           NodeId node,
+                                           std::string message);
+    SwapResult fail_swap_edit_locked_(LiveSwapFallbackReason reason,
+                                      NodeId node,
+                                      std::string message);
+    void cancel_swap_edit_locked_();
+    std::vector<audio::AudioProcessLoadSnapshot>
+    staged_node_loads_locked_() const;
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
     void invalidate_live_();
@@ -1287,5 +1408,24 @@ private:
 NodeId add_plugin_node_from_drop(SignalGraph& graph,
                                  const PluginInfo& info,
                                  bool* loaded_out = nullptr);
+
+// Live-swap admission decision: whether a live plugin-instance swap can proceed
+// without risking an xrun, plus a stable reason for diagnostics.
+struct LiveSwapAdmission {
+    bool admit = false;
+    const char* reason = "no history";
+};
+
+// Decide whether a live plugin-instance swap is admissible under the current audio
+// load. CONSERVATIVE (deny on uncertainty): if the whole-graph OR any staged node has
+// fewer than min_callbacks of measured history, deny with "no history" — an unmeasured
+// path could xrun and the eager-silence fallback is the safe outcome. Otherwise admit
+// iff max(graph.load, graph.last_load) + the sum over staged nodes of
+// max(node.load, node.last_load) (the fade's added second-render cost) is within
+// headroom_threshold. Pure — no graph state, so it is unit-testable in isolation.
+LiveSwapAdmission evaluate_live_swap_admission(
+    const audio::AudioProcessLoadSnapshot& graph,
+    const std::vector<audio::AudioProcessLoadSnapshot>& staged_nodes,
+    float headroom_threshold, std::uint64_t min_callbacks);
 
 } // namespace pulp::host

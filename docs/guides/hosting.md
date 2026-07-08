@@ -73,6 +73,22 @@ graph.connect(plug, 0, out,  0);
 Execution walks `graph.processing_order()` each block and invokes
 `PluginSlot::process()` on each plugin node.
 
+## Swapping a hosted plugin live
+
+Because the graph owns each hosted plugin behind a node, you can **replace
+the plugin sitting in a node while audio keeps playing** — re-instantiate
+the same plugin to reset it or feed it different state, or fall back to
+substituting a different one. When the change can be made seamlessly the
+audio stream never drops out; otherwise the graph re-prepares with a brief
+silence. Opt a node in with `set_node_live_swap_policy()`, register the
+plugins you're willing to swap in with `register_scanned_plugin()`, then
+stage and commit the change inside a `begin_swap_edit()` /
+`prepare_swap()` transaction. No new code is loaded — the swap only
+rearranges plugins already installed and scanned on the machine — so it
+carries no signing or trust surface. See
+[Live plugin swap](../reference/signal-graph.md#live-plugin-swap) for the
+full workflow and the fail-closed checks that protect the stream.
+
 ## Delay compensation (PDC)
 
 `PluginSlot::latency_samples()` reports per-node latency. The graph sums

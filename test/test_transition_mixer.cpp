@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <vector>
 
 using pulp::signal::TransitionCurve;
@@ -89,4 +90,53 @@ TEST_CASE("TransitionMixer EqualPower is constant-power + click-free", "[signal]
     float o, n; m.gains_at(256, o, n);
     REQUIRE(o == Catch::Approx(0.70710678f).margin(0.001));
     REQUIRE(n == Catch::Approx(0.70710678f).margin(0.001));
+}
+
+namespace {
+// Minimal BufferView-shaped mock so we can exercise the templated blend_fade_out
+// without pulling the audio buffer headers into this signal-only fixture.
+struct MockView {
+    std::vector<std::vector<float>> ch;
+    std::size_t num_channels() const { return ch.size(); }
+    std::size_t num_samples() const { return ch.empty() ? 0 : ch[0].size(); }
+    std::span<float> channel(std::size_t i) { return std::span<float>(ch[i]); }
+    std::span<const float> channel(std::size_t i) const { return std::span<const float>(ch[i]); }
+};
+}  // namespace
+
+TEST_CASE("blend_fade_out is click-free and reports completion", "[transition][blend]") {
+    const std::size_t frames = 64;
+
+    SECTION("Smoothstep equal-gain: identical old/new stays flat at 1.0 (no click)") {
+        TransitionMixer m;
+        m.configure(frames, TransitionCurve::Smoothstep);
+        MockView out{{std::vector<float>(frames, 1.0f)}};   // new render
+        MockView old{{std::vector<float>(frames, 1.0f)}};   // fading-out render
+        const bool done = pulp::signal::blend_fade_out(m, out, old);
+        for (float v : out.ch[0]) CHECK_THAT(v, WithinAbs(1.0f, 1e-6));  // old_gain+new_gain==1
+        CHECK(done);  // advanced by frames == configured length
+    }
+    SECTION("EqualPower: identical old/new stays bounded in [1, sqrt2]") {
+        TransitionMixer m;
+        m.configure(frames, TransitionCurve::EqualPower);
+        MockView out{{std::vector<float>(frames, 1.0f)}};
+        MockView old{{std::vector<float>(frames, 1.0f)}};
+        pulp::signal::blend_fade_out(m, out, old);
+        for (float v : out.ch[0]) {
+            CHECK(v >= 0.99f);
+            CHECK(v <= 1.4143f);  // cos+sin peaks at sqrt2
+        }
+    }
+    SECTION("a completed mixer reports done and leaves output as the new render") {
+        TransitionMixer m;
+        m.configure(frames, TransitionCurve::Smoothstep);
+        MockView out{{std::vector<float>(frames, 0.5f)}};
+        MockView old{{std::vector<float>(frames, 0.0f)}};
+        CHECK(pulp::signal::blend_fade_out(m, out, old));  // one block finishes it
+        // second call: mixer already done -> gains are full-new, output unchanged
+        MockView out2{{std::vector<float>(frames, 0.5f)}};
+        MockView old2{{std::vector<float>(frames, 9.0f)}};
+        CHECK(pulp::signal::blend_fade_out(m, out2, old2));
+        for (float v : out2.ch[0]) CHECK_THAT(v, WithinAbs(0.5f, 1e-6));  // old fully faded out
+    }
 }
