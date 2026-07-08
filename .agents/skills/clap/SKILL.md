@@ -38,6 +38,7 @@ binary and CLAP is the fastest iteration lane because the
 | Entry-point generator macro | `core/format/include/pulp/format/clap_entry.hpp` |
 | CLAP module (FetchContent) | declared in `CMakeLists.txt`; CLAP headers are MIT and fetched at configure time — there is no hand-written `PulpClap.cmake` |
 | WebAssembly compact variant (wclap) | `tools/cmake/PulpWclap.cmake`, `core/format/src/wasm/` |
+| Remote-control page builder | `core/format/src/clap_remote_controls.cpp` |
 | CLAP+ARA surface | `core/format/src/ara*`, see the `ara` skill |
 | Tests | `test/test_clap_entry.cpp` (dlopen + descriptor), `test/test_clap_ara_extension.cpp` (ARA companion factory), `test/test_clap_webview.cpp` (WebView bridge) |
 | CLI validator invocation | `tools/cli/cmd_validate.cpp` (`clap-validator validate …` with dlopen-only fallback) |
@@ -394,6 +395,24 @@ add another adapter that needs the same edge.
 `desc.manufacturer`/`desc.name`). Today only
 `CLAP_PRESET_DISCOVERY_LOCATION_FILE` is honoured; bundle- and plugin-
 internal preset sources are ignored and return false.
+
+### Remote controls and dynamic extension routing
+
+`clap_entry.hpp::get_extension(plugin, id)` handles static extensions first,
+then delegates to `clap_adapter::clap_get_extension(plugin, id)` for
+instance-owned extensions such as `preset-load`, ARA, and
+`clap.remote-controls/2`. Any new adapter-owned extension must be reachable
+through the real host callback path, not only through direct unit-test calls
+to the adapter helper.
+
+Remote-control page generation lives in `clap_remote_controls.cpp`. It is a
+main-thread, metadata-only extension: build pages from `StateStore` parameter
+and group metadata, do not touch DSP state, and do not add audio-thread work
+to `clap_process()`. The current pages expose ungrouped params as `Main`,
+then grouped params in registered group order, eight params per page, with
+unused slots set to `CLAP_INVALID_ID`. Keep the stable
+`CLAP_EXT_REMOTE_CONTROLS` id and the compatibility id routed together unless
+the CLAP headers remove the older spelling.
 
 ## Gotchas
 

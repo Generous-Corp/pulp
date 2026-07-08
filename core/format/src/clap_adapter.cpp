@@ -1,6 +1,8 @@
 // CLAP Adapter implementation
 // Implements the CLAP C API wrapping a Pulp Processor
 
+#include "clap_remote_controls.hpp"
+
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
@@ -1266,12 +1268,24 @@ static const clap_plugin_preset_load_t s_preset_load = {
 };
 
 const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
+    if (!plugin) return nullptr;
+    if (!id) return nullptr;
     auto* self = get_self(plugin);
+    if (!self) return nullptr;
 
     // Only expose preset-load if the plugin has a PresetManager
     if (self->preset_manager) {
         if (std::strcmp(id, CLAP_EXT_PRESET_LOAD) == 0) return &s_preset_load;
         if (std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT) == 0) return &s_preset_load;
+    }
+
+    if (self->store.param_count() > 0) {
+        if (std::strcmp(id, CLAP_EXT_REMOTE_CONTROLS) == 0) {
+            return remote_controls_extension();
+        }
+        if (std::strcmp(id, CLAP_EXT_REMOTE_CONTROLS_COMPAT) == 0) {
+            return remote_controls_extension();
+        }
     }
 
     // ARA companion factory. Lazily instantiate the controller the first time

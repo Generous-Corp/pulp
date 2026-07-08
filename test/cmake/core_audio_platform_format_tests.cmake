@@ -108,6 +108,7 @@ pulp_add_test_suite(pulp-test-diagnostic SOURCES test_diagnostic_reporter.cpp LI
 if(PULP_HAS_CLAP)
     add_executable(pulp-test-clap-entry test_clap_entry.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
     )
     target_link_libraries(pulp-test-clap-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-clap-entry PRIVATE PULP_CLAP_GUI=1)
@@ -136,6 +137,7 @@ if(PULP_HAS_CLAP)
     # PULP_CLAP_PLUGIN(...) entry-symbol generator.
     add_executable(pulp-test-clap-host-validation test_clap_host_validation.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
     )
     target_link_libraries(pulp-test-clap-host-validation PRIVATE pulp::format clap Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-clap-host-validation PRIVATE PULP_CLAP_GUI=1)
