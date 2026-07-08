@@ -47,6 +47,7 @@
 #include <pulp/view/command_registry.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/system.hpp>
 
 namespace pulp::format {
@@ -88,75 +89,7 @@ StandaloneApp::~StandaloneApp() {
     stop();
 }
 
-bool StandaloneApp::start() {
-    // Create the processor once and reuse it across audio reconfigurations
-    // (apply_config soft-restart). Recreating it on every settings change would
-    // dangle an editor ViewBridge holding a Processor&; parameters are
-    // defined a single time so the StateStore isn't re-registered on restart.
-    if (!processor_) {
-        processor_ = factory_();
-        if (!processor_) {
-            runtime::log_error("Standalone: failed to create processor");
-            return false;
-        }
-        processor_->set_state_store(&store_);
-        processor_->define_parameters(store_);
-    }
-
-    auto desc = processor_->descriptor();
-    runtime::log_info("Standalone: starting '{}'", desc.name);
-
-    // Restore the user's last-used audio/MIDI selection (default on; developer can opt out
-    // via StandaloneConfig::persist_settings). Overlays persisted keys onto the configured
-    // defaults, so the first launch (no saved file) keeps exactly what the app configured.
-    if (config_.persist_settings && !persisted_config_loaded_) {
-        config_ = load_persisted_config(desc.name, config_);
-        persisted_config_loaded_ = true;  // don't re-overlay on soft restarts (apply_config)
-    }
-
-    const bool processor_has_audio_input = !desc.input_buses.empty();
-    config_.supports_audio_input = config_.supports_audio_input && processor_has_audio_input;
-    if (!config_.supports_audio_input) {
-        config_.input_channels = 0;
-        // An instrument has no input bus to inject the test tone into, so the
-        // audio-settings test signal must go straight to the OUTPUT — otherwise it
-        // feeds a non-existent input and the user sees the meter LED but hears
-        // nothing. (Effects keep the default input-injection so the tone is
-        // processed by the effect.)
-        config_.route_test_signal_to_output = true;
-    }
-    constrain_audio_config(config_);
-
-    // Set up audio
-    audio_system_ = audio::create_audio_system();
-    audio_device_ = audio_system_->create_device(config_.audio_device_id);
-    if (!audio_device_) {
-        runtime::log_error("Standalone: failed to create audio device");
-        return false;
-    }
-
-    audio::DeviceConfig audio_config;
-    audio_config.device_id = config_.audio_device_id;
-    audio_config.sample_rate = config_.sample_rate;
-    audio_config.buffer_size = config_.buffer_size;
-    audio_config.output_channels = config_.output_channels;
-    audio_config.input_channels = config_.input_channels;
-
-    if (!audio_device_->open(audio_config)) {
-        runtime::log_error("Standalone: failed to open audio device");
-        return false;
-    }
-
-    // Only remember a CONCRETE device id when the user explicitly pinned one. For
-    // the default-following case keep audio_device_id empty so the next launch (and
-    // the live default-device listener) keep tracking the system default output —
-    // overwriting it with the resolved id here would pin the app to whatever was
-    // default at launch and it would only "follow" on relaunch.
-    if (!config_.audio_device_id.empty())
-        config_.audio_device_id = audio_device_->info().id;
-    config_.sample_rate = audio_device_->sample_rate();
-    config_.buffer_size = audio_device_->buffer_size();
-
+void StandaloneApp::prepare_render_state() {
     // The device's nominal buffer_size is NOT the largest block the audio
     // callback can deliver. When the hardware runs at a different sample rate
     // than the app, CoreAudio (and other backends) insert a resampler that
@@ -264,31 +197,12 @@ bool StandaloneApp::start() {
         rolling_capture_active_ = rolling_capture_.prepare(rolling_config);
     }
 #endif
+}
 
-    // Set up MIDI input (optional)
-    if (desc.accepts_midi) {
-        midi_system_ = midi::create_midi_system();
-        auto inputs = midi_system_->enumerate_inputs();
-        if (!inputs.empty()) {
-            midi_input_ = midi_system_->create_input();
-            auto midi_port_id = config_.midi_input_id.empty()
-                ? inputs[0].id : config_.midi_input_id;
-            midi_input_->open(midi_port_id, [this](const midi::MidiEvent& event) {
-                (void)hardware_midi_queue_.try_push(event);
-            });
-            if (midi_input_->is_open()) {
-                runtime::log_info("Standalone: MIDI input connected");
-            }
-        }
-    }
-
-    // Start audio
-    running_.store(true);
-    auto ok = audio_device_->start([this](
-        const audio::BufferView<const float>& input,
-        audio::BufferView<float>& output,
-        const audio::CallbackContext& ctx)
-    {
+void StandaloneApp::render_audio_block(
+    const audio::BufferView<const float>& input,
+    audio::BufferView<float>& output,
+    const audio::CallbackContext& ctx) {
         // Hard guard: the processor and all scratch buffers were prepared for at
         // most `max_callback_block_` frames (see start()). A block beyond that —
         // which would indicate a backend not honoring MaximumFramesPerSlice —
@@ -466,6 +380,11 @@ bool StandaloneApp::start() {
             // restore the host's FP mode. See docs/guides/dsp-threading.md
             // "Numeric mode".
             pulp::signal::ScopedFlushDenormals flush_denormals;
+            // Audio-thread render must neither allocate nor take a blocking
+            // lock. ScopedNoAlloc scopes just the process() call (the meter
+            // push below runs outside it) so the RT interposition guard traps a
+            // regression in test builds.
+            pulp::runtime::ScopedNoAlloc no_alloc_guard;
             processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
         }
 
@@ -495,6 +414,104 @@ bool StandaloneApp::start() {
             transport_position_samples_.fetch_add(
                 ctx.buffer_size, std::memory_order_relaxed);
         }
+}
+
+bool StandaloneApp::start() {
+    // Create the processor once and reuse it across audio reconfigurations
+    // (apply_config soft-restart). Recreating it on every settings change would
+    // dangle an editor ViewBridge holding a Processor&; parameters are
+    // defined a single time so the StateStore isn't re-registered on restart.
+    if (!processor_) {
+        processor_ = factory_();
+        if (!processor_) {
+            runtime::log_error("Standalone: failed to create processor");
+            return false;
+        }
+        processor_->set_state_store(&store_);
+        processor_->define_parameters(store_);
+    }
+
+    auto desc = processor_->descriptor();
+    runtime::log_info("Standalone: starting '{}'", desc.name);
+
+    // Restore the user's last-used audio/MIDI selection (default on; developer can opt out
+    // via StandaloneConfig::persist_settings). Overlays persisted keys onto the configured
+    // defaults, so the first launch (no saved file) keeps exactly what the app configured.
+    if (config_.persist_settings && !persisted_config_loaded_) {
+        config_ = load_persisted_config(desc.name, config_);
+        persisted_config_loaded_ = true;  // don't re-overlay on soft restarts (apply_config)
+    }
+
+    const bool processor_has_audio_input = !desc.input_buses.empty();
+    config_.supports_audio_input = config_.supports_audio_input && processor_has_audio_input;
+    if (!config_.supports_audio_input) {
+        config_.input_channels = 0;
+        // An instrument has no input bus to inject the test tone into, so the
+        // audio-settings test signal must go straight to the OUTPUT — otherwise it
+        // feeds a non-existent input and the user sees the meter LED but hears
+        // nothing. (Effects keep the default input-injection so the tone is
+        // processed by the effect.)
+        config_.route_test_signal_to_output = true;
+    }
+    constrain_audio_config(config_);
+
+    // Set up audio
+    audio_system_ = audio::create_audio_system();
+    audio_device_ = audio_system_->create_device(config_.audio_device_id);
+    if (!audio_device_) {
+        runtime::log_error("Standalone: failed to create audio device");
+        return false;
+    }
+
+    audio::DeviceConfig audio_config;
+    audio_config.device_id = config_.audio_device_id;
+    audio_config.sample_rate = config_.sample_rate;
+    audio_config.buffer_size = config_.buffer_size;
+    audio_config.output_channels = config_.output_channels;
+    audio_config.input_channels = config_.input_channels;
+
+    if (!audio_device_->open(audio_config)) {
+        runtime::log_error("Standalone: failed to open audio device");
+        return false;
+    }
+
+    // Only remember a CONCRETE device id when the user explicitly pinned one. For
+    // the default-following case keep audio_device_id empty so the next launch (and
+    // the live default-device listener) keep tracking the system default output —
+    // overwriting it with the resolved id here would pin the app to whatever was
+    // default at launch and it would only "follow" on relaunch.
+    if (!config_.audio_device_id.empty())
+        config_.audio_device_id = audio_device_->info().id;
+    config_.sample_rate = audio_device_->sample_rate();
+    config_.buffer_size = audio_device_->buffer_size();
+
+    prepare_render_state();
+
+    // Set up MIDI input (optional)
+    if (desc.accepts_midi) {
+        midi_system_ = midi::create_midi_system();
+        auto inputs = midi_system_->enumerate_inputs();
+        if (!inputs.empty()) {
+            midi_input_ = midi_system_->create_input();
+            auto midi_port_id = config_.midi_input_id.empty()
+                ? inputs[0].id : config_.midi_input_id;
+            midi_input_->open(midi_port_id, [this](const midi::MidiEvent& event) {
+                (void)hardware_midi_queue_.try_push(event);
+            });
+            if (midi_input_->is_open()) {
+                runtime::log_info("Standalone: MIDI input connected");
+            }
+        }
+    }
+
+    // Start audio
+    running_.store(true);
+    auto ok = audio_device_->start([this](
+        const audio::BufferView<const float>& input,
+        audio::BufferView<float>& output,
+        const audio::CallbackContext& ctx)
+    {
+        render_audio_block(input, output, ctx);
     });
 
     if (!ok) {
