@@ -514,3 +514,114 @@ TEST_CASE("StepGridView resync escalates to a full repaint",
 
     REQUIRE(host.pending_repaint_is_full());
 }
+
+// ── Freeze coverage: parametric configs + custom cell policy + self-heal ─────
+namespace {
+using YssConfig2 = SequencerConfig<5, 16, 8, StepCell>;
+using YssChannel2 = SequencerStateChannelT<YssConfig2>;
+
+struct VineCell2 {
+    std::uint16_t growth = 0;
+    std::uint8_t on = 0;
+};
+struct VinePolicy2 {
+    static StepGridViewBase::CellVisual visual(const VineCell2& c, bool muted) {
+        return {c.on != 0, std::clamp(c.growth / 65535.0f, 0.0f, 1.0f), muted};
+    }
+    static VineCell2 make_set_cell(const VineCell2& old, bool enabled) {
+        VineCell2 c = old;
+        c.on = enabled ? 1 : 0;
+        if (enabled && c.growth == 0) c.growth = 1000;
+        return c;
+    }
+};
+using VineConfig2 = SequencerConfig<6, 8, 2, VineCell2>;
+using VineChannel2 = SequencerStateChannelT<VineConfig2>;
+} // namespace
+
+TEST_CASE("StepGridViewT drives a second non-square config from a snapshot",
+          "[view][sequencer][freeze]") {
+    YssChannel2 ch;
+    StepGridViewT<YssConfig2> v;
+    v.set_bounds(Rect{0, 0, 160, 80});
+    v.set_channel(&ch);
+
+    YssChannel2::Snapshot s;
+    s.epoch = 1;
+    s.engine_sequence = 3;
+    s.patterns[0].lanes[4][15].flags = StepCell::kEnabledBit;  // lane 4 (<5), step 15 (<16)
+    s.patterns[0].lanes[4][15].velocity = 90;
+    ch.audio_publish_snapshot(s);
+    ch.audio_mark_resync_required(1);
+
+    auto r = v.pump();
+    REQUIRE(r.resynced);
+    REQUIRE(v.cell_visual(4, 15).enabled);
+    REQUIRE(v.cell_visual(0, 0).enabled == false);
+    REQUIRE(v.last_engine_sequence() == 3);
+}
+
+TEST_CASE("StepGridViewT with a custom cell policy projects visuals and edits",
+          "[view][sequencer][freeze]") {
+    VineChannel2 ch;
+    StepGridViewT<VineConfig2, VinePolicy2> v;
+    v.set_bounds(Rect{0, 0, 80, 60});  // 8 steps x 6 lanes
+    v.set_channel(&ch);
+
+    VineChannel2::Snapshot s;
+    s.epoch = 1;
+    s.engine_sequence = 1;
+    VineCell2 cell;
+    cell.on = 1;
+    cell.growth = 32768;
+    s.patterns[0].lanes[2][3] = cell;
+    ch.audio_publish_snapshot(s);
+    ch.audio_mark_resync_required(1);
+    v.pump();
+
+    REQUIRE(v.cell_visual(2, 3).enabled);
+    REQUIRE(v.cell_visual(2, 3).intensity > 0.4f);
+
+    // Edit path: a click on cell (0,0) submits a policy-made cell through the channel.
+    v.on_mouse_down(Point{5, 5});
+    v.on_mouse_up(Point{5, 5});
+    auto cmd = ch.audio_try_pop_command();
+    REQUIRE(cmd.has_value());
+    REQUIRE(cmd->kind == StepEditKind::SetCell);
+    REQUIRE(cmd->payload.set_cell.cell.on == 1);  // policy enabled a fresh cell
+}
+
+TEST_CASE("StepGridView self-heals when the resync bar precedes the matching snapshot",
+          "[view][sequencer][freeze]") {
+    SequencerStateChannel ch;
+    StepGridView v;
+    v.set_bounds(Rect{0, 0, 320, 96});
+    v.set_channel(&ch);
+
+    // Reversed ordering: the bar is raised to 10 but only an epoch-5 snapshot exists.
+    Snapshot s;
+    s.epoch = 5;
+    s.engine_sequence = 2;
+    s.patterns[0].lanes[1][1] = on_cell(70);
+    ch.audio_publish_snapshot(s);
+    ch.audio_mark_resync_required(10);
+
+    auto r1 = v.pump();
+    REQUIRE(r1.resynced);
+    REQUIRE(v.cell_visual(1, 1).enabled);  // render copy correct, never corrupted
+
+    // Still below the bar: keeps resyncing (glitchy but safe), no corruption.
+    auto r2 = v.pump();
+    REQUIRE(r2.resynced);
+    REQUIRE(v.cell_visual(1, 1).enabled);
+
+    // The matching snapshot arrives; the view converges and stops resyncing.
+    Snapshot s2 = s;
+    s2.epoch = 10;
+    ch.audio_publish_snapshot(s2);
+    ch.audio_mark_resync_required(10);
+    v.pump();
+    auto r4 = v.pump();
+    REQUIRE(r4.resynced == false);  // converged
+    REQUIRE(v.cell_visual(1, 1).enabled);
+}
