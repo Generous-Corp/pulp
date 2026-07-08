@@ -356,9 +356,9 @@ BakedGraphProcessor::BakedGraphProcessor(
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors)
     : nodes_(std::move(nodes)),
       conns_(std::move(connections)),
+      custom_processors_(std::move(custom_processors)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
-      custom_processors_(std::move(custom_processors)),
       input_channels_(input_channels),
       output_channels_(output_channels) {}
 
