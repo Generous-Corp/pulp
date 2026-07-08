@@ -257,6 +257,16 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `examples/web-demos/*/{browser-test,browser-host}/validate.mjs`; run them
   locally with a system Chrome/Canary via `node validate.mjs --screenshot out.png`
   (set `CHROME_PATH` or pass `--browser`).
+- **Android native `.cxx` caches must be dependency-aware.** The Android workflow
+  builds through Gradle's external native build, and `android/app/.cxx` can hold
+  FetchContent checkouts under `_deps`. Do not cache `.cxx` under a Gradle-only
+  key or a broad Gradle restore key: after a native dependency bump, CMake's
+  `UPDATE_DISCONNECTED` path can see the stale local checkout and fail because
+  the new git ref is not present. Keep the Gradle cache (`~/.gradle`) separate
+  from the native CMake cache, key `.cxx` on the native dependency inputs
+  (`CMakeLists.txt`, `tools/cmake/PulpAndroid.cmake`,
+  `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
+  Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
 - **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
   intent-trailer model — and it ships DORMANT.** It exists to kill the
   version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
