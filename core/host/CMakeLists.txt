@@ -22,6 +22,7 @@ target_sources(pulp-host PRIVATE
     src/node_pack.cpp
     src/signal_graph_executor_routing.cpp
     src/baked_graph_processor.cpp
+    src/baked_codec.cpp
     src/anticipation_eligibility.cpp
     src/anticipation_partition.cpp
     src/anticipation_subgraph.cpp
