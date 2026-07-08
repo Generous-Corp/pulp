@@ -13,7 +13,7 @@
 
 #pragma once
 
-#include <pulp/host/graph_types.hpp>
+#include <pulp/host/signal_graph.hpp>  // NodeId, NodeType
 
 #include <cstddef>
 #include <cstdint>

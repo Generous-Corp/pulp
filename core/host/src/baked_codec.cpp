@@ -129,8 +129,8 @@ std::optional<BakedPlan> parse_plan_bounded(std::span<const std::uint8_t> bytes)
     plan.input_channels = static_cast<int>(r.u32());
     plan.output_channels = static_cast<int>(r.u32());
     if (!r.ok || plan.input_channels < 0 || plan.output_channels < 0 ||
-        plan.input_channels > kBakedMaxTotalPorts ||
-        plan.output_channels > kBakedMaxTotalPorts) {
+        static_cast<std::size_t>(plan.input_channels) > kBakedMaxTotalPorts ||
+        static_cast<std::size_t>(plan.output_channels) > kBakedMaxTotalPorts) {
         return std::nullopt;
     }
 

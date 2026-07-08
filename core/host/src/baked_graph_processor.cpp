@@ -209,9 +209,9 @@ BakedGraphProcessor::BakedGraphProcessor(
       conns_(std::move(connections)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
+      custom_processors_(std::move(custom_processors)),
       input_channels_(input_channels),
-      output_channels_(output_channels),
-      custom_processors_(std::move(custom_processors)) {}
+      output_channels_(output_channels) {}
 
 fmt::PluginDescriptor BakedGraphProcessor::descriptor() const {
     fmt::PluginDescriptor desc;
