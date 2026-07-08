@@ -185,6 +185,94 @@ class ComposeReleaseNotesTests(unittest.TestCase):
         with mock.patch.object(crn.subprocess, "run", return_value=completed):
             self.assertTrue(crn.pr_has_breaking_label("12", "example/repo"))
 
+    def compose_tier(self, tag: str, tier: str) -> str:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                tag,
+                "--repo-url",
+                "https://github.com/example/repo",
+                "--tier",
+                tier,
+            ],
+            cwd=self.repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
+
+    def test_patch_tier_emits_light_grouped_body_without_highlights_heading(self) -> None:
+        # v0.1.0 -> v0.1.1 is a patch delta; auto tier must drop the Highlights H2
+        # wrapper while keeping the grouped section headers + bullets.
+        git(self.repo, "checkout", "-q", "-b", "fixbranch")
+        commit(self.repo, "fix(audio): correct gain ramp")
+        merge_pr(self.repo, "fixbranch", 21, "fix(audio): correct gain ramp")
+        git(self.repo, "tag", "v0.1.1")
+
+        notes = self.compose("v0.1.1")
+
+        self.assertNotIn("## Highlights", notes)
+        self.assertIn("### 🐛 Fixes", notes)
+        self.assertIn("fix(audio): correct gain ramp", notes)
+
+    def test_minor_tier_emits_full_highlights_heading(self) -> None:
+        # v0.1.0 -> v0.2.0 is a minor delta; auto tier keeps the full shape.
+        git(self.repo, "checkout", "-q", "-b", "featbranch")
+        commit(self.repo, "feat(view): add scope")
+        merge_pr(self.repo, "featbranch", 22, "feat(view): add scope")
+        git(self.repo, "tag", "v0.2.0")
+
+        notes = self.compose("v0.2.0")
+
+        self.assertIn("## Highlights", notes)
+        self.assertIn("### ✨ Features", notes)
+
+    def test_patch_tier_still_renders_breaking_section(self) -> None:
+        # A breaking change on a patch tag must still surface the ⚠️ section first.
+        git(self.repo, "checkout", "-q", "-b", "breakpatch")
+        commit(
+            self.repo,
+            "fix!: drop legacy path",
+            "BREAKING CHANGE: legacy path removed.",
+        )
+        merge_pr(self.repo, "breakpatch", 23, "fix!: drop legacy path")
+        git(self.repo, "tag", "v0.1.1")
+
+        notes = self.compose_tier("v0.1.1", "patch")
+
+        self.assertIn("## ⚠️ Breaking Changes", notes)
+        self.assertNotIn("## Highlights", notes)
+
+    def test_explicit_tier_override_forces_full_body_on_patch_tag(self) -> None:
+        git(self.repo, "checkout", "-q", "-b", "ovr")
+        commit(self.repo, "fix(ui): tweak spacing")
+        merge_pr(self.repo, "ovr", 24, "fix(ui): tweak spacing")
+        git(self.repo, "tag", "v0.1.1")
+
+        notes = self.compose_tier("v0.1.1", "minor")
+
+        self.assertIn("## Highlights", notes)
+
+    def test_bump_level_classifies_semver_deltas(self) -> None:
+        self.assertEqual(crn.bump_level("v0.1.1", "v0.1.0"), "patch")
+        self.assertEqual(crn.bump_level("v0.2.0", "v0.1.0"), "minor")
+        self.assertEqual(crn.bump_level("v1.0.0", "v0.9.3"), "major")
+        # no previous tag (first-ever release) => unknown (falls back to full body)
+        self.assertEqual(crn.bump_level("v0.1.0", None), "unknown")
+        # non-semver tag => unknown
+        self.assertEqual(crn.bump_level("nightly-2026", "v0.1.0"), "unknown")
+        # identical => unknown (no delta to classify)
+        self.assertEqual(crn.bump_level("v0.1.0", "v0.1.0"), "unknown")
+
+    def test_parse_semver_variants(self) -> None:
+        self.assertEqual(crn.parse_semver("v1.2.3"), (1, 2, 3))
+        self.assertEqual(crn.parse_semver("1.2.3"), (1, 2, 3))
+        self.assertEqual(crn.parse_semver("v1.2.3-rc1"), (1, 2, 3))
+        self.assertIsNone(crn.parse_semver("nightly"))
+        self.assertIsNone(crn.parse_semver(None))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
