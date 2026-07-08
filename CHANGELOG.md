@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06120"></a>
+## [0.612.0] - 2026-07-08
+
+- feat(format): add CLAP remote controls support ([#5734](https://github.com/danielraffel/pulp/pull/5734))
+- docs: surface the bake + signed .pulpbake capability in modules + capabilities ([#5726](https://github.com/danielraffel/pulp/pull/5726))
+
 <a id="v06110"></a>
 ## [0.611.0] - 2026-07-08
 
@@ -6086,6 +6092,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.612.0]: https://github.com/danielraffel/pulp/releases/tag/v0.612.0
 [0.611.0]: https://github.com/danielraffel/pulp/releases/tag/v0.611.0
 [0.610.0]: https://github.com/danielraffel/pulp/releases/tag/v0.610.0
 [0.609.1]: https://github.com/danielraffel/pulp/releases/tag/v0.609.1
