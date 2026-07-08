@@ -74,6 +74,13 @@ pulp_add_test_suite(pulp-test-view-design-viewport LIBRARIES pulp::view)
 # plugin-view hosts and a foreign-host embed tick gate repaint on.
 pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 
+# Frame-pipeline Perfetto instrumentation: drives frames headlessly through the
+# offscreen GPU path and proves the render/layout/canvas/gpu spans land in the
+# flushed trace (PULP_TRACING=ON), or the no-op contract holds (OFF). Self-skips
+# without a GPU capture backend. pulp::view carries the tracing interface + GPU
+# frame path transitively.
+pulp_add_test_suite(pulp-test-trace-frame-pipeline LIBRARIES pulp::view)
+
 # Sub-view rect-level partial invalidation: View::request_repaint(Rect) →
 # WindowHost dirty-region accumulation. Pins the local->root mapping, the
 # bounding-box union, and the full-repaint escalations (no-arg, transform,

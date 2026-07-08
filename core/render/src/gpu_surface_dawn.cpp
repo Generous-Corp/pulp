@@ -11,6 +11,7 @@
 // This ensures a single Dawn device can be shared with SkiaSurface.
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include "webgpu/webgpu_cpp.h"
 #include "dawn/native/DawnNative.h"
 #include "dawn/dawn_proc.h"
@@ -288,6 +289,9 @@ public:
     }
 
     void end_frame() override {
+        // Present the acquired surface texture — the GPU-present stage of the
+        // frame pipeline.
+        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_present");
         if (surface_ && current_texture_) {
             surface_.Present();
             current_texture_ = nullptr;  // texture invalid after present

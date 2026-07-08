@@ -15,6 +15,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 
 #ifdef PULP_VIEW_HAS_GPU_CAPTURE
 #include <pulp/render/headless_surface.hpp>
@@ -81,9 +82,12 @@ void paint_root(canvas::Canvas& c, View& root, uint32_t w, uint32_t h) {
     c.set_fill_color(canvas::Color::rgba8(30, 30, 46));
     c.fill_rect(0, 0, static_cast<float>(w), static_cast<float>(h));
     root.set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
-    root.layout_children();
-    root.paint_all(c);
-    View::paint_overlays(c, &root);
+    root.layout_children();  // emits the "layout" span (View::layout_children)
+    {
+        PULP_TRACE_SCOPE_NAMED("canvas", "paint");
+        root.paint_all(c);
+        View::paint_overlays(c, &root);
+    }
 }
 #endif
 

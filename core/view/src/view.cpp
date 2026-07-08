@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/gesture.hpp>
 #include <pulp/view/window_host.hpp>
@@ -2038,6 +2039,11 @@ void yoga_layout(View& root); // implemented in yoga_layout.cpp
 #endif
 
 void View::layout_children() {
+    // Frame-pipeline layout pass. With Yoga the root call lays out the whole
+    // subtree in one shot, so this reads as one span per frame; grid / custom
+    // subtrees that recurse show as nested layout spans.
+    PULP_TRACE_SCOPE_NAMED("layout", "layout_children");
+
     if (children_.empty()) return;
 
     // Dispatch to grid layout if layout mode is grid

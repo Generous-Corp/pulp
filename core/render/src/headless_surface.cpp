@@ -21,6 +21,7 @@
 #include <pulp/render/headless_surface.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/runtime/trace.hpp>
 
 #if defined(PULP_HAS_SKIA)
 #include "include/core/SkData.h"
@@ -56,6 +57,13 @@ public:
     }
 
     Rgba render_rgba(const PaintFn& paint) override {
+        // Top-level frame span for the offscreen frame driver — the headless
+        // sibling of the live host's per-frame render handler. frame_index_
+        // counts frames rendered through THIS surface (0 for a one-shot).
+        const std::uint64_t frame_index = frame_index_++;
+        PULP_TRACE_SCOPE_NAMED_ARGS("render", "frame", "frame_index", frame_index);
+        (void)frame_index;
+
         last_error_.clear();
         Rgba out;
         if (!is_ready()) {
@@ -136,6 +144,7 @@ private:
     std::unique_ptr<SkiaSurface> skia_;
     Config config_;
     mutable std::string last_error_;
+    std::uint64_t frame_index_ = 0;  // frame counter for the "frame" trace span
 };
 
 #else  // !PULP_HAS_SKIA

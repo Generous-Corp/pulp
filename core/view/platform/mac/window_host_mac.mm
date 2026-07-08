@@ -3,6 +3,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/continuous_frames.hpp>
@@ -2565,8 +2566,11 @@ private:
         } else {
             root_.set_bounds({0, 0, width_, height_});
         }
-        root_.layout_children();
+        root_.layout_children();  // emits the "layout" span
 
+        // Paint pass: background fill + view-tree paint into the canvas. Runs
+        // after layout, before the GPU submit/present in render_frame.
+        PULP_TRACE_SCOPE_NAMED("canvas", "paint");
         canvas.set_fill_color(canvas::Color::rgba8(30, 30, 46));
         canvas.fill_rect(0, 0, width_, height_);
 
@@ -2599,6 +2603,12 @@ private:
     bool render_frame(std::vector<uint8_t>* capture_pixels = nullptr,
                       uint32_t* capture_width = nullptr,
                       uint32_t* capture_height = nullptr) {
+        // Top-level frame span for the live host frame handler: one per rendered
+        // frame, tagged with the FrameClock's monotonic frame index. This is the
+        // real per-frame drive point (layout → paint → submit → present below).
+        PULP_TRACE_SCOPE_NAMED_ARGS("render", "frame", "frame_index",
+                                    frame_clock_.frame());
+
         if (!gpu_surface_ || !skia_surface_) return false;
 
         // Emit the per-frame dirty-rect decision the host would use for
