@@ -171,6 +171,12 @@ endif()
 # Streams feature demo (unified Stream / AsyncStream / HttpStream)
 add_subdirectory(stream-demo)
 
+# trace-demo: offline DSP tracing show-off (the "load meter said 40%, the trace
+# said WHY" reveal). Perfetto-only, so gated on the dev-only PULP_TRACING option.
+if(PULP_TRACING)
+    add_subdirectory(trace-demo)
+endif()
+
 # iOS AUv3 examples — gated on CMAKE_SYSTEM_NAME=iOS
 if(IOS)
     add_subdirectory(ios-auv3-synth)

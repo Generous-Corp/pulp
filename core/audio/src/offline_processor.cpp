@@ -1,6 +1,7 @@
 #include <pulp/audio/offline_processor.hpp>
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -217,6 +218,12 @@ std::optional<AudioFileData> offline_render(
         return std::nullopt;
     }
 
+    // Offline render is deadline-free and deterministic, so Perfetto spans are
+    // RT-hazard-free here (unlike the live audio callback — see trace.hpp / plan
+    // §0c D1). A whole-render span brackets the block loop; per-block spans
+    // below carry the DSP timing the load meter's scalar average hides.
+    PULP_TRACE_SCOPE_NAMED("dsp", "offline_render");
+
     uint32_t channels = input.num_channels();
     const uint64_t input_frames = input.num_frames();
     const uint64_t total_frames =
@@ -280,8 +287,21 @@ std::optional<AudioFileData> offline_render(
         context.state_generation = options.state_generation;
         context.deterministic_seed = options.deterministic_seed;
 
-        render_fn(in_block.data(), out_block.data(), static_cast<int>(channels),
-                  context);
+        {
+            // One span per rendered block, carrying the block index and sample
+            // position as args (read from SQL via EXTRACT_ARG). The counter
+            // tracks block size so a trace also shows the schedule. The user
+            // render_fn adds its own `dsp.node` spans (static names) for
+            // per-node attribution.
+            PULP_TRACE_SCOPE_NAMED_ARGS(
+                "dsp", "offline_block",
+                "block_index", static_cast<int64_t>(context.block_index),
+                "position_samples",
+                static_cast<int64_t>(context.sample_position));
+            PULP_TRACE_COUNTER("dsp", "block_frames", frames_this_block);
+            render_fn(in_block.data(), out_block.data(),
+                      static_cast<int>(channels), context);
+        }
 
         // Deinterleave output
         for (int f = 0; f < frames_this_block; ++f)

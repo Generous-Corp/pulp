@@ -6,6 +6,11 @@ pulp_add_test_suite(pulp-test-wav-metadata LIBRARIES pulp::audio)
 
 pulp_add_test_suite(pulp-test-offline-processor-edges LIBRARIES pulp::audio)
 
+# Offline-render DSP tracing (Perfetto, dev-only). Config-agnostic: OFF verifies
+# the no-op contract; ON byte-checks the flushed .pftrace for the dsp / dsp.node
+# offline span names.
+pulp_add_test_suite(pulp-test-offline-tracing LIBRARIES pulp::audio pulp::runtime)
+
 pulp_add_test_suite(pulp-test-ogg-reader LIBRARIES pulp::audio)
 
 # Audio tests

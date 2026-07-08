@@ -119,6 +119,15 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 #define PULP_TRACE_SCOPE_NAMED(category, name) \
     TRACE_EVENT(category, ::perfetto::StaticString(name))
 
+// A named scope span carrying typed debug-annotation args as trailing
+// "key", value pairs — e.g.
+//   PULP_TRACE_SCOPE_NAMED_ARGS("dsp", "offline_block",
+//                               "block_index", idx, "position_samples", pos);
+// Each key must be a string literal; Perfetto stores it as arg
+// `debug.<key>`, so SQL reads it via EXTRACT_ARG(arg_set_id, 'debug.<key>').
+#define PULP_TRACE_SCOPE_NAMED_ARGS(category, name, ...) \
+    TRACE_EVENT(category, ::perfetto::StaticString(name), __VA_ARGS__)
+
 #define PULP_TRACE_BEGIN(category, name) \
     TRACE_EVENT_BEGIN(category, ::perfetto::StaticString(name))
 
@@ -133,6 +142,7 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 // compile and cost nothing. No Perfetto header is pulled in.
 #define PULP_TRACE_SCOPE(category) ((void)0)
 #define PULP_TRACE_SCOPE_NAMED(category, name) ((void)0)
+#define PULP_TRACE_SCOPE_NAMED_ARGS(category, name, ...) ((void)0)
 #define PULP_TRACE_BEGIN(category, name) ((void)0)
 #define PULP_TRACE_END(category) ((void)0)
 #define PULP_TRACE_COUNTER(category, name, value) ((void)0)
