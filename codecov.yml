@@ -160,6 +160,7 @@ ignore:
   # exercised by the ON tracing smoke test instead.
   - "**/trace.cpp"
   - "**/trace.hpp"
+  - "**/trace_inspector.cpp"
   # C++ test harnesses sometimes live beside tool sources (for example
   # tools/scan-worker/test_scan_worker.cpp) instead of under top-level
   # test/. They are tests, not product coverage surface.

@@ -29,6 +29,7 @@
     "**/widget_bridge.cpp",
     "**/trace.cpp",
     "**/trace.hpp",
+    "**/trace_inspector.cpp",
     "**/test_*.cpp",
     "**/reload_probe.cpp"
   ],
