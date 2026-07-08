@@ -745,6 +745,21 @@
       ]
     },
     {
+      "name": "Perfetto",
+      "category": "runtime",
+      "license": "Apache-2.0",
+      "version": "v57.2",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/google/perfetto.git",
+      "upstream": { "kind": "git-tag", "ref": "v57.2" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Dev-only tracing SDK, gated behind PULP_TRACING (OFF by default; never linked into a shipping build, never exported by cmake --install). The amalgamated C++ SDK ships as the release artifact perfetto-cpp-sdk-src.zip (no longer in the git tree at sdk/); fetched by pinned URL + SHA-256 c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f. The trace_processor_shell query tool + skills land in a later phase.",
+      "source_files": [
+        "tools/cmake/PulpTracing.cmake"
+      ]
+    },
+    {
       "name": "pugixml",
       "category": "runtime",
       "license": "MIT",
