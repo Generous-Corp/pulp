@@ -166,6 +166,13 @@ export function makeBridge(exports) {
       exports.wam_set_transport(isPlaying ? 1 : 0, bpm, positionBeats,
                                 positionSamples, tsigNum | 0, tsigDen | 0);
     },
+    // Monotonic counter of parameter changes, the plugin's own writes included.
+    paramEpoch() { return exports.wam_param_epoch() >>> 0; },
+    // Bulk value read in parametersJson() order. `dstPtr` is a caller-owned wasm
+    // allocation of `capacity` floats; returns the total parameter count.
+    readParamValues(dstPtr, capacity) {
+      return exports.wam_read_param_values(dstPtr, capacity);
+    },
     descriptorJson() { return readCStr(exports.wam_descriptor()); },
     parametersJson() { return readCStr(exports.wam_parameters()); },
     readState() {

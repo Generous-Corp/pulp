@@ -68,6 +68,20 @@ void wam_midi(int status, int data1, int data2, int offset) {
                           static_cast<uint8_t>(data2), offset);
 }
 
+// Monotonic count of parameter changes across all stages, so a host can notice
+// a plugin rewriting its own parameters (e.g. a preset load) — see
+// WamChainBridge::param_epoch.
+__attribute__((used, visibility("default")))
+unsigned int wam_param_epoch() {
+    return g_chain.param_epoch();
+}
+
+// Every stage's values, concatenated in wam_parameters() order.
+__attribute__((used, visibility("default")))
+int wam_read_param_values(float* dst, int capacity) {
+    return g_chain.read_param_values(dst, capacity);
+}
+
 __attribute__((used, visibility("default")))
 int wam_midi_sysex(const uint8_t* data, int size, int offset) {
     return g_chain.schedule_sysex(data, size, offset) ? 1 : 0;

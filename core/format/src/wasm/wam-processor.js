@@ -41,6 +41,8 @@ function moduleExports(M) {
     wam_get_param: M._wam_get_param,
     wam_midi: M._wam_midi,
     wam_midi_sysex: M._wam_midi_sysex,
+    wam_param_epoch: M._wam_param_epoch,
+    wam_read_param_values: M._wam_read_param_values,
     wam_midi_out_drain: M._wam_midi_out_drain,
     wam_reset: M._wam_reset,
     wam_prepare: M._wam_prepare,
@@ -75,6 +77,10 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       this._outPtr = wam.malloc(MAX_CHANNELS * MAX_FRAMES * 4);
       // MIDI-out drain target, allocated once (never per block).
       this._midiOutPtr = wam.malloc(MIDI_OUT_CAP);
+      // Bulk parameter snapshot target + the last epoch we reported.
+      this._paramCount = wam.readParamValues(0, 0);
+      this._paramPtr = wam.malloc(Math.max(1, this._paramCount) * 4);
+      this._lastParamEpoch = wam.paramEpoch();
       this._wam = wam;
       for (const m of this._pendingMsgs) this._handle(m);
       this._pendingMsgs.length = 0;
@@ -156,6 +162,21 @@ class PulpWamProcessor extends AudioWorkletProcessor {
             truncated: available > MIDI_OUT_CAP,
           });
         }
+      }
+    }
+
+    // A plugin can rewrite its OWN parameters inside process() — synth-with-presets
+    // loads a factory preset into its timbre params when Program changes. The web
+    // ABI is pull-only, so without this the host's knobs would silently go stale.
+    // One wasm call per block; we only marshal values when the epoch actually moves.
+    if (this._wam.paramEpoch) {
+      const epoch = this._wam.paramEpoch();
+      if (epoch !== this._lastParamEpoch) {
+        this._lastParamEpoch = epoch;
+        this._wam.readParamValues(this._paramPtr, this._paramCount);
+        const values = this._wam.f32().subarray(this._paramPtr >> 2,
+                                                (this._paramPtr >> 2) + this._paramCount);
+        this.port.postMessage({ type: "paramValues", epoch, values: Array.from(values) });
       }
     }
 

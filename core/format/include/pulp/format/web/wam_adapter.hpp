@@ -29,6 +29,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <atomic>
 #include <cstdint>
 
 namespace pulp::format::wam {
@@ -149,6 +150,17 @@ public:
     float get_param(state::ParamID id) const { return store_.get_value(id); }
     const state::StateStore& store() const { return store_; }
 
+    // Bumped by an audio-thread listener on every parameter change in this
+    // stage, the plugin's own writes from inside process() included. See
+    // WamProcessorBridge::param_epoch for why a host needs this.
+    uint32_t param_epoch() const {
+        return param_epoch_.load(std::memory_order_relaxed);
+    }
+
+    // Bulk value read in all_params() declaration order. Writes
+    // min(count, capacity) floats; returns this stage's parameter count.
+    int read_param_values(float* dst, int capacity) const;
+
     // Per-stage state: the same versioned "PWS1" container the single-plugin
     // bridge writes, so one stage's blob is byte-identical to a standalone
     // plugin's and a legacy blob still loads.
@@ -171,6 +183,9 @@ private:
 
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
+
+    std::atomic<uint32_t> param_epoch_{0};
+    state::ListenerToken param_listener_;
 
     std::vector<float> output_planar_;
     std::vector<float*> output_ptrs_;
@@ -259,6 +274,24 @@ public:
     // allocates nor locks.
     int drain_midi_out(uint8_t* dst, int cap) const;
 
+    // A plugin can change its OWN parameters, and nothing told the host.
+    // synth-with-presets loads a factory preset into its timbre parameters when
+    // Program changes — inside process(), a block after the host wrote Program.
+    // A generated web UI therefore kept showing the previous knob values, since
+    // the web ABI is pull-only and the host had no reason to re-read.
+    //
+    // param_epoch() is bumped by an audio-thread StateStore listener on every
+    // value change (its own writes included). A host polls it once per block —
+    // one wasm call, no allocation, no lock — and re-reads values only when it
+    // moves.
+    uint32_t param_epoch() const;
+
+    // Bulk value read in all_params() declaration order, i.e. the same order
+    // wam_parameters() reports, so a host can zip the two. Avoids a
+    // string-keyed round trip per parameter. Writes min(count, capacity)
+    // floats and returns the total parameter count.
+    int read_param_values(float* dst, int capacity) const;
+
     // State persistence
     std::vector<uint8_t> get_state() const;
     bool set_state(const uint8_t* data, size_t size);
@@ -270,6 +303,12 @@ private:
     ProcessorFactory factory_;
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
+
+    // Bumped by an audio-thread listener on every parameter change. Atomic
+    // because the counter is written on the audio thread and read from a
+    // wam_param_epoch() call that a host may make from either side.
+    std::atomic<uint32_t> param_epoch_{0};
+    state::ListenerToken param_listener_;
 
     // De-interleave buffers (Web Audio uses interleaved, Pulp uses planar)
     std::vector<float> input_planar_;
@@ -374,6 +413,14 @@ public:
     // Accepts "<stage>:<paramId>" and, for stage 0, plain "<paramId>".
     float get_parameter_value(const std::string& id) const;
     void set_parameter_value(const std::string& id, float value);
+
+    // Sum of every stage's epoch: any stage rewriting a parameter moves it.
+    // See WamProcessorBridge::param_epoch for why a web host needs this.
+    uint32_t param_epoch() const;
+
+    // Every stage's values concatenated, in the order parameters_json() reports
+    // them (stage 0's parameters, then stage 1's, ...).
+    int read_param_values(float* dst, int capacity) const;
 
     // Host MIDI enters STAGE 0 as its midi_in.
     void schedule_midi(uint8_t status, uint8_t data1, uint8_t data2,

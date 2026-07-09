@@ -101,6 +101,15 @@ export default class PulpWAM {
       case "parameters":
         try { this._parameters = JSON.parse(msg.json); } catch { this._parameters = []; }
         break;
+      // The plugin changed its own parameters (e.g. loading a factory preset
+      // when its Program changes). `values` is in the same order as
+      // getParameterInfo(). Subscribe with `wam.onParamsChanged = (values) => …`
+      // to keep generated controls in step; without this a web UI goes stale,
+      // because the ABI is otherwise pull-only.
+      case "paramValues":
+        this._paramValues = msg.values;
+        this.onParamsChanged?.(msg.values, this._parameters || []);
+        break;
       case "error":
         // Surface a worklet-side failure rather than silently timing out.
         console.error("PulpWAM worklet error:", msg.error);

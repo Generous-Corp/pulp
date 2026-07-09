@@ -98,7 +98,7 @@ target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 # A rack introduces NO new export: it reuses this exact ABI, so the allowlist,
 # makeBridge, and moduleExports are shared unchanged between plugins and racks.
 set(_PULP_WAM_EXPORTED_FUNCTIONS
-    "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_midi_sysex','_wam_midi_out_drain','_wam_reset','_wam_prepare','_wam_latency_samples','_wam_set_transport','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
+    "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_param_epoch','_wam_read_param_values','_wam_midi_sysex','_wam_midi_out_drain','_wam_reset','_wam_prepare','_wam_latency_samples','_wam_set_transport','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
 
 # Shared link-flag + output-naming logic for a WAM target (plugin or rack). The
 # SINGLE_FILE form BASE64-embeds the wasm with synchronous compilation (required

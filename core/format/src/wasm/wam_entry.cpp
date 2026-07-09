@@ -64,6 +64,21 @@ void wam_midi(int status, int data1, int data2, int offset) {
                            static_cast<uint8_t>(data2), offset);
 }
 
+// Monotonic counter of parameter changes, including the plugin's own writes
+// from inside process(). A host polls this once per block and only re-reads
+// values when it moves — see WamProcessorBridge::param_epoch.
+__attribute__((used, visibility("default")))
+unsigned int wam_param_epoch() {
+    return g_bridge.param_epoch();
+}
+
+// Bulk parameter read in wam_parameters() order. Writes min(count, capacity)
+// floats; returns the total count (> capacity means truncated).
+__attribute__((used, visibility("default")))
+int wam_read_param_values(float* dst, int capacity) {
+    return g_bridge.read_param_values(dst, capacity);
+}
+
 // Variable-length SysEx input (full F0 .. F7 payload). Returns 0 when the
 // message was dropped (pool exhausted or payload too large), 1 on success.
 __attribute__((used, visibility("default")))

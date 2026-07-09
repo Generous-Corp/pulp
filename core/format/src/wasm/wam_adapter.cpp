@@ -189,6 +189,15 @@ bool WamProcessorBridge::initialize(double sample_rate, int max_block_size) {
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
 
+    // Count every parameter change, including the plugin's own writes from
+    // inside process() (synth-with-presets loads a factory preset into its
+    // timbre parameters when Program changes). An Audio listener fires inline,
+    // allocation-free, on the thread that performed the write.
+    param_listener_ = store_.add_audio_listener(
+        [this](state::ParamID, float) {
+            param_epoch_.fetch_add(1, std::memory_order_relaxed);
+        });
+
     auto desc = processor_->descriptor();
     sample_rate_ = sample_rate;
     num_channels_ = (std::max)(desc.default_input_channels(),
@@ -337,6 +346,32 @@ void WamProcessorBridge::process(const float* input, float* output,
             output[f * num_channels + c] = output_ptrs_[c][f];
         }
     }
+}
+
+int WamStage::read_param_values(float* dst, int capacity) const {
+    const auto params = store_.all_params();
+    const int count = static_cast<int>(params.size());
+    if (!dst || capacity <= 0) return count;
+    const int n = (std::min)(count, capacity);
+    for (int i = 0; i < n; ++i) {
+        dst[i] = store_.get_value(params[static_cast<std::size_t>(i)].id);
+    }
+    return count;
+}
+
+uint32_t WamProcessorBridge::param_epoch() const {
+    return param_epoch_.load(std::memory_order_relaxed);
+}
+
+int WamProcessorBridge::read_param_values(float* dst, int capacity) const {
+    const auto params = store_.all_params();
+    const int count = static_cast<int>(params.size());
+    if (!dst || capacity <= 0) return count;
+    const int n = (std::min)(count, capacity);
+    for (int i = 0; i < n; ++i) {
+        dst[i] = store_.get_value(params[static_cast<std::size_t>(i)].id);
+    }
+    return count;   // > capacity tells the caller it truncated
 }
 
 int WamProcessorBridge::drain_midi_out(uint8_t* dst, int cap) const {
@@ -589,6 +624,13 @@ bool WamStage::initialize(std::unique_ptr<Processor> processor,
 
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
+
+    // See WamProcessorBridge::initialize — a stage's plugin can rewrite its own
+    // parameters from inside process(), and the host must be able to notice.
+    param_listener_ = store_.add_audio_listener(
+        [this](state::ParamID, float) {
+            param_epoch_.fetch_add(1, std::memory_order_relaxed);
+        });
 
     auto desc = processor_->descriptor();
     num_channels_ = (std::max)(desc.default_input_channels(),
@@ -874,6 +916,24 @@ std::string WamChainBridge::parameters_json() const {
     }
     ss << "]";
     return ss.str();
+}
+
+uint32_t WamChainBridge::param_epoch() const {
+    uint32_t sum = 0;
+    for (const auto& stage : stages_) sum += stage->param_epoch();
+    return sum;   // wraps like any counter; hosts compare for inequality only
+}
+
+int WamChainBridge::read_param_values(float* dst, int capacity) const {
+    int written = 0, total = 0;
+    for (const auto& stage : stages_) {
+        const int remaining = (std::max)(0, capacity - written);
+        float* cursor = (dst && remaining > 0) ? dst + written : nullptr;
+        const int count = stage->read_param_values(cursor, remaining);
+        written += (std::min)(count, remaining);
+        total += count;
+    }
+    return total;
 }
 
 float WamChainBridge::get_parameter_value(const std::string& id) const {
