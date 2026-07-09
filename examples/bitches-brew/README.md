@@ -83,6 +83,14 @@ The sum is not clamped inside the mixer. Four depths at full reach 4.0, and
 flattening that before `Offset` and the output scale have had their say would
 silently discard a mix you asked for. It clamps once, at the jack.
 
+`Smooth` is the one control here that carries state, and it is off by default for
+that reason. At zero it is a wire, bit for bit. Turned up it slews (positive) or
+low-passes (negative) the shape before the output stage, exactly as `DC`'s does —
+which means a bounce from a fixed start is still identical every render, but a
+locate into the middle of a project agrees with a playthrough only after the
+smoother has settled. That transient is bounded by the time constant you dialled
+in, and it is the honest price of a slew limiter on a generator.
+
 `Swing` warps the beat timeline the same way `Sync`'s does, and for the same
 reason it is applied to the *position* before the position becomes a phase: warp
 the phase afterwards and the LFO stops agreeing with the clock it is supposed to
