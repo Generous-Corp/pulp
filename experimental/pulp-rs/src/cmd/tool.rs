@@ -466,6 +466,28 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     Ok(0)
 }
 
+/// `install trace-processor` — the Perfetto query tool is a bare (non-archive)
+/// binary, so the built-in verified fetcher downloads + SHA-256-checks it into
+/// the same `~/.pulp` location `pulp trace` resolves. No tar/zip delegation to
+/// `pulp-cpp` is needed. This is the registry-surfaced peer of `pulp trace
+/// fetch`; both share the fetch code and destination.
+fn install_trace_processor(version: Option<&str>, out: &mut impl Write) -> Result<i32> {
+    if let Some(v) = version {
+        if v != crate::cmd::trace_fetch::PINNED_VERSION {
+            writeln!(
+                out,
+                "{dim}note:{reset} trace-processor is pinned to {pin}; ignoring --version {v}",
+                dim = color::dim(),
+                reset = color::reset(),
+                pin = crate::cmd::trace_fetch::PINNED_VERSION,
+            )
+            .map_err(io)?;
+        }
+    }
+    crate::cmd::trace_fetch::run_fetch(false, out)?;
+    Ok(0)
+}
+
 fn install(
     reg: &ToolRegistry,
     id: Option<&str>,
@@ -473,6 +495,9 @@ fn install(
     version: Option<&str>,
     out: &mut impl Write,
 ) -> Result<i32> {
+    if id == Some("trace-processor") {
+        return install_trace_processor(version, out);
+    }
     // A `--version` is a durable user pin: record it before installing so
     // resolution (and the re-fetch below) honor it, and so it survives a
     // future Pulp registry-pin bump.
@@ -564,6 +589,12 @@ fn update(
 
     let active = tool_version::resolve_active(tool);
     report_active_version(id, &active, out)?;
+
+    if id == "trace-processor" {
+        // Bare binary: re-sync via the verified fetcher (idempotent — fetches
+        // only when the pinned artifact is absent), not the pulp-cpp installer.
+        return install_trace_processor(None, out);
+    }
 
     // Re-fetch/re-install at the resolved version (delegated to pulp-cpp,
     // forwarding the version via env).
