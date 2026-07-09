@@ -7,7 +7,7 @@ target_link_libraries(brew-ui INTERFACE brew-core pulp::view pulp::canvas)
 # Both binaries below construct the editors through the real
 # Processor::create_view() path, so both need every plug-in's view source and
 # every plug-in's include directory. One list, so adding a plug-in is one edit.
-set(_brew_plugins dc function lfo quantizer step sync)
+set(_brew_plugins cv_osc dc function lfo quantizer step sync)
 set(_brew_view_sources "")
 set(_brew_plugin_dirs "")
 foreach(plugin ${_brew_plugins})
@@ -17,14 +17,15 @@ foreach(plugin ${_brew_plugins})
 endforeach()
 
 if(PULP_BUILD_TESTS)
+    # pulp::osc because CV To OSC's editor pulls in its processor header.
     add_executable(brew-ui-test test_brew_ui.cpp ${_brew_view_sources})
     target_link_libraries(brew-ui-test
-        PRIVATE pulp::format brew-core brew-ui Catch2::Catch2WithMain)
+        PRIVATE pulp::format pulp::osc brew-core brew-ui Catch2::Catch2WithMain)
     target_include_directories(brew-ui-test PRIVATE ${_brew_plugin_dirs})
     catch_discover_tests(brew-ui-test)
 
     # Headless screenshot dumper: renders each editor to PNG with no window.
     add_executable(brew-shots brew_shots.cpp ${_brew_view_sources})
-    target_link_libraries(brew-shots PRIVATE pulp::format brew-core brew-ui)
+    target_link_libraries(brew-shots PRIVATE pulp::format pulp::osc brew-core brew-ui)
     target_include_directories(brew-shots PRIVATE ${_brew_plugin_dirs})
 endif()

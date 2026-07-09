@@ -6,6 +6,7 @@
 # changes they depend on are released.
 add_subdirectory(core)
 add_subdirectory(ui)
+add_subdirectory(cv_osc)
 add_subdirectory(dc)
 add_subdirectory(function)
 add_subdirectory(lfo)
