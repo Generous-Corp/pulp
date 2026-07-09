@@ -148,6 +148,53 @@ adapter and the WS-F skill.
 
 ---
 
+## 5b. Host capability declaration — threading (measured)
+
+The §5.6 threading spike, done cheaply here (probe + honest stub, not a full
+spike). Probed live in `AudioWorkletGlobalScope` and posted in the `ready`
+message:
+
+```
+worklet caps: { globalScope: "AudioWorkletGlobalScope",
+                hasWorker: false, hasSharedArrayBuffer: true,
+                memoryIsShared: true, moduleImportsThreadSpawn: false }
+```
+
+Facts and consequences:
+
+- **`typeof Worker === "undefined"` in the worklet.** Under wasi-threads a
+  spawned wasm thread *is* a Worker, so **wasm `thread-spawn` cannot succeed on
+  the audio thread.** It is imported as module `"wasi"`, name `"thread-spawn"` —
+  which the old shim did not provide at all (hard LinkError), or, if a build
+  routed it through the Proxy'd `wasi_snapshot_preview1`, a benign `0` = "thread 0
+  spawned" for a thread that never runs (**silent hang/corruption**). The PoC now
+  installs an **honest failing stub** (`wasi["thread-spawn"] = () => -1`) so
+  `pthread_create` returns EAGAIN and the plugin can fall back to serial.
+- **PulpGain `moduleImportsThreadSpawn: false`.** wasm-ld tree-shook the import
+  because PulpGain never spawns — which is *why the PoC passes*. A plugin that
+  *does* call `pthread_create` will hit the stub. That failure mode lands the
+  moment the lineup grows past gain/chorus/delay, so it must be handled now, not
+  discovered later.
+- **What the threaded build buys inside the worklet: nothing on the audio
+  thread.** `memoryIsShared: true` but the thread-parallelism the shared-memory
+  build exists to enable is unreachable in `AudioWorkletGlobalScope`. The threaded
+  build's only *effect* here is the hard COI deployment gate (no plain static
+  hosting, no third-party embed on a non-COI page).
+- **`clap.thread-pool` is fork-join inside `process()`; a worklet can neither
+  spawn nor block, so declining it is FORCED, not a conservative default.** A
+  browser WCLAP host should return `null` from `host->get_extension` for
+  `clap.thread-pool` and rely on the plugin's serial fallback. *(Open item — see
+  the second-opinion research dispatched with this spike: whether real WCLAP
+  plugins tolerate a declined `clap.thread-pool` / failed `thread-spawn`, and
+  whether the WCLAP spec/tooling actually requires the threaded build or a
+  single-threaded `wasm32-wasi` build would lift the COI gate.)*
+
+**Proposed host capability contract:** *single main thread + one audio thread; no
+wasm `thread-spawn`; `clap.thread-pool` declined.* Write it down and gate the
+plugin lineup on it until the second opinion resolves whether a non-threaded
+WebCLAP build is viable (which would re-open the plan's "No threadless WebCLAP"
+principle — a plan-level decision, flagged, not made here).
+
 ## 6. Adoption of the async-audit WS-C2 feedback
 
 The audit's WS-C2 note is adopted. Points folded into this decision:

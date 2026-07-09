@@ -91,7 +91,12 @@ async function boot() {
         buildControls();
         window.__poc.ready = true; window.__poc.descriptor = m.descriptor;
         window.__poc.params = m.params; window.__poc.startTime = performance.now();
+        window.__poc.capabilities = m.capabilities;
         log(`ready — ${m.params.length} params, rendering real-time in the worklet`, "ok");
+        const c = m.capabilities || {};
+        log(`worklet caps: scope=${c.globalScope} Worker=${c.hasWorker} ` +
+          `SAB=${c.hasSharedArrayBuffer} sharedMem=${c.memoryIsShared} ` +
+          `thisPluginSpawns=${c.moduleImportsThreadSpawn}`, c.hasWorker ? "" : "ok");
       } else if (m.type === "meter") {
         window.__poc.lastMeter = m; window.__poc.meters.push(m);
         if (window.__poc.meters.length > 600) window.__poc.meters.shift(); // bound memory

@@ -64,6 +64,17 @@ try {
     const plist = await page.evaluate(() => window.__poc.params);
     console.log(`plugin: ${desc.name} (${desc.id}); params: ${plist.map((p) => p.name).join(", ")}`);
 
+    // ── Threading-contract probe (an afternoon, not a spike): confirm the
+    //    worklet scope cannot create wasm threads, so thread-spawn must fail and
+    //    clap.thread-pool must be declined. Recorded in the host capability decl.
+    const caps = await page.evaluate(() => window.__poc.capabilities);
+    console.log("worklet caps:", JSON.stringify(caps));
+    if (caps.hasWorker)
+      console.log("NOTE: Worker IS defined in this scope — revisit the threading assumption.");
+    else
+      console.log("threading: no Worker in AudioWorkletGlobalScope → wasm thread-spawn cannot succeed; " +
+        "stubbed to fail, clap.thread-pool must be declined.");
+
     // ── Real-time proof: sample two meter snapshots ~1.2 s apart and check the
     //    quanta advanced at ~sampleRate/128 per second (audio-clock-locked).
     await page.waitForFunction(() => window.__poc.lastMeter, null, { timeout: 5000 });

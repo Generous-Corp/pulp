@@ -124,10 +124,28 @@ class WorkletWclapHost {
     const module = moduleOrBytes instanceof WebAssembly.Module
       ? moduleOrBytes
       : new WebAssembly.Module(moduleOrBytes);
+    // Detect whether THIS module actually references the wasi-threads
+    // thread-spawn import (wasm-ld tree-shakes it out if the plugin never
+    // spawns — as PulpGain doesn't). A spawning plugin would import
+    // ("wasi","thread-spawn").
+    this.importsThreadSpawn = WebAssembly.Module.imports(module)
+      .some((i) => /thread.?spawn/i.test(i.name));
+    this.threadSpawnAttempted = false;
+
     const imports = {
       env: { memory: this.memory },
       wasi_snapshot_preview1: makeWasiImports(() => this.memory,
         (fd, t) => this.onLog && this.onLog(fd, t)),
+      // HONEST failing stub for wasi-threads thread-spawn. AudioWorkletGlobalScope
+      // has no Worker constructor, so a wasm thread (which IS a Worker under
+      // wasi-threads/Emscripten) cannot be created here. Returning a NEGATIVE
+      // value = spawn failed, so wasi-libc's pthread_create yields EAGAIN and the
+      // plugin can fall back to serial — instead of the WASI Proxy's benign 0,
+      // which would claim "thread 0 spawned" for a thread that never runs
+      // (silent corruption/hang). This is the capability declaration in code.
+      wasi: {
+        "thread-spawn": () => { this.threadSpawnAttempted = true; return -1; },
+      },
     };
     this.instance = new WebAssembly.Instance(module, imports);
     this.ex = this.instance.exports;
@@ -360,8 +378,19 @@ class WclapProcessor extends AudioWorkletProcessor {
         this.plugin.prepare(2, 128);
         trace("ready!");
         this.ready = true;
+        // Host capability declaration, probed live in AudioWorkletGlobalScope.
+        // The threading story: no Worker here → wasm threads cannot be created →
+        // thread-spawn is stubbed to fail; clap.thread-pool must be declined.
+        const capabilities = {
+          globalScope: (typeof AudioWorkletGlobalScope !== "undefined") ? "AudioWorkletGlobalScope" : "unknown",
+          hasWorker: typeof Worker !== "undefined",            // expected: false
+          hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+          memoryIsShared: this.host.memory.buffer instanceof SharedArrayBuffer,
+          moduleImportsThreadSpawn: this.host.importsThreadSpawn, // this plugin
+          threadSpawnAttempted: this.host.threadSpawnAttempted,   // did clap_init try?
+        };
         this.port.postMessage({ type: "ready", descriptor: this.plugin.descriptor,
-          params: this.paramList, sampleRate });
+          params: this.paramList, sampleRate, capabilities });
       } catch (err) {
         this.port.postMessage({ type: "error", message: String(err && err.stack || err) });
       }
