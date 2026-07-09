@@ -14,11 +14,26 @@
 // only. Never call start()/the span macros from a live audio callback.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace pulp::runtime {
+
+/// One-shot gate for the "tracing compiled in" reminder. Returns `true` exactly
+/// once per `already_emitted` flag (on its first call) and `false` thereafter,
+/// so a reminder can be logged a single time even across threads and multiple
+/// plugin instances. Config-independent so the gate is unit-testable in the
+/// default OFF build.
+bool tracing_reminder_first_time(std::atomic<bool>& already_emitted);
+
+/// Emit — at most once for the whole process — a single dev-build reminder that
+/// Perfetto tracing is compiled in. In a PULP_TRACING=ON build this logs one
+/// `log_info` line the first time it is called; in the default OFF build it is
+/// a no-op that logs nothing. Safe to call unconditionally from app/plugin
+/// startup (no `#ifdef` at the call site).
+void log_tracing_reminder();
 
 /// Result of stopping a session: the flushed trace path + basic loss accounting
 /// so a caller can tell whether the ring dropped data under load (plan §0b #4).

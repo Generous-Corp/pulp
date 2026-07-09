@@ -940,6 +940,15 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
     )
     .map_err(io_err)?;
 
+    if proj.tracing_compiled_in() {
+        writeln!(
+            out,
+            "⚠ Perfetto tracing is COMPILED IN this build (dev only) — do NOT ship; \
+             reconfigure with -DPULP_TRACING=OFF to disable."
+        )
+        .map_err(io_err)?;
+    }
+
     write_pr_workflow_status(&proj, out)?;
     write_import_design_default_status(out)?;
 
@@ -1937,6 +1946,52 @@ mod tests {
         assert!(s.contains("Plugin Formats:"));
         assert!(s.contains("VST3: SDK not found"));
         assert!(s.contains("CLAP: available"));
+    }
+
+    #[test]
+    fn status_warns_when_perfetto_tracing_compiled_in() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let proj = project::resolve(td.path()).unwrap();
+        std::fs::create_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(
+            proj.build_dir.join("CMakeCache.txt"),
+            "PULP_TRACING:BOOL=ON\n",
+        )
+        .unwrap();
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(
+            s.contains("Perfetto tracing is COMPILED IN"),
+            "expected tracing warning, got: {s}"
+        );
+        assert!(s.contains("-DPULP_TRACING=OFF"), "{s}");
+    }
+
+    #[test]
+    fn status_omits_tracing_warning_when_off() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let proj = project::resolve(td.path()).unwrap();
+        std::fs::create_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(
+            proj.build_dir.join("CMakeCache.txt"),
+            "PULP_TRACING:BOOL=OFF\n",
+        )
+        .unwrap();
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("Perfetto tracing is COMPILED IN"), "{s}");
     }
 
     #[test]

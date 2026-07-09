@@ -8,16 +8,32 @@
 
 #include <pulp/runtime/trace_session.hpp>
 
+#include <atomic>
+
 #include <pulp/runtime/trace.hpp>  // PULP_TRACING_ENABLED + category storage decl
+
+namespace pulp::runtime {
+
+// Config-independent so the default OFF test build can exercise the one-shot
+// semantics directly: the first caller wins the compare-exchange and gets true,
+// every later caller sees the flag already set and gets false.
+bool tracing_reminder_first_time(std::atomic<bool>& already_emitted) {
+    bool expected = false;
+    return already_emitted.compare_exchange_strong(expected, true,
+                                                   std::memory_order_relaxed);
+}
+
+}  // namespace pulp::runtime
 
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
 
-#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <mutex>
+
+#include <pulp/runtime/log.hpp>
 
 // Track-event storage for the categories declared in trace.hpp. Exactly one TU.
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
@@ -32,6 +48,16 @@ extern "C" __attribute__((used, visibility("default")))
 const char pulp_tracing_ship_sentinel[] = "PULP_TRACING_COMPILED_IN__DO_NOT_SHIP";
 
 namespace pulp::runtime {
+
+void log_tracing_reminder() {
+    static std::atomic<bool> emitted{false};
+    if (tracing_reminder_first_time(emitted)) {
+        log_info(
+            "Perfetto tracing compiled in (dev build) — not for release. "
+            "Reconfigure with -DPULP_TRACING=OFF to disable.");
+    }
+}
+
 namespace {
 
 std::mutex g_mu;                                        // guards g_session/g_out
@@ -140,6 +166,9 @@ TraceStopResult Tracing::stop() { return {}; }
 bool Tracing::active() { return false; }
 void Tracing::attach() {}
 void Tracing::detach() {}
+
+// Default shipping build: the reminder never fires — tracing is not compiled in.
+void log_tracing_reminder() {}
 
 }  // namespace pulp::runtime
 

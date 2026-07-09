@@ -210,6 +210,16 @@ GROUP BY name ORDER BY n DESC;
 - **Category is a string column.** `WHERE category = 'dsp'` does not match
   `'dsp.node'` — they are distinct taxonomy entries. Use `GLOB 'dsp*'` only
   when you deliberately want both.
+- **Dynamic span names don't aggregate under `GROUP BY name`.** Most spans use a
+  static name (the default), so `GROUP BY name` collapses them into one row per
+  callsite — that is what makes "is `TextShaper::prepare` firing every frame?"
+  answerable. A span emitted through `PULP_TRACE_SCOPE_DYNAMIC(cat, expr)` carries
+  a *runtime-computed* name (a node id, a parameter name), so each distinct value
+  is its own `slice.name` and a `GROUP BY name` fragments instead of aggregating.
+  If a per-name rollup looks unexpectedly scattered, check whether the callsite is
+  dynamic (`SELECT name, COUNT(*) FROM slice WHERE category=... GROUP BY name` will
+  show the high-cardinality spread); group by `category` or a name prefix
+  (`substr(name, 1, instr(name,'_'))`) instead when you need the aggregate.
 
 ## Files this skill covers
 

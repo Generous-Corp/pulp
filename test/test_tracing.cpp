@@ -8,14 +8,51 @@
 // leaks PULP_TRACING=ON. It complements the configure-time guarantee in
 // tools/cmake/PulpTracing.cmake and the nm scan in AssertNoTracingSymbols.cmake.
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
 
 #include <pulp/runtime/trace.hpp>
+#include <pulp/runtime/trace_session.hpp>
 
 TEST_CASE("tracing is off by default", "[tracing][rt-safety]") {
     REQUIRE_FALSE(pulp::runtime::kTracingEnabled);
+}
+
+TEST_CASE("tracing reminder gate fires exactly once", "[tracing]") {
+    std::atomic<bool> emitted{false};
+    REQUIRE(pulp::runtime::tracing_reminder_first_time(emitted));
+    REQUIRE_FALSE(pulp::runtime::tracing_reminder_first_time(emitted));
+    REQUIRE_FALSE(pulp::runtime::tracing_reminder_first_time(emitted));
+}
+
+TEST_CASE("tracing reminder gate is single-winner under concurrency", "[tracing]") {
+    std::atomic<bool> emitted{false};
+    std::atomic<int> winners{0};
+    std::vector<std::thread> threads;
+    threads.reserve(16);
+    for (int i = 0; i < 16; ++i) {
+        threads.emplace_back([&] {
+            if (pulp::runtime::tracing_reminder_first_time(emitted)) {
+                winners.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+    for (auto& t : threads) t.join();
+    REQUIRE(winners.load() == 1);
+}
+
+TEST_CASE("tracing reminder is callable and silent when compiled out", "[tracing]") {
+    // Under the default OFF build this must log nothing; the call must compile
+    // and be safe regardless of configuration.
+    pulp::runtime::log_tracing_reminder();
+    if constexpr (!pulp::runtime::kTracingEnabled) {
+        SUCCEED("reminder is a no-op in the shipping configuration");
+    }
 }
 
 TEST_CASE("tracing macros compile as no-ops", "[tracing]") {
