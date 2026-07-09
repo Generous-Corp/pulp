@@ -102,6 +102,21 @@ commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Dis
 gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
 compare` is an advisory *judgment*, never a gate.
 
+**Inspector-proxy MCP tools use a different, lighter pattern than the
+`mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
+have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
+dispatch (an `else if (name == "pulp_X_*" || …)` block that maps each tool to an
+`inspector_method` + `--params '<args_json>'` and shells `pulp inspect --command`).
+So a new inspector-proxy tool needs only: tool JSON in `tools_list_json()`, the
+inline dispatch block, membership in `test/test_mcp_server.cpp`'s expected list,
+and the `docs/guides/claude-code-plugin.md` table — no handler, no `mcp_tools.*`.
+Parity: a tool whose top-level CLI command already carries a `cli_only` baseline
+entry (e.g. `trace`) needs NO new baseline row; only add an `mcp_only` entry for
+a tool with no CLI peer at all. Client-side CLI verbs with no inspector RPC
+(`trace doctor` / `open` / `fetch`, offline `query --trace`) get **no** MCP tool —
+say so in the plugin-table row and the `cli_only` reason so the asymmetry reads
+as intentional.
+
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.
 `audio-inspect` opens the in-app Audio Inspector window

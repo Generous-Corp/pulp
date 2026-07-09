@@ -148,6 +148,11 @@ static std::string tools_list_json() {
     out += R"JSON({"name":"pulp_motion_pause","description":"Pause fixture playback via Motion.pause. Returns {playing:false, playhead_frame}. Always safe — no-op when not playing.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_enable_cost","description":"Enable the cost-attribution channel via Motion.enableCost. Motion.cost events begin broadcasting per frame. Off by default — opt in per session.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_disable_cost","description":"Disable the cost-attribution channel via Motion.disableCost. Stops Motion.cost broadcasts. Safe to call when cost is already disabled.","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_start","description":"Begin a Perfetto tracing session via the inspector Trace.startSession protocol. Records the selected span categories into an in-process ring; enables tracing if it is currently off. Returns {out_path} — the .pftrace the session will flush to. Requires a host built with -DPULP_TRACING=ON (see pulp_trace_snapshot.compiled_in).","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the inspector pick its default taxonomy.","items":{"type":"string"}},"out_path":{"type":"string","description":"Explicit .pftrace output path (inspector picks a temp path when omitted)"},"ring_mb":{"type":"integer","description":"In-process ring size in mebibytes (default 80)"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_stop","description":"Flush the active tracing session and end it via Trace.stopSession. Returns {out_path} — hand it to pulp_trace_query (--trace) or ui.perfetto.dev.","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_snapshot","description":"Read the tracing subsystem state via Trace.snapshot: {compiled_in, active, categories, ring_bytes, last_trace_path}. Safe to call when nothing is being traced; compiled_in=false means the host was built without -DPULP_TRACING=ON.","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_query","description":"Run SQL over the live captured trace via Trace.query, or a named trace-stdlib preset. Pass exactly one of sql or preset. JSON by default. (Offline SQL over a flushed .pftrace uses the client-side CLI `pulp trace query --trace FILE`, which has no inspector RPC and therefore no MCP tool.)","inputSchema":{"type":"object","properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Named trace-stdlib preset (slowest-frames, xruns, dsp-hotspots, layout-vs-paint) instead of raw SQL"},"format":{"type":"string","enum":["json","table","csv"],"description":"Output format (default json)"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_explain","description":"One-shot narrated root-cause investigation via Trace.explain: the inspector loads the investigation protocol and returns a plain-English answer with a chain of evidence and a suggested fix.","inputSchema":{"type":"object","required":["question"],"properties":{"question":{"type":"string","description":"Plain-English question to investigate, e.g. 'why is my plugin slow to open?'"}}}},)JSON";
     out += R"JSON({"name":"pulp_compat","description":"Report pulp-mcp / MCP protocol / project SDK versions plus per-tool min_sdk_version floors so clients can pre-filter their tool list. Use this once at startup to detect SDK skew.","inputSchema":{"type":"object","properties":{}}})JSON";
     out += R"JSON(]})JSON";
     return out;
@@ -405,6 +410,42 @@ static std::string handle_request_raw(const std::string& json) {
                 inspector_method = "Motion.enableCost";
             } else if (name == "pulp_motion_disable_cost") {
                 inspector_method = "Motion.disableCost";
+            }
+
+            auto root = find_project_root();
+            if (root.empty()) {
+                result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+            } else {
+                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
+                auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
+                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+            }
+        }
+        // Perfetto tracing — inspector Trace.* wrappers (mirror the motion
+        // block). These proxy the LIVE-session RPCs; the client-side CLI verbs
+        // (doctor / open / fetch, and offline `query --trace`) have no
+        // inspector RPC and therefore no MCP tool. start/query/explain forward
+        // their args sub-object verbatim — the inspector parses the same keys
+        // the CLI's build_*_params emit ({categories,out_path,ring_mb},
+        // {sql|preset,format}, {question}).
+        else if (name == "pulp_trace_start" || name == "pulp_trace_stop" ||
+                 name == "pulp_trace_snapshot" || name == "pulp_trace_query" ||
+                 name == "pulp_trace_explain") {
+            std::string inspector_method;
+            std::string inspector_params;  // pulp inspect --params JSON, empty for none
+            if (name == "pulp_trace_start") {
+                inspector_method = "Trace.startSession";
+                inspector_params = " --params '" + args_json + "'";
+            } else if (name == "pulp_trace_stop") {
+                inspector_method = "Trace.stopSession";
+            } else if (name == "pulp_trace_snapshot") {
+                inspector_method = "Trace.snapshot";
+            } else if (name == "pulp_trace_query") {
+                inspector_method = "Trace.query";
+                inspector_params = " --params '" + args_json + "'";
+            } else if (name == "pulp_trace_explain") {
+                inspector_method = "Trace.explain";
+                inspector_params = " --params '" + args_json + "'";
             }
 
             auto root = find_project_root();
