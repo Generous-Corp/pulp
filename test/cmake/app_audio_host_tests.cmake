@@ -47,6 +47,11 @@ pulp_add_test_suite(pulp-test-load-measurer
     SOURCES test_load_measurer.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
 
+# Live per-node DSP telemetry: fixed-slot ring, drain, percentiles, RT-safety
+pulp_add_test_suite(pulp-test-live-dsp-telemetry
+    SOURCES test_live_dsp_telemetry.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio pulp::runtime)
+
 # FilterDesign tests
 pulp_add_test_suite(pulp-test-filter-design LIBRARIES pulp::signal)
 
