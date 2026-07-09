@@ -176,6 +176,12 @@ shipyard cleanup --ship-state --apply     # prune closed-PR state + aged records
 # Fast test iteration on any target
 shipyard run --resume-from build          # skip configure+setup, start at the build stage
 shipyard run --resume-from test           # skip configure+build, run tests only
+
+# The `windows` / `ubuntu` SSH targets are opt-in per machine and are NOT
+# declared in .shipyard/config.toml — the commands below only work once you
+# uncomment the matching block in .shipyard.local/config.toml (see
+# .shipyard.local/config.toml.example). `shipyard targets list` shows what
+# this machine actually has.
 shipyard run --targets windows --smoke    # fast Windows-only preflight
 shipyard run --targets windows --resume-from test   # ~2 min rerun vs ~15 min full
 

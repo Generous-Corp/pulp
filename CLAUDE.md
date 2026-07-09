@@ -1238,16 +1238,16 @@ shipyard pr --base main                         # base ref must NOT include `ori
 shipyard pr --no-apply-bumps                    # hard-fail on missing version bumps
 shipyard pr --skip-bump plugin --bump-reason="test-only change"
 shipyard pr --skip-skill-update ci --skill-reason="docs-only"
-shipyard pr --skip-target ubuntu                # deliberate lane skip
+shipyard pr --skip-target NAME                  # deliberate lane skip (rarely needed:
+                                                # only `mac` is declared by default)
 
 # Docs-only PR (no source under core/**, examples/**, ship/**, tools/cli/**, no
-# CMakeLists.txt change). Skip both SSH targets and the pre-push diff-cover
-# gate — both trigger a full CMake configure + build that fails in fresh
-# worktrees lacking Skia and FetchContent dependencies. Upstream fixes are
-# tracked at pulp #2021 (auto-detect docs-only and skip diff-cover) and
-# Shipyard #301 (--base double-prefix + auto-skip unreachable SSH targets).
-PULP_SKIP_DIFF_COVER=1 shipyard pr --base main \
-  --skip-target ubuntu --skip-target windows
+# CMakeLists.txt change). Skip the pre-push diff-cover gate — it triggers a
+# full CMake configure + build that fails in fresh worktrees lacking Skia and
+# FetchContent dependencies. Upstream fix tracked at pulp #2021 (auto-detect
+# docs-only and skip diff-cover). The SSH targets no longer need skipping —
+# they are not declared (see `.shipyard/config.toml`).
+PULP_SKIP_DIFF_COVER=1 shipyard pr --base main
 
 # `pulp pr` is a Pulp-side wrapper; it defaults to shipyard pr and reports
 # opt-out workflows via `pulp status`. Agents should prefer `shipyard pr`.
@@ -1327,9 +1327,12 @@ macOS runs on **local Macs + GitHub-hosted**, in this order:
    automatic.
 
 Linux and Windows use GitHub-hosted runners (advisory). SSH Ubuntu/Windows only
-when a human explicitly asks. If Shipyard probes SSH Ubuntu/Windows for a
-macOS-focused PR where they're out of scope, use
-`--skip-target ubuntu --skip-target windows`.
+when a human explicitly asks — and they are **no longer declared** in
+`.shipyard/config.toml`, so Shipyard does not probe them and
+`--skip-target ubuntu --skip-target windows` is no longer needed. To opt one
+machine into a local SSH lane, uncomment the target block in
+`.shipyard.local/config.toml` (template: `.shipyard.local/config.toml.example`);
+the gitignored overlay can declare a target outright, not just supply its host.
 
 **Future (deliberate, not automatic):** using the local Macs (Studio/M5) for the
 heavier lanes (release-cli, sanitizers) means wiring each lane its OWN dedicated

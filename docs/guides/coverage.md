@@ -63,7 +63,7 @@ explicitly:
 ```bash
 source "$(git rev-parse --show-toplevel)/tools/scripts/cli_version_check.sh"
 pulp_cli_version_check
-shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows
+shipyard pr --skip-target mac
 shipyard cloud run build <branch>
 ```
 

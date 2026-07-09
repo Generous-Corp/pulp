@@ -15,6 +15,9 @@
 [project]
 name      = "pulp"
 type      = "cmake"
+# The platforms Pulp ships. Not the set Shipyard validates locally — see
+# "Targets" below: `mac` is the only declared target, and Linux/Windows
+# validate as advisory GitHub-hosted lanes.
 platforms = ["macos", "linux", "windows"]
 
 # ── Gate script paths (Shipyard v0.19.1+ path discovery) ───────────────────
@@ -156,8 +159,35 @@ configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUIL
 build     = "cmake --build build --config Release --parallel 4; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --install build --prefix install --config Release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake -S tools/validation/sdk-smoke -B smoke/build -G \"Visual Studio 17 2022\" -A x64 -DCMAKE_PREFIX_PATH=install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --build smoke/build --config Release --parallel 4"
 
 # ── Targets ────────────────────────────────────────────────────────────────
-# Three platforms today: mac (local), ubuntu (SSH), windows (SSH).
-# Per-host details live in .shipyard.local/config.toml.
+# One target is declared here: `mac`, the required gate. Linux and Windows
+# validate as advisory GitHub-hosted lanes in .github/workflows/build.yml, so
+# Shipyard does not need a target for them.
+#
+# The SSH `ubuntu` / `windows` targets are OPT-IN, per machine. They used to be
+# declared here with `host` deferred to the gitignored .shipyard.local/config.toml
+# — which no machine in the fleet actually has. Shipyard preflights every
+# *declared* target, so on every box the result was:
+#
+#     Target 'ubuntu' (ssh) is unreachable.
+#       Failure category: configuration
+#       Last error: target has no host configured
+#
+# ...an exit-3 on every `shipyard run` / `shipyard pr`, worked around by passing
+# `--skip-target ubuntu --skip-target windows` forever. Declaring a target we
+# cannot reach makes the *default* path fail closed for a lane that is advisory
+# anyway. So the targets move to where their hosts live.
+#
+# To re-enable a local SSH lane on one machine, copy the target block from
+# .shipyard.local/config.toml.example into .shipyard.local/config.toml and fill
+# in `host` + `repo_path`. That overlay can define a target outright, not merely
+# supply its host — verified against Shipyard v0.70.0. Nothing else changes: the
+# [validation.*.overrides.windows] recipes below stay version-controlled here and
+# apply the moment the target exists.
+#
+# Note for anyone reaching for [profiles.*]: a profile's `targets` list does NOT
+# gate preflight in Shipyard v0.70.0. Setting `profile = "local"` still probes
+# every declared target. Profiles are the natural home for this and one day may
+# be; until then, "declared" is the only thing that matters.
 
 [targets.mac]
 # 2026-05-20: Namespace macOS routing is disabled for cost control.
@@ -170,19 +200,6 @@ workflow = "build"
 # git history for context. Kept at 1h because clean local builds still
 # run long on cold caches.
 timeout_secs = 3600
-
-[targets.ubuntu]
-backend  = "ssh"
-platform = "linux-x64"
-# host and repo_path go in .shipyard.local/config.toml
-
-[targets.windows]
-backend  = "ssh-windows"
-platform = "windows-x64"
-# Fresh builds from clean take ~25 min on the ARM64 VM (x64
-# cross-compile). The default 30 min timeout is too tight.
-timeout_secs = 3600
-# host, repo_path, cmake settings go in .shipyard.local/config.toml
 
 # ── Cloud dispatch (manual only) ───────────────────────────────────────────
 # Namespace remains available only for explicit operator-dispatched cloud
