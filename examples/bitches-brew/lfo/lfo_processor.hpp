@@ -1,6 +1,6 @@
 #pragma once
 
-// LFO — a tempo-locked modulation source, and its quadrature partner.
+// LFO — a modulation source, tempo-locked or free-running, and its quadrature partner.
 //
 // Two outputs: the shape on channel 0, and the same shape a quarter cycle ahead
 // on channel 1. Patched into two CV inputs they trace a circle, which is how you
@@ -48,6 +48,8 @@ public:
         kSeed = 11,
         kOutputScale = 12,
         kInvert = 13,
+        kRateMode = 14,
+        kFreeHz = 15,
     };
 
     format::PluginDescriptor descriptor() const override {
@@ -116,6 +118,16 @@ public:
                              .name = "Invert",
                              .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        // Off: locked to the host's musical grid. On: free-running in hertz.
+        store.add_parameter({.id = kRateMode,
+                             .name = "Free Run",
+                             .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        store.add_parameter({.id = kFreeHz,
+                             .name = "Free Rate",
+                             .unit = "Hz",
+                             .range = {static_cast<float>(kMinFreeHz),
+                                       static_cast<float>(kMaxFreeHz), 1.0f, 0.01f}});
     }
 
     /// A snapshot of the mix, taken once per block rather than once per sample.
@@ -140,7 +152,7 @@ public:
     /// the plug-in at Processor's 400x300 default, and the layout is laid out to
     /// a geometry the editor was never checked against. The scope, three knobs, and the two toggles.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 560};
+        return {380, 590};
     }
 
     /// Defined in lfo_view.cpp so the audio translation units never see the
@@ -155,30 +167,52 @@ public:
         return display_phase_.load(std::memory_order_relaxed);
     }
 
-    /// The value the plug-in emits at a given beat position, after the shared
-    /// output stage. Pure, and shared by process() and the tests so a test cannot
-    /// silently diverge from the DSP.
-    [[nodiscard]] float value_at(double position_beats,
-                                 double quadrature = 0.0) const noexcept {
-        return value_at(mix(), position_beats, quadrature);
+    [[nodiscard]] RateMode rate_mode() const noexcept {
+        return rate_mode_from_param(state().get_value(kRateMode));
+    }
+
+    /// Elapsed cycles at a timeline position, in whichever mode is selected.
+    [[nodiscard]] double cycles_at(double position_beats,
+                                   double position_seconds) const noexcept {
+        return lfo_cycles(rate_mode(), position_beats, position_seconds,
+                          static_cast<double>(state().get_value(kBeatsPerCycle)),
+                          static_cast<double>(state().get_value(kFreeHz)));
+    }
+
+    /// The value the plug-in emits at a number of elapsed cycles, after the
+    /// shared output stage. Pure, and shared by process(), the editor and the
+    /// tests, so none of them can silently diverge from the DSP.
+    [[nodiscard]] float value_at_cycles(double cycles,
+                                        double quadrature = 0.0) const noexcept {
+        return value_at_cycles(mix(), cycles, quadrature);
     }
 
     /// The overload the audio callback uses, with the mix hoisted out of the
     /// per-sample loop.
-    [[nodiscard]] float value_at(const LfoMix& m, double position_beats,
+    [[nodiscard]] float value_at_cycles(const LfoMix& m, double cycles,
+                                        double quadrature = 0.0) const noexcept {
+        // Phase and cycle index take the *same* offset. Keying the
+        // sample-and-hold on an un-offset index while the phase is offset makes
+        // the held value step in the middle of the visible cycle. It also keeps
+        // the quadrature output's hold aligned with its own wrap, so the circle
+        // the two outputs trace does not tear at a cycle boundary.
+        const double offset =
+            static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0 + quadrature;
+        return resolve_output(
+            lfo_mix_value(m, phase_at(cycles, offset), cycle_at(cycles, offset)),
+            state().get_value(kOutputScale), as_toggle(state().get_value(kInvert)));
+    }
+
+    /// Tempo-mode convenience: the value at a beat position.
+    [[nodiscard]] float value_at(double position_beats,
                                  double quadrature = 0.0) const noexcept {
-        const double rate = static_cast<double>(state().get_value(kBeatsPerCycle));
-        const double phase = lfo_phase(
-            position_beats, rate,
-            static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0 +
-                quadrature);
-        // The sample-and-hold is keyed on the cycle the *quadrature* phase sits
-        // in, not the main one, or the two outputs would hold different levels
-        // across a cycle boundary and the circle they trace would tear.
-        const std::int64_t cycle = lfo_cycle(position_beats + quadrature * rate, rate);
-        return resolve_output(lfo_mix_value(m, phase, cycle),
-                              state().get_value(kOutputScale),
-                              as_toggle(state().get_value(kInvert)));
+        return value_at_cycles(cycles_at(position_beats, 0.0), quadrature);
+    }
+
+    /// Free-run convenience: the value at a number of seconds.
+    [[nodiscard]] float value_at_time(double position_seconds,
+                                      double quadrature = 0.0) const noexcept {
+        return value_at_cycles(cycles_at(0.0, position_seconds), quadrature);
     }
 
     void process(audio::BufferView<float>& output,
@@ -212,17 +246,30 @@ public:
                                ? beats_per_sample(ctx.tempo_bpm, ctx.sample_rate)
                                : 0.0;
         const LfoMix m = mix();
+        // Seconds advance with the sample position, which a host reports whether
+        // or not it reports beats — so a free-running LFO stays a pure function of
+        // the timeline, exactly as the tempo-locked one is.
+        const double sr = ctx.sample_rate > 0.0 ? ctx.sample_rate : 48000.0;
+        const double start_seconds = static_cast<double>(ctx.position_samples) / sr;
+        const double seconds_per_sample = ctx.is_playing ? 1.0 / sr : 0.0;
+
         for (int n = 0; n < frames; ++n) {
-            const double at = ctx.position_beats + bps * static_cast<double>(n);
-            if (main) main[n] = value_at(m, at);
-            if (quad) quad[n] = value_at(m, at, kQuadratureOffset);
+            const double beats = ctx.position_beats + bps * static_cast<double>(n);
+            const double secs =
+                start_seconds + seconds_per_sample * static_cast<double>(n);
+            const double cycles = cycles_at(beats, secs);
+            if (main) main[n] = value_at_cycles(m, cycles);
+            if (quad) quad[n] = value_at_cycles(m, cycles, kQuadratureOffset);
         }
 
-        const double end = ctx.position_beats + bps * static_cast<double>(frames - 1);
+        const double end_beats =
+            ctx.position_beats + bps * static_cast<double>(frames - 1);
+        const double end_seconds =
+            start_seconds + seconds_per_sample * static_cast<double>(frames - 1);
+        const double offset =
+            static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0;
         display_phase_.store(
-            static_cast<float>(lfo_phase(
-                end, static_cast<double>(state().get_value(kBeatsPerCycle)),
-                static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0)),
+            static_cast<float>(phase_at(cycles_at(end_beats, end_seconds), offset)),
             std::memory_order_relaxed);
     }
 

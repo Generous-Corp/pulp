@@ -151,12 +151,53 @@ struct LfoMix {
     return v + m.offset;
 }
 
-/// Which cycle of the whole timeline a beat position falls in. Signed: cycle -1
-/// precedes the project's origin, and a host will ask for it.
-[[nodiscard]] inline std::int64_t lfo_cycle(double position_beats,
-                                            double beats_per_cycle) noexcept {
-    if (!(beats_per_cycle > 0.0)) return 0;
-    return static_cast<std::int64_t>(std::floor(position_beats / beats_per_cycle));
+/// How the rate knob is read.
+///
+/// `tempo` locks the LFO to the host's musical grid; `free` runs it in hertz,
+/// independent of tempo. Free-running does *not* mean accumulating: the phase is
+/// still a pure function of the host's absolute sample position, so a bounce is
+/// bit-identical and a locate lands where the timeline says. An LFO that
+/// accumulated would drift against the host over a long session, and render
+/// differently every time.
+enum class RateMode : int { tempo = 0, free = 1 };
+
+[[nodiscard]] inline RateMode rate_mode_from_param(float v) noexcept {
+    return v >= 0.5f ? RateMode::free : RateMode::tempo;
+}
+
+/// Slow enough to sweep a filter over a minute; fast enough to reach the bottom
+/// of the audio band, where a CV becomes a tone.
+inline constexpr double kMinFreeHz = 0.01;
+inline constexpr double kMaxFreeHz = 40.0;
+
+/// Elapsed cycles at a point on the timeline — the LFO's one time coordinate.
+///
+/// Both modes reduce to this, which is why the shapes, the phase offset, the
+/// quadrature and the sample-and-hold need to know nothing about tempo.
+[[nodiscard]] inline double lfo_cycles(RateMode mode, double position_beats,
+                                       double position_seconds,
+                                       double beats_per_cycle,
+                                       double free_hz) noexcept {
+    if (mode == RateMode::free)
+        return position_seconds * std::clamp(free_hz, kMinFreeHz, kMaxFreeHz);
+    if (!(beats_per_cycle > 0.0)) return 0.0;
+    return position_beats / beats_per_cycle;
+}
+
+/// The phase within the current cycle, given elapsed cycles and an offset.
+[[nodiscard]] inline double phase_at(double cycles, double offset) noexcept {
+    return wrap_phase(cycles + offset);
+}
+
+/// Which cycle of the whole timeline the offset position falls in. Signed:
+/// cycle -1 precedes the project's origin, and a host will ask for it.
+///
+/// It takes the *same* offset as `phase_at`, deliberately. Keying the
+/// sample-and-hold on an un-offset cycle index while the waveform's phase is
+/// offset makes the held value step in the middle of the visible cycle rather
+/// than where the shape wraps.
+[[nodiscard]] inline std::int64_t cycle_at(double cycles, double offset) noexcept {
+    return static_cast<std::int64_t>(std::floor(cycles + offset));
 }
 
 /// Map bipolar [-1, +1] to unipolar [0, 1]. Some CV inputs (a VCA, an envelope

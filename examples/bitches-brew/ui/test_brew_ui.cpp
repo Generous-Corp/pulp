@@ -23,6 +23,7 @@
 #include <brew/ui/panel.hpp>
 #include <pulp/view/screenshot.hpp>
 
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -75,6 +76,19 @@ struct Editor {
 /// failure — it produces megabytes of output and takes the process down with it.
 bool differs(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
     return a != b;
+}
+
+/// The toggle carrying `label`, anywhere in the tree, or null.
+///
+/// Searched by label rather than by child index: an editor's rows get reordered
+/// whenever a control is added, and a test that pins an index would then assert
+/// against whichever widget inherited the slot.
+view::Toggle* find_toggle(view::View& root, std::string_view label) {
+    if (auto* t = dynamic_cast<view::Toggle*>(&root); t && t->label() == label)
+        return t;
+    for (size_t i = 0; i < root.child_count(); ++i)
+        if (auto* hit = find_toggle(*root.child_at(i), label)) return hit;
+    return nullptr;
 }
 
 /// Push a constant level through both input channels for one block, so the
@@ -211,6 +225,26 @@ TEST_CASE("LFO's editor draws the selected shape", "[brew][ui][lfo]") {
         ed.host.state().set_value(LfoProcessor::kPhaseDegrees, 90.0f);
         REQUIRE(differs(ed.shoot(), at_1));
     }
+}
+
+TEST_CASE("LFO's Free Run toggle reaches the rate mode", "[brew][ui][lfo]") {
+    Editor ed(create_lfo);
+
+    // The scope is deliberately mode-agnostic — it sweeps one cycle either way —
+    // so no pixel comparison can prove this switch is connected. Without this
+    // test, deleting the toggle from the editor leaves the whole suite green and
+    // strands a shipped parameter with no way to reach it.
+    auto* toggle = find_toggle(*ed.view, "Free Run");
+    REQUIRE(toggle != nullptr);
+    REQUIRE_FALSE(toggle->is_on());
+    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 0.0f);
+
+    toggle->on_mouse_down(view::Point{});
+    REQUIRE(toggle->is_on());
+    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 1.0f);
+
+    toggle->on_mouse_down(view::Point{});
+    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 0.0f);
 }
 
 TEST_CASE("Function's editor draws the curve and tracks the signal on it",

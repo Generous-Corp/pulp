@@ -40,7 +40,7 @@ them).
 |------|--------------|
 | `DC` | Holds one constant value, optionally shaped by the input and slewed. The connection tester, and the suite's bit-exactness guard. |
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
-| `LFO` | A tempo-locked modulation source, plus the same shape a quarter cycle ahead. |
+| `LFO` | A modulation source locked to the tempo or free-running in hertz, plus the same shape a quarter cycle ahead. |
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
 | `Quantizer` | Snaps an incoming control voltage to discrete steps. |
 | `Step LFO` | An eight-step pattern and a gate, locked to the host. |
@@ -82,6 +82,13 @@ waveform's centre in time — a pulse-width control generalized to every shape �
 The sum is not clamped inside the mixer. Four depths at full reach 4.0, and
 flattening that before `Offset` and the output scale have had their say would
 silently discard a mix you asked for. It clamps once, at the jack.
+
+`Free Run` swaps the tempo for `Free`, a rate in hertz. Both are derived from the
+host's position — one from `position_beats`, one from `position_samples` — so free
+running is not free *floating*: it stays a pure function of where the playhead is,
+and keeps every property below. It is what a modulation that should ignore a tempo
+map needs, and the two rate knobs stay visible together so switching modes never
+moves a control out from under the mouse.
 
 Its phase is derived from the host's position rather than accumulated per block,
 so a bounce lands the modulation on the same samples every time, a locate puts the

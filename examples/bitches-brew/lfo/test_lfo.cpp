@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 using namespace pulp;
@@ -52,6 +53,35 @@ std::vector<float> render(format::HeadlessHost& host, double position_beats,
     return v;
 }
 
+
+/// Render a block at an absolute sample position, which is what a free-running
+/// LFO reads. `tempo` varies so a test can prove the free mode ignores it.
+std::vector<float> render_free(format::HeadlessHost& host, std::int64_t sample_pos,
+                               int frames, int ch, double tempo = kTempo,
+                               bool playing = true) {
+    audio::Buffer<float> in(2, static_cast<std::size_t>(frames));
+    audio::Buffer<float> out(2, static_cast<std::size_t>(frames));
+    in.clear();
+    out.clear();
+    const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
+    audio::BufferView<const float> iv(ip, 2, static_cast<std::size_t>(frames));
+    auto ov = out.view();
+
+    format::ProcessContext ctx;
+    ctx.sample_rate = kSampleRate;
+    ctx.num_samples = frames;
+    ctx.is_playing = playing;
+    ctx.tempo_bpm = tempo;
+    ctx.position_samples = sample_pos;
+    ctx.position_beats = static_cast<double>(sample_pos) / kSampleRate * (tempo / 60.0);
+    host.process(ov, iv, ctx);
+
+    std::vector<float> v(static_cast<std::size_t>(frames));
+    for (int n = 0; n < frames; ++n)
+        v[static_cast<std::size_t>(n)] =
+            out.channel(static_cast<std::size_t>(ch))[static_cast<std::size_t>(n)];
+    return v;
+}
 
 /// Select one shape by soloing its depth. The mixer subsumes the selector this
 /// replaced, and every test that wants a pure shape says so explicitly.
@@ -474,4 +504,114 @@ TEST_CASE("offset shifts the whole waveform", "[brew][lfo][mix]") {
         REQUIRE_THAT(lfo_mix_value(shifted, p, 0),
                      WithinAbs(lfo_mix_value(m, p, 0) + 0.25f, 1e-6));
     }
+}
+
+// ------------------------------------------------------------------- free run
+
+TEST_CASE("free run measures cycles in seconds, not beats", "[brew][lfo][free]") {
+    REQUIRE(lfo_cycles(RateMode::tempo, 4.0, 99.0, 2.0, 3.0) == 2.0);
+    REQUIRE(lfo_cycles(RateMode::free, 99.0, 4.0, 2.0, 3.0) == 12.0);
+
+    // A degenerate tempo rate yields no cycles rather than dividing by zero.
+    REQUIRE(lfo_cycles(RateMode::tempo, 4.0, 0.0, 0.0, 1.0) == 0.0);
+}
+
+TEST_CASE("the free rate is clamped at both ends", "[brew][lfo][free][safety]") {
+    // Zero hertz is a stopped LFO the user cannot restart from the knob; a
+    // megahertz LFO is an audio-rate oscillator aliasing into the CV.
+    REQUIRE(lfo_cycles(RateMode::free, 0.0, 10.0, 1.0, 0.0) ==
+            10.0 * kMinFreeHz);
+    REQUIRE(lfo_cycles(RateMode::free, 0.0, 10.0, 1.0, 1e6) ==
+            10.0 * kMaxFreeHz);
+    REQUIRE(lfo_cycles(RateMode::free, 0.0, 10.0, 1.0, -5.0) ==
+            10.0 * kMinFreeHz);
+}
+
+TEST_CASE("a free-running LFO ignores the tempo", "[brew][lfo][free]") {
+    // The whole point of the mode. Same sample position, different tempo, same
+    // voltage — otherwise it is not free of the transport at all.
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kRateMode, 1.0f);
+    host.state().set_value(LfoProcessor::kFreeHz, 2.0f);
+
+    const auto at_120 = render_free(host, 12345, 256, 0, 120.0);
+    const auto at_71 = render_free(host, 12345, 256, 0, 71.5);
+    REQUIRE(at_120 == at_71);
+
+    // ...and the tempo-locked mode does not.
+    host.state().set_value(LfoProcessor::kRateMode, 0.0f);
+    REQUIRE(render_free(host, 12345, 256, 0, 120.0) !=
+            render_free(host, 12345, 256, 0, 71.5));
+}
+
+TEST_CASE("free run is derived from the position, never accumulated",
+          "[brew][lfo][free][safety]") {
+    // Free-running must not mean stateful. Play into a block, versus locate
+    // straight to it: the same samples, or a bounce is not reproducible and a
+    // locate lands in the wrong place.
+    format::HeadlessHost played(create_lfo), located(create_lfo);
+    for (auto* h : {&played, &located}) {
+        h->prepare(kSampleRate, 512, 2, 2);
+        h->state().set_value(LfoProcessor::kRateMode, 1.0f);
+        h->state().set_value(LfoProcessor::kFreeHz, 3.7f);
+        h->state().set_value(LfoProcessor::kRandom, 0.6f);
+    }
+    constexpr int kFrames = 256;
+    std::vector<float> from_playing;
+    for (std::int64_t b = 0; b <= 20; ++b)
+        from_playing = render_free(played, b * kFrames, kFrames, 0);
+    const auto from_locate = render_free(located, 20 * kFrames, kFrames, 0);
+    REQUIRE(from_playing == from_locate);
+}
+
+TEST_CASE("one free-run cycle is exactly one over the rate, in seconds",
+          "[brew][lfo][free]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kRateMode, 1.0f);
+    host.state().set_value(LfoProcessor::kFreeHz, 2.0f);
+
+    const auto* lfo = static_cast<const LfoProcessor*>(host.processor());
+    // At 2 Hz a cycle is half a second. Points one cycle apart agree.
+    REQUIRE_THAT(lfo->value_at_time(0.125),
+                 Catch::Matchers::WithinAbs(lfo->value_at_time(0.625), 1e-6));
+    // And a quarter cycle apart, they do not.
+    REQUIRE(lfo->value_at_time(0.125) != lfo->value_at_time(0.25));
+}
+
+TEST_CASE("a stopped transport holds a free-running LFO still",
+          "[brew][lfo][free]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kRateMode, 1.0f);
+    host.state().set_value(LfoProcessor::kFreeHz, 5.0f);
+    const auto out = render_free(host, 4321, 128, 0, kTempo, /*playing=*/false);
+    for (float v : out) REQUIRE(v == out.front());
+}
+
+// ----------------------------------------------------- phase and the hold agree
+
+TEST_CASE("the sample-and-hold steps where the waveform wraps, not elsewhere",
+          "[brew][lfo][random]") {
+    // The phase offset shifts the shape. If the hold's cycle index does not take
+    // the same offset, the held random value steps in the middle of the visible
+    // cycle — the scope shows a waveform whose random component jumps at a point
+    // that corresponds to nothing.
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSine, 0.0f);
+    host.state().set_value(LfoProcessor::kRandom, 1.0f);
+    host.state().set_value(LfoProcessor::kPhaseDegrees, 180.0f);
+
+    const auto* lfo = static_cast<const LfoProcessor*>(host.processor());
+    // With a half-cycle offset, the wrap sits at cycles = 0.5. Either side of it
+    // the hold must differ; within a half-cycle either side it must not.
+    const float before = lfo->value_at_cycles(0.49);
+    const float after = lfo->value_at_cycles(0.51);
+    REQUIRE(before != after);
+    REQUIRE(lfo->value_at_cycles(0.1) == before);
+    REQUIRE(lfo->value_at_cycles(0.9) == after);
+    // ...and it does *not* step at cycles = 0, where an un-offset index would.
+    REQUIRE(lfo->value_at_cycles(-0.1) == lfo->value_at_cycles(0.1));
 }
