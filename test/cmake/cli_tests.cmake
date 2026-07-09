@@ -289,6 +289,17 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-ship-shellout)
 
+# Ship-time PULP_TRACING guard. Pure header-only scanner (ship_tracing_guard.hpp);
+# unit-tested against fixtures since the default/coverage config cannot build a
+# real PULP_TRACING=ON binary. PULP_SOURCE_DIR lets the sync-guard case read the
+# runtime source to prove the sentinel bytes still match.
+add_executable(pulp-test-ship-tracing-guard test_ship_tracing_guard.cpp)
+target_include_directories(pulp-test-ship-tracing-guard PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(pulp-test-ship-tracing-guard
+    PRIVATE PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(pulp-test-ship-tracing-guard PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ship-tracing-guard)
+
 # App Store Connect notary env-file parser. Compiles the parser source
 # directly so the test target stays free of pulp::ship + pulp::runtime
 # link surfaces (notary_env.cpp is intentionally pure stdlib).

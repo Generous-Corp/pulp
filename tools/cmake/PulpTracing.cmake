@@ -40,9 +40,21 @@ message(STATUS
 # (perfetto-cpp-sdk-src.zip); it is no longer in the git tree at sdk/. Pin by
 # URL + SHA-256 (URL_HASH), the same trust posture Pulp uses for Skia
 # (tools/deps/manifest.json). Verified against v57.2.
+#
+# BOTH pins are cache variables, so a developer can move to a newer (or older)
+# Perfetto release without editing this file — pass a matched pair:
+#   cmake -S . -B build -DPULP_TRACING=ON \
+#         -DPULP_PERFETTO_VERSION=v58.0 \
+#         -DPULP_PERFETTO_SHA256=<sha256 of that release's perfetto-cpp-sdk-src.zip>
+# The SHA must be a CACHE var too (not a bare set()), otherwise -D on the version
+# alone would keep the old hash and FetchContent would fail the integrity check.
+# To build against an already-unpacked local checkout instead of downloading,
+# use CMake's native escape hatch (no Pulp-specific flag needed):
+#   -DFETCHCONTENT_SOURCE_DIR_PERFETTO=/path/to/perfetto-sdk
 set(PULP_PERFETTO_VERSION "v57.2" CACHE STRING "Pinned Perfetto SDK release tag")
 set(PULP_PERFETTO_SHA256
-    "c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f")
+    "c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f"
+    CACHE STRING "SHA-256 of the pinned Perfetto perfetto-cpp-sdk-src.zip")
 
 include(FetchContent)
 FetchContent_Declare(perfetto

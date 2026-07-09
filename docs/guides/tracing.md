@@ -199,6 +199,55 @@ is supported as an advanced path with the caveats above.)*
 
 ---
 
+## Keeping Perfetto current
+
+The Perfetto SDK is a **dev-only, opt-in dependency** — fetched by pinned URL +
+SHA-256 in `tools/cmake/PulpTracing.cmake` only when `PULP_TRACING=ON`, never
+linked into a shipping build, never exported by `cmake --install`. You do not
+need to do anything for a normal build; this section is for updating the pin.
+
+**Moving to a newer Perfetto release.** Both the version tag and its hash are
+CMake cache variables, so you override them from the command line without
+editing the repo — pass a matched pair:
+
+```bash
+cmake -S . -B build -DPULP_TRACING=ON \
+      -DPULP_PERFETTO_VERSION=v58.0 \
+      -DPULP_PERFETTO_SHA256=<sha256 of that release's perfetto-cpp-sdk-src.zip>
+```
+
+The SHA is required alongside the version: bumping the version alone would keep
+the old hash and `FetchContent` would fail the integrity check (by design — a
+version/hash mismatch should never silently fetch unverified bytes). To build
+against an already-unpacked local checkout instead of downloading, use CMake's
+native escape hatch, no Pulp-specific flag needed:
+`-DFETCHCONTENT_SOURCE_DIR_PERFETTO=/path/to/perfetto-sdk`.
+
+**When Google ships a new Perfetto, does anything in Pulp break?** No — the pin
+is exact, so an upstream release changes nothing until someone bumps the pin.
+Perfetto is tracked in `tools/deps/manifest.json`, so
+`python3 tools/deps/audit.py --check-upstream` flags the drift on the same
+cadence as every other pinned dependency. Landing a new pin is the normal
+dependency-update workflow: bump `PulpTracing.cmake` + `manifest.json`, and keep
+`DEPENDENCIES.md` and `NOTICE.md` in sync (Perfetto is Apache-2.0; the
+`melatonin_perfetto` prettifier port is MIT — both already carry their notices).
+
+A developer who overrides the pin locally (the `-D` recipe above) is never
+blocked by Pulp being behind: the override is theirs and works immediately,
+whether or not the committed pin has caught up.
+
+## Never ship a traced build — and how the guard works
+
+`pulp ship sign` and `pulp ship package` **refuse** an artifact built with
+`PULP_TRACING=ON`. The runtime emits a retained sentinel byte-string into any ON
+build; `pulp ship` scans the candidate bundle/binary for it and stops with a
+clear error naming the offending file. `pulp ship release` inherits the guard
+through its `package` step. Override deliberately with `--allow-tracing` (it
+prints a loud warning and proceeds). This is the ship-time backstop to the
+build-time guarantee that a default configure never defines `PULP_TRACING`.
+
+---
+
 ## See also
 
 - The `trace-analysis` and `trace-sql` skills under `.agents/skills/`.
