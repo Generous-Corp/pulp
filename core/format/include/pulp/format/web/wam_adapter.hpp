@@ -23,6 +23,10 @@
 // The JS side (wam-plugin.js) wraps this as a standard WAMv2 module.
 
 #include <pulp/format/processor.hpp>
+#include <pulp/audio/buffer.hpp>
+#include <pulp/midi/buffer.hpp>
+#include <pulp/state/store.hpp>
+#include <memory>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -80,6 +84,100 @@ struct WamParamInfo {
     // Empty for continuous parameters. Lets a generated web control render a
     // <select> of real names instead of a bare 0..3 slider.
     std::vector<std::string> value_labels;
+};
+
+// Host-supplied transport snapshot (Web Audio has no transport of its own).
+// Plain POD so a set_transport() call is an allocation-free field write; copied
+// into ProcessContext at the top of every process(). Shared by both the single-
+// plugin bridge and the chain rack.
+struct WamTransport {
+    bool is_playing = false;
+    double tempo_bpm = 120.0;
+    double position_beats = 0.0;
+    int64_t position_samples = 0;
+    int time_sig_numerator = 4;
+    int time_sig_denominator = 4;
+};
+
+// One processor + its StateStore + its audio-output and MIDI-output buffers:
+// the reusable unit shared by the single-plugin bridge and the chain rack. A
+// stage does NOT own host-facing scratch (interleave buffers, the inbound MIDI
+// queue, the drain scratch) — those are the bridge's concern. It receives its
+// audio input as a BufferView and its MIDI input as a MidiBuffer&, so a chain
+// can hand stage i's output buffer directly to stage i+1 as its input with no
+// copy and no sample-offset rewriting (same wasm memory, by reference).
+//
+// RT contract: initialize() reserves the output planar buffer and the midi_out_
+// buffer once (the latter with set_realtime_capacity_limit(true)); run() then
+// neither allocates nor locks.
+class WamStage {
+public:
+    WamStage() = default;
+
+    // Bind a processor, define its parameters, prepare its DSP, and size its
+    // output buffers. Called once, off the audio thread.
+    bool initialize(std::unique_ptr<Processor> processor,
+                    double sample_rate, int max_block_size);
+
+    // Re-prepare for a sample-rate / block-size change. CONTROL THREAD ONLY —
+    // re-runs Processor::prepare() and grows the output buffer only when the
+    // block size increases (a same-or-smaller block never allocates).
+    void prepare(double sample_rate, int block_size);
+
+    // Run one block. `in_view` and `midi_in` are supplied by the bridge: host
+    // audio + inbound MIDI for stage 0, the previous stage's output buffer +
+    // midi_out for later stages. Writes this stage's audio into its own planar
+    // output and its MIDI into midi_out_ (cleared first). Allocation-free.
+    void run(const audio::BufferView<const float>& in_view,
+             midi::MidiBuffer& midi_in, const ProcessContext& ctx,
+             int num_frames);
+
+    // A const view over this stage's output planar buffer, to feed the next
+    // stage as its audio input — zero copy, same wasm memory.
+    audio::BufferView<const float> output_as_input(int num_frames) const;
+
+    // Copy this stage's planar output into an interleaved Web Audio buffer.
+    void interleave_into(float* output, int host_channels, int num_frames) const;
+
+    // The MIDI this stage produced during the last run() — handed by reference
+    // to the next stage as its midi_in, or serialized for the host by the rack.
+    midi::MidiBuffer& midi_out() { return midi_out_; }
+    const midi::MidiBuffer& midi_out() const { return midi_out_; }
+
+    // Parameters, addressed by the plugin's own numeric ParamID within a stage.
+    void set_param(state::ParamID id, float value) { store_.set_value(id, value); }
+    float get_param(state::ParamID id) const { return store_.get_value(id); }
+    const state::StateStore& store() const { return store_; }
+
+    // Per-stage state: the same versioned "PWS1" container the single-plugin
+    // bridge writes, so one stage's blob is byte-identical to a standalone
+    // plugin's and a legacy blob still loads.
+    std::vector<uint8_t> get_state() const;
+    bool set_state(const uint8_t* data, size_t size);
+
+    PluginDescriptor plugin_descriptor() const {
+        return processor_ ? processor_->descriptor() : PluginDescriptor{};
+    }
+    int latency_samples() const {
+        return processor_ ? processor_->latency_samples() : 0;
+    }
+    int num_channels() const { return num_channels_; }
+    bool ready() const { return processor_ != nullptr; }
+
+private:
+    static constexpr std::size_t kMidiEventCapacity = 256;
+    static constexpr std::size_t kSysexCapacity = 16;
+    static constexpr std::size_t kSysexPayloadCapacity = 512;
+
+    std::unique_ptr<Processor> processor_;
+    state::StateStore store_;
+
+    std::vector<float> output_planar_;
+    std::vector<float*> output_ptrs_;
+    midi::MidiBuffer midi_out_;
+
+    int num_channels_ = 2;
+    int block_size_ = 128;
 };
 
 // Audio-thread bridge: wraps a Processor for AudioWorkletProcessor calls
@@ -216,6 +314,110 @@ private:
         int time_sig_numerator = 4;
         int time_sig_denominator = 4;
     } transport_;
+};
+
+// ── WamChainBridge ──────────────────────────────────────────────────────
+//
+// N processors run as ONE rack inside ONE wasm module and ONE
+// AudioWorkletProcessor. Stage i's midi_out_ buffer is handed DIRECTLY (by
+// reference, no JS marshalling, no offset rewriting) to stage i+1 as its
+// midi_in, and stage i's audio output buffer becomes stage i+1's audio input —
+// all in the same wasm memory. This is why an in-worklet rack is not the same
+// as forwarding wam.onMidiOut into a second AudioWorkletNode's scheduleMidi():
+//
+//   * that costs at least one render block of latency (the forward is serviced
+//     on the next block), and
+//   * it RE-RELATIVIZES sample offsets — an event at offset 37 of block N
+//     arrives as offset 0 of block N+1 — and
+//   * two AudioWorkletNodes do not share a wasm memory, so no C++ buffer can
+//     pass between them.
+//
+// Here the whole rack advances within a single process() call: offsets are
+// preserved exactly and there is zero cross-thread hop between stages.
+//
+// The rack reuses the ENTIRE existing wam_* C ABI verbatim (no new export):
+// parameters are addressed "<stage>:<paramId>" (plain "6" still means stage 0),
+// state is a versioned "PWR1" container of per-stage "PWS1" blobs, and the
+// descriptor is the composite of the endpoints.
+class WamChainBridge {
+public:
+    // Supplied by the rack entry TU. Returns the ordered stages of the rack.
+    using ChainFactory = std::vector<std::unique_ptr<Processor>> (*)();
+
+    explicit WamChainBridge(ChainFactory factory);
+    ~WamChainBridge();
+
+    // Construct + prepare every stage. Off the audio thread.
+    bool initialize(double sample_rate, int max_block_size);
+
+    // Re-prepare every stage. CONTROL THREAD ONLY.
+    void prepare(double sample_rate, int block_size);
+
+    // One-shot DSP reset for the whole rack: the next process() raises
+    // ctx.reset_requested for every stage for exactly one block. RT-safe bool.
+    void request_reset() noexcept { reset_pending_ = true; }
+
+    // Sum of the stages' reported latencies (a host delay-compensates the rack
+    // as a unit). Control thread.
+    int latency_samples() const;
+
+    void set_transport(bool is_playing, double bpm, double position_beats,
+                       double position_samples, int tsig_num, int tsig_den) noexcept;
+
+    // Run the whole rack for one block. See the class comment for the wiring.
+    void process(const float* input, float* output,
+                 int num_channels, int num_frames);
+
+    // Every stage's parameters, stage-qualified. Each entry carries a "stage"
+    // field so a host can group them; ids are "<stage>:<paramId>".
+    std::string parameters_json() const;
+    // Accepts "<stage>:<paramId>" and, for stage 0, plain "<paramId>".
+    float get_parameter_value(const std::string& id) const;
+    void set_parameter_value(const std::string& id, float value);
+
+    // Host MIDI enters STAGE 0 as its midi_in.
+    void schedule_midi(uint8_t status, uint8_t data1, uint8_t data2,
+                       int sample_offset);
+    bool schedule_sysex(const uint8_t* data, int size, int sample_offset);
+
+    // Drain the LAST stage's MIDI output — same packed record layout as the
+    // single-plugin bridge. RT-safe memcpy out of the serialized scratch.
+    int drain_midi_out(uint8_t* dst, int cap) const;
+
+    // Rack state: "PWR1" [u32 stage_count] ( [u32 len][per-stage PWS1] )*.
+    // A legacy single-plugin blob (bare or "PWS1") loads into stage 0.
+    std::vector<uint8_t> get_state() const;
+    bool set_state(const uint8_t* data, size_t size);
+
+    // Composite descriptor JSON, incl. a "stages" name array.
+    std::string descriptor_json() const;
+
+private:
+    ChainFactory factory_;
+    // unique_ptr elements so a stage (which owns a StateStore and buffers whose
+    // pointers alias its own storage) never moves after initialize().
+    std::vector<std::unique_ptr<WamStage>> stages_;
+
+    // Host-facing de-interleave scratch feeding STAGE 0's audio input.
+    std::vector<float> input_planar_;
+    std::vector<float*> input_ptrs_;
+
+    // Inbound host MIDI → stage 0. Reserved once, RT-capacity-limited.
+    midi::MidiBuffer pending_midi_;
+
+    // Serialized last-stage MIDI output for drain_midi_out().
+    std::vector<uint8_t> midi_out_scratch_;
+    std::size_t midi_out_bytes_ = 0;
+
+    static constexpr std::size_t kMidiEventCapacity = 256;
+    static constexpr std::size_t kSysexCapacity = 16;
+    static constexpr std::size_t kSysexPayloadCapacity = 512;
+
+    double sample_rate_ = 48000.0;
+    int num_channels_ = 2;   // host-facing bus width (stage 0 input width)
+    int block_size_ = 128;
+    bool reset_pending_ = false;
+    WamTransport transport_;
 };
 
 } // namespace pulp::format::wam

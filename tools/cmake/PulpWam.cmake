@@ -60,6 +60,12 @@ set(_PULP_WAM_INCLUDES
 
 # Headless DSP subset + WAM bridge — compiled once into an OBJECT library and
 # shared across every WAM plugin target.
+#
+# NOTE: the wam_* C ABI entry point is NOT in this shared object library. It is
+# added per-target instead, because a single-plugin build links wam_entry.cpp
+# (one global WamProcessorBridge) while a rack build links wam_chain_entry.cpp
+# (one global WamChainBridge) — the two define the SAME C symbols and must never
+# be linked together. Both compile against wam_adapter.cpp, which lives here.
 set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/identity.cpp
@@ -69,9 +75,12 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/format/src/processor_f64.cpp
     ${_PULP_WAM_ROOT}/core/format/src/registry.cpp
     ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_adapter.cpp
-    ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_entry.cpp
     ${_PULP_WAM_ROOT}/core/format/src/wasm/headless_defaults.cpp
 )
+
+# The two mutually-exclusive wam_* C ABI entry points (see note above).
+set(_PULP_WAM_SINGLE_ENTRY ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_entry.cpp)
+set(_PULP_WAM_CHAIN_ENTRY  ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_chain_entry.cpp)
 
 add_library(pulp-wam-dsp OBJECT ${_PULP_WAM_CORE_SOURCES})
 target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
@@ -80,37 +89,22 @@ target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 # The wam_* C symbols every plugin entry point exports.
 # THE wam_* ABI IS LISTED IN FOUR PLACES THAT MUST STAY IN SYNC:
 #   1. core/format/src/wasm/wam_entry.cpp        (the C definitions)
+#      AND core/format/src/wasm/wam_chain_entry.cpp (the rack's parallel copy,
+#      which exports the SAME symbol names against a WamChainBridge)
 #   2. this EXPORTED_FUNCTIONS list              (Emscripten export table)
 #   3. core/format/src/wasm/wam-runtime.mjs      (makeBridge methods)
 #   4. core/format/src/wasm/wam-processor.js     (moduleExports adapter)
-# Adding/removing a wam_* function means editing all four.
+# Adding/removing a wam_* function means editing all four (and both entry TUs).
+# A rack introduces NO new export: it reuses this exact ABI, so the allowlist,
+# makeBridge, and moduleExports are shared unchanged between plugins and racks.
 set(_PULP_WAM_EXPORTED_FUNCTIONS
     "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_midi_sysex','_wam_midi_out_drain','_wam_reset','_wam_prepare','_wam_latency_samples','_wam_set_transport','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
 
-# pulp_add_wam_plugin(<Name>
-#     ENTRY    <entry.cpp>              # required: the wam_* C entry point
-#     [SOURCES <extra .cpp> ...]        # optional: extra plugin DSP sources
-#     [INCLUDES <dir> ...]              # optional: extra include dirs (plugin headers)
-#     [SINGLE_FILE])                    # optional: BASE64-embed wasm for AudioWorklet
-#
-# Emits <Name>.js (+ <Name>.wasm unless SINGLE_FILE). The default separate-wasm
-# form is for the Node runner + export inspection. SINGLE_FILE embeds the wasm
-# as BASE64 with synchronous compilation, which is required to run inside an
-# AudioWorkletGlobalScope (no fetch / no async compile there).
-function(pulp_add_wam_plugin NAME)
-    cmake_parse_arguments(ARG "SINGLE_FILE;NATIVE_EDITOR" "ENTRY" "SOURCES;INCLUDES" ${ARGN})
-    if(NOT ARG_ENTRY)
-        message(FATAL_ERROR "pulp_add_wam_plugin(${NAME}): ENTRY <entry.cpp> is required.")
-    endif()
-
-    add_executable(${NAME}-wam
-        $<TARGET_OBJECTS:pulp-wam-dsp>
-        ${ARG_ENTRY}
-        ${ARG_SOURCES}
-    )
-    target_include_directories(${NAME}-wam PRIVATE ${_PULP_WAM_INCLUDES} ${ARG_INCLUDES})
-    target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
-
+# Shared link-flag + output-naming logic for a WAM target (plugin or rack). The
+# SINGLE_FILE form BASE64-embeds the wasm with synchronous compilation (required
+# inside an AudioWorkletGlobalScope — no fetch / no async compile there); the
+# default separate-wasm form is for the Node runner + export inspection.
+function(_pulp_wam_apply_link_flags TARGET NAME IS_SINGLE_FILE)
     set(_link
         "-sALLOW_MEMORY_GROWTH=1"
         "-sEXPORTED_FUNCTIONS=${_PULP_WAM_EXPORTED_FUNCTIONS}"
@@ -118,7 +112,7 @@ function(pulp_add_wam_plugin NAME)
         "--no-entry"
         "-O2"
     )
-    if(ARG_SINGLE_FILE)
+    if(IS_SINGLE_FILE)
         # AudioWorklet DSP module: BASE64-embed the wasm (SINGLE_FILE) and emit
         # an ES-module factory (MODULARIZE+EXPORT_ES6). The processor module
         # imports this factory and awaits it at top level, so Module is fully
@@ -136,11 +130,36 @@ function(pulp_add_wam_plugin NAME)
             "-sENVIRONMENT=web,worker,node")
     endif()
     string(JOIN " " _link_str ${_link})
-
-    set_target_properties(${NAME}-wam PROPERTIES
+    set_target_properties(${TARGET} PROPERTIES
         OUTPUT_NAME "${NAME}"
         SUFFIX ".js"
         LINK_FLAGS "${_link_str}")
+endfunction()
+
+# pulp_add_wam_plugin(<Name>
+#     ENTRY    <entry.cpp>              # required: the wam_* C entry point
+#     [SOURCES <extra .cpp> ...]        # optional: extra plugin DSP sources
+#     [INCLUDES <dir> ...]              # optional: extra include dirs (plugin headers)
+#     [SINGLE_FILE])                    # optional: BASE64-embed wasm for AudioWorklet
+#
+# Emits <Name>.js (+ <Name>.wasm unless SINGLE_FILE). Links wam_entry.cpp (one
+# global WamProcessorBridge — a single plugin per module).
+function(pulp_add_wam_plugin NAME)
+    cmake_parse_arguments(ARG "SINGLE_FILE;NATIVE_EDITOR" "ENTRY" "SOURCES;INCLUDES" ${ARGN})
+    if(NOT ARG_ENTRY)
+        message(FATAL_ERROR "pulp_add_wam_plugin(${NAME}): ENTRY <entry.cpp> is required.")
+    endif()
+
+    add_executable(${NAME}-wam
+        $<TARGET_OBJECTS:pulp-wam-dsp>
+        ${_PULP_WAM_SINGLE_ENTRY}
+        ${ARG_ENTRY}
+        ${ARG_SOURCES}
+    )
+    target_include_directories(${NAME}-wam PRIVATE ${_PULP_WAM_INCLUDES} ${ARG_INCLUDES})
+    target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+
+    _pulp_wam_apply_link_flags(${NAME}-wam ${NAME} "${ARG_SINGLE_FILE}")
 
     # Emit a web-build report (<Name>.web-build.json) documenting what the web
     # build does with this plugin's UI: the generated-controls strategy, the
@@ -168,4 +187,39 @@ function(pulp_add_wam_plugin NAME)
             message(STATUS "PulpWam: node not found — skipping ${NAME}.web-build.json report.")
         endif()
     endif()
+endfunction()
+
+# pulp_add_wam_rack(<Name>
+#     ENTRY    <rack.cpp>               # required: defines pulp_wam_make_chain()
+#     [SOURCES <extra .cpp> ...]        # optional: extra DSP sources
+#     [INCLUDES <dir> ...]              # optional: extra include dirs (plugin headers)
+#     [SINGLE_FILE])                    # optional: BASE64-embed wasm for AudioWorklet
+#
+# Compiles an in-worklet CHAIN RACK: N processors in ONE wasm module, driven
+# through the identical wam_* C ABI as a single plugin. The ONLY build-level
+# difference from pulp_add_wam_plugin is that it links wam_chain_entry.cpp (one
+# global WamChainBridge) INSTEAD of wam_entry.cpp — both keep building, and the
+# two entry TUs are never linked together (they define the same C symbols). The
+# rack's ENTRY TU supplies the stage list:
+#
+#     std::vector<std::unique_ptr<pulp::format::Processor>> pulp_wam_make_chain();
+#
+# Emits <Name>.js (+ <Name>.wasm unless SINGLE_FILE). No per-plugin web-build
+# report is generated (that surface is about a single plugin's editor mapping).
+function(pulp_add_wam_rack NAME)
+    cmake_parse_arguments(ARG "SINGLE_FILE" "ENTRY" "SOURCES;INCLUDES" ${ARGN})
+    if(NOT ARG_ENTRY)
+        message(FATAL_ERROR "pulp_add_wam_rack(${NAME}): ENTRY <rack.cpp> is required.")
+    endif()
+
+    add_executable(${NAME}-wam
+        $<TARGET_OBJECTS:pulp-wam-dsp>
+        ${_PULP_WAM_CHAIN_ENTRY}
+        ${ARG_ENTRY}
+        ${ARG_SOURCES}
+    )
+    target_include_directories(${NAME}-wam PRIVATE ${_PULP_WAM_INCLUDES} ${ARG_INCLUDES})
+    target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+
+    _pulp_wam_apply_link_flags(${NAME}-wam ${NAME} "${ARG_SINGLE_FILE}")
 endfunction()
