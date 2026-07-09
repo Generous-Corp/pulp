@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <pulp/view/view.hpp>
+#include <pulp/view/caret.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/canvas/attributed_string.hpp>
 #include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/audio_bridge.hpp>
@@ -1580,6 +1582,19 @@ public:
     void commit_edit();
     void cancel_edit();
 
+    /// Caret shape. Defaults to the process-wide style (`CaretStyle::ibeam`).
+    void set_caret_style(CaretStyle style) { caret_style_ = style; request_repaint(); }
+    CaretStyle caret_style() const { return caret_style_; }
+
+    /// Blink timing. Defaults to the process-wide config.
+    void set_caret_blink(const CaretBlinkConfig& config) {
+        caret_blink_.set_config(config);
+        request_repaint();
+    }
+    const CaretBlinkConfig& caret_blink() const { return caret_blink_.config(); }
+
+    ~InlineValueEditor() override;
+
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_text_input(const TextInputEvent& event) override;
@@ -1589,12 +1604,19 @@ public:
 
 private:
     std::string display_() const;     // value + suffix
+    void subscribe_caret_blink_();
+    void unsubscribe_caret_blink_();
     double value_ = 0.0, min_ = -1e9, max_ = 1e9;
     int decimals_ = 1;
     std::string suffix_;
     bool enabled_ = true, editing_ = false, invalid_ = false;
     std::string edit_buffer_;
-    float blink_ = 0.0f;
+    CaretBlink caret_blink_;
+    CaretStyle caret_style_ = default_caret_style();
+    int caret_blink_sub_ = -1;
+    FrameClock* caret_blink_clock_ = nullptr;  ///< cached: frame_clock() returns
+                                               ///< null once detached, which would
+                                               ///< leak the sub with a dangling `this`
 };
 
 // ── SpectrogramView ──────────────────────────────────────────────────────────

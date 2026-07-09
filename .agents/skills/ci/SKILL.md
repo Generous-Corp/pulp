@@ -256,7 +256,14 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   FetchContents choc/clap itself). The browser drivers are
   `examples/web-demos/*/{browser-test,browser-host}/validate.mjs`; run them
   locally with a system Chrome/Canary via `node validate.mjs --screenshot out.png`
-  (set `CHROME_PATH` or pass `--browser`).
+  (set `CHROME_PATH` or pass `--browser`). The WAM node validations also cover
+  the in-worklet **rack** path (`wam_rack_runner.mjs` against the
+  `PulpPluckGainRack` target — the only committed consumer that compiles
+  `wam_chain_entry.cpp`/`WamChainBridge`), the wire protocol + version-skew
+  bridge contract (`core/format/src/wasm/wam-runtime.test.mjs`, pure JS), and
+  hostile-state rejection (overflow/CRC/truncation) folded into
+  `wam_feature_runner.mjs` — so a regression in the state codec or chain runtime
+  fails here rather than only in a browser.
 - **Android native `.cxx` caches must be dependency-aware.** The Android workflow
   builds through Gradle's external native build, and `android/app/.cxx` can hold
   FetchContent checkouts under `_deps`. Do not cache `.cxx` under a Gradle-only
@@ -314,6 +321,15 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `--require-ceiling-reduction` gate compares the merge-base blob against `HEAD`
   for branch-touched tracked hotspots, so leaving headroom after a shrink fails
   the pre-push/CI guard.
+  **Exception — a hotspot already ABOVE its ceiling.** `check_hotspots` only
+  fails the PR that itself grew a file, so `main` can drift past a `max_loc`
+  while every individual PR stays net-neutral (e.g. `window_host_mac.mm` at 2780
+  LOC against a 2770 ceiling). Shrinking such a file cannot lower the ceiling —
+  setting `max_loc` to the new LOC would *raise* it — so the guard does not ask
+  for a reduction there, and prints `still at/over ceiling; no reduction to
+  make`. The ratchet is demanded only when the shrink lands strictly under the
+  existing ceiling. If you see the guard demand a `max_loc` larger than the one
+  in the config, that is the bug this rule fixed, not a config you should edit.
   Editing `hotspot_size_guard.json` itself trips the `ci` skill-sync gate; the
   ceiling bump is normally part of a non-`ci` feature PR, so either fold this
   note's rationale into that PR or skip the `ci` gate with a

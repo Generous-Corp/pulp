@@ -257,6 +257,39 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
         self.assertIn("shrank 5 -> 3 LOC but max_loc is 4", result.stderr)
         self.assertIn("set max_loc to 3", result.stderr)
 
+    def test_require_ceiling_reduction_allows_shrink_of_hotspot_over_its_ceiling(self) -> None:
+        # A hotspot can sit above its ceiling: check_hotspots only fails the PR
+        # that grew it, so main drifts past max_loc while each PR stays
+        # net-neutral. Shrinking such a file cannot lower the ceiling — setting
+        # max_loc to the new LOC would raise it — so the reduction must not be
+        # demanded, or the shrink is unlandable.
+        self.commit_baseline(max_loc=3, contents="a\nb\nc\nd\ne\n")  # 5 LOC, ceiling 3
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\nc\nd\n", encoding="utf-8")  # 5 -> 4, still over 3
+        self.commit_all("shrink a hotspot that is still over its ceiling")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("missing hotspot ceiling reduction", result.stderr)
+        self.assertIn("5 -> 4 LOC", result.stderr)
+        self.assertIn("no reduction to make", result.stderr)
+        self.assertIn("hotspot_size_guard: ok", result.stdout)
+
+    def test_require_ceiling_reduction_still_fires_when_shrink_lands_under_ceiling(self) -> None:
+        # The same file, shrunk far enough to duck under the ceiling, must still
+        # be asked to ratchet — otherwise the reclaimed headroom is never locked in.
+        self.commit_baseline(max_loc=3, contents="a\nb\nc\nd\ne\n")
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\n", encoding="utf-8")  # 5 -> 2, now under 3
+        self.commit_all("shrink a hotspot under its ceiling")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("shrank 5 -> 2 LOC but max_loc is 3", result.stderr)
+        self.assertIn("set max_loc to 2", result.stderr)
+
     def test_require_ceiling_reduction_fails_when_shrink_removes_hotspot_entry(self) -> None:
         self.commit_baseline()
         hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"

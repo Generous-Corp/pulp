@@ -1324,12 +1324,16 @@ preset queries, or ask for a one-shot narrated root cause. Motion tells you
 pulp trace start --categories dsp,render --out /tmp/x.pftrace
 pulp trace stop                                   # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
+pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
 pulp trace query --preset dsp-hotspots
 pulp trace slowest-frames
 pulp trace xruns
 pulp trace layout-vs-paint
 pulp trace snapshot
 pulp trace explain "why is my plugin slow to open?"
+pulp trace doctor                                 # readiness: inspector + build + trace_processor
+pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
+pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
 ```
 
 Options:
@@ -1343,7 +1347,8 @@ Subcommands:
 |------------|------------------|-------------|
 | `start [--categories LIST] [--out FILE.pftrace] [--ring-mb N]` | `Trace.startSession` | Begin a session recording the selected span categories into an in-process ring. |
 | `stop` | `Trace.stopSession` | Flush the session and print the `.pftrace` path. |
-| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the captured trace; JSON by default. |
+| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the live captured trace; JSON by default. |
+| `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` without a live session, via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format`/`--preset` are live-path only. |
 | `query --preset <name>` | `Trace.query` | Run a named trace-stdlib preset. |
 | `slowest-frames` | `Trace.query` | L0 preset: frames over the vsync budget, worst first. |
 | `xruns` | `Trace.query` | L0 preset: audio xrun / deadline-miss events. |
@@ -1351,6 +1356,9 @@ Subcommands:
 | `layout-vs-paint` | `Trace.query` | L0 preset: one-row-per-category frame cost split. |
 | `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
 | `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
+| `doctor` | client-side + `Trace.snapshot` | Readiness check. Aggregates inspector reachability and `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) with the inspector's `compiled_in` / `active` / `last_trace_path`, then reports `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
+| `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
+| `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 
 The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,
 `text`, `js`, `gpu`, `state`, `io`. Tracing is a dev-only tool: never ship a
@@ -1780,8 +1788,11 @@ pulp tool info video-proof --json   # Emit the same metadata as JSON
 pulp tool install clap-validator    # Download and install one tool
 pulp tool install --all             # Install every tool available on the current platform
 pulp tool install <id> --force      # Reinstall even if already present
+pulp tool install <id> --version <v>  # Install and pin to a user-chosen version (durable override)
 pulp tool install <importer>        # Install a framework importer add-on (checksummed, version-window-checked)
 pulp tool install <importer> --from <path|file://...>  # Install from a local package (offline / pinned artifact)
+pulp tool update <id>               # Re-install a managed tool at the latest registry pin (clears a prior override)
+pulp tool update <id> --version <v> # Update and pin to a user-chosen version (durable override)
 pulp tool uninstall <id>            # Remove a pulp-managed tool, or an importer (also removes its skill)
 pulp tool path <id>                 # Print the absolute path to the installed tool's binary
 pulp tool run <id> [args...]        # Run the installed tool with pass-through arguments
@@ -1791,7 +1802,9 @@ pulp tool doctor <id> [--run]       # Check one tool; --run executes the resolve
 pulp add <importer>                 # Alias for `pulp tool install <importer>`
 ```
 
-Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), `npm_package` (repo-local npm wrapper installed under `~/.pulp/tools/npm-packages/<id>/`), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`. The aggregate form reports installable-but-missing tools without failing; the targeted form returns non-zero when the named tool is unknown, unavailable, or not installed. With `--run`, the targeted form executes the resolved tool path with no arguments and returns its exit code; `npm_package` entries use that path as their wrapper smoke check.
+Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), `npm_package` (repo-local npm wrapper installed under `~/.pulp/tools/npm-packages/<id>/`), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
+
+**Updating and overriding a tool's version.** Every `managed_by_pulp` tool is user-updatable and version-overridable without waiting for Pulp to bump its committed registry pin. `pulp tool update <id>` re-installs the tool at the registry pin (the latest known-good version Pulp ships) and clears any prior user override; `pulp tool update <id> --version <v>` (or `pulp tool install <id> --version <v>`) re-installs at an explicit version and records it as a durable override. The active version resolves by precedence, highest first: the `PULP_TOOL_<ID>_VERSION` env var (session-scoped; id upper-cased with non-alphanumerics turned into `_`), then the durable override in `$PULP_HOME/tool-overrides.json`, then the registry `pinned_version`. `pulp tool info <id>` (and `--json`, as `active_version` / `active_version_source`) reports which version is active and where it came from. This "added tools stay user-updatable + overridable" convention — and the `validate_registry.py` check that enforces it — is documented in [extending-pulp.md](extending-pulp.md#every-added-tool-must-be-user-updatable-and-overridable). The aggregate form reports installable-but-missing tools without failing; the targeted form returns non-zero when the named tool is unknown, unavailable, or not installed. With `--run`, the targeted form executes the resolved tool path with no arguments and returns its exit code; `npm_package` entries use that path as their wrapper smoke check.
 
 **Framework importers.** An importer is a vendor-specific add-on (described in the tool-registry with `category: "importer"`) that drives Pulp's JSON-over-stdio import SPI. Installing one is gated three ways: the importer's `[sdk_min, sdk_max]` must include the running SDK and its `[spi_min, spi_max]` window must overlap the SDK's supported import-SPI window (a mismatch fails loudly with an "upgrade Pulp" / "upgrade the importer" message); the fetched or local package's `sha256` must match the digest pinned in the registry (a mismatch refuses to install); and the importer's bundled `SKILL.md` is installed into `~/.agents/skills/<importer>/` on install and removed on uninstall. Each install is recorded under `~/.pulp/importers/<id>.json` (id, version, sha256, SDK version, SPI window, paths, terms metadata) so uninstall and version checks work, and so the importer-terms accept-gate composes with the same record. `pulp add <importer>` routes to the same install path. Use `--from <path|file://...>` to install from a local package rather than the registry URL (offline installs, pinned artifacts, CI). The producer side — how prebuilt per-platform artifacts are built, hosted, pinned per SDK release, and signed/notarized, and the bundled-libclang choice — is documented in [framework-importer-packaging.md](framework-importer-packaging.md); this CLI consumes that contract, it does not decide it.
 

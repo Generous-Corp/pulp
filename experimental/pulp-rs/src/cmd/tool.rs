@@ -14,6 +14,12 @@
 //! | `doctor`    | Ported      | Health report per tool.                      |
 //! | `install`   | Delegated   | Uses `pulp-cpp` when available; otherwise    |
 //! |             |             | prints the Rust fallback notice.             |
+//! | `update`    | Ported +    | Resolves/persists the user version override  |
+//! |             | Delegated   | (Rust), delegates the re-fetch to `pulp-cpp`.|
+//!
+//! `install`/`update` carry a user version override (`--version`, or the
+//! `PULP_TOOL_<ID>_VERSION` env var) that takes precedence over the registry
+//! `pinned_version` and survives Pulp pin bumps. See [`crate::tool_version`].
 //!
 //! The install branch still dispatches (so `pulp tool install <id>`
 //! delegates to `pulp-cpp` when available, or returns a clean "not
@@ -28,6 +34,7 @@ use crate::proc::{Invocation, Spawner};
 use crate::tool_registry::{
     self, current_platform_key, load, locate_tool, uninstall_tool, ToolRegistry,
 };
+use crate::tool_version::{self, ActiveVersion};
 
 mod tool_doctor;
 use tool_doctor::doctor;
@@ -49,7 +56,8 @@ pub enum Sub {
         /// Emit JSON instead of text.
         json: bool,
     },
-    /// `install <id>` / `install --all` / `install <id> --force`.
+    /// `install <id>` / `install --all` / `install <id> --force` /
+    /// `install <id> --version <v>`.
     Install {
         /// Tool id to install, `None` when `--all` is set.
         id: Option<String>,
@@ -57,6 +65,19 @@ pub enum Sub {
         all: bool,
         /// `--force`.
         force: bool,
+        /// `--version <v>` — pin this tool to a user-chosen version
+        /// (persisted as a durable override; overrides the registry pin).
+        version: Option<String>,
+    },
+    /// `update <id> [--version <v>]` — re-install a managed tool at the
+    /// latest registry pin, or at an explicit user-chosen version.
+    Update {
+        /// Tool id to update.
+        id: String,
+        /// `--version <v>` — pin to this version (durable user override).
+        /// When absent, `update` re-syncs to the registry pin and clears
+        /// any prior user override.
+        version: Option<String>,
     },
     /// `uninstall <id>`.
     Uninstall(String),
@@ -111,22 +132,58 @@ pub fn parse_sub(args: &[String]) -> Result<Sub> {
             Ok(Sub::Info { id, json })
         }
         "install" => {
+            let usage = "Usage: pulp tool install <tool-id> [--force] [--version <version>]";
             let mut id = None;
             let mut all = false;
             let mut force = false;
-            for a in &args[1..] {
-                match a.as_str() {
+            let mut version = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
                     "--all" => all = true,
                     "--force" => force = true,
-                    _ => id = Some(a.clone()),
+                    "--version" => {
+                        i += 1;
+                        version = Some(
+                            args.get(i)
+                                .cloned()
+                                .ok_or_else(|| CliError::BadUsage(usage.to_owned()))?,
+                        );
+                    }
+                    _ => id = Some(args[i].clone()),
                 }
+                i += 1;
             }
             if !all && id.is_none() {
-                return Err(CliError::BadUsage(
-                    "Usage: pulp tool install <tool-id> [--force]".to_owned(),
-                ));
+                return Err(CliError::BadUsage(usage.to_owned()));
             }
-            Ok(Sub::Install { id, all, force })
+            Ok(Sub::Install { id, all, force, version })
+        }
+        "update" => {
+            let usage = "Usage: pulp tool update <tool-id> [--version <version>]";
+            let mut id = None;
+            let mut version = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--version" => {
+                        i += 1;
+                        version = Some(
+                            args.get(i)
+                                .cloned()
+                                .ok_or_else(|| CliError::BadUsage(usage.to_owned()))?,
+                        );
+                    }
+                    other if other.starts_with("--") => {
+                        return Err(CliError::BadUsage(usage.to_owned()));
+                    }
+                    _ if id.is_none() => id = Some(args[i].clone()),
+                    _ => return Err(CliError::BadUsage(usage.to_owned())),
+                }
+                i += 1;
+            }
+            let id = id.ok_or_else(|| CliError::BadUsage(usage.to_owned()))?;
+            Ok(Sub::Update { id, version })
         }
         "uninstall" => {
             let id = args.get(1).cloned().ok_or_else(|| {
@@ -195,7 +252,10 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
         Sub::Info { id, json } => info(&reg, id, *json, out),
-        Sub::Install { id, all, force: _ } => install(id.as_deref(), *all, out),
+        Sub::Install { id, all, force: _, version } => {
+            install(&reg, id.as_deref(), *all, version.as_deref(), out)
+        }
+        Sub::Update { id, version } => update(&reg, id, version.as_deref(), out),
         Sub::Uninstall(id) => uninstall(id, out),
         Sub::Path(id) => path(&reg, id, out),
         Sub::Run { id, args } => run_tool(&reg, id, args, spawner, out),
@@ -219,11 +279,18 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 list                    Show available and installed tools\n\
         \x20 info <tool> [--json]    Show install/package metadata for one tool\n\
         \x20 install <tool>          Download and install a tool\n\
+        \x20 install <tool> --version <v>  Install and pin to a user-chosen version\n\
         \x20 install --all           Install all tools for current platform\n\
+        \x20 update <tool>           Re-install a tool at the latest registry pin\n\
+        \x20 update <tool> --version <v>   Update and pin to a user-chosen version\n\
         \x20 uninstall <tool>        Remove a pulp-managed tool\n\
         \x20 path <tool>             Print path to a tool's binary\n\
         \x20 run <tool> [args]       Run a tool with arguments\n\
-        \x20 doctor [tool] [--run]   Check tool health\n",
+        \x20 doctor [tool] [--run]   Check tool health\n\
+        \n\
+        A user version override (set via --version, or the\n\
+        PULP_TOOL_<ID>_VERSION env var) takes precedence over the registry\n\
+        pin and survives Pulp registry-pin bumps.\n",
     )
     .map_err(io)
 }
@@ -268,6 +335,7 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     };
     let platform = current_platform_key();
     let loc = locate_tool(tool);
+    let active = tool_version::resolve_active(tool);
     if json {
         let body = serde_json::json!({
             "id": tool.id,
@@ -288,6 +356,8 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
             "artifact_verify_command": tool.artifact_verify_command,
             "artifact_manifest_schema": tool.artifact_manifest_schema,
             "pinned_version": tool.pinned_version,
+            "active_version": active.version,
+            "active_version_source": active.source.label(),
             "bundleable": tool.bundleable,
             "managed_by_pulp": tool.managed_by_pulp,
             "platform": platform,
@@ -362,6 +432,15 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     if !tool.pinned_version.is_empty() {
         writeln!(out, "Pinned version: {}", tool.pinned_version).map_err(io)?;
     }
+    if !active.version.is_empty() {
+        writeln!(
+            out,
+            "Active version: {} ({})",
+            active.version,
+            active.source.label()
+        )
+        .map_err(io)?;
+    }
     writeln!(out, "Platform: {platform}").map_err(io)?;
     writeln!(
         out,
@@ -387,13 +466,169 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     Ok(0)
 }
 
-fn install(_id: Option<&str>, _all: bool, out: &mut impl Write) -> Result<i32> {
+fn install(
+    reg: &ToolRegistry,
+    id: Option<&str>,
+    _all: bool,
+    version: Option<&str>,
+    out: &mut impl Write,
+) -> Result<i32> {
+    // A `--version` is a durable user pin: record it before installing so
+    // resolution (and the re-fetch below) honor it, and so it survives a
+    // future Pulp registry-pin bump.
+    if let (Some(id), Some(v)) = (id, version) {
+        tool_version::set_override(id, v)?;
+        writeln!(
+            out,
+            "{green}✓{reset} Pinned {id} to {v} {dim}(user override){reset}",
+            green = color::green(),
+            reset = color::reset(),
+            dim = color::dim(),
+        )
+        .map_err(io)?;
+    }
+    if let Some(id) = id {
+        if let Some(tool) = reg.tools.get(id) {
+            let active = tool_version::resolve_active(tool);
+            report_active_version(id, &active, out)?;
+        }
+    }
+
     // Archive download + tar/zip/xz extraction + xattr cleanup is
     // ~500 LOC of new deps (tar + flate2 + zip). Delegate to pulp-cpp
     // when present; print the stub when it's not on PATH so
-    // CI/sandboxed callers see a clear error.
-    let argv = crate::fallthrough::current_argv_tail();
-    match crate::fallthrough::delegate(&argv)? {
+    // CI/sandboxed callers see a clear error. `--version` is stripped
+    // from the delegated argv (the C++ installer does not accept it) and
+    // forwarded via env instead.
+    let id_for_env = id.filter(|_| version.is_some());
+    let argv = strip_version_flag(crate::fallthrough::current_argv_tail());
+    delegate_install(id_for_env, &argv, out)
+}
+
+/// `update <id> [--version <v>]` — re-install a managed tool.
+fn update(
+    reg: &ToolRegistry,
+    id: &str,
+    version: Option<&str>,
+    out: &mut impl Write,
+) -> Result<i32> {
+    let Some(tool) = reg.tools.get(id) else {
+        writeln!(
+            out,
+            "{red}✗{reset} Tool '{id}' not found",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    };
+    if !tool.managed_by_pulp {
+        writeln!(
+            out,
+            "{red}✗{reset} {id} is not a pulp-managed tool; nothing to update",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    }
+
+    match version {
+        Some(v) => {
+            // Explicit version → durable user pin.
+            tool_version::set_override(id, v)?;
+            writeln!(
+                out,
+                "{green}✓{reset} Pinned {id} to {v} {dim}(user override){reset}",
+                green = color::green(),
+                reset = color::reset(),
+                dim = color::dim(),
+            )
+            .map_err(io)?;
+        }
+        None => {
+            // Bare update re-syncs to the registry pin, dropping any prior
+            // user override so the shipped pin becomes active.
+            if let Some(prev) = tool_version::clear_override(id)? {
+                writeln!(
+                    out,
+                    "{dim}note:{reset} cleared user override {prev}; tracking registry pin {pin}",
+                    dim = color::dim(),
+                    reset = color::reset(),
+                    pin = tool.pinned_version,
+                )
+                .map_err(io)?;
+            }
+        }
+    }
+
+    let active = tool_version::resolve_active(tool);
+    report_active_version(id, &active, out)?;
+
+    // Re-fetch/re-install at the resolved version (delegated to pulp-cpp,
+    // forwarding the version via env).
+    let argv = vec![
+        "tool".to_owned(),
+        "install".to_owned(),
+        id.to_owned(),
+        "--force".to_owned(),
+    ];
+    delegate_install(Some(id), &argv, out)
+}
+
+/// Print the active version + provenance line shared by install / update.
+fn report_active_version(id: &str, active: &ActiveVersion, out: &mut impl Write) -> Result<()> {
+    if active.version.is_empty() {
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "Active version for {id}: {} {dim}({}){reset}",
+        active.version,
+        active.source.label(),
+        dim = color::dim(),
+        reset = color::reset(),
+    )
+    .map_err(io)
+}
+
+/// Strip a `--version <value>` pair from a delegated argv. The C++ installer
+/// reads the version from the registry / env, not this flag.
+fn strip_version_flag(tail: Vec<String>) -> Vec<String> {
+    let mut kept = Vec::with_capacity(tail.len());
+    let mut skip_value = false;
+    for a in tail {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if a == "--version" {
+            skip_value = true;
+            continue;
+        }
+        kept.push(a);
+    }
+    kept
+}
+
+/// Delegate the archive fetch to `pulp-cpp`, forwarding the resolved version
+/// via env for the named tool (a durable override is the source of truth; the
+/// env var lets a C++ install honor it without touching the committed registry).
+fn delegate_install(id_for_env: Option<&str>, argv: &[String], out: &mut impl Write) -> Result<i32> {
+    // Forward the resolved version to the `pulp-cpp` child via env. Gated on
+    // fallthrough being live so a disabled/sandboxed run (and the unit suite)
+    // never mutates process-wide env — the durable override file remains the
+    // source of truth either way.
+    if !crate::fallthrough::is_fallthrough_disabled() {
+        if let Some(id) = id_for_env {
+            let resolved = tool_version::env_override(id)
+                .or_else(|| tool_version::read_overrides().get(id).cloned());
+            if let Some(v) = resolved.filter(|v| !v.is_empty()) {
+                std::env::set_var(tool_version::env_var_name(id), v);
+            }
+        }
+    }
+    match crate::fallthrough::delegate(argv)? {
         crate::fallthrough::Outcome::Delegated(rc) => Ok(rc),
         crate::fallthrough::Outcome::Disabled | crate::fallthrough::Outcome::NotFound => {
             writeln!(
@@ -780,8 +1015,10 @@ mod tests {
     #[test]
     fn install_prints_stub_notice() {
         let _guard = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
+        let td = plant_project(registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
         let mut buf = Vec::new();
-        let rc = install(Some("uv"), false, &mut buf).unwrap();
+        let rc = install(&reg, Some("uv"), false, None, &mut buf).unwrap();
         assert_eq!(rc, 1);
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("not ported"));
@@ -898,10 +1135,11 @@ mod tests {
     fn parse_sub_install_with_id_only() {
         let s = parse_sub(&["install".to_owned(), "uv".to_owned()]).unwrap();
         match s {
-            Sub::Install { id, all, force } => {
+            Sub::Install { id, all, force, version } => {
                 assert_eq!(id.as_deref(), Some("uv"));
                 assert!(!all);
                 assert!(!force);
+                assert!(version.is_none());
             }
             other => panic!("expected Install, got {other:?}"),
         }
@@ -916,10 +1154,11 @@ mod tests {
         ])
         .unwrap();
         match s {
-            Sub::Install { id, all, force } => {
+            Sub::Install { id, all, force, version } => {
                 assert!(id.is_none());
                 assert!(all);
                 assert!(force);
+                assert!(version.is_none());
             }
             other => panic!("expected Install, got {other:?}"),
         }
@@ -981,6 +1220,221 @@ mod tests {
     fn parse_sub_unknown_top_level_errors() {
         let err = parse_sub(&["nonsense".to_owned()]).unwrap_err();
         assert!(matches!(err, CliError::UnknownSubcommand) || err.to_string().contains("unknown"));
+    }
+
+    // ── update verb + version-override parsing ────────────────────
+
+    fn managed_registry_body() -> &'static str {
+        r#"{
+            "schema_version": 1,
+            "tools": {
+                "uv": {
+                    "display_name": "UV",
+                    "description": "Python package manager",
+                    "install_method": "binary_download",
+                    "pinned_version": "0.6.14",
+                    "managed_by_pulp": true,
+                    "binary_sources": {
+                        "macOS-arm64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
+                        "macOS-x64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
+                        "Windows-x64": {"url_template":"x","archive_format":"zip","binary_name":"uv.exe"},
+                        "Linux-x64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
+                        "Linux-arm64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"}
+                    }
+                }
+            }
+        }"#
+    }
+
+    #[test]
+    fn parse_update_captures_id() {
+        let s = parse_sub(&["update".into(), "uv".into()]).unwrap();
+        assert_eq!(
+            s,
+            Sub::Update {
+                id: "uv".to_owned(),
+                version: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_update_captures_id_and_version() {
+        let s = parse_sub(&["update".into(), "uv".into(), "--version".into(), "0.7.0".into()])
+            .unwrap();
+        assert_eq!(
+            s,
+            Sub::Update {
+                id: "uv".to_owned(),
+                version: Some("0.7.0".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_update_version_flag_before_id() {
+        let s = parse_sub(&["update".into(), "--version".into(), "1.0".into(), "uv".into()])
+            .unwrap();
+        assert_eq!(
+            s,
+            Sub::Update {
+                id: "uv".to_owned(),
+                version: Some("1.0".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_update_requires_id() {
+        let err = parse_sub(&["update".into()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool update"));
+    }
+
+    #[test]
+    fn parse_update_version_needs_value() {
+        let err = parse_sub(&["update".into(), "uv".into(), "--version".into()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool update"));
+    }
+
+    #[test]
+    fn parse_update_rejects_extra_positional() {
+        let err =
+            parse_sub(&["update".into(), "uv".into(), "extra".into()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool update"));
+    }
+
+    #[test]
+    fn parse_install_captures_version() {
+        let s = parse_sub(&["install".into(), "uv".into(), "--version".into(), "0.7.0".into()])
+            .unwrap();
+        match s {
+            Sub::Install { id, version, .. } => {
+                assert_eq!(id.as_deref(), Some("uv"));
+                assert_eq!(version.as_deref(), Some("0.7.0"));
+            }
+            other => panic!("expected Install, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_install_version_needs_value() {
+        let err = parse_sub(&["install".into(), "uv".into(), "--version".into()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool install"));
+    }
+
+    #[test]
+    fn strip_version_flag_removes_pair() {
+        let out = strip_version_flag(vec![
+            "tool".into(),
+            "install".into(),
+            "uv".into(),
+            "--version".into(),
+            "0.7.0".into(),
+            "--force".into(),
+        ]);
+        assert_eq!(out, vec!["tool", "install", "uv", "--force"]);
+    }
+
+    #[test]
+    fn update_with_version_persists_user_override() {
+        let td = plant_project(managed_registry_body());
+        let home = td.path().join("pulp-home");
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+            ("PULP_TOOL_UV_VERSION", None),
+        ]);
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+
+        let mut buf = Vec::new();
+        // Delegate is disabled → re-install prints the stub; the override
+        // persistence + reporting still happens first.
+        let _ = update(&reg, "uv", Some("0.7.0"), &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Pinned uv to 0.7.0"), "{s}");
+        assert!(s.contains("Active version for uv: 0.7.0"), "{s}");
+        assert!(s.contains("user override"), "{s}");
+        assert_eq!(
+            tool_version::read_overrides().get("uv").map(String::as_str),
+            Some("0.7.0")
+        );
+    }
+
+    #[test]
+    fn update_bare_clears_prior_override_and_tracks_pin() {
+        let td = plant_project(managed_registry_body());
+        let home = td.path().join("pulp-home");
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+            ("PULP_TOOL_UV_VERSION", None),
+        ]);
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+
+        tool_version::set_override("uv", "0.9.9").unwrap();
+        let mut buf = Vec::new();
+        let _ = update(&reg, "uv", None, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("cleared user override 0.9.9"), "{s}");
+        assert!(s.contains("Active version for uv: 0.6.14"), "{s}");
+        assert!(s.contains("registry pin"), "{s}");
+        assert!(tool_version::read_overrides().get("uv").is_none());
+    }
+
+    #[test]
+    fn update_unknown_tool_errors() {
+        let td = plant_project(managed_registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let mut buf = Vec::new();
+        let rc = update(&reg, "does-not-exist", None, &mut buf).unwrap();
+        assert_eq!(rc, 1);
+        assert!(String::from_utf8(buf).unwrap().contains("not found"));
+    }
+
+    #[test]
+    fn update_rejects_unmanaged_tool() {
+        // `registry_body`'s uv has no managed_by_pulp flag (defaults false).
+        let td = plant_project(registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let mut buf = Vec::new();
+        let rc = update(&reg, "uv", None, &mut buf).unwrap();
+        assert_eq!(rc, 1);
+        assert!(String::from_utf8(buf)
+            .unwrap()
+            .contains("not a pulp-managed tool"));
+    }
+
+    #[test]
+    fn info_json_surfaces_active_version_and_source() {
+        let td = plant_project(managed_registry_body());
+        let home = td.path().join("pulp-home");
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+            ("PULP_TOOL_UV_VERSION", None),
+        ]);
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+
+        let mut buf = Vec::new();
+        info(&reg, "uv", true, &mut buf).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(value["active_version"], "0.6.14");
+        assert_eq!(value["active_version_source"], "registry pin");
+
+        tool_version::set_override("uv", "0.7.0").unwrap();
+        let mut buf2 = Vec::new();
+        info(&reg, "uv", true, &mut buf2).unwrap();
+        let value2: serde_json::Value = serde_json::from_slice(&buf2).unwrap();
+        assert_eq!(value2["active_version"], "0.7.0");
+        assert_eq!(value2["active_version_source"], "user override");
+    }
+
+    #[test]
+    fn help_mentions_update_verb() {
+        let mut buf = Vec::new();
+        print_help(&mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("update <tool>"));
+        assert!(s.contains("PULP_TOOL_<ID>_VERSION"));
     }
 
     #[test]
