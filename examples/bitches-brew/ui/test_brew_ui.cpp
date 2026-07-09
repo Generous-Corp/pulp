@@ -245,6 +245,13 @@ TEST_CASE("LFO's Free Run toggle reaches the rate mode", "[brew][ui][lfo]") {
 
     toggle->on_mouse_down(view::Point{});
     REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 0.0f);
+
+    // Same blind spot, same fix: swing warps the timeline, not the shape, so the
+    // scope cannot see which unit is selected either.
+    auto* sixteenths = find_toggle(*ed.view, "16ths");
+    REQUIRE(sixteenths != nullptr);
+    sixteenths->on_mouse_down(view::Point{});
+    REQUIRE(ed.host.state().get_value(LfoProcessor::kSwingUnit) == 1.0f);
 }
 
 TEST_CASE("Function's editor draws the curve and tracks the signal on it",

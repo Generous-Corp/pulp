@@ -83,6 +83,13 @@ The sum is not clamped inside the mixer. Four depths at full reach 4.0, and
 flattening that before `Offset` and the output scale have had their say would
 silently discard a mix you asked for. It clamps once, at the jack.
 
+`Swing` warps the beat timeline the same way `Sync`'s does, and for the same
+reason it is applied to the *position* before the position becomes a phase: warp
+the phase afterwards and the LFO stops agreeing with the clock it is supposed to
+shuffle alongside. 50% is straight, bit-identically so. It has no meaning in free
+run — a hertz rate that shuffled would just be a wrong hertz rate — so it is
+ignored there rather than approximated.
+
 `Free Run` swaps the tempo for `Free`, a rate in hertz. Both are derived from the
 host's position — one from `position_beats`, one from `position_samples` — so free
 running is not free *floating*: it stays a pure function of where the playhead is,
