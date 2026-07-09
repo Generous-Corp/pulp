@@ -20,6 +20,7 @@
 
 #include <pulp/format/headless.hpp>
 
+#include <cmath>
 #include <vector>
 
 using namespace pulp;
@@ -532,4 +533,65 @@ TEST_CASE("Sync pulses survive a block boundary intact", "[brew][sync]") {
     // 240 samples of pulse: 100 + 100 + 40 high, then low.
     REQUIRE(rig.clock()[39] == 1.0f);
     REQUIRE(rig.clock()[40] == 0.0f);
+}
+
+// One beat is 24000 samples at 120 BPM / 48 kHz, so a swung edge lands on a
+// sample number that can be predicted by hand rather than by rerunning the code.
+TEST_CASE("Sync's swing moves the off-beat pulse to the sample it should",
+          "[brew][sync][swing]") {
+    constexpr int kBeatSamples = 24000;
+    constexpr int kLongBlock = 20000;
+
+    SyncRig rig;
+    rig.state().set_value(SyncProcessor::kPulsesPerBeat, 2.0f);  // an edge per eighth
+
+    SECTION("straight puts it halfway") {
+        rig.state().set_value(SyncProcessor::kSwingPercent, 50.0f);
+        const auto e = rig.render(0.0, true, true, kLongBlock);
+        REQUIRE(e == std::vector<int>{0, kBeatSamples / 2});
+    }
+
+    SECTION("66% pushes it back to two-thirds of the beat") {
+        rig.state().set_value(SyncProcessor::kSwingPercent, 66.0f);
+        const auto e = rig.render(0.0, true, true, kLongBlock);
+        // 0.66 of a beat = 15840 samples. The downbeat does not move.
+        REQUIRE(e == std::vector<int>{0, 15840});
+    }
+
+    SECTION("below 50% it rushes instead") {
+        rig.state().set_value(SyncProcessor::kSwingPercent, 40.0f);
+        const auto e = rig.render(0.0, true, true, kLongBlock);
+        REQUIRE(e == std::vector<int>{0, static_cast<int>(0.4 * kBeatSamples)});
+    }
+
+    SECTION("the sixteenth unit swings a different note") {
+        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 4.0f);
+        rig.state().set_value(SyncProcessor::kSwingUnit, 1.0f);
+        rig.state().set_value(SyncProcessor::kSwingPercent, 66.0f);
+        const auto e = rig.render(0.0, true, true, kLongBlock);
+        // Pairs are eighths now: the off-sixteenth at 0.25 beats moves to 0.33,
+        // the eighth at 0.5 is a pair boundary and stays put, and the sixteenth
+        // after it moves to 0.5 + 0.33 = 0.83.
+        REQUIRE(e == std::vector<int>{0, 7920, kBeatSamples / 2, 19920});
+    }
+}
+
+TEST_CASE("a swung pulse just after the play edge is not swallowed by the gate",
+          "[brew][sync][swing][safety]") {
+    // The run gate compares an edge's *sounding* beat against the beat the
+    // transport started at. Comparing its straight beat instead would drop any
+    // pulse the swing has carried across the play edge — a missing downstream
+    // clock tick, which reads as a dead cable rather than a rounding bug.
+    constexpr int kBeatSamples = 24000;
+    SyncRig rig;
+    rig.state().set_value(SyncProcessor::kPulsesPerBeat, 2.0f);
+    rig.state().set_value(SyncProcessor::kSwingPercent, 66.0f);
+
+    // Start playing at beat 0.55, for a block that ends at 0.967 — so the only
+    // edge it can contain is the swung off-eighth. Straight, that edge sits at
+    // 0.5, behind us. Swung, it sounds at 0.66, ahead of us, and must be emitted.
+    const auto e = rig.render(0.55, true, true, 10000);
+    const int expected = static_cast<int>((0.66 - 0.55) * kBeatSamples + 0.5);
+    REQUIRE(e.size() == 1);
+    REQUIRE(std::abs(e.front() - expected) <= 1);
 }
