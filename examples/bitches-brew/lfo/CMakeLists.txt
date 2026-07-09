@@ -1,4 +1,4 @@
-# LFO — tempo-locked modulation source with a quadrature partner.
+# LFO — modulation source, tempo-locked or free-running, with a quadrature partner.
 
 if(PULP_BUILD_TESTS)
     # lfo_view.cpp defines create_view(); without it the Processor's vtable is

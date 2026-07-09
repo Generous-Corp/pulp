@@ -83,7 +83,7 @@ private:
 class LfoUi : public ui::BrewPanel {
 public:
     explicit LfoUi(state::StateStore& store, const LfoProcessor& proc)
-        : ui::BrewPanel("LFO", "a tempo-locked modulation source, plus quadrature"),
+        : ui::BrewPanel("LFO", "a modulation source, tempo-locked or free, plus quadrature"),
           store_(store) {
         auto beats = [](float v) {
             char buf[20];
@@ -108,6 +108,12 @@ public:
             proc, [&proc] { return proc.display_phase(); });
         scope->flex().preferred_height = 88.0f;
         scope->flex().align_self = view::FlexAlign::stretch;
+
+        auto hertz = [](float v) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.4g Hz", v);
+            return std::string(buf);
+        };
 
         auto add = [&](view::View& row, state::ParamID id, const char* label,
                        std::function<std::string(float)> fmt, float w) {
@@ -134,10 +140,16 @@ public:
         add(*shaping, LfoProcessor::kRandom, "Random", depth, 76.0f);
         add(*shaping, LfoProcessor::kOffset, "Offset", depth, 76.0f);
         add(*shaping, LfoProcessor::kOutputScale, "Out", depth, 76.0f);
+        // Only one of Rate and Free is live at a time. Both are always shown, so
+        // flipping the switch never makes a knob appear where the mouse already is.
+        add(*shaping, LfoProcessor::kFreeHz, "Free", hertz, 76.0f);
 
         auto bottom = ui::row(14.0f, 52.0f);
+        auto free_run = ui::param_toggle(store_, LfoProcessor::kRateMode, "Free Run");
         auto inv = ui::param_toggle(store_, LfoProcessor::kInvert, "Invert");
+        ui::fixed_size(*free_run, 84.0f, 50.0f);
         ui::fixed_size(*inv, 78.0f, 50.0f);
+        bottom->add_child(std::move(free_run));
         bottom->add_child(std::move(inv));
 
         add_child(std::move(scope));
@@ -147,6 +159,8 @@ public:
         add_child(std::move(bottom));
         add_child(ui::caption_label(
             "orange is the output, blue is the quadrature a quarter cycle ahead"));
+        add_child(ui::caption_label(
+            "Free Run reads Free in hertz, and ignores the tempo"));
     }
 
 private:
