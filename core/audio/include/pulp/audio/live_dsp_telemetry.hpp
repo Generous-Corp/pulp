@@ -182,13 +182,23 @@ public:
     /// not prepared, or the ring is full (increments blocks_dropped).
     LiveDspTelemetryBlockWriter begin_block(std::uint32_t frame_count, double sample_rate) noexcept;
 
-    /// AUDIO THREAD (or replay). Feed a synthetic block record with explicit
+    /// AUDIO THREAD (or replay). Feed a complete block record with explicit
     /// per-node elapsed times, taking the same ring path as begin_block() +
     /// node scopes + finish(). RT-safe: no allocation, no locks, drop-on-full.
     /// Entries in `node_ns` beyond node_count() are ignored; missing nodes
-    /// default to 0. Used for deterministic tests and offline replay.
+    /// default to 0. Used both for path-agnostic recording from externally
+    /// measured per-node timings (e.g. the graph's persistent load measurers,
+    /// which cover every execution path) and for deterministic tests / replay.
     void inject_block(std::span<const std::int64_t> node_ns, std::int64_t graph_elapsed_ns,
                       std::uint32_t frame_count, double sample_rate) noexcept;
+
+    /// AUDIO THREAD. A pre-allocated node_count()-sized scratch for the caller to
+    /// fill with per-node elapsed values before calling inject_block() over it —
+    /// so a recording site needs no stack VLA and no allocation. Returns nullptr
+    /// when not prepared. The buffer is owned by the store and reused each block.
+    std::int64_t* external_record_scratch() noexcept {
+        return record_scratch_.empty() ? nullptr : record_scratch_.data();
+    }
 
     /// NON-RT. Consume all complete block records, update rolling windows,
     /// compute percentiles/jitter/attribution, and republish the snapshot.
@@ -237,6 +247,7 @@ private:
     std::vector<std::uint32_t> window_pos_;   // [node_count_] next write pos
     std::vector<std::uint32_t> window_len_;   // [node_count_] filled length
     std::vector<std::int64_t> scratch_;       // [window_blocks_] percentile scratch
+    std::vector<std::int64_t> record_scratch_;  // [node_count_] external-record staging
 
     std::vector<LiveDspNodeInfo> info_;       // [node_count_]
     std::uint64_t drained_ = 0;

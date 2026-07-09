@@ -19,6 +19,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -570,6 +571,21 @@ public:
     // the audio thread runs. Feeds the live-swap admission gate.
     audio::AudioProcessLoadSnapshot graph_load() const;
 
+    // Per-node live-DSP telemetry (fixed-slot p50/p95/p99 + jitter + over-budget
+    // attribution; see audio/live_dsp_telemetry.hpp). Disabled by default; the
+    // audio path is a single predicted-not-taken branch when off. The store lives
+    // per-CompiledGraph so it rides the RCU snapshot lifetime — telemetry resets on
+    // a topology recompile (a new topology is a new timing baseline). Per-node
+    // timing is recorded on the legacy reference-walk path (the default when routed
+    // dispatch is off); routed-executor blocks still contribute graph-level timing.
+    void set_live_dsp_telemetry_enabled(bool enabled);
+    bool live_dsp_telemetry_enabled() const;
+    // Drain the live snapshot's ring and return a copy of the latest summary.
+    // Non-real-time; single poller (control/UI thread). Pins the live snapshot for
+    // the duration of the drain. Returns an empty (available == false) snapshot when
+    // no graph is prepared.
+    audio::LiveDspTelemetrySnapshot poll_live_dsp_telemetry();
+
     // Test-only: run compile_() once and DISCARD the result, WITHOUT prepare()'s
     // null-first prologue. Exists so a TSan/ASan test can run compile_() on one
     // thread while process() runs the live snapshot on another — proving compile_()
@@ -974,6 +990,11 @@ private:
         };
         std::unordered_map<NodeId, NodeShape> shapes;
         std::vector<OrderedRuntime> ordered_runtime;
+        // Per-node live-DSP timing, prepared at compile in ordered_runtime order
+        // (slot i == ordered_runtime[i]). Non-movable (holds atomics); CompiledGraph
+        // is only ever make_shared'd and referenced, never copied, so an in-place
+        // member is safe. Rides this snapshot's RCU lifetime.
+        audio::LiveDspTelemetryStore live_dsp_telemetry;
         int max_block_size = 0;
         double sample_rate = 0.0;  // needed to convert automation_smoothing_ms
                                    // into samples.
@@ -1249,6 +1270,12 @@ private:
     // Heap-stable behind unique_ptr; snapshot() is concurrency-safe.
     std::unique_ptr<audio::AudioProcessLoadMeasurer> graph_load_ =
         std::make_unique<audio::AudioProcessLoadMeasurer>();
+
+    // Desired per-node live-DSP telemetry enable state. Read by compile_ to seed a
+    // new snapshot's store and written by set_live_dsp_telemetry_enabled(); both are
+    // control-thread but may be different control threads (host prepare vs UI
+    // toggle), so it is atomic.
+    std::atomic<bool> desired_live_dsp_telemetry_enabled_{false};
 
     // Serializes CONTROL-THREAD access to the source-of-truth topology — the
     // nodes_ / connections_ vectors and the plain (non-atomic) GraphNode fields
