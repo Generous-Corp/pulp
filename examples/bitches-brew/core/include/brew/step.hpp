@@ -23,7 +23,9 @@
 
 namespace pulp::examples::brew {
 
-inline constexpr int kMaxSteps = 8;
+/// Steps in a pattern. Distinct from the quantizer's step count, which divides
+/// a voltage range rather than a bar.
+inline constexpr int kMaxSequencerSteps = 8;
 
 /// Euclidean modulo. `%` on a negative index would return a negative step, and a
 /// negative step means the sequencer reads outside its own array before the

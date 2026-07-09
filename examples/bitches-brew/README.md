@@ -36,6 +36,7 @@ them).
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
 | `LFO` | A tempo-locked modulation source, plus the same shape a quarter cycle ahead. |
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
+| `Quantizer` | Snaps an incoming control voltage to discrete steps. |
 
 `Function` is the only plug-in here that reads its input bus — the others
 generate. It offers five curves, and they are not all the same kind of thing.

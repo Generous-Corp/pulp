@@ -13,6 +13,7 @@
 #include "dc_processor.hpp"
 #include "function_processor.hpp"
 #include "lfo_processor.hpp"
+#include "quantizer_processor.hpp"
 #include "sync_processor.hpp"
 
 #include <pulp/format/headless.hpp>
@@ -71,6 +72,24 @@ struct Editor {
 /// failure — it produces megabytes of output and takes the process down with it.
 bool differs(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
     return a != b;
+}
+
+/// Push a constant level through both input channels for one block, so the
+/// editors that display an operating point have a signal to point at.
+void drive(format::HeadlessHost& host, float level) {
+    constexpr std::size_t kFrames = 64;
+    audio::Buffer<float> in(2, kFrames), out(2, kFrames);
+    in.clear();
+    out.clear();
+    for (std::size_t c = 0; c < 2; ++c)
+        for (std::size_t n = 0; n < kFrames; ++n) in.channel(c)[n] = level;
+    const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
+    audio::BufferView<const float> iv(ip, 2, kFrames);
+    auto ov = out.view();
+    format::ProcessContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.num_samples = kFrames;
+    host.process(ov, iv, ctx);
 }
 
 }  // namespace
@@ -196,28 +215,13 @@ TEST_CASE("Function's editor draws the curve and tracks the signal on it",
         ed.host.state().set_value(FunctionProcessor::kCurve,
                                   static_cast<float>(Curve::linear));
 
-        auto drive = [&](float level) {
-            audio::Buffer<float> in(2, 64), out(2, 64);
-            in.clear();
-            out.clear();
-            for (std::size_t c = 0; c < 2; ++c)
-                for (std::size_t n = 0; n < 64; ++n) in.channel(c)[n] = level;
-            const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
-            audio::BufferView<const float> iv(ip, 2, 64);
-            auto ov = out.view();
-            format::ProcessContext ctx;
-            ctx.sample_rate = 48000.0;
-            ctx.num_samples = 64;
-            ed.host.process(ov, iv, ctx);
-        };
-
         const auto* fn = static_cast<const FunctionProcessor*>(ed.host.processor());
 
-        drive(-0.9f);
+        drive(ed.host, -0.9f);
         REQUIRE(fn->display_input() == -0.9f);
         const auto low = ed.shoot();
 
-        drive(0.9f);
+        drive(ed.host, 0.9f);
         REQUIRE(fn->display_input() == 0.9f);
         REQUIRE(differs(ed.shoot(), low));
     }
@@ -252,4 +256,35 @@ TEST_CASE("Lamp brightness reaches the raster", "[brew][ui][probe]") {
     REQUIRE_FALSE(dark.empty());
     b = 1.0f;
     REQUIRE(differs(dark, view::render_to_png(root, 200, 200, 1.0f)));
+}
+
+TEST_CASE("Quantizer's editor draws the staircase and the operating point",
+          "[brew][ui][quantizer]") {
+    Editor ed(create_quantizer);
+    if (!ed.can_capture()) {
+        WARN("no raster screenshot backend in this build — skipping");
+        return;
+    }
+    const auto twelve = ed.shoot();
+    REQUIRE_FALSE(twelve.empty());
+
+    // The graph evaluates the plug-in's own transfer function, so changing the
+    // step count must redraw it. A fixed staircase would be decoration.
+    ed.host.state().set_value(QuantizerProcessor::kSteps, 4.0f);
+    const auto four = ed.shoot();
+    REQUIRE(differs(twelve, four));
+
+    SECTION("offset slides the lattice") {
+        ed.host.state().set_value(QuantizerProcessor::kOffset, 0.5f);
+        REQUIRE(differs(ed.shoot(), four));
+    }
+
+    SECTION("the dot follows the incoming voltage") {
+        // Two inputs that land on different treads must move the dot. This is the
+        // only thing in the editor that distinguishes a live cable from a dead one.
+        drive(ed.host, -0.7f);
+        const auto low = ed.shoot();
+        drive(ed.host, 0.7f);
+        REQUIRE(differs(ed.shoot(), low));
+    }
 }

@@ -57,19 +57,12 @@ public:
         c.set_stroke_color(ui::palette::border);
         c.stroke_line(x_of(-1.0), y_of(-1.0), x_of(1.0), y_of(1.0));
 
-        const int steps = 128;
-        auto sample = [&](int i) {
-            const double in = -1.0 + 2.0 * static_cast<double>(i) / steps;
-            return function_transfer(static_cast<float>(in), settings);
-        };
-
         c.set_stroke_color(ui::palette::accent);
         c.set_line_width(2.0f * s);
-        for (int i = 1; i <= steps; ++i) {
-            const double in0 = -1.0 + 2.0 * static_cast<double>(i - 1) / steps;
-            const double in1 = -1.0 + 2.0 * static_cast<double>(i) / steps;
-            c.stroke_line(x_of(in0), y_of(sample(i - 1)), x_of(in1), y_of(sample(i)));
-        }
+        ui::plot(c, 128, x_of(-1.0), x_of(1.0), [&](float t) {
+            const auto in = static_cast<float>(-1.0 + 2.0 * t);
+            return y_of(function_transfer(in, settings));
+        });
 
         const float in = proc_.display_input();
         const float out = proc_.display_output();

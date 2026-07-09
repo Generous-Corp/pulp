@@ -45,20 +45,18 @@ public:
         const double rate =
             static_cast<double>(proc_.state().get_value(LfoProcessor::kBeatsPerCycle));
         const int steps = 160;
-        auto y_of = [&](int i, double quad) {
-            const double beat = rate * static_cast<double>(i) / steps;
-            const float v = proc_.value_at(beat, quad);
+        // `t` is the fraction of the cycle, straight from the plotter. Recovering
+        // an integer sample index from it would round the last point back onto the
+        // previous one.
+        auto y_of = [&](float t, double quad) {
+            const float v = proc_.value_at(rate * static_cast<double>(t), quad);
             return mid - v * (mid - 4.0f * s);
         };
 
         auto trace = [&](double quad, canvas::Color col, float width) {
             c.set_stroke_color(col);
             c.set_line_width(width * s);
-            for (int i = 1; i <= steps; ++i) {
-                const float x0 = w * static_cast<float>(i - 1) / steps;
-                const float x1 = w * static_cast<float>(i) / steps;
-                c.stroke_line(x0, y_of(i - 1, quad), x1, y_of(i, quad));
-            }
+            ui::plot(c, steps, 0.0f, w, [&](float t) { return y_of(t, quad); });
         };
 
         trace(kQuadratureOffset, ui::palette::negative, 1.0f);
