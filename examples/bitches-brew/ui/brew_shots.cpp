@@ -54,11 +54,16 @@ static void shoot(format::ProcessorFactory f, const char* path,
 }
 
 int main() {
+    // The rail reads the emitted sample, so DC needs a block run before its
+    // editor has anything to show.
     shoot(create_dc, "/tmp/brewshots/dc.png", [](format::HeadlessHost& h) {
-        h.state().set_value(DcProcessor::kValue, 0.62f);
+        h.state().set_value(DcProcessor::kValue, 0.42f);
+        h.state().set_value(DcProcessor::kUnipolar, 0.2f);
+        run_block(h, playing(0.0));
     });
     shoot(create_dc, "/tmp/brewshots/dc-negative.png", [](format::HeadlessHost& h) {
         h.state().set_value(DcProcessor::kValue, -0.45f);
+        run_block(h, playing(0.0));
     });
     shoot(create_lfo, "/tmp/brewshots/lfo.png", [](format::HeadlessHost& h) {
         // A mix, not a shape: mostly sine with a triangle folded in and a little

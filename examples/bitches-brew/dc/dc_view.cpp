@@ -6,7 +6,7 @@
 namespace pulp::examples::brew {
 
 std::unique_ptr<view::View> DcProcessor::create_view() {
-    return std::make_unique<DcUi>(state());
+    return std::make_unique<DcUi>(state(), *this);
 }
 
 }  // namespace pulp::examples::brew
