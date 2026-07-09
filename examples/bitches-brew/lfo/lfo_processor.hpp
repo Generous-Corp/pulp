@@ -50,6 +50,8 @@ public:
         kInvert = 13,
         kRateMode = 14,
         kFreeHz = 15,
+        kSwingPercent = 16,
+        kSwingUnit = 17,
     };
 
     format::PluginDescriptor descriptor() const override {
@@ -128,6 +130,28 @@ public:
                              .unit = "Hz",
                              .range = {static_cast<float>(kMinFreeHz),
                                        static_cast<float>(kMaxFreeHz), 1.0f, 0.01f}});
+        // The same swing Sync applies to its clock, applied to the same beat
+        // timeline. 50% is straight, and bit-identically so.
+        store.add_parameter({.id = kSwingPercent,
+                             .name = "Swing",
+                             .unit = "%",
+                             .range = {static_cast<float>(kMinSwing * 100.0),
+                                       static_cast<float>(kMaxSwing * 100.0),
+                                       50.0f, 0.1f}});
+        store.add_parameter({.id = kSwingUnit,
+                             .name = "Swing Sixteenths",
+                             .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+    }
+
+    /// The swing the beat timeline is warped by. At 50% this returns a `Swing`
+    /// that `swing_active` reports inactive, so the phase is untouched.
+    [[nodiscard]] Swing current_swing() const noexcept {
+        return {.unit_beats = as_toggle(state().get_value(kSwingUnit))
+                                  ? kSixteenthBeats
+                                  : kEighthBeats,
+                .amount = static_cast<double>(state().get_value(kSwingPercent)) /
+                          100.0};
     }
 
     /// A snapshot of the mix, taken once per block rather than once per sample.
@@ -152,7 +176,7 @@ public:
     /// the plug-in at Processor's 400x300 default, and the layout is laid out to
     /// a geometry the editor was never checked against. The scope, three knobs, and the two toggles.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {380, 590};
+        return {380, 700};
     }
 
     /// Defined in lfo_view.cpp so the audio translation units never see the
@@ -176,7 +200,8 @@ public:
                                    double position_seconds) const noexcept {
         return lfo_cycles(rate_mode(), position_beats, position_seconds,
                           static_cast<double>(state().get_value(kBeatsPerCycle)),
-                          static_cast<double>(state().get_value(kFreeHz)));
+                          static_cast<double>(state().get_value(kFreeHz)),
+                          current_swing());
     }
 
     /// The value the plug-in emits at a number of elapsed cycles, after the

@@ -615,3 +615,117 @@ TEST_CASE("the sample-and-hold steps where the waveform wraps, not elsewhere",
     // ...and it does *not* step at cycles = 0, where an un-offset index would.
     REQUIRE(lfo->value_at_cycles(-0.1) == lfo->value_at_cycles(0.1));
 }
+
+TEST_CASE("straight swing leaves the LFO bit-identical", "[brew][lfo][swing]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+
+    // Swing has a defined identity, and it must be *exact*: a user who never
+    // touches the control, and a user who sets it to 50 and back, must render the
+    // same file. An `Approx` here would hide a warp that is merely small.
+    const auto straight = render(host, 0.37, 512, 0);
+
+    host.state().set_value(LfoProcessor::kSwingPercent, 50.0f);
+    REQUIRE(render(host, 0.37, 512, 0) == straight);
+
+    host.state().set_value(LfoProcessor::kSwingUnit, 1.0f);
+    REQUIRE(render(host, 0.37, 512, 0) == straight);
+}
+
+TEST_CASE("swing delays the LFO's second eighth", "[brew][lfo][swing]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
+
+    // The phase the LFO reaches at a sounding beat is the phase the straight LFO
+    // would have reached at the *straight* beat that sounding beat stands for.
+    // At 66% swing on eighths the swing pair is one beat long, and its midpoint —
+    // straight beat 0.5 — is pushed out to sounding beat 0.66.
+    const float straight_mid = render(host, 0.5, 1, 0)[0];
+
+    host.state().set_value(LfoProcessor::kSwingPercent, 66.0f);
+    const float swung_early = render(host, 0.5, 1, 0)[0];
+    REQUIRE_THAT(render(host, 0.66, 1, 0)[0], WithinAbs(straight_mid, 1e-5f));
+
+    // ...and it is genuinely warped, not merely offset: the sounding beat that
+    // used to carry the midpoint no longer does.
+    REQUIRE(swung_early != straight_mid);
+
+    // Downbeats are fixed points of the warp — a swung LFO still starts its cycle
+    // on the beat, or it would drift against everything else in the project.
+    host.state().set_value(LfoProcessor::kSwingPercent, 50.0f);
+    const float straight_downbeat = render(host, 1.0, 1, 0)[0];
+    host.state().set_value(LfoProcessor::kSwingPercent, 66.0f);
+    REQUIRE(render(host, 1.0, 1, 0)[0] == straight_downbeat);
+}
+
+TEST_CASE("swing moves the sixteenth when asked", "[brew][lfo][swing]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
+    host.state().set_value(LfoProcessor::kSwingPercent, 66.0f);
+
+    // Eighth-swing and sixteenth-swing are different warps of the same timeline.
+    // A control that quietly ignored its unit would pass every test above.
+    //
+    // Beat 0.4 specifically. The two warps agree exactly wherever a position is
+    // in the *first* half of both swing pairs — at 0.3 both map through the same
+    // `p / 2a` — so a test there passes whether or not the unit is read. 0.4 is
+    // past the sixteenth pair's midpoint (0.33) and short of the eighth's (0.66),
+    // which is the only region where the two disagree.
+    const auto eighths = render(host, 0.4, 256, 0);
+    host.state().set_value(LfoProcessor::kSwingUnit, 1.0f);
+    REQUIRE(render(host, 0.4, 256, 0) != eighths);
+}
+
+TEST_CASE("a free-running LFO ignores swing", "[brew][lfo][swing][free]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kRateMode, 1.0f);
+    host.state().set_value(LfoProcessor::kFreeHz, 3.0f);
+
+    // Swing subdivides a beat. A free-running LFO has no beats, so a swung hertz
+    // rate is just a wrong hertz rate. Ignored, not approximated.
+    const auto free = render_free(host, 12345, 256, 0);
+    host.state().set_value(LfoProcessor::kSwingPercent, 66.0f);
+    REQUIRE(render_free(host, 12345, 256, 0) == free);
+    host.state().set_value(LfoProcessor::kSwingUnit, 1.0f);
+    REQUIRE(render_free(host, 12345, 256, 0) == free);
+}
+
+TEST_CASE("a swung LFO still locates and bounces identically",
+          "[brew][lfo][swing]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSwingPercent, 62.5f);
+
+    // The whole point of warping the position rather than accumulating a phase:
+    // swing costs nothing in determinism. Reaching beat 2.25 by playing through
+    // it and by dropping the playhead on it must give the same samples.
+    render(host, 1.0, 512, 0);   // play through the region first
+    render(host, 2.0, 512, 0);
+    const auto played = render(host, 2.25, 128, 0);
+
+    // A fresh instance dropped straight onto beat 2.25 must agree sample for
+    // sample. Nothing in the swung path may carry state between blocks.
+    format::HeadlessHost fresh(create_lfo);
+    fresh.prepare(kSampleRate, 512, 2, 2);
+    fresh.state().set_value(LfoProcessor::kSwingPercent, 62.5f);
+    REQUIRE(render(fresh, 2.25, 128, 0) == played);
+
+    // And block size must not matter: two 64-frame blocks reproduce one 128-frame
+    // one. Not bit-exactly — the host hands the second block a beat position it
+    // computed as `2.25 + bps*64`, and `bps*64 + bps*n` is not the same double as
+    // `bps*(64+n)`. That is the host's rounding, not state carried across the
+    // boundary, so the claim is agreement to within it.
+    format::HeadlessHost split(create_lfo);
+    split.prepare(kSampleRate, 512, 2, 2);
+    split.state().set_value(LfoProcessor::kSwingPercent, 62.5f);
+    const double bps = beats_per_sample(kTempo, kSampleRate);
+    auto a = render(split, 2.25, 64, 0);
+    const auto b = render(split, 2.25 + bps * 64.0, 64, 0);
+    a.insert(a.end(), b.begin(), b.end());
+    REQUIRE(a.size() == played.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+        REQUIRE_THAT(a[i], WithinAbs(played[i], 1e-6f));
+}

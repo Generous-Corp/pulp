@@ -109,6 +109,12 @@ public:
         scope->flex().preferred_height = 88.0f;
         scope->flex().align_self = view::FlexAlign::stretch;
 
+        auto percent = [](float v) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f%%", v);
+            return std::string(buf);
+        };
+
         auto hertz = [](float v) {
             char buf[16];
             std::snprintf(buf, sizeof(buf), "%.4g Hz", v);
@@ -144,6 +150,14 @@ public:
         // flipping the switch never makes a knob appear where the mouse already is.
         add(*shaping, LfoProcessor::kFreeHz, "Free", hertz, 76.0f);
 
+        // Swing warps the beat timeline, so it sits with the transport controls
+        // rather than the shaping ones. It does nothing in free-run mode.
+        auto feel = ui::row(6.0f, 80.0f);
+        add(*feel, LfoProcessor::kSwingPercent, "Swing", percent, 76.0f);
+        auto sixteenths = ui::param_toggle(store_, LfoProcessor::kSwingUnit, "16ths");
+        ui::fixed_size(*sixteenths, 78.0f, 50.0f);
+        feel->add_child(std::move(sixteenths));
+
         auto bottom = ui::row(14.0f, 52.0f);
         auto free_run = ui::param_toggle(store_, LfoProcessor::kRateMode, "Free Run");
         auto inv = ui::param_toggle(store_, LfoProcessor::kInvert, "Invert");
@@ -156,11 +170,14 @@ public:
         add_child(std::move(mix));
         add_child(std::move(timing));
         add_child(std::move(shaping));
+        add_child(std::move(feel));
         add_child(std::move(bottom));
         add_child(ui::caption_label(
             "orange is the output, blue is the quadrature a quarter cycle ahead"));
         add_child(ui::caption_label(
-            "Free Run reads Free in hertz, and ignores the tempo"));
+            "Free Run reads Free in hertz, and ignores the tempo and Swing"));
+        add_child(ui::caption_label(
+            "50% swing is straight, and exactly so"));
     }
 
 private:

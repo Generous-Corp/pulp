@@ -17,6 +17,7 @@
 // multiply at the output stage, and keeping the shapes bipolar means `invert`
 // and `output_scale` compose the same way they do for every other plug-in.
 
+#include <brew/clock.hpp>   // Swing, swing_unwarp
 #include <brew/random.hpp>
 
 #include <algorithm>
@@ -179,14 +180,23 @@ inline constexpr double kMaxFreeHz = 40.0;
 ///
 /// Both modes reduce to this, which is why the shapes, the phase offset, the
 /// quadrature and the sample-and-hold need to know nothing about tempo.
+/// Swing warps the beat timeline, so it is applied to the *position* before the
+/// position becomes a phase — not to the phase afterwards. `swing_unwarp` maps a
+/// sounding beat back to the straight beat it stands for, which is exactly the
+/// coordinate the cycle count is measured in.
+///
+/// It has no meaning in free-run mode. Swing is a subdivision of a beat, and a
+/// free-running LFO has no beats; a hertz rate that shuffled would just be a
+/// wrong hertz rate. The parameter is ignored there rather than approximated.
 [[nodiscard]] inline double lfo_cycles(RateMode mode, double position_beats,
                                        double position_seconds,
                                        double beats_per_cycle,
-                                       double free_hz) noexcept {
+                                       double free_hz,
+                                       const Swing& swing = {}) noexcept {
     if (mode == RateMode::free)
         return position_seconds * std::clamp(free_hz, kMinFreeHz, kMaxFreeHz);
     if (!(beats_per_cycle > 0.0)) return 0.0;
-    return position_beats / beats_per_cycle;
+    return swing_unwarp(position_beats, swing) / beats_per_cycle;
 }
 
 /// The phase within the current cycle, given elapsed cycles and an offset.
