@@ -661,6 +661,25 @@ waiting on the full matrix. Watch point: the backend's
 `winrt::Windows::Devices::Bluetooth::Advertisement` API surface is written
 without a local Windows compiler, so signature drift surfaces here first.
 
+### Advisory build-gate: `tracing-build.yml`
+
+`.github/workflows/tracing-build.yml` (advisory, `ubuntu-latest`, NOT a required
+check) is the only lane that builds the opt-in Perfetto tracing configuration
+(`-DPULP_TRACING=ON`). Every other lane builds the default OFF config, so a
+break in the ON path — the Perfetto amalgamation fetch/compile in
+`tools/cmake/PulpTracing.cmake` or the trace macros lighting up in
+`<pulp/runtime/trace.hpp>` — would otherwise land unnoticed. It configures
+`PULP_TRACING=ON -DPULP_ENABLE_GPU=OFF` (Release), builds `pulp-test-tracing`,
+`pulp-test-tracing-session`, `pulp-test-offline-tracing`, and
+`pulp-test-ship-tracing-guard`, and runs them. GPU/Skia stay OFF because the
+tracing tests only need `pulp::runtime` + `pulp::audio`, keeping the lane fast
+and hostable on a stock GitHub runner. Watch point: `test_tracing.cpp`'s
+"tracing is off by default" case asserts `kTracingEnabled == false` and is
+designed to fail under ON, so the lane excludes exactly that case (Catch2
+`~"tracing is off by default"`); the other suites are config-agnostic and must
+fully pass under ON. `runs-on` is a hard-coded `ubuntu-latest` — never route it
+to a self-hosted label or add it to branch protection.
+
 ## PR Review Thread Hygiene
 
 Before opening a follow-up PR or declaring a phase complete, sweep review
