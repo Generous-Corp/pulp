@@ -130,7 +130,7 @@ export function makeBridge(exports) {
     return utf8Decode(h.subarray(p, e));
   };
 
-  return {
+  const bridge = {
     exports, u8, f32, writeCStr, readCStr,
     malloc: (n) => exports.malloc(n),
     free: (p) => exports.free(p),
@@ -155,8 +155,9 @@ export function makeBridge(exports) {
     drainMidiOut(dstPtr, cap) { return exports.wam_midi_out_drain(dstPtr, cap); },
     // One-shot DSP-state reset: the NEXT process() sees ctx.reset_requested.
     reset() { exports.wam_reset(); },
-    // Re-prepare for a sample-rate / block-size change. CONTROL THREAD ONLY —
-    // never between the interleave and process() of a render block.
+    // Re-prepare for a sample-rate / block-size change. Serviced between render
+    // quanta (the worklet's port.onmessage runs on the audio render thread, not
+    // a separate control thread) — never between the interleave and process().
     prepare(sampleRate, blockSize) { exports.wam_prepare(sampleRate, blockSize); },
     // Processor-reported delay-compensation latency, in samples.
     latencySamples() { return exports.wam_latency_samples(); },
@@ -191,4 +192,24 @@ export function makeBridge(exports) {
       return ok === 1;
     },
   };
+
+  // Version-skew safety: several exports postdate the first WAM ABI. If a DSP
+  // module was built before them, its bridge method would call an absent export
+  // and throw. Drop each such method so callers can feature-detect it the
+  // obvious way (`if (wam.drainMidiOut)`), and the worklet degrades instead of
+  // crashing on the audio thread. A DSP built from this tree has them all.
+  const optional = {
+    sysex: "wam_midi_sysex",
+    drainMidiOut: "wam_midi_out_drain",
+    reset: "wam_reset",
+    prepare: "wam_prepare",
+    latencySamples: "wam_latency_samples",
+    setTransport: "wam_set_transport",
+    paramEpoch: "wam_param_epoch",
+    readParamValues: "wam_read_param_values",
+  };
+  for (const [method, exportName] of Object.entries(optional)) {
+    if (typeof exports[exportName] !== "function") delete bridge[method];
+  }
+  return bridge;
 }

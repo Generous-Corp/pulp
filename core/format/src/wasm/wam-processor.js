@@ -77,10 +77,27 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       this._outPtr = wam.malloc(MAX_CHANNELS * MAX_FRAMES * 4);
       // MIDI-out drain target, allocated once (never per block).
       this._midiOutPtr = wam.malloc(MIDI_OUT_CAP);
-      // Bulk parameter snapshot target + the last epoch we reported.
-      this._paramCount = wam.readParamValues(0, 0);
-      this._paramPtr = wam.malloc(Math.max(1, this._paramCount) * 4);
-      this._lastParamEpoch = wam.paramEpoch();
+      // Bulk parameter snapshot target + the last epoch we reported. These
+      // exports (readParamValues/paramEpoch) postdate the first WAM ABI, so a
+      // demo dir carrying a STALE wam-dsp.js won't have them. Calling an absent
+      // export unconditionally here would throw in the constructor, before the
+      // descriptor is posted — the host would then stall 1.5 s and render an
+      // empty GUI over dead audio (a silent failure). Degrade instead: skip the
+      // param-echo feature. process() already guards `if (this._wam.paramEpoch)`,
+      // so the plugin still runs; it just won't push self-driven param updates
+      // (which a DSP old enough to lack these exports never emitted anyway).
+      // makeBridge drops these methods when a stale DSP module lacks their
+      // backing exports (see wam-runtime.mjs), so feature-detecting the bridge
+      // method is sufficient and matches how process() guards drainMidiOut.
+      if (wam.readParamValues && wam.paramEpoch) {
+        this._paramCount = wam.readParamValues(0, 0);
+        this._paramPtr = wam.malloc(Math.max(1, this._paramCount) * 4);
+        this._lastParamEpoch = wam.paramEpoch();
+      } else {
+        this._paramCount = 0;
+        this._paramPtr = 0;
+        this._lastParamEpoch = 0;
+      }
       this._wam = wam;
       for (const m of this._pendingMsgs) this._handle(m);
       this._pendingMsgs.length = 0;
@@ -156,9 +173,13 @@ class PulpWamProcessor extends AudioWorkletProcessor {
                                               this._midiOutPtr + copied);
         const events = parseMidiOutRecords(bytes, copied);
         if (events.length) {
+          // parseMidiOutRecords already returns {offset, bytes} records; post
+          // them directly rather than re-wrapping (this is the audio thread —
+          // an arpeggiator emits MIDI most blocks, so the extra object graph
+          // was steady per-block GC pressure for no behavioural gain).
           this.port.postMessage({
             type: "midiOut",
-            events: events.map((e) => ({ offset: e.offset, bytes: e.bytes })),
+            events,
             truncated: available > MIDI_OUT_CAP,
           });
         }
