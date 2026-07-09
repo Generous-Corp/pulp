@@ -1,8 +1,11 @@
 # Sync — host-transport clock and run/stop gate.
 
 if(PULP_BUILD_TESTS)
-    add_executable(brew-sync-test test_sync.cpp)
-    target_link_libraries(brew-sync-test PRIVATE pulp::format brew-core Catch2::Catch2WithMain)
+    # sync_view.cpp defines create_view(); without it the Processor's vtable is
+    # incomplete and the test does not link.
+    add_executable(brew-sync-test test_sync.cpp sync_view.cpp)
+    target_link_libraries(brew-sync-test
+        PRIVATE pulp::format brew-core brew-ui Catch2::Catch2WithMain)
     target_include_directories(brew-sync-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(brew-sync-test)
 endif()
@@ -11,6 +14,7 @@ endif()
 # generated template picks it up. Deliberate — see the plan's classification note.
 pulp_add_plugin(BrewSync
     FORMATS         VST3 AU CLAP
+    SOURCES         sync_view.cpp
     PLUGIN_NAME     "Sync"
     BUNDLE_ID       "com.bitchesbrew.sync"
     MANUFACTURER    "Bitches Brew"
@@ -22,9 +26,13 @@ pulp_add_plugin(BrewSync
 # The entry translation units include sync_processor.hpp, which pulls in
 # brew-core's headers. No SOURCES were given, so there is no BrewSync_Core to
 # hang them off: link the header-only target into each format module directly.
+if(TARGET BrewSync_Core)
+    target_include_directories(BrewSync_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(BrewSync_Core PUBLIC brew-core brew-ui)
+endif()
 foreach(fmt VST3 AU CLAP)
     if(TARGET BrewSync_${fmt})
-        target_link_libraries(BrewSync_${fmt} PRIVATE brew-core)
+        target_link_libraries(BrewSync_${fmt} PRIVATE brew-core brew-ui)
     endif()
 endforeach()
 

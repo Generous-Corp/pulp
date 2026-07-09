@@ -36,6 +36,7 @@
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -117,6 +118,21 @@ public:
 
     void prepare(const format::PrepareContext&) override { hard_reset(); }
 
+    /// Defined in sync_view.cpp so the audio translation units never see the
+    /// view stack.
+    std::unique_ptr<view::View> create_view() override;
+
+    /// Peak clock level and run-gate level of the last block, for the editor's
+    /// indicator lamps. Written once per block on the audio thread with relaxed
+    /// ordering: a lamp that reads a stale value for one frame is invisible, and
+    /// paying for synchronization here would not be.
+    [[nodiscard]] float clock_lamp() const noexcept {
+        return clock_lamp_.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] float run_lamp() const noexcept {
+        return run_lamp_.load(std::memory_order_relaxed);
+    }
+
     /// The edges-per-beat implied by the current settings. Exposed so a test can
     /// predict the edge grid without duplicating the parameter plumbing.
     [[nodiscard]] double current_edges_per_beat() const noexcept {
@@ -152,6 +168,7 @@ public:
             const float off = resolve_output(0.0f, scale, invert);
             fill(clock_ch, frames, off);
             fill(run_ch, frames, off);
+            publish_lamps(0.0f, 0.0f);
             return;
         }
 
@@ -167,6 +184,7 @@ public:
             const float stopped = resolve_output(0.0f, scale, invert);
             fill(clock_ch, frames, stopped);
             fill(run_ch, frames, stopped);
+            publish_lamps(0.0f, 0.0f);
             return;
         }
 
@@ -192,6 +210,7 @@ public:
         // grid calls back in ascending sample order, so `written` only moves
         // forward.
         int written = 0;
+        bool pulsed = false;
         grid_.advance(ctx.position_beats, epb, bps, frames,
                       [&](int offset, std::int64_t index) {
                           const double at = ClockGrid::edge_beats(index, epb);
@@ -203,8 +222,14 @@ public:
                           run_.skip_consumed = true;
                           render_until(clock_ch, written, offset, high, low);
                           pulse_.trigger(width);
+                          pulsed = true;
                       });
         render_until(clock_ch, written, frames, high, low);
+
+        // A pulse narrower than the block would flicker a lamp driven by the
+        // final sample, so latch on "an edge happened anywhere in this block".
+        publish_lamps(pulsed || pulse_.high() ? 1.0f : 0.0f,
+                      std::abs(run_level));
     }
 
     void process(format::ProcessBuffers& audio,
@@ -244,6 +269,11 @@ private:
         flush();
     }
 
+    void publish_lamps(float clock, float run) noexcept {
+        clock_lamp_.store(clock, std::memory_order_relaxed);
+        run_lamp_.store(run, std::memory_order_relaxed);
+    }
+
     static void fill(float* dst, int frames, float value) noexcept {
         if (dst == nullptr) return;
         for (int n = 0; n < frames; ++n) dst[n] = value;
@@ -262,6 +292,8 @@ private:
     ClockGrid grid_;
     PulseShaper pulse_;
     RunSegment run_;
+    std::atomic<float> clock_lamp_{0.0f};
+    std::atomic<float> run_lamp_{0.0f};
 };
 
 inline std::unique_ptr<format::Processor> create_sync() {
