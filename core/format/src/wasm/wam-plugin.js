@@ -127,6 +127,35 @@ export default class PulpWAM {
   async getState() { return this._request("getState", {}); }
   async setState(data) { this._audioNode?.port.postMessage({ type: "setState", data }); }
 
+  /** One-shot DSP-state reset: the plugin clears synced phase / delay history /
+   *  held-note maps on the next processed block. Fire-and-forget over the port. */
+  reset() { this._audioNode?.port.postMessage({ type: "reset" }); }
+
+  /** Re-prepare the DSP for a new sample rate / block size (e.g. an
+   *  AudioContext that turned out to run at 44.1 kHz). Serviced on the audio
+   *  thread between render quanta. */
+  prepare(sampleRate, blockSize = 128) {
+    this._audioNode?.port.postMessage({ type: "prepare", sampleRate, blockSize });
+  }
+
+  /** Processor-reported delay-compensation latency, in samples. Reported in the
+   *  descriptor the worklet posts on ready; 0 until the descriptor arrives. */
+  get latencySamples() { return this._descriptor?.latencySamples || 0; }
+
+  /** Processor-reported tail length, in samples (0 = none, -1 = infinite). */
+  get tailSamples() { return this._descriptor?.tailSamples || 0; }
+
+  /** Supply host transport state (Web Audio has none of its own). Fields are
+   *  copied into the plugin's ProcessContext each block. */
+  setTransport({ isPlaying = false, bpm = 120, positionBeats = 0,
+                 positionSamples = 0, timeSigNumerator = 4,
+                 timeSigDenominator = 4 } = {}) {
+    this._audioNode?.port.postMessage({
+      type: "transport", isPlaying, bpm, positionBeats, positionSamples,
+      timeSigNumerator, timeSigDenominator,
+    });
+  }
+
   // Parameter metadata reported by the worklet (id/label/type/unit/range).
   get parameters() { return this._parameters || []; }
   async getParameterInfo() { return this._parameters || []; }

@@ -77,6 +77,9 @@ WamDescriptorData WamDescriptorData::from_processor(const PluginDescriptor& desc
     d.has_midi_input = desc.accepts_midi;
     d.has_midi_output = desc.produces_midi;
     d.has_automation_input = true;
+    // tail_samples lives on the descriptor; latency_samples is a Processor
+    // method, so WamProcessorBridge::descriptor() fills d.latency_samples in.
+    d.tail_samples = desc.tail_samples;
     return d;
 }
 
@@ -95,7 +98,9 @@ std::string WamDescriptorData::to_json() const {
     ss << "\"hasAutomationInput\":" << (has_automation_input ? "true" : "false") << ",";
     ss << "\"hasAutomationOutput\":" << (has_automation_output ? "true" : "false") << ",";
     ss << "\"hasMpeInput\":" << (has_mpe_input ? "true" : "false") << ",";
-    ss << "\"hasMpeOutput\":" << (has_mpe_output ? "true" : "false");
+    ss << "\"hasMpeOutput\":" << (has_mpe_output ? "true" : "false") << ",";
+    ss << "\"latencySamples\":" << latency_samples << ",";
+    ss << "\"tailSamples\":" << tail_samples;
     ss << "}";
     return ss.str();
 }
@@ -218,6 +223,23 @@ void WamProcessorBridge::process(const float* input, float* output,
     ctx.num_samples = num_frames;
     ctx.process_mode = ProcessMode::Realtime;
     ctx.render_speed_hint = RenderSpeedHint::Realtime;
+
+    // Host-supplied transport (Web Audio has none of its own). Fields the web
+    // host cannot fill keep ProcessContext's defaults.
+    ctx.is_playing = transport_.is_playing;
+    ctx.tempo_bpm = transport_.tempo_bpm;
+    ctx.position_beats = transport_.position_beats;
+    ctx.position_samples = transport_.position_samples;
+    ctx.time_sig_numerator = transport_.time_sig_numerator;
+    ctx.time_sig_denominator = transport_.time_sig_denominator;
+
+    // One-shot reset: Processor has no reset() virtual, so request a DSP-state
+    // reset via the ProcessContext contract for exactly this block, then clear
+    // the flag so it is not sticky. RT-safe — just a bool read + clear.
+    if (reset_pending_) {
+        ctx.reset_requested = true;
+        reset_pending_ = false;
+    }
 
     processor_->process(out_view, in_view, pending_midi_, midi_out_, ctx);
 
@@ -463,7 +485,57 @@ bool WamProcessorBridge::set_state(const uint8_t* data, size_t size) {
 
 WamDescriptorData WamProcessorBridge::descriptor() const {
     if (!processor_) return {};
-    return WamDescriptorData::from_processor(processor_->descriptor());
+    auto d = WamDescriptorData::from_processor(processor_->descriptor());
+    // latency_samples() is a Processor method, not a descriptor field, so it is
+    // filled here rather than in from_processor().
+    d.latency_samples = processor_->latency_samples();
+    return d;
+}
+
+int WamProcessorBridge::latency_samples() const {
+    return processor_ ? processor_->latency_samples() : 0;
+}
+
+void WamProcessorBridge::prepare(double sample_rate, int block_size) {
+    // CONTROL THREAD ONLY. Re-runs Processor::prepare() and may resize the
+    // planar buffers — both allocate. Never call from process(); in the worklet
+    // this is a port message serviced between render quanta.
+    if (!processor_ || block_size <= 0) return;
+
+    sample_rate_ = sample_rate;
+    auto desc = processor_->descriptor();
+
+    PrepareContext ctx;
+    ctx.sample_rate = sample_rate;
+    ctx.max_buffer_size = block_size;
+    ctx.input_channels = desc.default_input_channels();
+    ctx.output_channels = desc.default_output_channels();
+    processor_->prepare(ctx);
+
+    // Grow the planar buffers only when the block size actually increased, so a
+    // same-or-smaller block never reallocates. The de-interleave stride is
+    // block_size_, so it and the channel pointers move together on a grow.
+    if (block_size > block_size_) {
+        block_size_ = block_size;
+        input_planar_.assign(static_cast<std::size_t>(num_channels_) * block_size_, 0.0f);
+        output_planar_.assign(static_cast<std::size_t>(num_channels_) * block_size_, 0.0f);
+        for (int ch = 0; ch < num_channels_; ++ch) {
+            input_ptrs_[ch] = input_planar_.data() + ch * block_size_;
+            output_ptrs_[ch] = output_planar_.data() + ch * block_size_;
+        }
+    }
+}
+
+void WamProcessorBridge::set_transport(bool is_playing, double bpm,
+                                        double position_beats,
+                                        double position_samples, int tsig_num,
+                                        int tsig_den) noexcept {
+    transport_.is_playing = is_playing;
+    transport_.tempo_bpm = bpm;
+    transport_.position_beats = position_beats;
+    transport_.position_samples = static_cast<int64_t>(position_samples);
+    transport_.time_sig_numerator = tsig_num;
+    transport_.time_sig_denominator = tsig_den;
 }
 
 } // namespace pulp::format::wam

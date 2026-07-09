@@ -132,6 +132,19 @@ export function makeBridge(exports) {
     // allocation of `cap` bytes). Returns bytes AVAILABLE — greater than `cap`
     // means the tail was truncated.
     drainMidiOut(dstPtr, cap) { return exports.wam_midi_out_drain(dstPtr, cap); },
+    // One-shot DSP-state reset: the NEXT process() sees ctx.reset_requested.
+    reset() { exports.wam_reset(); },
+    // Re-prepare for a sample-rate / block-size change. CONTROL THREAD ONLY —
+    // never between the interleave and process() of a render block.
+    prepare(sampleRate, blockSize) { exports.wam_prepare(sampleRate, blockSize); },
+    // Processor-reported delay-compensation latency, in samples.
+    latencySamples() { return exports.wam_latency_samples(); },
+    // Push a host transport snapshot (Web Audio has none of its own); it is
+    // copied into ProcessContext at the top of each process().
+    setTransport(isPlaying, bpm, positionBeats, positionSamples, tsigNum, tsigDen) {
+      exports.wam_set_transport(isPlaying ? 1 : 0, bpm, positionBeats,
+                                positionSamples, tsigNum | 0, tsigDen | 0);
+    },
     descriptorJson() { return readCStr(exports.wam_descriptor()); },
     parametersJson() { return readCStr(exports.wam_parameters()); },
     readState() {

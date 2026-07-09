@@ -42,6 +42,10 @@ function moduleExports(M) {
     wam_midi: M._wam_midi,
     wam_midi_sysex: M._wam_midi_sysex,
     wam_midi_out_drain: M._wam_midi_out_drain,
+    wam_reset: M._wam_reset,
+    wam_prepare: M._wam_prepare,
+    wam_latency_samples: M._wam_latency_samples,
+    wam_set_transport: M._wam_set_transport,
     wam_descriptor: M._wam_descriptor,
     wam_parameters: M._wam_parameters,
     wam_state_size: M._wam_state_size,
@@ -89,6 +93,17 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       case "param": this._wam.setParam(String(msg.id), msg.value); break;
       case "midi":  this._wam.midi(msg.status, msg.data1, msg.data2, msg.offset | 0); break;
       case "sysex": this._wam.sysex(msg.data, msg.offset | 0); break;
+      // One-shot reset — the next process() clears the plugin's DSP state.
+      case "reset": this._wam.reset(); break;
+      // Sample-rate / block-size change. Serviced here, between render quanta,
+      // so it never races an in-flight process() on the audio thread.
+      case "prepare": this._wam.prepare(msg.sampleRate, msg.blockSize | 0); break;
+      // Host transport snapshot, copied into ProcessContext each block.
+      case "transport":
+        this._wam.setTransport(msg.isPlaying, msg.bpm, msg.positionBeats,
+                               msg.positionSamples, msg.timeSigNumerator,
+                               msg.timeSigDenominator);
+        break;
       case "getState":
         this.port.postMessage({ type: "state", reqId: msg.reqId, data: this._wam.readState() });
         break;

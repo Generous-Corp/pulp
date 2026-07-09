@@ -85,7 +85,7 @@ target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 #   4. core/format/src/wasm/wam-processor.js     (moduleExports adapter)
 # Adding/removing a wam_* function means editing all four.
 set(_PULP_WAM_EXPORTED_FUNCTIONS
-    "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_midi_sysex','_wam_midi_out_drain','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
+    "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_midi_sysex','_wam_midi_out_drain','_wam_reset','_wam_prepare','_wam_latency_samples','_wam_set_transport','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
 
 # pulp_add_wam_plugin(<Name>
 #     ENTRY    <entry.cpp>              # required: the wam_* C entry point

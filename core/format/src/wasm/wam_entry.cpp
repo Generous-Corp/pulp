@@ -79,6 +79,37 @@ int wam_midi_out_drain(uint8_t* dst, int cap) {
     return g_bridge.drain_midi_out(dst, cap);
 }
 
+// One-shot DSP-state reset. Processor has no reset() virtual — the reset
+// contract is ProcessContext::reset_requested — so this flips a bridge flag
+// that raises reset_requested for exactly the next block. RT-safe.
+__attribute__((used, visibility("default")))
+void wam_reset() {
+    g_bridge.request_reset();
+}
+
+// Re-prepare for a real sample-rate / block-size change (a Web Audio context
+// can run at 44.1 kHz). CONTROL THREAD ONLY — this re-runs Processor::prepare()
+// and may resize buffers, so it must never be called from wam_process().
+__attribute__((used, visibility("default")))
+void wam_prepare(double sample_rate, int block_size) {
+    g_bridge.prepare(sample_rate, block_size);
+}
+
+// Processor-reported delay-compensation latency in samples. Control thread.
+__attribute__((used, visibility("default")))
+int wam_latency_samples() {
+    return g_bridge.latency_samples();
+}
+
+// Host-supplied transport snapshot (Web Audio has no transport). Copied into
+// ProcessContext at the top of each process(). Control thread.
+__attribute__((used, visibility("default")))
+void wam_set_transport(int is_playing, double bpm, double position_beats,
+                       double position_samples, int tsig_num, int tsig_den) {
+    g_bridge.set_transport(is_playing != 0, bpm, position_beats,
+                           position_samples, tsig_num, tsig_den);
+}
+
 __attribute__((used, visibility("default")))
 const char* wam_descriptor() {
     static std::string json;

@@ -49,6 +49,14 @@ struct WamDescriptorData {
     bool has_mpe_input = false;
     bool has_mpe_output = false;
 
+    // Delay-compensation / tail hints surfaced to the web host so it can align
+    // the plugin like a native adapter would. latency_samples comes from
+    // Processor::latency_samples() (a method, not a descriptor field, so the
+    // bridge fills it after from_processor()); tail_samples is
+    // PluginDescriptor::tail_samples.
+    int latency_samples = 0;
+    int tail_samples = 0;
+
     // Build from a Pulp PluginDescriptor
     static WamDescriptorData from_processor(const PluginDescriptor& desc);
 
@@ -82,6 +90,35 @@ public:
 
     // Called once from AudioWorkletProcessor.constructor()
     bool initialize(double sample_rate, int max_block_size);
+
+    // Re-run the processor's prepare() for a real sample-rate / block-size
+    // change (a Web Audio context can run at 44.1 kHz, not the 48 kHz assumed
+    // at construction). CONTROL THREAD ONLY — never call from process(): it
+    // re-runs Processor::prepare() and may resize the planar buffers, both of
+    // which allocate. In the worklet it arrives as a port message, which the
+    // audio thread services BETWEEN render quanta (never mid-block). The planar
+    // buffers are only resized when the block size actually grows, so a same-
+    // or-smaller block never allocates here.
+    void prepare(double sample_rate, int block_size);
+
+    // One-shot DSP-state reset. Processor has no reset() virtual; the reset
+    // contract is ProcessContext::reset_requested / should_reset_dsp_state().
+    // This sets an RT-safe flag (a single bool) that makes the NEXT process()
+    // raise ctx.reset_requested for exactly one block, then clears it — so a
+    // plugin like mpe-spreader drops its held-note channel map on that block
+    // and is normal again on the next. Safe to call from any thread; it only
+    // flips a bool.
+    void request_reset() noexcept { reset_pending_ = true; }
+
+    // Processor-reported delay-compensation latency in samples. Control thread.
+    int latency_samples() const;
+
+    // Host-supplied transport snapshot. Web Audio has no transport of its own,
+    // so a host that wants tempo/playhead-aware DSP pushes it here; the values
+    // are copied into ProcessContext at the top of each process(). POD copy,
+    // no allocation — safe from the control thread between render quanta.
+    void set_transport(bool is_playing, double bpm, double position_beats,
+                       double position_samples, int tsig_num, int tsig_den) noexcept;
 
     // Called each AudioWorkletProcessor.process() frame
     // input/output are interleaved float arrays (Web Audio layout)
@@ -163,6 +200,22 @@ private:
     double sample_rate_ = 48000.0;
     int num_channels_ = 2;
     int block_size_ = 128;
+
+    // Set by request_reset(); consumed (and cleared) by the next process(), so
+    // exactly one block sees ctx.reset_requested = true. One bool: RT-safe.
+    bool reset_pending_ = false;
+
+    // Host-supplied transport, copied into ProcessContext every block. Plain
+    // POD so set_transport() is an allocation-free field write. Fields the web
+    // host cannot supply are left at ProcessContext's own defaults.
+    struct TransportSnapshot {
+        bool is_playing = false;
+        double tempo_bpm = 120.0;
+        double position_beats = 0.0;
+        int64_t position_samples = 0;
+        int time_sig_numerator = 4;
+        int time_sig_denominator = 4;
+    } transport_;
 };
 
 } // namespace pulp::format::wam
