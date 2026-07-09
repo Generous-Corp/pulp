@@ -122,6 +122,9 @@ proves nothing about what was on the wire. `brew-rig hold` parks a DC level on
 one channel so a meter or a scope can answer that, and until it is answered
 nothing in this suite may print a voltage.
 
+[HARDWARE.md](HARDWARE.md) is the bring-up procedure, the channel map established
+so far, and the traps — each of which has already cost an hour.
+
 ## The clock is derived, never accumulated
 
 `Sync` computes which clock edges fall inside a block from the host's reported
