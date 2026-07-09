@@ -1,0 +1,118 @@
+name: Tracing build (Perfetto opt-in)
+
+# Compile-and-test guard for the opt-in Perfetto tracing configuration
+# (-DPULP_TRACING=ON). Every other CI lane builds the default OFF config, so a
+# break in the ON path — the Perfetto amalgamation fetch/compile in
+# tools/cmake/PulpTracing.cmake, the trace macros lighting up in
+# <pulp/runtime/trace.hpp>, or the tracing test suites — would land unnoticed.
+# This lane configures ON, builds the tracing test targets, and runs them.
+#
+# Deliberately light + hermetic: the tracing tests only need pulp::runtime and
+# pulp::audio, so GPU/Skia/Dawn stay OFF. That keeps the lane fast and lets it
+# run on a stock GitHub-hosted Linux runner.
+#
+# ADVISORY, GitHub-hosted only. `runs-on` is a hard-coded `ubuntu-latest` on
+# purpose: this lane must NEVER route through PULP_LOCAL_MACOS_RUNS_ON_JSON or
+# any self-hosted label, and must NOT be added to branch-protection required
+# checks. It contends with nothing on the required `macos` gate.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'core/**'
+      - 'test/**'
+      - 'tools/cli/**'
+      - 'tools/cmake/**'
+      - 'CMakeLists.txt'
+      - 'setup.sh'
+      - '.github/workflows/tracing-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'test/**'
+      - 'tools/cli/**'
+      - 'tools/cmake/**'
+      - 'CMakeLists.txt'
+      - 'setup.sh'
+      - '.github/workflows/tracing-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tracing-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tracing-on:
+    # Hard-coded GitHub-hosted Linux — advisory, never self-hosted (see header).
+    runs-on: ubuntu-latest
+    name: PULP_TRACING=ON compiles + tests pass
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+
+      - name: Install Linux dev headers
+        # setup.sh --ci hard-fails without ALSA/X11/dbus dev headers even for a
+        # GPU=OFF configure. This is the leaner header set the header-self-
+        # contained lane uses for its GPU=OFF build.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libdbus-1-dev libgl1-mesa-dev libx11-dev \
+            libxext-dev libxrandr-dev libxkbcommon-dev libfontconfig1-dev
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure (PULP_TRACING=ON, GPU off, Release)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_TRACING=ON \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Build tracing test targets
+        run: |
+          cmake --build build \
+            --target pulp-test-tracing \
+                     pulp-test-tracing-session \
+                     pulp-test-offline-tracing \
+                     pulp-test-ship-tracing-guard \
+            -j"$(nproc)"
+
+      - name: Run tracing test suites
+        # "tracing is off by default" asserts kTracingEnabled == false and is
+        # DESIGNED to fail under PULP_TRACING=ON, so exclude exactly that case
+        # (Catch2 exact-name exclusion). The session / offline / guard suites
+        # are config-agnostic and must fully pass under ON.
+        run: |
+          set -euo pipefail
+          ./build/test/pulp-test-tracing "~tracing is off by default"
+          ./build/test/pulp-test-tracing-session
+          ./build/test/pulp-test-offline-tracing
+          ./build/test/pulp-test-ship-tracing-guard
+
+      - name: Summarize
+        if: always()
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## Tracing build (Perfetto opt-in)
+
+          Configured `-DPULP_TRACING=ON -DPULP_ENABLE_GPU=OFF` (Release) and
+          built + ran the tracing test suites: `pulp-test-tracing` (minus the
+          off-by-default guard case, which is designed to fail under ON),
+          `pulp-test-tracing-session`, `pulp-test-offline-tracing`, and
+          `pulp-test-ship-tracing-guard`.
+
+          Advisory, GitHub-hosted Linux — guards the opt-in path no other lane
+          builds. Does not gate merge.
+          EOF
