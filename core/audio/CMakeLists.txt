@@ -34,6 +34,7 @@ target_sources(pulp-audio PRIVATE
     src/instrument_envelope.cpp
     src/instrument_runtime.cpp
     src/instrument_voice_allocator.cpp
+    src/live_dsp_telemetry.cpp
     src/loop_point_analyzer.cpp
     src/loop_reader.cpp
     src/loop_renderer.cpp
