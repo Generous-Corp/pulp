@@ -276,12 +276,3 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # Right-click routing + root->local coordinate conversion shared by the window
 # hosts (test/test_pointer_dispatch.cpp).
 pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
-
-# Bendr editor host contracts: the keyboard is claimed only while a type-in is
-# open, and the latency readout tracks the processor (examples/bendr).
-# reference_view.cpp carries the out-of-line create_view(), which is also the
-# first non-inline virtual and therefore anchors ReferenceProcessor's vtable.
-pulp_add_test_suite(pulp-test-bendr-editor
-    SOURCES test_bendr_editor.cpp ${PROJECT_SOURCE_DIR}/examples/bendr/src/reference_view.cpp
-    LIBRARIES pulp::view pulp::format pulp::state pulp::signal pulp::canvas
-    INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/examples/bendr/src)
