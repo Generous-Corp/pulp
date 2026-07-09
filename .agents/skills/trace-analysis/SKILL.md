@@ -65,8 +65,10 @@ pulp trace doctor            # human report; add --json for {ready_to_capture, r
 
 `ready_to_capture:false` usually means the inspector is unreachable (start it
 with `PULP_TRACE_SERVER=1`) or tracing was compiled out; `ready_to_query:false`
-means no `trace_processor` on `$PULP_TRACE_PROCESSOR`/`$PATH` or no captured
-trace yet.
+means no `trace_processor` (on `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched
+build, or `$PATH`) or no captured trace yet. For zero-install, run
+`pulp trace fetch` once — it downloads the pinned `trace_processor_shell`
+(Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`.
 
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
@@ -92,8 +94,9 @@ needed:
 pulp trace query "SELECT DISTINCT category FROM slice" --trace /tmp/pulp-<ts>.pftrace
 ```
 
-This shells out to `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → `$PATH`;
-`pulp trace doctor` reports which) and returns its native table. `--format`
+This shells out to `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned
+Pulp-fetched build → `$PATH`; `pulp trace doctor` reports which, `pulp trace
+fetch` installs the pinned one) and returns its native table. `--format`
 json/csv and `--preset` apply only to the live inspector path; offline is raw
 SQL against the file.
 

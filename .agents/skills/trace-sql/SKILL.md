@@ -46,9 +46,12 @@ pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" \
   --trace /tmp/pulp-<ts>.pftrace
 ```
 
-Pulp resolves the binary via `$PULP_TRACE_PROCESSOR` → `$PATH` (a pinned,
-version+SHA, zero-install tier is tracked separately); `pulp trace doctor`
-reports which. To drive `trace_processor` directly:
+Pulp resolves the binary via `$PULP_TRACE_PROCESSOR` → the pinned Pulp-fetched
+build → `$PATH`; `pulp trace doctor` reports which. For zero-install, run
+`pulp trace fetch` once: it downloads the pinned `trace_processor_shell`
+(Perfetto v57.2, matching the tracing SDK), SHA-256-verified per platform, into
+`$PULP_HOME` — no manual install, no surprise download inside `query`. To drive
+`trace_processor` directly:
 
 ```bash
 # Interactive SQL over a capture:

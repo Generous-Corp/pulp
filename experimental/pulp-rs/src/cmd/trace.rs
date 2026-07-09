@@ -18,6 +18,7 @@
 //! | `stop`                                 | `Trace.stopSession`    |
 //! | `query "<SQL>" [--format …]`           | `Trace.query`          |
 //! | `query "<SQL>" --trace FILE.pftrace`   | `trace_processor` (offline) |
+//! | `fetch`                                | pinned `trace_processor` download |
 //! | `snapshot`                             | `Trace.snapshot`       |
 //! | `explain "<question>"`                 | `Trace.explain`        |
 //! | `slowest-frames` / `xruns` / …         | `Trace.query` (preset) |
@@ -139,6 +140,10 @@ pub enum Sub {
     /// HTTP server and open it in the Perfetto UI. Client-side (no inspector
     /// call), so [`dispatch`] runs it through `trace_open::run_open`.
     Open(OpenArgs),
+    /// `pulp trace fetch` — download + SHA-verify the pinned
+    /// `trace_processor_shell` into the Pulp home so `query --trace` works
+    /// zero-install. Client-side, so [`dispatch`] runs `trace_fetch::run_fetch`.
+    Fetch,
 }
 
 /// Shared flag state — flows into every [`dispatch`] call regardless
@@ -230,6 +235,7 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "snapshot" => Ok((Sub::Snapshot, globals)),
         "explain" => parse_explain(&rest[1..]).map(|s| (s, globals)),
         "doctor" => Ok((Sub::Doctor, globals)),
+        "fetch" => Ok((Sub::Fetch, globals)),
         "open" => parse_open(&rest[1..]).map(|s| (s, globals)),
         // L0 preset verbs — sugar for `query --preset <verb>`.
         "slowest-frames" | "xruns" | "dsp-hotspots" | "layout-vs-paint" => {
@@ -441,7 +447,7 @@ pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
         )),
         // Doctor and Open are client-side, not a single inspector call —
         // dispatch() runs them before reaching here.
-        Sub::Doctor | Sub::Open(_) => None,
+        Sub::Doctor | Sub::Open(_) | Sub::Fetch => None,
     }
 }
 
@@ -675,6 +681,9 @@ pub fn dispatch<T: InspectorTalker>(
     if let Sub::Open(args) = sub {
         return run_open(args, flags.json, out);
     }
+    if matches!(sub, Sub::Fetch) {
+        return crate::cmd::trace_fetch::run_fetch(flags.json, out);
+    }
     // `query --trace FILE` runs offline against a flushed `.pftrace` via
     // trace_processor; without `--trace` it falls through to the live
     // inspector `Trace.query` path below.
@@ -758,7 +767,7 @@ fn write_pretty(
         }
         // Doctor and Open are handled in dispatch() and never reach
         // write_pretty; these arms keep the match exhaustive.
-        Sub::Doctor | Sub::Open(_) => {
+        Sub::Doctor | Sub::Open(_) | Sub::Fetch => {
             writeln!(out, "{trimmed}")?;
         }
     }
@@ -821,6 +830,8 @@ const TRACE_PROCESSOR_ENV: &str = "PULP_TRACE_PROCESSOR";
 pub enum TraceProcessorSource {
     /// `$PULP_TRACE_PROCESSOR` pointed at an existing file.
     Env,
+    /// The pinned, Pulp-fetched `trace_processor_shell` in the Pulp home.
+    Pinned,
     /// Found on `$PATH`.
     Path,
     /// Not found anywhere.
@@ -846,6 +857,7 @@ impl TraceProcessorStatus {
     fn source_str(&self) -> &'static str {
         match self.source {
             TraceProcessorSource::Env => "env",
+            TraceProcessorSource::Pinned => "pinned",
             TraceProcessorSource::Path => "path",
             TraceProcessorSource::None => "none",
         }
@@ -853,10 +865,11 @@ impl TraceProcessorStatus {
 }
 
 /// Probe for a usable `trace_processor` binary. Resolution order:
-/// `$PULP_TRACE_PROCESSOR` (must point at an existing file) → a
-/// `trace_processor_shell` / `trace_processor` on `$PATH`. A pinned,
-/// auto-fetched tier (zero-install) is tracked separately; offline query
-/// works today against an env- or PATH-provided binary.
+/// `$PULP_TRACE_PROCESSOR` (must point at an existing file) → the pinned,
+/// Pulp-fetched `trace_processor_shell` in the Pulp home (populated by
+/// `pulp trace fetch`) → a `trace_processor_shell` / `trace_processor` on
+/// `$PATH`. The pinned tier makes offline query zero-install without a
+/// surprise download: `query` uses it only once fetched.
 #[must_use]
 pub fn resolve_trace_processor() -> TraceProcessorStatus {
     if let Ok(v) = std::env::var(TRACE_PROCESSOR_ENV) {
@@ -867,6 +880,12 @@ pub fn resolve_trace_processor() -> TraceProcessorStatus {
                 source: TraceProcessorSource::Env,
             };
         }
+    }
+    if let Some(p) = crate::cmd::trace_fetch::pinned_binary_if_present() {
+        return TraceProcessorStatus {
+            path: Some(p),
+            source: TraceProcessorSource::Pinned,
+        };
     }
     for name in ["trace_processor_shell", "trace_processor"] {
         if let Some(p) = crate::proc::which(name) {
@@ -1000,9 +1019,11 @@ pub fn build_doctor_report(
         "  trace_processor ......... {}\n",
         match tp.source {
             TraceProcessorSource::Env => "found (via $PULP_TRACE_PROCESSOR)",
+            TraceProcessorSource::Pinned => "found (pinned, fetched by Pulp)",
             TraceProcessorSource::Path => "found (on $PATH)",
             TraceProcessorSource::None =>
-                "MISSING (set $PULP_TRACE_PROCESSOR or install trace_processor_shell)",
+                "MISSING (run `pulp trace fetch` for the pinned build, \
+                 set $PULP_TRACE_PROCESSOR, or install trace_processor_shell)",
         }
     ));
     b.push('\n');
@@ -1080,6 +1101,10 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "  doctor                        Check inspector + tracing build + trace_processor readiness"
+    )?;
+    writeln!(
+        out,
+        "  fetch                         Download + SHA-verify the pinned trace_processor (zero-install offline query)"
     )?;
     writeln!(out)?;
     writeln!(out, "Viewing:")?;
@@ -1563,6 +1588,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_fetch_verb() {
+        let (sub, _) = parse(&s(&["fetch"])).unwrap();
+        assert!(matches!(sub, Sub::Fetch));
+    }
+
+    #[test]
+    fn fetch_has_no_single_inspector_call() {
+        assert!(to_inspector_call(&Sub::Fetch).is_none());
+    }
+
+    #[test]
     fn extract_bool_reads_true_false_and_missing() {
         let body = "{\"compiled_in\":true,\"active\":false}";
         assert_eq!(extract_bool(body, "compiled_in"), Some(true));
@@ -1646,8 +1682,11 @@ mod tests {
 
     #[test]
     fn resolve_trace_processor_honors_env_override() {
-        // A unique env var owned solely by trace-doctor, so no other test
-        // reads it — setting it here does not race another reader.
+        // Serialize with the pinned-tier test: both drive resolution off the
+        // process-global PULP_* env vars.
+        let _g = crate::cmd::trace_fetch::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut f = std::env::temp_dir();
         f.push("pulp-doctor-test-tp");
         std::fs::write(&f, b"#!/bin/sh\n").unwrap();
@@ -1657,6 +1696,39 @@ mod tests {
         let _ = std::fs::remove_file(&f);
         assert_eq!(status.source, TraceProcessorSource::Env);
         assert_eq!(status.path.as_deref(), Some(f.as_path()));
+    }
+
+    #[test]
+    fn resolve_prefers_pinned_over_path_when_env_unset() {
+        let Some(key) = crate::cmd::trace_fetch::host_platform_key() else {
+            return;
+        };
+        let pin = crate::cmd::trace_fetch::pin_for(key).unwrap();
+        let _g = crate::cmd::trace_fetch::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev_tp = std::env::var_os("PULP_TRACE_PROCESSOR");
+        let prev_home = std::env::var_os("PULP_HOME");
+        std::env::remove_var("PULP_TRACE_PROCESSOR");
+        let home = std::env::temp_dir()
+            .join(format!("pulp-resolve-pin-{}", std::process::id()));
+        let cached =
+            crate::cmd::trace_fetch::pinned_cache_path_under(&home, pin);
+        std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+        std::fs::write(&cached, b"pinned tp").unwrap();
+        std::env::set_var("PULP_HOME", &home);
+        let status = resolve_trace_processor();
+        match prev_tp {
+            Some(v) => std::env::set_var("PULP_TRACE_PROCESSOR", v),
+            None => std::env::remove_var("PULP_TRACE_PROCESSOR"),
+        }
+        match prev_home {
+            Some(v) => std::env::set_var("PULP_HOME", v),
+            None => std::env::remove_var("PULP_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(status.source, TraceProcessorSource::Pinned);
+        assert_eq!(status.path.as_deref(), Some(cached.as_path()));
     }
 
     #[test]
