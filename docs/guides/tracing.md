@@ -97,6 +97,58 @@ Every span is tagged with one fixed category — this is the query vocabulary:
 ---
 
 <!-- Self-contained subsection; keep edits here local to minimize merge churn. -->
+## Live DSP telemetry (fixed-slot, the RT-safe path)
+
+Perfetto tracing is never placed on the live audio thread (its `TRACE_EVENT`
+locks a mutex on chunk rollover). For **live** per-node DSP cost you want the
+fixed-slot telemetry surface instead — a lock-free, allocation-free ring the
+audio thread writes and an owner thread drains.
+
+It is **disabled by default**; when off the audio path is a single
+predicted-not-taken branch. Enable it on a `SignalGraph` and poll a snapshot
+from the UI/owner thread:
+
+```cpp
+graph.set_live_dsp_telemetry_enabled(true);          // arm; no recompile needed
+// ... the audio thread renders blocks ...
+auto snap = graph.poll_live_dsp_telemetry();          // drain + read latest
+for (const auto& node : snap.nodes) {
+    // node.kind / node.name, node.p50_elapsed_ns, node.p95_elapsed_ns,
+    // node.p99_elapsed_ns, node.jitter_ns (p95 - p50),
+    // node.over_budget_attributions
+}
+```
+
+Each block times every node into its persistent load measurer regardless of
+whether the routed serial executor or the reference walk ran, so the numbers
+are path-agnostic. `drain()` computes a rolling p50/p95/p99 per node, the
+graph-level load, and attributes each over-budget block to its most expensive
+node. The store lives on the compiled graph and resets when the topology
+recompiles.
+
+For a headless dump (agents, CI — no window), serialize the snapshot to a flat
+JSON object:
+
+```cpp
+#include <pulp/audio/live_dsp_telemetry_json.hpp>
+const std::string json = pulp::audio::live_dsp_telemetry_snapshot_to_json(snap);
+```
+
+The object carries the graph-level counters (`blocks_written` /
+`blocks_drained` / `blocks_dropped`, `graph_over_budget_blocks`, last-block
+context) plus a `nodes` array with each node's `kind` name, `sample_count`,
+min/max/mean, `p50`/`p95`/`p99`, `jitter_ns`, and `over_budget_attributions`.
+
+**RT-safety guarantee.** The write path (`begin_block` → per-node scopes →
+`finish`) never allocates, locks, or makes a syscall. Two layers verify this:
+`RtAllocationProbe` + `ScopedNoAlloc` assert no allocation across a burst of
+blocks, and the advisory RealtimeSanitizer lane exercises the same path under
+`-fsanitize=realtime` (via a `[[clang::nonblocking]]`-attributed wrapper) so a
+later lock/syscall regression fails loudly.
+
+---
+
+<!-- Self-contained subsection; keep edits here local to minimize merge churn. -->
 ## Span names: static (default) vs dynamic
 
 Span names are **static by default**. `PULP_TRACE_SCOPE(category)` derives the
