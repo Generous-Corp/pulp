@@ -342,6 +342,29 @@ A developer who overrides the pin locally (the `-D` recipe above) is never
 blocked by Pulp being behind: the override is theirs and works immediately,
 whether or not the committed pin has caught up.
 
+**The query tool is separate from the capture SDK.** Capture (above) compiles
+the Perfetto SDK into a `PULP_TRACING=ON` build. *Querying* a `.pftrace` uses
+Perfetto's prebuilt `trace_processor_shell` binary, which Pulp downloads and
+SHA-256-verifies on first use — no `brew`/`apt`, nothing to install by hand. It
+is a first-class entry in Pulp's cargo-like tool registry, so both of these
+install the identical pinned artifact into `~/.pulp/tools/trace-processor/`:
+
+```bash
+pulp trace fetch                    # pre-fetch before an offline/air-gapped session
+pulp tool install trace-processor   # same artifact, via the general tool surface
+pulp tool info trace-processor      # version, install state, resolved path
+pulp tool doctor trace-processor    # health check
+```
+
+The per-platform pins (version + SHA-256) live in
+`experimental/pulp-rs/src/cmd/trace_fetch.rs`; the registry entry in
+`tools/packages/tool-registry.json` mirrors the version + download URLs so
+`pulp tool` can describe the tool without duplicating the hashes. A drift test
+(`experimental/pulp-rs/tests/trace_processor_tool_test.rs`) fails if the two ever
+disagree, so a Perfetto bump can't leave the tool surface advertising a stale
+URL. `pulp trace query` auto-fetches on demand, so an explicit install is only
+needed to pre-warm a machine that will later be offline.
+
 ## Never ship a traced build — and how the guard works
 
 `pulp ship sign` and `pulp ship package` **refuse** an artifact built with
