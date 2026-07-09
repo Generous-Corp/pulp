@@ -1,0 +1,9 @@
+# Build artifact — the WebCLAP module (built via tools/cmake/PulpWclap.cmake),
+# not committed, same policy as the rest of the web demos.
+PulpGain.wasm
+*.wasm
+
+# Dev-only headless driver.
+node_modules/
+package.json
+package-lock.json
