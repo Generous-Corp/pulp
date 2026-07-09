@@ -91,11 +91,18 @@ public:
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer&,
                  midi::MidiBuffer&,
-                 const format::ProcessContext&) override {
+                 const format::ProcessContext& ctx) override {
+        // Bypass means stop driving the patch. Some hosts bypass by
+        // short-circuiting process(); others keep calling it, and on those a
+        // plug-in that ignores the flag holds its voltage at the jack after the
+        // user pressed Bypass. Emitting zero is the only safe reading. Passing
+        // the input bus through — an audio effect's bypass — would be worse
+        // still: it would drive the modular with whatever is on the track.
+        //
         // Held, not ramped. A stepped CV is what a user asks for when they
         // type a number; smoothing it would make the value the plug-in reports
         // and the value at the jack disagree for as long as the ramp lasts.
-        const float out = current_output();
+        const float out = ctx.is_bypassed ? 0.0f : current_output();
         for (std::size_t c = 0; c < output.num_channels(); ++c) {
             float* dst = output.channel_ptr(c);
             if (dst == nullptr) continue;

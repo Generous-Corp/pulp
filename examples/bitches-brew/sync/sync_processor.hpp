@@ -141,6 +141,20 @@ public:
         float* clock_ch = output.channel_ptr(0);
         float* run_ch = channels > 1 ? output.channel_ptr(1) : nullptr;
 
+        // Bypass means stop driving the patch. Some hosts bypass by
+        // short-circuiting process(); others keep calling it, and on those a
+        // clock that ignores the flag keeps pulsing after the user pressed
+        // Bypass. Drop the in-flight pulse so un-bypassing cannot resume a gate
+        // mid-high, but leave the edge grid alone — it is position-derived, so
+        // it resumes on the correct edge by itself.
+        if (ctx.is_bypassed) {
+            pulse_.reset();
+            const float off = resolve_output(0.0f, scale, invert);
+            fill(clock_ch, frames, off);
+            fill(run_ch, frames, off);
+            return;
+        }
+
         // The host asked us to flush. Drop the in-flight pulse and the edge
         // dedupe, but keep the run segment: a reset mid-run must not re-arm
         // "skip first pulse" and swallow a pulse the user already heard start.

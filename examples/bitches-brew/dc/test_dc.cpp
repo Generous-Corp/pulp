@@ -28,7 +28,8 @@ namespace {
 /// whole buffer rather than spot-checking sample 0.
 std::vector<float> render_block(format::HeadlessHost& host,
                                 int num_samples,
-                                int channels = 2) {
+                                int channels = 2,
+                                const format::ProcessContext* ctx = nullptr) {
     audio::Buffer<float> in(static_cast<std::size_t>(channels),
                             static_cast<std::size_t>(num_samples));
     audio::Buffer<float> out(static_cast<std::size_t>(channels),
@@ -43,7 +44,10 @@ std::vector<float> render_block(format::HeadlessHost& host,
                                       static_cast<std::size_t>(channels),
                                       static_cast<std::size_t>(num_samples));
     auto ov = out.view();
-    host.process(ov, iv);
+    if (ctx != nullptr)
+        host.process(ov, iv, *ctx);
+    else
+        host.process(ov, iv);
 
     std::vector<float> flat;
     flat.reserve(static_cast<std::size_t>(channels * num_samples));
@@ -118,6 +122,25 @@ TEST_CASE("DC scale and invert reach the rendered buffer", "[brew][dc]") {
 
     host.state().set_value(DcProcessor::kInvert, 1.0f);
     REQUIRE(all_equal(render_block(host, 512), -0.25f));
+}
+
+// Bypass means stop driving the patch. Some hosts bypass by short-circuiting
+// process(); others keep calling it, and on those a plug-in that ignores the flag
+// leaves its voltage at the jack after the user pressed Bypass.
+TEST_CASE("DC emits nothing while bypassed", "[brew][dc][safety][bypass]") {
+    format::HeadlessHost host(create_dc);
+    host.prepare(48000.0, 512, 2, 2);
+    host.state().set_value(DcProcessor::kValue, 0.75f);
+
+    format::ProcessContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.num_samples = 512;
+    ctx.is_bypassed = true;
+    REQUIRE(all_equal(render_block(host, 512, 2, &ctx), 0.0f));
+
+    // And the value comes straight back when the host un-bypasses.
+    ctx.is_bypassed = false;
+    REQUIRE(all_equal(render_block(host, 512, 2, &ctx), 0.75f));
 }
 
 // Whatever is on the input bus is irrelevant: DC generates, it does not process.
