@@ -112,6 +112,8 @@ jobs:
           node core/format/src/wasm/wclap_probe.mjs        examples/web-demos/wclap-build/build/PulpGain.wasm
           node core/format/src/wasm/wclap_host_runner.mjs  examples/web-demos/wclap-build/build/PulpGain.wasm --gain-db 6
           node core/format/src/wasm/pack-wclap.test.mjs
+          # Pure-JS host helper: no wasm, no browser, so it runs anywhere.
+          node core/format/src/wasm/wam-scope.test.mjs
 
       - name: WebCLAP browser host (headless Chrome)
         env:
