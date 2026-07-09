@@ -126,6 +126,12 @@ pub enum Sub {
         /// The natural-language question the inspector investigates.
         question: String,
     },
+    /// `pulp trace doctor` — readiness check. Aggregates client-side
+    /// probes (inspector reachability, `trace_processor` availability)
+    /// with the inspector's own `Trace.snapshot` facts. Not a single
+    /// inspector call, so [`to_inspector_call`] returns `None` for it and
+    /// [`dispatch`] runs it through [`run_doctor`].
+    Doctor,
 }
 
 /// Shared flag state — flows into every [`dispatch`] call regardless
@@ -209,6 +215,7 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "query" => parse_query(&rest[1..]).map(|s| (s, globals)),
         "snapshot" => Ok((Sub::Snapshot, globals)),
         "explain" => parse_explain(&rest[1..]).map(|s| (s, globals)),
+        "doctor" => Ok((Sub::Doctor, globals)),
         // L0 preset verbs — sugar for `query --preset <verb>`.
         "slowest-frames" | "xruns" | "dsp-hotspots" | "layout-vs-paint" => {
             Ok((preset_sub(verb), globals))
@@ -358,6 +365,9 @@ pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
             "Trace.explain",
             format!("{{\"question\":\"{}\"}}", escape_json(question)),
         )),
+        // Doctor is a client-side aggregation, not a single inspector
+        // call — dispatch() runs it via run_doctor() before reaching here.
+        Sub::Doctor => None,
     }
 }
 
@@ -585,6 +595,9 @@ pub fn dispatch<T: InspectorTalker>(
     if matches!(sub, Sub::Help) {
         return print_help(out).map_err(io_err);
     }
+    if matches!(sub, Sub::Doctor) {
+        return run_doctor(port, flags.json, talker, out);
+    }
     let Some((method, params)) = to_inspector_call(sub) else {
         // The `Help` arm above already returned. This stays here so
         // adding a new `Sub` variant without a matching
@@ -653,6 +666,11 @@ fn write_pretty(
         Sub::Help => {
             writeln!(out, "{trimmed}")?;
         }
+        // Doctor is handled in dispatch() via run_doctor() and never
+        // reaches write_pretty; this arm keeps the match exhaustive.
+        Sub::Doctor => {
+            writeln!(out, "{trimmed}")?;
+        }
     }
     Ok(())
 }
@@ -687,6 +705,230 @@ fn extract_str(json: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract a boolean field `"<key>":true|false` from a flat JSON object.
+/// Companion to [`extract_str`] with the same rationale (stable inspector
+/// response shapes make a substring match plenty).
+fn extract_bool(json: &str, key: &str) -> Option<bool> {
+    let needle = format!("\"{key}\":");
+    let idx = json.find(&needle)?;
+    let tail = json[idx + needle.len()..].trim_start();
+    if tail.starts_with("true") {
+        Some(true)
+    } else if tail.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Env var overriding the `trace_processor` binary path.
+const TRACE_PROCESSOR_ENV: &str = "PULP_TRACE_PROCESSOR";
+
+/// Which tier resolved a `trace_processor` binary (or that none did).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceProcessorSource {
+    /// `$PULP_TRACE_PROCESSOR` pointed at an existing file.
+    Env,
+    /// Found on `$PATH`.
+    Path,
+    /// Not found anywhere.
+    None,
+}
+
+/// Result of probing for a usable `trace_processor` / `trace_processor_shell`.
+#[derive(Debug, Clone)]
+pub struct TraceProcessorStatus {
+    /// Resolved path, or `None` when unavailable.
+    pub path: Option<PathBuf>,
+    /// Which tier resolved it.
+    pub source: TraceProcessorSource,
+}
+
+impl TraceProcessorStatus {
+    /// Whether a usable binary was found.
+    #[must_use]
+    pub fn available(&self) -> bool {
+        self.path.is_some()
+    }
+
+    fn source_str(&self) -> &'static str {
+        match self.source {
+            TraceProcessorSource::Env => "env",
+            TraceProcessorSource::Path => "path",
+            TraceProcessorSource::None => "none",
+        }
+    }
+}
+
+/// Probe for a usable `trace_processor` binary. Resolution order:
+/// `$PULP_TRACE_PROCESSOR` (must point at an existing file) → a
+/// `trace_processor_shell` / `trace_processor` on `$PATH`. The pinned
+/// in-tree binary tier lands with the offline-query slice.
+#[must_use]
+pub fn resolve_trace_processor() -> TraceProcessorStatus {
+    if let Ok(v) = std::env::var(TRACE_PROCESSOR_ENV) {
+        let p = PathBuf::from(&v);
+        if p.is_file() {
+            return TraceProcessorStatus {
+                path: Some(p),
+                source: TraceProcessorSource::Env,
+            };
+        }
+    }
+    for name in ["trace_processor_shell", "trace_processor"] {
+        if let Some(p) = crate::proc::which(name) {
+            return TraceProcessorStatus {
+                path: Some(p),
+                source: TraceProcessorSource::Path,
+            };
+        }
+    }
+    TraceProcessorStatus {
+        path: None,
+        source: TraceProcessorSource::None,
+    }
+}
+
+/// Run `pulp trace doctor`: aggregate client-side readiness probes
+/// (inspector reachability, `trace_processor` availability) with the
+/// inspector's own `Trace.snapshot` facts, then print a report.
+///
+/// # Errors
+///
+/// Only writer failures ([`CliError::Io`]). An unreachable inspector or a
+/// missing `trace_processor` is reported *in* the doctor output, not as an
+/// error — surfacing that is the whole point of a doctor.
+pub fn run_doctor<T: InspectorTalker>(
+    port: u16,
+    json: bool,
+    talker: &T,
+    out: &mut impl Write,
+) -> Result<()> {
+    let reachable = inspector_reachable(port);
+    // Only ask the inspector for its snapshot when we know it is up;
+    // otherwise the talker's own reachability probe would just re-fail.
+    let snapshot = if reachable {
+        talker.call(port, "Trace.snapshot", "{}").ok()
+    } else {
+        None
+    };
+    let tp = resolve_trace_processor();
+    let report =
+        build_doctor_report(port, reachable, snapshot.as_deref(), &tp, json);
+    write!(out, "{report}").map_err(io_err)
+}
+
+fn json_bool_opt(v: Option<bool>) -> &'static str {
+    match v {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "null",
+    }
+}
+
+fn json_str_opt(v: Option<&str>) -> String {
+    match v {
+        Some(s) => format!("\"{}\"", escape_json(s)),
+        None => "null".to_owned(),
+    }
+}
+
+/// Build the doctor report (human text or `--json`). Pure: every probe
+/// already ran in [`run_doctor`], so this is fully unit-testable.
+///
+/// `compiled_in` / `active` / `last_trace_path` come from the inspector's
+/// `Trace.snapshot`; they are `None` (JSON `null` / "unknown") when the
+/// inspector is unreachable. `ready_to_capture` needs a reachable inspector
+/// with tracing compiled in; `ready_to_query` needs a `trace_processor`
+/// plus a captured trace to run over.
+#[must_use]
+pub fn build_doctor_report(
+    port: u16,
+    reachable: bool,
+    snapshot_json: Option<&str>,
+    tp: &TraceProcessorStatus,
+    json: bool,
+) -> String {
+    let compiled_in = snapshot_json.and_then(|s| extract_bool(s, "compiled_in"));
+    let active = snapshot_json.and_then(|s| extract_bool(s, "active"));
+    let last_trace_path =
+        snapshot_json.and_then(|s| extract_str(s, "last_trace_path"));
+
+    let ready_to_capture = reachable && compiled_in.unwrap_or(false);
+    let ready_to_query = tp.available() && last_trace_path.is_some();
+
+    if json {
+        let tp_path = tp.path.as_deref().and_then(std::path::Path::to_str);
+        return format!(
+            "{{\"port\":{port},\
+             \"inspector_reachable\":{reachable},\
+             \"compiled_in\":{},\
+             \"active\":{},\
+             \"last_trace_path\":{},\
+             \"trace_processor_available\":{},\
+             \"trace_processor_path\":{},\
+             \"trace_processor_source\":\"{}\",\
+             \"ready_to_capture\":{ready_to_capture},\
+             \"ready_to_query\":{ready_to_query}}}\n",
+            json_bool_opt(compiled_in),
+            json_bool_opt(active),
+            json_str_opt(last_trace_path.as_deref()),
+            tp.available(),
+            json_str_opt(tp_path),
+            tp.source_str(),
+        );
+    }
+
+    let mut b = String::with_capacity(512);
+    b.push_str("pulp trace doctor\n");
+    b.push_str(&format!(
+        "  inspector (port {port}) ... {}\n",
+        if reachable { "reachable" } else { "UNREACHABLE" }
+    ));
+    b.push_str(&format!(
+        "  tracing compiled in ..... {}\n",
+        match compiled_in {
+            Some(true) => "yes",
+            Some(false) => "NO (rebuild with -DPULP_TRACING=ON)",
+            None => "unknown (inspector unreachable)",
+        }
+    ));
+    if let Some(a) = active {
+        b.push_str(&format!(
+            "  session active .......... {}\n",
+            if a { "yes" } else { "no" }
+        ));
+    }
+    b.push_str(&format!(
+        "  last trace .............. {}\n",
+        last_trace_path.as_deref().unwrap_or("none captured yet")
+    ));
+    b.push_str(&format!(
+        "  trace_processor ......... {}\n",
+        match tp.source {
+            TraceProcessorSource::Env => "found (via $PULP_TRACE_PROCESSOR)",
+            TraceProcessorSource::Path => "found (on $PATH)",
+            TraceProcessorSource::None =>
+                "MISSING (set $PULP_TRACE_PROCESSOR or install trace_processor_shell)",
+        }
+    ));
+    b.push('\n');
+    b.push_str(&format!(
+        "  ready to capture a trace . {}\n",
+        if ready_to_capture { "yes" } else { "no" }
+    ));
+    b.push_str(&format!(
+        "  ready to query offline ... {}\n",
+        if ready_to_query { "yes" } else { "no" }
+    ));
+    if !reachable {
+        b.push('\n');
+        b.push_str(&no_inspector_hint(port));
+        b.push('\n');
+    }
+    b
 }
 
 fn print_help(out: &mut impl Write) -> std::io::Result<()> {
@@ -737,6 +979,12 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "  explain \"<question>\"          One-shot narrated root cause (Trace.explain)"
+    )?;
+    writeln!(out)?;
+    writeln!(out, "Readiness:")?;
+    writeln!(
+        out,
+        "  doctor                        Check inspector + tracing build + trace_processor readiness"
     )?;
     writeln!(out)?;
     writeln!(out, "Global flags:")?;
@@ -1167,5 +1415,126 @@ mod tests {
     #[test]
     fn inspector_reachable_returns_quickly_for_unused_port() {
         let _ = inspector_reachable(1);
+    }
+
+    #[test]
+    fn parse_doctor_verb() {
+        let (sub, _) = parse(&s(&["doctor"])).unwrap();
+        assert!(matches!(sub, Sub::Doctor));
+    }
+
+    #[test]
+    fn doctor_has_no_single_inspector_call() {
+        assert!(to_inspector_call(&Sub::Doctor).is_none());
+    }
+
+    #[test]
+    fn extract_bool_reads_true_false_and_missing() {
+        let body = "{\"compiled_in\":true,\"active\":false}";
+        assert_eq!(extract_bool(body, "compiled_in"), Some(true));
+        assert_eq!(extract_bool(body, "active"), Some(false));
+        assert_eq!(extract_bool(body, "missing"), None);
+    }
+
+    fn tp(source: TraceProcessorSource, path: Option<&str>) -> TraceProcessorStatus {
+        TraceProcessorStatus {
+            path: path.map(PathBuf::from),
+            source,
+        }
+    }
+
+    #[test]
+    fn doctor_report_all_green_is_ready() {
+        let snap = "{\"compiled_in\":true,\"active\":false,\
+                    \"last_trace_path\":\"/tmp/x.pftrace\"}";
+        let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
+        let human = build_doctor_report(9147, true, Some(snap), &status, false);
+        assert!(human.contains("inspector (port 9147) ... reachable"), "{human}");
+        assert!(human.contains("tracing compiled in ..... yes"), "{human}");
+        assert!(human.contains("last trace .............. /tmp/x.pftrace"), "{human}");
+        assert!(human.contains("ready to capture a trace . yes"), "{human}");
+        assert!(human.contains("ready to query offline ... yes"), "{human}");
+    }
+
+    #[test]
+    fn doctor_report_unreachable_marks_unknowns_and_prints_hint() {
+        let status = tp(TraceProcessorSource::None, None);
+        let human = build_doctor_report(9200, false, None, &status, false);
+        assert!(human.contains("inspector (port 9200) ... UNREACHABLE"), "{human}");
+        assert!(human.contains("tracing compiled in ..... unknown"), "{human}");
+        assert!(human.contains("ready to capture a trace . no"), "{human}");
+        // The "how do I start the server" hint is surfaced.
+        assert!(human.contains("PULP_TRACE_SERVER=1"), "{human}");
+    }
+
+    #[test]
+    fn doctor_report_not_compiled_in_blocks_capture() {
+        let snap = "{\"compiled_in\":false,\"active\":false}";
+        let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
+        let human = build_doctor_report(9147, true, Some(snap), &status, false);
+        assert!(human.contains("tracing compiled in ..... NO"), "{human}");
+        assert!(human.contains("ready to capture a trace . no"), "{human}");
+        // No trace yet, so offline query is not ready even with the binary.
+        assert!(human.contains("ready to query offline ... no"), "{human}");
+    }
+
+    #[test]
+    fn doctor_report_json_shape() {
+        let snap = "{\"compiled_in\":true,\"active\":true,\
+                    \"last_trace_path\":\"/tmp/y.pftrace\"}";
+        let status = tp(TraceProcessorSource::Env, Some("/opt/tp"));
+        let json = build_doctor_report(9147, true, Some(snap), &status, true);
+        // Parses as one flat JSON object with the readiness contract.
+        let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+        assert_eq!(v["port"], 9147);
+        assert_eq!(v["inspector_reachable"], true);
+        assert_eq!(v["compiled_in"], true);
+        assert_eq!(v["active"], true);
+        assert_eq!(v["last_trace_path"], "/tmp/y.pftrace");
+        assert_eq!(v["trace_processor_available"], true);
+        assert_eq!(v["trace_processor_path"], "/opt/tp");
+        assert_eq!(v["trace_processor_source"], "env");
+        assert_eq!(v["ready_to_capture"], true);
+        assert_eq!(v["ready_to_query"], true);
+    }
+
+    #[test]
+    fn doctor_report_json_nulls_when_unreachable() {
+        let status = tp(TraceProcessorSource::None, None);
+        let json = build_doctor_report(9147, false, None, &status, true);
+        let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+        assert!(v["compiled_in"].is_null());
+        assert!(v["last_trace_path"].is_null());
+        assert!(v["trace_processor_path"].is_null());
+        assert_eq!(v["trace_processor_source"], "none");
+        assert_eq!(v["ready_to_query"], false);
+    }
+
+    #[test]
+    fn resolve_trace_processor_honors_env_override() {
+        // A unique env var owned solely by trace-doctor, so no other test
+        // reads it — setting it here does not race another reader.
+        let mut f = std::env::temp_dir();
+        f.push("pulp-doctor-test-tp");
+        std::fs::write(&f, b"#!/bin/sh\n").unwrap();
+        std::env::set_var("PULP_TRACE_PROCESSOR", &f);
+        let status = resolve_trace_processor();
+        std::env::remove_var("PULP_TRACE_PROCESSOR");
+        let _ = std::fs::remove_file(&f);
+        assert_eq!(status.source, TraceProcessorSource::Env);
+        assert_eq!(status.path.as_deref(), Some(f.as_path()));
+    }
+
+    #[test]
+    fn dispatch_doctor_reports_unreachable_without_a_call_mapping() {
+        // Port 1 is never a live inspector, so this is deterministic:
+        // run_doctor prints the report; no Trace.* call mapping is needed.
+        let t = RecordingTalker::new(vec![]);
+        let mut buf: Vec<u8> = Vec::new();
+        let flags = GlobalFlags { json: false, port: Some(1) };
+        dispatch(&Sub::Doctor, &flags, &t, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("pulp trace doctor"), "{out}");
+        assert!(out.contains("UNREACHABLE"), "{out}");
     }
 }
