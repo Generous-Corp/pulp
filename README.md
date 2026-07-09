@@ -220,6 +220,21 @@ Pulp's CLI works with any AI coding agent. Skills (`.agents/skills/`) are auto-l
 
 Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent-integrations.md). Plugin-specific setup details: [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md).
 
+## FAQ
+
+<details>
+<summary><strong>How does Pulp handle minimum OS support (Windows, Linux, macOS)?</strong></summary>
+
+Depends on the platform and on whether you enable V8 (optional; default is QuickJS/JSC). We track the lowest OS the prebuilts support and occasionally sit a step above for toolchain reasons. Numbers live at the source, not here — your floor is the highest of whatever you link:
+
+| Floor | Where |
+|---|---|
+| Pulp, resolved (all platforms) | [`tools/deps/min_os.json`](tools/deps/min_os.json) |
+| Skia + Dawn (always linked) | [skia-builder](https://github.com/danielraffel/skia-builder#minimum-os-versions-deployment-targets) |
+| V8 (only with `PULP_JS_ENGINE=v8`) | [v8-builder](https://github.com/danielraffel/v8-builder#minimum-os-versions-deployment-targets--glibc-floor) |
+
+</details>
+
 ## Contributing
 
 Pulp is early and actively evolving — contributions and plugin-author
