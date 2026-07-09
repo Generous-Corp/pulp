@@ -1331,6 +1331,7 @@ pulp trace layout-vs-paint
 pulp trace snapshot
 pulp trace explain "why is my plugin slow to open?"
 pulp trace doctor                                 # readiness: inspector + build + trace_processor
+pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
 ```
 
 Options:
@@ -1353,6 +1354,7 @@ Subcommands:
 | `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
 | `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
 | `doctor` | client-side + `Trace.snapshot` | Readiness check. Aggregates inspector reachability and `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → `$PATH`) with the inspector's `compiled_in` / `active` / `last_trace_path`, then reports `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
+| `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 
 The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,
 `text`, `js`, `gpu`, `state`, `io`. Tracing is a dev-only tool: never ship a
