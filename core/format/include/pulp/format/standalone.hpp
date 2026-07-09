@@ -6,6 +6,7 @@
 #include <pulp/audio/audio_probe.hpp>
 #include <pulp/audio/rolling_audio_capture_buffer.hpp>
 #endif
+#include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
@@ -235,6 +236,12 @@ private:
     state::StateStore store_;
     StandaloneConfig config_;
     bool persisted_config_loaded_ = false;  // overlay persisted settings once, not on soft restarts
+
+    /// Previous block's transport state, so the standalone driver derives the
+    /// same change flags (`tempo_changed`, `transport_changed`,
+    /// `transport_started`, `transport_jump`) the plugin adapters do. Touched
+    /// only from the audio callback.
+    detail::PlayheadSnapshot playhead_prev_{};
 
     std::unique_ptr<audio::AudioSystem> audio_system_;
     std::unique_ptr<audio::AudioDevice> audio_device_;
