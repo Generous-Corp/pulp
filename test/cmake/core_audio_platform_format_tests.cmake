@@ -8,8 +8,11 @@ pulp_add_test_suite(pulp-test-offline-processor-edges LIBRARIES pulp::audio)
 
 # Offline-render DSP tracing (Perfetto, dev-only). Config-agnostic: OFF verifies
 # the no-op contract; ON byte-checks the flushed .pftrace for the dsp / dsp.node
-# offline span names.
-pulp_add_test_suite(pulp-test-offline-tracing LIBRARIES pulp::audio pulp::runtime)
+# offline span names. Links pulp::format + the PulpCompressor example header so
+# one case proves the spans wrap a real Processor::process() driven headless.
+pulp_add_test_suite(pulp-test-offline-tracing
+    LIBRARIES pulp::audio pulp::runtime pulp::format
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/pulp-compressor)
 
 pulp_add_test_suite(pulp-test-ogg-reader LIBRARIES pulp::audio)
 

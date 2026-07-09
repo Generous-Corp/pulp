@@ -14,15 +14,25 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <numbers>
 #include <string>
 #include <vector>
 
+#include <pulp/audio/buffer.hpp>
 #include <pulp/audio/offline_processor.hpp>
+#include <pulp/format/headless.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/runtime/trace_session.hpp>
+
+// A real example effect plugin, to prove the offline `dsp.node` spans wrap real
+// Processor::process() code and not just a synthetic callback. Only this one
+// plugin header is included here: the example plugins share unscoped
+// `pulp::examples::kBypass` enumerators that collide across a single TU.
+#include "pulp_compressor.hpp"
 
 using pulp::runtime::Tracing;
 
@@ -108,4 +118,81 @@ TEST_CASE("offline render emits dsp / dsp.node spans", "[tracing][audio][offline
     // EXTRACT_ARG(arg_set_id, 'debug.<key>').
     REQUIRE(bytes.find("block_index") != std::string::npos);
     REQUIRE(bytes.find("position_samples") != std::string::npos);
+}
+
+namespace {
+
+// PulpCompressor param IDs (avoid the header's unscoped enum names here so the
+// intent — this is the compressor's threshold/ratio — stays explicit).
+constexpr pulp::state::ParamID kCompThreshold = 1;  // dB
+constexpr pulp::state::ParamID kCompRatio = 2;      // ratio
+
+// Drive a real PulpCompressor through HeadlessHost, one `dsp.node` span per
+// block. The loud sine keeps the compressor's gain-computation branch busy so
+// the span carries real work.
+void render_real_compressor_chain() {
+    constexpr int kBlock = 512;
+    constexpr int kBlocks = 4;
+
+    pulp::format::HeadlessHost comp(&pulp::examples::create_pulp_compressor);
+    comp.prepare(48000.0, kBlock, 2, 2);
+    comp.state().set_value(kCompThreshold, -35.0f);
+    comp.state().set_value(kCompRatio, 12.0f);
+
+    pulp::audio::Buffer<float> in(2, kBlock);
+    pulp::audio::Buffer<float> out(2, kBlock);
+    const pulp::audio::Buffer<float>& in_c = in;
+
+    double phase = 0.0;
+    const double inc = 2.0 * std::numbers::pi * 220.0 / 48000.0;
+    for (int b = 0; b < kBlocks; ++b) {
+        for (int i = 0; i < kBlock; ++i) {
+            const float s = 0.7f * static_cast<float>(std::sin(phase));
+            in.channel(0)[i] = s;
+            in.channel(1)[i] = s;
+            phase += inc;
+            if (phase > 2.0 * std::numbers::pi) phase -= 2.0 * std::numbers::pi;
+        }
+        auto out_v = out.view();
+        auto in_v = in_c.view();
+        PULP_TRACE_SCOPE_NAMED("dsp.node", "compressor");
+        comp.process(out_v, in_v);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("a real Processor under HeadlessHost emits a named dsp.node span",
+          "[tracing][audio][offline][format]") {
+    if (!pulp::runtime::kTracingEnabled) {
+        // OFF contract: start() no-ops, the render still runs with the span
+        // macros compiled out.
+        REQUIRE_FALSE(Tracing::start({"dsp", "dsp.node"}));
+        REQUIRE_FALSE(Tracing::active());
+        render_real_compressor_chain();
+        REQUIRE_FALSE(Tracing::stop().ok);
+        return;
+    }
+
+    auto path =
+        std::filesystem::temp_directory_path() / "pulp-offline-plugin-trace.pftrace";
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    REQUIRE(Tracing::start({"dsp", "dsp.node"}, path.string(), /*ring_kb=*/8192));
+    REQUIRE(Tracing::active());
+
+    render_real_compressor_chain();
+
+    auto r = Tracing::stop();
+    REQUIRE(r.ok);
+    REQUIRE(r.trace_bytes > 0);
+    REQUIRE_FALSE(Tracing::active());
+
+    std::ifstream f(path, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+    REQUIRE_FALSE(bytes.empty());
+    // The real plugin's per-block span name is interned in the trace stream.
+    REQUIRE(bytes.find("compressor") != std::string::npos);
 }

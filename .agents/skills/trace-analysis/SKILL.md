@@ -152,6 +152,16 @@ ambiguous compute the tail (p95/p99) over the raw slices — see `trace-sql`.
 "The load meter said 40%; the trace said WHY" is exactly this: the average was
 calm, one node's tail was not.
 
+The mean also lies in the *other* direction: a per-node average can be
+dominated by a one-time **cold-start spike on the first block** (the first
+`process()` call warms caches / touches fresh pages), making a genuinely cheap
+node look like the worst offender. Always separate the first-block outlier
+from steady-state cost — subtract the per-node `MAX(dur)` (the steady-state
+query in `trace-sql`'s "Common query shapes"), or just read the flamegraph and
+ignore block 0. `examples/trace-plugin-chain` is a runnable demonstration:
+gain's whole-run average is ~158× its steady-state cost, and the real per-block
+hot node is the biquad filter, not the gain the average fingers.
+
 ### 7. Consult the domain hints
 Match the symptom to a hints file and read it before drawing conclusions — each
 grounds the analysis in Pulp's real seams and names the specific traps:
