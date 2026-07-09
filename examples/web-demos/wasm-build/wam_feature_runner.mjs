@@ -79,6 +79,30 @@ if (params.length) {
   const saved = wam.readState();
   wam.setParam(id, params[0].minValue);
   check("state restore", wam.writeState(saved) && Math.abs(wam.getParam(id) - target) < 1e-3);
+
+  // State is the shared plugin_state_io format: a versioned "PLST" envelope
+  // when the plugin owns a blob, else the bare "PULP" StateStore payload.
+  const magic = String.fromCharCode(...saved.slice(0, 4));
+  check("state uses the plugin_state_io format (PLST or PULP)",
+        magic === "PLST" || magic === "PULP", magic);
+
+  // Hostile / corrupt state must be rejected WITHOUT trapping the worklet — the
+  // 32-bit bounds-check overflow that a crafted length once triggered, plus a
+  // flipped CRC byte and a truncated blob. writeState returns false; no throw.
+  const tryWrite = (label, bytes) => {
+    try { check(label, wam.writeState(bytes) === false); }
+    catch (e) { check(label, false, "TRAPPED: " + e.message); }
+  };
+  // "PWS1"/old-container-style length 0xFFFFFFF8 that wraps pos+len on wasm32.
+  tryWrite("overflow-length state blob rejected, no trap",
+           new Uint8Array([0x50, 0x57, 0x53, 0x31, 0xF8, 0xFF, 0xFF, 0xFF,
+                           0x50, 0x55, 0x4C, 0x50, 0, 0, 0, 0, 0, 0, 0, 0]));
+  if (saved.length > 4) {
+    const corrupt = saved.slice(); corrupt[corrupt.length - 1] ^= 0xFF;
+    check("corrupted state rejected or safely ignored (no trap)",
+          (() => { try { wam.writeState(corrupt); return true; } catch { return false; } })());
+    tryWrite("truncated state blob rejected, no trap", saved.slice(0, 4));
+  }
 }
 
 console.log(fails.length ? `\nFAILURES (${fails.length}): ${fails.join(", ")}` : "\nALL CHECKS PASSED");

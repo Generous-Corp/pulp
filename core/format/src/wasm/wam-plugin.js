@@ -9,7 +9,17 @@
 // wasm and is added to the worklet BEFORE the processor module, so the processor
 // can read globalThis.Module synchronously. No fetch happens in worklet scope.
 
+import { processorNameForUrl } from "./wam-runtime.mjs";
+
 let instanceCounter = 0;
+
+// Resolve exactly the way audioWorklet.addModule() does, so the URL we hash
+// matches the `import.meta.url` the worklet module sees. A bare "./x.js" would
+// otherwise hash differently on the two sides.
+function absoluteUrl(url) {
+  const base = typeof document !== "undefined" ? document.baseURI : self.location.href;
+  return new URL(url, base).href;
+}
 
 export default class PulpWAM {
   static get isWebAudioModuleConstructor() { return true; }
@@ -29,7 +39,8 @@ export default class PulpWAM {
     this._instanceId = `pulp-wam-${++instanceCounter}`;
     this._descriptor = null;
     this._dspUrl = urls.dsp || new URL("./PulpGainWorklet.js", import.meta.url).href;
-    this._processorUrl = urls.processor || new URL("./wam-processor.js", import.meta.url).href;
+    this._processorUrl = absoluteUrl(
+      urls.processor || new URL("./wam-processor.js", import.meta.url).href);
     this._pending = new Map(); // id -> resolver, for request/response over the port
     this._reqId = 0;
   }
@@ -50,7 +61,11 @@ export default class PulpWAM {
     // Module is ready before the AudioWorkletProcessor constructs.
     await this._audioContext.audioWorklet.addModule(this._processorUrl);
 
-    const node = new AudioWorkletNode(this._audioContext, "pulp-wam-processor", {
+    // The worklet registered itself under a name derived from its module URL, so
+    // a second, different plugin in this same AudioContext gets a different name
+    // instead of silently binding to this one's DSP.
+    const processorName = processorNameForUrl(this._processorUrl);
+    const node = new AudioWorkletNode(this._audioContext, processorName, {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [2],
@@ -73,12 +88,27 @@ export default class PulpWAM {
 
   _onMessage(msg) {
     switch (msg?.type) {
+      // MIDI the plugin produced. Subscribe with `wam.onMidiOut = (events) => …`
+      // where each event is { offset, bytes }: route it to a WebMIDI output, a
+      // visualiser, or another plugin's scheduleMidi().
+      case "midiOut":
+        this.onMidiOut?.(msg.events, { truncated: !!msg.truncated });
+        break;
       case "descriptor":
         try { this._descriptor = JSON.parse(msg.json); } catch { this._descriptor = {}; }
         this._resolveDescriptor?.(this._descriptor);
         break;
       case "parameters":
         try { this._parameters = JSON.parse(msg.json); } catch { this._parameters = []; }
+        break;
+      // The plugin changed its own parameters (e.g. loading a factory preset
+      // when its Program changes). `values` is in the same order as
+      // getParameterInfo(). Subscribe with `wam.onParamsChanged = (values) => …`
+      // to keep generated controls in step; without this a web UI goes stale,
+      // because the ABI is otherwise pull-only.
+      case "paramValues":
+        this._paramValues = msg.values;
+        this.onParamsChanged?.(msg.values, this._parameters || []);
         break;
       case "error":
         // Surface a worklet-side failure rather than silently timing out.
@@ -109,12 +139,46 @@ export default class PulpWAM {
   }
   async getParameterValue(id) { return this._request("getParam", { paramId: id }); }
 
+  /** Send a full SysEx payload (F0 .. F7). `bytes` is a Uint8Array. */
+  sendSysex(bytes, offset = 0) {
+    this._audioNode?.port.postMessage({ type: "sysex", data: bytes, offset });
+  }
+
   scheduleMidi(status, data1, data2, offset = 0) {
     this._audioNode?.port.postMessage({ type: "midi", status, data1, data2, offset });
   }
 
   async getState() { return this._request("getState", {}); }
   async setState(data) { this._audioNode?.port.postMessage({ type: "setState", data }); }
+
+  /** One-shot DSP-state reset: the plugin clears synced phase / delay history /
+   *  held-note maps on the next processed block. Fire-and-forget over the port. */
+  reset() { this._audioNode?.port.postMessage({ type: "reset" }); }
+
+  /** Re-prepare the DSP for a new sample rate / block size (e.g. an
+   *  AudioContext that turned out to run at 44.1 kHz). Serviced on the audio
+   *  thread between render quanta. */
+  prepare(sampleRate, blockSize = 128) {
+    this._audioNode?.port.postMessage({ type: "prepare", sampleRate, blockSize });
+  }
+
+  /** Processor-reported delay-compensation latency, in samples. Reported in the
+   *  descriptor the worklet posts on ready; 0 until the descriptor arrives. */
+  get latencySamples() { return this._descriptor?.latencySamples || 0; }
+
+  /** Processor-reported tail length, in samples (0 = none, -1 = infinite). */
+  get tailSamples() { return this._descriptor?.tailSamples || 0; }
+
+  /** Supply host transport state (Web Audio has none of its own). Fields are
+   *  copied into the plugin's ProcessContext each block. */
+  setTransport({ isPlaying = false, bpm = 120, positionBeats = 0,
+                 positionSamples = 0, timeSigNumerator = 4,
+                 timeSigDenominator = 4 } = {}) {
+    this._audioNode?.port.postMessage({
+      type: "transport", isPlaying, bpm, positionBeats, positionSamples,
+      timeSigNumerator, timeSigDenominator,
+    });
+  }
 
   // Parameter metadata reported by the worklet (id/label/type/unit/range).
   get parameters() { return this._parameters || []; }
@@ -144,6 +208,22 @@ export default class PulpWAM {
         input.type = "checkbox";
         input.checked = p.defaultValue >= 0.5;
         const sync = () => { this.setParameterValue(p.id, input.checked ? 1 : 0); readout.textContent = input.checked ? "on" : "off"; };
+        input.addEventListener("change", sync); sync();
+      } else if (p.type === "choice" && p.labels?.length) {
+        // A stepped parameter that named its values: show the names, not 0..3.
+        input = document.createElement("select");
+        input.style.cssText = "flex:1";
+        p.labels.forEach((name, i) => {
+          const opt = document.createElement("option");
+          opt.value = String(p.minValue + i * (p.step || 1));
+          opt.textContent = name;
+          input.appendChild(opt);
+        });
+        input.value = String(p.defaultValue);
+        const sync = () => {
+          this.setParameterValue(p.id, parseFloat(input.value));
+          readout.textContent = "";
+        };
         input.addEventListener("change", sync); sync();
       } else {
         input = document.createElement("input");

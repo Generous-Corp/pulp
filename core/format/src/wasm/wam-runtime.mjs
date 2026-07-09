@@ -70,6 +70,46 @@ export function makeWasmImports(getMemory) {
   };
 }
 
+// AudioWorklet processor names are global to an AudioContext, so every Pulp
+// plugin registering the same literal name meant two DIFFERENT plugins could not
+// coexist in one context: the second AudioWorkletNode silently bound to the
+// first plugin's DSP (a chained synth would render the MIDI effect's — silent —
+// output). Derive the name from the processor module's own absolute URL instead.
+// Each plugin ships its own copy of wam-processor.js next to its wam-dsp.js, so
+// the URLs differ and the names do too; loading the SAME plugin twice reuses one
+// name, which is correct (registerProcessor runs once per module evaluation).
+//
+// The worklet passes `import.meta.url`; the main thread passes the same URL
+// resolved against the document base. Both call this one function so they cannot
+// disagree. FNV-1a/32 — no crypto needed, just a stable short token.
+export function processorNameForUrl(url) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < url.length; i++) {
+    hash ^= url.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `pulp-wam-processor-${hash.toString(16).padStart(8, "0")}`;
+}
+
+// Decode the packed record stream written by wam_midi_out_drain:
+//   [int32 sample_offset][uint16 byte_len][byte_len raw MIDI bytes] ...
+// `bytes` is a Uint8Array view of the drain buffer; `len` is the byte count
+// actually copied (min(cap, available)). A trailing partial record — which is
+// what truncation looks like — is dropped rather than mis-decoded.
+export function parseMidiOutRecords(bytes, len) {
+  const events = [];
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let i = 0;
+  while (i + 6 <= len) {
+    const offset = dv.getInt32(i, true);
+    const size = dv.getUint16(i + 4, true);
+    if (i + 6 + size > len) break;                 // truncated tail
+    events.push({ offset, bytes: bytes.slice(i + 6, i + 6 + size) });
+    i += 6 + size;
+  }
+  return events;
+}
+
 // Wrap an instantiated module's exports with typed-array views and the wam_*
 // ABI. All heap access goes through fresh views because memory growth
 // invalidates old ArrayBuffer references.
@@ -90,7 +130,7 @@ export function makeBridge(exports) {
     return utf8Decode(h.subarray(p, e));
   };
 
-  return {
+  const bridge = {
     exports, u8, f32, writeCStr, readCStr,
     malloc: (n) => exports.malloc(n),
     free: (p) => exports.free(p),
@@ -101,6 +141,39 @@ export function makeBridge(exports) {
     setParam(id, value) { const p = writeCStr(id); exports.wam_set_param(p, value); exports.free(p); },
     getParam(id) { const p = writeCStr(id); const v = exports.wam_get_param(p); exports.free(p); return v; },
     midi(status, d1, d2, offset) { exports.wam_midi(status, d1, d2, offset); },
+    // Full F0..F7 payload. Returns false when the plugin dropped it.
+    sysex(bytes, offset = 0) {
+      const p = exports.malloc(bytes.length);
+      u8().set(bytes, p);
+      const ok = exports.wam_midi_sysex(p, bytes.length, offset | 0) !== 0;
+      exports.free(p);
+      return ok;
+    },
+    // Copy the last block's MIDI output into `dstPtr` (a caller-owned wasm
+    // allocation of `cap` bytes). Returns bytes AVAILABLE — greater than `cap`
+    // means the tail was truncated.
+    drainMidiOut(dstPtr, cap) { return exports.wam_midi_out_drain(dstPtr, cap); },
+    // One-shot DSP-state reset: the NEXT process() sees ctx.reset_requested.
+    reset() { exports.wam_reset(); },
+    // Re-prepare for a sample-rate / block-size change. Serviced between render
+    // quanta (the worklet's port.onmessage runs on the audio render thread, not
+    // a separate control thread) — never between the interleave and process().
+    prepare(sampleRate, blockSize) { exports.wam_prepare(sampleRate, blockSize); },
+    // Processor-reported delay-compensation latency, in samples.
+    latencySamples() { return exports.wam_latency_samples(); },
+    // Push a host transport snapshot (Web Audio has none of its own); it is
+    // copied into ProcessContext at the top of each process().
+    setTransport(isPlaying, bpm, positionBeats, positionSamples, tsigNum, tsigDen) {
+      exports.wam_set_transport(isPlaying ? 1 : 0, bpm, positionBeats,
+                                positionSamples, tsigNum | 0, tsigDen | 0);
+    },
+    // Monotonic counter of parameter changes, the plugin's own writes included.
+    paramEpoch() { return exports.wam_param_epoch() >>> 0; },
+    // Bulk value read in parametersJson() order. `dstPtr` is a caller-owned wasm
+    // allocation of `capacity` floats; returns the total parameter count.
+    readParamValues(dstPtr, capacity) {
+      return exports.wam_read_param_values(dstPtr, capacity);
+    },
     descriptorJson() { return readCStr(exports.wam_descriptor()); },
     parametersJson() { return readCStr(exports.wam_parameters()); },
     readState() {
@@ -119,4 +192,24 @@ export function makeBridge(exports) {
       return ok === 1;
     },
   };
+
+  // Version-skew safety: several exports postdate the first WAM ABI. If a DSP
+  // module was built before them, its bridge method would call an absent export
+  // and throw. Drop each such method so callers can feature-detect it the
+  // obvious way (`if (wam.drainMidiOut)`), and the worklet degrades instead of
+  // crashing on the audio thread. A DSP built from this tree has them all.
+  const optional = {
+    sysex: "wam_midi_sysex",
+    drainMidiOut: "wam_midi_out_drain",
+    reset: "wam_reset",
+    prepare: "wam_prepare",
+    latencySamples: "wam_latency_samples",
+    setTransport: "wam_set_transport",
+    paramEpoch: "wam_param_epoch",
+    readParamValues: "wam_read_param_values",
+  };
+  for (const [method, exportName] of Object.entries(optional)) {
+    if (typeof exports[exportName] !== "function") delete bridge[method];
+  }
+  return bridge;
 }
