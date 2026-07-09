@@ -11,6 +11,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "cv_osc_processor.hpp"
 #include "dc_processor.hpp"
 #include "function_processor.hpp"
 #include "lfo_processor.hpp"
@@ -379,4 +380,27 @@ TEST_CASE("Step LFO's editor draws the pattern and marks the playing step",
                     before[static_cast<std::size_t>(i)]);
         }
     }
+}
+
+TEST_CASE("CV To OSC's editor tracks the observed voltage", "[brew][ui][osc]") {
+    Editor ed(create_cv_osc);
+    if (!ed.can_capture()) {
+        WARN("no raster screenshot backend in this build — skipping");
+        return;
+    }
+    // Send is off, and rendering an editor must never turn it on.
+    REQUIRE(ed.host.state().get_value(CvOscProcessor::kEnabled) == 0.0f);
+
+    drive(ed.host, 0.2f);
+    const auto low = ed.shoot();
+    REQUIRE_FALSE(low.empty());
+
+    // The rail reads the input the DSP saw, so a different voltage redraws it.
+    drive(ed.host, -0.8f);
+    REQUIRE(differs(ed.shoot(), low));
+
+    const auto* proc = static_cast<const CvOscProcessor*>(ed.host.processor());
+    REQUIRE(proc->latest(0) == -0.8f);
+    // Nothing was sent, because nothing was asked for.
+    REQUIRE(proc->sent_count() == 0);
 }

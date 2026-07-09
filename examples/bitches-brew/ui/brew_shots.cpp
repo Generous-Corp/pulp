@@ -1,3 +1,4 @@
+#include "cv_osc_processor.hpp"
 #include "dc_processor.hpp"
 #include "function_processor.hpp"
 #include "lfo_processor.hpp"
@@ -96,6 +97,12 @@ int main() {
         h.state().set_value(StepProcessor::kSpeedMode, 1.0f);
         h.state().set_value(StepProcessor::kRate, 1.0f);
         run_block(h, playing(2.3));  // lights step 2
+    });
+    shoot(create_cv_osc, "/tmp/brewshots/cv-osc.png", [](format::HeadlessHost& h) {
+        // Send stays off in the shot: the lamp is dark, which is what a fresh
+        // instance looks like, and no packet leaves a screenshot run.
+        h.state().set_value(CvOscProcessor::kPort, 9001.0f);
+        run_block(h, playing(0.0), -0.35f);
     });
     shoot(create_sync, "/tmp/brewshots/sync-stopped.png", nullptr);
     shoot(create_sync, "/tmp/brewshots/sync-running.png",

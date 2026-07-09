@@ -44,6 +44,7 @@ them).
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
 | `Quantizer` | Snaps an incoming control voltage to discrete steps. |
 | `Step LFO` | An eight-step pattern and a gate, locked to the host. |
+| `CV To OSC` | Passes a control voltage through and reports it over OSC. Off by default. |
 
 `Function` is the only plug-in here that reads its input bus — the others
 generate. It offers five curves, and they are not all the same kind of thing.
