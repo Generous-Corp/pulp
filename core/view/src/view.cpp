@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/view/tracing_badge.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/gesture.hpp>
@@ -248,6 +249,27 @@ void View::cancel_animation(int id) {
             return;
         }
     }
+}
+
+// ── Tracing badge ────────────────────────────────────────────────────────
+// Process-global visibility flag for the "◉ TRACING" reminder painted by the
+// root View in a PULP_TRACING=ON build. Default visible; a golden-screenshot
+// harness can suppress it. Stored in a function-local static so the flag has no
+// static-init ordering dependency.
+namespace {
+std::atomic<bool>& tracing_badge_visible_flag() {
+    static std::atomic<bool> visible{true};
+    return visible;
+}
+}  // namespace
+
+bool tracing_badge_should_paint() {
+    return pulp::runtime::kTracingEnabled
+           && tracing_badge_visible_flag().load(std::memory_order_relaxed);
+}
+
+void set_tracing_badge_visible(bool visible) {
+    tracing_badge_visible_flag().store(visible, std::memory_order_relaxed);
 }
 
 void View::paint_all(canvas::Canvas& canvas) {
@@ -714,6 +736,43 @@ void View::paint_all(canvas::Canvas& canvas) {
     // opacity layer over the blurred parent backdrop.
     if (needs_backdrop_layer)
         canvas.restore();
+
+    // Always-visible tracing reminder. In a PULP_TRACING=ON build the root View
+    // stamps a small "◉ TRACING" corner pill on every frame so a developer can
+    // never forget that Perfetto tracing is compiled into this binary while
+    // looking at the plugin UI. `if constexpr (kTracingEnabled)` discards the
+    // entire block in the default OFF build: no branch, no symbols, no per-frame
+    // cost. Drawn here — after the view's own compositing-layer restores but
+    // before the outer restore — so it lands on top of the whole subtree, is not
+    // dimmed by any root-level opacity/filter layer, and is still positioned in
+    // the root's local coordinate space. The literal label is 11 UTF-8 bytes,
+    // so the temporary std::string the canvas API builds stays in SSO and never
+    // heap-allocates inside the paint_all no-alloc scope. Only the root paints
+    // it (parent_ == nullptr); a golden-screenshot harness can suppress it via
+    // set_tracing_badge_visible(false).
+    if constexpr (pulp::runtime::kTracingEnabled) {
+        if (parent_ == nullptr && tracing_badge_should_paint()) {
+            constexpr float kFontPx = 11.0f;
+            constexpr float kPadX   = 8.0f;
+            constexpr float kPadY   = 4.0f;
+            constexpr float kMargin = 8.0f;
+            const char* const label = "◉ TRACING";
+            canvas.set_font("system", kFontPx);
+            const float tw     = canvas.measure_text(label);
+            const float pill_w = tw + 2.0f * kPadX;
+            const float pill_h = kFontPx + 2.0f * kPadY;
+            const float px     = bounds_.width - pill_w - kMargin;
+            const float py     = kMargin;
+            // High-contrast: near-black translucent pill, bright amber glyph.
+            // Fixed diagnostic-overlay colours by design — this dev-only tracing
+            // badge is deliberately not themeable, so the literals are not routed
+            // through resolve_color.
+            canvas.set_fill_color(canvas::Color::rgba8(20, 20, 24, 220));  // token-lint:allow
+            canvas.fill_rounded_rect(px, py, pill_w, pill_h, pill_h * 0.5f);
+            canvas.set_fill_color(canvas::Color::rgba8(255, 190, 60, 255));  // token-lint:allow
+            canvas.fill_text(label, px + kPadX, py + pill_h * 0.72f);
+        }
+    }
 
     canvas.restore();
 

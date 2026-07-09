@@ -92,6 +92,12 @@ pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
 # unclipped for a full one, clearing the pending region after each paint.
 pulp_add_test_suite(pulp-test-dirty-region-consumption LIBRARIES pulp::view)
 
+# Root-View "◉ TRACING" reminder badge: painted only in a PULP_TRACING=ON build
+# and suppressible via set_tracing_badge_visible(). Config-agnostic — asserts the
+# badge is present under ON and wholly absent under the default OFF build, using a
+# RecordingCanvas (no raster backend).
+pulp_add_test_suite(pulp-test-tracing-badge LIBRARIES pulp::view)
+
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the
 # PluginViewHost virtuals + CPU-host inverse mouse mapping (GPU section
