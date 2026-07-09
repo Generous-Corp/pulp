@@ -56,12 +56,11 @@ enum class LiveSwapCurve { Smoothstep, EqualPower };
 
 struct NodeLiveSwapPolicy {
     bool allow_live_instance_swap = false;
-    // fade_ms / curve are the intended crossfade shape. The committed swap is
-    // currently a clean atomic instance switch at a block boundary (no dropped or
-    // repeated samples); the per-sample crossfade that consumes these two fields is
-    // not yet wired into the graph process path, so a swap between instances whose
-    // output differs can step at the boundary. They are accepted + clamped now so the
-    // policy is forward-compatible when the fade lands; treat them as reserved.
+    // The crossfade shape for a live instance swap: the committed swap renders both the
+    // old and new instance for fade_ms and blends old->new along `curve` (click-free at
+    // both ends), so a swap between instances whose output differs does not step at the
+    // boundary. fade_ms == 0 disables the fade (an instant atomic switch at a block
+    // boundary — gap-free but a hard cut).
     int fade_ms = 30;
     LiveSwapCurve curve = LiveSwapCurve::EqualPower;
     float headroom_threshold = 0.75f;

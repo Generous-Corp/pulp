@@ -10,6 +10,7 @@
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/anticipation_eligibility.hpp>
+#include <pulp/host/crossfade_plugin_slot.hpp>
 #include <pulp/host/anticipation_partition.hpp>
 #include <pulp/host/anticipation_subgraph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
@@ -94,9 +95,13 @@ std::size_t saturating_mul(std::size_t a, std::size_t b) {
 }
 
 NodeLiveSwapPolicy clamp_live_swap_policy(NodeLiveSwapPolicy policy) {
-    policy.fade_ms = std::clamp(policy.fade_ms,
-                                kLiveSwapMinFadeMs,
-                                kLiveSwapMaxFadeMs);
+    // fade_ms == 0 is the explicit "instant switch, no crossfade" request and passes
+    // through unclamped; any positive value is clamped into the supported fade range.
+    if (policy.fade_ms != 0) {
+        policy.fade_ms = std::clamp(policy.fade_ms,
+                                    kLiveSwapMinFadeMs,
+                                    kLiveSwapMaxFadeMs);
+    }
     policy.headroom_threshold =
         std::clamp(policy.headroom_threshold, 0.0f, 1.0f);
     return policy;
@@ -1450,6 +1455,17 @@ void SignalGraph::begin_swap_edit() {
     in_swap_edit_ = true;
     swap_edit_owner_ = std::this_thread::get_id();
     staged_replacements_.clear();
+    // Reclaim any prior crossfade: a node whose plugin is a fade-done wrapper is
+    // reinstated as the bare new instance, so the next published snapshot drops the
+    // wrapper and the retired snapshot frees the old instance on this control thread.
+    // (Only mutates the authoring graph; the live snapshot still renders the wrapper
+    // until prepare_swap publishes.)
+    for (auto& n : nodes_) {
+        if (auto* xf = dynamic_cast<CrossfadePluginSlot*>(n.plugin.get());
+            xf != nullptr && xf->fade_done()) {
+            n.plugin = xf->new_slot();
+        }
+    }
     set_live_swap_diagnostics_locked_(LiveSwapFallbackReason::None, 0, {});
 }
 
@@ -1505,6 +1521,7 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
     struct CandidateRestore {
         GraphNode* node = nullptr;
         std::shared_ptr<PluginSlot> old_slot;
+        std::shared_ptr<PluginSlot> new_slot;  // bare new instance (not the fade wrapper)
         PluginInfo old_info;
         bool old_transport_sensitive = false;
         bool had_metadata = false;
@@ -1552,11 +1569,32 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
         r.old_slot = n->plugin;
         r.old_info = n->plugin_info;
         r.old_transport_sensitive = n->transport_sensitive;
+        r.new_slot = staged.slot;
         r.had_metadata = true;
         r.old_metadata = meta_it->second;
         restore.push_back(std::move(r));
 
-        n->plugin = staged.slot;
+        // Click-free crossfade: when the node opts into a fade and there is an old
+        // instance to fade from, publish a CrossfadePluginSlot that renders both for
+        // fade_ms and blends old->new. It delegates every non-process call to the new
+        // instance, so the executor renders it as an ordinary slot; once the fade
+        // completes it stops rendering the old instance, and the old is freed on the
+        // control thread when a later edit collapses the wrapper (see
+        // collapse_completed_fades_locked_). fade_ms == 0 keeps the instant switch.
+        const int fade_ms = n->live_swap_policy.fade_ms;
+        if (fade_ms > 0 && r.old_slot) {
+            const auto fade_samples = static_cast<std::size_t>(
+                std::max<long long>(0, static_cast<long long>(
+                    static_cast<double>(fade_ms) * sample_rate / 1000.0)));
+            const auto curve = n->live_swap_policy.curve == LiveSwapCurve::Smoothstep
+                                   ? signal::TransitionCurve::Smoothstep
+                                   : signal::TransitionCurve::EqualPower;
+            n->plugin = std::make_shared<CrossfadePluginSlot>(
+                staged.slot, r.old_slot, fade_samples, curve,
+                staged.info.num_outputs, max_block_size);
+        } else {
+            n->plugin = staged.slot;
+        }
         n->plugin_info = staged.info;
         prepared_plugin_meta_[id] = staged.metadata;
     }
@@ -1599,7 +1637,7 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
         observer_calls.push_back({
             r.node->id,
             r.old_slot,
-            r.node->plugin,
+            r.new_slot,
             r.node->live_swap_policy,
         });
     }
