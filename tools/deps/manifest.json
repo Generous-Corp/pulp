@@ -967,8 +967,8 @@
             "sha256": "2420eed074e041384973338f9d8a41364b9ff444ffa0eb1857cb1ebdbd8781e9"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-linux-x64-gpu-release.zip",
-            "sha256": "68315e29a8fd3848ab05225b18355b5fe8c85f6e7df3575087ff02d8ce17a56a"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-glibc234/skia-build-linux-x64-gpu-release.zip",
+            "sha256": "518b74ee7f0b245c209349023e58a2891a83a7ab776504d7d8a23d1e76fbf4de"
           },
           "mac-arm64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-minos13/skia-build-mac-arm64-gpu-release.zip",
@@ -1058,8 +1058,8 @@
             "sha256": "49d87422b0e8b12ea501613484ea9b683b8af7c0af8019a452e085f02728ce64"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-linux-x64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "5f4cefd1ba7c20523f723e2182c185b35631f563cec5cbb4141b1697fcc12381"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523-glibc234/v8-linux-x64-15.2.24-lkgr-97440bd4f523.zip",
+            "sha256": "48a6d6877fbd5684b6e013a6cf1c66930917fbd541b9acec9a1b8e05d80549cb"
           },
           "linux-arm64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-linux-arm64-15.2.24-lkgr-97440bd4f523.zip",

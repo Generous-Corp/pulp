@@ -36,7 +36,7 @@ RELEASE_ASSET_SHA256 = {
         "2420eed074e041384973338f9d8a41364b9ff444ffa0eb1857cb1ebdbd8781e9"
     ),
     "linux-x64": (
-        "68315e29a8fd3848ab05225b18355b5fe8c85f6e7df3575087ff02d8ce17a56a"
+        "518b74ee7f0b245c209349023e58a2891a83a7ab776504d7d8a23d1e76fbf4de"
     ),
     # macOS slices are the chrome/m151-minos13 re-cut (minos 13.0 stamp).
     "mac-arm64": (
