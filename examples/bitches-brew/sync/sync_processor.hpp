@@ -21,11 +21,13 @@
 // line) hang off one explicit origin captured on the play edge, in
 // `brew/run_segment.hpp`. Nothing else in this plug-in carries musical state.
 //
-// Not yet implemented, deliberately: FSK tape sync, 1st-delay in milliseconds,
-// periodic reset, and swing. FSK in particular needs a continuous phase
+// Not implemented, deliberately. FSK tape sync needs a continuous phase
 // accumulator — re-deriving its phase from the position each block would click at
-// every block boundary and mis-decode at the receiver — so it wants to be
-// designed rather than bolted on.
+// every block boundary and mis-decode at the receiver — so it wants designing, not
+// bolting on. Swing and periodic reset are *named* in the plan's feature list but
+// their behavior is not specified anywhere we are permitted to derive it from, and
+// a plausible guess would ship as a green test asserting the guess. They stay out
+// until the documented behavior is in hand.
 
 #include <brew/clock.hpp>
 #include <brew/cv.hpp>
@@ -57,6 +59,8 @@ public:
         kWaitForBar = 7,
         kOutputScale = 8,
         kInvert = 9,
+        kFirstDelayMs = 10,
+        kOffsetMs = 11,
     };
 
     /// DIN sync runs at 24 pulses per quarter note. It is the default because it
@@ -114,6 +118,21 @@ public:
                              .name = "Invert",
                              .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        // Hold the clock off for this long after the transport starts. Measured
+        // from the run origin, so two runs starting at different beats behave
+        // identically.
+        store.add_parameter({.id = kFirstDelayMs,
+                             .name = "First Delay",
+                             .unit = "ms",
+                             .range = {0.0f, 1000.0f, 0.0f, 1.0f}});
+        // Slide the whole pulse train earlier or later. A DAC, its reconstruction
+        // filter, and the receiving gate input all add latency, so a clock that is
+        // sample-accurate in software arrives late at the hardware. Negative
+        // values pull the pulses ahead of the beat to compensate.
+        store.add_parameter({.id = kOffsetMs,
+                             .name = "Offset",
+                             .unit = "ms",
+                             .range = {-50.0f, 50.0f, 0.0f, 0.1f}});
     }
 
     void prepare(const format::PrepareContext&) override { hard_reset(); }
@@ -131,6 +150,12 @@ public:
     }
     [[nodiscard]] float run_lamp() const noexcept {
         return run_lamp_.load(std::memory_order_relaxed);
+    }
+
+    /// Milliseconds expressed in beats at a given tempo. Zero for a stopped clock.
+    [[nodiscard]] static double ms_to_beats(double ms, double tempo_bpm) noexcept {
+        if (!(tempo_bpm > 0.0)) return 0.0;
+        return ms / 1000.0 * tempo_bpm / 60.0;
     }
 
     /// The edges-per-beat implied by the current settings. Exposed so a test can
@@ -209,11 +234,23 @@ public:
         // Walk the block once, filling up to each edge and then retriggering. The
         // grid calls back in ascending sample order, so `written` only moves
         // forward.
+        // Sliding the *window* rather than the emitted sample offsets keeps the
+        // grid contiguous block to block, so the dedupe and the backwards-jump
+        // re-arm still see a monotonic timeline. Offsetting after the fact would
+        // let a pulse land outside the block it was derived in.
+        const double offset_beats =
+            ms_to_beats(static_cast<double>(state().get_value(kOffsetMs)),
+                        ctx.tempo_bpm);
+
         int written = 0;
         bool pulsed = false;
-        grid_.advance(ctx.position_beats, epb, bps, frames,
+        grid_.advance(ctx.position_beats - offset_beats, epb, bps, frames,
                       [&](int offset, std::int64_t index) {
-                          const double at = ClockGrid::edge_beats(index, epb);
+                          // The gate lives in host-position time, so compare the
+                          // beat the pulse actually *emits* at, not the grid beat
+                          // it was derived from — those differ by the offset.
+                          const double at =
+                              ClockGrid::edge_beats(index, epb) + offset_beats;
                           if (!run_.passes_gate(at)) return;
                           if (skip_first && !run_.skip_consumed) {
                               run_.skip_consumed = true;
@@ -259,13 +296,21 @@ private:
     /// Capture the run origin on the play edge and re-arm everything that is
     /// defined relative to it.
     void begin_run(const format::ProcessContext& ctx) noexcept {
-        const double gate =
+        const double start =
             as_toggle(state().get_value(kWaitForBar))
                 ? next_bar_at_or_after(
                       ctx.position_beats,
                       beats_per_bar(ctx.time_sig_numerator, ctx.time_sig_denominator))
                 : ctx.position_beats;
-        run_.begin(ctx.position_beats, gate);
+
+        // The delay is converted to beats once, from the tempo at the play edge.
+        // A tempo change during the delay therefore does not re-time it — the
+        // alternative, re-deriving it every block, would let a tempo automation
+        // ramp move a gate the user set in milliseconds.
+        const double delay = ms_to_beats(
+            static_cast<double>(state().get_value(kFirstDelayMs)), ctx.tempo_bpm);
+
+        run_.begin(ctx.position_beats, start + delay);
         flush();
     }
 

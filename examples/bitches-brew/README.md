@@ -35,6 +35,19 @@ them).
 | `DC` | Holds one constant value. The connection tester, and the suite's bit-exactness guard. |
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
 
+`Sync` also carries a **1st Delay** (hold the clock off for N ms after the
+transport starts, measured from the run origin so two runs behave identically)
+and a bipolar **Offset**. The offset exists because a DAC, its reconstruction
+filter, and the receiving gate input all add latency: a clock that is
+sample-accurate in software arrives late at the hardware, and a negative offset
+pulls the pulses back ahead of the beat.
+
+Swing and periodic reset are named in the suite's feature list but are **not
+implemented**. Their behavior is not specified anywhere this project is permitted
+to derive it from, and a plausible guess would ship as a green test asserting the
+guess. Same for FSK tape sync, which additionally needs a continuous phase
+accumulator designed rather than bolted on.
+
 Built for VST3, AU (`aufx`), and CLAP. `brew-core/` holds what they share: the
 output stage above, the clock grid, the pulse-width rules, and the run-segment
 origin. `brew-ui/` holds the shared editor furniture.

@@ -91,6 +91,15 @@ inline std::unique_ptr<vw::Knob> param_knob(state::StateStore& store,
     knob->set_label(std::move(label));
     knob->set_value(store.get_normalized(id));
 
+    // Double-click resets to the parameter's own default, not to 0. It matters
+    // for the bipolar knobs (Value, Offset), whose rest position is the middle.
+    //
+    // Note the Knob's value arc always sweeps from its minimum, so a bipolar knob
+    // at zero still draws a half-full arc. That is a widget-level gap, not
+    // something to paper over here; the numeric readout carries the sign.
+    if (const auto* pi = store.info(id))
+        knob->set_default_value(pi->range.normalize(pi->range.default_value));
+
     // The Knob speaks normalized [0,1]; the store owns the real range, the step,
     // and the denormalization. Never duplicate that mapping in the editor.
     auto* raw = knob.get();

@@ -12,8 +12,8 @@ static void shoot(format::ProcessorFactory f, const char* path,
     host.prepare(48000.0, 512, 2, 2);
     if (setup) setup(host);
     auto v = host.processor()->create_view();
-    v->set_bounds({0, 0, 360, 300});
-    const bool ok = view::render_to_file(*v, 360, 300, path, 2.0f);
+    v->set_bounds({0, 0, 360, 380});
+    const bool ok = view::render_to_file(*v, 360, 380, path, 2.0f);
     std::printf("%s %s\n", ok ? "OK  " : "FAIL", path);
 }
 
