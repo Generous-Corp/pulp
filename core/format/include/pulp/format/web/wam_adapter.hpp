@@ -67,6 +67,11 @@ struct WamParamInfo {
     float step;              // raw parameter step (e.g. 0.1); 0 = continuous
     int discrete_step;       // integer step for int/boolean params; 0 otherwise
     std::string unit;
+    // Display names for each discrete value, when the parameter is stepped and
+    // declares a ParamInfo::to_string formatter (e.g. Sine/Saw/Square/Triangle).
+    // Empty for continuous parameters. Lets a generated web control render a
+    // <select> of real names instead of a bare 0..3 slider.
+    std::vector<std::string> value_labels;
 };
 
 // Audio-thread bridge: wraps a Processor for AudioWorkletProcessor calls

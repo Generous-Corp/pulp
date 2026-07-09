@@ -156,6 +156,22 @@ export default class PulpWAM {
         input.checked = p.defaultValue >= 0.5;
         const sync = () => { this.setParameterValue(p.id, input.checked ? 1 : 0); readout.textContent = input.checked ? "on" : "off"; };
         input.addEventListener("change", sync); sync();
+      } else if (p.type === "choice" && p.labels?.length) {
+        // A stepped parameter that named its values: show the names, not 0..3.
+        input = document.createElement("select");
+        input.style.cssText = "flex:1";
+        p.labels.forEach((name, i) => {
+          const opt = document.createElement("option");
+          opt.value = String(p.minValue + i * (p.step || 1));
+          opt.textContent = name;
+          input.appendChild(opt);
+        });
+        input.value = String(p.defaultValue);
+        const sync = () => {
+          this.setParameterValue(p.id, parseFloat(input.value));
+          readout.textContent = "";
+        };
+        input.addEventListener("change", sync); sync();
       } else {
         input = document.createElement("input");
         input.type = "range";

@@ -269,9 +269,27 @@ std::vector<WamParamInfo> WamProcessorBridge::get_parameter_info() const {
         info.step = p.range.step;
         info.discrete_step = (p.range.step >= 1.0f) ? static_cast<int>(p.range.step) : 0;
 
+        // A stepped parameter that declares a display formatter is a choice:
+        // ask it to name each discrete value. Bounded so a pathological range
+        // (e.g. 0..100000 step 1) cannot generate a colossal JSON payload.
+        constexpr int kMaxEnumLabels = 64;
+        if (p.range.step >= 1.0f && p.to_string) {
+            const int count = static_cast<int>(
+                (p.range.max - p.range.min) / p.range.step) + 1;
+            if (count >= 2 && count <= kMaxEnumLabels) {
+                info.value_labels.reserve(static_cast<std::size_t>(count));
+                for (int i = 0; i < count; ++i) {
+                    info.value_labels.push_back(
+                        p.to_string(p.range.min + static_cast<float>(i) * p.range.step));
+                }
+            }
+        }
+
         // WAMv2 type classification
         if (p.range.step >= 1.0f && p.range.min == 0.0f && p.range.max == 1.0f)
             info.type = "boolean";
+        else if (!info.value_labels.empty())
+            info.type = "choice";
         else if (p.range.step >= 1.0f)
             info.type = "int";
         else
@@ -297,7 +315,18 @@ std::string WamProcessorBridge::parameters_json() const {
            << ",\"minValue\":" << p.min_value
            << ",\"maxValue\":" << p.max_value
            << ",\"step\":" << p.step
-           << ",\"discreteStep\":" << p.discrete_step << "}";
+           << ",\"discreteStep\":" << p.discrete_step;
+        if (!p.value_labels.empty()) {
+            ss << ",\"labels\":[";
+            bool first_label = true;
+            for (const auto& label : p.value_labels) {
+                if (!first_label) ss << ",";
+                first_label = false;
+                ss << "\""; append_json_escaped(ss, label); ss << "\"";
+            }
+            ss << "]";
+        }
+        ss << "}";
     }
     ss << "]";
     return ss.str();
