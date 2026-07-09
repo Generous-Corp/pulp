@@ -100,8 +100,18 @@ public:
                 case Curve::exponential: return std::string("exp");
                 case Curve::logarithmic: return std::string("log");
                 case Curve::absolute: return std::string("abs");
+                case Curve::power: return std::string("pow");
             }
             return std::string("?");
+        };
+        // Amount drives only the power curve. Showing a dash rather than a stale
+        // number is how the editor says "this knob does nothing right now".
+        auto amount_or_dash = [&store](float v) {
+            char buf[16];
+            if (!curve_uses_amount(curve_from_param(store.get_value(FunctionProcessor::kCurve))))
+                return std::string("—");
+            std::snprintf(buf, sizeof(buf), "%.3g", v);
+            return std::string(buf);
         };
 
         auto graph = std::make_unique<FunctionGraph>(proc);
@@ -117,7 +127,7 @@ public:
 
         auto top = ui::row(8.0f, 84.0f);
         add(*top, FunctionProcessor::kCurve, "Curve", curve_name);
-        add(*top, FunctionProcessor::kAmount, "Amount", number);
+        add(*top, FunctionProcessor::kAmount, "Amount", amount_or_dash);
         add(*top, FunctionProcessor::kInScale, "In Scale", number);
 
         auto bottom = ui::row(8.0f, 84.0f);

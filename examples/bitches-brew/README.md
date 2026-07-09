@@ -38,13 +38,25 @@ them).
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
 
 `Function` is the only plug-in here that reads its input bus — the others
-generate. Its curve is `y = sign(x) · |x|^k`: odd-symmetric so a bipolar CV keeps
-its polarity, monotone so it never folds, and fixed at the origin and both rails
-for every `k`, so the Amount knob bends the middle of the response without ever
-moving where full scale lands. Exponential and logarithmic are reciprocal
-exponents, which is why one knob drives both. Absolute rectifies. **These shapes
-are our design choice, not a match for anything** — the curve family is the
-obvious one for a bipolar signal, and nothing beyond that is claimed.
+generate. It offers five curves, and they are not all the same kind of thing.
+
+`Linear`, `Exponential` (`2^x - 1`), `Logarithm` (`1 + log2(x)`, zero for
+non-positive input) and `Absolute` are the conventional definitions, and they are
+the defaults, because a patch written against any other CV utility expects them.
+They are also poorly behaved on a bipolar signal, and honestly so: `2^x - 1` is
+not odd-symmetric, so it shifts the centre of a symmetric LFO; and the logarithm
+is undefined below zero, so it flattens half the range and dives toward negative
+infinity near the origin, where the output clamp catches it. Those are properties
+of the functions, not of this implementation.
+
+`Power` is ours: `y = sign(x) · |x|^k`, the obvious single-parameter family for a
+bipolar signal. Odd-symmetric, so polarity survives. Monotone, so it never folds.
+Fixed at the origin and both rails for every `k`, so `Amount` bends the middle of
+the response without ever moving where full scale lands. And `k` and `1/k` are
+exact inverses, so one knob spans both directions. Reach for it when the signal
+swings both ways; reach for the conventional pair when you are reproducing
+someone else's patch. `Amount` drives `Power` and nothing else — the editor shows
+a dash on the other curves rather than a stale number.
 
 Two consequences worth naming. Its defaults are a **bit-exact wire**, so a
 freshly inserted Function can never be the thing that changed a voltage. And its
