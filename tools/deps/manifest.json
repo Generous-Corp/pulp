@@ -754,9 +754,10 @@
       "upstream": { "kind": "git-tag", "ref": "v57.2" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Dev-only tracing SDK, gated behind PULP_TRACING (OFF by default; never linked into a shipping build, never exported by cmake --install). The amalgamated C++ SDK ships as the release artifact perfetto-cpp-sdk-src.zip (no longer in the git tree at sdk/); fetched by pinned URL + SHA-256 c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f. The trace_processor_shell query tool + skills land in a later phase.",
+      "notes": "Dev-only tracing SDK, gated behind PULP_TRACING (OFF by default; never linked into a shipping build, never exported by cmake --install). The amalgamated C++ SDK ships as the release artifact perfetto-cpp-sdk-src.zip (no longer in the git tree at sdk/); fetched by pinned URL + SHA-256 c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f. The prebuilt trace_processor_shell query tool (same v57.2) backs `pulp trace query --trace` (offline SQL over a .pftrace); `pulp trace fetch` downloads it on demand into $PULP_HOME, SHA-256-verified, from the immutable per-platform artifacts at https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v57.2/<platform>/ (mac-arm64 98a41b80e9f60da0373d64aff6455681f8c26b7c391ae5736324a5b11e3dacc2, mac-amd64 c0f61397901da47cbe1bb9a0843624f7c2038ac92176ce15e3736ce9aa0afef0, linux-amd64 55ba613fc6d4f71df81eee2dbfc293020063655c241b3e314bff75345b802684, linux-arm64 1dcc1d9aaff2eb92e8bc58f1957e4e445600294bd61dbc09345c1018c5ff0868, windows-amd64 trace_processor_shell.exe 100334b6091596fbc97f872556849a5747bf47a7f7190c485ba8cea8d2409c7b). Never linked or shipped.",
       "source_files": [
-        "tools/cmake/PulpTracing.cmake"
+        "tools/cmake/PulpTracing.cmake",
+        "experimental/pulp-rs/src/cmd/trace_fetch.rs"
       ]
     },
     {
