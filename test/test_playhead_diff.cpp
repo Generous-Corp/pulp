@@ -429,3 +429,164 @@ TEST_CASE("compute_playhead_changes: beat-position fallback distinguishes contin
     compute_playhead_changes(jumped, snapshot);
     REQUIRE(jumped.transport_jump);
 }
+
+// ---------------------------------------------------------------------------
+// transport_started — the run-start edge.
+//
+// Pressing play at a parked position leaves position_samples where it was, so
+// `transport_jump` is (correctly) false and `should_reset_dsp_state()` returns
+// false. A tempo-synced generator that keyed its phase reset off
+// should_reset_dsp_state() therefore never reset on play: it resumed a stale
+// phase and emitted every backlogged event at once — a pulse burst on the
+// first block of playback. `transport_started` is the signal that was missing.
+//
+// It is deliberately NOT folded into should_reset_dsp_state(): a transport
+// start is not a timeline discontinuity, and reverb/delay tails must survive it.
+
+TEST_CASE("compute_playhead_changes: play edge raises transport_started without a jump",
+          "[format][playhead][change-flags][transport-start]") {
+    PlayheadSnapshot snapshot;
+
+    // Parked at a non-zero position, stopped. Establishes `has_previous`.
+    ProcessContext parked;
+    parked.sample_rate = 48000.0;
+    parked.num_samples = 512;
+    parked.tempo_bpm = 120.0;
+    parked.is_playing = false;
+    parked.position_samples = 96000;
+    parked.position_beats = 4.0;
+    compute_playhead_changes(parked, snapshot);
+    REQUIRE_FALSE(parked.transport_started);
+
+    // The user hits play. The playhead has not moved.
+    ProcessContext rolling;
+    rolling.sample_rate = 48000.0;
+    rolling.num_samples = 512;
+    rolling.tempo_bpm = 120.0;
+    rolling.is_playing = true;
+    rolling.position_samples = 96000;
+    rolling.position_beats = 4.0;
+    compute_playhead_changes(rolling, snapshot);
+
+    REQUIRE(rolling.transport_started);
+    REQUIRE(rolling.transport_changed);
+    // The whole point: this is a start, not a seek. Nothing moved, so nothing
+    // may claim a discontinuity, and tails must not be told to reset.
+    REQUIRE_FALSE(rolling.transport_jump);
+    REQUIRE_FALSE(rolling.should_reset_dsp_state());
+}
+
+TEST_CASE("compute_playhead_changes: continued playback does not re-raise transport_started",
+          "[format][playhead][change-flags][transport-start]") {
+    PlayheadSnapshot snapshot;
+
+    ProcessContext first;
+    first.sample_rate = 48000.0;
+    first.num_samples = 512;
+    first.tempo_bpm = 120.0;
+    first.is_playing = true;
+    first.position_samples = 0;
+    compute_playhead_changes(first, snapshot);
+    REQUIRE(first.transport_started);  // first block, already rolling
+
+    ProcessContext second;
+    second.sample_rate = 48000.0;
+    second.num_samples = 512;
+    second.tempo_bpm = 120.0;
+    second.is_playing = true;
+    second.position_samples = 512;  // advanced normally
+    compute_playhead_changes(second, snapshot);
+
+    REQUIRE_FALSE(second.transport_started);
+    REQUIRE_FALSE(second.transport_changed);
+    REQUIRE_FALSE(second.transport_jump);
+}
+
+TEST_CASE("compute_playhead_changes: first block reports a start only when already playing",
+          "[format][playhead][change-flags][transport-start]") {
+    SECTION("instantiated mid-playback: the first block begins a run") {
+        // A plugin dropped onto a track while the transport is already rolling
+        // has no previous block to diff against. Reporting no start here would
+        // leave a clock with no run origin until the user stopped and
+        // restarted the transport.
+        PlayheadSnapshot snapshot;
+        ProcessContext ctx;
+        ctx.is_playing = true;
+        compute_playhead_changes(ctx, snapshot);
+
+        REQUIRE(ctx.transport_started);
+        // Still no *changes* on a first block — there is nothing to diff.
+        REQUIRE_FALSE(ctx.transport_changed);
+        REQUIRE_FALSE(ctx.transport_jump);
+    }
+
+    SECTION("instantiated while stopped: no run has begun") {
+        PlayheadSnapshot snapshot;
+        ProcessContext ctx;
+        ctx.is_playing = false;
+        compute_playhead_changes(ctx, snapshot);
+
+        REQUIRE_FALSE(ctx.transport_started);
+    }
+}
+
+TEST_CASE("compute_playhead_changes: stop edge and seek do not raise transport_started",
+          "[format][playhead][change-flags][transport-start]") {
+    PlayheadSnapshot snapshot;
+
+    ProcessContext rolling;
+    rolling.sample_rate = 48000.0;
+    rolling.num_samples = 512;
+    rolling.tempo_bpm = 120.0;
+    rolling.is_playing = true;
+    rolling.position_samples = 0;
+    compute_playhead_changes(rolling, snapshot);
+
+    SECTION("seek while playing is a jump, not a start") {
+        ProcessContext seeked;
+        seeked.sample_rate = 48000.0;
+        seeked.num_samples = 512;
+        seeked.tempo_bpm = 120.0;
+        seeked.is_playing = true;
+        seeked.position_samples = 480000;  // not previous + num_samples
+        compute_playhead_changes(seeked, snapshot);
+
+        REQUIRE_FALSE(seeked.transport_started);
+        REQUIRE(seeked.transport_jump);
+    }
+
+    SECTION("stopping is a transport change, not a start") {
+        ProcessContext stopped;
+        stopped.sample_rate = 48000.0;
+        stopped.num_samples = 512;
+        stopped.tempo_bpm = 120.0;
+        stopped.is_playing = false;
+        stopped.position_samples = 512;
+        compute_playhead_changes(stopped, snapshot);
+
+        REQUIRE_FALSE(stopped.transport_started);
+        REQUIRE(stopped.transport_changed);
+    }
+}
+
+TEST_CASE("compute_playhead_changes: stop then play raises transport_started again",
+          "[format][playhead][change-flags][transport-start]") {
+    PlayheadSnapshot snapshot;
+    const auto block = [&](bool playing, int64_t pos) {
+        ProcessContext ctx;
+        ctx.sample_rate = 48000.0;
+        ctx.num_samples = 512;
+        ctx.tempo_bpm = 120.0;
+        ctx.is_playing = playing;
+        ctx.position_samples = pos;
+        compute_playhead_changes(ctx, snapshot);
+        return ctx;
+    };
+
+    REQUIRE(block(true, 0).transport_started);        // first block, rolling
+    REQUIRE_FALSE(block(true, 512).transport_started); // still rolling
+    REQUIRE_FALSE(block(false, 1024).transport_started);
+    // Re-arm: a second run must produce a second start edge, or a generator
+    // that captured its run origin on the first start never re-anchors.
+    REQUIRE(block(true, 1024).transport_started);
+}

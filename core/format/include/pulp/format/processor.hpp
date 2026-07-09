@@ -481,6 +481,28 @@ struct ProcessContext {
     /// Default false.
     bool transport_changed = false;
 
+    /// True on the first block of a run — the block where the host's
+    /// transport begins rolling. Set when `is_playing` goes false→true,
+    /// and also on the very first block a processor ever sees if the
+    /// transport is *already* playing (a plugin inserted mid-playback),
+    /// because that block starts a run from the processor's point of view.
+    ///
+    /// This is deliberately NOT folded into `should_reset_dsp_state()`.
+    /// A transport start is not a timeline discontinuity: pressing play at
+    /// a parked position leaves `position_samples` unchanged, so
+    /// `transport_jump` stays false and delay/reverb tails must survive.
+    /// What a transport start *does* invalidate is run-relative phase —
+    /// a tempo-synced LFO's cycle origin, a clock generator's first-pulse
+    /// delay, a step sequencer's step index.
+    ///
+    /// Processors that free-run a phase accumulator across a stop and then
+    /// "catch up" to the new position on the next play emit a burst of
+    /// backlogged events on that block. Capture your run origin here
+    /// instead. Prefer deriving event positions from `position_beats`
+    /// outright; then a start, a seek, and a loop wrap are all the same
+    /// case and none of them can produce a burst.
+    bool transport_started = false;
+
     bool is_realtime() const noexcept {
         return process_mode == ProcessMode::Realtime;
     }

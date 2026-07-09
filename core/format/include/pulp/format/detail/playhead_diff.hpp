@@ -86,7 +86,17 @@ inline void compute_playhead_changes(ProcessContext& ctx,
         ctx.time_sig_changed = false;
         ctx.transport_changed = false;
         ctx.transport_jump = false;
+        // A processor instantiated while the transport is already rolling has
+        // no previous block to diff against, but this block still begins a run
+        // from its point of view. Reporting no start here would leave a clock
+        // or tempo-synced generator with no origin until the user happened to
+        // stop and restart the transport.
+        ctx.transport_started = ctx.is_playing;
     } else {
+        // false -> true on is_playing. Note this is independent of
+        // transport_jump: pressing play at a parked position leaves the
+        // position unchanged, so a jump is not reported and must not be.
+        ctx.transport_started = ctx.is_playing && !snapshot.is_playing;
         ctx.tempo_changed = (ctx.tempo_bpm != snapshot.tempo_bpm);
         ctx.time_sig_changed =
             (ctx.time_sig_numerator != snapshot.time_sig_numerator) ||
