@@ -10,6 +10,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <string>
+
 #include <pulp/runtime/trace.hpp>
 
 TEST_CASE("tracing is off by default", "[tracing][rt-safety]") {
@@ -21,6 +23,10 @@ TEST_CASE("tracing macros compile as no-ops", "[tracing]") {
     // These are UI/render/offline categories only — never the live audio path.
     PULP_TRACE_SCOPE("render");
     PULP_TRACE_SCOPE_NAMED("gpu", "submit");
+    // The dynamic-name opt-in must also vanish when OFF — a runtime string
+    // expression expands to nothing and is never evaluated.
+    const std::string node_id = "node_42";
+    PULP_TRACE_SCOPE_DYNAMIC("dsp.node", node_id);
     PULP_TRACE_BEGIN("layout", "reflow");
     PULP_TRACE_END("layout");
     PULP_TRACE_COUNTER("io", "bytes", 4096);

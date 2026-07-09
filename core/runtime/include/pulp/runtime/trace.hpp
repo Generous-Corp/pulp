@@ -119,6 +119,19 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 #define PULP_TRACE_SCOPE_NAMED(category, name) \
     TRACE_EVENT(category, ::perfetto::StaticString(name))
 
+// A named scope span whose name is computed at runtime (a parameter name, a
+// node id, a file basename). `name_expr` is any std::string / const char*
+// expression; it is wrapped in perfetto::DynamicString so Perfetto copies the
+// bytes per event instead of treating them as an interned StaticString.
+//
+// This is the ONLY sanctioned dynamic-name entry point, and it is a deliberate
+// per-call-site opt-in: a static name is the default because a dynamic name
+// allocates/copies on every event and multiplies `slice.name` cardinality, so
+// the `GROUP BY name` presets degrade. Reach for it only when the runtime value
+// is the thing you need to query on.
+#define PULP_TRACE_SCOPE_DYNAMIC(category, name_expr) \
+    TRACE_EVENT(category, ::perfetto::DynamicString{name_expr})
+
 // A named scope span carrying typed debug-annotation args as trailing
 // "key", value pairs — e.g.
 //   PULP_TRACE_SCOPE_NAMED_ARGS("dsp", "offline_block",
@@ -142,6 +155,7 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 // compile and cost nothing. No Perfetto header is pulled in.
 #define PULP_TRACE_SCOPE(category) ((void)0)
 #define PULP_TRACE_SCOPE_NAMED(category, name) ((void)0)
+#define PULP_TRACE_SCOPE_DYNAMIC(category, name_expr) ((void)0)
 #define PULP_TRACE_SCOPE_NAMED_ARGS(category, name, ...) ((void)0)
 #define PULP_TRACE_BEGIN(category, name) ((void)0)
 #define PULP_TRACE_END(category) ((void)0)

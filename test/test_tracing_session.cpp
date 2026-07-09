@@ -49,6 +49,12 @@ TEST_CASE("tracing session lifecycle", "[tracing]") {
             PULP_TRACE_COUNTER("dsp", "load", i & 63);
         }
     });
+    // Exercise the dynamic-name opt-in: a span name built at runtime must reach
+    // Perfetto intact (DynamicString copies the bytes per event).
+    {
+        const std::string dyn_name = std::string("node_") + std::to_string(7 * 6);
+        PULP_TRACE_SCOPE_DYNAMIC("dsp.node", dyn_name);
+    }
     // Exercise the auto-named (prettifier) path too — must compile + run.
     { PULP_TRACE_SCOPE("state"); }
     a.join();
@@ -65,4 +71,6 @@ TEST_CASE("tracing session lifecycle", "[tracing]") {
     // Interned span names are stored as UTF-8 in the trace stream.
     REQUIRE(bytes.find("frame_a") != std::string::npos);
     REQUIRE(bytes.find("block_b") != std::string::npos);
+    // The runtime-computed name survived as UTF-8, proving the DynamicString path.
+    REQUIRE(bytes.find("node_42") != std::string::npos);
 }
