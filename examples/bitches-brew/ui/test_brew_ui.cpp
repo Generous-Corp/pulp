@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "dc_processor.hpp"
+#include "function_processor.hpp"
 #include "lfo_processor.hpp"
 #include "sync_processor.hpp"
 
@@ -18,6 +19,7 @@
 #include <brew/ui/panel.hpp>
 #include <pulp/view/screenshot.hpp>
 
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -26,22 +28,23 @@ using namespace pulp::examples::brew;
 
 namespace {
 
-constexpr uint32_t kWidth = 340;
-constexpr uint32_t kHeight = 280;
-
-/// Build a plug-in's editor through the real Processor path, so the test cannot
-/// drift from what a host would actually construct.
+/// Build a plug-in's editor through the real Processor path, at the size the
+/// plug-in tells a host to open it at — so the test cannot drift from what a DAW
+/// would actually construct, nor pass at a geometry no host ever uses.
 struct Editor {
     explicit Editor(format::ProcessorFactory factory) : host(std::move(factory)) {
         host.prepare(48000.0, 512, 2, 2);
+        std::tie(width, height) = host.processor()->editor_size();
+        REQUIRE(width > 0);
+        REQUIRE(height > 0);
         view = host.processor()->create_view();
         REQUIRE(view != nullptr);
-        view->set_bounds({0, 0, static_cast<float>(kWidth),
-                          static_cast<float>(kHeight)});
+        view->set_bounds({0, 0, static_cast<float>(width),
+                          static_cast<float>(height)});
     }
 
     std::vector<uint8_t> shoot() {
-        return view::render_to_png(*view, kWidth, kHeight, 2.0f);
+        return view::render_to_png(*view, width, height, 2.0f);
     }
 
     /// True when this build has a raster backend at all. `has_screenshot_provider()`
@@ -60,6 +63,8 @@ struct Editor {
 
     format::HeadlessHost host;
     std::unique_ptr<view::View> view;
+    uint32_t width = 0;
+    uint32_t height = 0;
 };
 
 /// Compare renders without letting Catch2 stringify two 40 KB byte vectors on
@@ -168,6 +173,56 @@ TEST_CASE("LFO's editor draws the selected shape", "[brew][ui][lfo]") {
         const auto at_1 = ed.shoot();
         ed.host.state().set_value(LfoProcessor::kPhaseDegrees, 90.0f);
         REQUIRE(differs(ed.shoot(), at_1));
+    }
+}
+
+TEST_CASE("Function's editor draws the curve and tracks the signal on it",
+          "[brew][ui][function]") {
+    Editor ed(create_function);
+    if (!ed.can_capture()) {
+        WARN("no raster screenshot backend in this build — skipping");
+        return;
+    }
+    const auto linear = ed.shoot();
+    REQUIRE_FALSE(linear.empty());
+
+    // The graph evaluates the plug-in's own function_transfer(), so bending the
+    // curve must bend the picture.
+    ed.host.state().set_value(FunctionProcessor::kCurve,
+                              static_cast<float>(Curve::exponential));
+    ed.host.state().set_value(FunctionProcessor::kAmount, 4.0f);
+    REQUIRE(differs(ed.shoot(), linear));
+
+    SECTION("and the dot follows the incoming voltage") {
+        // Back to linear so the *curve* is identical between the two renders and
+        // the only thing that can move is the operating point.
+        ed.host.state().set_value(FunctionProcessor::kCurve,
+                                  static_cast<float>(Curve::linear));
+
+        auto drive = [&](float level) {
+            audio::Buffer<float> in(2, 64), out(2, 64);
+            in.clear();
+            out.clear();
+            for (std::size_t c = 0; c < 2; ++c)
+                for (std::size_t n = 0; n < 64; ++n) in.channel(c)[n] = level;
+            const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
+            audio::BufferView<const float> iv(ip, 2, 64);
+            auto ov = out.view();
+            format::ProcessContext ctx;
+            ctx.sample_rate = 48000.0;
+            ctx.num_samples = 64;
+            ed.host.process(ov, iv, ctx);
+        };
+
+        const auto* fn = static_cast<const FunctionProcessor*>(ed.host.processor());
+
+        drive(-0.9f);
+        REQUIRE(fn->display_input() == -0.9f);
+        const auto low = ed.shoot();
+
+        drive(0.9f);
+        REQUIRE(fn->display_input() == 0.9f);
+        REQUIRE(differs(ed.shoot(), low));
     }
 }
 
