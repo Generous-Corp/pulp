@@ -101,6 +101,27 @@ dumper render at whatever it returns. Without the override a host opens the edit
 at `Processor`'s 400×300 default, and a screenshot taken at any other geometry is
 a picture of a layout no DAW will ever show.
 
+## Nothing here has emitted a measured volt
+
+The suite's correctness is covered by golden-vector tests. Its *hardware* claims
+are covered by nothing at all, and this README will not pretend otherwise. A
+sample value becoming a voltage, the polarity of that voltage, which host channel
+arrives at which jack, whether a 1 ms trigger survives the DAC's reconstruction
+filter — none of that is knowable from a datasheet, and none of it is verified.
+
+`brew-rig` is the tool that closes what can be closed. Wire the interface's
+outputs through the modular's CV inputs and back into its inputs, and it will
+sweep one output channel at a time to discover the crossbar and the polarity of
+the chain. It emits nothing without `--armed`, clamps its probe level to half
+full scale, and writes zeros on every exit path including Ctrl-C — a CV tool that
+leaves a voltage on a jack when it dies is worse than no tool.
+
+What a loopback can never tell you is **volts**. A closed loop is dimensionless:
+full-scale out arriving as full-scale in proves the chain is unity gain and
+proves nothing about what was on the wire. `brew-rig hold` parks a DC level on
+one channel so a meter or a scope can answer that, and until it is answered
+nothing in this suite may print a voltage.
+
 ## The clock is derived, never accumulated
 
 `Sync` computes which clock edges fall inside a block from the host's reported
