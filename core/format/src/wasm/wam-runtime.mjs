@@ -70,6 +70,25 @@ export function makeWasmImports(getMemory) {
   };
 }
 
+// Decode the packed record stream written by wam_midi_out_drain:
+//   [int32 sample_offset][uint16 byte_len][byte_len raw MIDI bytes] ...
+// `bytes` is a Uint8Array view of the drain buffer; `len` is the byte count
+// actually copied (min(cap, available)). A trailing partial record — which is
+// what truncation looks like — is dropped rather than mis-decoded.
+export function parseMidiOutRecords(bytes, len) {
+  const events = [];
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let i = 0;
+  while (i + 6 <= len) {
+    const offset = dv.getInt32(i, true);
+    const size = dv.getUint16(i + 4, true);
+    if (i + 6 + size > len) break;                 // truncated tail
+    events.push({ offset, bytes: bytes.slice(i + 6, i + 6 + size) });
+    i += 6 + size;
+  }
+  return events;
+}
+
 // Wrap an instantiated module's exports with typed-array views and the wam_*
 // ABI. All heap access goes through fresh views because memory growth
 // invalidates old ArrayBuffer references.
@@ -101,6 +120,10 @@ export function makeBridge(exports) {
     setParam(id, value) { const p = writeCStr(id); exports.wam_set_param(p, value); exports.free(p); },
     getParam(id) { const p = writeCStr(id); const v = exports.wam_get_param(p); exports.free(p); return v; },
     midi(status, d1, d2, offset) { exports.wam_midi(status, d1, d2, offset); },
+    // Copy the last block's MIDI output into `dstPtr` (a caller-owned wasm
+    // allocation of `cap` bytes). Returns bytes AVAILABLE — greater than `cap`
+    // means the tail was truncated.
+    drainMidiOut(dstPtr, cap) { return exports.wam_midi_out_drain(dstPtr, cap); },
     descriptorJson() { return readCStr(exports.wam_descriptor()); },
     parametersJson() { return readCStr(exports.wam_parameters()); },
     readState() {

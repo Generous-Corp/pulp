@@ -73,6 +73,12 @@ export default class PulpWAM {
 
   _onMessage(msg) {
     switch (msg?.type) {
+      // MIDI the plugin produced. Subscribe with `wam.onMidiOut = (events) => …`
+      // where each event is { offset, bytes }: route it to a WebMIDI output, a
+      // visualiser, or another plugin's scheduleMidi().
+      case "midiOut":
+        this.onMidiOut?.(msg.events, { truncated: !!msg.truncated });
+        break;
       case "descriptor":
         try { this._descriptor = JSON.parse(msg.json); } catch { this._descriptor = {}; }
         this._resolveDescriptor?.(this._descriptor);

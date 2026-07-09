@@ -64,6 +64,14 @@ void wam_midi(int status, int data1, int data2, int offset) {
                            static_cast<uint8_t>(data2), offset);
 }
 
+// Drain the MIDI produced by the last wam_process() call. Returns the number of
+// bytes AVAILABLE; copies min(cap, available) into dst. See
+// WamProcessorBridge::drain_midi_out for the record layout.
+__attribute__((used, visibility("default")))
+int wam_midi_out_drain(uint8_t* dst, int cap) {
+    return g_bridge.drain_midi_out(dst, cap);
+}
+
 __attribute__((used, visibility("default")))
 const char* wam_descriptor() {
     static std::string json;

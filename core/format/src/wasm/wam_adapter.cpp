@@ -138,10 +138,49 @@ bool WamProcessorBridge::initialize(double sample_rate, int max_block_size) {
         output_ptrs_[ch] = output_planar_.data() + ch * max_block_size;
     }
 
+    // Reserve the MIDI buffers once, then forbid them from growing. Previously
+    // process() default-constructed a MidiBuffer every block and let midi_in /
+    // midi_out reallocate under add() — both allocations on the audio thread.
+    pending_midi_.reserve(kMidiEventCapacity, kSysexCapacity, kSysexPayloadCapacity);
+    pending_midi_.set_realtime_capacity_limit(true);
+    midi_out_.reserve(kMidiEventCapacity, kSysexCapacity, kSysexPayloadCapacity);
+    midi_out_.set_realtime_capacity_limit(true);
+
+    // Worst case per record: 4-byte offset + 2-byte length + payload.
+    constexpr std::size_t kRecordHeader = sizeof(int32_t) + sizeof(uint16_t);
+    midi_out_scratch_.assign(
+        kMidiEventCapacity * (kRecordHeader + 3)
+            + kSysexCapacity * (kRecordHeader + kSysexPayloadCapacity),
+        0);
+    midi_out_bytes_ = 0;
+
     runtime::log_info("WAMv2: initialized '{}' at {} Hz, {} channels",
                       desc.name, sample_rate, num_channels_);
     return true;
 }
+
+namespace {
+
+// Append one [int32 offset][uint16 len][bytes] record. Returns false (and writes
+// nothing) when the scratch is full — bounded, allocation-free, audio-thread safe.
+bool append_midi_record(std::vector<uint8_t>& scratch, std::size_t& used,
+                        int32_t sample_offset, const uint8_t* bytes,
+                        std::size_t len) {
+    if (len == 0 || len > 0xFFFF) return false;
+    const std::size_t need = sizeof(int32_t) + sizeof(uint16_t) + len;
+    if (used + need > scratch.size()) return false;
+
+    uint8_t* dst = scratch.data() + used;
+    const auto off = static_cast<int32_t>(sample_offset);
+    const auto len16 = static_cast<uint16_t>(len);
+    std::memcpy(dst, &off, sizeof(off));
+    std::memcpy(dst + sizeof(off), &len16, sizeof(len16));
+    std::memcpy(dst + sizeof(off) + sizeof(len16), bytes, len);
+    used += need;
+    return true;
+}
+
+} // namespace
 
 void WamProcessorBridge::process(const float* input, float* output,
                                   int num_channels, int num_frames) {
@@ -167,10 +206,11 @@ void WamProcessorBridge::process(const float* input, float* output,
         const_cast<const float* const*>(input_ptrs_.data()), ch, num_frames);
     audio::BufferView<float> out_view(output_ptrs_.data(), ch, num_frames);
 
-    // Process MIDI
-    midi::MidiBuffer midi_in = std::move(pending_midi_);
-    midi::MidiBuffer midi_out;
-    pending_midi_.clear();
+    // MIDI. pending_midi_ IS midi_in — no per-block MidiBuffer construction and
+    // no move that strips its reserved capacity.
+    midi_out_.clear();
+    midi_out_.clear_sysex();
+    midi_out_bytes_ = 0;
 
     ProcessContext ctx;
     ctx.sample_rate = sample_rate_;
@@ -178,7 +218,25 @@ void WamProcessorBridge::process(const float* input, float* output,
     ctx.process_mode = ProcessMode::Realtime;
     ctx.render_speed_hint = RenderSpeedHint::Realtime;
 
-    processor_->process(out_view, in_view, midi_in, midi_out, ctx);
+    processor_->process(out_view, in_view, pending_midi_, midi_out_, ctx);
+
+    // Serialize whatever the processor emitted, so drain_midi_out() is a plain
+    // memcpy. Previously midi_out simply went out of scope here and every MIDI
+    // event a plugin produced was discarded — while the descriptor advertised
+    // hasMidiOutput: true.
+    for (const auto& event : midi_out_) {
+        append_midi_record(midi_out_scratch_, midi_out_bytes_,
+                           event.sample_offset, event.data(), event.size());
+    }
+    for (const auto& event : midi_out_.sysex()) {
+        append_midi_record(midi_out_scratch_, midi_out_bytes_,
+                           event.sample_offset, event.data.data(),
+                           event.data.size());
+    }
+
+    // The block consumed its input events.
+    pending_midi_.clear();
+    pending_midi_.clear_sysex();
 
     // Re-interleave: planar → Web Audio interleaved
     for (int f = 0; f < num_frames; ++f) {
@@ -186,6 +244,15 @@ void WamProcessorBridge::process(const float* input, float* output,
             output[f * num_channels + c] = output_ptrs_[c][f];
         }
     }
+}
+
+int WamProcessorBridge::drain_midi_out(uint8_t* dst, int cap) const {
+    const auto available = static_cast<int>(midi_out_bytes_);
+    if (dst && cap > 0 && available > 0) {
+        std::memcpy(dst, midi_out_scratch_.data(),
+                    static_cast<std::size_t>((std::min)(cap, available)));
+    }
+    return available;   // > cap tells the caller the tail was truncated
 }
 
 std::vector<WamParamInfo> WamProcessorBridge::get_parameter_info() const {
@@ -250,17 +317,23 @@ void WamProcessorBridge::set_parameter_value(const std::string& id, float value)
 void WamProcessorBridge::schedule_midi(uint8_t status, uint8_t data1,
                                         uint8_t data2, int sample_offset) {
     midi::MidiEvent event;
-    if ((status & 0xF0) == 0x90 && data2 > 0)
-        event = midi::MidiEvent::note_on(status & 0x0F, data1, data2);
-    else if ((status & 0xF0) == 0x80 || ((status & 0xF0) == 0x90 && data2 == 0))
-        event = midi::MidiEvent::note_off(status & 0x0F, data1, data2);
-    else if ((status & 0xF0) == 0xB0)
-        event = midi::MidiEvent::cc(status & 0x0F, data1, data2);
-    else
-        return;
+
+    // Note-on with velocity 0 is a note-off; normalize it so downstream
+    // is_note_off() checks behave the same as they do on a hardware port.
+    if ((status & 0xF0) == 0x90 && data2 == 0) {
+        event = midi::MidiEvent::note_off(status & 0x0F, data1, 0);
+    } else {
+        // Everything else passes through verbatim. This previously `return`ed
+        // for any status outside note-on/note-off/CC, silently swallowing
+        // pitch-bend (0xE0), program change (0xC0), channel pressure (0xD0)
+        // and poly aftertouch (0xA0) — so, e.g., synth-with-presets' pitch
+        // bend never reached the DSP in a browser.
+        event = midi::MidiEvent{choc::midi::ShortMessage(status, data1, data2),
+                                0, 0.0};
+    }
 
     event.sample_offset = sample_offset;
-    pending_midi_.add(event);
+    pending_midi_.add(event);   // drops (counted) rather than growing when full
 }
 
 std::vector<uint8_t> WamProcessorBridge::get_state() const {

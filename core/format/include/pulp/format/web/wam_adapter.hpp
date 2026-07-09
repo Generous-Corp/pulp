@@ -95,6 +95,24 @@ public:
     void schedule_midi(uint8_t status, uint8_t data1, uint8_t data2,
                        int sample_offset);
 
+    // Drain the MIDI the processor produced during the LAST process() call.
+    //
+    // Copies up to `cap` bytes into `dst` and returns the number of bytes that
+    // were AVAILABLE — so a caller passing too small a buffer sees size > cap
+    // and knows the tail was truncated. Records are packed back-to-back:
+    //
+    //     [int32 sample_offset][uint16 byte_len][byte_len raw MIDI bytes]
+    //
+    // Short messages carry 1..3 bytes; SysEx carries the full F0..F7 payload,
+    // so one drain call handles both and the reader dispatches on the first
+    // byte. Records are emitted short-messages-first, then SysEx; consumers
+    // that need strict time order should stable-sort on sample_offset.
+    //
+    // Called from the audio thread immediately after process(): it is a single
+    // memcpy out of a buffer serialized during process(), so it neither
+    // allocates nor locks.
+    int drain_midi_out(uint8_t* dst, int cap) const;
+
     // State persistence
     std::vector<uint8_t> get_state() const;
     bool set_state(const uint8_t* data, size_t size);
@@ -113,7 +131,24 @@ private:
     std::vector<float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
 
+    // Bounds for the adapter-owned MIDI buffers. They are reserved once in
+    // initialize() and run with set_realtime_capacity_limit(true), so add()
+    // drops on overflow rather than reallocating on the audio thread.
+    static constexpr std::size_t kMidiEventCapacity = 256;
+    static constexpr std::size_t kSysexCapacity = 16;
+    static constexpr std::size_t kSysexPayloadCapacity = 512;
+
+    // Persistent across blocks — never reallocated during process().
+    // pending_midi_ is filled by schedule_midi() between render quanta and is
+    // handed to the processor as midi_in; midi_out_ receives what it emits.
     midi::MidiBuffer pending_midi_;
+    midi::MidiBuffer midi_out_;
+
+    // Serialized midi_out_ records, written at the end of process() and copied
+    // out by drain_midi_out(). Sized once; `midi_out_bytes_` is the live length.
+    std::vector<uint8_t> midi_out_scratch_;
+    std::size_t midi_out_bytes_ = 0;
+
     double sample_rate_ = 48000.0;
     int num_channels_ = 2;
     int block_size_ = 128;

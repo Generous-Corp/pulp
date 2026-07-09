@@ -20,10 +20,11 @@
 // served next to this file as ./wam-dsp.js (an ES-module factory).
 
 import createDspModule from "./wam-dsp.js";
-import { makeBridge } from "./wam-runtime.mjs";
+import { makeBridge, parseMidiOutRecords } from "./wam-runtime.mjs";
 
 const MAX_FRAMES = 128;   // Web Audio render quantum is fixed at 128.
 const MAX_CHANNELS = 2;   // Stereo lane (see plan: wider bus support is later).
+const MIDI_OUT_CAP = 8192; // drain buffer; a full block of MIDI is far smaller.
 
 // Adapt the Emscripten Module (Module._name, Module.HEAPF32) to the raw-exports
 // shape makeBridge wraps, so the worklet and the Node runner share one bridge.
@@ -39,6 +40,7 @@ function moduleExports(M) {
     wam_set_param: M._wam_set_param,
     wam_get_param: M._wam_get_param,
     wam_midi: M._wam_midi,
+    wam_midi_out_drain: M._wam_midi_out_drain,
     wam_descriptor: M._wam_descriptor,
     wam_parameters: M._wam_parameters,
     wam_state_size: M._wam_state_size,
@@ -66,6 +68,8 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       // Lifetime-persistent interleaved scratch buffers (not per-block).
       this._inPtr = wam.malloc(MAX_CHANNELS * MAX_FRAMES * 4);
       this._outPtr = wam.malloc(MAX_CHANNELS * MAX_FRAMES * 4);
+      // MIDI-out drain target, allocated once (never per block).
+      this._midiOutPtr = wam.malloc(MIDI_OUT_CAP);
       this._wam = wam;
       for (const m of this._pendingMsgs) this._handle(m);
       this._pendingMsgs.length = 0;
@@ -117,6 +121,26 @@ class PulpWamProcessor extends AudioWorkletProcessor {
     }
 
     this._wam.process(this._inPtr, this._outPtr, ch, frames);
+
+    // Drain whatever MIDI the plugin emitted this block. Only crosses to the
+    // main thread when there is something to report, so a plugin that emits no
+    // MIDI (every instrument/effect) costs one wasm call and nothing else.
+    if (this._wam.drainMidiOut) {
+      const available = this._wam.drainMidiOut(this._midiOutPtr, MIDI_OUT_CAP);
+      if (available > 0) {
+        const copied = Math.min(available, MIDI_OUT_CAP);
+        const bytes = this._wam.u8().subarray(this._midiOutPtr,
+                                              this._midiOutPtr + copied);
+        const events = parseMidiOutRecords(bytes, copied);
+        if (events.length) {
+          this.port.postMessage({
+            type: "midiOut",
+            events: events.map((e) => ({ offset: e.offset, bytes: e.bytes })),
+            truncated: available > MIDI_OUT_CAP,
+          });
+        }
+      }
+    }
 
     const out = this._wam.f32(); // refetch in case the heap grew
     const ob = this._outPtr >> 2;
