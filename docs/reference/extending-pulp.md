@@ -91,6 +91,37 @@ The command degrades to a clear skip with a single remediation line (for
 example, `pulp tool install video-proof`) and still produces whatever it can
 without the tool — never a false success.
 
+## Every added tool must be user-updatable and overridable
+
+When you add a `managed_by_pulp` tool to
+`tools/packages/tool-registry.json`, it must be updatable and
+version-overridable by the user **without waiting for Pulp to bump its
+committed pin**. This is a hard convention for the opt-in tool lane (it does
+not apply to shipped-by-default dependencies like Skia or Dawn — those are
+pinned by the build, not by `pulp tool`).
+
+Concretely, a managed tool must declare a non-empty `pinned_version`. That
+version string is the anchor the update/override path keys off:
+
+- **Update** — `pulp tool update <id>` re-installs the tool at the registry
+  pin (the latest known-good version Pulp ships), and `pulp tool update <id>
+  --version <v>` re-installs at an explicit version.
+- **Override** — a user can pin a tool to their own version and have it survive
+  future Pulp registry-pin bumps, three ways (highest precedence first):
+  1. `PULP_TOOL_<ID>_VERSION` env var (session-scoped; the id upper-cased with
+     non-alphanumerics turned into `_`, e.g. `PULP_TOOL_AUDIO_QUALITY_LAB_VERSION`),
+  2. `$PULP_HOME/tool-overrides.json` (durable; what `--version` on
+     `install`/`update` writes),
+  3. the registry `pinned_version` (the shipped default).
+
+  `pulp tool info <id>` (and `--json`) reports the **active version** and its
+  **source** so it is always explicit which version is in effect and why.
+
+This convention is enforced: `tools/packages/validate_registry.py` fails if any
+`managed_by_pulp` tool ships without a `pinned_version`, so we never again ship
+a tool users cannot update. Add the pin (and any user-facing update note) in the
+same change that registers the tool.
+
 ## See also
 
 - [cli.md](cli.md) — full command reference for `add`, `tool`, `kit`, `content`

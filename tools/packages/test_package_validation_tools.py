@@ -300,6 +300,95 @@ class ValidateRegistryTests(unittest.TestCase):
             self.assertIn("Structural errors:", out.getvalue())
             self.assertIn("bad: must have at least one platform", out.getvalue())
 
+    def test_validate_tool_registry_flags_managed_tool_without_pin(self) -> None:
+        # A pulp-managed tool with no pinned_version has no version to update
+        # from or override — the rule must flag it.
+        errors = vr.validate_tool_registry(
+            {
+                "tools": {
+                    "no-pin": {"managed_by_pulp": True, "pinned_version": ""},
+                    "missing-pin": {"managed_by_pulp": True},
+                }
+            }
+        )
+        self.assertEqual(len(errors), 2)
+        joined = "\n".join(errors)
+        self.assertIn("no-pin", joined)
+        self.assertIn("missing-pin", joined)
+        self.assertIn("pinned_version", joined)
+
+    def test_validate_tool_registry_accepts_pinned_and_exempts_unmanaged(self) -> None:
+        errors = vr.validate_tool_registry(
+            {
+                "tools": {
+                    # Managed + pinned → satisfies the update/override contract.
+                    "good": {"managed_by_pulp": True, "pinned_version": "1.2.3"},
+                    # Not pulp-managed → exempt even without a pin.
+                    "external": {"managed_by_pulp": False},
+                    "legacy": {},
+                }
+            }
+        )
+        self.assertEqual(errors, [])
+
+    def test_main_reports_tool_registry_update_override_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            registry_path = root / "registry.json"
+            schema_path = root / "schema.json"
+            tool_registry_path = root / "tool-registry.json"
+            # Minimal valid packages registry so only the tool-registry rule
+            # decides the exit code.
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "registry_version": 2,
+                        "packages": {
+                            "ok-pkg": {
+                                "version": "1.0.0",
+                                "license": "MIT",
+                                "verification": {
+                                    "verified_version": "1.0.0",
+                                    "build_status": {"macOS-arm64": "pass"},
+                                },
+                                "platforms": {"macOS": {}, "iOS": {}},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            schema_path.write_text("{}", encoding="utf-8")
+            tool_registry_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "tools": {
+                            "unupdatable": {
+                                "display_name": "Unupdatable",
+                                "managed_by_pulp": True,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            out = io.StringIO()
+            with module_attr(vr, "REGISTRY", registry_path), module_attr(
+                vr, "SCHEMA", schema_path
+            ), module_attr(vr, "TOOL_REGISTRY", tool_registry_path):
+                with mock.patch.object(vr, "validate_schema", return_value=[]):
+                    with argv(["validate_registry.py"]):
+                        with contextlib.redirect_stdout(out):
+                            rc = vr.main()
+
+            text = out.getvalue()
+            self.assertEqual(rc, 1)
+            self.assertIn("Validating tool-registry.json (1 tools)", text)
+            self.assertIn("Tool-registry update/override errors:", text)
+            self.assertIn("unupdatable", text)
+
 
 class FreshnessCheckTests(unittest.TestCase):
     def test_extract_owner_repo_accepts_github_urls(self) -> None:

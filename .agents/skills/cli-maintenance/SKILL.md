@@ -506,6 +506,39 @@ contract: `--run` executes the resolved tool path with no forwarded arguments
 and returns its exit code. For `npm_package` tools, that path is the
 `run.{sh,bat}` wrapper smoke check.
 
+### Every added `managed_by_pulp` tool must be user-updatable + overridable
+
+**Convention (hard rule for the opt-in tool lane, NOT for shipped-by-default
+deps like Skia/Dawn):** when you register a `managed_by_pulp` tool in
+`tools/packages/tool-registry.json`, users must be able to update it and pin
+their own version **without waiting for Pulp to bump the committed pin**. This
+is what `pulp tool update` + the version-override tiers provide, and it is
+enforced — do not add a managed tool that lacks it.
+
+- **Declare a non-empty `pinned_version`.** It is the anchor the update/override
+  path keys off. `tools/packages/validate_registry.py`'s
+  `validate_tool_registry` fails the build if any `managed_by_pulp` tool ships
+  without one (covered by `tools/packages/test_package_validation_tools.py`).
+- **`pulp tool update <id> [--version <v>]`** lives in
+  `experimental/pulp-rs/src/cmd/tool.rs`. Bare `update` re-installs at the
+  registry pin and clears any prior user override; `--version <v>` re-installs
+  at an explicit version and records a durable override. The archive re-fetch
+  delegates to `pulp-cpp tool install <id> --force` (Rust can't extract
+  archives), forwarding the resolved version via env — the override file is the
+  cross-language source of truth.
+- **Override precedence** (highest first, in `experimental/pulp-rs/src/tool_version.rs`):
+  `PULP_TOOL_<ID>_VERSION` env var → `$PULP_HOME/tool-overrides.json` (durable;
+  what `--version` writes) → registry `pinned_version`. `pulp tool info`
+  surfaces the **active version** and its **source** (text + `--json` as
+  `active_version` / `active_version_source`), so it is always explicit which
+  version is in effect and why.
+- **When you add a managed tool, touch (same PR):** the registry entry (with
+  `pinned_version`), and — if you extend the update/override surface itself —
+  `tool.rs` + `tool_version.rs` + their tests, `docs/status/cli-commands.yaml`
+  (`tool` subcommands), `docs/reference/cli.md#tool`, and
+  `docs/reference/extending-pulp.md`. The full convention lives in
+  [extending-pulp.md](../../../docs/reference/extending-pulp.md#every-added-tool-must-be-user-updatable-and-overridable).
+
 ### `pulp tool install <in-tree python tool>` — `source_dir` install
 
 A Python tool that lives **inside this repo** (not on PyPI) registers as a
