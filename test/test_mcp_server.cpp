@@ -724,6 +724,14 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_motion_snapshot",
         "pulp_motion_start_trace",
         "pulp_motion_stop_trace",
+        // pulp_trace_* wrappers expose the Perfetto Trace.* live-session
+        // inspector RPCs as first-class MCP tools (client-side doctor / open /
+        // fetch and offline `query --trace` have no inspector RPC, so no tool).
+        "pulp_trace_start",
+        "pulp_trace_stop",
+        "pulp_trace_snapshot",
+        "pulp_trace_query",
+        "pulp_trace_explain",
         "pulp_screenshot",
         "pulp_simulate_click",
         "pulp_status",
@@ -2563,6 +2571,107 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
         auto pos = tools.find(name_key);
         REQUIRE(pos != std::string::npos);
         auto window = tools.substr(pos, 600);
+        REQUIRE(window.find(R"JSON("description":")JSON") != std::string::npos);
+        REQUIRE(window.find(R"JSON("inputSchema":{"type":"object")JSON") != std::string::npos);
+    }
+}
+
+TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm",
+          "[mcp][tools][trace]") {
+    TempDir temp;
+    ScopedCurrentPath cwd(temp.path);
+
+    const auto no_param_tools = {
+        "pulp_trace_stop",
+        "pulp_trace_snapshot",
+    };
+    int id = 90;
+    for (const char* tool : no_param_tools) {
+        INFO("trace tool (no params): " << tool);
+        auto response = handle_request(tool_call(std::to_string(id++), tool));
+        // Reaching find_project_root() proves the dispatcher recognised the
+        // tool; guards against a tools/list registration with no dispatch arm.
+        require_contains(response, "Error: not in a Pulp project");
+        REQUIRE(response.find("Unknown tool") == std::string::npos);
+    }
+
+    auto start = handle_request(tool_call(
+        std::to_string(id++), "pulp_trace_start",
+        R"JSON({"categories":["dsp","render"],"ring_mb":32})JSON"));
+    require_contains(start, "Error: not in a Pulp project");
+    REQUIRE(start.find("Unknown tool") == std::string::npos);
+
+    auto query = handle_request(tool_call(
+        std::to_string(id++), "pulp_trace_query",
+        R"JSON({"sql":"select 1","format":"json"})JSON"));
+    require_contains(query, "Error: not in a Pulp project");
+    REQUIRE(query.find("Unknown tool") == std::string::npos);
+
+    auto explain = handle_request(tool_call(
+        std::to_string(id++), "pulp_trace_explain",
+        R"JSON({"question":"why is startup slow?"})JSON"));
+    require_contains(explain, "Error: not in a Pulp project");
+    REQUIRE(explain.find("Unknown tool") == std::string::npos);
+}
+
+// Code-shape check that the pulp_trace_* MCP tools map to the right Trace.*
+// inspector method names. Source-text assertion mirrors the motion mapping
+// test; the round-trip itself lands at TraceInspector::handle, covered by
+// test_trace_inspector.cpp.
+TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods",
+          "[mcp][tools][trace]") {
+    auto src_path = repo_root_path() / "tools" / "mcp" / "pulp_mcp.cpp";
+    REQUIRE(std::filesystem::exists(src_path));
+
+    std::ifstream in(src_path);
+    std::stringstream buf;
+    buf << in.rdbuf();
+    const std::string src = buf.str();
+
+    const std::pair<const char*, const char*> mappings[] = {
+        {"pulp_trace_start",    "Trace.startSession"},
+        {"pulp_trace_stop",     "Trace.stopSession"},
+        {"pulp_trace_snapshot", "Trace.snapshot"},
+        {"pulp_trace_query",    "Trace.query"},
+        {"pulp_trace_explain",  "Trace.explain"},
+    };
+    for (const auto& [tool, method] : mappings) {
+        INFO("trace tool=" << tool << " method=" << method);
+        REQUIRE(src.find(tool) != std::string::npos);
+        REQUIRE(src.find(method) != std::string::npos);
+    }
+}
+
+TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas",
+          "[mcp][tools][trace]") {
+    auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":98,"method":"tools/list"})JSON");
+
+    // pulp_trace_explain is the only trace tool with a required param.
+    {
+        std::string name_key = R"JSON("name":"pulp_trace_explain")JSON";
+        auto pos = tools.find(name_key);
+        REQUIRE(pos != std::string::npos);
+        auto window = tools.substr(pos, 1500);
+        REQUIRE(window.find(R"JSON("description":")JSON") != std::string::npos);
+        auto req_pos = window.find(R"JSON("required":[)JSON");
+        REQUIRE(req_pos != std::string::npos);
+        auto req_end = window.find(']', req_pos);
+        REQUIRE(req_end != std::string::npos);
+        auto required_window = window.substr(req_pos, req_end - req_pos + 1);
+        REQUIRE(required_window.find(R"JSON("question")JSON") != std::string::npos);
+    }
+
+    // Every trace tool needs a description + an inputSchema object.
+    const auto all_trace_tools = {
+        "pulp_trace_start",  "pulp_trace_stop", "pulp_trace_snapshot",
+        "pulp_trace_query",  "pulp_trace_explain",
+    };
+    for (const char* tool : all_trace_tools) {
+        INFO("trace tool: " << tool);
+        std::string name_key = std::string(R"JSON("name":")JSON") + tool + R"JSON(")JSON";
+        auto pos = tools.find(name_key);
+        REQUIRE(pos != std::string::npos);
+        auto window = tools.substr(pos, 900);
         REQUIRE(window.find(R"JSON("description":")JSON") != std::string::npos);
         REQUIRE(window.find(R"JSON("inputSchema":{"type":"object")JSON") != std::string::npos);
     }
