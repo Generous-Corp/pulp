@@ -78,8 +78,14 @@ jobs:
         run: |
           set -euo pipefail
           # Effect + instrument feature coverage (the runner takes a built .wasm).
+          # Covers param + plugin_state_io round-trip AND hostile-state rejection
+          # (32-bit overflow blob, corrupted CRC, truncation) — no worklet trap.
           node wam_feature_runner.mjs build/PulpGain.wasm effect
           node wam_feature_runner.mjs build/PulpPluck.wasm instrument
+          # In-worklet RACK path (pulp-pluck → pulp-gain): compiles
+          # wam_chain_entry.cpp + WamChainBridge and exercises stage-qualified
+          # params, MIDI→audio flow, and the "PWR1" multi-stage state container.
+          node wam_rack_runner.mjs build/PulpPluckGainRack.wasm
           # Web-build report (UI strategy + parameter binding targets, both modes).
           node ../../../core/format/src/wasm/wam_build_report.test.mjs --wasm build/PulpGain.wasm
 
@@ -112,8 +118,11 @@ jobs:
           node core/format/src/wasm/wclap_probe.mjs        examples/web-demos/wclap-build/build/PulpGain.wasm
           node core/format/src/wasm/wclap_host_runner.mjs  examples/web-demos/wclap-build/build/PulpGain.wasm --gain-db 6
           node core/format/src/wasm/pack-wclap.test.mjs
-          # Pure-JS host helper: no wasm, no browser, so it runs anywhere.
+          # Pure-JS host helpers: no wasm, no browser, so they run anywhere.
           node core/format/src/wasm/wam-scope.test.mjs
+          # MIDI-out wire records, per-URL processor naming, and version-skew
+          # bridge degradation (stale DSP missing newer exports must not throw).
+          node core/format/src/wasm/wam-runtime.test.mjs
 
       - name: WebCLAP browser host (headless Chrome)
         env:

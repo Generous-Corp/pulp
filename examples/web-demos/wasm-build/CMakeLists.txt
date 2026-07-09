@@ -42,3 +42,10 @@ pulp_add_wam_plugin(PulpChorus
 pulp_add_wam_plugin(PulpGainWorklet SINGLE_FILE
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_gain_wasm.cpp
     INCLUDES ${PULP_ROOT}/examples/pulp-gain)
+
+# An in-worklet RACK (pulp-pluck → pulp-gain) built through pulp_add_wam_rack.
+# This is the committed CI coverage for the chain path — it compiles
+# wam_chain_entry.cpp + WamChainBridge and is exercised by wam_rack_runner.mjs.
+pulp_add_wam_rack(PulpPluckGainRack
+    ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pluck_gain_rack_wasm.cpp
+    INCLUDES ${PULP_ROOT}/examples/pulp-pluck ${PULP_ROOT}/examples/pulp-gain)
