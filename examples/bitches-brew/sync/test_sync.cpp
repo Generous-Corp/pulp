@@ -298,6 +298,32 @@ TEST_CASE("Sync is silent with the transport stopped", "[brew][sync][safety]") {
     }
 }
 
+// Bypass means stop driving the patch. A clock that keeps pulsing after the user
+// pressed Bypass keeps clocking the modular, and un-bypassing must not resume a
+// gate that was left mid-high.
+TEST_CASE("Sync emits nothing while bypassed", "[brew][sync][safety][bypass]") {
+    SyncRig rig;
+    (void)rig.render(0.0, true, true);  // a 240-sample pulse is now in flight
+
+    format::ProcessContext ctx;
+    ctx.sample_rate = kSampleRate;
+    ctx.num_samples = kFrames;
+    ctx.is_playing = true;
+    ctx.tempo_bpm = kTempo;
+    ctx.position_beats = beats_per_sample(kTempo, kSampleRate) * kFrames;
+    ctx.is_bypassed = true;
+
+    REQUIRE(rig.render(ctx).empty());
+    REQUIRE(all_equal(rig.clock(), 0.0f));
+    REQUIRE(all_equal(rig.run(), 0.0f));
+
+    SECTION("un-bypassing resumes on the grid, not mid-pulse") {
+        ctx.is_bypassed = false;
+        ctx.position_beats = 1.0;  // an edge sits exactly here
+        REQUIRE(rig.render(ctx) == std::vector<int>{0});
+    }
+}
+
 // -------------------------------------------------------------- run/stop gate
 
 TEST_CASE("Sync raises the run gate while the transport runs", "[brew][sync]") {
