@@ -16,6 +16,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
+#include <pulp/view/pointer_dispatch.hpp>  // dispatch_context_menu (no-Skia builds too)
 #import <Cocoa/Cocoa.h>
 // CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
 // plugin host also drives a CVDisplayLink for continuous frames + the idle
@@ -29,6 +30,7 @@
 #include <exception>
 
 #include <functional>
+#include <iostream>
 #include <memory>
 
 // Reuse the standalone window host's coordinate/event helpers (to_local,
@@ -871,6 +873,28 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     pulp_plugin_mouse_up(self.rootView, event, [self localPoint:event], &_dragTarget);
     [self setNeedsDisplay:YES];
     [self syncKeyFocus];  // a tap may have entered (or left) type-in
+}
+// A plugin editor previously had no right-button path at all: mouseDown: hardcodes
+// MouseButton::left, and there was no rightMouseDown:, so a right-click inside a
+// DAW reached no view. TextEditor's own context menu and every JS onContextMenu
+// handler were dead in-host while working in the standalone.
+- (void)rightMouseDown:(NSEvent*)event {
+  @try {
+    try {
+        if (!self.rootView) { [super rightMouseDown:event]; return; }
+        if (pulp::view::dispatch_context_menu(*self.rootView, [self localPoint:event]))
+            [self setNeedsDisplay:YES];
+        else
+            [super rightMouseDown:event];  // let the host show its own menu
+    } catch (const std::exception& e) {
+        std::cerr << "PulpPluginView rightMouseDown error: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "PulpPluginView rightMouseDown error: unknown exception\n";
+    }
+  } @catch (NSException* exception) {
+    std::cerr << "PulpPluginView rightMouseDown NSException: "
+              << [[exception name] UTF8String] << "\n";
+  }
 }
 - (void)scrollWheel:(NSEvent*)event {
     if (!self.rootView) return;
