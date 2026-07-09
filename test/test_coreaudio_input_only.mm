@@ -20,6 +20,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace pulp::audio;
 
@@ -35,18 +36,21 @@ bool find_input_device(AudioSystem& sys, DeviceInfo& out) {
     return false;
 }
 
-// First output-capable device, preferring one that is NOT the system default.
+// Every stereo-capable output device that is NOT the system default.
 //
 // A test has no business grabbing whatever the developer is listening through,
 // and on a machine whose default output is a DC-coupled interface wired to a
 // modular synthesizer, "whatever the default is" reaches a patch cable.
-bool find_output_device(AudioSystem& sys, DeviceInfo& out) {
-    const auto devs = sys.enumerate_devices();
-    for (const auto& d : devs)
-        if (d.max_output_channels > 0 && !d.is_default_output) { out = d; return true; }
-    for (const auto& d : devs)
-        if (d.max_output_channels > 0) { out = d; return true; }
-    return false;
+//
+// All of them, not the first: the first non-default output on a real desk is as
+// likely as not an HDMI display, which opens cleanly and then will not start.
+// Stereo-capable, because the caller asks for two channels and a mono device
+// would fail `open` for a reason that has nothing to do with what is under test.
+std::vector<DeviceInfo> non_default_output_devices(AudioSystem& sys) {
+    std::vector<DeviceInfo> out;
+    for (const auto& d : sys.enumerate_devices())
+        if (d.max_output_channels >= 2 && !d.is_default_output) out.push_back(d);
+    return out;
 }
 
 /// Adopt whatever rate the device is already running at, rather than asking for
@@ -62,6 +66,7 @@ bool find_output_device(AudioSystem& sys, DeviceInfo& out) {
 constexpr double kAdoptCurrentRate = 0.0;
 
 struct RunObservation {
+    bool started = false;             // the device actually began running
     std::uint64_t callbacks = 0;      // total callbacks fired
     std::uint64_t input_frames = 0;   // frames delivered on the input view
     int input_channels = -1;          // channels seen on the input view (-1 = never fired)
@@ -92,7 +97,11 @@ RunObservation run_briefly(AudioDevice& dev) {
             if (in.num_channels() > 0)
                 in_frames.fetch_add(in.num_samples(), std::memory_order_relaxed);
         });
-    REQUIRE(started);
+    // Reported, not asserted. Some output-capable devices -- an HDMI display
+    // sink with no active audio stream, for one -- open cleanly and then refuse
+    // to start. Whether that is a bug or a fact about the host is the caller's
+    // question, not this helper's.
+    if (!started) return {};
 
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (cbs.load(std::memory_order_relaxed) < 4 &&
@@ -101,7 +110,7 @@ RunObservation run_briefly(AudioDevice& dev) {
     }
     dev.stop();
 
-    return {cbs.load(), in_frames.load(),
+    return {started, cbs.load(), in_frames.load(),
             in_ch.load(std::memory_order_relaxed),
             out_ch.load(std::memory_order_relaxed)};
 }
@@ -145,6 +154,7 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
         // The input callback fired and delivered input frames (the samples may be
         // a noise floor or, without microphone permission, zeros — either way the
         // frames are delivered).
+        REQUIRE(obs.started);
         CHECK(obs.callbacks > 0);
         CHECK(obs.input_channels >= 1);
         CHECK(obs.input_frames > 0);
@@ -153,29 +163,49 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
     }
 
     SECTION("output-only open still succeeds (regression guard)") {
-        DeviceInfo out_dev;
-        if (!find_output_device(*sys, out_dev)) {
-            SUCCEED("no output-capable audio device present");
+        const auto candidates = non_default_output_devices(*sys);
+        if (candidates.empty()) {
+            SUCCEED("no non-default stereo output device present");
             return;
         }
-        auto dev = sys->create_device(out_dev.id);
-        REQUIRE(dev);
-        DeviceConfig cfg;
-        cfg.device_id = out_dev.id;
-        cfg.sample_rate = kAdoptCurrentRate;
-        cfg.buffer_size = 256;
-        cfg.input_channels = 0;
-        cfg.output_channels = 2;
 
-        REQUIRE(dev->open(cfg));
-        REQUIRE(dev->is_open());
+        // Opening is what this section guards, and it must succeed on every
+        // candidate — the input-only fix must not have cost the output path.
+        // *Starting* is a fact about the device: an HDMI sink with no active
+        // audio stream opens and then returns -536870198 from AudioDeviceStart.
+        // So walk the candidates until one runs, and only give up if none do.
+        bool observed = false;
+        for (const auto& out_dev : candidates) {
+            auto dev = sys->create_device(out_dev.id);
+            REQUIRE(dev);
+            DeviceConfig cfg;
+            cfg.device_id = out_dev.id;
+            cfg.sample_rate = kAdoptCurrentRate;
+            cfg.buffer_size = 256;
+            cfg.input_channels = 0;
+            cfg.output_channels = 2;
 
-        const RunObservation obs = run_briefly(*dev);
-        dev->close();
+            INFO("device=" << out_dev.name);
+            REQUIRE(dev->open(cfg));
+            REQUIRE(dev->is_open());
 
-        INFO("callbacks=" << obs.callbacks << " output_channels=" << obs.output_channels);
-        CHECK(obs.callbacks > 0);
-        CHECK(obs.output_channels == 2);
+            const RunObservation obs = run_briefly(*dev);
+            dev->close();
+            if (!obs.started) continue;
+
+            INFO("callbacks=" << obs.callbacks
+                 << " output_channels=" << obs.output_channels);
+            CHECK(obs.callbacks > 0);
+            CHECK(obs.output_channels == 2);
+            observed = true;
+            break;
+        }
+
+        // Every candidate opened — the guard held — but none would run. Say so
+        // rather than pass quietly: a skip is not a pass.
+        if (!observed)
+            WARN("every non-default stereo output device opened, but none would "
+                 "start; the callback assertions did not run on this host");
     }
 
     SECTION("duplex open still succeeds (regression guard)") {
@@ -213,6 +243,7 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
              << " input_frames=" << obs.input_frames
              << " input_channels=" << obs.input_channels
              << " output_channels=" << obs.output_channels);
+        REQUIRE(obs.started);
         CHECK(obs.callbacks > 0);
         CHECK(obs.output_channels == 2);
         CHECK(obs.input_channels >= 1);
