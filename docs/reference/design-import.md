@@ -13,8 +13,10 @@ artifacts.
 pulp import-design --from <source> [options]
 ```
 
-**Sources:** `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`
+**Sources:** `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`
 
+> `fig` decodes a local Figma `.fig` save file offline into the same envelope
+> consumed by the `figma-plugin` path.
 > `figma-plugin` is the **"Design for Pulp"** Figma plugin export (a semantic
 > audio-widget envelope; see the [Figma plugin guide](../guides/figma-plugin.md)).
 > It accepts a `.pulp.zip` directly. `figma` is the raw Figma REST/file import.
@@ -24,7 +26,9 @@ pulp import-design --from <source> [options]
 | `--from <source>` | Design source (required) | — |
 | `--file <path>` | Input file path | — |
 | `--url <url>` | Design URL (Figma file URL, v0 share link) | — |
-| `--frame <name>` | Frame/artboard to import (Figma) | first frame |
+| `--frame <name>` | Frame/artboard to import. For `--from fig`, pass a frame guid or name; required unless using `--outline`. | first frame for `figma` |
+| `--page <name>` | Restrict local `.fig` frame lookup to one page | — |
+| `--outline` | List pages/frames of a local `.fig` file and exit | — |
 | `--screen <name>` | Screen to import (Stitch) | first screen |
 | `--output <path>` | Destination file for the primary artifact | `ui.js` |
 | `--emit {js\|ir-json\|cpp\|swiftui}` | Primary artifact kind. `js`, `ir-json`, `cpp`, and `swiftui` are implemented; `cpp` and `swiftui` require `--mode baked`. `swiftui` emits a baked native SwiftUI view (`ImportedPulpView.swift` + a per-view `<RootView>Theme.swift` + binding manifest). | `js` built-in, or `import_design.default_emit` |

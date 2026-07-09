@@ -2182,7 +2182,7 @@ int main(int argc, char* argv[]) {
     auto source = parse_design_source(source_str);
     if (!source) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
-        std::cerr << "Valid sources: figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx\n";
+        std::cerr << "Valid sources: fig, figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx\n";
         return 1;
     }
 

@@ -1,12 +1,15 @@
 # Importing Designs
 
-Pulp can import designs from external tools and translate them into web-compat JS, DesignIR, baked C++/SwiftUI, or token artifacts. Supported sources: **Figma/Figma plugin**, **Google Stitch**, **v0.dev**, **Pencil/OpenPencil**, **Claude Design**, and **Google DESIGN.md** (design *system* -- tokens only, no screen).
+Pulp can import designs from external tools and translate them into web-compat JS, DesignIR, baked C++/SwiftUI, or token artifacts. Supported sources: local **Figma `.fig` files**, **Figma REST/file JSON**, the **Pulp Figma plugin**, **Google Stitch**, **v0.dev**, **Pencil/OpenPencil**, **Claude Design**, and **Google DESIGN.md** (design *system* -- tokens only, no screen).
 
 ## Quick Start
 
 ```bash
 # Import a Figma export
 pulp import-design --from figma --file design.json
+
+# Inspect a local Figma .fig save file
+pulp import-design --from fig --file design.fig --outline
 
 # Import a v0.dev component
 pulp import-design --from v0 --file component.tsx --output my-ui.js
@@ -26,6 +29,7 @@ pulp export-tokens --tokens tokens.json
 The import pipeline has three layers:
 
 ```
+Local Figma .fig file --.
 Figma REST/file JSON ----.
 Figma plugin .pulp.zip --|
 Stitch HTML / directory -|--> Normalized IR --> JS / DesignIR / baked native artifacts
@@ -69,9 +73,13 @@ Example: `pulpgain-pencil-source.png`, `pulpgain-pencil-render.png`, `pulpgain-p
 
 ### Figma
 
-Figma imports are file/URL based at the CLI. Use `figma-plugin` for the Pulp Figma plugin's `.pulp.json` / `.pulp.zip` envelope, or `figma` for raw REST/file JSON:
+Figma imports are file/URL based at the CLI. Use `fig` for local `.fig` save
+files decoded offline, `figma-plugin` for the Pulp Figma plugin's `.pulp.json`
+/ `.pulp.zip` envelope, or `figma` for raw REST/file JSON:
 
 ```bash
+pulp import-design --from fig --file design.fig --outline
+pulp import-design --from fig --file design.fig --frame "Plugin UI" --output ui.js
 pulp import-design --from figma-plugin --file design.pulp.zip
 pulp import-design --from figma --file design.json
 ```
@@ -321,6 +329,7 @@ MCP connectors are acquisition helpers unless a source contract says otherwise. 
 
 | Source | Acquisition helpers | CLI input |
 |--------|---------------------|-----------|
+| Figma `.fig` save | Local Figma file export | `.fig` with `--from fig` |
 | Figma plugin | In-tree Figma plugin or REST exporter | `.pulp.json` / `.pulp.zip` with `--from figma-plugin` |
 | Figma / Figma Make | Figma MCP or REST data acquisition | Raw Figma JSON or constrained React TSX via `--from figma` |
 | Stitch | Stitch MCP or directory export | HTML/directory export or translated IR via `--from stitch` |
@@ -335,6 +344,7 @@ Current runtime parsers reject raw provider MCP JSON unless that source's parser
 pulp import-design --from <source> [options]
 
 Sources:
+  fig           Local Figma .fig save file decoded offline
   figma         Figma REST/file JSON or constrained Figma Make React export
   figma-plugin  Pulp Figma plugin .pulp.json/.pulp.zip envelope
   stitch        Google Stitch screen HTML or translated IR file

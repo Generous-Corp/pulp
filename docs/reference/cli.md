@@ -1412,10 +1412,13 @@ file error.
 
 **Status**: partial
 
-Import designs from Figma/Figma plugin, Stitch, v0, Pencil, Claude Design,
-React JSX, or Google DESIGN.md source files into generated Pulp UI code.
+Import designs from local Figma `.fig` files, Figma REST/file JSON, the Pulp
+Figma plugin, Stitch, v0, Pencil, Claude Design, React JSX, or Google DESIGN.md
+source files into generated Pulp UI code.
 
 ```bash
+pulp import-design --from fig --file design.fig --outline
+pulp import-design --from fig --file design.fig --frame 'Plugin UI' --output ui.js
 pulp import-design --from figma --file frame.json
 pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'
 pulp import-design --from figma-plugin --file design.pulp.zip
@@ -1429,9 +1432,9 @@ pulp import-design --from jsx --file bundle.js --mode live --emit js --output li
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
-Accepted `--from` values: `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
+Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
 
-Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection), and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
+Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection; required guid or name for `--from fig` unless using `--outline`), `--outline` / `--page` for local `.fig` files, and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
 For `--from claude`, the CLI emits a `classnames.json` artifact alongside the generated JS view and `tokens.json`. The artifact maps `classname → { cssProp(camelCase): cssValue, ... }` for every `<style>` rule with a plain classname selector — `@pulp/css-adapt` (and downstream) consumes it to merge class-based styles into inline before forwarding to bridge calls. Mirrors the output shape of Spectr's `tools/extract-html-bundle/extract.mjs`.
 
