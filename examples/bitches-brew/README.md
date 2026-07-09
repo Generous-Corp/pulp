@@ -37,7 +37,24 @@ them).
 
 Built for VST3, AU (`aufx`), and CLAP. `brew-core/` holds what they share: the
 output stage above, the clock grid, the pulse-width rules, and the run-segment
-origin.
+origin. `brew-ui/` holds the shared editor furniture.
+
+## The editors exist because CV is invisible
+
+A CV plug-in makes no sound and drives no meter, so from inside a DAW there is no
+way to tell "holding +0.5 full scale" from "cable unplugged". Both plug-ins
+therefore show what is actually leaving the jack: `DC` draws a bipolar rail with
+a marker at its current output, and `Sync` lights a CLOCK and a RUN lamp fed from
+real DSP state, published once per block from the audio thread.
+
+The rail reads in **normalized full scale, never volts**. The plug-in cannot know
+the interface's rail voltage, and printing a number it cannot know is a lie the
+user would wire into a modular.
+
+Controls are Pulp's own widgets, laid out with flex. `test_brew_ui.cpp` renders
+each editor headless and asserts the readouts *move with the state* — a
+screenshot test that only checks "the PNG is non-empty" passes on a blank canvas,
+and on a plug-in this quiet a dead readout is indistinguishable from a dead cable.
 
 ## The clock is derived, never accumulated
 

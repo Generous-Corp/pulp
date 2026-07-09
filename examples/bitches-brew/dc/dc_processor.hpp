@@ -79,6 +79,10 @@ public:
 
     void prepare(const format::PrepareContext&) override {}
 
+    /// Defined in dc_view.cpp so the audio translation units never see the
+    /// view stack.
+    std::unique_ptr<view::View> create_view() override;
+
     /// The value actually written to every output sample this block, after the
     /// suite's shared output stage (clamp, scale, invert — see brew/cv.hpp).
     float current_output() const noexcept {
