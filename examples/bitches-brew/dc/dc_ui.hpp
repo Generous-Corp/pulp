@@ -1,59 +1,92 @@
 #pragma once
 
-// DC's editor: one value, and proof of where it went.
+// DC's editor: the controls, and proof of where their sum went.
 //
 // The readout is the point. A CV plug-in produces no sound and draws no meter in
 // the host, so without a rail the user cannot distinguish "holding +0.5 full
 // scale" from "cable unplugged". The rail shows normalized full scale, never
 // volts — the plug-in does not know the interface's rail voltage, and printing a
 // number it cannot know would be a lie the user wires into a modular.
+//
+// Both readouts show the sample the DSP last emitted, not the value the knobs
+// ask for. Those differ whenever the input bus or the smoother is doing anything,
+// and it is the emitted sample that reaches the jack.
 
 #include "dc_processor.hpp"
 
 #include <brew/ui/panel.hpp>
 
 #include <cstdio>
+#include <functional>
 #include <string>
+#include <utility>
 
 namespace pulp::examples::brew {
 
 class DcUi : public ui::BrewPanel {
 public:
-    explicit DcUi(state::StateStore& store)
-        : ui::BrewPanel("DC", "a constant control voltage"), store_(store) {
+    DcUi(state::StateStore& store, const DcProcessor& proc)
+        : ui::BrewPanel("DC", "a constant control voltage"),
+          store_(store), proc_(proc) {
         auto pct = [](float v) {
             char buf[16];
             std::snprintf(buf, sizeof(buf), "%.0f%%", v * 100.0f);
             return std::string(buf);
         };
-
-        auto controls = ui::row(14.0f, 92.0f);
-        auto value = ui::param_knob(store_, DcProcessor::kValue, "Value", [](float v) {
+        auto signed_number = [](float v) {
             char buf[16];
             std::snprintf(buf, sizeof(buf), "%+.3f", v);
             return std::string(buf);
-        });
-        auto out_scale =
-            ui::param_knob(store_, DcProcessor::kOutputScale, "Output Scale", pct);
+        };
+        auto number = [](float v) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.3f", v);
+            return std::string(buf);
+        };
+        // Sign carries the mode, so it must be shown: positive slews, negative
+        // low-passes, and "0.0 ms" means the smoother is out of the circuit.
+        auto millis = [](float v) {
+            char buf[20];
+            std::snprintf(buf, sizeof(buf), "%+.1f ms", v);
+            return std::string(buf);
+        };
+
+        auto add = [&](view::View& row, state::ParamID id, const char* label,
+                       std::function<std::string(float)> fmt) {
+            auto k = ui::param_knob(store_, id, label, std::move(fmt));
+            ui::fixed_size(*k, 92.0f, 92.0f);
+            row.add_child(std::move(k));
+        };
+
+        auto levels = ui::row(14.0f, 92.0f);
+        add(*levels, DcProcessor::kValue, "Value", signed_number);
+        add(*levels, DcProcessor::kUnipolar, "Unipolar", number);
+        add(*levels, DcProcessor::kMultiplier, "Multiplier", signed_number);
+
+        auto inputs = ui::row(14.0f, 92.0f);
+        add(*inputs, DcProcessor::kInputAdd, "Input Add", signed_number);
+        add(*inputs, DcProcessor::kInputMul, "Input Mul", number);
+        add(*inputs, DcProcessor::kSmoothMs, "Smooth", millis);
+
+        auto rig = ui::row(14.0f, 92.0f);
+        add(*rig, DcProcessor::kOutputScale, "Output Scale", pct);
         auto invert = ui::param_toggle(store_, DcProcessor::kInvert, "Invert");
-        ui::fixed_size(*value, 92.0f, 92.0f);
-        ui::fixed_size(*out_scale, 92.0f, 92.0f);
         // Toggle draws its label at the bottom of its own box, so the box must
         // be tall enough for both the switch and the text.
         ui::fixed_size(*invert, 78.0f, 50.0f);
-        controls->add_child(std::move(value));
-        controls->add_child(std::move(out_scale));
-        controls->add_child(std::move(invert));
+        rig->add_child(std::move(invert));
 
         auto readout = ui::caption_label("", 14.0f);
         readout->set_text_color(ui::palette::text);
         readout_ = readout.get();
 
-        auto rail = std::make_unique<ui::VoltageRail>([this] { return resolved(); });
+        auto rail = std::make_unique<ui::VoltageRail>([this] { return emitted(); });
         rail->flex().preferred_height = 14.0f;
         rail->flex().align_self = view::FlexAlign::stretch;
 
-        add_child(std::move(controls));
+        add_child(std::move(levels));
+        add_child(std::move(inputs));
+        add_child(std::move(rig));
         add_child(std::move(readout));
         add_child(std::move(rail));
         // Full scale, never volts: the plug-in cannot know the interface's rail.
@@ -66,7 +99,7 @@ public:
         // updated here — not drawn here. A caption drawn under a child's bounds
         // is invisible.
         char buf[64];
-        std::snprintf(buf, sizeof(buf), "%+.3f  full scale", resolved());
+        std::snprintf(buf, sizeof(buf), "%+.3f  full scale", emitted());
         readout_->set_text(buf);
 
         ui::BrewPanel::paint(canvas);
@@ -76,16 +109,12 @@ public:
         request_repaint();
     }
 
-    /// The value the processor is writing to every sample, after the shared
-    /// output stage. Computed the same way the DSP computes it.
-    float resolved() const {
-        return resolve_output(store_.get_value(DcProcessor::kValue),
-                              store_.get_value(DcProcessor::kOutputScale),
-                              as_toggle(store_.get_value(DcProcessor::kInvert)));
-    }
+    /// The sample the processor last wrote to the bus.
+    float emitted() const { return proc_.display_output(); }
 
 private:
     state::StateStore& store_;
+    const DcProcessor& proc_;
     view::Label* readout_ = nullptr;
 };
 

@@ -102,25 +102,43 @@ TEST_CASE("DC's editor renders and tracks its output", "[brew][ui][dc]") {
         WARN("no raster screenshot backend in this build — skipping");
         return;
     }
-    ed.host.state().set_value(DcProcessor::kValue, 0.0f);
-    const auto at_zero = ed.shoot();
+    // The rail shows the sample the DSP *emitted*, not the value the knobs ask
+    // for — those differ whenever the input bus or the smoother is doing
+    // anything. So every render here is preceded by a block.
+    auto shoot_after_block = [&](float value) {
+        ed.host.state().set_value(DcProcessor::kValue, value);
+        drive(ed.host, 0.0f);
+        return ed.shoot();
+    };
+
+    const auto at_zero = shoot_after_block(0.0f);
     REQUIRE_FALSE(at_zero.empty());
 
     // The rail must follow the DSP. Same view, different value, different pixels.
-    ed.host.state().set_value(DcProcessor::kValue, 0.8f);
-    const auto at_high = ed.shoot();
+    const auto at_high = shoot_after_block(0.8f);
     REQUIRE_FALSE(at_high.empty());
     REQUIRE(differs(at_zero, at_high));
 
     // Polarity is visible too: +0.8 and -0.8 fill opposite halves of the rail.
-    ed.host.state().set_value(DcProcessor::kValue, -0.8f);
-    REQUIRE(differs(ed.shoot(), at_high));
+    REQUIRE(differs(shoot_after_block(-0.8f), at_high));
 
     SECTION("scale attenuates what the rail shows") {
-        ed.host.state().set_value(DcProcessor::kValue, 0.8f);
-        const auto full = ed.shoot();
+        const auto full = shoot_after_block(0.8f);
         ed.host.state().set_value(DcProcessor::kOutputScale, 0.1f);
+        drive(ed.host, 0.0f);
         REQUIRE(differs(ed.shoot(), full));
+    }
+
+    SECTION("the rail follows the input bus, not just the knobs") {
+        // Input Mul fully gates the output. Two different input levels must give
+        // two different rails — a rail wired to the knobs could not tell them
+        // apart, and that is precisely the dead-cable case it exists to catch.
+        ed.host.state().set_value(DcProcessor::kValue, 1.0f);
+        ed.host.state().set_value(DcProcessor::kInputMul, 1.0f);
+        drive(ed.host, 0.25f);
+        const auto quiet = ed.shoot();
+        drive(ed.host, 0.9f);
+        REQUIRE(differs(ed.shoot(), quiet));
     }
 }
 

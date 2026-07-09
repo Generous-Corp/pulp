@@ -16,8 +16,14 @@ which means a steady sample value is a steady voltage, and a plug-in that writes
 
 That is the whole trick, and it is also why these plug-ins are unusually strict
 about signal integrity. Anything that would be inaudible in an audio path —
-smoothing a parameter change, dithering, a DC-blocking filter, a host deciding a
-buffer is "silent" and substituting zeros — is a wrong voltage here.
+smoothing a parameter change behind the user's back, dithering, a DC-blocking
+filter, a host deciding a buffer is "silent" and substituting zeros — is a wrong
+voltage here.
+
+The rule is *nothing smooths unless you asked*, not *nothing smooths*. An
+explicit slew control is a portamento, and a modular has slew limiters in it for
+exactly that reason. DC has one, off by default; at zero it is a wire, and the
+bit-exactness tests still hold.
 
 ## Output convention
 
@@ -32,7 +38,7 @@ them).
 
 | Name | What it does |
 |------|--------------|
-| `DC` | Holds one constant value. The connection tester, and the suite's bit-exactness guard. |
+| `DC` | Holds one constant value, optionally shaped by the input and slewed. The connection tester, and the suite's bit-exactness guard. |
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
 | `LFO` | A tempo-locked modulation source, plus the same shape a quarter cycle ahead. |
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
