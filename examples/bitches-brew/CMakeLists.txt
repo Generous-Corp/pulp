@@ -7,4 +7,5 @@
 add_subdirectory(core)
 add_subdirectory(ui)
 add_subdirectory(dc)
+add_subdirectory(lfo)
 add_subdirectory(sync)

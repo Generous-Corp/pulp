@@ -34,6 +34,15 @@ them).
 |------|--------------|
 | `DC` | Holds one constant value. The connection tester, and the suite's bit-exactness guard. |
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
+| `LFO` | A tempo-locked modulation source, plus the same shape a quarter cycle ahead. |
+
+`LFO` derives its phase from the host's position rather than accumulating it per
+block, so a bounce lands the modulation on the same samples every time, a locate
+puts the LFO where the timeline says it should be, and a long session cannot
+drift against the host. The second output leads the first by a quarter cycle: fed
+into two CV inputs the pair traces a circle, which is how one oscillator drives a
+two-axis modulation. It is rendered per sample — a block-rate control voltage is
+an audible zipper on whatever it drives.
 
 `Sync` also carries a **1st Delay** (hold the clock off for N ms after the
 transport starts, measured from the run origin so two runs behave identically)
@@ -55,10 +64,12 @@ origin. `brew-ui/` holds the shared editor furniture.
 ## The editors exist because CV is invisible
 
 A CV plug-in makes no sound and drives no meter, so from inside a DAW there is no
-way to tell "holding +0.5 full scale" from "cable unplugged". Both plug-ins
-therefore show what is actually leaving the jack: `DC` draws a bipolar rail with
-a marker at its current output, and `Sync` lights a CLOCK and a RUN lamp fed from
-real DSP state, published once per block from the audio thread.
+way to tell "holding +0.5 full scale" from "cable unplugged". Every plug-in
+therefore shows what is actually leaving the jack: `DC` draws a bipolar rail with
+a marker at its current output, `Sync` lights a CLOCK and a RUN lamp, and `LFO`
+traces its own output — the scope calls the same `value_at()` the DSP does, so
+the picture cannot drift from the signal. All three read real DSP state,
+published once per block from the audio thread.
 
 The rail reads in **normalized full scale, never volts**. The plug-in cannot know
 the interface's rail voltage, and printing a number it cannot know is a lie the

@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "dc_processor.hpp"
+#include "lfo_processor.hpp"
 #include "sync_processor.hpp"
 
 #include <pulp/format/headless.hpp>
@@ -143,6 +144,32 @@ struct RectChild : view::View {
     }
 };
 }  // namespace
+
+TEST_CASE("LFO's editor draws the selected shape", "[brew][ui][lfo]") {
+    Editor ed(create_lfo);
+    if (!ed.can_capture()) {
+        WARN("no raster screenshot backend in this build — skipping");
+        return;
+    }
+    ed.host.state().set_value(LfoProcessor::kWaveform,
+                              static_cast<float>(Waveform::sine));
+    const auto sine = ed.shoot();
+    REQUIRE_FALSE(sine.empty());
+
+    // The scope reads the plug-in's own value_at(), so changing the shape must
+    // change the picture. A scope that renders a fixed curve is decoration.
+    ed.host.state().set_value(LfoProcessor::kWaveform,
+                              static_cast<float>(Waveform::square));
+    REQUIRE(differs(ed.shoot(), sine));
+
+    SECTION("and the rate changes it too") {
+        ed.host.state().set_value(LfoProcessor::kWaveform,
+                                  static_cast<float>(Waveform::sine));
+        const auto at_1 = ed.shoot();
+        ed.host.state().set_value(LfoProcessor::kPhaseDegrees, 90.0f);
+        REQUIRE(differs(ed.shoot(), at_1));
+    }
+}
 
 // Yoga owns child geometry. `render_to_png` (and the window host) call
 // `layout_children()` after `set_bounds()`, so bounds a view assigns by hand are

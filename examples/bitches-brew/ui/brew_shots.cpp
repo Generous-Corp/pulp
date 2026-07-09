@@ -1,4 +1,5 @@
 #include "dc_processor.hpp"
+#include "lfo_processor.hpp"
 #include "sync_processor.hpp"
 #include <pulp/format/headless.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -23,6 +24,18 @@ int main() {
     });
     shoot(create_dc, "/tmp/brewshots/dc-negative.png", [](format::HeadlessHost& h) {
         h.state().set_value(DcProcessor::kValue, -0.45f);
+    });
+    shoot(create_lfo, "/tmp/brewshots/lfo.png", [](format::HeadlessHost& h) {
+        h.state().set_value(LfoProcessor::kWaveform,
+                            static_cast<float>(Waveform::sine));
+        audio::Buffer<float> in(2, 512), out(2, 512); in.clear(); out.clear();
+        const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
+        audio::BufferView<const float> iv(ip, 2, 512);
+        auto ov = out.view();
+        format::ProcessContext c;
+        c.sample_rate = 48000; c.num_samples = 512; c.is_playing = true;
+        c.tempo_bpm = 120; c.position_beats = 0.3;
+        h.process(ov, iv, c);
     });
     shoot(create_sync, "/tmp/brewshots/sync-stopped.png", nullptr);
     shoot(create_sync, "/tmp/brewshots/sync-running.png", [](format::HeadlessHost& h) {
