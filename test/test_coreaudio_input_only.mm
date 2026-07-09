@@ -35,15 +35,31 @@ bool find_input_device(AudioSystem& sys, DeviceInfo& out) {
     return false;
 }
 
-// First output-capable device, preferring the system default output.
+// First output-capable device, preferring one that is NOT the system default.
+//
+// A test has no business grabbing whatever the developer is listening through,
+// and on a machine whose default output is a DC-coupled interface wired to a
+// modular synthesizer, "whatever the default is" reaches a patch cable.
 bool find_output_device(AudioSystem& sys, DeviceInfo& out) {
     const auto devs = sys.enumerate_devices();
     for (const auto& d : devs)
-        if (d.max_output_channels > 0 && d.is_default_output) { out = d; return true; }
+        if (d.max_output_channels > 0 && !d.is_default_output) { out = d; return true; }
     for (const auto& d : devs)
         if (d.max_output_channels > 0) { out = d; return true; }
     return false;
 }
+
+/// Adopt whatever rate the device is already running at, rather than asking for
+/// one.
+///
+/// `open()` only calls `set_nominal_sample_rate` when a positive rate is
+/// requested that differs from the current one, so zero means "do not touch the
+/// clock" and the actual rate is written back into the config. This matters:
+/// `DeviceInfo::sample_rates` is an unordered capability list, and its first
+/// entry is routinely NOT the rate the device is running. Reconfiguring a
+/// converter's clock from a unit test drops any ADAT link hanging off it — a
+/// failure that presents as a bad cable.
+constexpr double kAdoptCurrentRate = 0.0;
 
 struct RunObservation {
     std::uint64_t callbacks = 0;      // total callbacks fired
@@ -103,14 +119,12 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
         return;
     }
 
-    const double rate = !in_dev.sample_rates.empty() ? in_dev.sample_rates.front() : 44100.0;
-
     SECTION("input-only open succeeds and captures") {
         auto dev = sys->create_device(in_dev.id);
         REQUIRE(dev);
         DeviceConfig cfg;
         cfg.device_id = in_dev.id;
-        cfg.sample_rate = rate;
+        cfg.sample_rate = kAdoptCurrentRate;
         cfg.buffer_size = 256;
         cfg.input_channels = 1;   // capture at least one channel
         cfg.output_channels = 0;  // the configuration that regressed with -10868
@@ -148,7 +162,7 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
         REQUIRE(dev);
         DeviceConfig cfg;
         cfg.device_id = out_dev.id;
-        cfg.sample_rate = !out_dev.sample_rates.empty() ? out_dev.sample_rates.front() : 44100.0;
+        cfg.sample_rate = kAdoptCurrentRate;
         cfg.buffer_size = 256;
         cfg.input_channels = 0;
         cfg.output_channels = 2;
@@ -184,7 +198,7 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
         REQUIRE(dev);
         DeviceConfig cfg;
         cfg.device_id = duplex.id;
-        cfg.sample_rate = !duplex.sample_rates.empty() ? duplex.sample_rates.front() : 44100.0;
+        cfg.sample_rate = kAdoptCurrentRate;
         cfg.buffer_size = 256;
         cfg.input_channels = 1;
         cfg.output_channels = 2;
