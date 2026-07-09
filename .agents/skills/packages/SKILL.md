@@ -282,3 +282,16 @@ framework→Pulp project importers resolved by `pulp import`). They're parsed by
 `tools/cli/tool_registry.cpp` and ignored for non-importer tools. The importers
 themselves install via the tool lane (`pulp tool install <importer>`), never as
 project `packages.lock.json` dependencies.
+
+## Managed tools must declare an update/override path
+
+`tools/packages/validate_registry.py` also validates `tool-registry.json`: its
+`validate_tool_registry` rule fails if any `managed_by_pulp` tool ships without
+a non-empty `pinned_version`. That pin is the anchor for `pulp tool update` and
+for the user version override (`--version` / `PULP_TOOL_<ID>_VERSION` /
+`$PULP_HOME/tool-overrides.json`), so a managed tool without it would be one
+users can't update or override. When you add a `managed_by_pulp` entry, include
+its `pinned_version` in the same change. Rule + rationale:
+[extending-pulp.md](../../../docs/reference/extending-pulp.md#every-added-tool-must-be-user-updatable-and-overridable).
+The check runs anywhere `validate_registry.py` runs (its
+`test_package_validation_tools.py` unit suite covers the new rule).

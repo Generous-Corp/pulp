@@ -2280,7 +2280,7 @@ commands:
             kind: flag
             required: false
       - name: install
-        summary: "Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present. For a framework importer (category: importer), installs a checksummed per-platform package after validating the SDK/SPI version window, then drops its SKILL.md into ~/.agents/skills/ and records the install under ~/.pulp/importers/. --from <path|file://...> installs from a local package."
+        summary: "Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present; --version <v> pins to a user-chosen version (a durable override that survives Pulp registry-pin bumps). For a framework importer (category: importer), installs a checksummed per-platform package after validating the SDK/SPI version window, then drops its SKILL.md into ~/.agents/skills/ and records the install under ~/.pulp/importers/. --from <path|file://...> installs from a local package."
         args:
           - name: --force
             kind: flag
@@ -2288,10 +2288,24 @@ commands:
           - name: --all
             kind: flag
             required: false
+          - name: --version
+            kind: option
+            required: false
+            description: Install and pin the tool to a user-chosen version, recorded as a durable override in $PULP_HOME/tool-overrides.json (takes precedence over the registry pin)
           - name: --from
             kind: option
             required: false
             description: Install an importer add-on from a local path or file:// URL instead of the registry URL (offline / pinned artifact)
+      - name: update
+        summary: "Re-install a managed tool at the latest registry pin (the latest known-good version Pulp ships), clearing any prior user override; --version <v> instead re-installs at an explicit version and records it as a durable user override that survives Pulp registry-pin bumps. The active version resolves by precedence — PULP_TOOL_<ID>_VERSION env var, then $PULP_HOME/tool-overrides.json, then the registry pinned_version — and pulp tool info reports which version is active and its source."
+        args:
+          - name: tool-id
+            kind: positional
+            required: true
+          - name: --version
+            kind: option
+            required: false
+            description: Update and pin the tool to a user-chosen version (durable override) instead of re-syncing to the registry pin
       - name: uninstall
         summary: Remove a pulp-managed tool install; for an importer, also removes its installed skill and install record
       - name: path
