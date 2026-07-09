@@ -22,6 +22,15 @@
 // Track-event storage for the categories declared in trace.hpp. Exactly one TU.
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 
+// Ship-guard sentinel. This byte-string is emitted ONLY into a binary compiled
+// with PULP_TRACING=ON (this whole TU body is under `#if PULP_TRACING_ENABLED`).
+// `pulp ship` scans candidate artifacts for these exact bytes and refuses to
+// package a traced binary without `--allow-tracing`, so a dev build with
+// Perfetto compiled in can never silently reach a customer. `used` + default
+// visibility keep it past dead-strip; `volatile` reads block whole-program DCE.
+extern "C" __attribute__((used, visibility("default")))
+const char pulp_tracing_ship_sentinel[] = "PULP_TRACING_COMPILED_IN__DO_NOT_SHIP";
+
 namespace pulp::runtime {
 namespace {
 

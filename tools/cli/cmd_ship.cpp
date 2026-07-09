@@ -3,6 +3,7 @@
 
 #include "cli_common.hpp"
 #include "notary_env.hpp"
+#include "ship_tracing_guard.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <ctime>
@@ -90,6 +91,7 @@ static int print_ship_help() {
     std::cout << "  package    Create installers for the target platform\n";
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
+    std::cout << "             --allow-tracing  (override the guard that refuses a PULP_TRACING=ON build)\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
@@ -134,6 +136,38 @@ static void run_signing_preflight(const fs::path& root) {
     auto script = signing_doctor_script(root);
     if (fs::exists(script))
         run("/bin/bash \"" + script.string() + "\" --quiet >/dev/null 2>&1 || true");
+}
+
+// Ship-time PULP_TRACING guard. Refuses to sign/package/release an artifact
+// built with Perfetto tracing compiled in — a dev-only build that must never
+// reach a customer (an ~80 MB ring + a `.pftrace` written inside their DAW).
+// Scans the given roots for the runtime sentinel (pulp::cli::kTracingShipSentinel).
+// Returns 0 when clean or when `allow_tracing` overrides; non-zero (and prints a
+// loud, actionable error naming the offending file) when a traced artifact is
+// found. A missing path is skipped, not an error.
+static int enforce_no_tracing(const std::vector<fs::path>& roots,
+                              bool allow_tracing) {
+    for (const auto& r : roots) {
+        std::error_code ec;
+        if (r.empty() || !fs::exists(r, ec) || ec) continue;
+        auto offender = pulp::cli::artifact_tracing_offender(r);
+        if (offender.empty()) continue;
+        if (allow_tracing) {
+            std::cerr << "⚠︎  pulp ship: artifact was built with PULP_TRACING=ON ("
+                      << offender.string()
+                      << ") — proceeding because --allow-tracing was passed.\n";
+            return 0;
+        }
+        std::cerr
+            << "Error: refusing to ship a binary built with PULP_TRACING=ON.\n"
+            << "  Offending artifact: " << offender.string() << "\n"
+            << "  Perfetto tracing is a DEV-ONLY build (an ~80 MB in-memory ring\n"
+            << "  and a .pftrace written inside the host). Rebuild with tracing off\n"
+            << "  (the default: `pulp build` / `-DPULP_TRACING=OFF`) and re-run,\n"
+            << "  or pass --allow-tracing to override deliberately.\n";
+        return 1;
+    }
+    return 0;
 }
 
 // Load (or, on first use, create + store) the plugin's Ed25519 signing key from the
@@ -235,9 +269,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
+        bool allow_tracing = false;  // override the PULP_TRACING ship guard
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+            } else if (args[i] == "--allow-tracing") {
+                allow_tracing = true;
             } else if (args[i] == "--path") {
                 if (!take_ship_value(args, i, sub, args[i], sign_path)) return 2;
             } else if (args[i] == "--entitlements") {
@@ -255,6 +292,14 @@ int cmd_ship(const std::vector<std::string>& args) {
             } else {
                 return unknown_ship_arg(sub, args[i]);
             }
+        }
+
+        // Refuse to sign a PULP_TRACING=ON build unless explicitly allowed —
+        // signing is the first step toward distributing an artifact.
+        if (int rc = enforce_no_tracing({build_dir, fs::path(sign_path)},
+                                        allow_tracing);
+            rc != 0) {
+            return rc;
         }
 
         if (target == "android") {
@@ -397,6 +442,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string binary_path;   // Linux AppImage: path to the standalone executable
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
+        bool allow_tracing = false;  // override the PULP_TRACING ship guard
         // Item 7.5: per-artifact packaging on macOS. When the user
         // passes neither flag we use the historical default — `.pkg`
         // for every plugin bundle, which is right for AU/VST3/CLAP
@@ -437,7 +483,15 @@ int cmd_ship(const std::vector<std::string>& args) {
             else if (args[i] == "--per-user") per_user = true;
             else if (args[i] == "--pkg") want_pkg = true;
             else if (args[i] == "--dmg") want_dmg = true;
+            else if (args[i] == "--allow-tracing") allow_tracing = true;
             else return unknown_ship_arg(sub, args[i]);
+        }
+
+        // Refuse to package a PULP_TRACING=ON build unless explicitly allowed.
+        if (int rc = enforce_no_tracing({build_dir, fs::path(binary_path)},
+                                        allow_tracing);
+            rc != 0) {
+            return rc;
         }
 
         if (apk_only && aab_only) {

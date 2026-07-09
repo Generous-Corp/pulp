@@ -120,6 +120,19 @@ Before executing any signing, notarization, or packaging action, the `/ship` com
 
 When invoked via skill trigger (not slash command), apply the same pattern: always show what will happen and confirm before executing.
 
+## PULP_TRACING ship guard
+
+`sign` and `package` **refuse** an artifact built with `PULP_TRACING=ON` (the
+dev-only Perfetto tracing config — an ~80 MB in-memory ring + a `.pftrace`
+written inside the host). The runtime embeds a retained sentinel byte-string in
+any ON build; `pulp ship` scans the candidate bundle/binary for it and stops
+with an error naming the offending file. `release` inherits the guard through
+its `package` step. Override deliberately with `--allow-tracing` (prints a loud
+warning, then proceeds). If a ship step fails with "refusing to ship a binary
+built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
+default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
+`tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
+
 ## Workflows
 
 ### One-off share (macOS): hand a build to a friend, properly signed
