@@ -17,6 +17,7 @@
 //! | `start [--categories …] [--out FILE]…` | `Trace.startSession`   |
 //! | `stop`                                 | `Trace.stopSession`    |
 //! | `query "<SQL>" [--format …]`           | `Trace.query`          |
+//! | `query "<SQL>" --trace FILE.pftrace`   | `trace_processor` (offline) |
 //! | `snapshot`                             | `Trace.snapshot`       |
 //! | `explain "<question>"`                 | `Trace.explain`        |
 //! | `slowest-frames` / `xruns` / …         | `Trace.query` (preset) |
@@ -58,6 +59,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crate::cmd::trace_open::{run_open, OpenArgs};
+use crate::cmd::trace_query::run_offline_query;
 use crate::error::{CliError, Result};
 
 /// Default inspector port — matches `inspect/src/inspector_server.cpp`
@@ -175,6 +177,13 @@ pub struct QueryArgs {
     pub preset: Option<String>,
     /// Output format; JSON by default.
     pub format: QueryFormat,
+    /// True when `--format` was passed explicitly. Lets the offline path
+    /// reject `--format json|csv` without misreading the JSON default.
+    pub format_set: bool,
+    /// `--trace FILE.pftrace` — run the SQL offline against a flushed trace
+    /// via `trace_processor_shell` instead of the live inspector. `None`
+    /// keeps the default live-inspector `Trace.query` path.
+    pub trace: Option<PathBuf>,
 }
 
 /// Parse the post-`trace` argument slice into a [`Sub`] plus the
@@ -236,6 +245,7 @@ fn preset_sub(name: &str) -> Sub {
         sql: None,
         preset: Some(name.to_owned()),
         format: QueryFormat::default(),
+        ..QueryArgs::default()
     })
 }
 
@@ -309,6 +319,14 @@ fn parse_query(args: &[String]) -> Result<Sub> {
                         "--format: expected json|table|csv, got `{v}`"
                     ))
                 })?;
+                q.format_set = true;
+            }
+            "--trace" => {
+                i += 1;
+                let v = args.get(i).ok_or_else(|| {
+                    CliError::BadUsage("--trace requires a value".to_owned())
+                })?;
+                q.trace = Some(PathBuf::from(v));
             }
             other if other.starts_with("--") => {
                 return Err(CliError::BadUsage(format!(
@@ -657,6 +675,19 @@ pub fn dispatch<T: InspectorTalker>(
     if let Sub::Open(args) = sub {
         return run_open(args, flags.json, out);
     }
+    // `query --trace FILE` runs offline against a flushed `.pftrace` via
+    // trace_processor; without `--trace` it falls through to the live
+    // inspector `Trace.query` path below.
+    if let Sub::Query(q) = sub {
+        if q.trace.is_some() {
+            return run_offline_query(
+                q,
+                &resolve_trace_processor(),
+                flags.json,
+                out,
+            );
+        }
+    }
     let Some((method, params)) = to_inspector_call(sub) else {
         // The `Help` arm above already returned. This stays here so
         // adding a new `Sub` variant without a matching
@@ -823,8 +854,9 @@ impl TraceProcessorStatus {
 
 /// Probe for a usable `trace_processor` binary. Resolution order:
 /// `$PULP_TRACE_PROCESSOR` (must point at an existing file) → a
-/// `trace_processor_shell` / `trace_processor` on `$PATH`. The pinned
-/// in-tree binary tier lands with the offline-query slice.
+/// `trace_processor_shell` / `trace_processor` on `$PATH`. A pinned,
+/// auto-fetched tier (zero-install) is tracked separately; offline query
+/// works today against an env- or PATH-provided binary.
 #[must_use]
 pub fn resolve_trace_processor() -> TraceProcessorStatus {
     if let Ok(v) = std::env::var(TRACE_PROCESSOR_ENV) {
@@ -1018,6 +1050,10 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
+        "  query \"<sql>\" --trace FILE.pftrace        Run SQL offline via trace_processor"
+    )?;
+    writeln!(
+        out,
         "  query --preset <name>         Run a named trace-stdlib preset"
     )?;
     writeln!(
@@ -1179,6 +1215,31 @@ mod tests {
             parse(&s(&["query", "SELECT 1", "--format", "table"])).unwrap();
         let Sub::Query(q) = sub else { panic!() };
         assert_eq!(q.format, QueryFormat::Table);
+        assert!(q.format_set);
+    }
+
+    #[test]
+    fn parse_query_default_format_is_not_marked_set() {
+        let (sub, _) = parse(&s(&["query", "SELECT 1"])).unwrap();
+        let Sub::Query(q) = sub else { panic!() };
+        assert!(!q.format_set);
+        assert!(q.trace.is_none());
+    }
+
+    #[test]
+    fn parse_query_trace_flag_sets_offline_path() {
+        let (sub, _) =
+            parse(&s(&["query", "SELECT 1", "--trace", "/t/run.pftrace"]))
+                .unwrap();
+        let Sub::Query(q) = sub else { panic!() };
+        assert_eq!(q.trace.as_deref(), Some(std::path::Path::new("/t/run.pftrace")));
+        assert_eq!(q.sql.as_deref(), Some("SELECT 1"));
+    }
+
+    #[test]
+    fn parse_query_trace_requires_a_value() {
+        let err = parse(&s(&["query", "SELECT 1", "--trace"])).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
     }
 
     #[test]
@@ -1245,6 +1306,7 @@ mod tests {
                 sql: Some("SELECT 1".to_owned()),
                 preset: None,
                 format: QueryFormat::Json,
+                ..QueryArgs::default()
             }))
             .unwrap()
             .0,
@@ -1287,6 +1349,7 @@ mod tests {
             sql: Some("SELECT name FROM slice".to_owned()),
             preset: None,
             format: QueryFormat::Csv,
+            ..QueryArgs::default()
         });
         assert!(p.contains("\"sql\":\"SELECT name FROM slice\""));
         assert!(p.contains("\"format\":\"csv\""));
@@ -1299,6 +1362,7 @@ mod tests {
             sql: None,
             preset: Some("slowest-frames".to_owned()),
             format: QueryFormat::Json,
+            ..QueryArgs::default()
         });
         assert!(p.contains("\"preset\":\"slowest-frames\""));
         assert!(p.contains("\"format\":\"json\""));
@@ -1443,6 +1507,7 @@ mod tests {
             sql: Some("SELECT name FROM slice".to_owned()),
             preset: None,
             format: QueryFormat::Json,
+            ..QueryArgs::default()
         });
         dispatch(&sub, &flags, &t, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();

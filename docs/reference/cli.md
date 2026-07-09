@@ -1324,6 +1324,7 @@ preset queries, or ask for a one-shot narrated root cause. Motion tells you
 pulp trace start --categories dsp,render --out /tmp/x.pftrace
 pulp trace stop                                   # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
+pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
 pulp trace query --preset dsp-hotspots
 pulp trace slowest-frames
 pulp trace xruns
@@ -1345,7 +1346,8 @@ Subcommands:
 |------------|------------------|-------------|
 | `start [--categories LIST] [--out FILE.pftrace] [--ring-mb N]` | `Trace.startSession` | Begin a session recording the selected span categories into an in-process ring. |
 | `stop` | `Trace.stopSession` | Flush the session and print the `.pftrace` path. |
-| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the captured trace; JSON by default. |
+| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the live captured trace; JSON by default. |
+| `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` without a live session, via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → `$PATH`; see `pulp trace doctor`). Returns trace_processor's native table; `--format`/`--preset` are live-path only. |
 | `query --preset <name>` | `Trace.query` | Run a named trace-stdlib preset. |
 | `slowest-frames` | `Trace.query` | L0 preset: frames over the vsync budget, worst first. |
 | `xruns` | `Trace.query` | L0 preset: audio xrun / deadline-miss events. |

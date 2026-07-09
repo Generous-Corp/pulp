@@ -1153,7 +1153,7 @@ commands:
       - name: stop
         summary: Flush the session and print the `.pftrace` path via `Trace.stopSession`
       - name: query
-        summary: Run SQL over the captured trace via `Trace.query`; JSON by default. Pass a SQL string or `--preset <name>`.
+        summary: Run SQL over the captured trace via `Trace.query` (live) or offline against a `.pftrace` with `--trace`; JSON by default. Pass a SQL string or `--preset <name>`.
         args:
           - name: sql
             kind: positional
@@ -1162,11 +1162,15 @@ commands:
           - name: --preset
             kind: option
             required: false
-            description: Named trace-stdlib preset to run instead of raw SQL
+            description: Named trace-stdlib preset to run instead of raw SQL (live path only)
+          - name: --trace
+            kind: option
+            required: false
+            description: Run the SQL offline against a flushed FILE.pftrace via trace_processor instead of the live inspector; returns trace_processor's native table
           - name: --format
             kind: option
             required: false
-            description: Output format json|table|csv (default json)
+            description: Output format json|table|csv (default json; live path only — offline returns the native table)
       - name: slowest-frames
         summary: L0 preset (`Trace.query`) — frames over the vsync budget, worst first
       - name: xruns
