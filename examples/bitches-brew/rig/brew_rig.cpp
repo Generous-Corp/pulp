@@ -56,12 +56,19 @@ void usage() {
   brew-rig list
       Enumerate audio devices and channel counts. Emits nothing.
 
-  brew-rig map    --device <name> --armed [--level 0.25] [--settle-ms 60] [--measure-ms 120]
+  brew-rig map    --device <name> --armed [--level 0.25] [--rate 48000]
       Drive DC on each output channel in turn, record every input channel, and
       print the crossbar. Closes: which host channel reaches which jack, and
       whether the chain inverts polarity.
 
-  brew-rig hold   --device <name> --out <ch> --armed [--level 0.25] [--seconds 10]
+  brew-rig sweep  --device <name> --armed [--from 0] [--to 31] [--skip 14,15]
+                  [--seconds-each 3] [--level 0.25] [--rate 48000]
+      Hold DC on each output channel in turn, announcing each one, so you can watch
+      a meter or listen to a VCO and say which channel reaches which jack. Needs one
+      patch cable, no recording. --skip protects channels wired to something that
+      should not receive raw CV (an encoded-bitstream expander, a speaker).
+
+  brew-rig hold   --device <name> --out <ch> --armed [--level 0.25] [--seconds 10] [--rate 48000]
       Hold a DC level on one output channel so you can put a meter or a scope
       probe on the jack. This is how the full-scale voltage gets measured; it is
       the one number a loopback can never give you.
@@ -75,10 +82,37 @@ struct Args {
     int out_channel = -1;
     float level = 0.25f;
     double seconds = 10.0;
+    // 48 kHz, not "whatever CoreAudio lists first". Opening a device at a rate it
+    // is not already running reconfigures its clock, and an ADAT link to an
+    // expander drops when that happens — which looks exactly like a bad cable.
+    // 48 kHz is also the rate at which all 8 ADAT channels exist.
+    double rate = 48000.0;
     int settle_ms = 60;
     int measure_ms = 120;
+    int from_channel = 0;
+    int to_channel = -1;          // -1 = every channel the device has
+    double seconds_each = 3.0;
+    std::vector<int> skip;        // zero-based channels never to drive
     bool armed = false;
 };
+
+/// Parse "14,15" into channel indices. Zero-based, matching the audio API; a DAW
+/// shows these one higher, which is exactly the sort of thing that gets a cable
+/// blamed for an off-by-one.
+std::vector<int> parse_channel_list(const char* v) {
+    std::vector<int> out;
+    std::string token;
+    for (const char* p = v;; ++p) {
+        if (*p == ',' || *p == '\0') {
+            if (!token.empty()) out.push_back(std::atoi(token.c_str()));
+            token.clear();
+            if (*p == '\0') break;
+        } else {
+            token.push_back(*p);
+        }
+    }
+    return out;
+}
 
 bool parse(int argc, char** argv, Args& a) {
     if (argc < 2) return false;
@@ -93,6 +127,11 @@ bool parse(int argc, char** argv, Args& a) {
         else if (k == "--out") a.out_channel = std::atoi(v);
         else if (k == "--level") a.level = static_cast<float>(std::atof(v));
         else if (k == "--seconds") a.seconds = std::atof(v);
+        else if (k == "--rate") a.rate = std::atof(v);
+        else if (k == "--from") a.from_channel = std::atoi(v);
+        else if (k == "--to") a.to_channel = std::atoi(v);
+        else if (k == "--seconds-each") a.seconds_each = std::atof(v);
+        else if (k == "--skip") a.skip = parse_channel_list(v);
         else if (k == "--settle-ms") a.settle_ms = std::atoi(v);
         else if (k == "--measure-ms") a.measure_ms = std::atoi(v);
         else { std::fprintf(stderr, "unknown option %s\n", k.c_str()); return false; }
@@ -103,14 +142,18 @@ bool parse(int argc, char** argv, Args& a) {
 int cmd_list(audio::AudioSystem& sys) {
     const auto devices = sys.enumerate_devices();
     if (devices.empty()) { std::puts("no audio devices"); return 1; }
-    std::printf("%-40s %5s %6s %-8s %s\n", "name", "in", "out", "rate", "default");
+    std::printf("%-40s %5s %6s %-24s %s\n", "name", "in", "out", "rates", "default");
     for (const auto& d : devices) {
         std::string flags;
         if (d.is_default_input) flags += "in ";
         if (d.is_default_output) flags += "OUT";
-        const double rate = d.sample_rates.empty() ? 0.0 : d.sample_rates.front();
-        std::printf("%-40s %5d %6d %-8.0f %s\n", d.name.c_str(), d.max_input_channels,
-                    d.max_output_channels, rate, flags.c_str());
+        std::string rates;
+        for (double r : d.sample_rates) {
+            if (!rates.empty()) rates += ",";
+            rates += std::to_string(static_cast<int>(r));
+        }
+        std::printf("%-40s %5d %6d %-24s %s\n", d.name.c_str(), d.max_input_channels,
+                    d.max_output_channels, rates.c_str(), flags.c_str());
     }
     std::puts(
         "\nA device flagged OUT is the system default: alert sounds go there. If that\n"
@@ -136,6 +179,18 @@ bool find_device(audio::AudioSystem& sys, const std::string& want, audio::Device
     return false;
 }
 
+/// Refuse a rate the device does not advertise, rather than let CoreAudio
+/// silently reconfigure the interface's clock out from under an ADAT expander.
+bool rate_supported(const audio::DeviceInfo& dev, double rate) {
+    if (dev.sample_rates.empty()) return true;  // backend does not report; trust the caller
+    for (double r : dev.sample_rates)
+        if (std::abs(r - rate) < 1.0) return true;
+    std::fprintf(stderr, "device '%s' does not advertise %.0f Hz. It offers:", dev.name.c_str(), rate);
+    for (double r : dev.sample_rates) std::fprintf(stderr, " %.0f", r);
+    std::fputs("\nPass --rate explicitly, and prefer the rate it is already running.\n", stderr);
+    return false;
+}
+
 void arming_banner(const audio::DeviceInfo& dev, float level) {
     std::printf(
         "\n  ABOUT TO EMIT on '%s' at %.3f full scale.\n"
@@ -153,12 +208,13 @@ void arming_banner(const audio::DeviceInfo& dev, float level) {
 /// Owns the open device and guarantees the outputs are silent before it dies.
 class Rig {
 public:
-    Rig(audio::AudioSystem& sys, const audio::DeviceInfo& info, int in_ch, int out_ch)
+    Rig(audio::AudioSystem& sys, const audio::DeviceInfo& info, int in_ch, int out_ch,
+        double rate)
         : device_(sys.create_device(info.id)) {
         if (!device_) return;
         audio::DeviceConfig cfg;
         cfg.device_id = info.id;
-        cfg.sample_rate = info.sample_rates.empty() ? 48000.0 : info.sample_rates.front();
+        cfg.sample_rate = rate;
         cfg.buffer_size = 256;
         cfg.input_channels = in_ch;
         cfg.output_channels = out_ch;
@@ -197,11 +253,12 @@ int cmd_map(audio::AudioSystem& sys, const Args& a) {
         std::fputs("device has no inputs — a loopback needs to hear itself\n", stderr);
         return 2;
     }
+    if (!rate_supported(info, a.rate)) return 2;
     const float level = clamp_probe_level(a.level);
     arming_banner(info, level);
     if (g_abort.load(std::memory_order_relaxed)) { std::puts("aborted, nothing emitted"); return 130; }
 
-    Rig rig(sys, info, info.max_input_channels, info.max_output_channels);
+    Rig rig(sys, info, info.max_input_channels, info.max_output_channels, a.rate);
     if (!rig.ok()) { std::fputs("failed to open device\n", stderr); return 2; }
 
     const auto rate = rig.sample_rate();
@@ -300,6 +357,73 @@ int cmd_map(audio::AudioSystem& sys, const Args& a) {
     return 0;
 }
 
+/// Drive one output channel at a time, announcing each, so a human with a single
+/// patch cable can say which channel reaches which jack. The loopback in `map`
+/// answers the same question automatically, but it needs the interface's inputs
+/// wired back through the modular; this needs one cable and a pair of ears.
+int cmd_sweep(audio::AudioSystem& sys, const Args& a) {
+    audio::DeviceInfo info;
+    if (!find_device(sys, a.device, info)) return 2;
+    if (!rate_supported(info, a.rate)) return 2;
+
+    const int last = a.to_channel < 0 ? info.max_output_channels - 1
+                                      : std::min(a.to_channel, info.max_output_channels - 1);
+    const int first = std::max(a.from_channel, 0);
+    if (first > last) { std::fputs("--from is past --to\n", stderr); return 2; }
+
+    auto skipped = [&](int c) {
+        return std::find(a.skip.begin(), a.skip.end(), c) != a.skip.end();
+    };
+
+    const float level = clamp_probe_level(a.level);
+    const double each = std::min(std::max(a.seconds_each, 0.5), 30.0);
+
+    std::printf("\nSweeping output channels %d..%d at %+.3f full scale, %.1fs each.\n",
+                first, last, static_cast<double>(level), each);
+    if (!a.skip.empty()) {
+        std::fputs("Skipping (never driven):", stdout);
+        for (int c : a.skip) std::printf(" %d", c);
+        std::putchar('\n');
+    }
+    arming_banner(info, level);
+    if (g_abort.load(std::memory_order_relaxed)) { std::puts("aborted, nothing emitted"); return 130; }
+
+    Rig rig(sys, info, 0, info.max_output_channels, a.rate);
+    if (!rig.ok()) { std::fputs("failed to open device\n", stderr); return 2; }
+
+    std::atomic<int> driving{-1};   // -1 = drive nothing
+    rig.device().start([&](const audio::BufferView<const float>&,
+                           audio::BufferView<float>& out,
+                           const audio::CallbackContext&) {
+        silence(out);
+        if (g_abort.load(std::memory_order_relaxed)) return;
+        const int c = driving.load(std::memory_order_relaxed);
+        if (c < 0 || c >= static_cast<int>(out.num_channels())) return;
+        float* dst = out.channel_ptr(static_cast<std::size_t>(c));
+        if (dst) for (std::size_t i = 0; i < out.num_samples(); ++i) dst[i] = level;
+    });
+
+    for (int c = first; c <= last && !g_abort.load(std::memory_order_relaxed); ++c) {
+        if (skipped(c)) { std::printf("  channel %2d (DAW %2d)  SKIPPED\n", c, c + 1); continue; }
+        std::printf("  channel %2d (DAW %2d)  driving...\n", c, c + 1);
+        std::fflush(stdout);
+        driving.store(c, std::memory_order_relaxed);
+        const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(each);
+        while (std::chrono::steady_clock::now() < until && !g_abort.load(std::memory_order_relaxed))
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        driving.store(-1, std::memory_order_relaxed);
+        // A beat of silence between channels, so two adjacent live channels are
+        // distinguishable by ear rather than sounding like one long note.
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    }
+
+    driving.store(-1, std::memory_order_relaxed);
+    rig.device().stop();
+    std::puts(g_abort.load(std::memory_order_relaxed) ? "\naborted — outputs are at zero"
+                                                      : "\ndone — outputs are at zero");
+    return 0;
+}
+
 int cmd_hold(audio::AudioSystem& sys, const Args& a) {
     audio::DeviceInfo info;
     if (!find_device(sys, a.device, info)) return 2;
@@ -307,12 +431,13 @@ int cmd_hold(audio::AudioSystem& sys, const Args& a) {
         std::fprintf(stderr, "--out must be in [0, %d)\n", info.max_output_channels);
         return 2;
     }
+    if (!rate_supported(info, a.rate)) return 2;
     const float level = clamp_probe_level(a.level);
     const double seconds = std::min(a.seconds, 120.0);  // never hold a voltage forever
     arming_banner(info, level);
     if (g_abort.load(std::memory_order_relaxed)) { std::puts("aborted, nothing emitted"); return 130; }
 
-    Rig rig(sys, info, 0, info.max_output_channels);
+    Rig rig(sys, info, 0, info.max_output_channels, a.rate);
     if (!rig.ok()) { std::fputs("failed to open device\n", stderr); return 2; }
 
     const int ch = a.out_channel;
@@ -361,6 +486,7 @@ int main(int argc, char** argv) {
                    "Confirm what is patched to this interface first.\n", stderr);
         return 1;
     }
+    if (a.command == "sweep") return cmd_sweep(*sys, a);
     if (a.command == "map") return cmd_map(*sys, a);
     if (a.command == "hold") return cmd_hold(*sys, a);
 
