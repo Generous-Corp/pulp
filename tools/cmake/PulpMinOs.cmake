@@ -26,7 +26,16 @@
 #                                 what the toolchain/deps support)
 
 if(NOT DEFINED PULP_MIN_OS_JSON)
-  set(PULP_MIN_OS_JSON "${CMAKE_CURRENT_LIST_DIR}/../deps/min_os.json")
+  # Two layouts carry this module:
+  #   * source tree  — tools/cmake/PulpMinOs.cmake → tools/deps/min_os.json
+  #   * installed SDK — lib/cmake/Pulp/PulpMinOs.cmake → lib/cmake/Pulp/min_os.json
+  #     (PulpInstallRules.cmake ships min_os.json next to this module so a
+  #     find_package(Pulp) consumer inherits the same floor as Pulp itself).
+  if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../deps/min_os.json")
+    set(PULP_MIN_OS_JSON "${CMAKE_CURRENT_LIST_DIR}/../deps/min_os.json")
+  else()
+    set(PULP_MIN_OS_JSON "${CMAKE_CURRENT_LIST_DIR}/min_os.json")
+  endif()
 endif()
 
 # A min_os.json edit is a data change CMake would not otherwise treat as a
@@ -74,8 +83,16 @@ function(_pulp_min_os_pin_macos)
   endif()
 
   # Decide whether to (re)pin per the override policy documented above.
+  #
+  # "unset" has two forms depending on when this runs. Included BEFORE project()
+  # (Pulp's own build) the variable is genuinely NOT DEFINED. Included from
+  # PulpConfig.cmake at find_package() time (an installed-SDK consumer) it runs
+  # AFTER the consumer's project(), where CMake has already DEFINED it as the
+  # empty string. Both mean "the developer did not choose a target" → pin
+  # silently to the floor; only a non-empty value BELOW the floor is a real
+  # (warn-worthy) below-floor request.
   set(_apply FALSE)
-  if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+  if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "")
     set(_apply TRUE)
   elseif(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS _floor)
     set(_apply TRUE)

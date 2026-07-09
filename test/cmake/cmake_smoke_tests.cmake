@@ -96,6 +96,20 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     # but pays a configure-amortised cost — pull it out of fast-CI.
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
+
+# Min-OS floor propagation to find_package(Pulp) consumers. PulpMinOs.cmake must
+# pin the consumer's deployment target when it runs AFTER project() (where the
+# target is a DEFINED-but-empty cache entry), not only when it runs before
+# Pulp's own project(). Without this, a plugin built against the installed SDK
+# silently inherits the build host's OS floor. Standalone `cmake -P` — no build
+# dir needed; asserts the correct per-host outcome (macOS deployment target /
+# Windows _WIN32_WINNT / Linux glibc floor).
+add_test(NAME cmake-pulp-minos-consumer-pin
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_minos_consumer_pin.cmake)
+set_tests_properties(cmake-pulp-minos-consumer-pin PROPERTIES
+    LABELS "cmake;min-os"
+    TIMEOUT 60)
 # Install-layout regression for format helper sources used by
 # PulpAuv3.cmake / PulpPluginFormats.cmake from _PULP_FORMAT_SOURCE_DIR.
 # Without au_view_controller_mac.mm in the installed SDK, downstream
