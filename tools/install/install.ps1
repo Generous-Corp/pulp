@@ -54,7 +54,7 @@ if (-not $DownloadUrl) {
     Write-Host ""
     Write-Host "Pre-built binaries may not be available yet."
     Write-Host "To build from source instead:"
-    Write-Host "  git clone https://github.com/$Repo.git; cd pulp; .\setup.sh"
+    Write-Host "  git clone https://github.com/$Repo.git; cd pulp; powershell -ExecutionPolicy Bypass -File .\setup.ps1"
     exit 1
 }
 
@@ -105,7 +105,7 @@ Write-Host "  pulp doctor              # check your environment"
 Write-Host ""
 Write-Host "Or clone the framework:"
 Write-Host "  git clone https://github.com/$Repo.git"
-Write-Host "  cd pulp; .\setup.sh"
-Write-Host "  bash tools/install-shipyard.sh   # optional: source-checkout PR/CI tooling"
+Write-Host "  cd pulp; powershell -ExecutionPolicy Bypass -File .\setup.ps1"
+Write-Host "  See docs/guides/local-ci.md for optional source-checkout PR/CI tooling"
 Write-Host ""
 Write-Host "You may need to restart your terminal for PATH changes to take effect."

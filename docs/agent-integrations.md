@@ -16,9 +16,20 @@ SDK or CLI assumes a specific agent. Editor integrations are additive.
 
 ### Bare CLI (no agent, or any agent)
 
+**macOS / Linux**
+
 ```bash
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 pulp create my-plugin && cd my-plugin && pulp run
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://www.generouscorp.com/pulp/install.ps1 | iex
+pulp create my-plugin
+cd my-plugin
+pulp run
 ```
 
 Everything works — `pulp build`, `pulp test`, `pulp ship`, the lot.
@@ -32,9 +43,11 @@ audio formats, view system, CI flow, hosting other plugins. Same
 skills the Claude Code plugin exposes; no separate install.
 
 ```bash
-# Same install as bare CLI — Codex picks up the skills automatically
+# Same CLI install as above — Codex picks up the skills automatically
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
+
+On Windows, use the PowerShell installer from the bare CLI section.
 
 ### Claude Code (with the optional plugin)
 

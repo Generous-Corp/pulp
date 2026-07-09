@@ -9,28 +9,56 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 
 ## Install
 
+**macOS / Linux**
+
 ```bash
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
 
-Prefer not to run the installer? You can [build Pulp from source](#build-from-source).
+**Windows (PowerShell)**
+
+```powershell
+irm https://www.generouscorp.com/pulp/install.ps1 | iex
+```
 
 <details>
 <summary><strong>Optional: Verify before installation</strong> (click to expand)</summary>
 
 For an additional layer of security, you can download the installer and verify its SHA-256 checksum before running it:
 
+**macOS / Linux**
+
 ```bash
-curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
-curl -fsSL https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS \
-  | shasum -a 256 -c --ignore-missing
-sh install.sh
+(
+  set -e
+  curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
+  curl -fLso SHA256SUMS https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS
+  if command -v sha256sum >/dev/null; then
+    sha256sum -c SHA256SUMS --ignore-missing
+  else
+    shasum -a 256 -c SHA256SUMS --ignore-missing
+  fi
+  sh install.sh
+)
 ```
 
-The checksum confirms that the `install.sh` you downloaded matches the script
+**Windows (PowerShell)**
+
+```powershell
+Invoke-WebRequest https://www.generouscorp.com/pulp/install.ps1 -OutFile install.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS -OutFile SHA256SUMS
+$expected = (Select-String -Path .\SHA256SUMS -Pattern ' install\.ps1$').Line.Split()[0]
+$actual = (Get-FileHash .\install.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "Checksum mismatch for install.ps1" }
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The checksum confirms that the installer you downloaded matches the script
 Pulp publishes in source control. It does not replace reading a network script
 before running it, but it avoids executing bytes that differ from the published
 checksum.
+
+Prefer not to run the installer? You can [build Pulp from source](#build-from-source).
 
 GitHub's release verification can also check immutable releases and downloaded
 release assets. This path requires the GitHub CLI:
@@ -52,14 +80,6 @@ clearer.
 
 </details>
 
-## Create your first plugin
-
-```bash
-pulp create my-plugin && cd my-plugin && pulp run
-```
-
-Three commands from zero to a working native plugin for your platform.
-
 ### Optional: install the Claude Code plugin
 
 ```bash
@@ -77,8 +97,8 @@ server.
 
 Install the CLI first. The plugin's MCP server is `pulp-mcp`, which ships with
 the CLI tarball (above) into `~/.pulp/bin/`. The plugin itself contains no
-binaries; it locates `pulp-mcp` on `$PATH`. If you install the plugin before
-running `install.sh`, `/mcp` will report `pulp-mcp: cannot locate binary`. Run
+binaries; it locates `pulp-mcp` on `$PATH`. If you install the plugin before the
+CLI, `/mcp` will report `pulp-mcp: cannot locate binary`. Run
 `pulp doctor` to confirm `pulp-mcp` is found and matches your CLI version.
 
 Building from a source checkout instead? The repo's project-local MCP server
@@ -89,24 +109,38 @@ No CLI install is needed.
 
 See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each agent path.
 
-<details>
-<summary><strong>What Pulp gives you</strong> (features, click to expand)</summary>
+## Features
 
-## What you get
-
-This is the short version. The full status inventory lives in the
+The full status inventory lives in the
 [Capabilities Reference](docs/reference/capabilities.md).
 
-- **Plugin formats:** VST3, Audio Unit v2, AUv3, CLAP, LV2, standalone, experimental web targets, and optional AAX with a developer-supplied SDK.
-- **Native UI:** scripted UIs render with [Dawn](https://dawn.googlesource.com/dawn) + [Skia](https://skia.org/) and QuickJS, with modern Flexbox/Grid layout through [Yoga](https://www.yogalayout.dev/).
-- **Design import:** bring in Figma/Figma plugin, React/JSX, Stitch, v0, Pencil/OpenPencil, Claude Design, and DESIGN.md exports. See [Importing Designs](docs/guides/importing-designs.md).
-- **DSP:** processors, MIDI, audio file I/O, sidechains, headless processing, and DSP hot reload for reloadable plugins. See [DSP Hot-Reload](docs/guides/dsp-hot-reload.md).
-- **Testing and inspection:** Audio Inspector, optional Audio Quality Lab, golden-file audio tests, headless screenshots, visual regression, motion traces, and MCP tools for agent-driven validation.
-- **Migration and interop:** guides and bridge projects for moving from JUCE or embedding Pulp UI in JUCE/iPlug2 projects, plus a framework-importer packaging contract for external importer add-ons.
+- **Plugin formats:** VST3, Audio Unit v2, AUv3, CLAP, LV2, standalone, [WAMv2 and WebCLAP](docs/reference/web-plugin-support.md) browser/WASM targets, and optional AAX with a developer-supplied SDK.
+- **GPU Accelerated Native UI:** scripted UIs render with [Dawn](https://dawn.googlesource.com/dawn) + [Skia](https://skia.org/) and QuickJS, with modern Flexbox/Grid layout through [Yoga](https://www.yogalayout.dev/).
+- **Design import:** bring in screens from Claude Design, Figma `.fig` files, Figma REST/file JSON, React/JSX, Stitch, v0, and Pencil/OpenPencil, plus token systems from DESIGN.md exports. See [Importing Designs](docs/guides/importing-designs.md).
+- **DSP:** processors, realtime [SignalGraph](docs/reference/signal-graph.md) node graphs, MIDI, audio file I/O, sidechains, headless processing, signed `.pulpbake` graph artifacts, and DSP hot reload for reloadable plugins. See [DSP Hot-Reload](docs/guides/dsp-hot-reload.md).
+- **Testing and inspection:** [Audio Inspector](docs/guides/audio-inspector.md), optional [Audio Quality Lab](docs/guides/audio-quality-lab.md) with ViSQOL, PEAQ, AQUA-Tk, and aubio adapters, golden-file audio tests, headless screenshots, visual regression, motion traces, and MCP tools for agent-driven validation.
+- **Migration and interop:** embed Pulp's GPU front end in existing [JUCE](docs/guides/juce-embed.md) or [iPlug2](docs/guides/juce-embed.md#iplug2) projects, or import existing projects into Pulp. The iPlug2 importer is public; the JUCE importer is in private beta.
 - **Shipping:** macOS signing/notarization, DMG/PKG packaging, Sparkle appcasts, release assets, and `pulp ship` commands.
-- **Automation:** GitHub Actions for the public matrix, [Shipyard](https://github.com/danielraffel/Shipyard) for maintainer merge-on-green orchestration, optional [tartci](https://github.com/danielraffel/tartci) local VM lanes, explicit [Namespace](https://namespace.so/) cloud dispatch, and agent-facing CLI/MCP/Claude plugin surfaces.
+- **Automation:** GitHub Actions for the public matrix, optional [Shipyard](https://github.com/danielraffel/Shipyard) maintainer merge-on-green orchestration, optional [tartci](https://github.com/danielraffel/tartci) local VM lanes, and agent-facing CLI/MCP/Claude plugin surfaces.
 
-</details>
+## Create your first plugin
+
+```bash
+pulp create my-plugin && cd my-plugin && pulp run
+```
+
+Three commands from zero to a working native plugin for your platform.
+
+## Documentation
+
+**[Full Documentation](https://www.generouscorp.com/pulp/)** · **[Getting Started](https://www.generouscorp.com/pulp/getting-started.html)** · **[Capabilities](https://www.generouscorp.com/pulp/capabilities.html)** · **[Examples](https://www.generouscorp.com/pulp/examples-index.html)**
+
+- [Getting Started](docs/guides/getting-started.md) — install, create, build, run
+- [Capabilities Reference](docs/reference/capabilities.md) — full feature inventory with status
+- [Module Reference](docs/reference/modules.md) — module-by-module API docs
+- [CLI Reference](docs/reference/cli.md) — all `pulp` commands
+- [CI & Local CI](docs/guides/local-ci.md) — local and cloud CI setup
+- [Shipping Guide](docs/guides/shipping.md) — signing, notarization, packaging
 
 <a id="build-from-source"></a>
 <details>
@@ -115,10 +149,18 @@ This is the short version. The full status inventory lives in the
 ```bash
 git clone https://github.com/danielraffel/pulp.git
 cd pulp
-./setup.sh                                    # bootstrap deps
+./setup.sh                                    # macOS / Linux bootstrap
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  # configure
 cmake --build build                            # build
 ctest --test-dir build --output-on-failure    # test
+```
+
+On Windows, use the supported PowerShell bootstrap before configuring/building:
+
+```powershell
+git clone https://github.com/danielraffel/pulp.git
+cd pulp
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 **Prerequisites:** CMake 3.24+, C++20 compiler (Clang 15+, GCC 13+, MSVC 2022+), git-lfs.
@@ -178,22 +220,10 @@ Pulp's CLI works with any AI coding agent. Skills (`.agents/skills/`) are auto-l
 
 Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent-integrations.md). Plugin-specific setup details: [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md).
 
-## Documentation
-
-**[Full Documentation](https://www.generouscorp.com/pulp/)** · **[Getting Started](https://www.generouscorp.com/pulp/getting-started.html)** · **[Capabilities](https://www.generouscorp.com/pulp/capabilities.html)** · **[Examples](https://www.generouscorp.com/pulp/examples-index.html)**
-
-- [Getting Started](docs/guides/getting-started.md) — install, create, build, run
-- [Capabilities Reference](docs/reference/capabilities.md) — full feature inventory with status
-- [Module Reference](docs/reference/modules.md) — module-by-module API docs
-- [CLI Reference](docs/reference/cli.md) — all `pulp` commands
-- [CI & Local CI](docs/guides/local-ci.md) — local and cloud CI setup
-- [Shipping Guide](docs/guides/shipping.md) — signing, notarization, packaging
-
 ## Contributing
 
 Pulp is early and actively evolving — contributions and plugin-author
-feedback are very welcome. Most people working on Pulp clone the repo (to
-extend the framework, or to build a plugin against source); see
+feedback are very welcome. People seeking to extend the Pulp framework should clone the repo. See
 [Build from source](#build-from-source) to get set up.
 
 ### Workflow
@@ -217,9 +247,7 @@ The maintainer's optional disposable local VM lanes, host leases, and timing
 metrics are powered by [tartci](https://github.com/danielraffel/tartci) and
 described by the parseable profile in
 [`.shipyard/ci-profiles/normal-local-fast.toml`](.shipyard/ci-profiles/normal-local-fast.toml).
-[Namespace](https://namespace.so/) cloud dispatch remains available for explicit
-operator runs, but it is not the default PR path. See
-[docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and
+See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and
 [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
 
 ### Security & CI policy

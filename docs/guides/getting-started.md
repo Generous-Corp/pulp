@@ -7,11 +7,13 @@ Build your first audio plugin with Pulp.
 Install the Pulp CLI with one command:
 
 **macOS / Linux:**
+
 ```bash
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 irm https://www.generouscorp.com/pulp/install.ps1 | iex
 ```
@@ -20,14 +22,53 @@ The installer installs Pulp CLI artifacts only. It does not install Shipyard
 or GitHub CLI (`gh`); ordinary Pulp users do not need either tool to create,
 build, run, or upgrade a plugin project.
 
+### Optional: Verify before installation
+
+If you prefer not to pipe a network script directly into a shell, download the
+installer first and verify it against Pulp's published SHA-256 checksums.
+
+**macOS / Linux:**
+
+```bash
+(
+  set -e
+  curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
+  curl -fLso SHA256SUMS https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS
+  if command -v sha256sum >/dev/null; then
+    sha256sum -c SHA256SUMS --ignore-missing
+  else
+    shasum -a 256 -c SHA256SUMS --ignore-missing
+  fi
+  sh install.sh
+)
+```
+
+**Windows (PowerShell):**
+
+```powershell
+Invoke-WebRequest https://www.generouscorp.com/pulp/install.ps1 -OutFile install.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS -OutFile SHA256SUMS
+$expected = (Select-String -Path .\SHA256SUMS -Pattern ' install\.ps1$').Line.Split()[0]
+$actual = (Get-FileHash .\install.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "Checksum mismatch for install.ps1" }
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+These checks verify the installer script bytes before execution. Release users
+can also verify downloaded release assets with `gh release verify` and
+`gh release verify-asset`.
+
 ### Claude Code plugin: install the CLI first
 
-If you plan to use the Pulp [Claude Code plugin](claude-code-plugin.md), run
-`install.sh` **before** `claude plugin install pulp`. The plugin's MCP server
-is `pulp-mcp`, which ships in the CLI tarball into `~/.pulp/bin/` — the
-plugin itself ships no binaries and locates `pulp-mcp` on `$PATH`. Reversing
-the order leaves the plugin's `/mcp` panel reporting `pulp-mcp: cannot locate
-binary` on first connect.
+If you plan to use the Pulp [Claude Code plugin](claude-code-plugin.md), install
+the CLI **before** `claude plugin install pulp`. The plugin's MCP server is
+`pulp-mcp`, which ships in the CLI tarball into `~/.pulp/bin/` on macOS/Linux
+or `%USERPROFILE%\.pulp\bin\` on Windows. The plugin itself ships no binaries
+and locates `pulp-mcp` on `PATH`. Reversing the order leaves the plugin's
+`/mcp` panel reporting `pulp-mcp: cannot locate binary` on first connect.
+
+The example below uses the macOS/Linux installer. On Windows, use the PowerShell
+installer from [Quick Install](#quick-install) for step 1.
 
 ```bash
 # 1. CLI first (drops pulp-mcp into ~/.pulp/bin/ and onto PATH).

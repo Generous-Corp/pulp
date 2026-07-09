@@ -12,7 +12,7 @@ you start from — they are not interchangeable.
 
 | Your situation | Start here | What it is |
 |---|---|---|
-| I have an **existing** JUCE plugin and want to move its UI to Pulp | **[`pulp-import-juce`](https://github.com/danielraffel/pulp-import-juce)** → `--emit hybrid-ui` | An **importer** that reads your plugin and generates a Pulp editor swap over your unchanged DSP, wiring every APVTS parameter for you. **Status: spike** — run it today as `python3 spike/emit/emit.py … --emit hybrid-ui` in a `pulp-import-juce` checkout; a released `pulp import` command lands later. |
+| I have an **existing** JUCE plugin and want to move its UI to Pulp | **[`pulp-import-juce`](https://github.com/danielraffel/pulp-import-juce)** → `--emit hybrid-ui` | A private-beta **importer** that reads your plugin and generates a Pulp editor swap over your unchanged DSP, wiring every APVTS parameter for you. With beta access, run the current spike as `python3 spike/emit/emit.py … --emit hybrid-ui` in a `pulp-import-juce` checkout; a released `pulp import` command lands later. |
 | I'm **starting a new** plugin and want a Pulp UI | **[`pulp-embed-juce-template`](https://github.com/danielraffel/pulp-embed-juce-template)** | A GitHub **template** — clone it and you have a working plugin with one knob bound end-to-end; hand-build the rest |
 | I want to **understand or extend the bridge itself** | **[`pulp-embed-juce`](https://github.com/danielraffel/pulp-embed-juce)** | The **adapter library** (`PulpEmbedComponent`) that both of the above depend on |
 
