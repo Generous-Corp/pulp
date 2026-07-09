@@ -729,3 +729,190 @@ TEST_CASE("a swung LFO still locates and bounces identically",
     for (std::size_t i = 0; i < a.size(); ++i)
         REQUIRE_THAT(a[i], WithinAbs(played[i], 1e-6f));
 }
+
+TEST_CASE("Smooth at zero is a wire", "[brew][lfo][smooth]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSquare, 1.0f);
+    host.state().set_value(LfoProcessor::kSine, 0.0f);
+
+    // The default must be bit-exact, not merely close. Everything else in this
+    // suite promises an identical bounce; a smoother that leaked a fraction of a
+    // sample at zero would quietly cost that promise for every user who never
+    // touched the control.
+    const auto raw = render(host, 0.0, 512, 0);
+    host.state().set_value(LfoProcessor::kSmoothMs, 0.0f);
+    REQUIRE(render(host, 0.0, 512, 0) == raw);
+
+    // And the pure accessor agrees with what the block emitted, sample for sample.
+    const auto* lfo = static_cast<const LfoProcessor*>(host.processor());
+    const double bps = beats_per_sample(kTempo, kSampleRate);
+    for (int n = 0; n < 512; n += 37)
+        REQUIRE(lfo->value_at(bps * n) == raw[static_cast<std::size_t>(n)]);
+}
+
+TEST_CASE("positive Smooth limits the slew rate", "[brew][lfo][smooth]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSine, 0.0f);
+    host.state().set_value(LfoProcessor::kSquare, 1.0f);  // hard edges to limit
+    host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
+
+    constexpr float kMs = 50.0f;
+    host.state().set_value(LfoProcessor::kSmoothMs, kMs);
+
+    // Long enough to contain a falling edge. At 120 BPM one beat per cycle is
+    // 500 ms and the square flips at 250 ms, so a block shorter than that never
+    // asks the limiter to do anything — and the test would pass on a build that
+    // ignored `Smooth` entirely.
+    constexpr int kFrames = 32768;   // ~683 ms: more than one full cycle
+    REQUIRE(static_cast<double>(kFrames) / kSampleRate > 0.5);
+
+    // Slew is calibrated in milliseconds per FULL swing (-1 to +1), so the
+    // per-sample bound is 2 / (ms * sr). A square wave asks for an infinite
+    // derivative at every edge; the limiter is the only thing standing there.
+    const double limit = kFullSwing / (static_cast<double>(kMs) * 0.001 * kSampleRate);
+    const auto out = render(host, 0.0, kFrames, 0);
+
+    // The raw square really does step, so the bound below is a claim about the
+    // limiter and not about the shape.
+    REQUIRE(std::abs(lfo_shape(Waveform::square, 0.51) -
+                     lfo_shape(Waveform::square, 0.49)) > 1.0f);
+
+    for (std::size_t n = 1; n < out.size(); ++n)
+        REQUIRE(std::abs(out[n] - out[n - 1]) <= limit + 1e-6);
+
+    // ...and it does reach both rails: a limiter that never arrives is a low-pass.
+    REQUIRE(*std::max_element(out.begin(), out.end()) > 0.99f);
+    REQUIRE(*std::min_element(out.begin(), out.end()) < -0.99f);
+}
+
+TEST_CASE("Smooth acts before the output stage", "[brew][lfo][smooth]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSine, 0.0f);
+    host.state().set_value(LfoProcessor::kSquare, 1.0f);
+    host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
+
+    constexpr float kMs = 50.0f;
+    constexpr float kScale = 0.25f;
+    host.state().set_value(LfoProcessor::kSmoothMs, kMs);
+    host.state().set_value(LfoProcessor::kOutputScale, kScale);
+
+    // The slew limiter is not linear, so where it sits relative to the output
+    // scale is observable rather than a matter of taste. Limiting the shape and
+    // then attenuating gives a quarter of the slew rate at the jack; attenuating
+    // and then limiting would give the full rate. DC smooths before its output
+    // stage; this must agree, or the same knob means two things.
+    const double limit = kFullSwing / (static_cast<double>(kMs) * 0.001 * kSampleRate);
+    const auto out = render(host, 0.0, 32768, 0);
+    double worst = 0.0;
+    for (std::size_t n = 1; n < out.size(); ++n)
+        worst = std::max(worst, static_cast<double>(std::abs(out[n] - out[n - 1])));
+
+    REQUIRE(worst <= limit * static_cast<double>(kScale) + 1e-6);
+    // And it really is slewing — otherwise the bound above is vacuous.
+    REQUIRE(worst > limit * static_cast<double>(kScale) * 0.5);
+}
+
+TEST_CASE("prepare clears the smoother", "[brew][lfo][smooth]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSmoothMs, 500.0f);
+    render(host, 0.0, 2048, 0);   // charge the smoother well away from zero
+    REQUIRE(std::abs(render(host, 0.0, 1, 0)[0]) > 0.01f);
+
+    // A host re-preparing the plug-in (a sample-rate change, a new session) must
+    // not leave a voltage from the old one sitting in the filter.
+    host.prepare(kSampleRate, 512, 2, 2);
+    REQUIRE(std::abs(render(host, 0.0, 1, 0)[0]) < 0.01f);
+}
+
+TEST_CASE("the two outputs smooth independently", "[brew][lfo][smooth]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
+    host.state().set_value(LfoProcessor::kSmoothMs, 20.0f);
+
+    // One filter shared across both channels would make the quadrature output
+    // filter the main channel's samples — the circle the pair traces would
+    // collapse onto a line. Each channel must still lead/lag the other.
+    //
+    // A sine, not a square: over this block a half-second square is high on both
+    // channels, so a shared filter and two independent ones produce the same two
+    // ramps and the test would pass on either. The sine starts at 0 while its
+    // quadrature partner starts at +1.
+    audio::Buffer<float> in(2, 4096), out(2, 4096);
+    in.clear();
+    out.clear();
+    const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
+    audio::BufferView<const float> iv(ip, 2, 4096);
+    auto ov = out.view();
+    format::ProcessContext ctx;
+    ctx.sample_rate = kSampleRate;
+    ctx.num_samples = 4096;
+    ctx.is_playing = true;
+    ctx.tempo_bpm = kTempo;
+    ctx.position_beats = 0.0;
+    host.process(ov, iv, ctx);
+
+    bool differ = false;
+    for (std::size_t n = 0; n < 4096; ++n)
+        if (std::abs(out.channel(0)[n] - out.channel(1)[n]) > 0.1f) differ = true;
+    REQUIRE(differ);
+}
+
+TEST_CASE("Smooth costs only a bounded transient after a locate",
+          "[brew][lfo][smooth]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSmoothMs, -5.0f);  // 5 ms low-pass
+
+    // The honest cost of a stateful control on a generator: reaching a beat by
+    // playing through it and by dropping onto it no longer agree *immediately*.
+    // They must agree soon — the smoother's memory decays — and "soon" is what a
+    // user needs to be able to rely on. Bounded, not absent.
+    render(host, 0.0, 4096, 0);
+    const auto played = render(host, 2.0, 4096, 0);
+
+    format::HeadlessHost located(create_lfo);
+    located.prepare(kSampleRate, 512, 2, 2);
+    located.state().set_value(LfoProcessor::kSmoothMs, -5.0f);
+    const auto dropped = render(located, 2.0, 4096, 0);
+
+    // Immediately after the locate the two disagree...
+    REQUIRE(std::abs(dropped[0] - played[0]) > 1e-4f);
+
+    // ...and after ten time constants (~50 ms) they have converged.
+    const std::size_t settled = static_cast<std::size_t>(0.05 * kSampleRate);
+    for (std::size_t n = settled; n < played.size(); ++n)
+        REQUIRE_THAT(dropped[n], WithinAbs(played[n], 1e-3f));
+}
+
+TEST_CASE("bypass clears the smoother", "[brew][lfo][smooth]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kSmoothMs, 500.0f);  // very slow slew
+    render(host, 0.0, 512, 0);   // charge the smoother toward +1
+
+    audio::Buffer<float> in(2, 64), out(2, 64);
+    in.clear();
+    out.clear();
+    const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
+    audio::BufferView<const float> iv(ip, 2, 64);
+    auto ov = out.view();
+    format::ProcessContext ctx;
+    ctx.sample_rate = kSampleRate;
+    ctx.num_samples = 64;
+    ctx.is_playing = true;
+    ctx.tempo_bpm = kTempo;
+    ctx.position_beats = 0.0;
+    ctx.is_bypassed = true;
+    host.process(ov, iv, ctx);
+    for (std::size_t n = 0; n < 64; ++n) REQUIRE(out.channel(0)[n] == 0.0f);
+
+    // Coming out of bypass the ramp starts from zero — the voltage the patch
+    // cable was actually holding — not from the level the cycle had reached.
+    const auto resumed = render(host, 0.0, 64, 0);
+    REQUIRE(std::abs(resumed[0]) < 0.01f);
+}

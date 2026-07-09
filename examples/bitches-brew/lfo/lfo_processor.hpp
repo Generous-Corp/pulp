@@ -18,10 +18,12 @@
 #include <brew/clock.hpp>  // beats_per_sample
 #include <brew/cv.hpp>
 #include <brew/lfo.hpp>
+#include <brew/smooth.hpp>
 
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <tuple>
@@ -52,6 +54,7 @@ public:
         kFreeHz = 15,
         kSwingPercent = 16,
         kSwingUnit = 17,
+        kSmoothMs = 18,
     };
 
     format::PluginDescriptor descriptor() const override {
@@ -142,6 +145,14 @@ public:
                              .name = "Swing Sixteenths",
                              .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        // Positive slews at a constant rate; negative low-passes. Milliseconds
+        // for a full swing, as DC's does. Zero is a wire — and it is the default,
+        // because a smoothed LFO is the only control here that costs the plug-in
+        // its exact locate-invariance. See the note on `smooth_`.
+        store.add_parameter({.id = kSmoothMs,
+                             .name = "Smooth",
+                             .unit = "ms",
+                             .range = {-1000.0f, 1000.0f, 0.0f, 0.1f}});
     }
 
     /// The swing the beat timeline is warped by. At 50% this returns a `Swing`
@@ -170,13 +181,15 @@ public:
         };
     }
 
-    void prepare(const format::PrepareContext&) override {}
+    void prepare(const format::PrepareContext&) override {
+        for (auto& s : smooth_) s.reset(0.0f);
+    }
 
     /// The size this editor actually needs. Without this override a host opens
     /// the plug-in at Processor's 400x300 default, and the layout is laid out to
     /// a geometry the editor was never checked against. The scope, three knobs, and the two toggles.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {380, 700};
+        return {360, 528};
     }
 
     /// Defined in lfo_view.cpp so the audio translation units never see the
@@ -212,20 +225,28 @@ public:
         return value_at_cycles(mix(), cycles, quadrature);
     }
 
-    /// The overload the audio callback uses, with the mix hoisted out of the
-    /// per-sample loop.
-    [[nodiscard]] float value_at_cycles(const LfoMix& m, double cycles,
+    /// The shape itself, before the output stage and before any smoothing.
+    ///
+    /// Phase and cycle index take the *same* offset. Keying the sample-and-hold
+    /// on an un-offset index while the phase is offset makes the held value step
+    /// in the middle of the visible cycle. It also keeps the quadrature output's
+    /// hold aligned with its own wrap, so the circle the two outputs trace does
+    /// not tear at a cycle boundary.
+    [[nodiscard]] float shape_at_cycles(const LfoMix& m, double cycles,
                                         double quadrature = 0.0) const noexcept {
-        // Phase and cycle index take the *same* offset. Keying the
-        // sample-and-hold on an un-offset index while the phase is offset makes
-        // the held value step in the middle of the visible cycle. It also keeps
-        // the quadrature output's hold aligned with its own wrap, so the circle
-        // the two outputs trace does not tear at a cycle boundary.
         const double offset =
             static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0 + quadrature;
-        return resolve_output(
-            lfo_mix_value(m, phase_at(cycles, offset), cycle_at(cycles, offset)),
-            state().get_value(kOutputScale), as_toggle(state().get_value(kInvert)));
+        return lfo_mix_value(m, phase_at(cycles, offset), cycle_at(cycles, offset));
+    }
+
+    /// The overload the audio callback uses, with the mix hoisted out of the
+    /// per-sample loop. Unsmoothed: smoothing has state, so only `process()` can
+    /// apply it, and the scope draws this.
+    [[nodiscard]] float value_at_cycles(const LfoMix& m, double cycles,
+                                        double quadrature = 0.0) const noexcept {
+        return resolve_output(shape_at_cycles(m, cycles, quadrature),
+                              state().get_value(kOutputScale),
+                              as_toggle(state().get_value(kInvert)));
     }
 
     /// Tempo-mode convenience: the value at a beat position.
@@ -259,6 +280,10 @@ public:
                 if (main) main[n] = 0.0f;
                 if (quad) quad[n] = 0.0f;
             }
+            // The smoother must forget the voltage it was holding, or the first
+            // block after bypass ramps down from a level that is no longer on
+            // the patch cable.
+            for (auto& sm : smooth_) sm.reset(0.0f);
             display_phase_.store(-1.0f, std::memory_order_relaxed);
             return;
         }
@@ -278,13 +303,26 @@ public:
         const double start_seconds = static_cast<double>(ctx.position_samples) / sr;
         const double seconds_per_sample = ctx.is_playing ? 1.0 / sr : 0.0;
 
+        // Smoothing is the one stateful thing here. Hoisted out of the loop, and
+        // the two outputs get their own filters: sharing one would make the
+        // quadrature channel filter the main channel's samples.
+        const float ms = state().get_value(kSmoothMs);
+        const float scale = state().get_value(kOutputScale);
+        const bool inv = as_toggle(state().get_value(kInvert));
+
         for (int n = 0; n < frames; ++n) {
             const double beats = ctx.position_beats + bps * static_cast<double>(n);
             const double secs =
                 start_seconds + seconds_per_sample * static_cast<double>(n);
             const double cycles = cycles_at(beats, secs);
-            if (main) main[n] = value_at_cycles(m, cycles);
-            if (quad) quad[n] = value_at_cycles(m, cycles, kQuadratureOffset);
+            if (main)
+                main[n] = resolve_output(
+                    smooth_[0].process(shape_at_cycles(m, cycles), ms, sr), scale, inv);
+            if (quad)
+                quad[n] = resolve_output(
+                    smooth_[1].process(shape_at_cycles(m, cycles, kQuadratureOffset),
+                                       ms, sr),
+                    scale, inv);
         }
 
         const double end_beats =
@@ -309,6 +347,14 @@ public:
     }
 
 private:
+    /// One per output. Zero milliseconds is a wire — bit for bit — which is why
+    /// it is the default: a smoother carries state between blocks, so a non-zero
+    /// `Smooth` is the only control on this plug-in that makes the output depend
+    /// on how the playhead arrived rather than only on where it is. The
+    /// dependence is bounded by the smoother's own settling time, and a bounce
+    /// from a fixed start is still bit-identical every render.
+    std::array<Smoother, 2> smooth_{};
+
     std::atomic<float> display_phase_{-1.0f};
 };
 
