@@ -272,3 +272,7 @@ pulp_add_test_suite(pulp-test-resizable-shell LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-atk-mapping LIBRARIES pulp::view)
 # Background scanner.
 pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
+
+# Right-click routing + root->local coordinate conversion shared by the window
+# hosts (test/test_pointer_dispatch.cpp).
+pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
