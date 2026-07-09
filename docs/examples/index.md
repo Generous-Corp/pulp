@@ -2,7 +2,7 @@
 
 This page is the curated gallery for the documented core examples. The broader
 `examples/` tree also contains subsystem demos and platform-specific proof
-projects such as Bendr, PulpTempoSampler, MPE, WebView, Three.js, SDF, Stream,
+projects such as PulpTempoSampler, MPE, WebView, Three.js, SDF, Stream,
 Plugin Host, Audio Inspector, and iOS AUv3 examples.
 
 ## Gallery
@@ -39,6 +39,7 @@ These examples explore features that are not yet stable across all platforms.
 | [SuperConvolver](super-convolver.html) | GPU convolution reverb with live IR swap — built on the [GPU audio runtime](../reference/modules.md#gpu_audio) | VST3, AU v2, CLAP, Standalone |
 | [Spectral Lab](spectral-lab.html) | N-layer GPU spectral freeze / morph cloud — built on the [GPU audio runtime](../reference/modules.md#gpu_audio) | VST3, AU v2, CLAP, Standalone |
 | [GPU NAM](gpu-nam.html) | Neural Amp Modeler (`.nam`) player with a GPU audio engine — now in [its own repo](https://github.com/danielraffel/pulp-gpu-nam) | VST3, AU v2, CLAP, Standalone |
+| [Bendr](bendr.html) | Pitch / formant shifter with spectral freeze and a pitched feedback delay — now in [its own repo](https://github.com/danielraffel/pulp-bendr) | VST3, AU v2, CLAP, Standalone |
 
 ## Building Examples
 
