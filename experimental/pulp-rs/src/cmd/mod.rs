@@ -30,5 +30,6 @@ pub mod sdk;
 pub mod tool;
 pub mod trace;
 pub mod trace_open;
+pub mod trace_query;
 pub mod upgrade;
 pub mod version;

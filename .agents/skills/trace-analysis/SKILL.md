@@ -84,6 +84,19 @@ concurrent `pulp motion record` so the motion `trace_id` joins in.
 or missing the category you asked for, means re-capture with a larger
 `--ring-mb` or a shorter window — not "nothing was slow."
 
+When you already have a flushed `.pftrace` and no live session (the common case
+for a trace a user handed you), run SQL against the file directly — no inspector
+needed:
+
+```bash
+pulp trace query "SELECT DISTINCT category FROM slice" --trace /tmp/pulp-<ts>.pftrace
+```
+
+This shells out to `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → `$PATH`;
+`pulp trace doctor` reports which) and returns its native table. `--format`
+json/csv and `--preset` apply only to the live inspector path; offline is raw
+SQL against the file.
+
 To eyeball a trace in the Perfetto timeline instead of querying it, hand it to
 the UI (browsers block `file://`, so this serves it over loopback and opens the
 UI at it): `pulp trace open /tmp/pulp-<ts>.pftrace` (`--no-browser` prints the

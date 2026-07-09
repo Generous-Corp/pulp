@@ -34,10 +34,21 @@ depends on a specific agent, MCP server, or vendor.
 
 ## The tool: `trace_processor`
 
-Queries run through the pinned `trace_processor` wrapper (a small Python
-launcher that lazy-loads the precompiled `trace_processor_shell` binary). Pulp
-pins it by version + SHA-256; `pulp trace query` shells to it for you. To drive
-it directly:
+Queries run through the `trace_processor` wrapper (a small Python launcher that
+lazy-loads the precompiled `trace_processor_shell` binary). The live path
+(`pulp trace query "<sql>"`) forwards to the inspector's `Trace.query`; once a
+session is flushed to a `.pftrace`, run SQL **offline against the file** with
+`--trace` and Pulp shells to `trace_processor` for you:
+
+```bash
+# Offline SQL against a saved capture (no live inspector needed):
+pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" \
+  --trace /tmp/pulp-<ts>.pftrace
+```
+
+Pulp resolves the binary via `$PULP_TRACE_PROCESSOR` → `$PATH` (a pinned,
+version+SHA, zero-install tier is tracked separately); `pulp trace doctor`
+reports which. To drive `trace_processor` directly:
 
 ```bash
 # Interactive SQL over a capture:
@@ -45,7 +56,7 @@ it directly:
   "SELECT name, dur FROM slice WHERE category='dsp.node' ORDER BY dur DESC LIMIT 20" \
   /tmp/pulp-<ts>.pftrace
 
-# Run a file of view definitions, then query:
+# Run a file of view definitions, then query (trace as the trailing positional):
 ./trace_processor -q .agents/skills/trace-sql/pulp_dsp_node_cost.sql /tmp/x.pftrace
 ```
 
