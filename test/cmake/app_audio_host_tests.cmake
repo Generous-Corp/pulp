@@ -91,6 +91,12 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_coreaudio_default_follow.mm
         LIBRARIES pulp::audio)
     target_link_libraries(pulp-test-coreaudio-default-follow PRIVATE "-framework CoreAudio")
+
+    # CoreAudio input-only open (capture without opening any output).
+    pulp_add_test_suite(pulp-test-coreaudio-input-only
+        SOURCES test_coreaudio_input_only.mm
+        LIBRARIES pulp::audio)
+    target_link_libraries(pulp-test-coreaudio-input-only PRIVATE "-framework CoreAudio")
 endif()
 
 # Plugin matrix tests (sample rate/buffer size/edge case sweep)
