@@ -14,10 +14,9 @@ curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
 
 <details>
-<summary><strong>Verification</strong> (optional checks, click to expand)</summary>
+<summary><strong>Optional: Verify before installation</strong> (click to expand)</summary>
 
-As an additional layer of security, you can download the shell installer and
-verify its SHA-256 checksum before running it:
+For an additional layer of security, you can download the installer and verify its SHA-256 checksum before running it:
 
 ```bash
 curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
