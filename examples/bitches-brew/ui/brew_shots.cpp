@@ -1,6 +1,7 @@
 #include "dc_processor.hpp"
 #include "function_processor.hpp"
 #include "lfo_processor.hpp"
+#include "quantizer_processor.hpp"
 #include "sync_processor.hpp"
 #include <pulp/format/headless.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -71,6 +72,14 @@ int main() {
                                   static_cast<float>(Curve::exponential));
               h.state().set_value(FunctionProcessor::kAmount, 3.0f);
               run_block(h, playing(0.0), 0.7f);
+          });
+    shoot(create_quantizer, "/tmp/brewshots/quantizer.png",
+          [](format::HeadlessHost& h) {
+              // Few enough steps that the treads are legible, offset off the
+              // lattice, and an input parked between two of them.
+              h.state().set_value(QuantizerProcessor::kSteps, 6.0f);
+              h.state().set_value(QuantizerProcessor::kOffset, 0.3f);
+              run_block(h, playing(0.0), 0.42f);
           });
     shoot(create_sync, "/tmp/brewshots/sync-stopped.png", nullptr);
     shoot(create_sync, "/tmp/brewshots/sync-running.png",

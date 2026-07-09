@@ -18,6 +18,9 @@
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/theme.hpp>
+
+#include <cstddef>
+#include <vector>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -259,5 +262,24 @@ private:
     std::string title_;
     std::string tagline_;
 };
+
+/// Plot `f` over `[x0, x1]` as one continuous stroked path.
+///
+/// One `stroke_path` call, not N `stroke_line` calls. Per-segment strokes give
+/// every joint its own pair of caps, which double-blend where segments meet: at
+/// the sample density a curve needs, a solid line comes out visibly beaded. A
+/// polyline gets real line joins and strokes once.
+template <typename Fn>
+void plot(cv::Canvas& canvas, int samples, float x0, float x1, Fn&& f) {
+    if (samples < 1) return;
+    std::vector<cv::Canvas::Point2D> pts;
+    pts.reserve(static_cast<std::size_t>(samples) + 1);
+    for (int i = 0; i <= samples; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(samples);
+        const float x = x0 + (x1 - x0) * t;
+        pts.push_back({x, f(t)});
+    }
+    canvas.stroke_path(pts.data(), pts.size());
+}
 
 }  // namespace pulp::examples::brew::ui

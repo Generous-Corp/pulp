@@ -7,7 +7,7 @@ target_link_libraries(brew-ui INTERFACE brew-core pulp::view pulp::canvas)
 # Both binaries below construct the editors through the real
 # Processor::create_view() path, so both need every plug-in's view source and
 # every plug-in's include directory. One list, so adding a plug-in is one edit.
-set(_brew_plugins dc function lfo sync)
+set(_brew_plugins dc function lfo quantizer sync)
 set(_brew_view_sources "")
 set(_brew_plugin_dirs "")
 foreach(plugin ${_brew_plugins})
