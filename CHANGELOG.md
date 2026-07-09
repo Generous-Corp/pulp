@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06360"></a>
+## [0.636.0] - 2026-07-09
+
+- feat(wam): WAMv2 web-audio ABI — MIDI/SysEx/state/rack + review-sweep hardening ([#5809](https://github.com/danielraffel/pulp/pull/5809))
+- docs/link tracing dev tools ([#5849](https://github.com/danielraffel/pulp/pull/5849))
+- feature/trace plugin chain example ([#5848](https://github.com/danielraffel/pulp/pull/5848))
+- feature/trace mcp proxies ([#5844](https://github.com/danielraffel/pulp/pull/5844))
+
 <a id="v06350"></a>
 ## [0.635.0] - 2026-07-09
 
@@ -6152,6 +6160,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.636.0]: https://github.com/danielraffel/pulp/releases/tag/v0.636.0
 [0.635.0]: https://github.com/danielraffel/pulp/releases/tag/v0.635.0
 [0.634.0]: https://github.com/danielraffel/pulp/releases/tag/v0.634.0
 [0.626.0]: https://github.com/danielraffel/pulp/releases/tag/v0.626.0
