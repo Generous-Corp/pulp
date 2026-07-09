@@ -1186,6 +1186,13 @@ commands:
             description: Plain-English question to investigate
       - name: doctor
         summary: Readiness check. Aggregates client-side inspector reachability and `trace_processor` availability (`$PULP_TRACE_PROCESSOR` then `$PATH`) with the inspector's `compiled_in` / `active` / `last_trace_path` from `Trace.snapshot`, then reports `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object.
+      - name: open
+        summary: Serve a flushed `.pftrace` from a loopback-only HTTP server and open it in the Perfetto UI via the `?url=` deep link (browsers block `file://`). `--no-browser` prints the URLs to paste instead of launching one; `--keep-alive-seconds N` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`.
+        args:
+          - name: file
+            kind: positional
+            required: true
+            description: The .pftrace file to serve and open
     docs: reference/cli.md#trace
 
   - name: tweaks

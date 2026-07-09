@@ -84,6 +84,11 @@ concurrent `pulp motion record` so the motion `trace_id` joins in.
 or missing the category you asked for, means re-capture with a larger
 `--ring-mb` or a shorter window — not "nothing was slow."
 
+To eyeball a trace in the Perfetto timeline instead of querying it, hand it to
+the UI (browsers block `file://`, so this serves it over loopback and opens the
+UI at it): `pulp trace open /tmp/pulp-<ts>.pftrace` (`--no-browser` prints the
+URL to paste; `--json` for agents).
+
 ---
 
 ## The investigation protocol

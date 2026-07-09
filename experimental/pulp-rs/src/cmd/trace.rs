@@ -57,6 +57,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use crate::cmd::trace_open::{run_open, OpenArgs};
 use crate::error::{CliError, Result};
 
 /// Default inspector port — matches `inspect/src/inspector_server.cpp`
@@ -132,6 +133,10 @@ pub enum Sub {
     /// inspector call, so [`to_inspector_call`] returns `None` for it and
     /// [`dispatch`] runs it through [`run_doctor`].
     Doctor,
+    /// `pulp trace open <file.pftrace>` — serve the trace from a loopback
+    /// HTTP server and open it in the Perfetto UI. Client-side (no inspector
+    /// call), so [`dispatch`] runs it through `trace_open::run_open`.
+    Open(OpenArgs),
 }
 
 /// Shared flag state — flows into every [`dispatch`] call regardless
@@ -216,6 +221,7 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "snapshot" => Ok((Sub::Snapshot, globals)),
         "explain" => parse_explain(&rest[1..]).map(|s| (s, globals)),
         "doctor" => Ok((Sub::Doctor, globals)),
+        "open" => parse_open(&rest[1..]).map(|s| (s, globals)),
         // L0 preset verbs — sugar for `query --preset <verb>`.
         "slowest-frames" | "xruns" | "dsp-hotspots" | "layout-vs-paint" => {
             Ok((preset_sub(verb), globals))
@@ -348,6 +354,56 @@ fn parse_explain(args: &[String]) -> Result<Sub> {
     })
 }
 
+fn parse_open(args: &[String]) -> Result<Sub> {
+    let mut file: Option<PathBuf> = None;
+    let mut no_browser = false;
+    let mut keep_alive_secs = OpenArgs::DEFAULT_KEEP_ALIVE_SECS;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--no-browser" => no_browser = true,
+            "--keep-alive-seconds" => {
+                i += 1;
+                let v = args.get(i).ok_or_else(|| {
+                    CliError::BadUsage(
+                        "--keep-alive-seconds requires a value".to_owned(),
+                    )
+                })?;
+                keep_alive_secs = v.parse::<u64>().map_err(|_| {
+                    CliError::BadUsage(format!(
+                        "--keep-alive-seconds: invalid u64 value `{v}`"
+                    ))
+                })?;
+            }
+            other if other.starts_with("--") => {
+                return Err(CliError::BadUsage(format!(
+                    "pulp trace open: unknown argument `{other}`"
+                )));
+            }
+            _ => {
+                if file.is_some() {
+                    return Err(CliError::BadUsage(
+                        "pulp trace open: only one .pftrace file is allowed"
+                            .to_owned(),
+                    ));
+                }
+                file = Some(PathBuf::from(&args[i]));
+            }
+        }
+        i += 1;
+    }
+    let file = file.ok_or_else(|| {
+        CliError::BadUsage(
+            "pulp trace open: missing <file.pftrace>".to_owned(),
+        )
+    })?;
+    Ok(Sub::Open(OpenArgs {
+        file,
+        no_browser,
+        keep_alive_secs,
+    }))
+}
+
 /// Translate a [`Sub`] into the inspector call surface —
 /// `(method, params_json)`. Pure function: easy to unit test without
 /// spawning anything.
@@ -365,9 +421,9 @@ pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
             "Trace.explain",
             format!("{{\"question\":\"{}\"}}", escape_json(question)),
         )),
-        // Doctor is a client-side aggregation, not a single inspector
-        // call — dispatch() runs it via run_doctor() before reaching here.
-        Sub::Doctor => None,
+        // Doctor and Open are client-side, not a single inspector call —
+        // dispatch() runs them before reaching here.
+        Sub::Doctor | Sub::Open(_) => None,
     }
 }
 
@@ -598,6 +654,9 @@ pub fn dispatch<T: InspectorTalker>(
     if matches!(sub, Sub::Doctor) {
         return run_doctor(port, flags.json, talker, out);
     }
+    if let Sub::Open(args) = sub {
+        return run_open(args, flags.json, out);
+    }
     let Some((method, params)) = to_inspector_call(sub) else {
         // The `Help` arm above already returned. This stays here so
         // adding a new `Sub` variant without a matching
@@ -666,9 +725,9 @@ fn write_pretty(
         Sub::Help => {
             writeln!(out, "{trimmed}")?;
         }
-        // Doctor is handled in dispatch() via run_doctor() and never
-        // reaches write_pretty; this arm keeps the match exhaustive.
-        Sub::Doctor => {
+        // Doctor and Open are handled in dispatch() and never reach
+        // write_pretty; these arms keep the match exhaustive.
+        Sub::Doctor | Sub::Open(_) => {
             writeln!(out, "{trimmed}")?;
         }
     }
@@ -985,6 +1044,16 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "  doctor                        Check inspector + tracing build + trace_processor readiness"
+    )?;
+    writeln!(out)?;
+    writeln!(out, "Viewing:")?;
+    writeln!(
+        out,
+        "  open <file.pftrace> [--no-browser] [--keep-alive-seconds N]"
+    )?;
+    writeln!(
+        out,
+        "                                Serve the trace on loopback + open it in the Perfetto UI"
     )?;
     writeln!(out)?;
     writeln!(out, "Global flags:")?;
@@ -1536,5 +1605,51 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("pulp trace doctor"), "{out}");
         assert!(out.contains("UNREACHABLE"), "{out}");
+    }
+
+    #[test]
+    fn parse_open_verb_defaults() {
+        let (sub, _) = parse(&s(&["open", "/tmp/x.pftrace"])).unwrap();
+        let Sub::Open(a) = sub else { panic!("expected open") };
+        assert_eq!(a.file, Path::new("/tmp/x.pftrace"));
+        assert!(!a.no_browser);
+        assert_eq!(a.keep_alive_secs, OpenArgs::DEFAULT_KEEP_ALIVE_SECS);
+    }
+
+    #[test]
+    fn parse_open_collects_flags() {
+        let (sub, _) = parse(&s(&[
+            "open",
+            "/tmp/y.pftrace",
+            "--no-browser",
+            "--keep-alive-seconds",
+            "3",
+        ]))
+        .unwrap();
+        let Sub::Open(a) = sub else { panic!("expected open") };
+        assert!(a.no_browser);
+        assert_eq!(a.keep_alive_secs, 3);
+    }
+
+    #[test]
+    fn parse_open_requires_a_file() {
+        let err = parse(&s(&["open", "--no-browser"])).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn parse_open_rejects_a_second_file() {
+        let err = parse(&s(&["open", "a.pftrace", "b.pftrace"])).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn open_has_no_single_inspector_call() {
+        let sub = Sub::Open(OpenArgs {
+            file: PathBuf::from("/tmp/x.pftrace"),
+            no_browser: true,
+            keep_alive_secs: 0,
+        });
+        assert!(to_inspector_call(&sub).is_none());
     }
 }
