@@ -1,0 +1,33 @@
+# Cloudflare Pages headers for the WebCLAP demo.
+#
+# WebCLAP needs cross-origin isolation: the module imports a shared
+# WebAssembly.Memory (threads + SharedArrayBuffer), which the browser only
+# permits when the page is crossOriginIsolated. That requires BOTH of these on
+# the DOCUMENT response:
+#   Cross-Origin-Opener-Policy: same-origin
+#   Cross-Origin-Embedder-Policy: require-corp
+#
+# COEP: require-corp then BLOCKS any subresource that does not explicitly opt in
+# via CORP (or CORS). So EVERY subresource — the .mjs modules, the .wasm, and
+# any future font/image/worklet — carries Cross-Origin-Resource-Policy. The
+# `/*` block below applies COOP/COEP/CORP to every response (document AND
+# subresource); the per-extension blocks pin the correct MIME so the browser
+# accepts the ES modules (text/javascript) and instantiates the module
+# (application/wasm). This mirrors the working dev server, browser-host/serve.mjs.
+
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: cross-origin
+
+/*.wasm
+  Content-Type: application/wasm
+
+/*.mjs
+  Content-Type: text/javascript; charset=utf-8
+
+/*.js
+  Content-Type: text/javascript; charset=utf-8
+
+/*.css
+  Content-Type: text/css; charset=utf-8
