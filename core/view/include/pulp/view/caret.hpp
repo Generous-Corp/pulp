@@ -101,6 +101,10 @@ void set_default_caret_blink(const CaretBlinkConfig& config) noexcept;
 /// still responsible for not painting a caret on an unfocused widget.
 class CaretBlink {
 public:
+    /// Adopts `default_caret_blink()` as it stands at construction, so an app
+    /// that sets a process-wide default before building its view tree gets it.
+    CaretBlink() noexcept;
+
     void set_config(const CaretBlinkConfig& config) noexcept;
     const CaretBlinkConfig& config() const noexcept { return config_; }
 

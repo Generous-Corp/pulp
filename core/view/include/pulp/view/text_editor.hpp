@@ -5,6 +5,7 @@
 /// Inspired by Visage TextEditor patterns (see ~/Code/visage).
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/caret.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/platform/clipboard.hpp>
 #include <cstddef>
@@ -241,6 +242,18 @@ public:
     /// Caret position in the text, for IME cursor rect queries.
     int caret_pos() const { return caret_position_; }
 
+    /// Caret shape. Defaults to the process-wide style (`CaretStyle::ibeam`).
+    void set_caret_style(CaretStyle style) { caret_style_ = style; request_repaint(); }
+    CaretStyle caret_style() const { return caret_style_; }
+
+    /// Blink timing. Defaults to the process-wide config. The caret still holds
+    /// solid across caret movement and edits regardless of the rate chosen.
+    void set_caret_blink(const CaretBlinkConfig& config) {
+        caret_blink_.set_config(config);
+        request_repaint();
+    }
+    const CaretBlinkConfig& caret_blink() const { return caret_blink_.config(); }
+
     /// Caret bounding rect in local view coordinates. Returns the position
     /// the caret occupies after the most recent paint — both single-line
     /// (uses measured text width and the editor's vertical centering) and
@@ -263,8 +276,8 @@ private:
     float font_size_ = 13.0f;
     float content_inset_left_ = 0.0f; ///< Extra left inset to clear a leading icon
     float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
-    float caret_blink_time_ = 0.0f; ///< Accumulated time for caret blinking
-    float caret_solid_time_remaining_ = 0.0f; ///< Brief solid-caret hold after movement/input
+    CaretBlink caret_blink_;     ///< Solid-while-moving, blinking-while-still state machine
+    CaretStyle caret_style_ = default_caret_style();
     bool has_preferred_horizontal_ = false; ///< Active while walking vertical lines.
     float preferred_visual_x_ = 0.0f;       ///< Layout-space caret x for visual up/down.
     int preferred_text_column_ = 0;         ///< Fallback hard-line column before paint.

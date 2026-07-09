@@ -202,9 +202,19 @@ TEST_CASE("shortening the period does not strand the phase past it", "[view][car
 
 // ── Geometry ─────────────────────────────────────────────────────────────
 
-TEST_CASE("every caret style anchors at the same x", "[view][caret]") {
+TEST_CASE("every caret style anchors at the same glyph boundary", "[view][caret]") {
     const auto m = mid_text_metrics();
-    for (auto style : {CaretStyle::ibeam, CaretStyle::underline, CaretStyle::block})
+
+    // The I-beam straddles the anchor — it marks the boundary itself, and a bar
+    // starting at the anchor would sit on top of the following glyph. Painting
+    // it as a centered stroke of this width reproduces the exact pixels the
+    // editors placed before the caret was factored out.
+    const Rect ibeam = caret_rect_for_style(CaretStyle::ibeam, m);
+    CHECK_THAT(ibeam.x + ibeam.width * 0.5f, WithinAbs(m.x, 1e-4));
+
+    // The cell-covering styles start at the anchor and extend right over the
+    // glyph that follows it.
+    for (auto style : {CaretStyle::underline, CaretStyle::block})
         CHECK_THAT(caret_rect_for_style(style, m).x, WithinAbs(m.x, 1e-4));
 }
 
@@ -215,6 +225,7 @@ TEST_CASE("caret shapes cover the right band", "[view][caret]") {
     CHECK_THAT(ibeam.width, WithinAbs(m.stroke, 1e-4));
     CHECK_THAT(ibeam.y, WithinAbs(m.cell_top, 1e-4));
     CHECK_THAT(ibeam.height, WithinAbs(m.cell_height, 1e-4));
+    CHECK_THAT(ibeam.x, WithinAbs(m.x - m.stroke * 0.5f, 1e-4));  // straddles the anchor
 
     // The underline sits on the baseline, the way a `_` glyph does — NOT at
     // the bottom of the widget's box, and never above the baseline.

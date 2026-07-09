@@ -56,6 +56,8 @@ void set_default_caret_blink(const CaretBlinkConfig& config) noexcept {
 
 // ── Blink state machine ──────────────────────────────────────────────────
 
+CaretBlink::CaretBlink() noexcept : config_(g_default_blink) {}
+
 void CaretBlink::set_config(const CaretBlinkConfig& config) noexcept {
     config_ = sanitize(config);
     // A period change must not leave the phase past the new period, which
@@ -118,8 +120,14 @@ Rect caret_rect_for_style(CaretStyle style, const CaretMetrics& m) noexcept {
         case CaretStyle::block:
             return {m.x, m.cell_top, caret_advance(m), m.cell_height};
         case CaretStyle::ibeam:
-        default:
-            return {m.x, m.cell_top, std::max(1.0f, m.stroke), m.cell_height};
+        default: {
+            // Straddles the anchor rather than starting at it, so the bar marks
+            // the glyph boundary itself instead of overlapping the glyph after
+            // it. The underline and block, which cover a whole cell, start at
+            // the anchor and extend right.
+            const float w = std::max(1.0f, m.stroke);
+            return {m.x - w * 0.5f, m.cell_top, w, m.cell_height};
+        }
     }
 }
 
@@ -127,6 +135,15 @@ void paint_caret(canvas::Canvas& canvas, CaretStyle style, const CaretMetrics& m
                  canvas::Color color) {
     const Rect r = caret_rect_for_style(style, m);
     if (r.is_empty()) return;
+    if (style == CaretStyle::ibeam) {
+        // A centered stroke, not a filled rect: the two differ by half a stroke
+        // width, and every existing editor pixel is placed by this line.
+        const float cx = r.x + r.width * 0.5f;
+        canvas.set_stroke_color(color);
+        canvas.set_line_width(r.width);
+        canvas.stroke_line(cx, r.y, cx, r.bottom());
+        return;
+    }
     canvas.set_fill_color(color);
     canvas.fill_rect(r.x, r.y, r.width, r.height);
 }
