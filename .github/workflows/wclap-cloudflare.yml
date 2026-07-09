@@ -1,0 +1,108 @@
+# WebCLAP → Cloudflare Pages deploy.
+#
+# Builds the WebCLAP PulpGain module (wasi-sdk, pinned), assembles a
+# self-contained deploy dir (examples/web-demos/wclap-build/cloudflare/public),
+# PROVES it in headless Chrome (crossOriginIsolated + audio + every subresource
+# 200 under the real _headers), and — only once the owner has connected a
+# Cloudflare account (secrets present) — deploys it to Cloudflare Pages.
+#
+# Cloudflare is WebCLAP's canonical host because it can send the COOP/COEP
+# headers that cross-origin isolation (threads + SharedArrayBuffer) requires;
+# GitHub Pages cannot. Until the two secrets below exist the deploy step is
+# skipped and this workflow is a build+proof gate only.
+name: WebCLAP Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "core/format/src/wasm/wclap-*.mjs"
+      - "examples/web-demos/wclap-build/**"
+      - "examples/pulp-gain/**"
+      - "tools/cmake/PulpWclap.cmake"
+      - "tools/cmake/wasi-toolchain.cmake"
+      - ".github/workflows/wclap-cloudflare.yml"
+  pull_request:
+    paths:
+      - "examples/web-demos/wclap-build/**"
+      - ".github/workflows/wclap-cloudflare.yml"
+  # Weekly drift check — a broken build is a red run, not a dead site.
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: wclap-cloudflare-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-prove-deploy:
+    name: Build + prove + (owner-gated) deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up wasi-sdk (pinned)
+        run: |
+          set -euo pipefail
+          ver=25
+          url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-x86_64-linux.tar.gz"
+          curl -fsSL "$url" -o /tmp/wasi-sdk.tar.gz
+          mkdir -p "$HOME/wasi-sdk"
+          tar -xzf /tmp/wasi-sdk.tar.gz -C "$HOME/wasi-sdk" --strip-components=1
+          echo "WASI_SDK_PREFIX=$HOME/wasi-sdk" >> "$GITHUB_ENV"
+
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install playwright-core
+        run: npm install --no-save playwright-core
+
+      - name: Build WebCLAP module
+        working-directory: examples/web-demos/wclap-build
+        run: |
+          set -euo pipefail
+          cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+
+      - name: Assemble self-contained deploy dir
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: node assemble.mjs
+
+      - name: Prove locally (crossOriginIsolated + WebCLAP audio + subresources)
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          ln -s "$GITHUB_WORKSPACE/node_modules" node_modules
+          node validate-deploy.mjs --screenshot /tmp/wclap-cloudflare.png
+
+      - name: Upload proof screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wclap-cloudflare-proof
+          path: /tmp/wclap-cloudflare.png
+          if-no-files-found: ignore
+
+      # ── Owner-gated deploy ─────────────────────────────────────────────────
+      # Runs only after the owner adds CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
+      # repo secrets (see cloudflare/README.md). Until then this step is skipped.
+      - name: Deploy to Cloudflare Pages
+        if: ${{ github.event_name != 'pull_request' && secrets.CLOUDFLARE_API_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: examples/web-demos/wclap-build/cloudflare
+          command: pages deploy public --project-name pulp-wclap-demos
