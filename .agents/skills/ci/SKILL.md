@@ -256,7 +256,14 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   FetchContents choc/clap itself). The browser drivers are
   `examples/web-demos/*/{browser-test,browser-host}/validate.mjs`; run them
   locally with a system Chrome/Canary via `node validate.mjs --screenshot out.png`
-  (set `CHROME_PATH` or pass `--browser`).
+  (set `CHROME_PATH` or pass `--browser`). The WAM node validations also cover
+  the in-worklet **rack** path (`wam_rack_runner.mjs` against the
+  `PulpPluckGainRack` target — the only committed consumer that compiles
+  `wam_chain_entry.cpp`/`WamChainBridge`), the wire protocol + version-skew
+  bridge contract (`core/format/src/wasm/wam-runtime.test.mjs`, pure JS), and
+  hostile-state rejection (overflow/CRC/truncation) folded into
+  `wam_feature_runner.mjs` — so a regression in the state codec or chain runtime
+  fails here rather than only in a browser.
 - **Android native `.cxx` caches must be dependency-aware.** The Android workflow
   builds through Gradle's external native build, and `android/app/.cxx` can hold
   FetchContent checkouts under `_deps`. Do not cache `.cxx` under a Gradle-only
