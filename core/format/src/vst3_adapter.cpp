@@ -1759,6 +1759,18 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
 
+    // VST3 puts the obligation to declare output silence on the plugin, and a
+    // host is free to propagate its input silenceFlags into the output buffers
+    // it hands us. A Processor may synthesize output from silence — a
+    // generator, an oscillator, a DC/control-voltage source, a reverb tail — so
+    // any bus we just rendered into must be reported as carrying signal.
+    // Leaving a stale flag set hands the host a full buffer labelled silent.
+    // The bypass path returns before this point and leaves the flags alone:
+    // there the plugin is a wire, so upstream silence stays silence.
+    for (int32 b = 0; b < data.numOutputs; ++b) {
+        data.outputs[b].silenceFlags = 0;
+    }
+
     if (boundary_f64) {
         if (data.numOutputs > 0 && data.outputs[0].channelBuffers64) {
             for (int ch = 0; ch < out_channels; ++ch) {

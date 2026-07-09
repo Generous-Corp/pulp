@@ -18,6 +18,8 @@
 
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>  // pulls the MusicDevice SDK (AUMusicLookup)
+#include <pulp/format/processor.hpp>
+#include <pulp/format/registry.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
@@ -27,7 +29,9 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -784,4 +788,174 @@ TEST_CASE("AU v2 MIDI out: callback pair publishes atomically (no torn pair)",
 
     REQUIRE_FALSE(torn.load(std::memory_order_relaxed));
     REQUIRE(reads.load(std::memory_order_relaxed) > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Silence-flag contract for generated output.
+//
+// AUEffectBase::Render hands ioActionFlags to AUInputElement::PullInput, so a
+// host that renders silence upstream ORs kAudioUnitRenderAction_OutputIsSilence
+// into it before ProcessBufferLists ever runs. The stock
+// AUEffectBase::ProcessBufferLists is the code that clears the bit again once a
+// kernel produces output — and PulpAUEffect overrides ProcessBufferLists, so
+// that clear never happened. The result was a full output buffer labelled
+// silent: a host that honours the label substitutes digital silence, which
+// silently deletes the output of every generator, oscillator, reverb tail, and
+// DC/control-voltage source.
+//
+// The failure is invisible without this test. PulpAUEffect passes
+// inProcessesInPlace = true, so AUEffectBase::Render's
+// `if (silence && !ProcessesInPlace()) ZeroBuffer(output)` never fires — the
+// buffer really does hold the right samples. Only the flag is wrong, and only
+// the host acts on it. A Processor-level "write 0.5, read 0.5" test passes
+// while the bug is live.
+namespace {
+
+// Writes a constant to every output sample regardless of input. The shape of
+// every CV/generator plugin, and the shape the silence bit destroys.
+class DcEffectProcessor : public pulp::format::Processor {
+public:
+    static constexpr float kValue = 0.5f;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUEffectSilenceTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-effect-silence",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2}},
+            .output_buses = {{"Main Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        for (std::size_t c = 0; c < output.num_channels(); ++c) {
+            float* dst = output.channel_ptr(c);
+            for (std::size_t n = 0; n < output.num_samples(); ++n) dst[n] = kValue;
+        }
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        if (auto* out = audio.main_output()) {
+            pulp::audio::BufferView<const float> empty_input;
+            process(*out, empty_input, midi_in, midi_out, context);
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_dc_effect() {
+    return std::make_unique<DcEffectProcessor>();
+}
+
+struct ScopedDcFactory {
+    ScopedDcFactory() : previous(pulp::format::registered_factory()) {
+        pulp::format::register_plugin(create_dc_effect);
+    }
+    ~ScopedDcFactory() { pulp::format::register_plugin(previous); }
+    pulp::format::ProcessorFactory previous;
+};
+
+AudioStreamBasicDescription silence_test_format(double sample_rate, UInt32 channels) {
+    AudioStreamBasicDescription fmt{};
+    fmt.mSampleRate = sample_rate;
+    fmt.mFormatID = kAudioFormatLinearPCM;
+    fmt.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                       kAudioFormatFlagIsNonInterleaved;
+    fmt.mBytesPerPacket = sizeof(float);
+    fmt.mFramesPerPacket = 1;
+    fmt.mBytesPerFrame = sizeof(float);
+    fmt.mChannelsPerFrame = channels;
+    fmt.mBitsPerChannel = 32;
+    return fmt;
+}
+
+}  // namespace
+
+TEST_CASE("AU v2 effect clears OutputIsSilence when the processor generates output",
+          "[au][au-v2][effect][silence][dc]")
+{
+    ScopedDcFactory factory;
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 64;
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    // Silent input, as a host feeds a generator sitting on an empty track.
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+
+    // AudioBufferList declares mBuffers[1]; a two-channel list is the standard
+    // trailing-storage idiom. The static_assert pins the layout the idiom needs.
+    struct TwoBufferList {
+        AudioBufferList bl;
+        AudioBuffer second;
+    };
+    static_assert(offsetof(TwoBufferList, second) ==
+                      offsetof(AudioBufferList, mBuffers) + sizeof(AudioBuffer),
+                  "AudioBufferList trailing-storage layout assumption broken");
+
+    auto make_bufferlist = [](float* a, float* b, TwoBufferList& list) {
+        list.bl.mNumberBuffers = 2;
+        list.bl.mBuffers[0] = {1, static_cast<UInt32>(kFrames * sizeof(float)), a};
+        list.bl.mBuffers[1] = {1, static_cast<UInt32>(kFrames * sizeof(float)), b};
+    };
+
+    TwoBufferList input{}, output{};
+    make_bufferlist(in_l.data(), in_r.data(), input);
+    make_bufferlist(out_l.data(), out_r.data(), output);
+
+    // The host says "what I handed you upstream is digital silence."
+    AudioUnitRenderActionFlags flags = kAudioUnitRenderAction_OutputIsSilence;
+
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+
+    // The processor generated a DC level from that silence. The buffer must
+    // hold it, and the adapter must retract the host's silence claim — the
+    // whole point, and the half that was missing.
+    REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) == 0);
+    for (UInt32 n = 0; n < kFrames; ++n) {
+        REQUIRE(out_l[n] == DcEffectProcessor::kValue);
+        REQUIRE(out_r[n] == DcEffectProcessor::kValue);
+    }
+
+    // A second block must not re-raise it (the flag is per-block, and a host
+    // that keeps passing the bit in must keep getting it cleared).
+    flags = kAudioUnitRenderAction_OutputIsSilence;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) == 0);
+
+    // Unrelated flags the host may have set are preserved: we retract exactly
+    // one claim, not the whole word.
+    flags = kAudioUnitRenderAction_OutputIsSilence |
+            kAudioUnitRenderAction_PreRender;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) == 0);
+    REQUIRE((flags & kAudioUnitRenderAction_PreRender) != 0);
+
+    effect.DoCleanup();
 }

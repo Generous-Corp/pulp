@@ -654,6 +654,22 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         processor_->process(process_buffers, midi_in, midi_out, ctx);
     }
 
+    // The host ORs kAudioUnitRenderAction_OutputIsSilence into ioActionFlags via
+    // AUInputElement::PullInput whenever it renders silence upstream, and
+    // AUEffectBase::Render never clears it afterwards. Overriding
+    // ProcessBufferLists bypasses the stock implementation, which is the only
+    // place the base class would have cleared the bit on behalf of a kernel that
+    // produced output. A Processor may synthesize output from silence — a
+    // generator, an oscillator, a DC/control-voltage source, a reverb tail — and
+    // the adapter cannot know whether this one did, so the flag must not survive
+    // an active render. Leaving it set hands the host a full buffer labelled
+    // silent, and a host that honours the label substitutes digital silence.
+    //
+    // The bypass path above returns early and deliberately leaves the flag
+    // alone: there the plugin really is a wire, so upstream silence is still
+    // silence downstream.
+    ioActionFlags &= ~kAudioUnitRenderAction_OutputIsSilence;
+
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. GetParameter reads the
     // store directly, so the host sees the control settle back automatically.
