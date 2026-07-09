@@ -27,6 +27,28 @@ namespace pulp::examples::brew {
 /// a voltage range rather than a bar.
 inline constexpr int kMaxSequencerSteps = 8;
 
+/// How a rate knob is interpreted.
+///
+/// This is the fork between an LFO and a sequencer, and it is a real choice, not
+/// a preference. In `cycle` the whole pattern occupies the rate, so shortening it
+/// makes the steps faster and the modulation keeps its period — it stays an LFO.
+/// In `step` each step occupies the rate, so the pattern's period grows with its
+/// length — it becomes a sequencer. Neither can be derived from the other by
+/// scaling a knob, because in `cycle` the step duration depends on the length.
+enum class SpeedMode : int { cycle = 0, step = 1 };
+
+[[nodiscard]] inline SpeedMode speed_mode_from_param(float v) noexcept {
+    return v >= 0.5f ? SpeedMode::step : SpeedMode::cycle;
+}
+
+/// Beats occupied by one step, given the rate knob and how it is read.
+[[nodiscard]] inline double beats_per_step(SpeedMode mode, double rate_beats,
+                                           int length) noexcept {
+    if (!(rate_beats > 0.0) || length < 1) return 0.0;
+    return mode == SpeedMode::step ? rate_beats
+                                   : rate_beats / static_cast<double>(length);
+}
+
 /// Euclidean modulo. `%` on a negative index would return a negative step, and a
 /// negative step means the sequencer reads outside its own array before the
 /// timeline's origin — which a host will happily ask it to do.

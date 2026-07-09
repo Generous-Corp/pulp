@@ -8,12 +8,14 @@
 // and on a plug-in that makes no sound, a dead readout is indistinguishable from
 // a dead cable.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "dc_processor.hpp"
 #include "function_processor.hpp"
 #include "lfo_processor.hpp"
 #include "quantizer_processor.hpp"
+#include "step_processor.hpp"
 #include "sync_processor.hpp"
 
 #include <pulp/format/headless.hpp>
@@ -286,5 +288,77 @@ TEST_CASE("Quantizer's editor draws the staircase and the operating point",
         const auto low = ed.shoot();
         drive(ed.host, 0.7f);
         REQUIRE(differs(ed.shoot(), low));
+    }
+}
+
+TEST_CASE("Step LFO's editor draws the pattern and marks the playing step",
+          "[brew][ui][step]") {
+    Editor ed(create_step);
+    if (!ed.can_capture()) {
+        WARN("no raster screenshot backend in this build — skipping");
+        return;
+    }
+    const auto ramp = ed.shoot();
+    REQUIRE_FALSE(ramp.empty());
+
+    // The bars read the store, so editing a step must redraw them.
+    ed.host.state().set_value(StepProcessor::step_param(3), -0.9f);
+    REQUIRE(differs(ed.shoot(), ramp));
+
+    SECTION("shortening the pattern recesses the steps that no longer play") {
+        const auto full = ed.shoot();
+        ed.host.state().set_value(StepProcessor::kLength, 3.0f);
+        REQUIRE(differs(ed.shoot(), full));
+    }
+
+    SECTION("clicking a bar writes the step under the cursor, and only it") {
+        // The bars are the control, not a picture of one. Render once so flex has
+        // placed them, then click inside the first bar near its top.
+        (void)ed.shoot();
+        const view::Rect bars = ed.view->child_at(0)->bounds();
+        REQUIRE(bars.width > 0.0f);
+
+        const float slot = bars.width / 8.0f;
+        const float x = bars.x + slot * 0.5f;          // centre of bar 0
+        const float y = bars.y + bars.height * 0.2f;   // 20% down => +0.6
+
+        const float neighbour_before =
+            ed.host.state().get_value(StepProcessor::step_param(1));
+        ed.view->simulate_click({x, y});
+
+        REQUIRE(ed.host.state().get_value(StepProcessor::step_param(0)) ==
+                Catch::Approx(0.6f).margin(0.02f));
+        // A click on one bar must not disturb its neighbour.
+        REQUIRE(ed.host.state().get_value(StepProcessor::step_param(1)) ==
+                neighbour_before);
+    }
+
+    SECTION("a drag keeps writing the bar it started on") {
+        // A drag that wandered sideways must keep writing the step it began on.
+        // `ParameterEdit` already refuses writes outside its gesture, so a
+        // re-picking handler could not corrupt a neighbour — it would instead go
+        // quietly dead the moment the cursor left the first bar. So the assertion
+        // that matters is the *final* value, not merely that something changed.
+        (void)ed.shoot();
+        const view::Rect bars = ed.view->child_at(0)->bounds();
+        const float slot = bars.width / 8.0f;
+        const float mid_y = bars.y + bars.height * 0.5f;
+
+        std::vector<float> before;
+        for (int i = 0; i < 8; ++i)
+            before.push_back(ed.host.state().get_value(StepProcessor::step_param(i)));
+
+        // Start in bar 0 at the zero line, drag right across bars 1..3 and up to
+        // 10% from the top, which is +0.8.
+        ed.view->simulate_drag({bars.x + slot * 0.5f, mid_y},
+                               {bars.x + slot * 3.5f, bars.y + bars.height * 0.1f});
+
+        REQUIRE(ed.host.state().get_value(StepProcessor::step_param(0)) ==
+                Catch::Approx(0.8f).margin(0.02f));
+        for (int i = 1; i < 8; ++i) {
+            CAPTURE(i);
+            REQUIRE(ed.host.state().get_value(StepProcessor::step_param(i)) ==
+                    before[static_cast<std::size_t>(i)]);
+        }
     }
 }

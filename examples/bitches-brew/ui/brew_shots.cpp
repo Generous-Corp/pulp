@@ -2,6 +2,7 @@
 #include "function_processor.hpp"
 #include "lfo_processor.hpp"
 #include "quantizer_processor.hpp"
+#include "step_processor.hpp"
 #include "sync_processor.hpp"
 #include <pulp/format/headless.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -81,6 +82,16 @@ int main() {
               h.state().set_value(QuantizerProcessor::kOffset, 0.3f);
               run_block(h, playing(0.0), 0.42f);
           });
+    shoot(create_step, "/tmp/brewshots/step.png", [](format::HeadlessHost& h) {
+        const float shape[8] = {-0.2f, 0.55f, -0.75f, 0.35f,
+                                0.9f,  -0.4f, 0.15f,  -0.9f};
+        for (int i = 0; i < 8; ++i)
+            h.state().set_value(StepProcessor::step_param(i), shape[i]);
+        h.state().set_value(StepProcessor::kLength, 6.0f);
+        h.state().set_value(StepProcessor::kSpeedMode, 1.0f);
+        h.state().set_value(StepProcessor::kRate, 1.0f);
+        run_block(h, playing(2.3));  // lights step 2
+    });
     shoot(create_sync, "/tmp/brewshots/sync-stopped.png", nullptr);
     shoot(create_sync, "/tmp/brewshots/sync-running.png",
           [](format::HeadlessHost& h) {
