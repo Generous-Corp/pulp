@@ -114,23 +114,23 @@ public:
         auto add = [&](view::View& row, state::ParamID id, const char* label,
                        std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 78.0f, 84.0f);
+            ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        auto top = ui::row(8.0f, 84.0f);
+        auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*top, FunctionProcessor::kCurve, "Curve", curve_name);
         add(*top, FunctionProcessor::kAmount, "Amount", amount_or_dash);
         add(*top, FunctionProcessor::kInScale, "In Scale", number);
 
-        auto bottom = ui::row(8.0f, 84.0f);
+        auto bottom = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*bottom, FunctionProcessor::kInOffset, "In Off", number);
         add(*bottom, FunctionProcessor::kOutOffset, "Out Off", number);
         add(*bottom, FunctionProcessor::kOutputScale, "Out", number);
 
-        auto toggles = ui::row(14.0f, 52.0f);
+        auto toggles = ui::row(ui::kRowGap, ui::kToggleHeight);
         auto inv = ui::param_toggle(store_, FunctionProcessor::kInvert, "Invert");
-        ui::fixed_size(*inv, 78.0f, 50.0f);
+        ui::toggle_size(*inv);
         toggles->add_child(std::move(inv));
 
         add_child(std::move(graph));

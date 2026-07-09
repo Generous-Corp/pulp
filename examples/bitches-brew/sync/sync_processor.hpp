@@ -157,7 +157,7 @@ public:
     /// the two lamps. Without this override a host opens the plug-in at
     /// Processor's 400x300 default — a geometry the layout was never checked at.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 470};
+        return {360, 306};
     }
 
     /// Defined in sync_view.cpp so the audio translation units never see the

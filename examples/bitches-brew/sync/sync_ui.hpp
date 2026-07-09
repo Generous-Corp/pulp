@@ -51,43 +51,42 @@ public:
             return std::string(buf);
         };
 
-        auto rate = ui::row(10.0f, 84.0f);
-        auto timing = ui::row(10.0f, 84.0f);
-        auto feel = ui::row(14.0f, 84.0f);
+        auto rate = ui::row(ui::kRowGap, ui::kKnobHeight);
+        auto timing = ui::row(ui::kRowGap, ui::kKnobHeight);
         auto add_knob = [&](vw_row& into, state::ParamID id, const char* label,
                             std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 88.0f, 84.0f);
+            ui::knob_size(*k);
             into->add_child(std::move(k));
         };
         add_knob(rate, SyncProcessor::kPulsesPerBeat, "PPQN", integer);
         add_knob(rate, SyncProcessor::kMultiplier, "Mult", integer);
         add_knob(rate, SyncProcessor::kDivisor, "Div", integer);
-        add_knob(timing, SyncProcessor::kTriggerLengthMs, "Width", millis);
-        add_knob(timing, SyncProcessor::kFirstDelayMs, "1st Delay", millis);
+        add_knob(rate, SyncProcessor::kTriggerLengthMs, "Width", millis);
+        add_knob(rate, SyncProcessor::kFirstDelayMs, "1st Dly", millis);
         add_knob(timing, SyncProcessor::kOffsetMs, "Offset", signed_millis);
-        add_knob(feel, SyncProcessor::kSwingPercent, "Swing", percent);
+        add_knob(timing, SyncProcessor::kSwingPercent, "Swing", percent);
 
         // Which note the swing moves. Off swings the eighth, on the sixteenth.
         auto sixteenths =
             ui::param_toggle(store_, SyncProcessor::kSwingUnit, "16ths");
-        ui::fixed_size(*sixteenths, 78.0f, 50.0f);
-        feel->add_child(std::move(sixteenths));
+        ui::toggle_size(*sixteenths);
+        timing->add_child(std::move(sixteenths));
 
-        auto bottom = ui::row(14.0f, 52.0f);
+        auto bottom = ui::row(ui::kRowGap, ui::kToggleHeight);
         auto skip = ui::param_toggle(store_, SyncProcessor::kSkipFirst, "Skip 1st");
         auto wait = ui::param_toggle(store_, SyncProcessor::kWaitForBar, "Wait Bar");
         // Toggle draws its label at the bottom of its own box, so the box must be
         // tall enough for both the switch and the text.
-        ui::fixed_size(*skip, 78.0f, 50.0f);
-        ui::fixed_size(*wait, 78.0f, 50.0f);
+        ui::toggle_size(*skip);
+        ui::toggle_size(*wait);
 
         auto clock_lamp = std::make_unique<ui::Lamp>(
             "CLOCK", [this] { return proc_.clock_lamp(); });
         auto run_lamp =
             std::make_unique<ui::Lamp>("RUN", [this] { return proc_.run_lamp(); });
-        ui::fixed_size(*clock_lamp, 56.0f, 50.0f);
-        ui::fixed_size(*run_lamp, 56.0f, 50.0f);
+        ui::fixed_size(*clock_lamp, 46.0f, ui::kToggleHeight);
+        ui::fixed_size(*run_lamp, 46.0f, ui::kToggleHeight);
 
         bottom->add_child(std::move(skip));
         bottom->add_child(std::move(wait));
@@ -96,7 +95,6 @@ public:
 
         add_child(std::move(rate));
         add_child(std::move(timing));
-        add_child(std::move(feel));
         add_child(std::move(bottom));
         add_child(ui::caption_label(
             "24 PPQN is DIN sync. 50% swing is straight, and exactly so."));

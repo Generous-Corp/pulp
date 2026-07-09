@@ -70,6 +70,23 @@ inline std::unique_ptr<vw::View> row(float gap, float height) {
 }
 
 /// Give a widget a fixed box in the flex layout.
+/// Control metrics for the whole suite, in one place.
+///
+/// A plug-in that makes no sound is read, not just operated: the user is looking
+/// for the number, and the knob is how they change it. So the knobs are only as
+/// large as the arc needs to be legible — the value and the label are drawn at a
+/// fixed point size regardless — and the editor stays short enough that a host
+/// never has to scroll it. A label longer than `kKnobWidth` spills over its
+/// neighbours; abbreviate it rather than widening every knob in the suite.
+inline constexpr float kKnobWidth = 60.0f;
+inline constexpr float kKnobHeight = 70.0f;
+inline constexpr float kToggleWidth = 68.0f;
+// A Toggle paints its switch and then its label inside the same box, with the
+// label's baseline six points off the bottom. Anything shorter than this and the
+// text sits on top of the switch.
+inline constexpr float kToggleHeight = 48.0f;
+inline constexpr float kRowGap = 6.0f;
+
 inline void fixed_size(vw::View& v, float w, float h) {
     v.flex().preferred_width = w;
     v.flex().preferred_height = h;
@@ -143,6 +160,11 @@ inline std::unique_ptr<vw::Toggle> param_toggle(state::StateStore& store,
     };
     return toggle;
 }
+
+/// Size a knob and a toggle from the shared metrics, so a density change is one
+/// edit rather than seven.
+inline void knob_size(vw::View& v) { fixed_size(v, kKnobWidth, kKnobHeight); }
+inline void toggle_size(vw::View& v) { fixed_size(v, kToggleWidth, kToggleHeight); }
 
 /// A bipolar voltage rail: full-scale negative at the left, zero at the centre,
 /// full-scale positive at the right, with a marker at the current output.
@@ -231,11 +253,11 @@ public:
         // Reserve the header strip with padding rather than by positioning
         // children below it: Yoga owns the child boxes.
         flex().direction = vw::FlexDirection::column;
-        flex().padding_top = 78.0f;
-        flex().padding_left = 20.0f;
-        flex().padding_right = 20.0f;
-        flex().padding_bottom = 16.0f;
-        flex().gap = 14.0f;
+        flex().padding_top = 66.0f;
+        flex().padding_left = 16.0f;
+        flex().padding_right = 16.0f;
+        flex().padding_bottom = 12.0f;
+        flex().gap = 8.0f;
     }
 
     void paint(cv::Canvas& canvas) override {
@@ -246,16 +268,16 @@ public:
         canvas.fill_rect(0, 0, w, h);
 
         canvas.set_fill_color(palette::text);
-        canvas.set_font("Inter", 22.0f * s);
-        canvas.fill_text(title_, 20.0f * s, 34.0f * s);
+        canvas.set_font("Inter", 20.0f * s);
+        canvas.fill_text(title_, 16.0f * s, 30.0f * s);
 
         canvas.set_fill_color(palette::text_dim);
         canvas.set_font("Inter", 11.0f * s);
-        canvas.fill_text(tagline_, 20.0f * s, 52.0f * s);
+        canvas.fill_text(tagline_, 16.0f * s, 46.0f * s);
 
         canvas.set_stroke_color(palette::border);
         canvas.set_line_width(1.0f * s);
-        canvas.stroke_line(20.0f * s, 64.0f * s, w - 20.0f * s, 64.0f * s);
+        canvas.stroke_line(16.0f * s, 54.0f * s, w - 16.0f * s, 54.0f * s);
     }
 
 private:

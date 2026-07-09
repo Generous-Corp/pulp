@@ -115,7 +115,7 @@ public:
     void prepare(const format::PrepareContext&) override { start_sender(); }
 
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 350};
+        return {360, 274};
     }
 
     std::unique_ptr<view::View> create_view() override;

@@ -102,7 +102,7 @@ public:
     /// the plug-in at Processor's 400x300 default, and the layout is laid out to
     /// a geometry the editor was never checked against. The curve needs vertical room, and six knobs need two rows.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 490};
+        return {360, 434};
     }
 
     /// Defined in function_view.cpp so the audio translation units never see the

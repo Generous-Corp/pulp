@@ -54,27 +54,27 @@ public:
         auto add = [&](view::View& row, state::ParamID id, const char* label,
                        std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 92.0f, 92.0f);
+            ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        auto levels = ui::row(14.0f, 92.0f);
+        // Labels are abbreviated to the knob's width. A Knob centres its label on
+        // its own box, so a longer one silently overlaps its neighbours.
+        auto levels = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*levels, DcProcessor::kValue, "Value", signed_number);
         add(*levels, DcProcessor::kUnipolar, "Unipolar", number);
-        add(*levels, DcProcessor::kMultiplier, "Multiplier", signed_number);
+        add(*levels, DcProcessor::kMultiplier, "Mult", signed_number);
+        add(*levels, DcProcessor::kSmoothMs, "Smooth", millis);
 
-        auto inputs = ui::row(14.0f, 92.0f);
-        add(*inputs, DcProcessor::kInputAdd, "Input Add", signed_number);
-        add(*inputs, DcProcessor::kInputMul, "Input Mul", number);
-        add(*inputs, DcProcessor::kSmoothMs, "Smooth", millis);
-
-        auto rig = ui::row(14.0f, 92.0f);
-        add(*rig, DcProcessor::kOutputScale, "Output Scale", pct);
+        auto inputs = ui::row(ui::kRowGap, ui::kKnobHeight);
+        add(*inputs, DcProcessor::kInputAdd, "In Add", signed_number);
+        add(*inputs, DcProcessor::kInputMul, "In Mul", number);
+        add(*inputs, DcProcessor::kOutputScale, "Out", pct);
         auto invert = ui::param_toggle(store_, DcProcessor::kInvert, "Invert");
         // Toggle draws its label at the bottom of its own box, so the box must
         // be tall enough for both the switch and the text.
-        ui::fixed_size(*invert, 78.0f, 50.0f);
-        rig->add_child(std::move(invert));
+        ui::toggle_size(*invert);
+        inputs->add_child(std::move(invert));
 
         auto readout = ui::caption_label("", 14.0f);
         readout->set_text_color(ui::palette::text);
@@ -86,7 +86,6 @@ public:
 
         add_child(std::move(levels));
         add_child(std::move(inputs));
-        add_child(std::move(rig));
         add_child(std::move(readout));
         add_child(std::move(rail));
         // Full scale, never volts: the plug-in cannot know the interface's rail.
