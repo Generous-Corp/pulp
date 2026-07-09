@@ -56,7 +56,13 @@ void usage() {
   brew-rig list
       Enumerate audio devices and channel counts. Emits nothing.
 
+  brew-rig listen --device <name> [--seconds 3] [--rate 48000]
+      Record every input channel and report what is on each. Emits NOTHING, so it
+      needs no --armed. Use it to find which host input channel a jack lands on,
+      and to prove the OS is letting this process record at all.
+
   brew-rig map    --device <name> --armed [--level 0.25] [--rate 48000]
+                  [--from 0] [--to 31] [--skip 14,15]
       Drive DC on each output channel in turn, record every input channel, and
       print the crossbar. Closes: which host channel reaches which jack, and
       whether the chain inverts polarity.
@@ -266,6 +272,12 @@ int cmd_map(audio::AudioSystem& sys, const Args& a) {
     const auto measure = static_cast<std::int64_t>(rate * a.measure_ms / 1000.0);
     const int n_out = info.max_output_channels;
     const int n_in = info.max_input_channels;
+    const int first = std::max(a.from_channel, 0);
+    const int last = a.to_channel < 0 ? n_out - 1 : std::min(a.to_channel, n_out - 1);
+    auto skipped = [&](int c) {
+        return c < first || c > last ||
+               std::find(a.skip.begin(), a.skip.end(), c) != a.skip.end();
+    };
 
     // Owned by the audio thread for the duration; read by main after stop().
     std::vector<std::vector<double>> sums(static_cast<std::size_t>(n_out),
@@ -274,7 +286,7 @@ int cmd_map(audio::AudioSystem& sys, const Args& a) {
                                           std::vector<float>(static_cast<std::size_t>(n_in), 0.0f));
     std::vector<std::int64_t> counts(static_cast<std::size_t>(n_out), 0);
 
-    std::atomic<int> step{0};   // which output channel is being driven
+    std::atomic<int> step{first};   // which output channel is being driven
     std::atomic<bool> done{false};
     std::int64_t phase = 0;
 
@@ -286,10 +298,13 @@ int cmd_map(audio::AudioSystem& sys, const Args& a) {
         if (g_abort.load(std::memory_order_relaxed)) { done.store(true, std::memory_order_relaxed); return; }
 
         const int c = step.load(std::memory_order_relaxed);
-        if (c >= n_out) { done.store(true, std::memory_order_relaxed); return; }
+        if (c > last) { done.store(true, std::memory_order_relaxed); return; }
 
         const std::size_t frames = out.num_samples();
-        float* dst = c < static_cast<int>(out.num_channels()) ? out.channel_ptr(c) : nullptr;
+        // A skipped channel still consumes its slot in the schedule; it is simply
+        // never driven. That keeps the sweep timing uniform and the report aligned.
+        float* dst = (!skipped(c) && c < static_cast<int>(out.num_channels()))
+                         ? out.channel_ptr(c) : nullptr;
         if (dst) for (std::size_t i = 0; i < frames; ++i) dst[i] = level;
 
         // Ignore `settle` frames so the converters' group delay and any DC
@@ -320,7 +335,8 @@ int cmd_map(audio::AudioSystem& sys, const Args& a) {
     bool any_signal = false;
     bool any_nonzero_sample = false;
     std::printf("\n%-10s -> %s\n", "out ch", "input channels that responded (gain)");
-    for (int c = 0; c < n_out; ++c) {
+    for (int c = first; c <= last; ++c) {
+        if (skipped(c)) continue;
         std::vector<ChannelStats> stats(static_cast<std::size_t>(n_in));
         const auto n = counts[static_cast<std::size_t>(c)];
         for (int ic = 0; ic < n_in; ++ic) {
@@ -354,6 +370,81 @@ int cmd_map(audio::AudioSystem& sys, const Args& a) {
         "\nGain near +1 is a straight wire. Near -1 means the chain inverts polarity,\n"
         "which is what every plug-in's Invert control is for. These are ratios, not\n"
         "volts: a loopback cannot measure absolute scale. Use `hold` and a meter.");
+    return 0;
+}
+
+/// Record every input channel and report it. The only emitting-free measurement
+/// in the tool, and the first one worth running: it answers "which host channel
+/// is this jack?" and "is the OS letting me record?" at the same time.
+int cmd_listen(audio::AudioSystem& sys, const Args& a) {
+    audio::DeviceInfo info;
+    if (!find_device(sys, a.device, info)) return 2;
+    if (!rate_supported(info, a.rate)) return 2;
+    if (info.max_input_channels == 0) { std::fputs("device has no inputs\n", stderr); return 2; }
+
+    // Zero output channels: this command cannot emit even by accident.
+    Rig rig(sys, info, info.max_input_channels, 0, a.rate);
+    if (!rig.ok()) { std::fputs("failed to open device for input\n", stderr); return 2; }
+
+    const int n_in = info.max_input_channels;
+    std::vector<double> sums(static_cast<std::size_t>(n_in), 0.0);
+    std::vector<double> sumsq(static_cast<std::size_t>(n_in), 0.0);
+    std::vector<float> peaks(static_cast<std::size_t>(n_in), 0.0f);
+    std::atomic<std::int64_t> frames{0};
+
+    rig.device().start([&](const audio::BufferView<const float>& in,
+                           audio::BufferView<float>& out,
+                           const audio::CallbackContext&) {
+        silence(out);
+        if (g_abort.load(std::memory_order_relaxed)) return;
+        const std::size_t n = in.num_samples();
+        for (std::size_t c = 0; c < in.num_channels() && c < static_cast<std::size_t>(n_in); ++c) {
+            const float* src = in.channel_ptr(c);
+            if (!src) continue;
+            for (std::size_t i = 0; i < n; ++i) {
+                const double v = static_cast<double>(src[i]);
+                sums[c] += v;
+                sumsq[c] += v * v;
+                const float m = std::abs(src[i]);
+                if (m > peaks[c]) peaks[c] = m;
+            }
+        }
+        frames.fetch_add(static_cast<std::int64_t>(n), std::memory_order_relaxed);
+    });
+
+    const double seconds = std::min(std::max(a.seconds, 0.5), 30.0);
+    std::printf("listening on '%s' for %.1fs (emitting nothing)...\n", info.name.c_str(), seconds);
+    const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+    while (std::chrono::steady_clock::now() < until && !g_abort.load(std::memory_order_relaxed))
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    rig.device().stop();
+
+    const auto n = frames.load(std::memory_order_relaxed);
+    if (n == 0) { std::fputs("no frames captured\n", stderr); return 3; }
+
+    std::vector<ChannelStats> stats(static_cast<std::size_t>(n_in));
+    std::printf("\n%-5s %-6s %12s %12s %12s\n", "in", "DAW", "peak", "rms", "dc");
+    for (int c = 0; c < n_in; ++c) {
+        const auto i = static_cast<std::size_t>(c);
+        const double mean = sums[i] / static_cast<double>(n);
+        const double rms = std::sqrt(sumsq[i] / static_cast<double>(n));
+        stats[i] = {mean, peaks[i]};
+        const bool live = peaks[i] > 0.0f;
+        std::printf("%-5d %-6d %12.6f %12.6f %12.6f %s\n", c, c + 1, static_cast<double>(peaks[i]),
+                    rms, mean, live ? "" : "(silent)");
+    }
+
+    if (all_exactly_zero(stats)) {
+        std::fputs(
+            "\nEVERY sample on EVERY channel was exactly 0.0.\n"
+            "That is not an unpatched cable. A real converter input has a noise floor,\n"
+            "so this is macOS refusing this process microphone access. Over ssh, grant\n"
+            "/usr/libexec/sshd-keygen-wrapper Microphone access in System Settings >\n"
+            "Privacy & Security, or run from a GUI session.\n", stderr);
+        return 3;
+    }
+    std::puts("\nA channel with a real noise floor is connected. High rms means signal.\n"
+              "dc is the average \u2014 a control voltage shows up there, audio does not.");
     return 0;
 }
 
@@ -479,6 +570,10 @@ int main(int argc, char** argv) {
     if (!sys) { std::fputs("no audio system on this platform\n", stderr); return 2; }
 
     if (a.command == "list") return cmd_list(*sys);
+    if (a.command == "listen") {
+        if (a.device.empty()) { std::fputs("--device is required\n", stderr); return 1; }
+        return cmd_listen(*sys, a);   // emits nothing, so no --armed gate
+    }
 
     if (a.device.empty()) { std::fputs("--device is required\n", stderr); return 1; }
     if (!a.armed) {
