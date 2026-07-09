@@ -206,8 +206,8 @@ Full inventory and boundary live in `DEPENDENCIES.md`.
 | **scikit-image** | BSD-3-Clause | Image metrics for the Motion visual-analysis lane |
 | **opencv-python** | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
 | **soundfile** (libsndfile) | BSD-3-Clause (package); libsndfile LGPL-2.1 | WAV/audio IO for the Audio Quality Lab |
-| **Perfetto** | Apache-2.0 | Dev-only tracing SDK (amalgamated `perfetto.cc`/`perfetto.h`); fetched by pinned URL + SHA-256 via `tools/cmake/PulpTracing.cmake` only when `PULP_TRACING=ON` (OFF by default; never linked into a shipping build, never exported by `cmake --install`) |
-| **melatonin_perfetto** | MIT | Compile-time `PRETTY_FUNCTION` trimmer adapted into `pulp::runtime::trace_detail::prettify_function` (only that component; dev-only, compiled under `PULP_TRACING`). See NOTICE.md |
+| **Perfetto** ([google/perfetto](https://github.com/google/perfetto)) | Apache-2.0 | Dev-only tracing SDK (amalgamated `perfetto.cc`/`perfetto.h`); fetched by pinned URL + SHA-256 via `tools/cmake/PulpTracing.cmake` only when `PULP_TRACING=ON` (OFF by default; never linked into a shipping build, never exported by `cmake --install`). The pinned `trace_processor` query tool (same v57.2) backs `pulp trace query --trace` and is fetched on demand by `pulp trace fetch`, SHA-256-verified per platform, never linked or shipped |
+| **melatonin_perfetto** ([sudara/melatonin_perfetto](https://github.com/sudara/melatonin_perfetto)) | MIT | Compile-time `PRETTY_FUNCTION` trimmer adapted into `pulp::runtime::trace_detail::prettify_function` (only that component; dev-only, compiled under `PULP_TRACING`). See NOTICE.md |
 
 **Audio Quality Lab — optional perceptual models + MIR oracle (not bundled, developer-supplied).**
 The Audio Quality Lab (`tools/audio/quality-lab`) can optionally consult full-reference
