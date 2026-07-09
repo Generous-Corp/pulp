@@ -111,6 +111,39 @@ if(NOT _installed_size EQUAL _source_size)
         "publishing a stale or different file.")
 endif()
 
+# Min-OS floor propagation: the SDK must ship PulpMinOs.cmake AND min_os.json
+# beside it, and PulpConfig.cmake must include PulpMinOs.cmake. Without all
+# three, a find_package(Pulp) consumer cannot resolve Pulp's floor and its
+# plugin silently inherits the build host's OS floor (e.g. a macOS-26 machine
+# ships a macOS-26-only plugin instead of Pulp's 13.3).
+set(_installed_minos "${_pulp_cmake_dir}/PulpMinOs.cmake")
+if(NOT EXISTS "${_installed_minos}")
+    message(FATAL_ERROR
+        "PulpMinOs.cmake not bundled with the installed Pulp SDK.\n"
+        "Expected: ${_installed_minos}\n"
+        "Consumers would not pin Pulp's min-OS floor and would ship plugins "
+        "targeting the build host's OS version.")
+endif()
+set(_installed_minos_json "${_pulp_cmake_dir}/min_os.json")
+if(NOT EXISTS "${_installed_minos_json}")
+    message(FATAL_ERROR
+        "min_os.json not bundled next to PulpMinOs.cmake in the installed SDK.\n"
+        "Expected: ${_installed_minos_json}\n"
+        "PulpMinOs.cmake finds no floor data and cannot pin the consumer.")
+endif()
+file(GLOB _pulp_config LIST_DIRECTORIES false
+    "${_pulp_cmake_dir}/PulpConfig.cmake")
+if(_pulp_config)
+    list(GET _pulp_config 0 _pulp_config)
+    file(READ "${_pulp_config}" _installed_config_text)
+    if(NOT _installed_config_text MATCHES "PulpMinOs\\.cmake")
+        message(FATAL_ERROR
+            "Installed PulpConfig.cmake does not include PulpMinOs.cmake — the "
+            "min-OS floor would not be pinned for find_package(Pulp) consumers.")
+    endif()
+endif()
+
 message(STATUS
     "Install layout: PulpUtils.cmake at ${_pulp_utils}, encoder at "
-    "${_installed_encoder} (${_installed_size} bytes). All present.")
+    "${_installed_encoder} (${_installed_size} bytes), PulpMinOs.cmake + "
+    "min_os.json bundled and wired into PulpConfig.cmake. All present.")
