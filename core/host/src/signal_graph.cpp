@@ -982,6 +982,33 @@ pulp::audio::AudioProcessLoadSnapshot SignalGraph::graph_load() const {
     return graph_load_ ? graph_load_->snapshot() : pulp::audio::AudioProcessLoadSnapshot{};
 }
 
+void SignalGraph::set_live_dsp_telemetry_enabled(bool enabled) {
+    // Record the desired state so future recompiles seed their store from it, then
+    // flip the live snapshot's store immediately (atomic) so the toggle takes effect
+    // without waiting for a recompile. Pinning keeps the live snapshot alive for the
+    // store access; set_enabled touches only a relaxed atomic.
+    desired_live_dsp_telemetry_enabled_.store(enabled, std::memory_order_relaxed);
+    ProcessReadGuard read_guard{*this};
+    if (auto* cg = live_raw_.load(std::memory_order_seq_cst)) {
+        cg->live_dsp_telemetry.set_enabled(enabled);
+    }
+}
+
+bool SignalGraph::live_dsp_telemetry_enabled() const {
+    return desired_live_dsp_telemetry_enabled_.load(std::memory_order_relaxed);
+}
+
+pulp::audio::LiveDspTelemetrySnapshot SignalGraph::poll_live_dsp_telemetry() {
+    // Single non-real-time poller (control/UI thread): pin the live snapshot, drain
+    // its ring (the SPSC consumer side; the audio thread is the producer), and return
+    // a copy of the latest summary while the snapshot is still pinned alive.
+    ProcessReadGuard read_guard{*this};
+    auto* cg = live_raw_.load(std::memory_order_seq_cst);
+    if (!cg) return {};
+    cg->live_dsp_telemetry.drain();
+    return cg->live_dsp_telemetry.latest();
+}
+
 LiveSwapAdmission evaluate_live_swap_admission(
     const pulp::audio::AudioProcessLoadSnapshot& graph,
     const std::vector<pulp::audio::AudioProcessLoadSnapshot>& staged_nodes,
@@ -2023,6 +2050,44 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         });
     }
 
+    // Prepare this snapshot's per-node live-DSP telemetry store in ordered_runtime
+    // order (slot i == ordered_runtime[i]). Enabled state is inherited from the
+    // control-thread desired flag so a toggle survives recompiles. Allocation-free
+    // once the audio thread is running; all storage is reserved here.
+    {
+        const auto kind_of = [](NodeType t) noexcept {
+            switch (t) {
+                case NodeType::AudioInput:  return audio::LiveDspNodeKind::AudioInput;
+                case NodeType::AudioOutput: return audio::LiveDspNodeKind::AudioOutput;
+                case NodeType::Plugin:      return audio::LiveDspNodeKind::Plugin;
+                case NodeType::Gain:        return audio::LiveDspNodeKind::Gain;
+                case NodeType::MidiInput:   return audio::LiveDspNodeKind::MidiInput;
+                case NodeType::MidiOutput:  return audio::LiveDspNodeKind::MidiOutput;
+                case NodeType::Custom:      return audio::LiveDspNodeKind::Custom;
+            }
+            return audio::LiveDspNodeKind::Unknown;
+        };
+        std::vector<audio::LiveDspNodeInfo> infos;
+        infos.reserve(cg->ordered_runtime.size());
+        for (const auto& ordered : cg->ordered_runtime) {
+            audio::LiveDspNodeInfo info;
+            info.node_id = ordered.id;
+            info.kind = kind_of(ordered.shape.type);
+            info.input_ports = static_cast<std::uint32_t>(
+                std::max(0, ordered.shape.num_input_ports));
+            info.output_ports = static_cast<std::uint32_t>(
+                std::max(0, ordered.shape.num_output_ports));
+            info.set_name(to_string(info.kind));
+            infos.push_back(info);
+        }
+        if (!infos.empty()) {
+            audio::LiveDspTelemetryConfig tcfg;
+            cg->live_dsp_telemetry.prepare(tcfg, infos);
+            cg->live_dsp_telemetry.set_enabled(
+                desired_live_dsp_telemetry_enabled_.load(std::memory_order_relaxed));
+        }
+    }
+
     compute_latencies_for_(*cg, connections_, prepared_plugin_meta_);
 
     // Build the canonical-executor routing for this snapshot when the topology
@@ -2771,6 +2836,39 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
     // end() are relaxed-atomic timestamps, no alloc/lock). The RAII guard's end()
     // covers every return path below. graph_load() reads this for live-swap admission.
     if (graph_load_) graph_load_->begin(num_samples, static_cast<float>(cg->sample_rate));
+
+    // Record one live-DSP telemetry block per process() call, path-agnostic: the
+    // routed executor and the legacy walk BOTH time each node into its persistent
+    // AudioProcessLoadMeasurer (node_load_) and the whole block into graph_load_.
+    // This guard reads those already-populated measurers after the block and pushes
+    // a single fixed-slot record — so per-node p50/p95/p99 + jitter + over-budget
+    // attribution work on every execution path with no per-node hook in either the
+    // executor or the walk. Declared BEFORE graph_load_end_guard so it destructs
+    // AFTER it (reverse order): graph_load_->end() has stamped this block's graph
+    // elapsed by the time this runs. Inactive at one-branch cost when telemetry is
+    // off; the record path is allocation-free (pre-sized scratch + drop-on-full ring).
+    struct TelemetryRecordGuard {
+        CompiledGraph* cg;
+        audio::AudioProcessLoadMeasurer* graph_measurer;
+        int num_samples;
+        ~TelemetryRecordGuard() {
+            auto& store = cg->live_dsp_telemetry;
+            if (!store.enabled() || !store.prepared()) return;
+            std::int64_t* scratch = store.external_record_scratch();
+            if (scratch == nullptr) return;
+            const std::uint32_t n = store.node_count();
+            for (std::uint32_t i = 0; i < n && i < cg->ordered_runtime.size(); ++i) {
+                auto* rt = cg->ordered_runtime[i].runtime;
+                auto* m = rt ? rt->load : nullptr;
+                scratch[i] = m ? m->last_elapsed_ns() : 0;
+            }
+            const std::int64_t graph_ns =
+                graph_measurer ? graph_measurer->last_elapsed_ns() : 0;
+            store.inject_block(std::span<const std::int64_t>(scratch, n), graph_ns,
+                               static_cast<std::uint32_t>(num_samples), cg->sample_rate);
+        }
+    } telemetry_record_guard{cg, graph_load_.get(), num_samples};
+
     struct GraphLoadEndGuard {
         audio::AudioProcessLoadMeasurer* m;
         ~GraphLoadEndGuard() {

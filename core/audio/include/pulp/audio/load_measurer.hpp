@@ -187,6 +187,12 @@ public:
     /// Last raw load sample.
     float last_load() const noexcept { return last_load_.load(std::memory_order_relaxed); }
 
+    /// Most recent measured callback duration, in nanoseconds (0 before the first
+    /// valid window). Cheap relaxed read; safe to poll while the audio thread runs.
+    std::int64_t last_elapsed_ns() const noexcept {
+        return last_elapsed_ns_.load(std::memory_order_relaxed);
+    }
+
     /// Number of valid callback windows measured since the last reset.
     std::uint64_t callback_count() const noexcept {
         return callback_count_.load(std::memory_order_relaxed);

@@ -150,7 +150,9 @@ void SignalGraph::run_reference_walk_(
 
         // 3. Produce output based on node type. Wrap the node's work in its
         // persistent load measurer (relaxed-atomic begin()/end(); RT-safe) so
-        // per-node CPU load is attributable via node_loads().
+        // per-node CPU load is attributable via node_loads(). Live-DSP telemetry
+        // reads these same per-node measurers after the block (see process_impl),
+        // so it needs no separate hook here.
         if (rt.load) rt.load->begin(num_samples, static_cast<float>(cg->sample_rate));
         switch (shape.type) {
             case NodeType::AudioInput: {
