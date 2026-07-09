@@ -9,6 +9,7 @@
 //       → interleave planar back to Web Audio buffers
 
 #include <pulp/format/web/wam_adapter.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/runtime/log.hpp>
@@ -449,20 +450,14 @@ bool WamProcessorBridge::schedule_sysex(const uint8_t* data, int size,
                                         sample_offset);
 }
 
-// Composed web state container. Previously get_state()/set_state() serialized
-// only the StateStore, so Processor::serialize_plugin_state() was never called
-// and any non-parameter state (state-memo's free-text memo, for instance) was
-// silently lost across a save/load in the browser.
-//
-//   "PWS1"                                    magic + container version
-//   [u32 params_len][params_len bytes]        store_.serialize()  (starts "PULP")
-//   [u32 plugin_len][plugin_len bytes]        serialize_plugin_state()
-//
-// Blobs that do not begin with the magic are treated as legacy params-only
-// state (which is exactly what older builds wrote) and still load.
+// Single-plugin state is the framework's shared plugin_state_io format (see
+// encode_stage_state / decode_stage_state below): a versioned, CRC-checked
+// "PLST" envelope composing StateStore params + Processor::serialize_plugin_state()
+// (so state-memo's free-text memo survives a browser save/load), or a bare
+// "PULP" StateStore blob when the plugin owns no extra state. It is byte-for-byte
+// the format the native VST3/AU/CLAP builds read and write. Only the multi-stage
+// RACK framing below ("PWR1") is web-specific; each stage payload is a plugin_state_io blob.
 namespace {
-
-constexpr std::array<uint8_t, 4> kWebStateMagic{'P', 'W', 'S', '1'};
 
 void append_u32(std::vector<uint8_t>& out, uint32_t value) {
     const auto le = value;   // wasm is little-endian; keep the wire LE explicitly
@@ -473,7 +468,10 @@ void append_u32(std::vector<uint8_t>& out, uint32_t value) {
 }
 
 bool read_u32(const uint8_t* data, size_t size, size_t& pos, uint32_t& out) {
-    if (pos + 4 > size) return false;
+    // Wrap-safe: `pos + 4` would overflow on wasm32 for a hostile `pos`. The
+    // subtractive form can't wrap because `pos <= size` is the invariant every
+    // caller maintains (each read advances `pos` only after this guard passes).
+    if (pos > size || size - pos < 4) return false;
     out = static_cast<uint32_t>(data[pos])
         | (static_cast<uint32_t>(data[pos + 1]) << 8)
         | (static_cast<uint32_t>(data[pos + 2]) << 16)
@@ -482,15 +480,11 @@ bool read_u32(const uint8_t* data, size_t size, size_t& pos, uint32_t& out) {
     return true;
 }
 
-bool has_web_state_magic(const uint8_t* data, size_t size) {
-    return size >= kWebStateMagic.size()
-        && std::equal(kWebStateMagic.begin(), kWebStateMagic.end(), data);
-}
-
 // The magic for the rack container: "PWR1" [u32 stage_count] then, per stage,
-// [u32 len][a per-stage PWS1 blob]. A stage blob is byte-identical to a
-// standalone plugin's, so one stage of a rack and a single-plugin save are
-// interchangeable at the container level.
+// [u32 len][a per-stage plugin_state_io blob]. A stage blob is byte-identical
+// to a standalone plugin's save, so one stage of a rack and a single-plugin
+// save are interchangeable at the container level. Only the outer multi-stage
+// framing is web-specific; each stage payload is the shared "PLST" envelope.
 constexpr std::array<uint8_t, 4> kRackStateMagic{'P', 'W', 'R', '1'};
 
 bool has_rack_state_magic(const uint8_t* data, size_t size) {
@@ -498,56 +492,29 @@ bool has_rack_state_magic(const uint8_t* data, size_t size) {
         && std::equal(kRackStateMagic.begin(), kRackStateMagic.end(), data);
 }
 
-// Serialize one plugin (StateStore params + Processor plugin-owned state) into
-// the versioned "PWS1" container. Single source of truth for both the single-
-// plugin bridge and each stage of a rack.
+// Serialize one plugin's host-facing state (StateStore params + Processor
+// plugin-owned blob). Delegates to the framework's shared `plugin_state_io`
+// envelope ("PLST" + CRC + versioning) — the SAME format VST3/AU/CLAP/headless
+// write — so a state blob saved in the browser round-trips through a native
+// build of the same plugin and vice versa. (`plugin_state_io::serialize`
+// returns a bare StateStore blob when the plugin-owned payload is empty, which
+// is the common case for parameter-only effects.) Single source of truth for
+// both the single-plugin bridge and each stage of a rack.
 std::vector<uint8_t> encode_stage_state(const state::StateStore& store,
                                         const Processor* processor) {
-    const auto params = store.serialize();
-    const auto plugin = processor ? processor->serialize_plugin_state()
-                                  : std::vector<uint8_t>{};
-    std::vector<uint8_t> out;
-    out.reserve(kWebStateMagic.size() + 8 + params.size() + plugin.size());
-    out.insert(out.end(), kWebStateMagic.begin(), kWebStateMagic.end());
-    append_u32(out, static_cast<uint32_t>(params.size()));
-    out.insert(out.end(), params.begin(), params.end());
-    append_u32(out, static_cast<uint32_t>(plugin.size()));
-    out.insert(out.end(), plugin.begin(), plugin.end());
-    return out;
+    if (!processor) return store.serialize();
+    return plugin_state_io::serialize(store, *processor);
 }
 
-// Restore one plugin from a "PWS1" container, falling back to a legacy bare
-// StateStore blob (which older builds wrote). Bounds-checked before every slice.
+// Restore one plugin from a `plugin_state_io` blob. `deserialize` accepts both
+// the "PLST" envelope and a legacy bare StateStore blob, verifies the CRC, and
+// rolls the live StateStore back to its prior contents if the restore fails —
+// so a truncated or corrupt blob can never half-apply. It is wrap-safe on
+// wasm32 (exact-size envelope check, subtractive bounds arithmetic).
 bool decode_stage_state(state::StateStore& store, Processor* processor,
                         const uint8_t* data, size_t size) {
-    if (!data || size == 0) return false;
-
-    // Legacy: a bare StateStore blob written before the container existed.
-    if (!has_web_state_magic(data, size)) {
-        const bool ok = store.deserialize({data, size});
-        // Tell the plugin its owned state carried no payload, per the Processor
-        // contract ("empty span" => reset to defaults).
-        if (processor) processor->deserialize_plugin_state({});
-        return ok;
-    }
-
-    size_t pos = kWebStateMagic.size();
-    uint32_t params_len = 0;
-    if (!read_u32(data, size, pos, params_len)) return false;
-    if (pos + params_len > size) return false;
-    const bool params_ok = store.deserialize({data + pos, params_len});
-    pos += params_len;
-
-    uint32_t plugin_len = 0;
-    if (!read_u32(data, size, pos, plugin_len)) return false;
-    if (pos + plugin_len > size) return false;
-
-    bool plugin_ok = true;
-    if (processor) {
-        plugin_ok = processor->deserialize_plugin_state(
-            {data + pos, static_cast<std::size_t>(plugin_len)});
-    }
-    return params_ok && plugin_ok;
+    if (!data || size == 0 || !processor) return false;
+    return plugin_state_io::deserialize({data, size}, store, *processor);
 }
 
 } // namespace
@@ -574,9 +541,10 @@ int WamProcessorBridge::latency_samples() const {
 }
 
 void WamProcessorBridge::prepare(double sample_rate, int block_size) {
-    // CONTROL THREAD ONLY. Re-runs Processor::prepare() and may resize the
-    // planar buffers — both allocate. Never call from process(); in the worklet
-    // this is a port message serviced between render quanta.
+    // Runs BETWEEN render quanta, not on a separate control thread: in an
+    // AudioWorkletProcessor the port message that reaches here is dispatched on
+    // the audio render thread itself. Re-runs Processor::prepare() and may
+    // resize the planar buffers — both allocate — so never call from process().
     if (!processor_ || block_size <= 0) return;
 
     sample_rate_ = sample_rate;
@@ -658,7 +626,8 @@ bool WamStage::initialize(std::unique_ptr<Processor> processor,
 }
 
 void WamStage::prepare(double sample_rate, int block_size) {
-    // CONTROL THREAD ONLY (re-runs prepare(); may resize the output buffer).
+    // Between render quanta (see WamProcessorBridge::prepare) — re-runs
+    // prepare() and may resize the output buffer; never call from process().
     if (!processor_ || block_size <= 0) return;
 
     auto desc = processor_->descriptor();
@@ -801,7 +770,7 @@ bool WamChainBridge::initialize(double sample_rate, int max_block_size) {
 }
 
 void WamChainBridge::prepare(double sample_rate, int block_size) {
-    // CONTROL THREAD ONLY.
+    // Between render quanta (see WamProcessorBridge::prepare); never from process().
     if (block_size <= 0) return;
     sample_rate_ = sample_rate;
     for (auto& st : stages_) st->prepare(sample_rate, block_size);
@@ -978,7 +947,7 @@ int WamChainBridge::drain_midi_out(uint8_t* dst, int cap) const {
 }
 
 std::vector<uint8_t> WamChainBridge::get_state() const {
-    // "PWR1" [u32 stage_count] ( [u32 len][per-stage PWS1 blob] )*
+    // "PWR1" [u32 stage_count] ( [u32 len][per-stage plugin_state_io blob] )*
     std::vector<uint8_t> out;
     out.insert(out.end(), kRackStateMagic.begin(), kRackStateMagic.end());
     append_u32(out, static_cast<uint32_t>(stages_.size()));
@@ -993,8 +962,8 @@ std::vector<uint8_t> WamChainBridge::get_state() const {
 bool WamChainBridge::set_state(const uint8_t* data, size_t size) {
     if (!data || size == 0 || stages_.empty()) return false;
 
-    // Legacy: a single-plugin blob (bare StateStore or "PWS1") loads into
-    // stage 0. Other stages keep their initialized defaults.
+    // A single-plugin blob (bare StateStore or a plugin_state_io "PLST"
+    // envelope) loads into stage 0. Other stages keep their initialized defaults.
     if (!has_rack_state_magic(data, size)) {
         return stages_[0]->set_state(data, size);
     }
@@ -1007,7 +976,7 @@ bool WamChainBridge::set_state(const uint8_t* data, size_t size) {
     for (uint32_t s = 0; s < stage_count; ++s) {
         uint32_t len = 0;
         if (!read_u32(data, size, pos, len)) return false;
-        if (pos + len > size) return false;
+        if (len > size - pos) return false;   // wrap-safe (pos <= size holds)
         if (s < stages_.size())
             ok = stages_[s]->set_state(data + pos, len) && ok;
         pos += len;

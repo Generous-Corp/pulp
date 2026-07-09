@@ -74,6 +74,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/events/src/event_loop.cpp
     ${_PULP_WAM_ROOT}/core/format/src/processor_f64.cpp
     ${_PULP_WAM_ROOT}/core/format/src/registry.cpp
+    ${_PULP_WAM_ROOT}/core/format/src/plugin_state_io.cpp
     ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_adapter.cpp
     ${_PULP_WAM_ROOT}/core/format/src/wasm/headless_defaults.cpp
 )

@@ -103,8 +103,11 @@ void wam_reset() {
 }
 
 // Re-prepare for a real sample-rate / block-size change (a Web Audio context
-// can run at 44.1 kHz). CONTROL THREAD ONLY — this re-runs Processor::prepare()
-// and may resize buffers, so it must never be called from wam_process().
+// can run at 44.1 kHz). Dispatched from the worklet's port.onmessage, which in
+// an AudioWorkletProcessor runs ON THE AUDIO RENDER THREAD — so this executes
+// *between* render quanta, never concurrently with wam_process(), but NOT on a
+// separate control thread. It re-runs Processor::prepare() and may resize
+// buffers (allocation), so it must never be called from within wam_process().
 __attribute__((used, visibility("default")))
 void wam_prepare(double sample_rate, int block_size) {
     g_bridge.prepare(sample_rate, block_size);
