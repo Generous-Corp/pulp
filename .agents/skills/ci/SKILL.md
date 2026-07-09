@@ -1174,11 +1174,50 @@ editing checkout, which false-fails via Debug-over-Release build-dir
 churn + host-keychain prompts — Phase 2 points that validation at the
 VM lane instead.
 
-Linux and Windows CI legs default to GitHub-hosted runners. The legacy
-Shipyard SSH targets (`ubuntu`, `windows`) are optional local validation
-hosts and may be unreachable; use `--skip-target ubuntu --skip-target
-windows` when shipping a macOS/local-only tranche and the PR has already
-run the appropriate focused local tests.
+Linux and Windows CI legs default to GitHub-hosted runners.
+
+### SSH `ubuntu` / `windows` targets are opt-in, per machine
+
+`.shipyard/config.toml` declares exactly one target: **`mac`**. The SSH
+`ubuntu` / `windows` targets are not declared there.
+
+They used to be — with `host` deferred to the gitignored
+`.shipyard.local/config.toml`. No machine in the fleet ever had that file
+populated (checked 2026-07-08 across studio / m1 / m5 / mini), and Shipyard
+preflights every *declared* target, so every `shipyard run` and `shipyard pr`
+on every box hit:
+
+```
+Target 'ubuntu' (ssh) is unreachable.
+  Failure category: configuration
+  Last error: target has no host configured
+```
+
+...an exit-3 papered over with `--skip-target ubuntu --skip-target windows`.
+**That flag pair is no longer needed.** The targets now live where their hosts
+live.
+
+To opt one machine into a local SSH lane, uncomment the block in
+`.shipyard.local/config.toml` (template:
+`.shipyard.local/config.toml.example`) and fill in `host` + `repo_path`. The
+gitignored overlay can **declare a target outright**, not merely supply its
+host — verified against Shipyard v0.70.0. The per-target validation recipes
+(`[validation.default.overrides.windows]` etc.) stay version-controlled in
+`.shipyard/config.toml` and apply the moment the target exists.
+
+Check what a machine will actually probe:
+
+```bash
+shipyard targets list        # reachability per declared target
+shipyard targets test ubuntu # probe one
+```
+
+**Do not reach for `[profiles.*]` to solve this.** A profile's `targets` list
+does **not** gate preflight in Shipyard v0.70.0 — `shipyard config use local`
+writes `profile = "local"` into the tracked config and Shipyard still probes
+every declared target. (m5's local overlay defines `local` / `normal` / `full`
+profiles for exactly this purpose; they have no effect on preflight.) Only
+*declaring* a target matters.
 
 If a PR's macOS check is queued, first verify whether it is actually
 waiting on the self-hosted runner pool before taking action:

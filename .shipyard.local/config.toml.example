@@ -5,20 +5,46 @@
 # .shipyard.local/config.toml on each machine and edit to match your
 # local SSH config.
 #
-# Shipyard merges this file on top of .shipyard/config.toml, so you
-# only need to declare the fields that differ from the project
-# defaults.
+# Shipyard merges this file on top of .shipyard/config.toml. It can both
+# override fields on an existing target AND declare a target that the project
+# config does not define at all — which is how the SSH lanes below work.
+#
+# ── Optional local SSH lanes (ubuntu / windows) ────────────────────────────
+#
+# Pulp's default validation is macOS-only: `mac` is the single target declared
+# in .shipyard/config.toml, and Linux/Windows validate as advisory
+# GitHub-hosted lanes in build.yml. Nothing below is required.
+#
+# Uncomment a block to opt this machine into a local SSH lane. Shipyard
+# preflights every declared target, so a block with a `host` you cannot reach
+# turns `shipyard run` / `shipyard pr` into an exit-3 on this machine —
+# uncomment only what you actually run. Verify with:
+#
+#     shipyard targets list      # reachability per target
+#     shipyard targets test ubuntu
+#
+# The per-target validation recipes (build/test commands, Windows generator
+# quirks) stay version-controlled in .shipyard/config.toml under
+# [validation.default.overrides.windows] and friends; they apply automatically
+# once the target exists. You only supply the machine-specific parts here.
 
-[targets.ubuntu]
-host          = "ubuntu"            # ssh host alias
-repo_path     = "/home/<you>/pulp"  # absolute path on the remote
-fallback_host = "ubuntu2"           # optional, used when ubuntu is down
+# [targets.ubuntu]
+# backend       = "ssh"
+# platform      = "linux-x64"
+# host          = "ubuntu"            # ssh host alias
+# repo_path     = "/home/<you>/pulp"  # absolute path on the remote
+# fallback_host = "ubuntu2"           # optional, used when ubuntu is down
 
-[targets.windows]
-host          = "win"
-repo_path     = "C:\\Users\\<you>\\pulp"
-cmake_generator = "Visual Studio 17 2022"
-cmake_platform  = "x64"
+# [targets.windows]
+# backend         = "ssh-windows"
+# platform        = "windows-x64"
+# host            = "win"
+# repo_path       = "C:\\Users\\<you>\\pulp"
+# cmake_generator = "Visual Studio 17 2022"
+# cmake_platform  = "x64"
+# # Fresh builds from clean take ~25 min on the ARM64 VM (x64 cross-compile).
+# # The default 30 min timeout is too tight.
+# timeout_secs    = 3600
 
 # Optional: per-host Namespace selectors if you want to override
 # Pulp's defaults from the workflow file.
