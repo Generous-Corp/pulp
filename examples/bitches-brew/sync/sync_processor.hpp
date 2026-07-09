@@ -21,13 +21,15 @@
 // line) hang off one explicit origin captured on the play edge, in
 // `brew/run_segment.hpp`. Nothing else in this plug-in carries musical state.
 //
+// Swing is the one thing here that bends the grid, and it does so by warping the
+// beat axis rather than by nudging edges after they are found — see `clock.hpp`.
+// Straight (50%) is bit-identical to no swing.
+//
 // Not implemented, deliberately. FSK tape sync needs a continuous phase
 // accumulator — re-deriving its phase from the position each block would click at
 // every block boundary and mis-decode at the receiver — so it wants designing, not
-// bolting on. Swing and periodic reset are *named* in the plan's feature list but
-// their behavior is not specified anywhere we are permitted to derive it from, and
-// a plausible guess would ship as a green test asserting the guess. They stay out
-// until the documented behavior is in hand.
+// bolting on. Periodic reset stays out until its documented behavior is in hand;
+// a plausible guess would ship as a green test asserting the guess.
 
 #include <brew/clock.hpp>
 #include <brew/cv.hpp>
@@ -62,6 +64,8 @@ public:
         kInvert = 9,
         kFirstDelayMs = 10,
         kOffsetMs = 11,
+        kSwingPercent = 12,
+        kSwingUnit = 13,
     };
 
     /// DIN sync runs at 24 pulses per quarter note. It is the default because it
@@ -85,6 +89,17 @@ public:
                              .name = "Pulses Per Beat",
                              .unit = "ppqn",
                              .range = {1.0f, 48.0f, kDinSyncPulsesPerBeat, 1.0f}});
+        store.add_parameter({.id = kSwingPercent,
+                             .name = "Swing",
+                             .unit = "%",
+                             .range = {25.0f, 75.0f, 50.0f, 0.1f}});
+        // Which subdivision's off-beat moves. Off is the eighth, on the
+        // sixteenth — the same two choices every swing control offers, because
+        // they are the two that correspond to how people count.
+        store.add_parameter({.id = kSwingUnit,
+                             .name = "Swing Sixteenths",
+                             .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
         store.add_parameter({.id = kMultiplier,
                              .name = "Multiplier",
                              .unit = "",
@@ -138,11 +153,11 @@ public:
 
     void prepare(const format::PrepareContext&) override { hard_reset(); }
 
-    /// The size this editor actually needs. Without this override a host opens
-    /// the plug-in at Processor's 400x300 default, and the layout is laid out to
-    /// a geometry the editor was never checked against. Two rows of knobs, the toggles, and the two lamps.
+    /// The size this editor actually needs: three rows of knobs, the toggles, and
+    /// the two lamps. Without this override a host opens the plug-in at
+    /// Processor's 400x300 default — a geometry the layout was never checked at.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 380};
+        return {360, 470};
     }
 
     /// Defined in sync_view.cpp so the audio translation units never see the
@@ -168,6 +183,16 @@ public:
 
     /// The edges-per-beat implied by the current settings. Exposed so a test can
     /// predict the edge grid without duplicating the parameter plumbing.
+    /// The beat-axis warp the current settings ask for. Straight (50%) yields a
+    /// `Swing` that `swing_active` reports inactive, so the clock is untouched.
+    [[nodiscard]] Swing current_swing() const noexcept {
+        return {.unit_beats = as_toggle(state().get_value(kSwingUnit))
+                                  ? kSixteenthBeats
+                                  : kEighthBeats,
+                .amount = static_cast<double>(state().get_value(kSwingPercent)) /
+                          100.0};
+    }
+
     [[nodiscard]] double current_edges_per_beat() const noexcept {
         return edges_per_beat(
             static_cast<double>(state().get_value(kPulsesPerBeat)),
@@ -250,15 +275,19 @@ public:
             ms_to_beats(static_cast<double>(state().get_value(kOffsetMs)),
                         ctx.tempo_bpm);
 
+        const Swing swing = current_swing();
+
         int written = 0;
         bool pulsed = false;
-        grid_.advance(ctx.position_beats - offset_beats, epb, bps, frames,
+        grid_.advance(ctx.position_beats - offset_beats, epb, bps, frames, swing,
                       [&](int offset, std::int64_t index) {
                           // The gate lives in host-position time, so compare the
                           // beat the pulse actually *emits* at, not the grid beat
-                          // it was derived from — those differ by the offset.
+                          // it was derived from — those differ by the offset, and
+                          // by the swing.
                           const double at =
-                              ClockGrid::edge_beats(index, epb) + offset_beats;
+                              ClockGrid::edge_beats(index, epb, swing) +
+                              offset_beats;
                           if (!run_.passes_gate(at)) return;
                           if (skip_first && !run_.skip_consumed) {
                               run_.skip_consumed = true;

@@ -6,6 +6,7 @@
 // a real ProcessContext — lives in the Sync tests.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <brew/clock.hpp>
 #include <brew/cv.hpp>
@@ -36,6 +37,16 @@ std::vector<int> edges_of(ClockGrid& grid, double start_beats, double epb,
 /// Beats spanned by one block.
 double block_beats(int frames, double tempo = kTempo, double sr = kSampleRate) {
     return beats_per_sample(tempo, sr) * frames;
+}
+
+/// Collect edges with the beat axis swung.
+std::vector<int> swung_edges_of(ClockGrid& grid, double start_beats, double epb,
+                                int frames, const Swing& sw,
+                                double tempo = kTempo, double sr = kSampleRate) {
+    std::vector<int> out;
+    grid.advance(start_beats, epb, beats_per_sample(tempo, sr), frames, sw,
+                 [&](int offset, std::int64_t) { out.push_back(offset); });
+    return out;
 }
 
 }  // namespace
@@ -327,4 +338,168 @@ TEST_CASE("run segment gates edges before its origin", "[brew][core][run-segment
         REQUIRE_FALSE(run.skip_consumed);
         REQUIRE(run.passes_gate(8.0));
     }
+}
+
+// -------------------------------------------------------------------- swing
+
+TEST_CASE("straight swing is bit-identical to no swing", "[brew][core][swing]") {
+    // Not "close to". A clock that drifts by an ulp when the user leaves the knob
+    // at 50% would ruin bit-exactness of a bounce, and nothing else would notice.
+    const Swing straight{kEighthBeats, 0.5};
+    REQUIRE_FALSE(swing_active(straight));
+    for (double b : {-3.25, -0.5, 0.0, 0.125, 0.5, 1.0, 7.3333, 1024.75}) {
+        CAPTURE(b);
+        REQUIRE(swing_warp(b, straight) == b);
+        REQUIRE(swing_unwarp(b, straight) == b);
+    }
+    // And a zero unit disables it whatever the amount.
+    const Swing none{0.0, 0.66};
+    REQUIRE(swing_warp(0.5, none) == 0.5);
+}
+
+TEST_CASE("swing fixes every pair boundary", "[brew][core][swing]") {
+    // A swung clock must still land exactly on the downbeat: the warp is the
+    // identity at multiples of the pair period, or the whole grid slides.
+    const Swing sw{kEighthBeats, 0.66};
+    const double period = 2.0 * kEighthBeats;
+    for (int k = -4; k <= 4; ++k) {
+        const double at = period * k;
+        CAPTURE(k);
+        REQUIRE_THAT(swing_warp(at, sw), Catch::Matchers::WithinAbs(at, 1e-12));
+    }
+}
+
+TEST_CASE("swing pushes the off-beat back and rushes it below 50%",
+          "[brew][core][swing]") {
+    const Swing late{kEighthBeats, 0.66};
+    // The off-eighth sits at beat 0.5 straight; at 66% it sounds 0.66 of the way
+    // through the quarter.
+    REQUIRE_THAT(swing_warp(0.5, late), Catch::Matchers::WithinAbs(0.66, 1e-12));
+
+    const Swing early{kEighthBeats, 0.4};
+    REQUIRE(swing_warp(0.5, early) < 0.5);
+
+    // The sixteenth unit moves a different note: the off-sixteenth at 0.25.
+    const Swing sixteenths{kSixteenthBeats, 0.66};
+    REQUIRE_THAT(swing_warp(0.25, sixteenths),
+                 Catch::Matchers::WithinAbs(0.33, 1e-12));
+    // ...and leaves the eighth alone, because it is a pair boundary now.
+    REQUIRE_THAT(swing_warp(0.5, sixteenths),
+                 Catch::Matchers::WithinAbs(0.5, 1e-12));
+}
+
+TEST_CASE("the swing warp is strictly increasing and invertible",
+          "[brew][core][swing][safety]") {
+    // Monotonicity is what lets the grid search the straight axis and warp back.
+    // A warp that folded would emit edges out of order, or twice.
+    for (double amount : {0.25, 0.4, 0.5, 0.66, 0.75}) {
+        const Swing sw{kEighthBeats, amount};
+        double prev = swing_warp(-2.0, sw);
+        for (int i = 1; i <= 4000; ++i) {
+            const double b = -2.0 + 4.0 * i / 4000.0;
+            const double w = swing_warp(b, sw);
+            CAPTURE(amount, b);
+            REQUIRE(w > prev);
+            REQUIRE_THAT(swing_unwarp(w, sw), Catch::Matchers::WithinAbs(b, 1e-9));
+            prev = w;
+        }
+    }
+}
+
+TEST_CASE("an out-of-range swing amount is clamped, not honoured",
+          "[brew][core][swing][safety]") {
+    // At 0 or 1 the warp collapses half of every pair to zero width and stops
+    // being invertible. The clamp is what stands between a knob and a divide by
+    // (nearly) zero.
+    const Swing absurd{kEighthBeats, 1.0};
+    REQUIRE(std::isfinite(swing_warp(0.5, absurd)));
+    REQUIRE_THAT(swing_warp(0.5, absurd),
+                 Catch::Matchers::WithinAbs(swing_warp(0.5, Swing{kEighthBeats, kMaxSwing}),
+                                            1e-12));
+    const Swing negative{kEighthBeats, -3.0};
+    REQUIRE_THAT(swing_warp(0.5, negative),
+                 Catch::Matchers::WithinAbs(swing_warp(0.5, Swing{kEighthBeats, kMinSwing}),
+                                            1e-12));
+}
+
+TEST_CASE("a swung grid emits the same edges however the playhead arrived",
+          "[brew][core][swing][safety]") {
+    // This is the property a per-edge nudge cannot have, and the reason swing is
+    // a warp of the axis. Play into a block, versus locate straight to it: the
+    // pulse must land on the same sample.
+    const Swing sw{kSixteenthBeats, 0.7};
+    const double epb = 4.0;
+    constexpr int kFrames = 512;
+    const double target = block_beats(kFrames) * 9.0;
+
+    ClockGrid played;
+    std::vector<int> from_playing;
+    for (int b = 0; b <= 9; ++b)
+        from_playing = swung_edges_of(played, block_beats(kFrames) * b, epb,
+                                      kFrames, sw);
+
+    ClockGrid located;
+    const auto from_locate = swung_edges_of(located, target, epb, kFrames, sw);
+
+    REQUIRE(from_playing == from_locate);
+}
+
+TEST_CASE("swing moves edges without losing or duplicating any",
+          "[brew][core][swing]") {
+    // Over a whole pair period the warp is a bijection, so the edge count is
+    // conserved. If swing ever gains or drops a pulse, a sequencer downstream
+    // walks off the beat and never recovers.
+    const double epb = 4.0;              // an edge every sixteenth
+    constexpr int kFrames = 4096;
+    const double span = block_beats(kFrames);
+    // Enough blocks to cover two whole quarters, the pair period at eighths.
+    const int blocks = static_cast<int>(std::ceil(2.0 / span));
+
+    auto count = [&](const Swing& sw) {
+        ClockGrid grid;
+        int n = 0;
+        for (int b = 0; b < blocks; ++b)
+            n += static_cast<int>(swung_edges_of(grid, span * b, epb, kFrames, sw).size());
+        return n;
+    };
+
+    const int straight = count(Swing{kEighthBeats, 0.5});
+    REQUIRE(straight > 0);
+    REQUIRE(count(Swing{kEighthBeats, 0.66}) == straight);
+    REQUIRE(count(Swing{kEighthBeats, 0.3}) == straight);
+    REQUIRE(count(Swing{kSixteenthBeats, 0.72}) == straight);
+}
+
+// A beat is exactly 1000 samples at 60 BPM / 1 kHz, so swung sample offsets can
+// be written down rather than read off the implementation.
+TEST_CASE("a swung grid places its edges at the swung samples",
+          "[brew][core][swing]") {
+    constexpr double kSr = 1000.0, kBpm = 60.0;
+    const Swing sw{kEighthBeats, 0.66};
+
+    SECTION("from the downbeat") {
+        ClockGrid grid;
+        // Edges every half beat. Straight they fall at samples 0 and 500; swung,
+        // the second sounds at 0.66 beats.
+        const auto e = swung_edges_of(grid, 0.0, 2.0, 1000, sw, kBpm, kSr);
+        REQUIRE(e == std::vector<int>{0, 660});
+    }
+
+    SECTION("from a block that starts between two swung edges") {
+        // The block spans sounding beats [0.55, 0.75). Straight, no edge lies in
+        // it — the half-beat edge is at 0.5, already behind. Swung, that edge
+        // sounds at 0.66 and belongs to this block. Searching the *sounding*
+        // bounds against the straight grid would find nothing at all.
+        ClockGrid grid;
+        const auto e = swung_edges_of(grid, 0.55, 2.0, 200, sw, kBpm, kSr);
+        REQUIRE(e == std::vector<int>{110});
+    }
+}
+
+TEST_CASE("a swung grid still puts an edge on the downbeat",
+          "[brew][core][swing]") {
+    ClockGrid grid;
+    const auto e = swung_edges_of(grid, 0.0, 4.0, 512, Swing{kEighthBeats, 0.66});
+    REQUIRE_FALSE(e.empty());
+    REQUIRE(e.front() == 0);
 }

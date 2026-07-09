@@ -45,8 +45,15 @@ public:
             return std::string(buf);
         };
 
+        auto percent = [](float v) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.0f%%", v);
+            return std::string(buf);
+        };
+
         auto rate = ui::row(10.0f, 84.0f);
         auto timing = ui::row(10.0f, 84.0f);
+        auto feel = ui::row(14.0f, 84.0f);
         auto add_knob = [&](vw_row& into, state::ParamID id, const char* label,
                             std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
@@ -59,6 +66,13 @@ public:
         add_knob(timing, SyncProcessor::kTriggerLengthMs, "Width", millis);
         add_knob(timing, SyncProcessor::kFirstDelayMs, "1st Delay", millis);
         add_knob(timing, SyncProcessor::kOffsetMs, "Offset", signed_millis);
+        add_knob(feel, SyncProcessor::kSwingPercent, "Swing", percent);
+
+        // Which note the swing moves. Off swings the eighth, on the sixteenth.
+        auto sixteenths =
+            ui::param_toggle(store_, SyncProcessor::kSwingUnit, "16ths");
+        ui::fixed_size(*sixteenths, 78.0f, 50.0f);
+        feel->add_child(std::move(sixteenths));
 
         auto bottom = ui::row(14.0f, 52.0f);
         auto skip = ui::param_toggle(store_, SyncProcessor::kSkipFirst, "Skip 1st");
@@ -82,9 +96,10 @@ public:
 
         add_child(std::move(rate));
         add_child(std::move(timing));
+        add_child(std::move(feel));
         add_child(std::move(bottom));
         add_child(ui::caption_label(
-            "24 PPQN is DIN sync. Width is clamped below half the pulse period."));
+            "24 PPQN is DIN sync. 50% swing is straight, and exactly so."));
     }
 
 private:
