@@ -93,6 +93,14 @@ public:
     // ── Lines ────────────────────────────────────────────────────────────
     void stroke_line(float x0, float y0, float x1, float y1) override;
 
+    // ── Polyline / polygon ───────────────────────────────────────────────
+    // Build one SkPath and paint it once. The base-class stroke_path fallback
+    // degrades to N independent stroke_line calls (each with its own caps and
+    // no joins, which beads a dense curve), and the base fill_path is a silent
+    // no-op. Overriding both keeps the Skia backend at parity with CgCanvas.
+    void stroke_path(const Point2D* points, size_t count) override;
+    void fill_path(const Point2D* points, size_t count) override;
+
     // ── Text ─────────────────────────────────────────────────────────────
     void set_font(const std::string& family, float size) override;
     void set_font_full(const std::string& family, float size,
