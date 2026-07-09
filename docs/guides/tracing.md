@@ -273,6 +273,36 @@ hid the per-node max. Because the render is offline and deterministic, the
 answer reproduces exactly, so it is safe for docs. *(Live in-DAW DSP profiling
 is supported as an advanced path with the caveats above.)*
 
+### Use case 4 — "Which plugin in my chain is expensive?" (real plugins, and why the average lies)
+
+`examples/trace-plugin-chain` is the runnable version of use case 3 on **real
+example plugins**: it drives PulpGain → PulpEffect (a biquad filter) →
+PulpCompressor through their actual `Processor::process()` code offline (via
+`HeadlessHost`), one `dsp.node` span per plugin per block.
+
+```bash
+# Build the dev-only tracing examples and render the chain to a .pftrace.
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_TRACING=ON
+cmake --build build --target pulp-trace-plugin-chain -j"$(getconf _NPROCESSORS_ONLN)"
+./build/examples/trace-plugin-chain/pulp-trace-plugin-chain 0.06 /tmp/chain.pftrace
+
+# Attribute cost per plugin — the average and the steady state disagree:
+pulp trace query \
+  "select name as plugin, round(avg(dur)/1000.0,2) as avg_all_blocks, \
+   round((sum(dur)-max(dur))/1000.0/(count(*)-1),2) as avg_steady_state \
+   from slice where name in ('gain','biquad_filter','compressor') \
+   group by name order by avg_all_blocks desc" \
+  --trace /tmp/chain.pftrace
+```
+
+The trace catches a truth a scalar load meter inverts: `gain`'s *average* looks
+like the worst offender, but nearly all of it is a one-time cold-start spike on
+the first block (the first `process()` call warms caches and touches fresh
+pages). In steady state the biquad filter is the real per-block hot node and the
+gain is effectively free. The per-block trace separates one-time warmup from the
+cost that actually recurs — the whole reason to reach for a trace over an
+average.
+
 ---
 
 ## Keeping Perfetto current

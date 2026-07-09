@@ -211,6 +211,17 @@ SELECT name, COUNT(*) AS n, SUM(dur)/1e6 AS total_ms
 FROM slice
 WHERE category = 'text' AND dur >= 0
 GROUP BY name ORDER BY n DESC;
+
+-- Steady-state vs whole-run average per node (drop the single cold-start
+-- outlier). A per-node average is often dominated by the FIRST block, where
+-- the first process() call warms caches / touches fresh pages — a one-time
+-- cost, not a per-block cost. Subtracting the per-node max isolates it:
+SELECT name,
+       ROUND(AVG(dur)/1e3, 2)                          AS avg_all_us,
+       ROUND((SUM(dur) - MAX(dur)) / 1e3 / (COUNT(*) - 1), 2) AS avg_steady_us
+FROM slice
+WHERE category = 'dsp.node' AND dur >= 0
+GROUP BY name ORDER BY avg_all_us DESC;
 ```
 
 ## Gotchas

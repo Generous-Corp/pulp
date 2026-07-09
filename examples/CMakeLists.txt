@@ -174,6 +174,7 @@ add_subdirectory(stream-demo)
 # said WHY" reveal). Perfetto-only, so gated on the dev-only PULP_TRACING option.
 if(PULP_TRACING)
     add_subdirectory(trace-demo)
+    add_subdirectory(trace-plugin-chain)
 endif()
 
 # iOS AUv3 examples — gated on CMAKE_SYSTEM_NAME=iOS
