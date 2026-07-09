@@ -64,6 +64,13 @@ void wam_midi(int status, int data1, int data2, int offset) {
                            static_cast<uint8_t>(data2), offset);
 }
 
+// Variable-length SysEx input (full F0 .. F7 payload). Returns 0 when the
+// message was dropped (pool exhausted or payload too large), 1 on success.
+__attribute__((used, visibility("default")))
+int wam_midi_sysex(const uint8_t* data, int size, int offset) {
+    return g_bridge.schedule_sysex(data, size, offset) ? 1 : 0;
+}
+
 // Drain the MIDI produced by the last wam_process() call. Returns the number of
 // bytes AVAILABLE; copies min(cap, available) into dst. See
 // WamProcessorBridge::drain_midi_out for the record layout.

@@ -40,6 +40,7 @@ function moduleExports(M) {
     wam_set_param: M._wam_set_param,
     wam_get_param: M._wam_get_param,
     wam_midi: M._wam_midi,
+    wam_midi_sysex: M._wam_midi_sysex,
     wam_midi_out_drain: M._wam_midi_out_drain,
     wam_descriptor: M._wam_descriptor,
     wam_parameters: M._wam_parameters,
@@ -87,6 +88,7 @@ class PulpWamProcessor extends AudioWorkletProcessor {
     switch (msg.type) {
       case "param": this._wam.setParam(String(msg.id), msg.value); break;
       case "midi":  this._wam.midi(msg.status, msg.data1, msg.data2, msg.offset | 0); break;
+      case "sysex": this._wam.sysex(msg.data, msg.offset | 0); break;
       case "getState":
         this.port.postMessage({ type: "state", reqId: msg.reqId, data: this._wam.readState() });
         break;

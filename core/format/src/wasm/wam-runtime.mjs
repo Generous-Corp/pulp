@@ -120,6 +120,14 @@ export function makeBridge(exports) {
     setParam(id, value) { const p = writeCStr(id); exports.wam_set_param(p, value); exports.free(p); },
     getParam(id) { const p = writeCStr(id); const v = exports.wam_get_param(p); exports.free(p); return v; },
     midi(status, d1, d2, offset) { exports.wam_midi(status, d1, d2, offset); },
+    // Full F0..F7 payload. Returns false when the plugin dropped it.
+    sysex(bytes, offset = 0) {
+      const p = exports.malloc(bytes.length);
+      u8().set(bytes, p);
+      const ok = exports.wam_midi_sysex(p, bytes.length, offset | 0) !== 0;
+      exports.free(p);
+      return ok;
+    },
     // Copy the last block's MIDI output into `dstPtr` (a caller-owned wasm
     // allocation of `cap` bytes). Returns bytes AVAILABLE — greater than `cap`
     // means the tail was truncated.

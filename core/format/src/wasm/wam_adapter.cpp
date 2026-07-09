@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <optional>
 
@@ -336,12 +337,99 @@ void WamProcessorBridge::schedule_midi(uint8_t status, uint8_t data1,
     pending_midi_.add(event);   // drops (counted) rather than growing when full
 }
 
+bool WamProcessorBridge::schedule_sysex(const uint8_t* data, int size,
+                                         int sample_offset) {
+    if (!data || size <= 0) return false;
+    // add_sysex_copy() honours set_realtime_capacity_limit(): it takes a payload
+    // from the reserved pool and drops when none is large enough or free.
+    return pending_midi_.add_sysex_copy(data, static_cast<std::size_t>(size),
+                                        sample_offset);
+}
+
+// Composed web state container. Previously get_state()/set_state() serialized
+// only the StateStore, so Processor::serialize_plugin_state() was never called
+// and any non-parameter state (state-memo's free-text memo, for instance) was
+// silently lost across a save/load in the browser.
+//
+//   "PWS1"                                    magic + container version
+//   [u32 params_len][params_len bytes]        store_.serialize()  (starts "PULP")
+//   [u32 plugin_len][plugin_len bytes]        serialize_plugin_state()
+//
+// Blobs that do not begin with the magic are treated as legacy params-only
+// state (which is exactly what older builds wrote) and still load.
+namespace {
+
+constexpr std::array<uint8_t, 4> kWebStateMagic{'P', 'W', 'S', '1'};
+
+void append_u32(std::vector<uint8_t>& out, uint32_t value) {
+    const auto le = value;   // wasm is little-endian; keep the wire LE explicitly
+    out.push_back(static_cast<uint8_t>(le & 0xFF));
+    out.push_back(static_cast<uint8_t>((le >> 8) & 0xFF));
+    out.push_back(static_cast<uint8_t>((le >> 16) & 0xFF));
+    out.push_back(static_cast<uint8_t>((le >> 24) & 0xFF));
+}
+
+bool read_u32(const uint8_t* data, size_t size, size_t& pos, uint32_t& out) {
+    if (pos + 4 > size) return false;
+    out = static_cast<uint32_t>(data[pos])
+        | (static_cast<uint32_t>(data[pos + 1]) << 8)
+        | (static_cast<uint32_t>(data[pos + 2]) << 16)
+        | (static_cast<uint32_t>(data[pos + 3]) << 24);
+    pos += 4;
+    return true;
+}
+
+bool has_web_state_magic(const uint8_t* data, size_t size) {
+    return size >= kWebStateMagic.size()
+        && std::equal(kWebStateMagic.begin(), kWebStateMagic.end(), data);
+}
+
+} // namespace
+
 std::vector<uint8_t> WamProcessorBridge::get_state() const {
-    return store_.serialize();
+    const auto params = store_.serialize();
+    const auto plugin = processor_ ? processor_->serialize_plugin_state()
+                                   : std::vector<uint8_t>{};
+
+    std::vector<uint8_t> out;
+    out.reserve(kWebStateMagic.size() + 8 + params.size() + plugin.size());
+    out.insert(out.end(), kWebStateMagic.begin(), kWebStateMagic.end());
+    append_u32(out, static_cast<uint32_t>(params.size()));
+    out.insert(out.end(), params.begin(), params.end());
+    append_u32(out, static_cast<uint32_t>(plugin.size()));
+    out.insert(out.end(), plugin.begin(), plugin.end());
+    return out;
 }
 
 bool WamProcessorBridge::set_state(const uint8_t* data, size_t size) {
-    return store_.deserialize({data, size});
+    if (!data || size == 0) return false;
+
+    // Legacy: a bare StateStore blob written before the container existed.
+    if (!has_web_state_magic(data, size)) {
+        const bool ok = store_.deserialize({data, size});
+        // Tell the plugin its owned state carried no payload, per the
+        // Processor contract ("empty span" => reset to defaults).
+        if (processor_) processor_->deserialize_plugin_state({});
+        return ok;
+    }
+
+    size_t pos = kWebStateMagic.size();
+    uint32_t params_len = 0;
+    if (!read_u32(data, size, pos, params_len)) return false;
+    if (pos + params_len > size) return false;
+    const bool params_ok = store_.deserialize({data + pos, params_len});
+    pos += params_len;
+
+    uint32_t plugin_len = 0;
+    if (!read_u32(data, size, pos, plugin_len)) return false;
+    if (pos + plugin_len > size) return false;
+
+    bool plugin_ok = true;
+    if (processor_) {
+        plugin_ok = processor_->deserialize_plugin_state(
+            {data + pos, static_cast<std::size_t>(plugin_len)});
+    }
+    return params_ok && plugin_ok;
 }
 
 WamDescriptorData WamProcessorBridge::descriptor() const {

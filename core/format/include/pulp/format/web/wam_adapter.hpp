@@ -95,6 +95,12 @@ public:
     void schedule_midi(uint8_t status, uint8_t data1, uint8_t data2,
                        int sample_offset);
 
+    // Variable-length System Exclusive input (a full F0 .. F7 payload), which
+    // the 3-byte schedule_midi() cannot express. Copies into a pre-reserved
+    // payload pool; oversized or overflowing messages are dropped (and counted)
+    // rather than allocating. Returns false when the message was dropped.
+    bool schedule_sysex(const uint8_t* data, int size, int sample_offset);
+
     // Drain the MIDI the processor produced during the LAST process() call.
     //
     // Copies up to `cap` bytes into `dst` and returns the number of bytes that

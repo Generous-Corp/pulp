@@ -115,6 +115,11 @@ export default class PulpWAM {
   }
   async getParameterValue(id) { return this._request("getParam", { paramId: id }); }
 
+  /** Send a full SysEx payload (F0 .. F7). `bytes` is a Uint8Array. */
+  sendSysex(bytes, offset = 0) {
+    this._audioNode?.port.postMessage({ type: "sysex", data: bytes, offset });
+  }
+
   scheduleMidi(status, data1, data2, offset = 0) {
     this._audioNode?.port.postMessage({ type: "midi", status, data1, data2, offset });
   }
