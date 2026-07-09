@@ -18,10 +18,11 @@
 // `output_scale` and `invert` are the user's per-instance calibration; a UI may
 // display volts once the user declares their interface's full-scale voltage.
 
+#include <brew/cv.hpp>
+
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
-#include <algorithm>
 #include <cstddef>
 #include <memory>
 
@@ -78,19 +79,12 @@ public:
 
     void prepare(const format::PrepareContext&) override {}
 
-    /// The value actually written to every output sample this block, after
-    /// scale and polarity. Pure; shared by process() and the tests so a test
-    /// cannot silently diverge from the DSP.
-    static float resolve_output(float value, float scale, bool invert) noexcept {
-        const float scaled = std::clamp(value, -1.0f, 1.0f) *
-                             std::clamp(scale, 0.0f, 1.0f);
-        return invert ? -scaled : scaled;
-    }
-
+    /// The value actually written to every output sample this block, after the
+    /// suite's shared output stage (clamp, scale, invert — see brew/cv.hpp).
     float current_output() const noexcept {
         return resolve_output(state().get_value(kValue),
                               state().get_value(kOutputScale),
-                              state().get_value(kInvert) >= 0.5f);
+                              as_toggle(state().get_value(kInvert)));
     }
 
     void process(audio::BufferView<float>& output,

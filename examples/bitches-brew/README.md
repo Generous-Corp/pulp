@@ -33,14 +33,44 @@ them).
 | Name | What it does |
 |------|--------------|
 | `DC` | Holds one constant value. The connection tester, and the suite's bit-exactness guard. |
+| `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
 
-Built for VST3, AU, and CLAP.
+Built for VST3, AU (`aufx`), and CLAP. `brew-core/` holds what they share: the
+output stage above, the clock grid, the pulse-width rules, and the run-segment
+origin.
+
+## The clock is derived, never accumulated
+
+`Sync` computes which clock edges fall inside a block from the host's reported
+position. It does not advance a phase counter one block at a time.
+
+This is the single most important decision in the suite. An accumulator has to
+*catch up* whenever the host moves the playhead — and the audible result is a
+burst of pulses at the instant the transport starts, arriving downstream as a
+fistful of spurious clock ticks. Deriving from position means beat 3.7 maps to the
+same edge regardless of how the playhead got there, so there is nothing to catch
+up. `test_sync.cpp` asserts the exact multiset of edge offsets for ten transport
+scenarios — play from the top, play from mid-timeline, stop/play cycles, loop
+wrap, forward locate, tempo change, bar wait, a host re-rendering the same block,
+a host lying about `transport_jump`, and no transport at all.
+
+The features that genuinely *are* run-relative (skip the first pulse, wait for the
+bar) hang off one explicit origin captured on the play edge. That is the whole of
+the plug-in's musical state.
+
+Two physical constraints bound the pulse width, and `Sync` clamps to both. A
+one-sample pulse does not survive a DAC's reconstruction filter, so there is a
+~1 ms floor. And a pulse as long as the clock period never falls — a welded gate —
+so the width is held strictly under half the period. At 24 ppqn and 300 BPM the
+period is 8.3 ms, which a perfectly reasonable-looking 10 ms trigger length would
+weld. The ceiling wins when the two conflict: a weak trigger beats a stuck one.
 
 ## What is and isn't verified
 
-`test_dc.cpp` proves that `Processor::process()` holds a value bit-exactly
-across block sizes and sample rates, and that a fresh instance emits zero. That
-is a real guarantee, and it is not the whole chain.
+`test_dc.cpp` proves that `Processor::process()` holds a value bit-exactly across
+block sizes and sample rates, and that a fresh instance emits zero. `test_sync.cpp`
+proves the clock's response to every transport scenario above. Those are real
+guarantees, and they are not the whole chain.
 
 Two links past it are **not** covered by these tests:
 
@@ -64,8 +94,13 @@ These are developed inside the Pulp tree against the live SDK, and are extracted
 to their own public repo once the SDK changes they depend on ship in a release.
 
 ```bash
-cmake --build build --target brew-dc-test && ./build/examples/bitches-brew/dc/brew-dc-test
+cmake --build build --target brew-core-test brew-dc-test brew-sync-test
+./build/examples/bitches-brew/core/brew-core-test
+./build/examples/bitches-brew/dc/brew-dc-test
+./build/examples/bitches-brew/sync/brew-sync-test
+
 cmake --build build --target BrewDC_VST3 BrewDC_CLAP BrewDC_AU
+cmake --build build --target BrewSync_VST3 BrewSync_CLAP BrewSync_AU
 ```
 
 ## Provenance
