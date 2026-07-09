@@ -385,6 +385,92 @@ TEST_CASE("Sync skips the first pulse of a run when asked",
     }
 }
 
+// The delay is measured from the run origin, so two runs starting at different
+// beats behave identically — that is the whole point of having an origin.
+TEST_CASE("Sync holds the clock off for the first delay",
+          "[brew][sync][run-segment]") {
+    SyncRig rig;
+    // 24 ppqn at 120 BPM: one edge every 1000 samples, i.e. every 20.8333 ms.
+    // 15 ms swallows the edge at beat 0 and lets the next one through. The delay
+    // is deliberately not an exact multiple of the edge period: a gate that lands
+    // exactly on an edge is decided by the last bit of a float parameter, and
+    // asserting on that would be asserting on rounding.
+    rig.state().set_value(SyncProcessor::kFirstDelayMs, 15.0f);
+    REQUIRE(rig.render(0.0, true, true, 2048) == std::vector<int>{1000, 2000});
+
+    SECTION("zero delay is the unchanged clock") {
+        SyncRig plain;
+        REQUIRE(plain.render(0.0, true, true, 2048) ==
+                std::vector<int>{0, 1000, 2000});
+    }
+
+    SECTION("a delay longer than one period swallows two edges") {
+        SyncRig r4;
+        r4.state().set_value(SyncProcessor::kFirstDelayMs, 25.0f);  // > 20.83 ms
+        REQUIRE(r4.render(0.0, true, true, 3072) == std::vector<int>{2000, 3000});
+    }
+
+    SECTION("the delay is relative to the run, not the timeline") {
+        SyncRig r2;
+        r2.state().set_value(SyncProcessor::kFirstDelayMs, 15.0f);
+        // Start at beat 4 instead of 0: the same edge is swallowed.
+        const auto edges = r2.render(4.0, true, true, 2048);
+        REQUIRE(edges == std::vector<int>{1000, 2000});
+    }
+
+    SECTION("delay and Skip First compose: the delay gates, then skip eats one") {
+        SyncRig r3;
+        r3.state().set_value(SyncProcessor::kFirstDelayMs, 15.0f);
+        r3.state().set_value(SyncProcessor::kSkipFirst, 1.0f);
+        // Edge at 0 is gated (never reaches skip); edge at 1000 is skipped.
+        REQUIRE(r3.render(0.0, true, true, 3072) == std::vector<int>{2000, 3000});
+    }
+}
+
+// A DAC, its reconstruction filter, and the receiving gate input all add latency,
+// so a clock that is sample-accurate in software arrives late at the hardware.
+TEST_CASE("Sync offset slides the whole pulse train", "[brew][sync]") {
+    SECTION("a positive offset moves every pulse later by the same amount") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kOffsetMs, 5.0f);  // 240 samples
+        REQUIRE(rig.render(0.0, true, true, 2048) ==
+                std::vector<int>{240, 1240});
+    }
+
+    SECTION("a negative offset pulls them ahead of the beat") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kOffsetMs, -5.0f);
+        // The edge that would sit at 1000 now lands at 760; the one at 0 has
+        // already gone by, before the run started, so it is gated away.
+        REQUIRE(rig.render(0.0, true, true, 2048) ==
+                std::vector<int>{760, 1760});
+    }
+
+    // The gate lives in host-position time; the grid does not. With a positive
+    // offset, an edge whose *grid* beat falls just before the run origin still
+    // emits just after it, and must not be gated away. Starting at beat 0.005
+    // with a +5 ms (0.01-beat) offset puts edge 0 exactly in that window.
+    SECTION("an edge that emits after the run start is kept, even if its grid "
+            "beat precedes it") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kOffsetMs, 5.0f);
+        REQUIRE(rig.render(0.005, true, true, 2048) == std::vector<int>{120, 1120});
+    }
+
+    SECTION("offset adds and removes no edges across contiguous blocks") {
+        SyncRig a, b;
+        b.state().set_value(SyncProcessor::kOffsetMs, 3.0f);
+        int na = 0, nb = 0;
+        double beat = 0.0;
+        const double step = beats_per_sample(kTempo, kSampleRate) * 512.0;
+        for (int i = 0; i < 40; ++i, beat += step) {
+            na += static_cast<int>(a.render(beat, true, i == 0).size());
+            nb += static_cast<int>(b.render(beat, true, i == 0).size());
+        }
+        REQUIRE(na == nb);
+    }
+}
+
 TEST_CASE("Sync output scale and polarity reach the clock channel",
           "[brew][sync]") {
     SyncRig rig;

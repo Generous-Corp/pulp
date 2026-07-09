@@ -20,6 +20,8 @@
 namespace pulp::examples::brew {
 
 class SyncUi : public ui::BrewPanel {
+    using vw_row = std::unique_ptr<view::View>;
+
 public:
     SyncUi(state::StateStore& store, const SyncProcessor& proc)
         : ui::BrewPanel("Sync", "a clock and a run gate, locked to the host"),
@@ -35,18 +37,28 @@ public:
             std::snprintf(buf, sizeof(buf), "%.1f ms", v);
             return std::string(buf);
         };
+        // The offset is bipolar, and its sign is the whole point: negative pulls
+        // the pulses ahead of the beat to compensate hardware latency.
+        auto signed_millis = [](float v) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%+.1f ms", v);
+            return std::string(buf);
+        };
 
-        auto knobs = ui::row(10.0f, 84.0f);
-        auto add_knob = [&](state::ParamID id, const char* label,
+        auto rate = ui::row(10.0f, 84.0f);
+        auto timing = ui::row(10.0f, 84.0f);
+        auto add_knob = [&](vw_row& into, state::ParamID id, const char* label,
                             std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 68.0f, 84.0f);
-            knobs->add_child(std::move(k));
+            ui::fixed_size(*k, 88.0f, 84.0f);
+            into->add_child(std::move(k));
         };
-        add_knob(SyncProcessor::kPulsesPerBeat, "PPQN", integer);
-        add_knob(SyncProcessor::kMultiplier, "Mult", integer);
-        add_knob(SyncProcessor::kDivisor, "Div", integer);
-        add_knob(SyncProcessor::kTriggerLengthMs, "Width", millis);
+        add_knob(rate, SyncProcessor::kPulsesPerBeat, "PPQN", integer);
+        add_knob(rate, SyncProcessor::kMultiplier, "Mult", integer);
+        add_knob(rate, SyncProcessor::kDivisor, "Div", integer);
+        add_knob(timing, SyncProcessor::kTriggerLengthMs, "Width", millis);
+        add_knob(timing, SyncProcessor::kFirstDelayMs, "1st Delay", millis);
+        add_knob(timing, SyncProcessor::kOffsetMs, "Offset", signed_millis);
 
         auto bottom = ui::row(14.0f, 52.0f);
         auto skip = ui::param_toggle(store_, SyncProcessor::kSkipFirst, "Skip 1st");
@@ -68,10 +80,11 @@ public:
         bottom->add_child(std::move(clock_lamp));
         bottom->add_child(std::move(run_lamp));
 
-        add_child(std::move(knobs));
+        add_child(std::move(rate));
+        add_child(std::move(timing));
         add_child(std::move(bottom));
         add_child(ui::caption_label(
-            "24 PPQN is DIN sync. Pulse width is clamped below half the period."));
+            "24 PPQN is DIN sync. Width is clamped below half the pulse period."));
     }
 
 private:
