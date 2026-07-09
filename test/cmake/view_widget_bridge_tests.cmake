@@ -338,6 +338,9 @@ pulp_add_test_suite(pulp-test-editor-bridge LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-input-events LIBRARIES pulp::view)
 
 # Text editor tests
+# Caret shape geometry + the solid-while-moving blink policy shared by every
+# editable widget.
+pulp_add_test_suite(pulp-test-caret LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-text-editor LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-text-editor-mouse LIBRARIES pulp::view PROPERTIES RESOURCE_LOCK system-clipboard)
 pulp_add_test_suite(pulp-test-text-editor-paint LIBRARIES pulp::view)

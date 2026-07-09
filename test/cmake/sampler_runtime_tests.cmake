@@ -154,6 +154,11 @@ pulp_add_test_suite(pulp-test-signal-graph-prepared-swap
 pulp_add_test_suite(pulp-test-signal-graph-metadata-cache
     SOURCES test_signal_graph_metadata_cache.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# Per-node live-DSP telemetry wired through SignalGraph: default-off, per-node
+# recording on the reference walk, live toggle without recompile, no audio-path alloc.
+pulp_add_test_suite(pulp-test-live-dsp-telemetry-graph
+    SOURCES test_live_dsp_telemetry_graph.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::runtime)
 # 2.2b: the no-silence LIVE swap — begin_swap_edit/prepare_swap publishes a
 # reinit-free gain-graph edit with no silent block under a concurrent render, and
 # rejects non-reinit-free edits (SR change / removed node / anticipation) as

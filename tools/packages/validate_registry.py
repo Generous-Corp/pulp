@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "tools" / "packages" / "registry.json"
 SCHEMA = ROOT / "tools" / "packages" / "registry-schema.json"
+TOOL_REGISTRY = ROOT / "tools" / "packages" / "tool-registry.json"
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -112,6 +113,32 @@ def validate_licenses(registry: dict) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def validate_tool_registry(tool_registry: dict) -> list[str]:
+    """Enforce the opt-in-tool update/override contract.
+
+    Every tool Pulp manages (``managed_by_pulp: true``) must be updatable and
+    version-overridable by the user without waiting for a registry bump. The
+    ``pulp tool update`` command and the user override (``--version`` /
+    ``PULP_TOOL_<ID>_VERSION`` / ``$PULP_HOME/tool-overrides.json``) both key
+    off the tool's ``pinned_version`` anchor, so a managed tool that ships
+    without a non-empty ``pinned_version`` has no version to update from or
+    override — exactly the "tool users can't update" case this rule forbids.
+    """
+    errors: list[str] = []
+    for tool_id, tool in tool_registry.get("tools", {}).items():
+        if not tool.get("managed_by_pulp"):
+            continue
+        pinned = tool.get("pinned_version", "")
+        if not isinstance(pinned, str) or not pinned.strip():
+            errors.append(
+                f"  {tool_id}: managed_by_pulp tool must declare a non-empty "
+                "'pinned_version' — it is the anchor for `pulp tool update` and "
+                "user version overrides. A managed tool with no update/override "
+                "path must not ship."
+            )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate the Pulp package registry")
     parser.add_argument("--strict", action="store_true", help="Exit non-zero on warnings")
@@ -140,6 +167,17 @@ def main() -> int:
     all_errors.extend(struct_errors)
     all_warnings.extend(struct_warnings)
 
+    tool_errors: list[str] = []
+    if TOOL_REGISTRY.exists():
+        tool_registry = load_json(TOOL_REGISTRY)
+        tool_count = len(tool_registry.get("tools", {}))
+        print(
+            f"Validating tool-registry.json ({tool_count} tools) — "
+            "managed tools must declare an update/override path..."
+        )
+        tool_errors = validate_tool_registry(tool_registry)
+        all_errors.extend(tool_errors)
+
     if args.check_licenses:
         lic_errors, lic_warnings = validate_licenses(registry)
         all_errors.extend(lic_errors)
@@ -154,6 +192,11 @@ def main() -> int:
     if struct_errors:
         print("\nStructural errors:")
         for e in struct_errors:
+            print(e)
+
+    if tool_errors:
+        print("\nTool-registry update/override errors:")
+        for e in tool_errors:
             print(e)
 
     if struct_warnings:

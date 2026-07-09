@@ -54,6 +54,22 @@ prose. L2 is the same protocol, interactive, for cases the presets cannot crack.
 
 ## Capture (if you don't already have a `.pftrace`)
 
+If a capture or query fails for an unclear reason, run the readiness check first
+— it tells you, in one shot, whether the inspector is reachable, whether the
+host was built with `-DPULP_TRACING=ON`, and whether a `trace_processor` is
+available for offline SQL:
+
+```bash
+pulp trace doctor            # human report; add --json for {ready_to_capture, ready_to_query, …}
+```
+
+`ready_to_capture:false` usually means the inspector is unreachable (start it
+with `PULP_TRACE_SERVER=1`) or tracing was compiled out; `ready_to_query:false`
+means no `trace_processor` (on `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched
+build, or `$PATH`) or no captured trace yet. For zero-install, run
+`pulp trace fetch` once — it downloads the pinned `trace_processor_shell`
+(Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`.
+
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
@@ -69,6 +85,25 @@ concurrent `pulp motion record` so the motion `trace_id` joins in.
 (ring overflow → empty trace): `SELECT DISTINCT category FROM slice`. No rows,
 or missing the category you asked for, means re-capture with a larger
 `--ring-mb` or a shorter window — not "nothing was slow."
+
+When you already have a flushed `.pftrace` and no live session (the common case
+for a trace a user handed you), run SQL against the file directly — no inspector
+needed:
+
+```bash
+pulp trace query "SELECT DISTINCT category FROM slice" --trace /tmp/pulp-<ts>.pftrace
+```
+
+This shells out to `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned
+Pulp-fetched build → `$PATH`; `pulp trace doctor` reports which, `pulp trace
+fetch` installs the pinned one) and returns its native table. `--format`
+json/csv and `--preset` apply only to the live inspector path; offline is raw
+SQL against the file.
+
+To eyeball a trace in the Perfetto timeline instead of querying it, hand it to
+the UI (browsers block `file://`, so this serves it over loopback and opens the
+UI at it): `pulp trace open /tmp/pulp-<ts>.pftrace` (`--no-browser` prints the
+URL to paste; `--json` for agents).
 
 ---
 
@@ -116,6 +151,16 @@ next to `mean_ms` (the stdlib views expose both), and when the gap is
 ambiguous compute the tail (p95/p99) over the raw slices — see `trace-sql`.
 "The load meter said 40%; the trace said WHY" is exactly this: the average was
 calm, one node's tail was not.
+
+The mean also lies in the *other* direction: a per-node average can be
+dominated by a one-time **cold-start spike on the first block** (the first
+`process()` call warms caches / touches fresh pages), making a genuinely cheap
+node look like the worst offender. Always separate the first-block outlier
+from steady-state cost — subtract the per-node `MAX(dur)` (the steady-state
+query in `trace-sql`'s "Common query shapes"), or just read the flamegraph and
+ignore block 0. `examples/trace-plugin-chain` is a runnable demonstration:
+gain's whole-run average is ~158× its steady-state cost, and the real per-block
+hot node is the biquad filter, not the gain the average fingers.
 
 ### 7. Consult the domain hints
 Match the symptom to a hints file and read it before drawing conclusions — each

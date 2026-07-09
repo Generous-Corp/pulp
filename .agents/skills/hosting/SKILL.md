@@ -393,6 +393,26 @@ predictable output, no MIDI.
   never erase while a snapshot may be live, or the audio thread's raw
   `NodeRuntime::load` pointer dangles. `begin()/end()` are relaxed-atomic and
   RT-safe (proven under the no-alloc trap in test_signal_graph_rt_safety).
+- Per-node live-DSP telemetry (`audio::LiveDspTelemetryStore`): richer than the
+  load measurer — fixed-slot p50/p95/p99 + jitter + over-budget attribution.
+  Disabled by default (`set_live_dsp_telemetry_enabled()`; the audio path is one
+  predicted-not-taken branch when off); drain + read a snapshot copy via
+  `poll_live_dsp_telemetry()` (single non-RT poller). Unlike `node_load_`, the
+  store is PER-`CompiledGraph` (not a SignalGraph member): it rides the RCU
+  snapshot lifetime, so telemetry resets on a topology recompile (a new topology
+  is a new timing baseline) and no re-prepare races the audio thread. Recording
+  is PATH-AGNOSTIC and lives at ONE site: a guard at the top of `process_impl`
+  destructs after the block (reverse-order vs the graph-load end guard) and reads
+  the values BOTH the routed serial executor and the legacy walk already stamped
+  into each node's persistent `AudioProcessLoadMeasurer` + `graph_load_`, then
+  pushes one fixed-slot record via `inject_block()` over a pre-sized scratch
+  (`external_record_scratch()`). This is why there is NO per-node hook in the
+  executor or the walk — both already time per node, so the store just harvests
+  those measurements once per block. `canonical_executor_routing_enabled_`
+  defaults TRUE, so the serial executor is the common path; harvesting the
+  measurers (not hooking the walk) is what makes telemetry work by default.
+  Per-node slot == the node's index in `ordered_runtime`, matching the store
+  metadata built at compile.
 - `.pulpgraph` schema changes must go through the graph serializer migration
   path. Bump the graph format version, add a deterministic migrator for older
   fixtures, and keep future-version loads fail-closed instead of silently

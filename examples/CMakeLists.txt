@@ -29,12 +29,11 @@ add_subdirectory(super-convolver)
 add_subdirectory(spectral-lab)
 # GPU NAM (Neural Amp Modeler player) lives in its own repo and consumes Pulp as
 # an SDK: https://github.com/danielraffel/pulp-gpu-nam
+# Bendr (pitch / formant / freeze effect) likewise lives in its own repo:
+# https://github.com/danielraffel/pulp-bendr
 
 # PulpCompressor: sidechain compressor validating multi-bus
 add_subdirectory(pulp-compressor)
-
-# Bendr: pitch/time/freeze effect composed from public pulp::signal primitives
-add_subdirectory(bendr)
 
 # Hot-Reload Demo: a reloadable shell plugin whose DSP lives in a separate
 # .dylib that hot-swaps live in a DAW (the Phase 1b DAW-integration example).
@@ -175,6 +174,7 @@ add_subdirectory(stream-demo)
 # said WHY" reveal). Perfetto-only, so gated on the dev-only PULP_TRACING option.
 if(PULP_TRACING)
     add_subdirectory(trace-demo)
+    add_subdirectory(trace-plugin-chain)
 endif()
 
 # iOS AUv3 examples — gated on CMAKE_SYSTEM_NAME=iOS

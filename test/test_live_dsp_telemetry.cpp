@@ -227,3 +227,51 @@ TEST_CASE("live-dsp telemetry survives a concurrent producer and drainer", "[liv
     REQUIRE(store.blocks_written() == static_cast<std::uint64_t>(kBlocks) - store.blocks_dropped());
     REQUIRE(snap.blocks_drained + store.blocks_dropped() == static_cast<std::uint64_t>(kBlocks));
 }
+
+// A [[clang::nonblocking]] wrapper so RealtimeSanitizer verifies the telemetry
+// write path is free of locks and syscalls too — not only allocations, which
+// the RtAllocationProbe cases above already cover. Under a non-RTSan build the
+// attribute is inert (the RTSan lane configures without -Wfunction-effects), so
+// this compiles everywhere and runs as a plain functional smoke; under the
+// advisory `-fsanitize=realtime` lane it arms the runtime RT-violation checks
+// over the whole begin_block -> node scopes -> finish path. Guarded because only
+// Clang understands the attribute.
+#if defined(__clang__)
+#  define PULP_TEST_RT_NONBLOCKING [[clang::nonblocking]]
+#else
+#  define PULP_TEST_RT_NONBLOCKING
+#endif
+
+namespace {
+
+// The attribute is a function-type attribute: it sits after the parameter list
+// (like noexcept), never as a leading declaration attribute.
+void write_one_telemetry_block(LiveDspTelemetryStore& store, std::uint32_t frames)
+    PULP_TEST_RT_NONBLOCKING {
+    auto writer = store.begin_block(frames, 48000.0);
+    for (std::uint32_t n = 0; n < 3; ++n) {
+        auto scope = writer.node(n);
+        volatile int x = static_cast<int>(n);
+        (void)x;
+    }
+    writer.finish();
+}
+
+}  // namespace
+
+TEST_CASE("live-dsp telemetry write path is nonblocking (RTSan-checkable)", "[live-dsp-telemetry][rt-safety]") {
+    LiveDspTelemetryStore store;
+    const auto nodes = make_nodes({"a", "b", "c"});
+    REQUIRE(store.prepare({}, nodes));
+    store.set_enabled(true);
+
+    // Warm one block (prepare pre-allocates the ring, so nothing lazy remains,
+    // but this keeps the checked loop on the pure steady-state path).
+    write_one_telemetry_block(store, 128);
+    store.drain();
+
+    for (int b = 0; b < 64; ++b) write_one_telemetry_block(store, 128);
+    store.drain();
+
+    REQUIRE(store.latest().blocks_drained >= 64);
+}

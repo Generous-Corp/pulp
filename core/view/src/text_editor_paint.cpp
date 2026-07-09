@@ -252,14 +252,28 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             // re-measuring a prefix substring every paint.
             const auto& snap_line =
                 last_layout_.lines[static_cast<size_t>(caret_line)];
-            size_t col = std::clamp<size_t>(caret_column, 0,
-                snap_line.x_offsets.empty() ? 0 : snap_line.x_offsets.size() - 1);
+            const size_t last_col =
+                snap_line.x_offsets.empty() ? 0 : snap_line.x_offsets.size() - 1;
+            size_t col = std::clamp<size_t>(caret_column, 0, last_col);
             float caret_x = snap_line.inner_x + (snap_line.x_offsets.empty()
                 ? 0.f : snap_line.x_offsets[col]);
             float caret_y = inner_y + caret_line * line_h - scroll_offset_;
-            canvas.set_stroke_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
-            canvas.set_line_width(1.5f);
-            canvas.stroke_line(caret_x, caret_y, caret_x, caret_y + line_h - 2.0f);
+
+            CaretMetrics m;
+            m.x = caret_x;
+            m.cell_top = caret_y;
+            m.cell_height = line_h - 2.0f;
+            m.baseline = inner_y + font_size_ + caret_line * line_h - scroll_offset_;
+            // The next glyph on this row sizes the underline/block. At the row's
+            // end there is none, so fall back to a nominal advance.
+            m.advance = col < last_col ? snap_line.x_offsets[col + 1] - snap_line.x_offsets[col]
+                                       : 0.0f;
+            m.nominal_advance = canvas.measure_text("0");
+            m.stroke = 1.5f;
+            paint_caret_over_text(canvas, caret_style_, m,
+                                  resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)),
+                                  bg_color, lines[static_cast<size_t>(caret_line)].text,
+                                  snap_line.inner_x);
         }
         return;
     }
@@ -414,10 +428,21 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     if (should_paint_caret()) {
         // Use the shaped offsets (same as the drawn text), not measure_text of
         // a prefix substring — keeps the caret exactly at the glyph boundary.
-        float caret_x = text_x + x_at(caret_position_);
-        canvas.set_stroke_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
-        canvas.set_line_width(1.5f);
-        canvas.stroke_line(caret_x, b.y + 4, caret_x, b.y + b.height - 4);
+        const float caret_x = text_x + x_at(caret_position_);
+        const int next = text_edit::move_clusters(text_, caret_position_, 1);
+
+        CaretMetrics m;
+        m.x = caret_x;
+        m.cell_top = b.y + 4;
+        m.cell_height = b.height - 8;
+        m.baseline = text_y;
+        // Zero at end of text: there is no glyph for the underline/block to cover.
+        m.advance = next > caret_position_ ? (text_x + x_at(next)) - caret_x : 0.0f;
+        m.nominal_advance = canvas.measure_text("0");
+        m.stroke = 1.5f;
+        paint_caret_over_text(canvas, caret_style_, m,
+                              resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)),
+                              bg_color, display, text_x);
     }
     canvas.restore();
 }

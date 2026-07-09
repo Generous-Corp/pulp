@@ -159,6 +159,7 @@ bool LiveDspTelemetryStore::prepare(const LiveDspTelemetryConfig& config,
     window_pos_.assign(node_count_, 0);
     window_len_.assign(node_count_, 0);
     scratch_.assign(window_blocks_, 0);
+    record_scratch_.assign(node_count_, 0);
 
     info_.assign(nodes.begin(), nodes.end());
 

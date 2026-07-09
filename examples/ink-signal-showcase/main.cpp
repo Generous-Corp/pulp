@@ -14,6 +14,7 @@
 
 #include <pulp/view/breadcrumb.hpp>
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/caret.hpp>
 #include <pulp/view/context_menu.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/gap_widgets.hpp>
@@ -265,6 +266,42 @@ void advance_anims(View* v, float dt) {
         auto combo = std::make_unique<ComboBox>(); combo->set_items({"Sine", "Saw", "Square"}); combo->set_selected(1);
         add(std::move(combo), kMargin + 390.0f, y, 180.0f, 32.0f);
         y += 52.0f;
+    }
+
+    // ── Caret — shape picker + blink rate ──────────────────────────────
+    section("Caret");
+    {
+        // A caret paints only while its widget is focused, so one field plus an
+        // exclusive picker A/Bs the shapes without the field ever losing focus.
+        auto ted = std::make_unique<TextEditor>(); ted->set_text("Velvet Plate");
+        auto* ed = static_cast<TextEditor*>(add(std::move(ted), kMargin, y, 200.0f, 32.0f));
+
+        // 3-way exclusive shape picker driving the single editor above.
+        const CaretStyle styles[] = {CaretStyle::ibeam, CaretStyle::underline, CaretStyle::block};
+        auto seg = std::make_unique<SegmentedControl>();
+        seg->set_segments({"ibeam", "underline", "block"});
+        seg->set_selected(0);  // ibeam is the default
+        seg->on_change = [ed, styles](int i) { ed->set_caret_style(styles[i]); };
+        add(std::move(seg), kMargin + 220.0f, y + 1.0f, 240.0f, 30.0f);
+
+        // Blink-period readout, updated live by the slider below.
+        auto rate = std::make_unique<Label>("1.06 s"); rate->set_font_size(12.0f);
+        auto* rl = static_cast<Label*>(add(std::move(rate), kMargin + 252.0f, y + 44.0f, 60.0f, 16.0f));
+
+        // Maps to CaretBlinkConfig::period_seconds; the other blink fields carry over.
+        auto sl = std::make_unique<RangeSlider>();
+        sl->set_min(0.4f); sl->set_max(2.0f); sl->set_value(1.06f);
+        sl->on_change = [ed, rl](float v) {
+            CaretBlinkConfig cfg = ed->caret_blink();
+            cfg.period_seconds = v;
+            ed->set_caret_blink(cfg);
+            char b[16]; std::snprintf(b, sizeof b, "%.2f s", v);
+            rl->set_text(b);
+        };
+        add(std::move(sl), kMargin, y + 46.0f, 240.0f, 18.0f);
+
+        label("Click the field, pick a shape, drag to set blink rate", kMargin, y + 70.0f, 420.0f, 11.0f);
+        y += 90.0f;
     }
 
     // ── Meters & progress ──────────────────────────────────────────────
