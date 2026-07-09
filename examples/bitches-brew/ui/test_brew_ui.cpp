@@ -23,6 +23,7 @@
 #include <brew/ui/panel.hpp>
 #include <pulp/view/screenshot.hpp>
 
+#include <algorithm>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -91,6 +92,18 @@ view::Toggle* find_toggle(view::View& root, std::string_view label) {
     return nullptr;
 }
 
+/// The bottom-right corner of the furthest-extending descendant, in the root's
+/// coordinates. Yoga has already placed everything by the time this runs.
+void content_extent(const view::View& v, float ox, float oy, float& w, float& h) {
+    for (size_t i = 0; i < v.child_count(); ++i) {
+        const view::View* c = v.child_at(i);
+        const auto b = c->bounds();
+        w = std::max(w, ox + b.x + b.width);
+        h = std::max(h, oy + b.y + b.height);
+        content_extent(*c, ox + b.x, oy + b.y, w, h);
+    }
+}
+
 /// Push a constant level through both input channels for one block, so the
 /// editors that display an operating point have a signal to point at.
 void drive(format::HeadlessHost& host, float level) {
@@ -110,6 +123,42 @@ void drive(format::HeadlessHost& host, float level) {
 }
 
 }  // namespace
+
+TEST_CASE("every editor fits inside the size it asks the host for",
+          "[brew][ui][layout]") {
+    // A DAW opens a plug-in at exactly `editor_size()`. Adding a control and
+    // forgetting to grow the panel is a one-line mistake no screenshot test
+    // notices, because a screenshot of a squashed editor still looks like an
+    // editor.
+    //
+    // Measured against an unbounded height, NOT against `editor_size()` itself.
+    // Yoga compresses a shrinkable child — the caption labels — to fit whatever
+    // box it is given, so laying out at the declared size and asking "did the
+    // content fit" always answers yes. It fits because Yoga made it fit. The
+    // question worth asking is how tall the content wants to be.
+    constexpr float kUnbounded = 4000.0f;
+
+    struct Case { const char* name; format::ProcessorFactory factory; };
+    const Case cases[] = {
+        {"CV To OSC", create_cv_osc}, {"DC", create_dc},   {"Function", create_function},
+        {"LFO", create_lfo},          {"Quantizer", create_quantizer},
+        {"Step LFO", create_step},    {"Sync", create_sync},
+    };
+
+    for (const auto& c : cases) {
+        Editor ed(c.factory);
+        ed.view->set_bounds({0, 0, static_cast<float>(ed.width), kUnbounded});
+        ed.view->layout_children();
+
+        float w = 0.0f, h = 0.0f;
+        content_extent(*ed.view, 0.0f, 0.0f, w, h);
+
+        INFO(c.name << " asks the host for " << ed.width << "x" << ed.height
+                    << " but its content wants " << w << "x" << h);
+        CHECK(w <= static_cast<float>(ed.width));
+        CHECK(h <= static_cast<float>(ed.height));
+    }
+}
 
 TEST_CASE("DC's editor renders and tracks its output", "[brew][ui][dc]") {
     Editor ed(create_dc);

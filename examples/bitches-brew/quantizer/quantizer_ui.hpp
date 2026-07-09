@@ -100,22 +100,21 @@ public:
         auto add = [&](view::View& row, state::ParamID id, const char* label,
                        std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 76.0f, 84.0f);
+            ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        auto top = ui::row(6.0f, 84.0f);
+        auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*top, QuantizerProcessor::kSteps, "Steps", whole);
         add(*top, QuantizerProcessor::kFine, "Fine", number);
         add(*top, QuantizerProcessor::kOffset, "Offset", number);
         add(*top, QuantizerProcessor::kTranspose, "Transp", signed_whole);
 
-        auto bottom = ui::row(14.0f, 84.0f);
-        auto out = ui::param_knob(store_, QuantizerProcessor::kOutputScale, "Out", number);
-        ui::fixed_size(*out, 76.0f, 84.0f);
+        add(*top, QuantizerProcessor::kOutputScale, "Out", number);
+
+        auto bottom = ui::row(ui::kRowGap, ui::kToggleHeight);
         auto inv = ui::param_toggle(store_, QuantizerProcessor::kInvert, "Invert");
-        ui::fixed_size(*inv, 78.0f, 50.0f);
-        bottom->add_child(std::move(out));
+        ui::toggle_size(*inv);
         bottom->add_child(std::move(inv));
 
         add_child(std::move(graph));

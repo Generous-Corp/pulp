@@ -126,7 +126,7 @@ public:
 
     /// The step editor, two rows of controls, and the two caption lines.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {380, 460};
+        return {360, 412};
     }
 
     std::unique_ptr<view::View> create_view() override;

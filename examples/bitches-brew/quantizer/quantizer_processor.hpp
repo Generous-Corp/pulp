@@ -89,7 +89,7 @@ public:
     /// the plug-in at Processor's 400x300 default, and the layout is laid out to
     /// a geometry the editor was never checked against. The staircase needs
     /// vertical room; four knobs fit one row.
-    std::pair<uint32_t, uint32_t> editor_size() const override { return {360, 440}; }
+    std::pair<uint32_t, uint32_t> editor_size() const override { return {360, 366}; }
 
     /// Defined in quantizer_view.cpp so the audio translation units never see the
     /// view stack.

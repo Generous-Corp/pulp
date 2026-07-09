@@ -44,22 +44,22 @@ public:
         auto add = [&](view::View& row, state::ParamID id, const char* label,
                        std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 88.0f, 88.0f);
+            ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        auto controls = ui::row(12.0f, 88.0f);
+        auto controls = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*controls, CvOscProcessor::kPort, "Port", whole);
         add(*controls, CvOscProcessor::kRateHz, "Rate", hz);
         add(*controls, CvOscProcessor::kDeadband, "Deadband", fine);
 
-        auto bottom = ui::row(14.0f, 52.0f);
+        auto bottom = ui::row(ui::kRowGap, ui::kToggleHeight);
         auto send = ui::param_toggle(store_, CvOscProcessor::kEnabled, "Send");
-        ui::fixed_size(*send, 78.0f, 50.0f);
+        ui::toggle_size(*send);
         // Lit while the count is climbing: proof a packet left, not proof a
         // switch is on.
         auto lamp = std::make_unique<ui::Lamp>("OSC", [this] { return sending(); });
-        ui::fixed_size(*lamp, 56.0f, 50.0f);
+        ui::fixed_size(*lamp, 46.0f, ui::kToggleHeight);
         bottom->add_child(std::move(send));
         bottom->add_child(std::move(lamp));
 

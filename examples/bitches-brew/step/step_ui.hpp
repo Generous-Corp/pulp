@@ -135,23 +135,23 @@ public:
         auto add = [&](view::View& row, state::ParamID id, const char* label,
                        std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 82.0f, 84.0f);
+            ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        auto top = ui::row(8.0f, 84.0f);
+        auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*top, StepProcessor::kRate, "Rate", beats);
         add(*top, StepProcessor::kLength, "Length", whole);
         add(*top, StepProcessor::kGlide, "Glide", number);
         add(*top, StepProcessor::kRandom, "Random", number);
 
-        auto bottom = ui::row(12.0f, 84.0f);
+        auto bottom = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*bottom, StepProcessor::kSeed, "Seed", whole);
         add(*bottom, StepProcessor::kOutputScale, "Out", number);
         auto per_step = ui::param_toggle(store_, StepProcessor::kSpeedMode, "Per Step");
         auto inv = ui::param_toggle(store_, StepProcessor::kInvert, "Invert");
-        ui::fixed_size(*per_step, 78.0f, 50.0f);
-        ui::fixed_size(*inv, 70.0f, 50.0f);
+        ui::toggle_size(*per_step);
+        ui::toggle_size(*inv);
         bottom->add_child(std::move(per_step));
         bottom->add_child(std::move(inv));
 

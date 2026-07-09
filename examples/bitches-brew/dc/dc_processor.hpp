@@ -147,7 +147,7 @@ public:
     /// polarity switch. Without this override a host opens the plug-in at
     /// Processor's 400x300 default — a geometry the layout was never checked at.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {380, 490};
+        return {360, 300};
     }
 
     /// Defined in dc_view.cpp so the audio translation units never see the

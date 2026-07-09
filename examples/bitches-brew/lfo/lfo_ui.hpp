@@ -115,6 +115,14 @@ public:
             return std::string(buf);
         };
 
+        auto millis = [](float v) {
+            char buf[24];
+            if (v == 0.0f) return std::string("off");
+            std::snprintf(buf, sizeof(buf), "%s %.0f ms", v > 0.0f ? "slew" : "lpf",
+                          std::abs(v));
+            return std::string(buf);
+        };
+
         auto hertz = [](float v) {
             char buf[16];
             std::snprintf(buf, sizeof(buf), "%.4g Hz", v);
@@ -122,62 +130,59 @@ public:
         };
 
         auto add = [&](view::View& row, state::ParamID id, const char* label,
-                       std::function<std::string(float)> fmt, float w) {
+                       std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, w, 80.0f);
+            ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
         // The four depths are summed, not selected. Sine at full and the rest at
         // zero is the single-shape behaviour this replaced.
-        auto mix = ui::row(6.0f, 80.0f);
-        add(*mix, LfoProcessor::kSine, "Sine", depth, 76.0f);
-        add(*mix, LfoProcessor::kTriangle, "Tri", depth, 76.0f);
-        add(*mix, LfoProcessor::kSaw, "Saw", depth, 76.0f);
-        add(*mix, LfoProcessor::kSquare, "Sqr", depth, 76.0f);
+        auto mix = ui::row(ui::kRowGap, ui::kKnobHeight);
+        add(*mix, LfoProcessor::kSine, "Sine", depth);
+        add(*mix, LfoProcessor::kTriangle, "Tri", depth);
+        add(*mix, LfoProcessor::kSaw, "Saw", depth);
+        add(*mix, LfoProcessor::kSquare, "Sqr", depth);
 
-        auto timing = ui::row(6.0f, 80.0f);
-        add(*timing, LfoProcessor::kBeatsPerCycle, "Rate", beats, 76.0f);
-        add(*timing, LfoProcessor::kPhaseDegrees, "Phase", degrees, 76.0f);
-        add(*timing, LfoProcessor::kAsymmetry, "Asym", depth, 76.0f);
-        add(*timing, LfoProcessor::kPulseWidth, "PW", depth, 76.0f);
+        // Rate and Free are never both live. Both are always shown, so flipping
+        // Free Run never makes a knob appear where the mouse already is.
+        auto timing = ui::row(ui::kRowGap, ui::kKnobHeight);
+        add(*timing, LfoProcessor::kBeatsPerCycle, "Rate", beats);
+        add(*timing, LfoProcessor::kFreeHz, "Free", hertz);
+        add(*timing, LfoProcessor::kPhaseDegrees, "Phase", degrees);
+        add(*timing, LfoProcessor::kAsymmetry, "Asym", depth);
+        add(*timing, LfoProcessor::kPulseWidth, "PW", depth);
 
-        auto shaping = ui::row(6.0f, 80.0f);
-        add(*shaping, LfoProcessor::kRandom, "Random", depth, 76.0f);
-        add(*shaping, LfoProcessor::kOffset, "Offset", depth, 76.0f);
-        add(*shaping, LfoProcessor::kOutputScale, "Out", depth, 76.0f);
-        // Only one of Rate and Free is live at a time. Both are always shown, so
-        // flipping the switch never makes a knob appear where the mouse already is.
-        add(*shaping, LfoProcessor::kFreeHz, "Free", hertz, 76.0f);
+        // Swing warps the beat timeline; Smooth is the only stateful control.
+        auto shaping = ui::row(ui::kRowGap, ui::kKnobHeight);
+        add(*shaping, LfoProcessor::kRandom, "Random", depth);
+        add(*shaping, LfoProcessor::kOffset, "Offset", depth);
+        add(*shaping, LfoProcessor::kOutputScale, "Out", depth);
+        add(*shaping, LfoProcessor::kSwingPercent, "Swing", percent);
+        add(*shaping, LfoProcessor::kSmoothMs, "Smooth", millis);
 
-        // Swing warps the beat timeline, so it sits with the transport controls
-        // rather than the shaping ones. It does nothing in free-run mode.
-        auto feel = ui::row(6.0f, 80.0f);
-        add(*feel, LfoProcessor::kSwingPercent, "Swing", percent, 76.0f);
-        auto sixteenths = ui::param_toggle(store_, LfoProcessor::kSwingUnit, "16ths");
-        ui::fixed_size(*sixteenths, 78.0f, 50.0f);
-        feel->add_child(std::move(sixteenths));
-
-        auto bottom = ui::row(14.0f, 52.0f);
+        auto bottom = ui::row(ui::kRowGap, ui::kToggleHeight);
         auto free_run = ui::param_toggle(store_, LfoProcessor::kRateMode, "Free Run");
+        auto sixteenths = ui::param_toggle(store_, LfoProcessor::kSwingUnit, "16ths");
         auto inv = ui::param_toggle(store_, LfoProcessor::kInvert, "Invert");
-        ui::fixed_size(*free_run, 84.0f, 50.0f);
-        ui::fixed_size(*inv, 78.0f, 50.0f);
+        ui::toggle_size(*free_run);
+        ui::toggle_size(*sixteenths);
+        ui::toggle_size(*inv);
         bottom->add_child(std::move(free_run));
+        bottom->add_child(std::move(sixteenths));
         bottom->add_child(std::move(inv));
 
         add_child(std::move(scope));
         add_child(std::move(mix));
         add_child(std::move(timing));
         add_child(std::move(shaping));
-        add_child(std::move(feel));
         add_child(std::move(bottom));
         add_child(ui::caption_label(
             "orange is the output, blue is the quadrature a quarter cycle ahead"));
         add_child(ui::caption_label(
-            "Free Run reads Free in hertz, and ignores the tempo and Swing"));
+            "Free Run ignores the tempo and Swing; 50% swing is straight"));
         add_child(ui::caption_label(
-            "50% swing is straight, and exactly so"));
+            "the scope draws the unsmoothed shape"));
     }
 
 private:
