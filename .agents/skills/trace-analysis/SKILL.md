@@ -135,6 +135,24 @@ each tied to what a span/query showed), and a **concrete fix**. Give magnitudes
 ("~620 ms Dawn/Graphite init, one-time" ), say whether the cost repeats, and
 estimate the win. See the worked narrative below.
 
+### Escalating to the user — only at a genuine priority fork
+**Default: investigate autonomously.** Follow the blocker, gather evidence, and
+verify exhaustively. Resolve every *factual* gap from the trace itself — a
+category total, a thread state, a span's args are things you query, not things
+you ask. Never stop to ask the user something a query can answer.
+
+**Reach for `AskUserQuestion` only when the direction turns on the user's
+priorities, not on data you can gather.** Genuine forks: startup splits
+near-evenly across font-shaping *and* shader-compile and only the user knows
+which path matters for their use case; or the fix has a fast-approximate branch
+and a slower-thorough branch and the tradeoff is theirs to pick. These are
+preference forks, not missing facts.
+
+**Form it well:** put the recommended option first and label it recommended,
+with a terse pro/con per option. Never use it as a progress checkpoint ("should
+I keep going?") — that is exactly the pause to avoid — and never to re-confirm a
+decision already made or to ask what a query would answer.
+
 ---
 
 ## Worked example — "why is my plugin slow to open?" (the flagship)
@@ -185,7 +203,9 @@ render (`examples/trace-demo`) so the answer reproduces exactly. See
 4. Follow blockers across threads; the slow thread is often not the guilty one.
 5. Verify globally — report the ranked budget, not the first bottleneck.
 6. Every claim cites a query result. No evidence, no finding.
-7. L1 returns prose (root cause + evidence + fix); never dump SQL at a novice.
+7. Investigate autonomously; `AskUserQuestion` only at a genuine priority fork,
+   never for something a query answers or a progress checkpoint.
+8. L1 returns prose (root cause + evidence + fix); never dump SQL at a novice.
 
 ## Files this skill covers
 
