@@ -24,6 +24,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <tuple>
 #include <cstddef>
 #include <memory>
 #include <utility>
@@ -34,12 +35,19 @@ class LfoProcessor : public format::Processor {
 public:
     // Parameter IDs are part of the persisted state contract. Never renumber.
     enum ParamId : state::ParamID {
-        kWaveform = 1,
-        kBeatsPerCycle = 2,
-        kPhaseDegrees = 3,
-        kUnipolar = 4,
-        kOutputScale = 5,
-        kInvert = 6,
+        kBeatsPerCycle = 1,
+        kPhaseDegrees = 2,
+        kSine = 3,
+        kTriangle = 4,
+        kSaw = 5,
+        kSquare = 6,
+        kPulseWidth = 7,
+        kRandom = 8,
+        kAsymmetry = 9,
+        kOffset = 10,
+        kSeed = 11,
+        kOutputScale = 12,
+        kInvert = 13,
     };
 
     format::PluginDescriptor descriptor() const override {
@@ -55,11 +63,6 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
-        store.add_parameter({.id = kWaveform,
-                             .name = "Waveform",
-                             .unit = "",
-                             .range = {0.0f, static_cast<float>(kWaveformCount - 1),
-                                       0.0f, 1.0f}});
         // Beats per cycle: 4 is one cycle per bar of 4/4, 0.25 is four per beat.
         store.add_parameter({.id = kBeatsPerCycle,
                              .name = "Rate",
@@ -69,12 +72,42 @@ public:
                              .name = "Phase",
                              .unit = "deg",
                              .range = {0.0f, 360.0f, 0.0f, 1.0f}});
-        // A VCA or an envelope-depth input wants positive voltage only; a bipolar
-        // LFO would waste half its travel and silence half the cycle.
-        store.add_parameter({.id = kUnipolar,
-                             .name = "Unipolar",
+
+        // Four depths, summed. Bipolar, so a shape can be subtracted as easily as
+        // added. Sine defaults to full and the rest to zero, which reproduces the
+        // single-shape selector this replaced.
+        for (auto [id, name, def] :
+             {std::tuple{kSine, "Sine", 1.0f}, std::tuple{kTriangle, "Triangle", 0.0f},
+              std::tuple{kSaw, "Saw", 0.0f}, std::tuple{kSquare, "Square", 0.0f}})
+            store.add_parameter({.id = id, .name = name, .unit = "",
+                                 .range = {-1.0f, 1.0f, def, 0.001f}});
+
+        store.add_parameter({.id = kPulseWidth,
+                             .name = "Pulse Width",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.01f, 0.99f, 0.5f, 0.001f}});
+        // A sample-and-hold: one level per cycle, held flat. A hash of the cycle
+        // index, so a bounce lands identically. See brew/random.hpp.
+        store.add_parameter({.id = kRandom,
+                             .name = "Random",
+                             .unit = "",
+                             .range = {-1.0f, 1.0f, 0.0f, 0.001f}});
+        // Where the waveform's centre falls in time. A pulse-width control
+        // generalized to every shape.
+        store.add_parameter({.id = kAsymmetry,
+                             .name = "Asymmetry",
+                             .unit = "",
+                             .range = {0.01f, 0.99f, 0.5f, 0.001f}});
+        // A constant offset. Set it to +1 with a half-scale mix and the output is
+        // unipolar, which is what a VCA or an envelope-depth input wants.
+        store.add_parameter({.id = kOffset,
+                             .name = "Offset",
+                             .unit = "",
+                             .range = {-1.0f, 1.0f, 0.0f, 0.001f}});
+        store.add_parameter({.id = kSeed,
+                             .name = "Seed",
+                             .unit = "",
+                             .range = {0.0f, 255.0f, 0.0f, 1.0f}});
         store.add_parameter({.id = kOutputScale,
                              .name = "Output Scale",
                              .unit = "",
@@ -85,13 +118,29 @@ public:
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
     }
 
+    /// A snapshot of the mix, taken once per block rather than once per sample.
+    /// The editor's scope reads the same struct, so the picture cannot drift.
+    [[nodiscard]] LfoMix mix() const noexcept {
+        return {
+            .sine = state().get_value(kSine),
+            .triangle = state().get_value(kTriangle),
+            .saw = state().get_value(kSaw),
+            .square = state().get_value(kSquare),
+            .random = state().get_value(kRandom),
+            .pulse_width = state().get_value(kPulseWidth),
+            .asymmetry = state().get_value(kAsymmetry),
+            .offset = state().get_value(kOffset),
+            .seed = static_cast<std::uint32_t>(state().get_value(kSeed)),
+        };
+    }
+
     void prepare(const format::PrepareContext&) override {}
 
     /// The size this editor actually needs. Without this override a host opens
     /// the plug-in at Processor's 400x300 default, and the layout is laid out to
     /// a geometry the editor was never checked against. The scope, three knobs, and the two toggles.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 380};
+        return {360, 560};
     }
 
     /// Defined in lfo_view.cpp so the audio translation units never see the
@@ -111,15 +160,24 @@ public:
     /// silently diverge from the DSP.
     [[nodiscard]] float value_at(double position_beats,
                                  double quadrature = 0.0) const noexcept {
-        const auto wave = waveform_from_param(state().get_value(kWaveform));
+        return value_at(mix(), position_beats, quadrature);
+    }
+
+    /// The overload the audio callback uses, with the mix hoisted out of the
+    /// per-sample loop.
+    [[nodiscard]] float value_at(const LfoMix& m, double position_beats,
+                                 double quadrature = 0.0) const noexcept {
+        const double rate = static_cast<double>(state().get_value(kBeatsPerCycle));
         const double phase = lfo_phase(
-            position_beats, static_cast<double>(state().get_value(kBeatsPerCycle)),
+            position_beats, rate,
             static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0 +
                 quadrature);
-
-        float v = lfo_shape(wave, phase);
-        if (as_toggle(state().get_value(kUnipolar))) v = to_unipolar(v);
-        return resolve_output(v, state().get_value(kOutputScale),
+        // The sample-and-hold is keyed on the cycle the *quadrature* phase sits
+        // in, not the main one, or the two outputs would hold different levels
+        // across a cycle boundary and the circle they trace would tear.
+        const std::int64_t cycle = lfo_cycle(position_beats + quadrature * rate, rate);
+        return resolve_output(lfo_mix_value(m, phase, cycle),
+                              state().get_value(kOutputScale),
                               as_toggle(state().get_value(kInvert)));
     }
 
@@ -153,10 +211,11 @@ public:
         const double bps = ctx.is_playing
                                ? beats_per_sample(ctx.tempo_bpm, ctx.sample_rate)
                                : 0.0;
+        const LfoMix m = mix();
         for (int n = 0; n < frames; ++n) {
             const double at = ctx.position_beats + bps * static_cast<double>(n);
-            if (main) main[n] = value_at(at);
-            if (quad) quad[n] = value_at(at, kQuadratureOffset);
+            if (main) main[n] = value_at(m, at);
+            if (quad) quad[n] = value_at(m, at, kQuadratureOffset);
         }
 
         const double end = ctx.position_beats + bps * static_cast<double>(frames - 1);
