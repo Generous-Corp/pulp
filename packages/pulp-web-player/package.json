@@ -1,0 +1,46 @@
+{
+  "name": "@pulp/web-player",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable, skinnable, host-agnostic web player for Pulp audio plugins (WAMv2 today, WebCLAP next) — the overlay/lifecycle shell, auto-generated parameter grid, on-screen + computer keyboard + WebMIDI, oscilloscope/meter, safety limiter, PLST state container, MIDI visualisers and canvas widget set, driven through a small host-adapter interface.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./shell": "./src/shell.js",
+    "./adapters/wam": "./src/adapters/wam.js",
+    "./widgets": "./src/widgets/index.js",
+    "./theme/tokens.css": "./src/theme/tokens.css",
+    "./theme/fonts.css": "./src/theme/fonts.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/adapter-seam.test.mjs"
+  },
+  "keywords": [
+    "pulp",
+    "audio-plugin",
+    "wam",
+    "webaudiomodules",
+    "wam2",
+    "webclap",
+    "web-audio",
+    "audioworklet",
+    "plugin-demo",
+    "design-tokens"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielraffel/pulp.git",
+    "directory": "packages/pulp-web-player"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
