@@ -11,10 +11,6 @@ namespace pulp::view {
 
 namespace {
 
-constexpr float kCaretBlinkPeriodSeconds = 1.06f;
-constexpr float kCaretBlinkOnSeconds = 0.53f;
-constexpr float kCaretSolidHoldSeconds = 0.35f;
-
 enum TextEditorMenuCommand {
     kTextEditorMenuCut = 1,
     kTextEditorMenuCopy,
@@ -565,31 +561,21 @@ void TextEditor::reset_preferred_horizontal() {
 }
 
 void TextEditor::keep_caret_solid() {
-    caret_blink_time_ = 0.0f;
-    caret_solid_time_remaining_ = kCaretSolidHoldSeconds;
+    caret_blink_.keep_solid();
     request_repaint();
 }
 
 void TextEditor::advance_caret_blink(float dt) {
     if (!has_focus()) return;
-    dt = std::max(0.0f, dt);
-    if (caret_solid_time_remaining_ > 0.0f) {
-        if (dt < caret_solid_time_remaining_) {
-            caret_solid_time_remaining_ -= dt;
-            return;
-        }
-        dt -= caret_solid_time_remaining_;
-        caret_solid_time_remaining_ = 0.0f;
-        caret_blink_time_ = 0.0f;
-    }
-    caret_blink_time_ = std::fmod(caret_blink_time_ + dt, kCaretBlinkPeriodSeconds);
+    caret_blink_.advance(dt);
 }
 
 bool TextEditor::should_paint_caret() const {
     if (!has_focus()) return false;
+    // A selection already marks the insertion point, and a caret strobing at one
+    // end of it reads as noise.
     if (has_selection()) return true;
-    if (caret_solid_time_remaining_ > 0.0f) return true;
-    return std::fmod(caret_blink_time_, kCaretBlinkPeriodSeconds) < kCaretBlinkOnSeconds;
+    return caret_blink_.visible();
 }
 
 void TextEditor::ensure_caret_blink_subscription() {
@@ -970,12 +956,11 @@ void TextEditor::on_focus_changed(bool gained) {
     View::on_focus_changed(gained);  // sets has_focus_ for border rendering
     if (gained) {
         if (select_on_focus) select_all();
-        caret_blink_time_ = 0.0f;
-        caret_solid_time_remaining_ = 0.0f;
+        caret_blink_.reset();
         ensure_caret_blink_subscription();
     } else {
         clear_caret_blink_subscription();
-        caret_solid_time_remaining_ = 0.0f;
+        caret_blink_.reset();
         request_repaint();  // clear the caret now that focus is lost
     }
 }

@@ -410,6 +410,8 @@ target_sources(pulp-view-core PRIVATE
     src/script_event_dispatch.cpp
     src/gesture.cpp
     src/view.cpp
+    src/pointer_dispatch.cpp
+    src/caret.cpp
     src/continuous_frames.cpp
     src/host_param_surface.cpp
     src/yoga_layout.cpp

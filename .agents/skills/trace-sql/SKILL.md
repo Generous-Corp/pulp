@@ -34,10 +34,24 @@ depends on a specific agent, MCP server, or vendor.
 
 ## The tool: `trace_processor`
 
-Queries run through the pinned `trace_processor` wrapper (a small Python
-launcher that lazy-loads the precompiled `trace_processor_shell` binary). Pulp
-pins it by version + SHA-256; `pulp trace query` shells to it for you. To drive
-it directly:
+Queries run through the `trace_processor` wrapper (a small Python launcher that
+lazy-loads the precompiled `trace_processor_shell` binary). The live path
+(`pulp trace query "<sql>"`) forwards to the inspector's `Trace.query`; once a
+session is flushed to a `.pftrace`, run SQL **offline against the file** with
+`--trace` and Pulp shells to `trace_processor` for you:
+
+```bash
+# Offline SQL against a saved capture (no live inspector needed):
+pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" \
+  --trace /tmp/pulp-<ts>.pftrace
+```
+
+Pulp resolves the binary via `$PULP_TRACE_PROCESSOR` → the pinned Pulp-fetched
+build → `$PATH`; `pulp trace doctor` reports which. For zero-install, run
+`pulp trace fetch` once: it downloads the pinned `trace_processor_shell`
+(Perfetto v57.2, matching the tracing SDK), SHA-256-verified per platform, into
+`$PULP_HOME` — no manual install, no surprise download inside `query`. To drive
+`trace_processor` directly:
 
 ```bash
 # Interactive SQL over a capture:
@@ -45,7 +59,7 @@ it directly:
   "SELECT name, dur FROM slice WHERE category='dsp.node' ORDER BY dur DESC LIMIT 20" \
   /tmp/pulp-<ts>.pftrace
 
-# Run a file of view definitions, then query:
+# Run a file of view definitions, then query (trace as the trailing positional):
 ./trace_processor -q .agents/skills/trace-sql/pulp_dsp_node_cost.sql /tmp/x.pftrace
 ```
 
@@ -197,6 +211,17 @@ SELECT name, COUNT(*) AS n, SUM(dur)/1e6 AS total_ms
 FROM slice
 WHERE category = 'text' AND dur >= 0
 GROUP BY name ORDER BY n DESC;
+
+-- Steady-state vs whole-run average per node (drop the single cold-start
+-- outlier). A per-node average is often dominated by the FIRST block, where
+-- the first process() call warms caches / touches fresh pages — a one-time
+-- cost, not a per-block cost. Subtracting the per-node max isolates it:
+SELECT name,
+       ROUND(AVG(dur)/1e3, 2)                          AS avg_all_us,
+       ROUND((SUM(dur) - MAX(dur)) / 1e3 / (COUNT(*) - 1), 2) AS avg_steady_us
+FROM slice
+WHERE category = 'dsp.node' AND dur >= 0
+GROUP BY name ORDER BY avg_all_us DESC;
 ```
 
 ## Gotchas

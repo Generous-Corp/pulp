@@ -64,6 +64,70 @@ void wam_midi(int status, int data1, int data2, int offset) {
                            static_cast<uint8_t>(data2), offset);
 }
 
+// Monotonic counter of parameter changes, including the plugin's own writes
+// from inside process(). A host polls this once per block and only re-reads
+// values when it moves — see WamProcessorBridge::param_epoch.
+__attribute__((used, visibility("default")))
+unsigned int wam_param_epoch() {
+    return g_bridge.param_epoch();
+}
+
+// Bulk parameter read in wam_parameters() order. Writes min(count, capacity)
+// floats; returns the total count (> capacity means truncated).
+__attribute__((used, visibility("default")))
+int wam_read_param_values(float* dst, int capacity) {
+    return g_bridge.read_param_values(dst, capacity);
+}
+
+// Variable-length SysEx input (full F0 .. F7 payload). Returns 0 when the
+// message was dropped (pool exhausted or payload too large), 1 on success.
+__attribute__((used, visibility("default")))
+int wam_midi_sysex(const uint8_t* data, int size, int offset) {
+    return g_bridge.schedule_sysex(data, size, offset) ? 1 : 0;
+}
+
+// Drain the MIDI produced by the last wam_process() call. Returns the number of
+// bytes AVAILABLE; copies min(cap, available) into dst. See
+// WamProcessorBridge::drain_midi_out for the record layout.
+__attribute__((used, visibility("default")))
+int wam_midi_out_drain(uint8_t* dst, int cap) {
+    return g_bridge.drain_midi_out(dst, cap);
+}
+
+// One-shot DSP-state reset. Processor has no reset() virtual — the reset
+// contract is ProcessContext::reset_requested — so this flips a bridge flag
+// that raises reset_requested for exactly the next block. RT-safe.
+__attribute__((used, visibility("default")))
+void wam_reset() {
+    g_bridge.request_reset();
+}
+
+// Re-prepare for a real sample-rate / block-size change (a Web Audio context
+// can run at 44.1 kHz). Dispatched from the worklet's port.onmessage, which in
+// an AudioWorkletProcessor runs ON THE AUDIO RENDER THREAD — so this executes
+// *between* render quanta, never concurrently with wam_process(), but NOT on a
+// separate control thread. It re-runs Processor::prepare() and may resize
+// buffers (allocation), so it must never be called from within wam_process().
+__attribute__((used, visibility("default")))
+void wam_prepare(double sample_rate, int block_size) {
+    g_bridge.prepare(sample_rate, block_size);
+}
+
+// Processor-reported delay-compensation latency in samples. Control thread.
+__attribute__((used, visibility("default")))
+int wam_latency_samples() {
+    return g_bridge.latency_samples();
+}
+
+// Host-supplied transport snapshot (Web Audio has no transport). Copied into
+// ProcessContext at the top of each process(). Control thread.
+__attribute__((used, visibility("default")))
+void wam_set_transport(int is_playing, double bpm, double position_beats,
+                       double position_samples, int tsig_num, int tsig_den) {
+    g_bridge.set_transport(is_playing != 0, bpm, position_beats,
+                           position_samples, tsig_num, tsig_den);
+}
+
 __attribute__((used, visibility("default")))
 const char* wam_descriptor() {
     static std::string json;

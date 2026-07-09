@@ -3,6 +3,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -890,11 +891,7 @@ static void install_app_menu(NSString* appName) {
         try {
             if (!self.rootView) return;
             auto pt = [self localPoint:event];
-            auto* target = self.rootView->hit_test(pt);
-            if (target && target->on_context_menu) {
-                auto local = to_local(pt, target, self.rootView);
-                target->on_context_menu(local);
-            }
+            pulp::view::dispatch_context_menu(*self.rootView, pt);
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost rightMouseDown error: " << e.what() << "\n";

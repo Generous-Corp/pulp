@@ -52,6 +52,11 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry
     SOURCES test_live_dsp_telemetry.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::runtime)
 
+# Live per-node DSP telemetry snapshot → JSON serializer (schema contract)
+pulp_add_test_suite(pulp-test-live-dsp-telemetry-json
+    SOURCES test_live_dsp_telemetry_json.cpp
+    LIBRARIES pulp::audio)
+
 # FilterDesign tests
 pulp_add_test_suite(pulp-test-filter-design LIBRARIES pulp::signal)
 

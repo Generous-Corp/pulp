@@ -120,7 +120,7 @@ Features:
 ## Additional CMake-Backed Examples
 
 `examples/CMakeLists.txt` includes more shipped targets than the curated plugin
-gallery above. Current examples include Bendr, PulpTempoSampler, PulpMpeSynth,
+gallery above. Current examples include PulpTempoSampler, PulpMpeSynth,
 ViewBridge, Audio Inspector, Plugin Host, Stream, SDF, WebView, Three.js, and iOS
 AUv3 demos. Some are gated by platform, optional dependencies, or feature flags.
 

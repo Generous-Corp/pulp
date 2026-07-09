@@ -102,6 +102,21 @@ commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Dis
 gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
 compare` is an advisory *judgment*, never a gate.
 
+**Inspector-proxy MCP tools use a different, lighter pattern than the
+`mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
+have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
+dispatch (an `else if (name == "pulp_X_*" || …)` block that maps each tool to an
+`inspector_method` + `--params '<args_json>'` and shells `pulp inspect --command`).
+So a new inspector-proxy tool needs only: tool JSON in `tools_list_json()`, the
+inline dispatch block, membership in `test/test_mcp_server.cpp`'s expected list,
+and the `docs/guides/claude-code-plugin.md` table — no handler, no `mcp_tools.*`.
+Parity: a tool whose top-level CLI command already carries a `cli_only` baseline
+entry (e.g. `trace`) needs NO new baseline row; only add an `mcp_only` entry for
+a tool with no CLI peer at all. Client-side CLI verbs with no inspector RPC
+(`trace doctor` / `open` / `fetch`, offline `query --trace`) get **no** MCP tool —
+say so in the plugin-table row and the `cli_only` reason so the asymmetry reads
+as intentional.
+
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.
 `audio-inspect` opens the in-app Audio Inspector window
@@ -505,6 +520,39 @@ The targeted `pulp tool doctor <id> [--run]` surface is part of that same
 contract: `--run` executes the resolved tool path with no forwarded arguments
 and returns its exit code. For `npm_package` tools, that path is the
 `run.{sh,bat}` wrapper smoke check.
+
+### Every added `managed_by_pulp` tool must be user-updatable + overridable
+
+**Convention (hard rule for the opt-in tool lane, NOT for shipped-by-default
+deps like Skia/Dawn):** when you register a `managed_by_pulp` tool in
+`tools/packages/tool-registry.json`, users must be able to update it and pin
+their own version **without waiting for Pulp to bump the committed pin**. This
+is what `pulp tool update` + the version-override tiers provide, and it is
+enforced — do not add a managed tool that lacks it.
+
+- **Declare a non-empty `pinned_version`.** It is the anchor the update/override
+  path keys off. `tools/packages/validate_registry.py`'s
+  `validate_tool_registry` fails the build if any `managed_by_pulp` tool ships
+  without one (covered by `tools/packages/test_package_validation_tools.py`).
+- **`pulp tool update <id> [--version <v>]`** lives in
+  `experimental/pulp-rs/src/cmd/tool.rs`. Bare `update` re-installs at the
+  registry pin and clears any prior user override; `--version <v>` re-installs
+  at an explicit version and records a durable override. The archive re-fetch
+  delegates to `pulp-cpp tool install <id> --force` (Rust can't extract
+  archives), forwarding the resolved version via env — the override file is the
+  cross-language source of truth.
+- **Override precedence** (highest first, in `experimental/pulp-rs/src/tool_version.rs`):
+  `PULP_TOOL_<ID>_VERSION` env var → `$PULP_HOME/tool-overrides.json` (durable;
+  what `--version` writes) → registry `pinned_version`. `pulp tool info`
+  surfaces the **active version** and its **source** (text + `--json` as
+  `active_version` / `active_version_source`), so it is always explicit which
+  version is in effect and why.
+- **When you add a managed tool, touch (same PR):** the registry entry (with
+  `pinned_version`), and — if you extend the update/override surface itself —
+  `tool.rs` + `tool_version.rs` + their tests, `docs/status/cli-commands.yaml`
+  (`tool` subcommands), `docs/reference/cli.md#tool`, and
+  `docs/reference/extending-pulp.md`. The full convention lives in
+  [extending-pulp.md](../../../docs/reference/extending-pulp.md#every-added-tool-must-be-user-updatable-and-overridable).
 
 ### `pulp tool install <in-tree python tool>` — `source_dir` install
 

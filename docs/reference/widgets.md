@@ -21,7 +21,7 @@ interactive version of this set (dark + light), build and run
 | `Fader` | Linear parameter slider | value 0–1, orientation, thumb shape/size, skin overrides, shader/sprite, hover-grow, wheel | `widgets.hpp` |
 | `RangeSlider` | Min/max/step slider (HTML range) | min/max/step, orientation, accent, track thickness, quantize, hover-grow, wheel | `widgets.hpp` |
 | `DualRangeSlider` | Two-thumb min–max range slider | low/high values, no-cross clamp, orientation, accent, hover-grow, per-thumb drag | `widgets.hpp` |
-| `InlineValueEditor` | Inline readout that becomes an editor | label + value, click-to-type, range clamp + danger ring, suffix, change callback | `widgets.hpp` |
+| `InlineValueEditor` | Inline readout that becomes an editor | label + value, click-to-type, range clamp + danger ring, suffix, change callback, configurable caret style + blink | `widgets.hpp` |
 | `PanControl` | Bipolar pan with centre detent | value −1..+1, hover-grow, wheel | `gap_widgets.hpp` |
 | `XYPad` | 2-D parameter surface | x/y 0–1, axis labels, drag + gesture callbacks | `widgets.hpp` |
 | `Toggle` | Animated on/off switch | on state, label, animated thumb + hover | `widgets.hpp` |
@@ -45,8 +45,77 @@ interactive version of this set (dark + light), build and run
 
 | Widget | Purpose | Key capabilities | Header |
 |--------|---------|------------------|--------|
-| `TextEditor` | Single/multi-line text editor | `multi_line`, `numeric_only`, `password_mode`, `placeholder`, select-on-focus, clipboard, undo/redo, IME, caret blink | `text_editor.hpp` |
+| `TextEditor` | Single/multi-line text editor | `multi_line`, `numeric_only`, `password_mode`, `placeholder`, select-on-focus, clipboard, undo/redo, IME, configurable caret style + blink | `text_editor.hpp` |
 | `Label` | Static/dynamic text | font/weight/align/transform/decoration, multi-line, line-clamp, RTL, attributed runs | `widgets.hpp` |
+
+### Caret
+
+`caret.hpp` owns caret shape and blink policy for every editable widget —
+`TextEditor`, `InlineValueEditor`, and any custom widget that draws its own
+caret. Both concerns are configurable per widget, with process-wide defaults
+(`default_caret_style` / `set_default_caret_style`, `default_caret_blink` /
+`set_default_caret_blink`).
+
+| Style | Renders as | Covers |
+|-------|-----------|--------|
+| `CaretStyle::ibeam` *(default)* | `be│` | a `stroke`-wide vertical rule spanning the glyph cell |
+| `CaretStyle::underline` | `be_` | a rule at the underline position, one glyph cell wide |
+| `CaretStyle::block` | `be█` | the filled glyph cell; the covered glyph is redrawn in the background color |
+
+All three anchor at the same caret x — the boundary between the glyph before
+the caret and the glyph after it. `ibeam` straddles that boundary, so the bar
+marks the boundary itself rather than overlapping the glyph after it; the
+cell-covering styles start at the boundary and extend right over that glyph.
+The `underline` style sits **on the text baseline**, where a `_` glyph would land;
+it is not a rule at the bottom of the widget's box, and it has nothing to do
+with text-decoration underline. Because it occupies the cell of the glyph *at*
+the caret rather than the text behind it, it never displaces the text.
+
+At the end of the text there is no glyph under the caret, so its `advance` is 0
+and `underline` and `block` size themselves from `CaretMetrics::nominal_advance`
+instead. Leave `nominal_advance` at 0 and those two styles collapse to nothing;
+set it from a representative glyph (a digit, in a numeric field). `ibeam` is
+unaffected — it is always `stroke` wide.
+
+**Blink policy.** The caret holds solid for `solid_hold_seconds` after any
+caret movement or edit, then resumes blinking with `period_seconds` at `duty`
+on-fraction. That hold is what makes an arrow-key sweep read as a continuous
+caret rather than a strobe: every arrow, word jump, home/end, keystroke,
+delete, and mouse drag calls `keep_solid()`, and blinking only restarts once
+the caret has been still. The caret is also solid whenever a selection exists,
+and it is never painted while the widget lacks focus.
+
+The phase advances from a `FrameClock` subscription held while focused, so the
+blink rate is the same on a 60 Hz and a 120 Hz display.
+
+A blinking caret is animated content, so `CaretBlink` honors
+[`MotionPreferences`](../guides/motion-observability.md): under
+`MotionPolicy::Off` the caret is always visible and never blinks.
+`CaretBlinkConfig::enabled = false` does the same thing unconditionally.
+
+```cpp
+#include <pulp/view/caret.hpp>
+
+// App-wide: an underline caret that blinks slowly.
+pulp::view::set_default_caret_style(pulp::view::CaretStyle::underline);
+pulp::view::CaretBlinkConfig slow;
+slow.period_seconds = 1.6f;   // full on+off cycle
+slow.duty = 0.5f;             // visible for half of it
+slow.solid_hold_seconds = 0.35f;
+pulp::view::set_default_caret_blink(slow);
+
+// ...but this one field keeps the stock I-beam and stock timing.
+field.set_caret_style(pulp::view::CaretStyle::ibeam);
+field.set_caret_blink({});
+```
+
+A custom widget that draws its own caret uses the same pieces: hold a
+`CaretBlink`, call `keep_solid()` from every movement path, `advance(dt)` from a
+`FrameClock` subscription taken while focused, and paint via
+`caret_rect_for_style()` / `paint_caret()` — or `paint_caret_over_text()`, which
+redraws the covered glyph in the background color so a `block` caret stays
+legible. `caret_style_to_string` / `caret_style_from_string` give stable
+lowercase names for serialization and the JS bridge.
 
 ## Lists & data
 
