@@ -96,6 +96,30 @@ Every span is tagged with one fixed category — this is the query vocabulary:
 
 ---
 
+<!-- Self-contained subsection; keep edits here local to minimize merge churn. -->
+## Span names: static (default) vs dynamic
+
+Span names are **static by default**. `PULP_TRACE_SCOPE(category)` derives the
+name from the enclosing function at compile time, and
+`PULP_TRACE_SCOPE_NAMED(category, "literal")` takes a string literal — both
+intern the name once, so `GROUP BY name` presets stay cheap and low-cardinality.
+
+When you need the name itself to carry a **runtime** value (a parameter name, a
+graph node id, a file basename), use the per-call-site opt-in:
+
+```cpp
+PULP_TRACE_SCOPE_DYNAMIC("dsp.node", node.display_name());  // std::string / const char*
+```
+
+This is the only sanctioned way to get a dynamic span name. It wraps the value
+in `perfetto::DynamicString` so Perfetto copies the bytes on every event.
+Prefer a static name unless the runtime value is the thing you need to query on:
+a dynamic name allocates/copies per event and multiplies `slice.name`
+cardinality, which degrades the `GROUP BY name` presets. Like every macro here,
+it compiles to nothing when `PULP_TRACING` is off.
+
+---
+
 ## Gotchas
 
 > **Ring-buffer overflow → a silently empty or truncated trace.** The trace is a
