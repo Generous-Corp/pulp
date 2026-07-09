@@ -54,6 +54,20 @@ prose. L2 is the same protocol, interactive, for cases the presets cannot crack.
 
 ## Capture (if you don't already have a `.pftrace`)
 
+If a capture or query fails for an unclear reason, run the readiness check first
+— it tells you, in one shot, whether the inspector is reachable, whether the
+host was built with `-DPULP_TRACING=ON`, and whether a `trace_processor` is
+available for offline SQL:
+
+```bash
+pulp trace doctor            # human report; add --json for {ready_to_capture, ready_to_query, …}
+```
+
+`ready_to_capture:false` usually means the inspector is unreachable (start it
+with `PULP_TRACE_SERVER=1`) or tracing was compiled out; `ready_to_query:false`
+means no `trace_processor` on `$PULP_TRACE_PROCESSOR`/`$PATH` or no captured
+trace yet.
+
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...

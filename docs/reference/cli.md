@@ -1330,6 +1330,7 @@ pulp trace xruns
 pulp trace layout-vs-paint
 pulp trace snapshot
 pulp trace explain "why is my plugin slow to open?"
+pulp trace doctor                                 # readiness: inspector + build + trace_processor
 ```
 
 Options:
@@ -1351,6 +1352,7 @@ Subcommands:
 | `layout-vs-paint` | `Trace.query` | L0 preset: one-row-per-category frame cost split. |
 | `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
 | `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
+| `doctor` | client-side + `Trace.snapshot` | Readiness check. Aggregates inspector reachability and `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → `$PATH`) with the inspector's `compiled_in` / `active` / `last_trace_path`, then reports `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
 
 The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,
 `text`, `js`, `gpu`, `state`, `io`. Tracing is a dev-only tool: never ship a
