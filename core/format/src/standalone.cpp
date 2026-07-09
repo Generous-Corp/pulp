@@ -362,18 +362,17 @@ void StandaloneApp::render_audio_block(
                     static_cast<double>(block_start_samples) / samples_per_beat;
             }
         }
-        // Derive `bar` so processors that branch on it (e.g. metronome
-        // accents) don't re-compute per block. Mirrors the
-        // ProcessContext doc-comment derivation.
-        if (config_.time_sig_numerator > 0 && config_.time_sig_denominator > 0) {
-            const double beats_per_bar =
-                static_cast<double>(config_.time_sig_numerator) *
-                (4.0 / static_cast<double>(config_.time_sig_denominator));
-            if (beats_per_bar > 0.0) {
-                proc_ctx.bar = static_cast<int64_t>(
-                    proc_ctx.position_beats / beats_per_bar);
-            }
-        }
+        // Derive `bar`, then diff against the previous block for the transport
+        // change flags. The standalone driver is a transport, so a processor
+        // running here must see the same `tempo_changed` / `transport_changed` /
+        // `transport_started` / `transport_jump` signals it would see under a
+        // DAW — otherwise a tempo-synced generator behaves differently in the
+        // standalone build than in the plugin builds, and the standalone is
+        // exactly where those generators get developed. Shared with the VST3 /
+        // AU / CLAP adapters so there is one definition of "the transport
+        // started". Stateful; updates `playhead_prev_` in place.
+        detail::derive_bar_from_beats(proc_ctx);
+        detail::compute_playhead_changes(proc_ctx, playhead_prev_);
 
         {
             // Flush denormals to zero for the DSP callback so quiet tails in

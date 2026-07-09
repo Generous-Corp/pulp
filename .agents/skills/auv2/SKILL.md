@@ -530,3 +530,62 @@ buffer and flips the initialized flag). The FIRST `Render` is warm-up (one-time
 IO-buffer alloc) and must run OUTSIDE the probe; measure a steady-state block. The
 `ScopedNoAlloc` around the instrument `process()` is a no-op in Release (NDEBUG) —
 it only traps in the test/sanitizer build, same as every other placement.
+
+## OutputIsSilence must be cleared — overriding ProcessBufferLists bypasses the SDK's clear
+
+`PulpAUEffect` overrides `ProcessBufferLists`, and that override is the *only*
+place the silence bit can be retracted.
+
+`AUEffectBase::Render` hands `ioActionFlags` to `AUInputElement::PullInput`, so a
+host that renders silence upstream ORs `kAudioUnitRenderAction_OutputIsSilence`
+into the flags before our override ever runs. The stock
+`AUEffectBase::ProcessBufferLists` clears the bit again once a kernel writes
+output — but Pulp never calls it. Left uncleared, the adapter hands the host a
+full buffer labelled silent, and a host that honours the label substitutes
+digital silence. That deletes the output of every plugin that synthesizes signal
+from a silent input: generators, oscillators, reverb tails, DC / control-voltage
+sources.
+
+The failure is invisible from inside. `PulpAUEffect` passes
+`inProcessesInPlace = true`, so `AUEffectBase::Render`'s
+`if (silence && !ProcessesInPlace()) ZeroBuffer(output)` never fires — the buffer
+really does hold the right samples. Only the flag is wrong, and only the host
+acts on it. **A `Processor`-level "write 0.5, read 0.5" test passes while the bug
+is live.** Test at the adapter boundary or you are testing nothing.
+
+Rules:
+- Clear the bit after a non-bypassed `process()`:
+  `ioActionFlags &= ~kAudioUnitRenderAction_OutputIsSilence;`
+- Clear it *unconditionally* on that path. The adapter cannot know whether this
+  Processor generated output, and the cost of over-clearing is a lost host-side
+  silence optimisation; the cost of under-clearing is deleted audio.
+- Retract exactly that one bit — other flags the host set (`kPreRender`, …) must
+  survive.
+- **Leave the bypass path alone.** There the plugin really is a wire, so upstream
+  silence is still silence downstream.
+- Re-run `auval` after touching this: it has silence/tail contract tests.
+
+`test_au_v2_effect.cpp`'s `[silence]` case pins the contract.
+
+## Driving PulpAUEffect::ProcessBufferLists in a headless test
+
+Same shape as the `PulpAUInstrument::Render` recipe below, plus an input element:
+
+```cpp
+ScopedFactoryRegistration reg(create_my_processor);   // swap the global factory
+pulp::format::au::PulpAUEffect effect(nullptr);       // no AudioComponentInstance
+effect.CreateElements();                              // dispatch normally does this
+effect.GetInput(0)->SetStreamFormat(fmt);
+effect.GetOutput(0)->SetStreamFormat(fmt);
+effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice, ...);
+effect.DoInitialize();                                // NOT the bare Initialize()
+AudioUnitRenderActionFlags flags = kAudioUnitRenderAction_OutputIsSilence;
+effect.ProcessBufferLists(flags, in_bl, out_bl, frames);   // public; skips PullInput
+effect.DoCleanup();
+```
+
+Calling `ProcessBufferLists` directly (rather than `Render`) sidesteps `PullInput`
+and lets the test *inject* the host's silence claim, which is the whole point. A
+two-channel `AudioBufferList` needs the trailing-storage idiom
+(`struct { AudioBufferList bl; AudioBuffer second; }`) — assert the layout with a
+`static_assert` on `offsetof`.

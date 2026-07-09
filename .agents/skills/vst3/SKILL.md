@@ -834,3 +834,29 @@ events. The queue cache and skip-set are pre-sized at block start (alongside
 `param_snapshot_`), so the drain is allocation-free. Values are **normalized**
 (`ParamInfo::range.normalize`). `test_vst3_plugin_state.cpp` asserts two distinct
 offset points (16, 48) with no offset-0 duplicate.
+
+## Output silenceFlags are the plugin's job — clear them after an active render
+
+VST3 puts the obligation to declare output silence on the **plugin**. A host is
+free to hand us `AudioBusBuffers` whose `silenceFlags` already carry its inbound
+silence, and to act on whatever we leave in that field. The adapter never wrote
+it, so a plugin that synthesizes output from a silent input — generator,
+oscillator, reverb tail, DC / control-voltage source — returned a full buffer
+still labelled silent.
+
+After `processor_->process(...)`, on the non-bypass path:
+
+```cpp
+for (int32 b = 0; b < data.numOutputs; ++b) data.outputs[b].silenceFlags = 0;
+```
+
+Every rendered output bus, every block — a host that keeps asserting silence must
+keep having it retracted, not just on the first block. The bypass path returns
+before this point and deliberately leaves the flags alone: there the plugin is a
+wire, so upstream silence stays silence.
+
+Do not try to prove this with a `Processor`-level test. `Processor::process()`
+writing `0.5` into a buffer passes whether or not the flag is set; the defect
+only exists at the adapter boundary. `test_vst3_plugin_state.cpp`'s `[silence]`
+case drives `PulpVst3Processor::process()` with `outputs[0].silenceFlags = 0x3`
+and asserts it comes back `0`.

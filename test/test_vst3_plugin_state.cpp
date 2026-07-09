@@ -4403,3 +4403,67 @@ TEST_CASE("VST3 expression before its note-on at the same offset is dropped (eve
 
     REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
 }
+
+// VST3 puts the obligation to declare output silence on the plugin: a host is
+// free to hand us AudioBusBuffers whose silenceFlags carry its inbound
+// silence, and to act on whatever we leave there. The adapter never wrote the
+// field, so a generator / oscillator / DC-control-voltage source that
+// synthesizes output from a silent input returned a full buffer still labelled
+// silent. Assert we retract the claim on every rendered output bus.
+TEST_CASE("VST3 clears output silenceFlags after an active render",
+          "[vst3][audio][silence][dc]") {
+    reset_test_processor();
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    // The host tells us both input channels are digital silence.
+    audio_inputs[0].silenceFlags = 0x3;
+
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+    // ...and propagates that claim into the output buffers it hands us, which
+    // is exactly what a silence-optimising host does.
+    audio_outputs[0].silenceFlags = 0x3;
+
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE(data.outputs[0].silenceFlags == 0);
+
+    // Sticky across blocks: a host that keeps asserting silence keeps having it
+    // retracted, rather than the flag surviving from the first block onward.
+    data.outputs[0].silenceFlags = 0x3;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE(data.outputs[0].silenceFlags == 0);
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}

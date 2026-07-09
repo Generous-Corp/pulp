@@ -1237,3 +1237,48 @@ The mechanism is format-agnostic and driven by the shared idle pump:
 Test: `test_view_bridge.cpp` `[reload]` cases — a reloadable stub rebuilds into
 the same root object with new content/bg, is idempotent, and is inert for a normal
 processor. `examples/hot-reload-morph` exercises it end-to-end.
+
+## Standalone is a transport — it must derive the same playhead change flags
+
+`StandaloneApp` synthesizes transport (tempo, time signature, `position_beats`
+from the rolling sample clock, `is_playing` from the user's play/stop toggle), so
+it *is* a host for the Processor running inside it. It must therefore populate the
+same derived `ProcessContext` fields the VST3 / AU / CLAP adapters do:
+
+```cpp
+detail::derive_bar_from_beats(proc_ctx);
+detail::compute_playhead_changes(proc_ctx, playhead_prev_);   // member snapshot
+```
+
+It previously hand-rolled the `bar` derivation and never computed the change
+flags at all, so `tempo_changed` / `time_sig_changed` / `transport_changed` /
+`transport_started` / `transport_jump` were permanently `false` in the standalone
+build. A tempo-synced generator therefore behaved differently in standalone than
+in the plugin builds — and standalone is exactly where such generators get
+developed. `playhead_prev_` is touched only from the audio callback.
+
+## `transport_started` fires on the play edge; `should_reset_dsp_state()` does not
+
+`ProcessContext::should_reset_dsp_state()` is `reset_requested || transport_jump`.
+Pressing play at a **parked** position does not move the playhead, so
+`compute_playhead_changes()` correctly reports no jump — and therefore
+`should_reset_dsp_state()` returns `false` on the block where the transport starts.
+
+That is correct for delay/reverb tails (a start is not a discontinuity, and tails
+must survive it) and catastrophic for anything with run-relative phase. A
+tempo-synced clock, LFO, or step sequencer that keys its phase reset off
+`should_reset_dsp_state()` resumes a stale free-running phase and emits every
+backlogged event on the first block of playback — a **pulse burst on play**.
+
+Use `ProcessContext::transport_started` instead. It is deliberately *not* folded
+into `should_reset_dsp_state()`, because the two answer different questions:
+"did the timeline jump?" versus "did a run begin?"
+
+Two subtleties:
+- A processor instantiated **while the transport is already rolling** has no
+  previous block to diff against (`!snapshot.has_previous`), so
+  `transport_started` is set from `is_playing` on that first block. Without this a
+  clock sits dead until the user stops and restarts the transport.
+- Better still, derive event positions from `position_beats` outright rather than
+  from an accumulator. Then a start, a seek, and a loop wrap are the same case,
+  and none of them can produce a burst.
