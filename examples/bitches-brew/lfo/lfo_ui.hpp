@@ -100,15 +100,10 @@ public:
             std::snprintf(buf, sizeof(buf), "%.0f°", v);
             return std::string(buf);
         };
-        auto shape_name = [](float v) {
-            switch (waveform_from_param(v)) {
-                case Waveform::sine: return std::string("sine");
-                case Waveform::triangle: return std::string("tri");
-                case Waveform::saw_up: return std::string("saw");
-                case Waveform::saw_down: return std::string("ramp");
-                case Waveform::square: return std::string("sqr");
-            }
-            return std::string("?");
+        auto depth = [](float v) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%+.2f", v);
+            return std::string(buf);
         };
 
         auto scope = std::make_unique<LfoScope>(
@@ -116,27 +111,41 @@ public:
         scope->flex().preferred_height = 88.0f;
         scope->flex().align_self = view::FlexAlign::stretch;
 
-        auto knobs = ui::row(10.0f, 84.0f);
-        auto add = [&](state::ParamID id, const char* label,
-                       std::function<std::string(float)> fmt) {
+        auto add = [&](view::View& row, state::ParamID id, const char* label,
+                       std::function<std::string(float)> fmt, float w) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
-            ui::fixed_size(*k, 88.0f, 84.0f);
-            knobs->add_child(std::move(k));
+            ui::fixed_size(*k, w, 80.0f);
+            row.add_child(std::move(k));
         };
-        add(LfoProcessor::kWaveform, "Shape", shape_name);
-        add(LfoProcessor::kBeatsPerCycle, "Rate", beats);
-        add(LfoProcessor::kPhaseDegrees, "Phase", degrees);
+
+        // The four depths are summed, not selected. Sine at full and the rest at
+        // zero is the single-shape behaviour this replaced.
+        auto mix = ui::row(6.0f, 80.0f);
+        add(*mix, LfoProcessor::kSine, "Sine", depth, 76.0f);
+        add(*mix, LfoProcessor::kTriangle, "Tri", depth, 76.0f);
+        add(*mix, LfoProcessor::kSaw, "Saw", depth, 76.0f);
+        add(*mix, LfoProcessor::kSquare, "Sqr", depth, 76.0f);
+
+        auto timing = ui::row(6.0f, 80.0f);
+        add(*timing, LfoProcessor::kBeatsPerCycle, "Rate", beats, 76.0f);
+        add(*timing, LfoProcessor::kPhaseDegrees, "Phase", degrees, 76.0f);
+        add(*timing, LfoProcessor::kAsymmetry, "Asym", depth, 76.0f);
+        add(*timing, LfoProcessor::kPulseWidth, "PW", depth, 76.0f);
+
+        auto shaping = ui::row(6.0f, 80.0f);
+        add(*shaping, LfoProcessor::kRandom, "Random", depth, 76.0f);
+        add(*shaping, LfoProcessor::kOffset, "Offset", depth, 76.0f);
+        add(*shaping, LfoProcessor::kOutputScale, "Out", depth, 76.0f);
 
         auto bottom = ui::row(14.0f, 52.0f);
-        auto uni = ui::param_toggle(store_, LfoProcessor::kUnipolar, "Unipolar");
         auto inv = ui::param_toggle(store_, LfoProcessor::kInvert, "Invert");
-        ui::fixed_size(*uni, 78.0f, 50.0f);
         ui::fixed_size(*inv, 78.0f, 50.0f);
-        bottom->add_child(std::move(uni));
         bottom->add_child(std::move(inv));
 
         add_child(std::move(scope));
-        add_child(std::move(knobs));
+        add_child(std::move(mix));
+        add_child(std::move(timing));
+        add_child(std::move(shaping));
         add_child(std::move(bottom));
         add_child(ui::caption_label(
             "orange is the output, blue is the quadrature a quarter cycle ahead"));

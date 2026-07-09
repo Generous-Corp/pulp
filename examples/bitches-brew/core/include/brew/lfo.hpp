@@ -17,6 +17,9 @@
 // multiply at the output stage, and keeping the shapes bipolar means `invert`
 // and `output_scale` compose the same way they do for every other plug-in.
 
+#include <brew/random.hpp>
+
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -87,6 +90,74 @@ inline constexpr int kWaveformCount = 5;
 /// A quarter cycle ahead. Patched alongside the main output it gives a circular
 /// (X, Y) pair — the usual way to drive a two-axis modulation from one LFO.
 inline constexpr double kQuadratureOffset = 0.25;
+
+/// Bend the time axis so the waveform's centre falls at `centre` rather than at
+/// half a cycle. This is a pulse-width control generalized to every shape: at
+/// 0.25 a triangle becomes a fast-rise slow-fall ramp, a sine leans, and a square
+/// spends a quarter of its cycle high.
+///
+/// Continuous and monotone in `phase`, so it never introduces a discontinuity a
+/// clean waveform did not already have. Degenerate centres are refused rather
+/// than divided by.
+[[nodiscard]] inline double warp_phase(double phase, double centre) noexcept {
+    const double p = wrap_phase(phase);
+    const double c = std::clamp(centre, 1e-4, 1.0 - 1e-4);
+    return p < c ? 0.5 * p / c : 0.5 + 0.5 * (p - c) / (1.0 - c);
+}
+
+/// A square with an explicit duty cycle. `pulse_width` is the fraction of the
+/// cycle spent high.
+[[nodiscard]] inline float square_shape(double phase, double pulse_width) noexcept {
+    return wrap_phase(phase) < std::clamp(pulse_width, 0.0, 1.0) ? 1.0f : -1.0f;
+}
+
+/// How much of each shape is summed into the output.
+///
+/// A mixer, not a selector. Four depths subsume the five-way enum this replaced
+/// (set one to 1.0 and the rest to 0) and reach everything between. Each depth is
+/// bipolar, so a shape can be subtracted as easily as added.
+///
+/// `random` is a sample-and-hold: one level per cycle, held flat across it, in the
+/// manner of a noise source feeding a hardware S&H. It is a hash of the cycle
+/// index rather than a generator, so it renders identically every time — see
+/// brew/random.hpp.
+struct LfoMix {
+    float sine = 1.0f;
+    float triangle = 0.0f;
+    float saw = 0.0f;
+    float square = 0.0f;
+    float random = 0.0f;
+    float pulse_width = 0.5f;
+    float asymmetry = 0.5f;
+    float offset = 0.0f;
+    std::uint32_t seed = 0;
+};
+
+/// The mixed waveform at a phase, before the output stage.
+///
+/// The sum is *not* clamped here. Four depths at full can reach 4.0, and clamping
+/// mid-chain would silently flatten a mix the user asked for before `offset` and
+/// the output scale have had their say. `resolve_output` clamps once, at the jack.
+[[nodiscard]] inline float lfo_mix_value(const LfoMix& m, double phase,
+                                         std::int64_t cycle) noexcept {
+    const double p = warp_phase(phase, static_cast<double>(m.asymmetry));
+    float v = 0.0f;
+    if (m.sine != 0.0f) v += m.sine * lfo_shape(Waveform::sine, p);
+    if (m.triangle != 0.0f) v += m.triangle * lfo_shape(Waveform::triangle, p);
+    if (m.saw != 0.0f) v += m.saw * lfo_shape(Waveform::saw_up, p);
+    if (m.square != 0.0f) v += m.square * square_shape(p, static_cast<double>(m.pulse_width));
+    // Held across the whole cycle, so it is keyed on the cycle, not the phase.
+    if (m.random != 0.0f) v += m.random * hash_bipolar(cycle, m.seed);
+    return v + m.offset;
+}
+
+/// Which cycle of the whole timeline a beat position falls in. Signed: cycle -1
+/// precedes the project's origin, and a host will ask for it.
+[[nodiscard]] inline std::int64_t lfo_cycle(double position_beats,
+                                            double beats_per_cycle) noexcept {
+    if (!(beats_per_cycle > 0.0)) return 0;
+    return static_cast<std::int64_t>(std::floor(position_beats / beats_per_cycle));
+}
 
 /// Map bipolar [-1, +1] to unipolar [0, 1]. Some CV inputs (a VCA, an envelope
 /// depth) want only positive voltage; feeding them a bipolar LFO wastes half the

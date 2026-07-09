@@ -59,8 +59,10 @@ int main() {
         h.state().set_value(DcProcessor::kValue, -0.45f);
     });
     shoot(create_lfo, "/tmp/brewshots/lfo.png", [](format::HeadlessHost& h) {
-        h.state().set_value(LfoProcessor::kWaveform,
-                            static_cast<float>(Waveform::sine));
+        // A mix, not a shape: mostly sine with a triangle folded in and a little
+        // asymmetry, which is the thing a selector could never do.
+        h.state().set_value(LfoProcessor::kTriangle, 0.35f);
+        h.state().set_value(LfoProcessor::kAsymmetry, 0.35f);
         run_block(h, playing(0.3));
     });
     shoot(create_function, "/tmp/brewshots/function.png",

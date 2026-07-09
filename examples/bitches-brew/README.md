@@ -63,13 +63,27 @@ freshly inserted Function can never be the thing that changed a voltage. And its
 bypass is a **wire, not a mute** — the opposite of the generators, because muting
 an insert would drop the voltage the plug-in *upstream* of it is generating.
 
-`LFO` derives its phase from the host's position rather than accumulating it per
-block, so a bounce lands the modulation on the same samples every time, a locate
-puts the LFO where the timeline says it should be, and a long session cannot
-drift against the host. The second output leads the first by a quarter cycle: fed
+`LFO` is a **mixer, not a selector**. Sine, triangle, saw and square each have
+their own bipolar depth and are summed, so a shape can be subtracted as easily as
+added and everything between the four is reachable. One depth at full and the rest
+at zero is the single-shape behaviour you would expect. `Asymmetry` moves the
+waveform's centre in time — a pulse-width control generalized to every shape — and
+`Random` is a sample-and-hold, one level per cycle held flat across it.
+
+The sum is not clamped inside the mixer. Four depths at full reach 4.0, and
+flattening that before `Offset` and the output scale have had their say would
+silently discard a mix you asked for. It clamps once, at the jack.
+
+Its phase is derived from the host's position rather than accumulated per block,
+so a bounce lands the modulation on the same samples every time, a locate puts the
+LFO where the timeline says it should be, and a long session cannot drift against
+the host. The `Random` level is a **hash of the cycle index**, not a generator, for
+exactly that reason: render twice, get the same samples. Reroll it with `Seed`, not
+by pressing play again. The second output leads the first by a quarter cycle: fed
 into two CV inputs the pair traces a circle, which is how one oscillator drives a
-two-axis modulation. It is rendered per sample — a block-rate control voltage is
-an audible zipper on whatever it drives.
+two-axis modulation — and its sample-and-hold is keyed on the cycle *its own* phase
+sits in, or the circle would tear at every cycle boundary. Rendered per sample: a
+block-rate control voltage is an audible zipper on whatever it drives.
 
 `Sync` also carries a **1st Delay** (hold the clock off for N ms after the
 transport starts, measured from the run origin so two runs behave identically)

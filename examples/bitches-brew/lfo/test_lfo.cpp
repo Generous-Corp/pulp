@@ -13,6 +13,7 @@
 
 #include <pulp/format/headless.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -49,6 +50,15 @@ std::vector<float> render(format::HeadlessHost& host, double position_beats,
         v[static_cast<std::size_t>(n)] =
             out.channel(static_cast<std::size_t>(ch))[static_cast<std::size_t>(n)];
     return v;
+}
+
+
+/// Select one shape by soloing its depth. The mixer subsumes the selector this
+/// replaced, and every test that wants a pure shape says so explicitly.
+void solo(format::HeadlessHost& host, state::ParamID shape) {
+    for (auto id : {LfoProcessor::kSine, LfoProcessor::kTriangle,
+                    LfoProcessor::kSaw, LfoProcessor::kSquare})
+        host.state().set_value(id, id == shape ? 1.0f : 0.0f);
 }
 
 }  // namespace
@@ -167,8 +177,7 @@ TEST_CASE("LFO advances within a block rather than stepping per block",
           "[brew][lfo][phase]") {
     format::HeadlessHost host(create_lfo);
     host.prepare(kSampleRate, 4096, 2, 2);
-    host.state().set_value(LfoProcessor::kWaveform,
-                           static_cast<float>(Waveform::saw_up));
+    solo(host, LfoProcessor::kSaw);
 
     const auto block = render(host, 0.0, 512, 0);
     // A block-rate LFO would hold one value for all 512 samples; a stepped CV is
@@ -181,8 +190,7 @@ TEST_CASE("a stopped transport holds the LFO at the playhead",
           "[brew][lfo][phase]") {
     format::HeadlessHost host(create_lfo);
     host.prepare(kSampleRate, 4096, 2, 2);
-    host.state().set_value(LfoProcessor::kWaveform,
-                           static_cast<float>(Waveform::saw_up));
+    solo(host, LfoProcessor::kSaw);
 
     const auto block = render(host, 0.3, 256, 0, /*playing=*/false);
     for (float v : block) REQUIRE(v == block.front());
@@ -194,8 +202,7 @@ TEST_CASE("the quadrature output leads the main output by a quarter cycle",
           "[brew][lfo][quadrature]") {
     format::HeadlessHost host(create_lfo);
     host.prepare(kSampleRate, 4096, 2, 2);
-    host.state().set_value(LfoProcessor::kWaveform,
-                           static_cast<float>(Waveform::sine));
+    solo(host, LfoProcessor::kSine);
     host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
 
     const auto main = render(host, 0.0, 512, 0);
@@ -223,8 +230,7 @@ TEST_CASE("the quadrature output leads the main output by a quarter cycle",
 TEST_CASE("LFO honors the suite's output stage", "[brew][lfo]") {
     format::HeadlessHost host(create_lfo);
     host.prepare(kSampleRate, 4096, 2, 2);
-    host.state().set_value(LfoProcessor::kWaveform,
-                           static_cast<float>(Waveform::square));
+    solo(host, LfoProcessor::kSquare);
 
     REQUIRE(render(host, 0.0, 8, 0).front() == 1.0f);
 
@@ -238,8 +244,12 @@ TEST_CASE("LFO honors the suite's output stage", "[brew][lfo]") {
         REQUIRE(render(host, 0.0, 8, 0).front() == -1.0f);
     }
 
-    SECTION("unipolar keeps the whole cycle positive") {
-        host.state().set_value(LfoProcessor::kUnipolar, 1.0f);
+    // `Unipolar` is gone: `Offset` subsumes it, and generalizes. Half the depth
+    // plus half an offset is the old unipolar square, and unlike a toggle it also
+    // reaches every partial offset in between.
+    SECTION("a depth and an offset keep the whole cycle positive") {
+        host.state().set_value(LfoProcessor::kSquare, 0.5f);
+        host.state().set_value(LfoProcessor::kOffset, 0.5f);
         REQUIRE(render(host, 0.0, 8, 0).front() == 1.0f);   // square high  → 1.0
         REQUIRE(render(host, 0.5, 8, 0).front() == 0.0f);   // square low   → 0.0
     }
@@ -256,8 +266,7 @@ TEST_CASE("LFO honors the suite's output stage", "[brew][lfo]") {
 TEST_CASE("LFO emits nothing while bypassed", "[brew][lfo][safety][bypass]") {
     format::HeadlessHost host(create_lfo);
     host.prepare(kSampleRate, 512, 2, 2);
-    host.state().set_value(LfoProcessor::kWaveform,
-                           static_cast<float>(Waveform::square));
+    solo(host, LfoProcessor::kSquare);
 
     audio::Buffer<float> in(2, 512), out(2, 512);
     in.clear();
@@ -277,5 +286,192 @@ TEST_CASE("LFO emits nothing while bypassed", "[brew][lfo][safety][bypass]") {
     for (int n = 0; n < 512; ++n) {
         REQUIRE(out.channel(0)[static_cast<std::size_t>(n)] == 0.0f);
         REQUIRE(out.channel(1)[static_cast<std::size_t>(n)] == 0.0f);
+    }
+}
+
+// ------------------------------------------------------------------ the mixer
+
+// The mixer subsumes the selector it replaced: one depth at full and the rest at
+// zero is exactly the old single-shape behaviour.
+TEST_CASE("depths sum, and a solo depth is the pure shape", "[brew][lfo][mix]") {
+    LfoMix m{};
+    m.sine = 1.0f;
+    m.triangle = 0.0f;
+    for (double p = 0.0; p < 1.0; p += 0.05) {
+        CAPTURE(p);
+        REQUIRE_THAT(lfo_mix_value(m, p, 0), WithinAbs(lfo_shape(Waveform::sine, p), 1e-6));
+    }
+
+    // Two shapes at once is their sum, sample for sample.
+    LfoMix both = m;
+    both.saw = 1.0f;
+    for (double p = 0.0; p < 1.0; p += 0.05) {
+        CAPTURE(p);
+        REQUIRE_THAT(lfo_mix_value(both, p, 0),
+                     WithinAbs(lfo_shape(Waveform::sine, p) + lfo_shape(Waveform::saw_up, p),
+                               1e-6));
+    }
+}
+
+// Depths are bipolar. A negative depth subtracts the shape, which is how the
+// down-saw of the old enum is reached without a fifth entry.
+TEST_CASE("a negative depth subtracts its shape", "[brew][lfo][mix]") {
+    LfoMix up{};
+    up.sine = 0.0f;
+    up.saw = 1.0f;
+    LfoMix down = up;
+    down.saw = -1.0f;
+    for (double p = 0.05; p < 1.0; p += 0.1) {
+        CAPTURE(p);
+        REQUIRE_THAT(lfo_mix_value(down, p, 0), WithinAbs(-lfo_mix_value(up, p, 0), 1e-6));
+    }
+}
+
+// The sum is deliberately not clamped mid-chain: four depths at full reach 4.0,
+// and flattening that before `offset` and the output scale have spoken would
+// silently discard a mix the user asked for. `resolve_output` clamps once, at the
+// jack.
+TEST_CASE("the mix is clamped at the jack, not inside the mixer",
+          "[brew][lfo][mix]") {
+    LfoMix loud{};
+    loud.sine = 1.0f;
+    loud.triangle = 1.0f;
+    loud.square = 1.0f;
+
+    // Somewhere in the cycle three shapes at full depth reach past the rail. The
+    // mixer must hand that overshoot on rather than swallowing it.
+    float peak = 0.0f;
+    for (int i = 0; i < 512; ++i)
+        peak = std::max(peak, lfo_mix_value(loud, static_cast<double>(i) / 512, 0));
+    REQUIRE(peak > 1.0f);
+
+    // The jack sees it clamped, and exactly at the rail — proof the clamp is the
+    // output stage's and not a quiet rescale inside the mixer.
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 4096, 2, 2);
+    for (auto id : {LfoProcessor::kTriangle, LfoProcessor::kSquare})
+        host.state().set_value(id, 1.0f);
+    bool saw_rail = false;
+    for (int i = 0; i < 64; ++i) {
+        for (float v : render(host, static_cast<double>(i) / 64.0, 4, 0)) {
+            REQUIRE(v <= 1.0f);
+            REQUIRE(v >= -1.0f);
+            if (v == 1.0f) saw_rail = true;
+        }
+    }
+    REQUIRE(saw_rail);
+}
+
+// ------------------------------------------------------- asymmetry / pulse width
+
+// Asymmetry moves the waveform's centre in time. With an identity pulse width, a
+// square's duty cycle *is* the asymmetry — which is the cleanest way to observe a
+// warp that applies to every shape.
+TEST_CASE("asymmetry moves the waveform's centre", "[brew][lfo][mix]") {
+    REQUIRE_THAT(warp_phase(0.3, 0.5), WithinAbs(0.3, 1e-12));  // 0.5 is identity
+    REQUIRE_THAT(warp_phase(0.25, 0.25), WithinAbs(0.5, 1e-12));  // centre pulled early
+
+    LfoMix m{};
+    m.sine = 0.0f;
+    m.square = 1.0f;
+    m.asymmetry = 0.25f;
+    int high = 0;
+    const int n = 1000;
+    for (int i = 0; i < n; ++i)
+        if (lfo_mix_value(m, static_cast<double>(i) / n, 0) > 0.0f) ++high;
+    REQUIRE(std::abs(high - 250) <= 2);
+}
+
+TEST_CASE("pulse width sets the square's duty cycle", "[brew][lfo][mix]") {
+    LfoMix m{};
+    m.sine = 0.0f;
+    m.square = 1.0f;
+    m.pulse_width = 0.8f;
+    int high = 0;
+    const int n = 1000;
+    for (int i = 0; i < n; ++i)
+        if (lfo_mix_value(m, static_cast<double>(i) / n, 0) > 0.0f) ++high;
+    REQUIRE(std::abs(high - 800) <= 2);
+}
+
+// ---------------------------------------------------------------- sample & hold
+
+// One level per cycle, held flat across it. That is what a noise source feeding a
+// hardware sample-and-hold does, and a level that moved within the cycle would be
+// noise, not S&H.
+TEST_CASE("random holds one level for a whole cycle", "[brew][lfo][random]") {
+    LfoMix m{};
+    m.sine = 0.0f;
+    m.random = 1.0f;
+    const float held = lfo_mix_value(m, 0.0, 7);
+    for (double p = 0.0; p < 1.0; p += 0.05) {
+        CAPTURE(p);
+        REQUIRE(lfo_mix_value(m, p, 7) == held);
+    }
+    // And it is a different level in the next cycle.
+    REQUIRE(lfo_mix_value(m, 0.0, 8) != held);
+}
+
+// The property that separates this from every other CV utility: render twice, get
+// the same samples. A generator advanced once per cycle could not promise it.
+TEST_CASE("random is a pure function of the cycle and the seed",
+          "[brew][lfo][random]") {
+    LfoMix a{};
+    a.sine = 0.0f;
+    a.random = 1.0f;
+    a.seed = 0;
+    LfoMix b = a;
+
+    // Two independent evaluations of cycle 12345 agree, bit for bit.
+    for (std::int64_t cycle : {std::int64_t{0}, std::int64_t{12345}, std::int64_t{-7}}) {
+        CAPTURE(cycle);
+        REQUIRE(lfo_mix_value(a, 0.3, cycle) == lfo_mix_value(b, 0.3, cycle));
+    }
+
+    // A different seed rerolls the whole sequence.
+    b.seed = 1;
+    int differing = 0;
+    for (std::int64_t cycle = 0; cycle < 32; ++cycle)
+        if (lfo_mix_value(a, 0.0, cycle) != lfo_mix_value(b, 0.0, cycle)) ++differing;
+    REQUIRE(differing >= 30);
+
+    // And a negative cycle index — the timeline before the project's origin, which
+    // a host will happily ask for — is as valid as any other.
+    REQUIRE(std::isfinite(lfo_mix_value(a, 0.0, -99)));
+}
+
+TEST_CASE("the quadrature output holds the same random level across the circle",
+          "[brew][lfo][random]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 4096, 2, 2);
+    host.state().set_value(LfoProcessor::kSine, 0.0f);
+    host.state().set_value(LfoProcessor::kRandom, 1.0f);
+    host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
+
+    // The quadrature output is keyed on the cycle its own phase sits in, so it
+    // steps a quarter cycle before the main output rather than tearing.
+    const auto* lfo = static_cast<const LfoProcessor*>(host.processor());
+    REQUIRE(lfo->value_at(0.0, kQuadratureOffset) == lfo->value_at(0.25));
+    REQUIRE(lfo->value_at(0.6, kQuadratureOffset) == lfo->value_at(0.85));
+
+    // The case that matters, and the only one that distinguishes the two keyings:
+    // a quadrature phase that has crossed into the *next* cycle while the main
+    // phase has not. Keying the S&H on the main cycle passes every assertion
+    // above and tears exactly here.
+    REQUIRE(lfo->value_at(0.8, kQuadratureOffset) == lfo->value_at(1.05));
+    REQUIRE(lfo->value_at(0.8, kQuadratureOffset) != lfo->value_at(0.8));
+}
+
+// ---------------------------------------------------------------------- offset
+
+TEST_CASE("offset shifts the whole waveform", "[brew][lfo][mix]") {
+    LfoMix m{};
+    m.sine = 1.0f;
+    LfoMix shifted = m;
+    shifted.offset = 0.25f;
+    for (double p = 0.0; p < 1.0; p += 0.1) {
+        CAPTURE(p);
+        REQUIRE_THAT(lfo_mix_value(shifted, p, 0),
+                     WithinAbs(lfo_mix_value(m, p, 0) + 0.25f, 1e-6));
     }
 }
