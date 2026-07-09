@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06190"></a>
+## [0.619.0] - 2026-07-08
+
+- feat(host): click-free crossfade for the SignalGraph live plugin swap ([#5763](https://github.com/danielraffel/pulp/pull/5763))
+- docs/readme verification collapse ([#5767](https://github.com/danielraffel/pulp/pull/5767))
+- plan/install trust hardening ([#5761](https://github.com/danielraffel/pulp/pull/5761))
+
 <a id="v06170"></a>
 ## [0.617.0] - 2026-07-08
 
@@ -6115,6 +6122,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.619.0]: https://github.com/danielraffel/pulp/releases/tag/v0.619.0
 [0.617.0]: https://github.com/danielraffel/pulp/releases/tag/v0.617.0
 [0.615.0]: https://github.com/danielraffel/pulp/releases/tag/v0.615.0
 [0.614.0]: https://github.com/danielraffel/pulp/releases/tag/v0.614.0
