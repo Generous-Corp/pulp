@@ -99,6 +99,10 @@ jobs:
           - os: ubuntu-24.04
             platform: linux-x64
             artifact: pulp
+            # Build the linux-x64 SDK inside an Ubuntu 22.04 container so Pulp's OWN
+            # objects don't re-leak the runner's glibc ~2.39 — matching the portable
+            # Skia/Dawn/V8 deps' 2.34 floor. Proven by the --elf floor check below.
+            container: "ubuntu:22.04"
           - os: ubuntu-24.04-arm
             platform: linux-arm64
             artifact: pulp
@@ -110,6 +114,8 @@ jobs:
             artifact: pulp.exe
 
     runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
+    # Empty for non-container cells (mac/win/linux-arm64) = run directly on the runner.
+    container: ${{ matrix.container }}
     name: CLI ${{ matrix.platform }}
     permissions:
       contents: read
@@ -117,6 +123,53 @@ jobs:
       attestations: write
 
     steps:
+      - name: Container pre-setup (ubuntu:22.04 — build toolchain the bare image lacks)
+        if: matrix.container != ''
+        # The linux-x64 SDK is built in an ubuntu:22.04 container so the shipped
+        # objects link against glibc 2.34 (the Linux min-OS floor) instead of the
+        # ubuntu-24.04 host's glibc 2.39. A bare ubuntu:22.04 image lacks the tools
+        # GitHub's ubuntu-latest pre-installs, so materialize them here (runs as
+        # root — no sudo needed for this step; later steps use the sudo we install).
+        #
+        # Two container-specific gotchas:
+        #  * Container jobs default to `sh` (dash), which rejects `set -o pipefail`.
+        #    Force bash.
+        #  * jammy's apt cmake is 3.22, but Pulp needs 3.24+ (cmake_minimum_required).
+        #    Install a recent cmake wheel from pip instead of apt.
+        shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates gnupg software-properties-common
+          # Pulp's logging (core/runtime/log.hpp) includes <format>, which
+          # libstdc++ only ships from GCC 13. jammy's default is GCC 11 (no
+          # <format>) — ubuntu-latest builds fine because 24.04 defaults to GCC
+          # 13/14. Pull GCC 13 from the toolchain PPA and make it the default
+          # compiler. The compiler version does NOT change the target glibc: the
+          # objects still link against jammy's glibc, so the floor stays at the
+          # base-image level (measured by the --elf report step below).
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git git-lfs sudo curl xz-utils \
+            build-essential gcc-13 g++-13 pkg-config binutils \
+            unzip zip file lcov \
+            python3 python3-pip
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 130
+          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 130
+          update-alternatives --install /usr/bin/cc  cc  /usr/bin/gcc-13 130
+          update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 130
+          # jammy apt cmake (3.22) is below Pulp's 3.24 floor — use a pip wheel.
+          pip3 install --no-cache-dir "cmake>=3.24"
+          # The workdir (/__w/pulp/pulp) is owned by the runner-host UID, not the
+          # container's root — so git-lfs's `git rev-parse` in setup.sh trips
+          # "detected dubious ownership". Trust the repo for every later git/git-lfs
+          # step (--system persists across steps regardless of HOME).
+          git config --system --add safe.directory '*'
+          git --version; cmake --version | head -1; g++ --version | head -1; git-lfs version || git lfs version || true
       - uses: actions/checkout@v5
         with:
           # lfs: false — release-cli fetches the Skia binaries explicitly via
@@ -512,6 +565,20 @@ jobs:
           # binary (built in `build/` with WebView=OFF) portable.
           cmake --build build-sdk --config Release
         shell: bash
+
+      - name: Report Linux SDK glibc floor (min-OS validation)
+        if: runner.os == 'Linux' && matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -uo pipefail
+          BIN="$(find build build-sdk -type f \( -name pulp -o -name 'libpulp*.so' \) 2>/dev/null | head -1)"
+          echo "measuring glibc floor of: ${BIN:-<none found>}"
+          if [ -n "$BIN" ]; then
+            python3 tools/scripts/measure_min_os.py --elf "$BIN" --max 2.34 \
+              || echo "::warning::Linux SDK floor exceeds 2.34 (build-host leak) — see above"
+          else
+            echo "::warning::no pulp binary found to measure"
+          fi
 
       - name: Prepare SDK build dir (macOS)
         if: runner.os == 'macOS'
