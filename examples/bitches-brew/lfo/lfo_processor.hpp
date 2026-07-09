@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <utility>
 
 namespace pulp::examples::brew {
 
@@ -85,6 +86,13 @@ public:
     }
 
     void prepare(const format::PrepareContext&) override {}
+
+    /// The size this editor actually needs. Without this override a host opens
+    /// the plug-in at Processor's 400x300 default, and the layout is laid out to
+    /// a geometry the editor was never checked against. The scope, three knobs, and the two toggles.
+    std::pair<uint32_t, uint32_t> editor_size() const override {
+        return {360, 380};
+    }
 
     /// Defined in lfo_view.cpp so the audio translation units never see the
     /// view stack.

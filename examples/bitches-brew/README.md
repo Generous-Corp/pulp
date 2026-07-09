@@ -35,6 +35,21 @@ them).
 | `DC` | Holds one constant value. The connection tester, and the suite's bit-exactness guard. |
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
 | `LFO` | A tempo-locked modulation source, plus the same shape a quarter cycle ahead. |
+| `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
+
+`Function` is the only plug-in here that reads its input bus — the others
+generate. Its curve is `y = sign(x) · |x|^k`: odd-symmetric so a bipolar CV keeps
+its polarity, monotone so it never folds, and fixed at the origin and both rails
+for every `k`, so the Amount knob bends the middle of the response without ever
+moving where full scale lands. Exponential and logarithmic are reciprocal
+exponents, which is why one knob drives both. Absolute rectifies. **These shapes
+are our design choice, not a match for anything** — the curve family is the
+obvious one for a bipolar signal, and nothing beyond that is claimed.
+
+Two consequences worth naming. Its defaults are a **bit-exact wire**, so a
+freshly inserted Function can never be the thing that changed a voltage. And its
+bypass is a **wire, not a mute** — the opposite of the generators, because muting
+an insert would drop the voltage the plug-in *upstream* of it is generating.
 
 `LFO` derives its phase from the host's position rather than accumulating it per
 block, so a bounce lands the modulation on the same samples every time, a locate
@@ -66,10 +81,11 @@ origin. `brew-ui/` holds the shared editor furniture.
 A CV plug-in makes no sound and drives no meter, so from inside a DAW there is no
 way to tell "holding +0.5 full scale" from "cable unplugged". Every plug-in
 therefore shows what is actually leaving the jack: `DC` draws a bipolar rail with
-a marker at its current output, `Sync` lights a CLOCK and a RUN lamp, and `LFO`
-traces its own output — the scope calls the same `value_at()` the DSP does, so
-the picture cannot drift from the signal. All three read real DSP state,
-published once per block from the audio thread.
+a marker at its current output, `Sync` lights a CLOCK and a RUN lamp, `LFO` traces
+its own output, and `Function` plots its curve with a dot at the point the signal
+is currently sitting on it. The scope and the graph call the same `value_at()` and
+`function_transfer()` the DSP does, so the picture cannot drift from the signal.
+All four read real DSP state, published once per block from the audio thread.
 
 The rail reads in **normalized full scale, never volts**. The plug-in cannot know
 the interface's rail voltage, and printing a number it cannot know is a lie the
@@ -79,6 +95,11 @@ Controls are Pulp's own widgets, laid out with flex. `test_brew_ui.cpp` renders
 each editor headless and asserts the readouts *move with the state* — a
 screenshot test that only checks "the PNG is non-empty" passes on a blank canvas,
 and on a plug-in this quiet a dead readout is indistinguishable from a dead cable.
+
+Each plug-in overrides `editor_size()`, and both the test and the screenshot
+dumper render at whatever it returns. Without the override a host opens the editor
+at `Processor`'s 400×300 default, and a screenshot taken at any other geometry is
+a picture of a layout no DAW will ever show.
 
 ## The clock is derived, never accumulated
 

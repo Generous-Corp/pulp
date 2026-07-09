@@ -57,6 +57,12 @@ inline std::unique_ptr<vw::View> row(float gap, float height) {
     v->flex().align_items = vw::FlexAlign::center;
     v->flex().gap = gap;
     v->flex().preferred_height = height;
+    // Rows never compress. Yoga's default is to shrink an overflowing child, and
+    // a shrunk row still paints its knobs at full size — so the row above ends up
+    // with the row below drawn over its labels. Holding the height means an
+    // editor that is too small for its contents clips at the bottom, which is
+    // obvious, instead of overlapping, which reads as a paint bug.
+    v->flex().flex_shrink = 0;
     return v;
 }
 

@@ -4,33 +4,27 @@ add_library(brew-ui INTERFACE)
 target_include_directories(brew-ui INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(brew-ui INTERFACE brew-core pulp::view pulp::canvas)
 
+# Both binaries below construct the editors through the real
+# Processor::create_view() path, so both need every plug-in's view source and
+# every plug-in's include directory. One list, so adding a plug-in is one edit.
+set(_brew_plugins dc function lfo sync)
+set(_brew_view_sources "")
+set(_brew_plugin_dirs "")
+foreach(plugin ${_brew_plugins})
+    list(APPEND _brew_view_sources
+        ${CMAKE_CURRENT_SOURCE_DIR}/../${plugin}/${plugin}_view.cpp)
+    list(APPEND _brew_plugin_dirs ${CMAKE_CURRENT_SOURCE_DIR}/../${plugin})
+endforeach()
+
 if(PULP_BUILD_TESTS)
-    # The editors are constructed through the real Processor::create_view() path,
-    # so the test needs both plug-ins' sources.
-    add_executable(brew-ui-test
-        test_brew_ui.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../dc/dc_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lfo/lfo_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../sync/sync_view.cpp)
+    add_executable(brew-ui-test test_brew_ui.cpp ${_brew_view_sources})
     target_link_libraries(brew-ui-test
         PRIVATE pulp::format brew-core brew-ui Catch2::Catch2WithMain)
-    target_include_directories(brew-ui-test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../dc
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lfo
-        ${CMAKE_CURRENT_SOURCE_DIR}/../sync)
+    target_include_directories(brew-ui-test PRIVATE ${_brew_plugin_dirs})
     catch_discover_tests(brew-ui-test)
-endif()
 
-# Headless screenshot dumper: renders each editor to PNG with no window.
-if(PULP_BUILD_TESTS)
-    add_executable(brew-shots
-        brew_shots.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../dc/dc_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lfo/lfo_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../sync/sync_view.cpp)
+    # Headless screenshot dumper: renders each editor to PNG with no window.
+    add_executable(brew-shots brew_shots.cpp ${_brew_view_sources})
     target_link_libraries(brew-shots PRIVATE pulp::format brew-core brew-ui)
-    target_include_directories(brew-shots PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../dc
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lfo
-        ${CMAKE_CURRENT_SOURCE_DIR}/../sync)
+    target_include_directories(brew-shots PRIVATE ${_brew_plugin_dirs})
 endif()

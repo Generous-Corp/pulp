@@ -1,4 +1,5 @@
 #include "dc_processor.hpp"
+#include "function_processor.hpp"
 #include "lfo_processor.hpp"
 #include "sync_processor.hpp"
 #include <pulp/format/headless.hpp>
@@ -7,14 +8,46 @@
 using namespace pulp;
 using namespace pulp::examples::brew;
 
+/// Run one block so the editors that display real DSP state (Sync's lamps, LFO's
+/// phase marker, Function's operating point) have something to show. `fill` seeds
+/// the input bus for the plug-ins that read it.
+static void run_block(format::HeadlessHost& h,
+                      const format::ProcessContext& base,
+                      float input = 0.0f) {
+    constexpr std::size_t kFrames = 512;
+    audio::Buffer<float> in(2, kFrames), out(2, kFrames);
+    in.clear();
+    out.clear();
+    for (std::size_t c = 0; c < 2; ++c)
+        for (std::size_t n = 0; n < kFrames; ++n) in.channel(c)[n] = input;
+    const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
+    audio::BufferView<const float> iv(ip, 2, kFrames);
+    auto ov = out.view();
+    format::ProcessContext c = base;
+    c.sample_rate = 48000;
+    c.num_samples = kFrames;
+    h.process(ov, iv, c);
+}
+
+static format::ProcessContext playing(double beats) {
+    format::ProcessContext c;
+    c.is_playing = true;
+    c.tempo_bpm = 120;
+    c.position_beats = beats;
+    return c;
+}
+
 static void shoot(format::ProcessorFactory f, const char* path,
                   void (*setup)(format::HeadlessHost&)) {
     format::HeadlessHost host(f);
     host.prepare(48000.0, 512, 2, 2);
     if (setup) setup(host);
+    // Render at the size the plug-in tells a host to open it at, so a
+    // screenshot cannot flatter a layout that a DAW would never show.
+    const auto [w, h] = host.processor()->editor_size();
     auto v = host.processor()->create_view();
-    v->set_bounds({0, 0, 360, 380});
-    const bool ok = view::render_to_file(*v, 360, 380, path, 2.0f);
+    v->set_bounds({0, 0, static_cast<float>(w), static_cast<float>(h)});
+    const bool ok = view::render_to_file(*v, w, h, path, 2.0f);
     std::printf("%s %s\n", ok ? "OK  " : "FAIL", path);
 }
 
@@ -28,25 +61,21 @@ int main() {
     shoot(create_lfo, "/tmp/brewshots/lfo.png", [](format::HeadlessHost& h) {
         h.state().set_value(LfoProcessor::kWaveform,
                             static_cast<float>(Waveform::sine));
-        audio::Buffer<float> in(2, 512), out(2, 512); in.clear(); out.clear();
-        const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
-        audio::BufferView<const float> iv(ip, 2, 512);
-        auto ov = out.view();
-        format::ProcessContext c;
-        c.sample_rate = 48000; c.num_samples = 512; c.is_playing = true;
-        c.tempo_bpm = 120; c.position_beats = 0.3;
-        h.process(ov, iv, c);
+        run_block(h, playing(0.3));
     });
+    shoot(create_function, "/tmp/brewshots/function.png",
+          [](format::HeadlessHost& h) {
+              h.state().set_value(FunctionProcessor::kCurve,
+                                  static_cast<float>(Curve::exponential));
+              h.state().set_value(FunctionProcessor::kAmount, 3.0f);
+              run_block(h, playing(0.0), 0.7f);
+          });
     shoot(create_sync, "/tmp/brewshots/sync-stopped.png", nullptr);
-    shoot(create_sync, "/tmp/brewshots/sync-running.png", [](format::HeadlessHost& h) {
-        audio::Buffer<float> in(2, 512), out(2, 512); in.clear(); out.clear();
-        const float* ip[2] = {in.channel(0).data(), in.channel(1).data()};
-        audio::BufferView<const float> iv(ip, 2, 512);
-        auto ov = out.view();
-        format::ProcessContext c;
-        c.sample_rate = 48000; c.num_samples = 512; c.is_playing = true;
-        c.transport_started = true; c.tempo_bpm = 120; c.position_beats = 0;
-        h.process(ov, iv, c);
-    });
+    shoot(create_sync, "/tmp/brewshots/sync-running.png",
+          [](format::HeadlessHost& h) {
+              auto c = playing(0.0);
+              c.transport_started = true;
+              run_block(h, c);
+          });
     return 0;
 }

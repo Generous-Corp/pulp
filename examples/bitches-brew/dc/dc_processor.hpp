@@ -25,6 +25,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <utility>
 
 namespace pulp::examples::brew {
 
@@ -78,6 +79,13 @@ public:
     }
 
     void prepare(const format::PrepareContext&) override {}
+
+    /// The size this editor actually needs. Without this override a host opens
+    /// the plug-in at Processor's 400x300 default, and the layout is laid out to
+    /// a geometry the editor was never checked against. The rail, two knobs, and a polarity switch.
+    std::pair<uint32_t, uint32_t> editor_size() const override {
+        return {340, 280};
+    }
 
     /// Defined in dc_view.cpp so the audio translation units never see the
     /// view stack.
