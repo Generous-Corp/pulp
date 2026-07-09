@@ -6,7 +6,7 @@
 namespace bendr {
 
 std::unique_ptr<pulp::view::View> ReferenceProcessor::create_view() {
-    return std::make_unique<ReferenceUi>(state(), &spectrum_bus(), &midi_map());
+    return std::make_unique<ReferenceUi>(state(), &spectrum_bus(), &midi_map(), &latency_ms());
 }
 
 } // namespace bendr

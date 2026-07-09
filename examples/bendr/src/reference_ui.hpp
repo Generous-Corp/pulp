@@ -19,6 +19,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -55,8 +56,10 @@ inline constexpr cv::Color spectrum_fill = cv::Color::rgba8(148, 226, 213, 38);
 class ReferenceUi : public vw::View {
 public:
     ReferenceUi(pulp::state::StateStore& store, SpectrumBus* spectrum,
-                pulp::state::MidiParameterMap* midi_map)
-        : store_(store), spectrum_(spectrum), midi_map_(midi_map), edit_(store) {
+                pulp::state::MidiParameterMap* midi_map,
+                const std::atomic<float>* latency_ms = nullptr)
+        : store_(store), spectrum_(spectrum), midi_map_(midi_map),
+          latency_ms_(latency_ms), edit_(store) {
         // The editor has live content (spectrum, the XY handle and value
         // readouts that must track host automation), so it repaints every
         // frame. (The "wedge on parameter adjust" was NOT this — it was an
@@ -143,6 +146,14 @@ public:
     void on_mouse_down(vw::Point p) override { pointer_press(p, vw::MouseButton::left); }
     void on_mouse_drag(vw::Point p) override { pointer_move(p); }
     void on_mouse_up(vw::Point) override { pointer_release(); }
+
+    // The macOS plugin host gates acceptsFirstResponder on the focused view's
+    // accepts_text_input(). Claiming the input-focus slot is not enough: without
+    // this the editor never becomes first responder in a DAW and on_key_event /
+    // on_text_input below are never called. Reporting true only while a type-in
+    // is open hands the keyboard straight back, so the host keeps its transport
+    // keys and Musical Typing the rest of the time.
+    bool accepts_text_input() const override { return edit_ctl_ >= 0; }
 
     bool on_key_event(const vw::KeyEvent& e) override {
         if (edit_ctl_ < 0 || !e.is_down) return false;
@@ -629,7 +640,8 @@ private:
         canvas.set_fill_color(palette::success);
         canvas.set_font("Inter", 11.0f * s);
         char lat[48];
-        std::snprintf(lat, sizeof lat, "latency  %.1f ms", latency_ms_);
+        const float ms = latency_ms_ ? latency_ms_->load(std::memory_order_relaxed) : 0.0f;
+        std::snprintf(lat, sizeof lat, "latency  %.1f ms", static_cast<double>(ms));
         canvas.fill_text(lat, hud_.x + 12 * s, hud_.bottom() - 7 * s);
     }
 
@@ -656,6 +668,7 @@ private:
     pulp::state::StateStore& store_;
     SpectrumBus* spectrum_ = nullptr;
     pulp::state::MidiParameterMap* midi_map_ = nullptr;
+    const std::atomic<float>* latency_ms_ = nullptr;
     pulp::state::ParameterEdit edit_;
     pulp::state::ParameterEdit ctl_edit_{store_};
     vw::Rect pad_{}, spectrum_rect_{}, freeze_{}, hud_{}, settings_btn_{};
@@ -673,7 +686,6 @@ private:
     bool learn_armed_ = false;
     bool learn_seen_armed_ = false;
     const char* learn_name_ = "";
-    float latency_ms_ = 96.0f;
 };
 
 } // namespace bendr

@@ -20,6 +20,7 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <complex>
 #include <memory>
@@ -154,9 +155,20 @@ public:
         silence_.assign(static_cast<size_t>(max_block), 0.0f);
 
         max_block_ = max_block;
+
+        // Published for the editor's latency readout. The vocoder's latency is
+        // geometry-derived, so it is only known once prepare() has picked a
+        // sample rate and block size.
+        latency_ms_.store(
+            static_cast<float>(pitch_.latency_samples() / sample_rate_ * 1000.0),
+            std::memory_order_relaxed);
     }
 
     int latency_samples() const override { return pitch_.latency_samples(); }
+
+    // Reported latency in milliseconds, for the editor. Written on prepare(),
+    // read by the UI thread.
+    const std::atomic<float>& latency_ms() const { return latency_ms_; }
 
     // Native GPU UI. Defined in reference_view.cpp to keep the UI header
     // (which includes this one) out of the audio-only TUs.
@@ -338,6 +350,7 @@ private:
     std::vector<float> silence_;       // zero buffer for an absent input bus
     float midi_note_offset_ = 0.0f;
     float midi_bend_ = 0.0f;
+    std::atomic<float> latency_ms_{0.0f};
 
     SpectrumBus spectrum_bus_;
     pulp::state::MidiParameterMap midi_map_;
