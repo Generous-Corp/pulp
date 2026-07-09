@@ -2,7 +2,7 @@
 
 if(PULP_BUILD_TESTS)
     add_executable(brew-dc-test test_dc.cpp)
-    target_link_libraries(brew-dc-test PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_link_libraries(brew-dc-test PRIVATE pulp::format brew-core Catch2::Catch2WithMain)
     target_include_directories(brew-dc-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(brew-dc-test)
 endif()
@@ -19,6 +19,12 @@ pulp_add_plugin(BrewDC
     PLUGIN_CODE     "BbDc"
     MANUFACTURER_CODE "BtBr"
 )
+
+foreach(fmt VST3 AU CLAP)
+    if(TARGET BrewDC_${fmt})
+        target_link_libraries(BrewDC_${fmt} PRIVATE brew-core)
+    endif()
+endforeach()
 
 if(PULP_HAS_CLAP AND APPLE)
     add_test(NAME clap-dlopen-BrewDC

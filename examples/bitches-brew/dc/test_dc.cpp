@@ -106,31 +106,8 @@ TEST_CASE("DC holds its value bit-exactly across block sizes and sample rates",
     }
 }
 
-TEST_CASE("DC output stage applies scale, polarity, and clamps", "[brew][dc]") {
-    SECTION("scale attenuates toward zero") {
-        REQUIRE(DcProcessor::resolve_output(1.0f, 0.5f, false) == 0.5f);
-        REQUIRE(DcProcessor::resolve_output(-1.0f, 0.5f, false) == -0.5f);
-        REQUIRE(DcProcessor::resolve_output(0.5f, 0.0f, false) == 0.0f);
-    }
-
-    // Some interfaces wire their outputs with reversed polarity. Without this
-    // the suite is unusable on them.
-    SECTION("invert flips polarity, including zero's sign-insensitivity") {
-        REQUIRE(DcProcessor::resolve_output(0.5f, 1.0f, true) == -0.5f);
-        REQUIRE(DcProcessor::resolve_output(-0.5f, 1.0f, true) == 0.5f);
-        REQUIRE(DcProcessor::resolve_output(0.0f, 1.0f, true) == 0.0f);
-    }
-
-    // Out-of-range input must not exceed full scale: a CV above the interface's
-    // rail is a clipped voltage, not a louder one.
-    SECTION("value and scale are clamped, never wrapped") {
-        REQUIRE(DcProcessor::resolve_output(2.0f, 1.0f, false) == 1.0f);
-        REQUIRE(DcProcessor::resolve_output(-2.0f, 1.0f, false) == -1.0f);
-        REQUIRE(DcProcessor::resolve_output(1.0f, 2.0f, false) == 1.0f);
-        REQUIRE(DcProcessor::resolve_output(1.0f, -1.0f, false) == 0.0f);
-    }
-}
-
+// The output stage itself (clamp / scale / invert) is brew-core's, and is tested
+// there. What DC owes is proof that its parameters actually reach it.
 TEST_CASE("DC scale and invert reach the rendered buffer", "[brew][dc]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 512, 2, 2);
