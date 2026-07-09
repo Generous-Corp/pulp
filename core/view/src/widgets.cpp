@@ -1454,11 +1454,38 @@ std::string InlineValueEditor::display_() const {
     return std::string(buf) + suffix_;
 }
 
+InlineValueEditor::~InlineValueEditor() {
+    // By destruction the widget may already be detached, and frame_clock() walks
+    // parent_ — it would return null and leak a subscription holding a dangling
+    // `this`. The cached clock pointer is what makes the unsubscribe reliable.
+    unsubscribe_caret_blink_();
+}
+
+void InlineValueEditor::subscribe_caret_blink_() {
+    if (caret_blink_sub_ >= 0) return;
+    if (auto* fc = frame_clock()) {
+        caret_blink_clock_ = fc;
+        caret_blink_sub_ = fc->subscribe([this](float dt) {
+            caret_blink_.advance(dt);
+            request_repaint();
+            return true;
+        });
+    }
+}
+
+void InlineValueEditor::unsubscribe_caret_blink_() {
+    if (caret_blink_sub_ >= 0 && caret_blink_clock_)
+        caret_blink_clock_->unsubscribe(caret_blink_sub_);
+    caret_blink_sub_ = -1;
+    caret_blink_clock_ = nullptr;
+}
+
 void InlineValueEditor::begin_edit() {
     if (!enabled_ || editing_) return;
     editing_ = true;
     invalid_ = false;
-    blink_ = 0.0f;
+    caret_blink_.reset();
+    subscribe_caret_blink_();
     char buf[48];
     std::snprintf(buf, sizeof buf, "%.*f", std::max(0, decimals_), value_);
     edit_buffer_ = buf;
@@ -1468,6 +1495,7 @@ void InlineValueEditor::begin_edit() {
 void InlineValueEditor::commit_edit() {
     if (!editing_) return;
     editing_ = false;
+    unsubscribe_caret_blink_();
     if (!edit_buffer_.empty()) {
         try {
             double v = std::stod(edit_buffer_);
@@ -1489,6 +1517,7 @@ void InlineValueEditor::cancel_edit() {
     editing_ = false;
     invalid_ = false;
     edit_buffer_.clear();
+    unsubscribe_caret_blink_();
     request_repaint();
 }
 
@@ -1502,6 +1531,7 @@ void InlineValueEditor::on_text_input(const TextInputEvent& event) {
         if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+')
             edit_buffer_ += c;
     invalid_ = false;
+    caret_blink_.keep_solid();  // typing holds the caret visible
     request_repaint();
 }
 
@@ -1511,6 +1541,7 @@ bool InlineValueEditor::on_key_event(const KeyEvent& event) {
     if (event.key == KeyCode::escape) { cancel_edit(); return true; }
     if (event.key == KeyCode::backspace) {
         if (!edit_buffer_.empty()) edit_buffer_.pop_back();
+        caret_blink_.keep_solid();  // an edit holds the caret visible
         request_repaint();
         return true;
     }
@@ -1546,18 +1577,26 @@ void InlineValueEditor::paint(canvas::Canvas& canvas) {
     canvas.fill_text_anchored(txt, b.width * 0.5f, b.height * 0.5f,
                               canvas::Canvas::TextAnchor::GlyphCenter);
     canvas.set_text_align(canvas::TextAlign::left);
-    // Caret is a SEPARATE blinking line just right of the (stable, centered)
-    // text — never part of the measured string, so the value doesn't jump or
-    // shift left/right as the caret blinks.
-    if (editing_) {
-        blink_ += 1.0f / 60.0f;
-        if (std::fmod(blink_, 1.06f) < 0.53f) {
-            float tw = canvas.measure_text(txt);
-            float cx = b.width * 0.5f + tw * 0.5f + 3.0f;
-            canvas.set_stroke_color(accent);
-            canvas.set_line_width(1.5f);
-            canvas.stroke_line(cx, b.height * 0.28f, cx, b.height * 0.72f);
-        }
+    // Caret is a SEPARATE shape just right of the (stable, centered) text —
+    // never part of the measured string, so the value doesn't jump or shift
+    // left/right as the caret blinks. The blink phase advances on the frame
+    // clock, not here: advancing it per paint would tie the rate to the
+    // display's refresh.
+    if (editing_ && caret_blink_.visible()) {
+        const float tw = canvas.measure_text(txt);
+        const float font_size = std::min(14.0f, b.height * 0.55f);
+
+        CaretMetrics m;
+        m.x = b.width * 0.5f + tw * 0.5f + 3.0f;
+        m.cell_top = b.height * 0.28f;
+        m.cell_height = b.height * 0.44f;
+        m.baseline = b.height * 0.5f + font_size * 0.36f;  // GlyphCenter → baseline
+        m.advance = 0.0f;  // the caret always sits past the last glyph here
+        m.nominal_advance = canvas.measure_text("0");
+        m.stroke = 1.5f;
+        // The text is centered, so a block caret's glyph redraw would need the
+        // same anchored placement; there is no glyph under it, so nothing to invert.
+        paint_caret(canvas, caret_style_, m, accent);
     }
 }
 

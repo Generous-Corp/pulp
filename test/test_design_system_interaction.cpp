@@ -7,6 +7,7 @@
 
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/context_menu.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -644,6 +645,69 @@ TEST_CASE("NumberBox steps, click-to-types, and scrubs on vertical drag",
     n.on_mouse_leave();
     REQUIRE(n.hovered_zone() == -1);
     REQUIRE(fired > 0);
+}
+
+TEST_CASE("InlineValueEditor caret blinks on the clock, not on paint",
+          "[design-system][interaction][caret]") {
+    // The caret's phase used to advance by a hardcoded 1/60 inside paint(), so
+    // its rate followed the display's refresh and repainting alone could blink
+    // it. Painting must be a pure function of the blink state.
+    FrameClock clock;
+    auto parent = std::make_unique<View>();
+    parent->set_frame_clock(&clock);
+
+    auto owned = std::make_unique<InlineValueEditor>();
+    InlineValueEditor* e = owned.get();
+    e->set_bounds({0, 0, 96, 26});
+    e->set_range(-60, 0);
+    e->set_value(-12.0);
+    parent->add_child(std::move(owned));
+
+    auto caret_strokes = [](const pulp::canvas::RecordingCanvas& c) {
+        size_t n = 0;
+        for (const auto& cmd : c.commands())
+            if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line &&
+                std::abs(cmd.f[0] - cmd.f[2]) < 0.01f && cmd.f[3] > cmd.f[1])
+                ++n;
+        return n;
+    };
+
+    pulp::canvas::RecordingCanvas rec;
+    e->paint(rec);
+    REQUIRE(caret_strokes(rec) == 0);  // not editing: no caret at all
+
+    e->begin_edit();
+    rec.clear();
+    e->paint(rec);
+    REQUIRE(caret_strokes(rec) == 1);
+
+    // 200 paints with the clock stopped. Under the old code this advanced the
+    // phase by 3.3 s and the caret would have blinked away repeatedly.
+    for (int i = 0; i < 200; ++i) {
+        rec.clear();
+        e->paint(rec);
+        REQUIRE(caret_strokes(rec) == 1);
+    }
+
+    // Only real elapsed time turns it off.
+    clock.tick(0.90f);
+    rec.clear();
+    e->paint(rec);
+    REQUIRE(caret_strokes(rec) == 0);
+
+    // A keystroke holds it solid again, mid-blink.
+    TextInputEvent t{};
+    t.text = "5";
+    e->on_text_input(t);
+    rec.clear();
+    e->paint(rec);
+    REQUIRE(caret_strokes(rec) == 1);
+
+    // Committing retires the caret.
+    e->commit_edit();
+    rec.clear();
+    e->paint(rec);
+    REQUIRE(caret_strokes(rec) == 0);
 }
 
 TEST_CASE("InlineValueEditor click-to-type: commit / out-of-range / cancel",
