@@ -69,25 +69,27 @@
     },
     "linux-x64": {
       "unit": "glibc_version",
-      "floor": null,
-      "binding": null,
-      "note": "Not yet measured. Measure GLIBC max in the .so (objdump -T | grep GLIBC_ | sort -V | tail). skia-builder Linux path pins no sysroot; v8-builder enforces glibc <= 2.28 (Rocky 8).",
+      "floor": "2.34",
+      "binding": "skia,dawn,v8",
+      "note": "Floor = glibc 2.34, measured off the shipped artifacts (v8: objdump -T libv8.so; skia/dawn: --whole-archive link-probe over libskia.a + libdawn_combined.a, since static .a undefined refs are unversioned). The prebuilts are built in an Ubuntu 22.04 container (portable-linux-x64 jobs in skia-builder build-skia.yml + v8-builder build-v8.yml) to keep the floor low; the DEFAULT ubuntu-latest lanes leak glibc ~2.39. 22.04 (gcc-11) is the oldest clean C++20 base: V8 must use the platform libstdc++ (its public API exposes std:: types; bundled libc++ breaks the drop-in ABI), and Skia is C++20 too. Loadable on RHEL/Rocky 9+, Ubuntu 22.04+, Debian 12+, Fedora 35+. IMPORTANT: a consumer's final binary also includes ITS OWN compiled objects — to actually ship a 2.34 floor, Pulp's own Linux build must run on the same <=2.34 base (ubuntu:22.04); the PulpMinOs.cmake post-link drift-check catches a build host that re-leaks a higher glibc.",
       "deps": {
         "skia": {
-          "measured": null,
-          "expected": null,
-          "always_linked": true
+          "measured": "2.34",
+          "expected": "2.34",
+          "always_linked": true,
+          "source": "skia-builder build-skia.yml portable-linux-x64 job (Ubuntu 22.04 container); --whole-archive link-probe floor"
         },
         "dawn": {
-          "measured": null,
-          "expected": null,
-          "always_linked": true
+          "measured": "2.34",
+          "expected": "2.34",
+          "always_linked": true,
+          "source": "skia-builder build-skia.yml portable-linux-x64 job (Ubuntu 22.04 container); bundled in libdawn_combined.a"
         },
         "v8": {
-          "measured": "2.28",
-          "expected": "2.28",
+          "measured": "2.34",
+          "expected": "2.34",
           "always_linked": false,
-          "source": "v8-builder tools/rhel8/check_glibc_floor.py --max 2.28"
+          "source": "v8-builder build-v8.yml portable-linux-x64 job (Ubuntu 22.04 container); objdump -T libv8.so"
         }
       }
     },

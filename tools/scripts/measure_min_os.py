@@ -146,9 +146,42 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--write", action="store_true", help="update min_os.json measured fields")
     ap.add_argument("--check", action="store_true", help="exit non-zero on measured != expected")
+    ap.add_argument("--elf", type=Path, metavar="PATH",
+                    help="measure one Linux ELF's glibc floor and assert it is <= --max "
+                         "(default: min_os.json linux-x64 floor). Use in CI over a freshly "
+                         "linked Pulp binary to catch a build host that re-leaks a higher "
+                         "glibc than the shipped prebuilts declare.")
+    ap.add_argument("--max", metavar="VER",
+                    help="max acceptable glibc floor for --elf, e.g. 2.34 "
+                         "(default: min_os.json platforms.linux-x64.floor)")
     args = ap.parse_args()
 
     doc = json.loads(MIN_OS_JSON.read_text())
+
+    # Standalone floor-verify over one binary (floor semantics: measured <= max is OK).
+    if args.elf is not None:
+        if not args.elf.exists():
+            print(f"--elf path does not exist: {args.elf}", file=sys.stderr)
+            return 2
+        measured = _glibc_floor(args.elf)
+        mx = args.max or doc.get("platforms", {}).get("linux-x64", {}).get("floor")
+        if not mx or mx == "null":
+            print("no --max given and min_os.json linux-x64 floor is unset; nothing to check "
+                  "against.", file=sys.stderr)
+            return 2
+        if measured is None:
+            print(f"{args.elf}: no GLIBC_ version symbols found "
+                  "(static archive or fully static binary?) — vacuously OK.")
+            return 0
+        v = lambda s: tuple(int(x) for x in s.split("."))
+        if v(measured) <= v(mx):
+            print(f"[glibc-floor] OK — {args.elf} floor {measured} <= {mx}")
+            return 0
+        print(f"[glibc-floor] FAIL — {args.elf} needs glibc {measured} > declared floor {mx}.\n"
+              "This build host leaked a newer glibc than the prebuilts. Build Pulp's Linux "
+              "artifacts on the same <=floor base (ubuntu:22.04) the Skia/V8 portable lanes use.",
+              file=sys.stderr)
+        return 1
     measured = measure()
     if not measured:
         print("no prebuilt libraries found to measure "

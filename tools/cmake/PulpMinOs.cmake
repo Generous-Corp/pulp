@@ -124,6 +124,33 @@ function(_pulp_min_os_pin_windows)
   message(STATUS "Pulp min-OS: Windows _WIN32_WINNT/WINVER pinned to ${_winnt} (min_os.json windows-x64 floor)")
 endfunction()
 
+function(_pulp_min_os_note_linux)
+  # Linux has no compile-time deployment target to pin (unlike the macOS
+  # -mmacosx-version-min or the Windows _WIN32_WINNT define). The glibc floor of
+  # a final binary is a POST-LINK property: max(the prebuilts' floor, the floor
+  # the *build host's* glibc leaks into Pulp's own compiled objects). So there is
+  # nothing to force here — only a value to expose and a check to run after the
+  # link. We publish the declared floor as PULP_LINUX_GLIBC_FLOOR (for CI /
+  # packaging) and leave the actual verification to:
+  #   tools/scripts/measure_min_os.py --elf <built .so/exe> --max <floor>
+  # run over a freshly linked Pulp binary. The shipped Skia/Dawn/V8 prebuilts are
+  # already built on an Ubuntu 22.04 base (glibc 2.34) by the portable-linux
+  # release lanes, so a floor above 2.34 means THIS build host re-leaked a newer
+  # glibc — build Pulp's Linux artifacts on the same <=floor base.
+  if(NOT EXISTS "${PULP_MIN_OS_JSON}")
+    return()
+  endif()
+  file(READ "${PULP_MIN_OS_JSON}" _json)
+  string(JSON _floor ERROR_VARIABLE _err GET "${_json}" platforms linux-x64 floor)
+  if(NOT _err STREQUAL "NOTFOUND" OR _floor STREQUAL "" OR _floor STREQUAL "null")
+    return()
+  endif()
+  set(PULP_LINUX_GLIBC_FLOOR "${_floor}" CACHE STRING
+      "Pulp min-OS: declared Linux glibc floor (verify built binaries with measure_min_os.py --elf)")
+  message(STATUS "Pulp min-OS: Linux glibc floor is ${_floor} "
+                 "(post-link check: measure_min_os.py --elf <binary> --max ${_floor})")
+endfunction()
+
 # Detect the host robustly before project() (APPLE / CMAKE_HOST_APPLE are not yet
 # reliably set at this point; uname is). uname is absent on Windows → empty, so
 # CMAKE_HOST_WIN32 (set before project()) is the Windows signal.
@@ -138,4 +165,6 @@ if(PULP_HOST_UNAME STREQUAL "Darwin")
   _pulp_min_os_pin_macos()
 elseif(CMAKE_HOST_WIN32)
   _pulp_min_os_pin_windows()
+elseif(PULP_HOST_UNAME STREQUAL "Linux")
+  _pulp_min_os_note_linux()
 endif()
