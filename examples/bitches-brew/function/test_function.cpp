@@ -1,4 +1,11 @@
-// Function — the transfer curve, and the properties a CV shaper must not break.
+// Function — the transfer curves, and the properties a CV shaper must not break.
+//
+// Note that the curves do NOT share a property set. `power` is odd-symmetric,
+// monotone, and pinned at the rails. `exponential` and `logarithmic` are the
+// conventional definitions and are none of those things — the logarithm is not
+// even defined on half its input range. Asserting a shared invariant across all
+// five would either be false or would quietly force the conventional curves into
+// a shape they do not have. So each curve is held to what it actually promises.
 //
 // Scope note. These tests exercise the pure transfer function and
 // `Processor::process()`. They do NOT prove a shaped value survives the host bus
@@ -43,7 +50,7 @@ std::vector<float> shape(format::HeadlessHost& host,
     return std::vector<float>(out.channel(0).begin(), out.channel(0).end());
 }
 
-/// A ramp across the whole bipolar range, plus the exact rails and zero.
+/// A ramp across the whole bipolar range, hitting the exact rails and zero.
 std::vector<float> sweep(int n = 65) {
     std::vector<float> v;
     v.reserve(static_cast<std::size_t>(n));
@@ -82,82 +89,139 @@ TEST_CASE("Function's defaults are a bit-exact wire", "[brew][function][identity
     REQUIRE(shape(host, in) == in);
 }
 
-// Every curve passes through the origin and both rails, for every amount. This
-// is what makes the Amount knob safe to sweep live: it bends the middle of the
-// response without ever moving where full scale lands.
-TEST_CASE("Curves fix the origin and the rails", "[brew][function][curve]") {
-    for (int c = 0; c < kCurveCount; ++c) {
-        const auto curve = static_cast<Curve>(c);
-        for (float amount : {1.0f, 1.7f, 3.0f, 8.0f}) {
-            CAPTURE(c, amount);
-            REQUIRE(apply_curve(curve, amount, 0.0) == 0.0);
-            REQUIRE_THAT(apply_curve(curve, amount, 1.0), WithinAbs(1.0, 1e-12));
-            // Absolute rectifies, so -1 maps to +1 rather than to -1.
-            const double at_min = apply_curve(curve, amount, -1.0);
-            REQUIRE_THAT(at_min, WithinAbs(curve == Curve::absolute ? 1.0 : -1.0, 1e-12));
-        }
+// ---------------------------------------------------------------------------
+// The conventional curves. These are the defaults because a patch written
+// against any other CV utility expects them, not because they are well behaved.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("exponential is 2^x - 1", "[brew][function][curve]") {
+    for (double x = -1.0; x <= 1.0; x += 0.125) {
+        CAPTURE(x);
+        REQUIRE_THAT(apply_curve(Curve::exponential, 1.0, x),
+                     WithinAbs(std::exp2(x) - 1.0, 1e-12));
+    }
+    // Passes through the origin and reaches +1 at full scale...
+    REQUIRE_THAT(apply_curve(Curve::exponential, 1.0, 0.0), WithinAbs(0.0, 1e-12));
+    REQUIRE_THAT(apply_curve(Curve::exponential, 1.0, 1.0), WithinAbs(1.0, 1e-12));
+    // ...but bottoms out at -0.5, not -1. It is not odd-symmetric, so it shifts
+    // the centre of a symmetric signal. That is the function, not a bug.
+    REQUIRE_THAT(apply_curve(Curve::exponential, 1.0, -1.0), WithinAbs(-0.5, 1e-12));
+}
+
+TEST_CASE("logarithmic is 1 + log2(x), and zero below the origin",
+          "[brew][function][curve]") {
+    REQUIRE_THAT(apply_curve(Curve::logarithmic, 1.0, 1.0), WithinAbs(1.0, 1e-12));
+    REQUIRE_THAT(apply_curve(Curve::logarithmic, 1.0, 0.5), WithinAbs(0.0, 1e-12));
+    REQUIRE_THAT(apply_curve(Curve::logarithmic, 1.0, 0.25), WithinAbs(-1.0, 1e-12));
+
+    // Half the bipolar range is flat. Documented, and the reason `power` exists.
+    for (double x = -1.0; x < 0.0; x += 0.1) {
+        CAPTURE(x);
+        REQUIRE(apply_curve(Curve::logarithmic, 1.0, x) == 0.0);
+    }
+
+    // log2(0) is negative infinity. A curve that returns -inf at the origin is
+    // not a curve anyone can patch, so zero is folded in with the negatives.
+    REQUIRE(apply_curve(Curve::logarithmic, 1.0, 0.0) == 0.0);
+
+    // And it dives past the rail just above the origin, where the clamp catches it.
+    REQUIRE(std::isfinite(apply_curve(Curve::logarithmic, 1.0, 1e-30)));
+    REQUIRE(apply_curve(Curve::logarithmic, 1.0, 1e-30) == -1.0);
+}
+
+TEST_CASE("absolute rectifies", "[brew][function][curve]") {
+    for (double x = -1.0; x <= 1.0; x += 0.1) {
+        CAPTURE(x);
+        REQUIRE_THAT(apply_curve(Curve::absolute, 1.0, x), WithinAbs(std::abs(x), 1e-12));
     }
 }
 
-// Odd symmetry: a bipolar CV keeps its polarity through every curve but the
-// rectifier. A curve that broke this would silently invert half of an LFO.
-TEST_CASE("Curves are odd-symmetric except absolute", "[brew][function][curve]") {
-    for (int c = 0; c < kCurveCount; ++c) {
-        const auto curve = static_cast<Curve>(c);
+// The Amount knob belongs to `power` alone. A knob that silently does nothing is
+// a knob a user will turn while wondering why the sound is not changing.
+TEST_CASE("only the power curve reads Amount", "[brew][function][curve]") {
+    REQUIRE(curve_uses_amount(Curve::power));
+    REQUIRE_FALSE(curve_uses_amount(Curve::linear));
+    REQUIRE_FALSE(curve_uses_amount(Curve::exponential));
+    REQUIRE_FALSE(curve_uses_amount(Curve::logarithmic));
+    REQUIRE_FALSE(curve_uses_amount(Curve::absolute));
+
+    for (double a : {0.125, 1.0, 8.0}) {
+        CAPTURE(a);
+        REQUIRE_THAT(apply_curve(Curve::exponential, a, 0.3),
+                     WithinAbs(std::exp2(0.3) - 1.0, 1e-12));
+        REQUIRE_THAT(apply_curve(Curve::logarithmic, a, 0.7),
+                     WithinAbs(1.0 + std::log2(0.7), 1e-12));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `power` — ours. Every property below is one the conventional curves lack, and
+// each is why it exists.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("power fixes the origin and both rails, for every exponent",
+          "[brew][function][power]") {
+    for (double k : {0.125, 0.5, 1.0, 3.0, 8.0}) {
+        CAPTURE(k);
+        REQUIRE(apply_curve(Curve::power, k, 0.0) == 0.0);
+        REQUIRE_THAT(apply_curve(Curve::power, k, 1.0), WithinAbs(1.0, 1e-12));
+        REQUIRE_THAT(apply_curve(Curve::power, k, -1.0), WithinAbs(-1.0, 1e-12));
+    }
+}
+
+TEST_CASE("power is odd-symmetric, so a bipolar CV keeps its polarity",
+          "[brew][function][power]") {
+    for (double k : {0.25, 1.0, 4.0}) {
         for (double x = 0.05; x < 1.0; x += 0.05) {
-            CAPTURE(c, x);
-            const double pos = apply_curve(curve, 3.0, x);
-            const double neg = apply_curve(curve, 3.0, -x);
-            if (curve == Curve::absolute)
-                REQUIRE_THAT(neg, WithinAbs(pos, 1e-12));
-            else
-                REQUIRE_THAT(neg, WithinAbs(-pos, 1e-12));
+            CAPTURE(k, x);
+            REQUIRE_THAT(apply_curve(Curve::power, k, -x),
+                         WithinAbs(-apply_curve(Curve::power, k, x), 1e-12));
         }
     }
 }
 
-// Monotone: a curve must never fold. A folding transfer function maps two input
-// voltages to one output, which makes the plug-in unusable as a shaper.
-TEST_CASE("Curves are monotone across the range", "[brew][function][curve]") {
-    for (int c = 0; c < kCurveCount; ++c) {
-        const auto curve = static_cast<Curve>(c);
-        // Absolute folds at zero by definition; test each half separately.
-        const double from = curve == Curve::absolute ? 0.0 : -1.0;
-        double prev = apply_curve(curve, 4.0, from);
-        for (double x = from + 0.01; x <= 1.0; x += 0.01) {
-            const double y = apply_curve(curve, 4.0, x);
-            CAPTURE(c, x, prev, y);
+TEST_CASE("power never folds", "[brew][function][power]") {
+    for (double k : {0.125, 1.0, 8.0}) {
+        double prev = apply_curve(Curve::power, k, -1.0);
+        for (double x = -0.99; x <= 1.0; x += 0.01) {
+            const double y = apply_curve(Curve::power, k, x);
+            CAPTURE(k, x, prev, y);
             REQUIRE(y >= prev - 1e-12);
             prev = y;
         }
     }
 }
 
-// Exponential bends toward the origin, logarithmic away from it, and the two are
-// reciprocals — so the same Amount undoes the other. That relationship is the
-// reason a single knob can drive both.
-TEST_CASE("Exponential and logarithmic are inverses", "[brew][function][curve]") {
+// k and 1/k are exact inverses, which is what lets one knob span both directions.
+// Neither conventional curve has an inverse in this set.
+TEST_CASE("power's exponent and its reciprocal undo each other",
+          "[brew][function][power]") {
     for (double x = -0.95; x < 1.0; x += 0.1) {
-        for (double amount : {1.5, 2.0, 5.5}) {
-            CAPTURE(x, amount);
-            const double bent = apply_curve(Curve::exponential, amount, x);
-            REQUIRE_THAT(apply_curve(Curve::logarithmic, amount, bent),
-                         WithinAbs(x, 1e-9));
+        for (double k : {1.5, 2.0, 5.5}) {
+            CAPTURE(x, k);
+            const double bent = apply_curve(Curve::power, k, x);
+            REQUIRE_THAT(apply_curve(Curve::power, 1.0 / k, bent), WithinAbs(x, 1e-9));
         }
     }
-    // And they bend in opposite directions.
-    REQUIRE(apply_curve(Curve::exponential, 2.0, 0.5) < 0.5);
-    REQUIRE(apply_curve(Curve::logarithmic, 2.0, 0.5) > 0.5);
+    // And they bend in opposite directions about the identity.
+    REQUIRE(apply_curve(Curve::power, 2.0, 0.5) < 0.5);
+    REQUIRE(apply_curve(Curve::power, 0.5, 0.5) > 0.5);
+    // k = 1 is the identity, which is why the knob's default sits there.
+    for (double x = -1.0; x <= 1.0; x += 0.1)
+        REQUIRE_THAT(apply_curve(Curve::power, 1.0, x), WithinAbs(x, 1e-12));
 }
 
-// Amount = 1 is no bend at all, which is why the parameter's range starts there.
-TEST_CASE("Amount of 1 leaves every curve unbent", "[brew][function][curve]") {
-    for (double x = -1.0; x <= 1.0; x += 0.1) {
-        CAPTURE(x);
-        REQUIRE_THAT(apply_curve(Curve::exponential, 1.0, x), WithinAbs(x, 1e-12));
-        REQUIRE_THAT(apply_curve(Curve::logarithmic, 1.0, x), WithinAbs(x, 1e-12));
-    }
+// An out-of-range exponent from a host must not blow up the curve.
+TEST_CASE("power clamps its exponent", "[brew][function][power][safety]") {
+    REQUIRE_THAT(apply_curve(Curve::power, 1e6, 0.5),
+                 WithinAbs(apply_curve(Curve::power, kMaxPower, 0.5), 1e-12));
+    REQUIRE_THAT(apply_curve(Curve::power, -3.0, 0.5),
+                 WithinAbs(apply_curve(Curve::power, kMinPower, 0.5), 1e-12));
 }
+
+// ---------------------------------------------------------------------------
+// The chain around the curve.
+// ---------------------------------------------------------------------------
 
 // An out-of-range curve index from a host must clamp, never wrap onto a
 // different shape.
@@ -169,8 +233,8 @@ TEST_CASE("Curve parameter clamps rather than wraps", "[brew][function][curve]")
     // shape. Pinned because a host stepping a discrete parameter through its
     // normalized range can land exactly on a tie.
     REQUIRE(curve_from_param(1.5f) == Curve::logarithmic);
-    REQUIRE(curve_from_param(3.0f) == Curve::absolute);
-    REQUIRE(curve_from_param(99.0f) == Curve::absolute);
+    REQUIRE(curve_from_param(4.0f) == Curve::power);
+    REQUIRE(curve_from_param(99.0f) == Curve::power);
 }
 
 // The clamp between the input stage and the curve. `in_scale` can push a signal
@@ -184,7 +248,7 @@ TEST_CASE("Function clamps before the curve, not only after",
           "[brew][function][clamp]") {
     FunctionSettings s;
     s.in_scale = 2.0f;
-    s.curve = Curve::exponential;
+    s.curve = Curve::power;
     s.amount = 2.0f;
     s.out_offset = -0.5f;
     REQUIRE_THAT(function_transfer(0.6f, s), WithinAbs(0.5f, 1e-6f));
@@ -192,8 +256,7 @@ TEST_CASE("Function clamps before the curve, not only after",
     // And the shape of the failure it guards: an unclamped curve would exceed
     // what the same input at the rail produces, which is impossible for a
     // monotone map onto [-1, 1].
-    FunctionSettings rail = s;
-    REQUIRE(function_transfer(0.6f, s) == function_transfer(1.0f, rail));
+    REQUIRE(function_transfer(0.6f, s) == function_transfer(1.0f, s));
 }
 
 // Output can never leave the rails, whatever the knobs say. A CV plug-in that
@@ -235,7 +298,7 @@ TEST_CASE("In Scale and Invert act at opposite ends", "[brew][function]") {
     REQUIRE_THAT(function_transfer(0.5f, s), WithinAbs(-0.5f, 1e-6f));
     REQUIRE_THAT(function_transfer(-0.5f, s), WithinAbs(-0.5f, 1e-6f));
 
-    // Flip the input, then rectify: still positive, because |−x| = |x|.
+    // Flip the input, then rectify: still positive, because |-x| = |x|.
     s.invert = false;
     s.in_scale = -1.0f;
     REQUIRE_THAT(function_transfer(0.5f, s), WithinAbs(0.5f, 1e-6f));

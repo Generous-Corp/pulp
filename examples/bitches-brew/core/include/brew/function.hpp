@@ -1,19 +1,29 @@
 #pragma once
 
-// Function's transfer curve: the math that maps an incoming control voltage to
+// Function's transfer curves: the math that maps an incoming control voltage to
 // an outgoing one.
 //
-// One definition, used by three callers — the audio callback, the editor's
-// graph, and the tests. The graph therefore cannot draw a curve the DSP does not
+// One definition, used by three callers — the audio callback, the editor's graph,
+// and the tests. The graph therefore cannot draw a curve the DSP does not
 // produce, and a test cannot pass against a transform the plug-in does not run.
 //
-// The curve shapes here are OUR design, chosen because they are the obvious
-// single-parameter family for a bipolar signal, not because they match any
-// particular product. `y = sign(x) * |x|^k` is odd-symmetric (so a bipolar CV
-// keeps its polarity), monotone (so it never folds), passes through the origin
-// and through ±1 for every k (so full scale stays full scale), and degenerates to
-// the identity at k = 1. Raising k bends the response toward the origin; lowering
-// it bends away. Nothing else about the shape is claimed.
+// Five curves, and they are not all the same kind of thing.
+//
+// `exponential` and `logarithmic` are the conventional ones: `2^x - 1` and
+// `1 + log2(x)`. They are what a patch written against any other CV utility
+// expects, so they are the defaults. They are also badly behaved on a bipolar
+// signal — `2^x - 1` is not odd-symmetric, so it shifts a symmetric LFO's centre;
+// and the logarithm is undefined for negative input, so it flattens half the
+// range to zero and its positive half runs to negative infinity near the origin.
+// Both facts are inherent to the functions, not to this implementation.
+//
+// `power` is ours: `y = sign(x) * |x|^k`. It is the obvious single-parameter
+// family for a bipolar signal. Odd-symmetric, so polarity survives. Monotone, so
+// it never folds. Fixed at the origin and at both rails for every `k`, so the
+// Amount knob bends the middle of the response without ever moving where full
+// scale lands. `k` and `1/k` are exact inverses, so one knob spans both
+// directions. Reach for it when the signal swings both ways; reach for the
+// conventional pair when you are reproducing someone else's patch.
 
 #include <brew/cv.hpp>
 
@@ -25,12 +35,18 @@ namespace pulp::examples::brew {
 /// The transfer shapes. Parameter values are persisted, so: append only.
 enum class Curve : int {
     linear = 0,
-    exponential = 1,
-    logarithmic = 2,
-    absolute = 3,
+    exponential = 1,   ///< 2^x - 1
+    logarithmic = 2,   ///< 1 + log2(x), zero for non-positive input
+    absolute = 3,      ///< |x|
+    power = 4,         ///< sign(x) * |x|^Amount
 };
 
-inline constexpr int kCurveCount = 4;
+inline constexpr int kCurveCount = 5;
+
+/// The exponent range of the `power` curve. `k` and `1/k` bend by the same factor
+/// in opposite directions, so one knob covers both and 1.0 is the identity.
+inline constexpr float kMinPower = 0.125f;
+inline constexpr float kMaxPower = 8.0f;
 
 /// Coerce a parameter float to a Curve, clamping rather than wrapping — an
 /// out-of-range value from a host must not silently select a different shape.
@@ -41,20 +57,10 @@ inline constexpr int kCurveCount = 4;
     return static_cast<Curve>(i);
 }
 
-/// The exponent a curve applies. `amount` only shapes the two bent curves;
-/// `linear` and `absolute` are unbent by definition.
-///
-/// Exponential and logarithmic are reciprocals of each other, so the same
-/// `amount` bends the response by the same factor in either direction.
-[[nodiscard]] inline double curve_exponent(Curve c, double amount) noexcept {
-    if (!(amount > 0.0)) return 1.0;
-    switch (c) {
-        case Curve::exponential: return amount;
-        case Curve::logarithmic: return 1.0 / amount;
-        case Curve::linear:
-        case Curve::absolute: return 1.0;
-    }
-    return 1.0;
+/// True when this curve reads the Amount knob. The editor greys the knob out for
+/// the others rather than letting a user turn a control that does nothing.
+[[nodiscard]] inline constexpr bool curve_uses_amount(Curve c) noexcept {
+    return c == Curve::power;
 }
 
 /// `sign(x) * |x|^k`, with the identity short-circuited.
@@ -70,9 +76,30 @@ inline constexpr int kCurveCount = 4;
 }
 
 /// Apply a curve to a value already known to lie in [-1, +1].
+///
+/// The result is clamped back into range because two of these curves leave it:
+/// `2^x - 1` reaches only -0.5 at the bottom (it does not overshoot), but
+/// `1 + log2(x)` dives to negative infinity as `x` approaches zero from above.
+/// Clamping there is what makes the logarithm usable at all.
 [[nodiscard]] inline double apply_curve(Curve c, double amount, double x) noexcept {
-    const double y = odd_power(x, curve_exponent(c, amount));
-    return c == Curve::absolute ? std::abs(y) : y;
+    switch (c) {
+        case Curve::linear:
+            return x;
+        case Curve::exponential:
+            return std::exp2(x) - 1.0;
+        case Curve::logarithmic:
+            // Documented as zero for negative input. Zero itself is folded in
+            // here too: log2(0) is negative infinity, and a curve that returns
+            // -inf at the origin is not a curve anyone can patch.
+            if (!(x > 0.0)) return 0.0;
+            return std::clamp(1.0 + std::log2(x), -1.0, 1.0);
+        case Curve::absolute:
+            return std::abs(x);
+        case Curve::power:
+            return odd_power(x, std::clamp(amount, static_cast<double>(kMinPower),
+                                           static_cast<double>(kMaxPower)));
+    }
+    return x;
 }
 
 /// Everything Function does to one sample. Grouped so the editor can evaluate the
@@ -81,7 +108,7 @@ struct FunctionSettings {
     float in_scale = 1.0f;
     float in_offset = 0.0f;
     Curve curve = Curve::linear;
-    float amount = 2.0f;
+    float amount = 1.0f;
     float out_offset = 0.0f;
     float out_scale = 1.0f;
     bool invert = false;

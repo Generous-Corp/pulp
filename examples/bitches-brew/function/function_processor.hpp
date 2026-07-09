@@ -63,12 +63,13 @@ public:
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kCurveCount - 1),
                                        0.0f, 1.0f}});
-        // How hard the exponential and logarithmic curves bend. 1 is no bend at
-        // all, which is why the range starts there rather than at 0.
+        // The `power` curve's exponent, and only that curve's. 1 is the
+        // identity; k and 1/k bend by the same factor in opposite directions,
+        // which is why one knob spans both and the range is centred on 1.
         store.add_parameter({.id = kAmount,
                              .name = "Amount",
                              .unit = "",
-                             .range = {1.0f, 8.0f, 2.0f, 0.01f}});
+                             .range = {kMinPower, kMaxPower, 1.0f, 0.001f}});
         // Bipolar: a negative input scale flips the polarity of the incoming CV,
         // which is how you turn a rising ramp into a falling one.
         store.add_parameter({.id = kInScale,
