@@ -60,6 +60,33 @@ impl ActiveProject {
     pub fn is_configured(&self) -> bool {
         self.build_dir.join("CMakeCache.txt").is_file()
     }
+
+    /// True when this build was configured with `-DPULP_TRACING=ON`, i.e. the
+    /// dev-only Perfetto tracing subsystem is compiled in (an ~80 MB ring and a
+    /// slower UI that must never ship). Reads `build/CMakeCache.txt`; a missing
+    /// or unreadable cache reads as `false`.
+    #[must_use]
+    pub fn tracing_compiled_in(&self) -> bool {
+        std::fs::read_to_string(self.build_dir.join("CMakeCache.txt"))
+            .map(|text| cache_has_tracing_on(&text))
+            .unwrap_or(false)
+    }
+}
+
+/// Scan CMakeCache text for an active `PULP_TRACING:BOOL=ON` entry.
+///
+/// Pure and dependency-free so the "tracing is compiled in" reminder can be
+/// unit-tested without a configured build. Tolerant of surrounding whitespace
+/// and case in the value; the key must match CMake's exact cache variable name.
+#[must_use]
+pub fn cache_has_tracing_on(cache_text: &str) -> bool {
+    cache_text.lines().any(|line| {
+        matches!(
+            line.trim().split_once('='),
+            Some((key, value))
+                if key.trim() == "PULP_TRACING:BOOL" && value.trim().eq_ignore_ascii_case("on")
+        )
+    })
 }
 
 /// Resolve the active project root starting from `cwd`.
@@ -116,5 +143,46 @@ mod tests {
         std::fs::create_dir_all(&ap.build_dir).unwrap();
         write_file(&ap.build_dir.join("CMakeCache.txt"), "cache\n");
         assert!(ap.is_configured());
+    }
+
+    #[test]
+    fn cache_has_tracing_on_detects_enabled_entry() {
+        let cache = "\
+//Some option
+PULP_TRACING:BOOL=ON
+CMAKE_BUILD_TYPE:STRING=Release
+";
+        assert!(cache_has_tracing_on(cache));
+    }
+
+    #[test]
+    fn cache_has_tracing_on_ignores_disabled_or_absent() {
+        assert!(!cache_has_tracing_on("PULP_TRACING:BOOL=OFF\n"));
+        assert!(!cache_has_tracing_on("CMAKE_BUILD_TYPE:STRING=Release\n"));
+        assert!(!cache_has_tracing_on(""));
+    }
+
+    #[test]
+    fn cache_has_tracing_on_tolerates_whitespace_and_case() {
+        assert!(cache_has_tracing_on("  PULP_TRACING:BOOL = on \n"));
+    }
+
+    #[test]
+    fn cache_has_tracing_on_does_not_match_substring_keys() {
+        assert!(!cache_has_tracing_on("PULP_TRACING_ENABLED:BOOL=ON\n"));
+    }
+
+    #[test]
+    fn tracing_compiled_in_reads_cmake_cache() {
+        let td = tempfile::tempdir().unwrap();
+        write_file(&td.path().join("pulp.toml"), "");
+        let ap = resolve(td.path()).unwrap();
+        assert!(!ap.tracing_compiled_in());
+        std::fs::create_dir_all(&ap.build_dir).unwrap();
+        write_file(
+            &ap.build_dir.join("CMakeCache.txt"),
+            "PULP_TRACING:BOOL=ON\n",
+        );
+        assert!(ap.tracing_compiled_in());
     }
 }

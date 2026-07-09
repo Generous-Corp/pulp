@@ -49,6 +49,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/system.hpp>
+#include <pulp/runtime/trace_session.hpp>
 
 namespace pulp::format {
 
@@ -433,6 +434,10 @@ bool StandaloneApp::start() {
 
     auto desc = processor_->descriptor();
     runtime::log_info("Standalone: starting '{}'", desc.name);
+
+    // No-op in the default OFF build; in a PULP_TRACING=ON dev build this logs a
+    // single reminder that the tracing ring is compiled in and must not ship.
+    runtime::log_tracing_reminder();
 
     // Restore the user's last-used audio/MIDI selection (default on; developer can opt out
     // via StandaloneConfig::persist_settings). Overlays persisted keys onto the configured
