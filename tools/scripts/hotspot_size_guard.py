@@ -66,6 +66,20 @@ class HotspotShrink:
             return False
         return self.current_max_loc == self.current_loc
 
+    @property
+    def ratchet_possible(self) -> bool:
+        """True when the shrink leaves the file strictly under its ceiling.
+
+        A hotspot can sit ABOVE its ceiling: `check_hotspots` only fails a PR
+        that itself grew the file, so main can drift past `max_loc` while every
+        individual PR stays net-neutral. Shrinking such a file cannot lower the
+        ceiling — setting `max_loc` to the new LOC would RAISE it — so demanding
+        a reduction there is unsatisfiable, and the PR gets trapped between
+        `ceiling_lowered` and `ceiling_tracks_current_loc`. Only ask for the
+        ratchet when there is headroom to reclaim.
+        """
+        return self.current_loc < self.base_max_loc
+
 
 @dataclass(frozen=True)
 class HotspotRemoval:
@@ -544,8 +558,14 @@ def main(argv: list[str] | None = None) -> int:
             if shrink.current_max_loc is None:
                 state = "ceiling removed"
                 current_max_loc = "removed"
+            elif shrink.ceiling_lowered:
+                state = "ceiling lowered"
+                current_max_loc = str(shrink.current_max_loc)
+            elif not shrink.ratchet_possible:
+                state = "still at/over ceiling; no reduction to make"
+                current_max_loc = str(shrink.current_max_loc)
             else:
-                state = "ceiling lowered" if shrink.ceiling_lowered else "ceiling unchanged"
+                state = "ceiling unchanged"
                 current_max_loc = str(shrink.current_max_loc)
             print(
                 "  "
@@ -597,7 +617,8 @@ def main(argv: list[str] | None = None) -> int:
 
         missing_reductions = [
             shrink for shrink in shrinks
-            if not shrink.ceiling_lowered or not shrink.ceiling_tracks_current_loc
+            if shrink.ratchet_possible
+            and (not shrink.ceiling_lowered or not shrink.ceiling_tracks_current_loc)
         ]
         if missing_reductions:
             print("hotspot_size_guard: missing hotspot ceiling reduction(s):", file=sys.stderr)
