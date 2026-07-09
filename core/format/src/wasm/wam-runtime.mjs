@@ -70,6 +70,27 @@ export function makeWasmImports(getMemory) {
   };
 }
 
+// AudioWorklet processor names are global to an AudioContext, so every Pulp
+// plugin registering the same literal name meant two DIFFERENT plugins could not
+// coexist in one context: the second AudioWorkletNode silently bound to the
+// first plugin's DSP (a chained synth would render the MIDI effect's — silent —
+// output). Derive the name from the processor module's own absolute URL instead.
+// Each plugin ships its own copy of wam-processor.js next to its wam-dsp.js, so
+// the URLs differ and the names do too; loading the SAME plugin twice reuses one
+// name, which is correct (registerProcessor runs once per module evaluation).
+//
+// The worklet passes `import.meta.url`; the main thread passes the same URL
+// resolved against the document base. Both call this one function so they cannot
+// disagree. FNV-1a/32 — no crypto needed, just a stable short token.
+export function processorNameForUrl(url) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < url.length; i++) {
+    hash ^= url.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `pulp-wam-processor-${hash.toString(16).padStart(8, "0")}`;
+}
+
 // Decode the packed record stream written by wam_midi_out_drain:
 //   [int32 sample_offset][uint16 byte_len][byte_len raw MIDI bytes] ...
 // `bytes` is a Uint8Array view of the drain buffer; `len` is the byte count

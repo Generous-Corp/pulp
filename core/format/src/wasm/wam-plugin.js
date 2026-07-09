@@ -9,7 +9,17 @@
 // wasm and is added to the worklet BEFORE the processor module, so the processor
 // can read globalThis.Module synchronously. No fetch happens in worklet scope.
 
+import { processorNameForUrl } from "./wam-runtime.mjs";
+
 let instanceCounter = 0;
+
+// Resolve exactly the way audioWorklet.addModule() does, so the URL we hash
+// matches the `import.meta.url` the worklet module sees. A bare "./x.js" would
+// otherwise hash differently on the two sides.
+function absoluteUrl(url) {
+  const base = typeof document !== "undefined" ? document.baseURI : self.location.href;
+  return new URL(url, base).href;
+}
 
 export default class PulpWAM {
   static get isWebAudioModuleConstructor() { return true; }
@@ -29,7 +39,8 @@ export default class PulpWAM {
     this._instanceId = `pulp-wam-${++instanceCounter}`;
     this._descriptor = null;
     this._dspUrl = urls.dsp || new URL("./PulpGainWorklet.js", import.meta.url).href;
-    this._processorUrl = urls.processor || new URL("./wam-processor.js", import.meta.url).href;
+    this._processorUrl = absoluteUrl(
+      urls.processor || new URL("./wam-processor.js", import.meta.url).href);
     this._pending = new Map(); // id -> resolver, for request/response over the port
     this._reqId = 0;
   }
@@ -50,7 +61,11 @@ export default class PulpWAM {
     // Module is ready before the AudioWorkletProcessor constructs.
     await this._audioContext.audioWorklet.addModule(this._processorUrl);
 
-    const node = new AudioWorkletNode(this._audioContext, "pulp-wam-processor", {
+    // The worklet registered itself under a name derived from its module URL, so
+    // a second, different plugin in this same AudioContext gets a different name
+    // instead of silently binding to this one's DSP.
+    const processorName = processorNameForUrl(this._processorUrl);
+    const node = new AudioWorkletNode(this._audioContext, processorName, {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [2],

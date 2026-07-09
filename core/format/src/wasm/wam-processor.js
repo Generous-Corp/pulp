@@ -20,7 +20,7 @@
 // served next to this file as ./wam-dsp.js (an ES-module factory).
 
 import createDspModule from "./wam-dsp.js";
-import { makeBridge, parseMidiOutRecords } from "./wam-runtime.mjs";
+import { makeBridge, parseMidiOutRecords, processorNameForUrl } from "./wam-runtime.mjs";
 
 const MAX_FRAMES = 128;   // Web Audio render quantum is fixed at 128.
 const MAX_CHANNELS = 2;   // Stereo lane (see plan: wider bus support is later).
@@ -174,4 +174,8 @@ class PulpWamProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor("pulp-wam-processor", PulpWamProcessor);
+// Name this processor after its own module URL, so two different plugins in one
+// AudioContext get distinct names. Must stay a synchronous top-level call: a
+// top-level await before registerProcessor() leaves the name unregistered
+// because addModule() resolves without waiting for it.
+registerProcessor(processorNameForUrl(import.meta.url), PulpWamProcessor);
