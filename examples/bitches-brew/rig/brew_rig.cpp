@@ -382,9 +382,22 @@ int cmd_listen(audio::AudioSystem& sys, const Args& a) {
     if (!rate_supported(info, a.rate)) return 2;
     if (info.max_input_channels == 0) { std::fputs("device has no inputs\n", stderr); return 2; }
 
-    // Zero output channels: this command cannot emit even by accident.
+    // Prefer zero output channels: then this command cannot emit even by
+    // accident. Pulp's CoreAudio backend cannot currently open a device
+    // input-only (it sets the output stream format unconditionally and fails
+    // with -10868), so fall back to opening the outputs and writing nothing but
+    // zeros. Zero is the safe state for a CV output, and `silence()` runs at the
+    // top of every callback, so the fallback still never drives a level.
     Rig rig(sys, info, info.max_input_channels, 0, a.rate);
-    if (!rig.ok()) { std::fputs("failed to open device for input\n", stderr); return 2; }
+    std::unique_ptr<Rig> fallback;
+    if (!rig.ok()) {
+        fallback = std::make_unique<Rig>(sys, info, info.max_input_channels,
+                                         info.max_output_channels, a.rate);
+        if (!fallback->ok()) { std::fputs("failed to open device for input\n", stderr); return 2; }
+        std::fputs("note: this backend cannot open input-only; outputs are open and held at zero.\n",
+                   stderr);
+    }
+    Rig& dev = fallback ? *fallback : rig;
 
     const int n_in = info.max_input_channels;
     std::vector<double> sums(static_cast<std::size_t>(n_in), 0.0);
@@ -392,7 +405,7 @@ int cmd_listen(audio::AudioSystem& sys, const Args& a) {
     std::vector<float> peaks(static_cast<std::size_t>(n_in), 0.0f);
     std::atomic<std::int64_t> frames{0};
 
-    rig.device().start([&](const audio::BufferView<const float>& in,
+    dev.device().start([&](const audio::BufferView<const float>& in,
                            audio::BufferView<float>& out,
                            const audio::CallbackContext&) {
         silence(out);
@@ -417,7 +430,7 @@ int cmd_listen(audio::AudioSystem& sys, const Args& a) {
     const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
     while (std::chrono::steady_clock::now() < until && !g_abort.load(std::memory_order_relaxed))
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
-    rig.device().stop();
+    dev.device().stop();
 
     const auto n = frames.load(std::memory_order_relaxed);
     if (n == 0) { std::fputs("no frames captured\n", stderr); return 3; }
