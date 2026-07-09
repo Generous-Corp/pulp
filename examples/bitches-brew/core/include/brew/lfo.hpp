@@ -64,6 +64,11 @@ inline constexpr int kWaveformCount = 5;
     return wrap_phase(position_beats / beats_per_cycle + phase_offset);
 }
 
+/// A full turn, in radians. `M_PI` is a POSIX extension: MSVC's `<cmath>` omits it
+/// unless `_USE_MATH_DEFINES` is defined before every include of it, which a header
+/// cannot guarantee for its includers. Spelling the constant is portable and exact.
+inline constexpr double kTau = 6.283185307179586476925286766559;
+
 /// Evaluate a shape at a phase, bipolar in [-1, +1].
 ///
 /// Sine and both saws cross zero rising at phase 0; triangle starts at its
@@ -74,7 +79,7 @@ inline constexpr int kWaveformCount = 5;
     const double p = wrap_phase(phase);
     switch (w) {
         case Waveform::sine:
-            return static_cast<float>(std::sin(2.0 * M_PI * p));
+            return static_cast<float>(std::sin(kTau * p));
         case Waveform::triangle:
             return static_cast<float>(1.0 - 4.0 * std::abs(p - 0.5));
         case Waveform::saw_up:
