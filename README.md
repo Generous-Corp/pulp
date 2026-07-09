@@ -13,11 +13,12 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
 
-<details>
-<summary><strong>Verification</strong> (optional checks, click to expand)</summary>
+Prefer not to run the installer? You can [build Pulp from source](#build-from-source).
 
-As an additional layer of security, you can download the shell installer and
-verify its SHA-256 checksum before running it:
+<details>
+<summary><strong>Optional: Verify before installation</strong> (click to expand)</summary>
+
+For an additional layer of security, you can download the installer and verify its SHA-256 checksum before running it:
 
 ```bash
 curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
@@ -61,101 +62,49 @@ Three commands from zero to a working native plugin for your platform.
 
 ### Optional: install the Claude Code plugin
 
-The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use
-**Claude Code**, you can additionally install the
-[Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin)
-for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP
-server:
-
 ```bash
 claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
 ```
 
-> **Install the CLI first.** The plugin's MCP server is `pulp-mcp`, which
-> ships with the CLI tarball (above) into `~/.pulp/bin/`. The plugin itself
-> contains no binaries — it locates `pulp-mcp` on `$PATH`. If you install
-> the plugin before running `install.sh`, `/mcp` will report `pulp-mcp:
-> cannot locate binary`. Run `pulp doctor` to confirm `pulp-mcp` is found
-> and matches your CLI version.
->
-> (Building from a source checkout instead? The repo's project-local MCP
-> server uses the binary from your build tree — see
-> [Build from source](#build-from-source). No CLI install needed.)
+<details>
+<summary><strong>Learn more</strong></summary>
+
+The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use
+**Claude Code**, you can additionally install the
+[Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin)
+for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP
+server.
+
+Install the CLI first. The plugin's MCP server is `pulp-mcp`, which ships with
+the CLI tarball (above) into `~/.pulp/bin/`. The plugin itself contains no
+binaries; it locates `pulp-mcp` on `$PATH`. If you install the plugin before
+running `install.sh`, `/mcp` will report `pulp-mcp: cannot locate binary`. Run
+`pulp doctor` to confirm `pulp-mcp` is found and matches your CLI version.
+
+Building from a source checkout instead? The repo's project-local MCP server
+uses the binary from your build tree. See [Build from source](#build-from-source).
+No CLI install is needed.
+
+</details>
 
 See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each agent path.
 
 <details>
-<summary><strong>What you get</strong> (click to expand)</summary>
+<summary><strong>What Pulp gives you</strong> (features, click to expand)</summary>
 
-## Features
+## What you get
 
-**Plugin Formats**
-- VST3, Audio Unit v2, AUv3, CLAP, LV2, Standalone
-- WAM / WebCLAP browser targets (experimental)
-- Optional AAX support via external SDK
+This is the short version. The full status inventory lives in the
+[Capabilities Reference](docs/reference/capabilities.md).
 
-**Create & Build**
-- `pulp create` scaffolds a full plugin project with the default native targets for your platform
-- `pulp build` builds all formats in one pass
-- `pulp test` runs the local test suite (`ctest` over the project's build directory); cross-platform execution and coverage roll up to CI — coverage is tracked at [codecov.io/gh/danielraffel/pulp](https://app.codecov.io/gh/danielraffel/pulp)
-- `pulp run` launches standalone for quick iteration
-- `pulp doctor` checks your environment and reports missing dependencies
-
-**UI & Design**
-- JS-scripted GPU UIs via Dawn, Skia, and QuickJS
-- CSS Flexbox + Grid layout engine with 81 CSS properties
-- Responsive design via `matchMedia` queries
-- 15+ widgets: Knob, Fader, Toggle, TextEditor, ComboBox, XYPad, WaveformView, SpectrumView, and more
-- Hot reload for rapid UI iteration (standalone host; plugin host support planned)
-- Screenshot capture and headless rendering
-- Component inspector for debugging view hierarchy
-- AI-assisted design tool (`pulp design`) for token, shader, and widget-style iteration
-- Design import from Figma/Figma plugin, Stitch, v0, Pencil/OpenPencil, Claude Design, and DESIGN.md exports
-- Agent-first motion observability — runtime traces, fixture record/replay/assert, visual analysis, Swift + Kotlin facades, scrubber, cost attribution ([guide](docs/guides/motion-observability.md))
-
-**DSP & Audio**
-- 30+ signal processors: oscillator, filters, compressor, reverb, delay, FFT, envelope follower, and more
-- Thread-safe parameter system with atomic reads and gesture-aware bindings
-- Headless audio processing for testing and offline rendering
-- MIDI I/O with parsed short messages, SysEx, UMP helpers, and documented backend limits
-- Audio file import for WAV, AIFF/AIFF-C, FLAC, MP3, Ogg Vorbis, and CoreAudio-backed Apple formats
-- Audio file export for WAV/AIFF, with optional FLAC, MP3, AAC, and ALAC encoders via `pulp add`
-- Multi-bus I/O with sidechain support
-
-**Rendering**
-- GPU rendering via Dawn + Skia Graphite (Metal, D3D12, Vulkan)
-- CoreGraphics fallback on macOS/iOS
-- SkSL runtime shaders for custom GPU effects
-- SDF shape primitives for resolution-independent drawing
-- Waveform and spectrum visualization widgets
-- Headless screenshot capture for CI and validation via `capture_view()`
-
-**Shipping**
-- Code signing and notarization on macOS
-- DMG and PKG installer creation
-- Appcast generation for Sparkle auto-updates
-- Semantic versioning baked into the build
-- `pulp ship sign`, `pulp ship package`, `pulp ship check`
-
-**CI & Automation**
-- [Shipyard](https://github.com/danielraffel/Shipyard) cross-platform CI: local Mac + SSH to Linux/Windows VMs
-- Namespace.so cloud CI integration
-- GitHub Actions CI for the full build matrix
-- MCP server for repo automation and tool integration
-- Claude Code plugin for AI-assisted development
-
-**Platform Support**
-- macOS — primary, ARM64 (Apple Silicon)
-- Windows — experimental, CI-backed
-- Linux — experimental, CI-backed
-- iOS — experimental
-- Web/WASM — experimental
-
-**DSL Support**
-- FAUST — offline codegen into native Processor instances
-- Cmajor — external toolchain with validation and code generation
-- JSFX — bounded subset support via QuickJS
-- Three.js bridge for 3D rendering in Dawn without a browser
+- **Plugin formats:** VST3, Audio Unit v2, AUv3, CLAP, LV2, standalone, experimental web targets, and optional AAX with a developer-supplied SDK.
+- **Native UI:** scripted UIs render with [Dawn](https://dawn.googlesource.com/dawn) + [Skia](https://skia.org/) and QuickJS, with modern Flexbox/Grid layout through [Yoga](https://www.yogalayout.dev/).
+- **Design import:** bring in Figma/Figma plugin, React/JSX, Stitch, v0, Pencil/OpenPencil, Claude Design, and DESIGN.md exports. See [Importing Designs](docs/guides/importing-designs.md).
+- **DSP:** processors, MIDI, audio file I/O, sidechains, headless processing, and DSP hot reload for reloadable plugins. See [DSP Hot-Reload](docs/guides/dsp-hot-reload.md).
+- **Testing and inspection:** Audio Inspector, optional Audio Quality Lab, golden-file audio tests, headless screenshots, visual regression, motion traces, and MCP tools for agent-driven validation.
+- **Migration and interop:** guides and bridge projects for moving from JUCE or embedding Pulp UI in JUCE/iPlug2 projects, plus a framework-importer packaging contract for external importer add-ons.
+- **Shipping:** macOS signing/notarization, DMG/PKG packaging, Sparkle appcasts, release assets, and `pulp ship` commands.
+- **Automation:** GitHub Actions for the public matrix, [Shipyard](https://github.com/danielraffel/Shipyard) for maintainer merge-on-green orchestration, optional [tartci](https://github.com/danielraffel/tartci) local VM lanes, explicit [Namespace](https://namespace.so/) cloud dispatch, and agent-facing CLI/MCP/Claude plugin surfaces.
 
 </details>
 
@@ -225,13 +174,7 @@ version values.
 
 Pulp's CLI works with any AI coding agent. Skills (`.agents/skills/`) are auto-loaded by Claude Code and Codex; `AGENTS.md` redirects Codex to the same `CLAUDE.md` Claude reads. No agent-specific install is required to use the CLI.
 
-**Claude Code users** can additionally install the Pulp plugin for slash-command shortcuts and a native MCP server:
-
-```bash
-claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
-```
-
-The plugin extends Claude Code with `/build`, `/test`, `/create`, `/design`, `/ship`, `/import-design`, `/version`, `/upgrade` plus an MCP server exposing build/test/inspect tools (highest value: the live-plugin inspector tools).
+**Claude Code users** can additionally install the optional Pulp plugin for slash-command shortcuts and a native MCP server. The plugin extends Claude Code with `/build`, `/test`, `/create`, `/design`, `/ship`, `/import-design`, `/version`, `/upgrade` plus build/test/inspect MCP tools.
 
 Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent-integrations.md). Plugin-specific setup details: [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md).
 
@@ -253,33 +196,45 @@ feedback are very welcome. Most people working on Pulp clone the repo (to
 extend the framework, or to build a plugin against source); see
 [Build from source](#build-from-source) to get set up.
 
-### Help wanted (no Pulp internals required)
-
-Two high-impact ways to contribute that don't require digging into the framework:
-
-- **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts without checked-in results: Logic, Live, Bitwig, Cubase, Studio One, Wavelab, FL Studio, and AUM.
-- **[#3042 — Validate AAX with an Avid SDK setup](https://github.com/danielraffel/pulp/issues/3042)** — AAX is optional and requires a developer-supplied Avid SDK plus DigiShell/AAX Validator. If you have Avid access and can run local Pro Tools validation, comment so we can verify the adapter and host-quirk rows.
-
 ### Workflow
 
-Every change goes through: **branch → CI → PR → merge on green**. Pulp accepts third-party PRs.
+Every change goes through: **branch → PR → CI → merge on green**. Pulp accepts third-party PRs.
 
 ```bash
-# Validate on macOS + Ubuntu + Windows before creating a PR
-shipyard run                              # validate current branch
+# Optional maintainer-style flow from a source checkout
+./tools/install-shipyard.sh --status      # compare installed vs pinned Shipyard
 shipyard pr                               # create, track, validate, and merge on green
 ```
 
-Pulp uses [Shipyard](https://github.com/danielraffel/Shipyard) for cross-platform CI — it validates on macOS (local), Linux (SSH), and Windows (SSH), and gates merges on per-SHA evidence across all three platforms. The maintainer's optional local VM lanes are powered by [tartci](https://github.com/danielraffel/tartci) and described by the parseable profile in [`.shipyard/ci-profiles/normal-local-fast.toml`](.shipyard/ci-profiles/normal-local-fast.toml). Public Pulp installs include the Pulp CLI only. Source-checkout contributors install the pinned Shipyard tool with `./tools/install-shipyard.sh` for the first install, then use `shipyard update` (Shipyard v0.55.0+) as the preferred in-tool upgrade path; GitHub CLI (`gh`) is only needed for GitHub-facing contributor workflows. See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup, optional Shipyard/tartci runner timing metrics, and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
+Pulp uses GitHub Actions for the public macOS, Linux, and Windows build matrix.
+Maintainers use [Shipyard](https://github.com/danielraffel/Shipyard) on top of
+that for exact-SHA validation, PR tracking, and merge-on-green. Source-checkout
+contributors who want the same flow install the pinned Shipyard tool with
+`./tools/install-shipyard.sh`; ordinary Pulp users do not need Shipyard or GitHub
+CLI to create, build, run, or upgrade projects.
+
+The maintainer's optional disposable local VM lanes, host leases, and timing
+metrics are powered by [tartci](https://github.com/danielraffel/tartci) and
+described by the parseable profile in
+[`.shipyard/ci-profiles/normal-local-fast.toml`](.shipyard/ci-profiles/normal-local-fast.toml).
+[Namespace](https://namespace.so/) cloud dispatch remains available for explicit
+operator runs, but it is not the default PR path. See
+[docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
 
 ### Security & CI policy
 
-- Pulp's `main` branch is protected: every change must go through a PR, and a PR cannot merge until macOS, Linux, and Windows builds + tests are all green.
-- Release tags (`v*`) are signed by the release bot and protected from force-push, deletion, or update. Published GitHub Releases are immutable after publication.
-- The repository default for the CI workflow token is read-only. Workflows that need write access (the release workflow's `contents: write`, `auto-label-issues.yml`'s `issues: write`, `freshness-check.yml`'s `issues: write`, and `docs-deploy.yml`'s `pages: write` + `id-token: write`) declare those scopes explicitly per job rather than inheriting a broad default.
-- Pulp is currently a **single-maintainer project**, so the governance settings are tuned to a "solo profile". Settings will be revisited if/when Pulp gains co-maintainers — see [CONTRIBUTING.md](CONTRIBUTING.md) for the current contract.
+Pulp follows patterns documented in [Astral's open-source security post](https://astral.sh/blog/open-source-security-at-astral) and uses [Shipyard](https://github.com/danielraffel/Shipyard) to manage the merge and release controls where possible.
 
-These practices follow patterns documented in [Astral's open-source security post](https://astral.sh/blog/open-source-security-at-astral) and are managed (or in the process of being managed) by [Shipyard](https://github.com/danielraffel/Shipyard).
+<details>
+<summary><strong>Learn more</strong></summary>
+
+- Pulp's `main` branch is protected: every change must go through a PR, and the stable `macos`, `linux`, `windows`, and `Enforce version & skill sync` checks must pass before merge.
+- Release tags (`v*`) are signed by the release bot and protected from force-push, deletion, or update. Published GitHub Releases are immutable after publication.
+- The repository default for the CI workflow token is read-only. Workflows that need write access, including release publishing, issue automation, freshness checks, and docs deploys, declare those scopes explicitly per job rather than inheriting a broad default.
+- Pulp is currently a **single-maintainer project**, so the governance settings are tuned to a "solo profile". Settings will be revisited if/when Pulp gains co-maintainers; see [CONTRIBUTING.md](CONTRIBUTING.md) for the current contract.
+
+</details>
 
 ## License
 
