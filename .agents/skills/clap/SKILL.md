@@ -231,7 +231,13 @@ debug log. See the `mpe` skill for tracker details.
 **Outbound MIDI**: the processor's `midi_out` emits short messages as
 `CLAP_EVENT_MIDI` and sysex entries as
 `CLAP_EVENT_MIDI_SYSEX`, both via `out_events->try_push`.
-`sample_offset` carries through to `header.time`. The sysex
+`sample_offset` carries through to `header.time` via the shared cross-format
+helper `detail::clap_output_offset(sample_offset)` (clamps a negative offset up
+to 0, since `header.time` is unsigned) — the same "offset N in → offset N out"
+contract AU v2 and VST3 share, defined once in
+`core/format/include/pulp/format/detail/midi_out_offset.hpp` and pinned by
+`test/test_midi_out_offset_parity.cpp`. Do NOT re-open-code the offset clamp.
+The sysex
 `clap_event_midi_sysex_t.buffer` field is non-owning — the backing
 vector is alive for the duration of `clap_process()`, which is all
 CLAP's push contract requires (the host copies before returning).
@@ -769,3 +775,20 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## Param text entry + gesture threading (PARAMS region)
+
+- `params_text_to_value` must try `ParamInfo::from_string` BEFORE the generic
+  numeric parse. from_string is the inverse of the `to_string` used by
+  `value_to_text`, so a custom rendering ("quality=0.75", an enum label)
+  round-trips; a bare strtod would reject it. CLAP values are plain (min..max),
+  the same domain from_string returns — no normalization step. Guard the result
+  with `std::isfinite` and fall through to the locale-independent strtod path on
+  a non-finite parse. Keep the locale-independent fallback (`parse_double_c_locale`)
+  for plain-numeric params. Test: `test/test_clap_entry.cpp`
+  ("text_to_value routes through ParamInfo::from_string").
+- CLAP delivers `CLAP_EVENT_PARAM_GESTURE_BEGIN/END` on the process/flush path
+  and calls `store.begin_gesture/end_gesture` directly. Those StateStore entry
+  points are main-thread-only (they forward to host undo grouping). A background
+  writer must use `StateStore::run_gesture_on_main()` — see the state notes in
+  `binding.hpp`.

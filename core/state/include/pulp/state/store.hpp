@@ -194,12 +194,47 @@ public:
     std::size_t param_count() const { return params_.size(); }
 
     /// Signal the host that a gesture (drag, click) has begun on a parameter.
-    /// Call from the UI thread before a series of set_value() calls so the
-    /// host groups them into a single undo step.
+    ///
+    /// **Main-thread only.** The registered gesture callbacks forward to the
+    /// host's undo-grouping calls — VST3 `beginEdit`, AU
+    /// `AudioUnitEvent(kAudioUnitEvent_BeginParameterChangeGesture)`, CLAP
+    /// `CLAP_EVENT_PARAM_GESTURE_BEGIN` — all of which are only legal on the
+    /// host UI/main thread. Call this from the UI thread before a series of
+    /// `set_value()` calls so the host groups them into a single undo step.
+    ///
+    /// A background writer (e.g. a MIDI-learn engine setting a mapped
+    /// parameter from a timer thread) must NOT call this directly; route the
+    /// whole gesture through @c run_gesture_on_main(). When a main-thread
+    /// backend is registered and this is called off it, the misuse is counted
+    /// (see @c gesture_thread_violation_count) and, in debug builds, asserts.
     void begin_gesture(ParamID id);
 
-    /// Signal the host that a gesture has ended.
+    /// Signal the host that the current gesture has ended.
+    /// **Main-thread only** — see @c begin_gesture().
     void end_gesture(ParamID id);
+
+    /// Run a complete parameter gesture (begin_gesture → value writes →
+    /// end_gesture) on the host's main thread, from ANY thread.
+    ///
+    /// This is the enforced marshalling path for background writers. If a
+    /// main-thread backend is registered (i.e. inside a real host) and the
+    /// caller is off it, @p gesture is posted via
+    /// @c events::MainThreadDispatcher::call_async and runs later on the main
+    /// thread. Otherwise (already on the main thread, or a headless test with
+    /// no backend) it runs inline. The whole begin→set→end sequence must be
+    /// posted as one unit so the host sees the calls in order on one thread —
+    /// posting only begin/end while writing the value elsewhere would corrupt
+    /// undo grouping.
+    void run_gesture_on_main(std::function<void()> gesture);
+
+    /// Number of times a gesture entry point (@c begin_gesture / @c
+    /// end_gesture) was called off the host main thread while a main-thread
+    /// backend was registered. Always zero in headless tests (no backend) and
+    /// for correctly main-thread-confined UIs. A non-zero value flags a
+    /// threading bug — a background writer that bypassed @c run_gesture_on_main.
+    std::uint64_t gesture_thread_violation_count() const {
+        return gesture_thread_violations_.load(std::memory_order_relaxed);
+    }
 
     /// Install an @c EventLoop used to marshal @c ListenerThread::Main
     /// listeners onto the main thread. If unset, Main listeners run
@@ -332,6 +367,12 @@ private:
 
     std::function<void(ParamID)> on_begin_gesture_;
     std::function<void(ParamID)> on_end_gesture_;
+
+    // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
+    // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but
+    // the caller is not on the main thread. Observability only — never blocks
+    // the audio path (gestures are main-thread UI events, not audio).
+    std::atomic<std::uint64_t> gesture_thread_violations_{0};
 
 public:
     /// Install callbacks that forward gesture begin/end to the plugin host.

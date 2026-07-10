@@ -24,6 +24,7 @@
 #include <clap/clap.h>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 #include <string>
@@ -197,8 +198,30 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
     return true;
 }
 
-inline bool params_text_to_value(const clap_plugin_t*, clap_id, const char* text, double* value) {
+inline bool params_text_to_value(const clap_plugin_t* plugin, clap_id param_id,
+                                 const char* text, double* value) {
     if (!text) return false;
+
+    // Prefer the author-supplied from_string parser: it is the inverse of the
+    // to_string used by params_value_to_text, so a fully custom rendering
+    // ("quality=0.75", "12 o'clock", an enum label) round-trips even though a
+    // bare numeric parse would reject it. CLAP values are plain (min..max),
+    // the same domain from_string returns, so no normalization step is needed.
+    if (plugin) {
+        auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+        auto* info = self->store.info(static_cast<state::ParamID>(param_id));
+        if (info && info->from_string) {
+            const float parsed = info->from_string(text);
+            // Reject a non-finite parse rather than writing garbage; fall
+            // through to the generic numeric parse so a partly-numeric string
+            // still has a chance (author from_string is best-effort).
+            if (std::isfinite(parsed)) {
+                *value = parsed;
+                return true;
+            }
+        }
+    }
+
     // Locale-independent parse via a C-locale strtod. std::from_chars' float
     // overload is =deleted on some toolchains (see locale_independent_float.hpp),
     // so we cannot use it for the value. strtod skips leading whitespace and
