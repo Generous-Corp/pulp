@@ -74,10 +74,15 @@ class LkProcessor extends AudioWorkletProcessor {
     super();
     this.kernel = null;
     this.ready = false;
-    this.pending = null;   // one pending edit {kind, ...}
+    // A QUEUE of pending edits (not a single slot): live playing sends bursts of
+    // note pokes interleaved with patch edits, and each must land — dropping one
+    // (the old single-slot behaviour) would swallow a note or an edit. Drained in
+    // order at the top of the next process() so each is timestamped at the exact
+    // quantum it becomes audible (edit->sound latency on the audio clock).
+    this.pendingEdits = [];
     this.quanta = 0;
     this.reportEvery = Math.max(1, Math.round(sampleRate / 128 / 20)); // ~20 Hz meter
-    this._rms = 0; this._n = 0;
+    this._rms = 0; this._n = 0; this._peak = 0;
     this.port.onmessage = (e) => this._onMsg(e.data);
   }
 
@@ -87,10 +92,8 @@ class LkProcessor extends AudioWorkletProcessor {
         this.kernel = new LkKernel(m.bytes, sampleRate);
         this.ready = true;
         this.port.postMessage({ type: "ready", sampleRate });
-      } else if (m.type === "structuralEdit" || m.type === "param") {
-        // Defer to the next process() so we can timestamp the exact quantum the
-        // edit becomes audible (edit->sound latency in the audio clock).
-        this.pending = m;
+      } else if (m.type === "structuralEdit" || m.type === "param" || m.type === "params") {
+        this.pendingEdits.push(m);
       } else if (m.type === "allocProbe") {
         this.port.postMessage({ type: "allocProbe", id: m.id, count: this.kernel.allocCount() });
       }
@@ -99,15 +102,20 @@ class LkProcessor extends AudioWorkletProcessor {
     }
   }
 
-  _applyPending() {
-    const m = this.pending; this.pending = null;
+  _apply(m) {
     if (m.type === "param") {
       this.kernel.setParam(m.node, m.paramId, m.value);
-      this.port.postMessage({ type: "applied", kind: "param", editId: m.editId, ctxTime: currentTime, buildMs: 0 });
+      if (m.editId != null)
+        this.port.postMessage({ type: "applied", kind: "param", editId: m.editId, ctxTime: currentTime, buildMs: 0 });
+    } else if (m.type === "params") {
+      // Atomic batch (a note event: pitch across N oscillators + gate applied in
+      // one quantum, so a legato change never briefly gates the wrong pitch).
+      for (let i = 0; i < m.sets.length; i++) this.kernel.setParam(m.sets[i][0], m.sets[i][1], m.sets[i][2]);
     } else { // structuralEdit
       const { rc, buildMs } = this.kernel.loadPlan(m.bytes);
       if (rc === 0) this.kernel.swap(m.fadeMs);
-      this.port.postMessage({ type: "applied", kind: "structural", editId: m.editId, ctxTime: currentTime, buildMs, rc });
+      if (m.editId != null)
+        this.port.postMessage({ type: "applied", kind: "structural", editId: m.editId, ctxTime: currentTime, buildMs, rc });
     }
   }
 
@@ -116,25 +124,26 @@ class LkProcessor extends AudioWorkletProcessor {
     const frames = out[0] ? out[0].length : 128;
     if (!this.ready) { for (const ch of out) ch.fill(0); return true; }
 
-    // Apply a pending edit at the TOP of the block so the rendered audio already
-    // reflects it; currentTime here is the audio-clock time of this block's first
-    // sample -> the moment the change is audible.
-    if (this.pending) this._applyPending();
+    // Drain every pending edit at the TOP of the block so the rendered audio
+    // already reflects them; currentTime here is the audio-clock time of this
+    // block's first sample -> the moment the change is audible.
+    while (this.pendingEdits.length) this._apply(this.pendingEdits.shift());
 
     const mono = this.kernel.process(frames);
     for (let c = 0; c < out.length; c++) out[c].set(mono.subarray(0, frames));
 
     // meter + real-time proof
     this.quanta++;
-    let s = 0;
-    for (let i = 0; i < frames; i++) s += mono[i] * mono[i];
-    this._rms += s; this._n += frames;
+    let s = 0, pk = 0;
+    for (let i = 0; i < frames; i++) { const v = mono[i]; s += v * v; const a = v < 0 ? -v : v; if (a > pk) pk = a; }
+    this._rms += s; this._n += frames; if (pk > this._peak) this._peak = pk;
     if ((this.quanta % this.reportEvery) === 0) {
       this.port.postMessage({
         type: "meter", quanta: this.quanta, currentTime, sampleRate,
-        outRms: Math.sqrt(this._rms / this._n), fading: this.kernel.isFading(),
+        outRms: Math.sqrt(this._rms / this._n), peak: this._peak,
+        fading: this.kernel.isFading(),
       });
-      this._rms = 0; this._n = 0;
+      this._rms = 0; this._n = 0; this._peak = 0;
     }
     return true;
   }
