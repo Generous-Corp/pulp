@@ -1035,6 +1035,14 @@ public:
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
+    ///
+    /// The store belongs to the host, not to the Processor, and the Processor may
+    /// reach it for its whole lifetime — including from its destructor, and from
+    /// any worker thread that destructor is about to join. A host must therefore
+    /// keep the store alive until the Processor is gone: declare the store *before*
+    /// the `unique_ptr<Processor>`, since members are destroyed in reverse. Every
+    /// host in this directory does; a host that gets it backwards hands a running
+    /// thread a freed store, which crashes on plug-in close and nowhere else.
     state::StateStore& state() { return *state_store_; }
     const state::StateStore& state() const { return *state_store_; }
 

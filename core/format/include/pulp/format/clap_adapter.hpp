@@ -42,8 +42,12 @@ static constexpr state::ModulationSourceId kClapHostModulationSourceId = 1;
 // CLAP plugin instance — wraps a Pulp Processor
 struct PulpClapPlugin {
     clap_plugin_t plugin;
-    std::unique_ptr<Processor> processor;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
+    std::unique_ptr<Processor> processor;
     ProcessorFactory factory;
 
     // Host accommodations, resolved once in clap_init() via the runtime
