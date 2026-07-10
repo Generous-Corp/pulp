@@ -312,6 +312,42 @@ def pr_has_breaking_label(pr_number: str, github_repo: str | None) -> bool:
     return any(line.strip().lower() == "breaking" for line in result.stdout.splitlines())
 
 
+_PR_FOR_COMMIT_CACHE: dict[str, str | None] = {}
+
+
+def pr_for_commit(sha: str, github_repo: str | None) -> str | None:
+    """Resolve the PR that introduced a commit whose subject carries no `(#N)`.
+
+    A commit made through a rebase-merge or squash-merge that dropped the
+    trailing `(#N)` — or one referenced by GitHub's commit→PR association — is
+    still a clickable PR; only genuine direct-to-`main` commits (a `chore: bump
+    versions`, a `docs: regenerate changelog`) have no PR. GitHub's
+    `commits/{sha}/pulls` returns the association, so we prefer a PR link and
+    fall back to the short SHA only when there truly is no PR. Cached per SHA.
+    """
+    if not github_repo:
+        return None
+    if sha in _PR_FOR_COMMIT_CACHE:
+        return _PR_FOR_COMMIT_CACHE[sha]
+    result = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/{github_repo}/commits/{sha}/pulls",
+            "--jq",
+            # first MERGED pr for this commit; ignore still-open associations
+            "[.[] | select(.merged_at != null) | .number] | first // empty",
+        ],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    number = result.stdout.strip() if result.returncode == 0 else ""
+    resolved = number or None
+    _PR_FOR_COMMIT_CACHE[sha] = resolved
+    return resolved
+
+
 def collect_entries(
     tag: str,
     *,
@@ -326,6 +362,11 @@ def collect_entries(
     for sha in commits:
         merge_message = commit_message(sha)
         pr_number, pr_title = pull_request_entry(merge_message)
+        if pr_number is None:
+            # Subject carried no `(#N)` (a direct/rebase-merged commit) — ask
+            # GitHub for the associated PR so the entry links to something
+            # clickable instead of a bare SHA. Genuine direct commits stay SHA.
+            pr_number = pr_for_commit(merge_message.sha, github_repo)
         messages = associated_messages(sha)
         if not messages and is_skipped_subject(merge_message.subject):
             continue
