@@ -38,6 +38,42 @@ platforms:
     status: experimental
     notes: WAMv2 builds a Pulp Processor to a browser AudioWorklet plugin via pulp_add_wam_plugin — the PulpGain canary loads, renders audio, and exposes generated parameter controls in Chrome (verified via an OfflineAudioContext fixture and a Node runner). WebCLAP builds a Pulp Processor to a CLAP-in-WebAssembly module via pulp_add_wclap (wasi-sdk); the PulpGain WebCLAP is hosted in Node through the full CLAP lifecycle with audio and parameter control proven, but is not yet hosted in-browser. Browser validation is fixture-based, not yet a CI lane.
 
+# macOS CPU-architecture tiers. macOS as a platform is `usable` (see
+# platforms.macos), but that maturity is the arm64 (Apple Silicon) primary
+# target. x86_64 and universal builds configure+build via
+# -DCMAKE_OSX_ARCHITECTURES and are verified by the tiered Intel CI
+# (docs/guides/intel-support.md), but ship experimental. Full rationale, the
+# Tier 0-3 tiering, the honest canary catch/miss list, and the promotion
+# criteria live in docs/guides/intel-support.md.
+macos_architectures:
+  arm64:
+    status: usable
+    notes: Apple Silicon — the primary, `usable` macOS target. Required `macos` CI gate.
+  x86_64:
+    status: experimental
+    notes: >
+      Intel builds configure+build via -DCMAKE_OSX_ARCHITECTURES=x86_64 and are
+      exercised by the Intel CI tiering (Tier 0 canary per PR, Tier 1 advisory
+      x86_64 build+test on path match, Tier 2 native macos-15-intel nightly,
+      Tier 3 blocking universal+dual-arch-auval release gate — see
+      docs/guides/intel-support.md). Ships experimental because two classes stay
+      untestable in GitHub's macOS VMs: Metal on real AMD/Intel GPUs (the runners
+      are VMs without a representative discrete GPU, so not even the native
+      macos-15-intel runner exercises a real Intel/AMD Metal driver) and
+      Intel-native DAW-in-the-loop hosting. Tier 4 (a dedicated Intel Mac /
+      tartci Intel host) is CUT: macos-15-intel already covers the native Intel
+      CPU + toolchain, leaving only those two GPU/DAW gaps. Highway runtime SIMD
+      dispatch is arch-portable; there is no raw NEON in core/.
+  universal:
+    status: experimental
+    notes: >
+      Universal (arm64;x86_64) builds fetch the fat mac Skia slice and lipo the
+      two thin wgpu-native dylibs into a fat dylib that is ad-hoc re-signed
+      (tools/cmake/PulpWgpuUniversal.cmake) — a raw lipo output fails
+      codesign --verify and the arm64 slice is killed at load. The Tier 3
+      release gate asserts lipo -archs + codesign --verify on every shipped
+      bundle and embedded dylib before publish.
+
 formats:
   vst3:
     macos: usable

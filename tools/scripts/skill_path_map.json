@@ -219,6 +219,16 @@
         "experimental/pulp-rs/src/tool_registry.rs"
       ]
     },
+    "intel-canary": {
+      "paths": [
+        "tools/scripts/intel_canary_lint.py",
+        "tools/scripts/test_intel_canary_lint.py",
+        "tools/scripts/intel_canary_allowlist.txt",
+        "docs/guides/intel-support.md",
+        ".github/workflows/intel-portability.yml",
+        ".github/workflows/nightly-intel.yml"
+      ]
+    },
     "jsfx-subset": {
       "paths": [
         "tools/scripts/jsfx_subset.py",

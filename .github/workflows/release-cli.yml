@@ -842,8 +842,88 @@ jobs:
               Write-Host "OK: $art is portable on ${{ matrix.platform }}."
           }
 
+  # ── Tier 3: blocking universal + dual-arch auval gate ────────────────────
+  #
+  # "Tested when it really really matters." Before a release publishes, prove
+  # the macOS universal (arm64;x86_64) path end-to-end on a capable macOS
+  # runner: build the PulpGain example universal, assert `lipo -archs` +
+  # `codesign --verify` on every shipped bundle and embedded dylib
+  # (check_bundle_architectures.py — the arm64 slice is killed at load if the
+  # lipo'd wgpu dylib is unsigned), and run auval BOTH natively (arm64) and
+  # under `arch -x86_64` (Rosetta). This is the top Intel tier
+  # (docs/guides/intel-support.md); it BLOCKS the release job below.
+  universal-arch-gate:
+    needs: resolve-macos-runner
+    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) }}
+    name: Universal + dual-arch auval gate
+    timeout-minutes: 120
+    env:
+      BUILD_DIR: build-universal-gate
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref != '' && inputs.source_ref || inputs.version) || '' }}
+
+      - name: Install ninja
+        run: command -v ninja >/dev/null 2>&1 || brew install ninja
+        shell: bash
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Fetch prebuilt Skia (macOS universal)
+        run: python3 tools/scripts/fetch_skia_for_release.py darwin-universal
+        shell: bash
+
+      - name: Configure (universal arm64;x86_64)
+        run: |
+          set -euo pipefail
+          cmake -S . -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        shell: bash
+
+      - name: Build PulpGain (all formats)
+        run: |
+          cmake --build "${BUILD_DIR}" \
+            --target PulpGain_VST3 PulpGain_AU PulpGain_CLAP
+        shell: bash
+
+      - name: Assert bundle architectures + signature (BLOCKING)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bundle in \
+              "${BUILD_DIR}/AU/PulpGain.component" \
+              "${BUILD_DIR}/VST3/PulpGain.vst3" \
+              "${BUILD_DIR}/CLAP/PulpGain.clap"; do
+            test -e "$bundle" || { echo "::error::universal bundle missing: $bundle"; exit 1; }
+            echo "== $bundle =="
+            python3 tools/scripts/check_bundle_architectures.py \
+              "$bundle" --archs arm64,x86_64 --strict --label "$(basename "$bundle")"
+          done
+
+      - name: Dual-arch auval (BLOCKING)
+        shell: bash
+        run: |
+          set -euo pipefail
+          comp="${BUILD_DIR}/AU/PulpGain.component"
+          dest="$HOME/Library/Audio/Plug-Ins/Components/PulpGain.releasegate.component"
+          rm -rf "$dest"
+          cp -R "$comp" "$dest"
+          cleanup() { rm -rf "$dest"; }
+          trap cleanup EXIT
+          killall -KILL AudioComponentRegistrar 2>/dev/null || true
+          sleep 1
+          echo "--- native (arm64) auval ---"
+          auval -v aufx PGan Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'
+          echo "--- arch -x86_64 auval (Rosetta) ---"
+          arch -x86_64 auval -v aufx PGan Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'
+
   release:
-    needs: [build-cli, smoke-cli]
+    needs: [build-cli, smoke-cli, universal-arch-gate]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
