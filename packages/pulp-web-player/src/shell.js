@@ -251,67 +251,115 @@ function injectStyles(skin = {}) {
 }
 
 // ————————————————————————————————————————————————— procedural musical loop
-// A 2-bar Am–F–C–G eighth-note arp with a soft kick + hat, at 110 BPM. No
-// external asset, no permission prompt — this is the default source for effects.
+// An 8-bar Am–F–C–G progression at 96 BPM: a rotating eighth-note arpeggio, a
+// developing A-minor-pentatonic top-line melody, a warm sustained pad, a
+// rounded kick and a soft band-limited shaker. Every event's tail is written
+// modulo the buffer length (writes wrap with % len), so the loop is
+// mathematically seamless — no discontinuity, no click at the boundary — and
+// the 8 bars evolve enough not to feel repetitive. No external asset, no
+// permission prompt — this is the default source for effects.
 function synthLoop(ctx) {
-  const bpm = 110, beat = 60 / bpm, eighth = beat / 2;
-  const bars = 2, seconds = beat * 4 * bars;
+  const bpm = 96, beat = 60 / bpm, eighth = beat / 2;
+  const bars = 8, seconds = beat * 4 * bars;
   const sr = ctx.sampleRate;
   const len = Math.floor(seconds * sr);
   const buf = ctx.createBuffer(2, len, sr);
   const L = buf.getChannelData(0), R = buf.getChannelData(1);
   const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
-  const add = (start, dur, midi, amp, detune = 0) => {
-    const f = mtof(midi + detune);
-    const s0 = Math.floor(start * sr), s1 = Math.min(len, Math.floor((start + dur) * sr));
-    for (let i = s0; i < s1; i++) {
-      const t = (i - s0) / sr;
-      const env = Math.exp(-t * 6) * (1 - Math.exp(-t * 400));
-      const v = (Math.sin(2 * Math.PI * f * t) + 0.35 * Math.sin(4 * Math.PI * f * t)) * env * amp;
-      L[i] += v; R[i] += v;
+  const TAU = 2 * Math.PI;
+  // Pitched voice. A short attack ramp and a release fade make every tone start
+  // AND end at zero amplitude, and each sample is written modulo len so any tail
+  // crossing the buffer end continues at the start. Together those give a truly
+  // seamless loop (the periodic extension is continuous across the boundary).
+  const voice = (start, dur, midi, amp, opts = {}) => {
+    const { decay = 6, atk = 0.006, rel = 0.03, vib = 0, pan = 0,
+            partials = [[1, 1], [2, 0.3]] } = opts;
+    const f = mtof(midi);
+    const n = Math.floor(dur * sr), s0 = Math.floor(start * sr);
+    const th = (pan + 1) * Math.PI / 4;            // equal-power pan, pan in [-1,1]
+    const gl = amp * Math.cos(th), gr = amp * Math.sin(th);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const a = Math.min(1, t / atk);
+      const r = Math.min(1, (dur - t) / rel);
+      const env = a * r * Math.exp(-t * decay);
+      const vf = vib ? (1 + 0.004 * Math.sin(TAU * 5 * t)) : 1;
+      const ph = TAU * f * t * vf;
+      let s = 0;
+      for (let p = 0; p < partials.length; p++) s += partials[p][1] * Math.sin(ph * partials[p][0]);
+      const j = (s0 + i) % len;
+      L[j] += s * env * gl; R[j] += s * env * gr;
     }
   };
-  const noise = (start, dur, amp, decay) => {
-    const s0 = Math.floor(start * sr), s1 = Math.min(len, Math.floor((start + dur) * sr));
-    for (let i = s0; i < s1; i++) {
-      const t = (i - s0) / sr;
-      const v = (Math.random() * 2 - 1) * Math.exp(-t * decay) * amp;
-      L[i] += v; R[i] += v;
+  // Rounded kick: pitch drop, soft attack ramp, decays to ~0 inside its window
+  // (no truncation step at the tail). Supports the groove, never dominates.
+  const kick = (start, amp) => {
+    const dur = 0.30, n = Math.floor(dur * sr), s0 = Math.floor(start * sr);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const f = 95 * Math.exp(-t * 24) + 44;
+      const a = Math.min(1, t / 0.004);
+      const r = Math.min(1, (dur - t) / 0.04);
+      const env = a * r * Math.exp(-t * 12);
+      const v = Math.sin(TAU * f * t) * env * amp;
+      const j = (s0 + i) % len;
+      L[j] += v; R[j] += v;
     }
   };
-  const kick = (start) => {
-    const s0 = Math.floor(start * sr), s1 = Math.min(len, Math.floor((start + 0.18) * sr));
-    for (let i = s0; i < s1; i++) {
-      const t = (i - s0) / sr;
-      const f = 120 * Math.exp(-t * 18) + 45;
-      // 0.45, not 0.7: the loop is normalised by its peak, and a loud kick
-      // drags the arp and bass down with it — you end up hearing percussion
-      // with a tone buried under it.
-      const v = Math.sin(2 * Math.PI * f * t) * Math.exp(-t * 9) * 0.45;
-      L[i] += v; R[i] += v;
+  // Soft shaker: white noise through a one-pole low-pass then high-pass (a
+  // band-limited "tss"), Hann-windowed so it starts and ends exactly at zero.
+  // Replaces the old raw-Math.random() hat that fired every eighth and sounded
+  // static-y — gentle, and it never clicks or breaks the seam.
+  const shaker = (start, dur, amp) => {
+    const n = Math.floor(dur * sr), s0 = Math.floor(start * sr);
+    let lp = 0, xPrev = 0, yPrev = 0;
+    for (let i = 0; i < n; i++) {
+      const x = Math.random() * 2 - 1;
+      lp += (x - lp) * 0.45;                        // tame the harsh top end
+      const hp = 0.9 * (yPrev + lp - xPrev);        // drop rumble -> airy band
+      xPrev = lp; yPrev = hp;
+      const w = 0.5 - 0.5 * Math.cos(TAU * i / (n - 1));   // Hann window
+      const v = hp * w * amp;
+      const j = (s0 + i) % len;
+      L[j] += v; R[j] += v;
     }
   };
-  // Am, F, C, G — two chords per bar. Arp pattern over each chord's four eighths.
-  const chords = [[57,60,64],[53,57,60],[48,52,55],[55,59,62]];
-  let step = 0;
+  // Am – F – C – G, one chord per bar, cycled twice across the 8-bar loop.
+  const chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
+  const bassMidi = [45, 41, 48, 43];                 // A2 F2 C3 G2
+  const arpShape = [0, 1, 2, 3, 2, 3, 1, 2];         // contour, rotated per bar
+  // A-minor-pentatonic top line: a developing 2-notes-per-bar phrase that never
+  // repeats within the loop and resolves back to its first note.
+  const penta = [69, 72, 74, 76, 79, 81];            // A4 C5 D5 E5 G5 A5
+  const melody = [0, 1, 3, 2, 1, 3, 2, 1, 3, 4, 5, 4, 3, 2, 1, 0];
   for (let bar = 0; bar < bars; bar++) {
-    for (let half = 0; half < 2; half++) {
-      const chord = chords[(bar * 2 + half) % chords.length];
-      for (let e = 0; e < 4; e++) {
-        const t = (bar * 4 + half * 2) * beat + e * eighth;
-        add(t, eighth * 1.6, chord[e % chord.length] + 12, 0.26);
-        if (e === 0) add(t, beat * 1.9, chord[0] - 12, 0.17); // bass
-        noise(t + eighth * 0.5, 0.05, 0.03, 70);              // hat (the "brush tap")
-        if (e % 2 === 0) kick(t);
-        step++;
-      }
+    const ci = bar % 4, chord = chords[ci], t0 = bar * 4 * beat;
+    const pool = [chord[0], chord[1], chord[2], chord[0] + 12];
+    // Bass: root of the bar, sustained.
+    voice(t0, beat * 3.6, bassMidi[ci], 0.17, { decay: 1.6, partials: [[1, 1], [2, 0.18]] });
+    // Warm pad: two upper chord tones, very soft, spread across the stereo field.
+    voice(t0, beat * 3.8, chord[1] + 12, 0.055, { decay: 0.9, atk: 0.05, pan: -0.35, partials: [[1, 1], [2, 0.25], [3, 0.12]] });
+    voice(t0, beat * 3.8, chord[2] + 12, 0.055, { decay: 0.9, atk: 0.05, pan: 0.35, partials: [[1, 1], [2, 0.25], [3, 0.12]] });
+    // Arp: eighth notes, contour rotated per bar so no two bars are identical.
+    for (let e = 0; e < 8; e++) {
+      const deg = arpShape[(e + bar) % 8];
+      voice(t0 + e * eighth, eighth * 1.7, pool[deg % pool.length] + 12, 0.15,
+            { decay: 5.5, pan: (e % 2 ? 0.25 : -0.25) });
     }
+    // Melody: two half notes per bar, gentle vibrato, just right of centre.
+    for (let m = 0; m < 2; m++) {
+      voice(t0 + m * 2 * beat, beat * 2.0, penta[melody[bar * 2 + m]], 0.2,
+            { decay: 2.4, atk: 0.012, vib: 1, pan: 0.15, partials: [[1, 1], [2, 0.22], [3, 0.08]] });
+    }
+    // Light groove: kick on beats 1 & 3, soft shaker on the offbeats.
+    kick(t0, 0.34);
+    kick(t0 + 2 * beat, 0.34);
+    for (let e = 1; e < 8; e += 2) shaker(t0 + e * eighth, 0.06, 0.05);
   }
-  // Normalise to avoid clipping.
+  // Normalise to 0.7 (headroom: effects add gain — delay feedback, filter
+  // resonance, compressor makeup — so the source must leave room).
   let peak = 0;
-  for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(L[i]));
-  // Normalise to 0.7, not 0.9: nearly every effect here adds gain (delay
-  // feedback, filter resonance, compressor makeup), so the source needs room.
+  for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
   if (peak > 0) { const g = 0.7 / peak; for (let i = 0; i < len; i++) { L[i] *= g; R[i] *= g; } }
   return buf;
 }
@@ -838,7 +886,7 @@ export async function mountDemo(opts) {
           <option value="off">Off</option>
         </select>
       </div>
-      <div class="pp-tip">A 2-bar Am–F–C–G arpeggio is synthesized in-page at 110 BPM — no external asset, no mic permission. Switch to Microphone to run your own input through the effect.</div>`;
+      <div class="pp-tip">An 8-bar Am–F–C–G loop is synthesized in-page at 96 BPM — a rotating arpeggio, an evolving melody and a light groove; no external asset, no mic permission. Switch to Microphone to run your own input through the effect.</div>`;
     $("#body").appendChild(sec);
     const sel = $("#src");
     sel.addEventListener("change", () => setSource(sel.value));
