@@ -36,6 +36,16 @@ constexpr int kFrames = 512;
 ///
 /// The rising-edge detector carries the last sample across blocks, so a pulse
 /// that spans a block boundary is not miscounted as two.
+class SyncRig;
+
+/// Point the clock at the `Pulses Per Beat` knob.
+///
+/// The knob is inert unless `Clock Type` selects `Custom` — the two named rates,
+/// 24 and 48 ppqn, ignore it. Every rate-dependent test therefore has to say so
+/// explicitly, which is the point: a test that quietly relied on the knob would
+/// have gone on passing after the menu was added and asserted nothing.
+void set_custom_ppqn(SyncRig& rig, float ppqn);
+
 class SyncRig {
 public:
     SyncRig() { host_.prepare(kSampleRate, 4096, 2, 2); }
@@ -65,6 +75,10 @@ public:
         audio::Buffer<float> out(2, static_cast<std::size_t>(frames));
         in.clear();
         out.clear();
+        if (input_level_ != 0.0f)
+            for (std::size_t c = 0; c < 2; ++c)
+                for (int n = 0; n < frames; ++n)
+                    in.channel(c)[static_cast<std::size_t>(n)] = input_level_;
 
         const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
         audio::BufferView<const float> iv(in_ptrs, 2,
@@ -95,6 +109,9 @@ public:
     /// Run/stop samples of the most recent block.
     const std::vector<float>& run() const { return run_; }
 
+    /// Present a constant level on both input channels.
+    void set_input_level(float v) { input_level_ = v; }
+
     /// Make the host lie about `transport_jump` on every block.
     void force_transport_jump(bool on) { force_jump_ = on; }
     void set_time_sig(int num, int den) {
@@ -107,10 +124,17 @@ private:
     std::vector<float> clock_;
     std::vector<float> run_;
     float prev_ = 0.0f;
+    float input_level_ = 0.0f;
     bool force_jump_ = false;
     int time_sig_num_ = 4;
     int time_sig_den_ = 4;
 };
+
+void set_custom_ppqn(SyncRig& rig, float ppqn) {
+    rig.state().set_value(SyncProcessor::kClockType,
+                          static_cast<float>(static_cast<int>(ClockType::custom)));
+    rig.state().set_value(SyncProcessor::kPulsesPerBeat, ppqn);
+}
 
 /// Width of the first pulse in a block, in samples. -1 if the block never goes
 /// high, or if the pulse is still high at the block's end (so a caller cannot
@@ -349,14 +373,14 @@ TEST_CASE("Sync raises the run gate while the transport runs", "[brew][sync]") {
 TEST_CASE("Sync multiplier and divisor scale the edge density", "[brew][sync]") {
     SECTION("one pulse per beat") {
         SyncRig rig;
-        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 1.0f);
+        set_custom_ppqn(rig, 1.0f);
         // One beat of samples at 120 BPM / 48 kHz is 24000 samples: one edge.
         REQUIRE(rig.render(0.0, true, true, 24000).size() == 1);
     }
 
     SECTION("a multiplier of 4 quadruples them") {
         SyncRig rig;
-        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 1.0f);
+        set_custom_ppqn(rig, 1.0f);
         rig.state().set_value(SyncProcessor::kMultiplier, 4.0f);
         REQUIRE(rig.render(0.0, true, true, 24000) ==
                 std::vector<int>{0, 6000, 12000, 18000});
@@ -364,7 +388,7 @@ TEST_CASE("Sync multiplier and divisor scale the edge density", "[brew][sync]") 
 
     SECTION("a divisor of 2 halves them") {
         SyncRig rig;
-        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 4.0f);
+        set_custom_ppqn(rig, 4.0f);
         rig.state().set_value(SyncProcessor::kDivisor, 2.0f);
         REQUIRE(rig.render(0.0, true, true, 24000) ==
                 std::vector<int>{0, 12000});
@@ -374,7 +398,7 @@ TEST_CASE("Sync multiplier and divisor scale the edge density", "[brew][sync]") 
 TEST_CASE("Sync skips the first pulse of a run when asked",
           "[brew][sync][run-segment]") {
     SyncRig rig;
-    rig.state().set_value(SyncProcessor::kPulsesPerBeat, 1.0f);
+    set_custom_ppqn(rig, 1.0f);
     rig.state().set_value(SyncProcessor::kSkipFirst, 1.0f);
 
     // Two beats: edges at 0 and 24000. The first is swallowed.
@@ -518,7 +542,7 @@ TEST_CASE("Sync never welds the gate at high tempo", "[brew][sync][safety]") {
 
 TEST_CASE("Sync pulses survive a block boundary intact", "[brew][sync]") {
     SyncRig rig;
-    rig.state().set_value(SyncProcessor::kPulsesPerBeat, 1.0f);
+    set_custom_ppqn(rig, 1.0f);
 
     // Edge at sample 0 of a 100-sample block; the 240-sample pulse must still be
     // high through the next two blocks and fall in the third.
@@ -543,7 +567,7 @@ TEST_CASE("Sync's swing moves the off-beat pulse to the sample it should",
     constexpr int kLongBlock = 20000;
 
     SyncRig rig;
-    rig.state().set_value(SyncProcessor::kPulsesPerBeat, 2.0f);  // an edge per eighth
+    set_custom_ppqn(rig, 2.0f);  // an edge per eighth
 
     SECTION("straight puts it halfway") {
         rig.state().set_value(SyncProcessor::kSwingPercent, 50.0f);
@@ -565,7 +589,7 @@ TEST_CASE("Sync's swing moves the off-beat pulse to the sample it should",
     }
 
     SECTION("the sixteenth unit swings a different note") {
-        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 4.0f);
+        set_custom_ppqn(rig, 4.0f);
         rig.state().set_value(SyncProcessor::kSwingUnit, 1.0f);
         rig.state().set_value(SyncProcessor::kSwingPercent, 66.0f);
         const auto e = rig.render(0.0, true, true, kLongBlock);
@@ -584,7 +608,7 @@ TEST_CASE("a swung pulse just after the play edge is not swallowed by the gate",
     // clock tick, which reads as a dead cable rather than a rounding bug.
     constexpr int kBeatSamples = 24000;
     SyncRig rig;
-    rig.state().set_value(SyncProcessor::kPulsesPerBeat, 2.0f);
+    set_custom_ppqn(rig, 2.0f);
     rig.state().set_value(SyncProcessor::kSwingPercent, 66.0f);
 
     // Start playing at beat 0.55, for a block that ends at 0.967 — so the only
@@ -594,4 +618,235 @@ TEST_CASE("a swung pulse just after the play edge is not swallowed by the gate",
     const int expected = static_cast<int>((0.66 - 0.55) * kBeatSamples + 0.5);
     REQUIRE(e.size() == 1);
     REQUIRE(std::abs(e.front() - expected) <= 1);
+}
+
+// ------------------------------------------------------------ the clock's type
+
+namespace {
+
+float as_param(ClockType t) { return static_cast<float>(static_cast<int>(t)); }
+float as_param(RunSignal r) { return static_cast<float>(static_cast<int>(r)); }
+float as_param(NoteUnit u) { return static_cast<float>(static_cast<int>(u)); }
+
+/// Rising edges within one block. Unlike SyncRig::render's clock detector this
+/// carries no state across blocks, which is what the run channel wants: a run
+/// *level* is high from sample zero, and a carried `prev_` would hide its edge.
+std::vector<int> rising_edges(const std::vector<float>& v) {
+    std::vector<int> e;
+    for (std::size_t n = 1; n < v.size(); ++n)
+        if (v[n - 1] <= 0.0f && v[n] > 0.0f) e.push_back(static_cast<int>(n));
+    if (!v.empty() && v[0] > 0.0f) e.insert(e.begin(), 0);
+    return e;
+}
+
+}  // namespace
+
+TEST_CASE("Sync's clock type selects the rate, and Off silences the clock",
+          "[brew][sync][clock-type]") {
+    constexpr int kBeatSamples = 24000;  // 120 BPM at 48 kHz
+
+    SECTION("Off emits nothing, however the ppqn knob is set") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kClockType, as_param(ClockType::off));
+        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 4.0f);
+        REQUIRE(rig.render(0.0, true, true, kBeatSamples).empty());
+        REQUIRE(all_equal(rig.clock(), 0.0f));
+    }
+
+    SECTION("24 ppqn puts 24 edges in a beat and ignores the knob") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kClockType, as_param(ClockType::ppqn24));
+        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 1.0f);
+        REQUIRE(rig.render(0.0, true, true, kBeatSamples).size() == 24);
+    }
+
+    SECTION("48 ppqn puts 48 edges in a beat and ignores the knob") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kClockType, as_param(ClockType::ppqn48));
+        rig.state().set_value(SyncProcessor::kPulsesPerBeat, 1.0f);
+        REQUIRE(rig.render(0.0, true, true, kBeatSamples).size() == 48);
+    }
+
+    SECTION("Custom hands the rate to the knob") {
+        SyncRig rig;
+        set_custom_ppqn(rig, 2.0f);
+        REQUIRE(rig.render(0.0, true, true, kBeatSamples).size() == 2);
+    }
+}
+
+TEST_CASE("a Trigger Length of zero makes the clock a 50% duty square wave",
+          "[brew][sync][clock-type]") {
+    constexpr int kBeatSamples = 24000;
+    SyncRig rig;
+    set_custom_ppqn(rig, 1.0f);  // one edge per beat: a 24000-sample period
+
+    SECTION("zero means half the period, not a zero-width pulse") {
+        rig.state().set_value(SyncProcessor::kTriggerLengthMs, 0.0f);
+        rig.render(0.0, true, true, kBeatSamples);
+        REQUIRE(first_pulse_width(rig.clock()) == kBeatSamples / 2);
+    }
+
+    SECTION("a positive length is still a fixed-width trigger") {
+        rig.state().set_value(SyncProcessor::kTriggerLengthMs, 5.0f);
+        rig.render(0.0, true, true, kBeatSamples);
+        // 5 ms at 48 kHz, well under the ceiling of half a 24000-sample period.
+        REQUIRE(first_pulse_width(rig.clock()) == 240);
+    }
+}
+
+// -------------------------------------------------------------- the run signal
+
+TEST_CASE("Sync's run signal type decides what the run output carries",
+          "[brew][sync][run-signal]") {
+    SECTION("Run holds a level for the whole run") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::run));
+        rig.render(0.0, true, true);
+        REQUIRE(all_equal(rig.run(), 1.0f));
+        rig.render(1.0, true, false);
+        REQUIRE(all_equal(rig.run(), 1.0f));
+        rig.render(2.0, false, false);
+        REQUIRE(all_equal(rig.run(), 0.0f));
+    }
+
+    SECTION("Start pulses once at the play edge and never again") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::start));
+        rig.render(0.0, true, true);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0});
+        // 5 ms is 240 samples, so the pulse has finished inside this 512-frame block.
+        REQUIRE(first_pulse_width(rig.run()) == 240);
+
+        rig.render(0.25, true, false);
+        REQUIRE(all_equal(rig.run(), 0.0f));
+    }
+
+    SECTION("Stop pulses when the transport stops, not when it starts") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::stop));
+        rig.render(0.0, true, true);
+        REQUIRE(all_equal(rig.run(), 0.0f));
+        rig.render(0.25, false, false);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0});
+    }
+
+    SECTION("Start/Stop pulses at both edges") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::start_stop));
+        rig.render(0.0, true, true);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0});
+        rig.render(0.25, true, false);
+        REQUIRE(all_equal(rig.run(), 0.0f));
+        rig.render(0.5, false, false);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0});
+    }
+
+    SECTION("a stop pulse wider than the block finishes on the stopped path") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::stop));
+        // 20 ms is 960 samples: it cannot fit in one 512-frame block.
+        rig.state().set_value(SyncProcessor::kRunPulseMs, 20.0f);
+        rig.render(0.0, true, true);
+        rig.render(0.25, false, false);
+        REQUIRE(all_equal(rig.run(), 1.0f));  // still high at the block's end
+        rig.render(0.25, false, false);
+        REQUIRE(rig.run().front() > 0.0f);
+        REQUIRE(rig.run().back() == 0.0f);  // and it falls in the next one
+    }
+}
+
+// ----------------------------------------------------------- the periodic reset
+
+TEST_CASE("Sync's periodic reset fires at the interval, measured from the run",
+          "[brew][sync][periodic-reset]") {
+    constexpr int kBeatSamples = 24000;
+
+    SECTION("one pulse per beat, and the play edge is not double-triggered") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::start));
+        rig.state().set_value(SyncProcessor::kResetBeats, 1.0f);
+        rig.state().set_value(SyncProcessor::kResetUnit, as_param(NoteUnit::quarter));
+        rig.render(0.0, true, true, 2 * kBeatSamples);
+        // Beat 0 is the play edge's own pulse; beat 1 is the first periodic one.
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0, kBeatSamples});
+    }
+
+    // The reset grid's index 0 sits exactly on the run origin. With `Start` that
+    // is invisible — the play edge has already pulsed at that sample, and firing
+    // again only retriggers a pulse that is already high. With `Stop` nothing has
+    // pulsed there, so an unguarded index 0 emits a reset the moment the user
+    // presses play. That is the bug the guard exists for, and this is the only
+    // configuration that can see it.
+    SECTION("Stop's periodic resets do not put a pulse on the play edge") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::stop));
+        rig.state().set_value(SyncProcessor::kResetBeats, 1.0f);
+        rig.state().set_value(SyncProcessor::kResetUnit, as_param(NoteUnit::quarter));
+        rig.render(0.0, true, true, 2 * kBeatSamples);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{kBeatSamples});
+    }
+
+    SECTION("the interval is counted from the run origin, not the timeline") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::start));
+        rig.state().set_value(SyncProcessor::kResetBeats, 2.0f);
+        rig.state().set_value(SyncProcessor::kResetUnit, as_param(NoteUnit::quarter));
+        // Start at beat 3.5, which is not a multiple of the two-beat interval.
+        rig.render(3.5, true, true, 3 * kBeatSamples);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0, 2 * kBeatSamples});
+    }
+
+    SECTION("the note unit scales the interval") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::start));
+        rig.state().set_value(SyncProcessor::kResetBeats, 1.0f);
+        rig.state().set_value(SyncProcessor::kResetUnit, as_param(NoteUnit::half));
+        rig.render(0.0, true, true, 3 * kBeatSamples);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0, 2 * kBeatSamples});
+    }
+
+    SECTION("zero beats disables it") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::start));
+        rig.state().set_value(SyncProcessor::kResetBeats, 0.0f);
+        rig.render(0.0, true, true, 2 * kBeatSamples);
+        REQUIRE(rising_edges(rig.run()) == std::vector<int>{0});
+    }
+
+    SECTION("a level run output has no periodic reset to give") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kRunType, as_param(RunSignal::run));
+        rig.state().set_value(SyncProcessor::kResetBeats, 1.0f);
+        rig.render(0.0, true, true, 2 * kBeatSamples);
+        REQUIRE(all_equal(rig.run(), 1.0f));
+    }
+}
+
+// ------------------------------------------------------------- signal routing
+
+TEST_CASE("Sync sums its inputs into its outputs", "[brew][sync][routing]") {
+    SECTION("the input rides on top of the clock and the run gate") {
+        SyncRig rig;
+        rig.state().set_value(SyncProcessor::kClockType, as_param(ClockType::off));
+        rig.set_input_level(0.25f);
+        rig.render(0.0, true, true);
+        REQUIRE(all_equal(rig.clock(), 0.25f));
+        REQUIRE(all_equal(rig.run(), 1.0f));  // 1.0 + 0.25, clamped at the jack
+    }
+
+    SECTION("bypass is a wire, not a mute") {
+        SyncRig rig;
+        rig.set_input_level(0.25f);
+        format::ProcessContext ctx;
+        ctx.sample_rate = kSampleRate;
+        ctx.num_samples = kFrames;
+        ctx.is_playing = true;
+        ctx.transport_started = true;
+        ctx.tempo_bpm = kTempo;
+        ctx.position_beats = 0.0;
+        ctx.is_bypassed = true;
+        rig.render(ctx);
+        REQUIRE(all_equal(rig.clock(), 0.25f));
+        REQUIRE(all_equal(rig.run(), 0.25f));
+    }
 }
