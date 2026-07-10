@@ -143,7 +143,49 @@ if(_pulp_config)
     endif()
 endif()
 
+# pulp::osc export: the OSC sender/receiver is a public SDK subsystem, but was
+# long absent from PULP_SDK_TARGETS and the header-install loop. A consumer that
+# links pulp::osc (a CV-to-OSC plugin, say) then fails find_package(Pulp) with an
+# unknown target, or fails to compile against a missing pulp/osc header. Assert
+# both halves of the export: the public header, and the exported target.
+if(NOT EXISTS "${_prefix}/include/pulp/osc/osc.hpp")
+    message(FATAL_ERROR
+        "pulp/osc/osc.hpp not installed under ${_prefix}/include/pulp/osc/.\n"
+        "The osc subsystem is missing from the header-install loop in "
+        "PulpInstallRules.cmake, so find_package(Pulp) consumers that include "
+        "<pulp/osc/osc.hpp> would fail to compile.")
+endif()
+# The install exports the imported target under the `Pulp::` namespace in
+# PulpTargets*.cmake; PulpConfig.cmake then adds the lower-case `pulp::osc`
+# alias consumers actually link. Assert both halves so neither can silently
+# drop: the raw `Pulp::osc` export AND `pulp-osc`'s membership in the
+# lower-case alias loop's target list.
+file(GLOB _pulp_targets LIST_DIRECTORIES false "${_pulp_cmake_dir}/PulpTargets*.cmake")
+set(_osc_target_found FALSE)
+foreach(_tf IN LISTS _pulp_targets)
+    file(READ "${_tf}" _tf_text)
+    if(_tf_text MATCHES "Pulp::osc")
+        set(_osc_target_found TRUE)
+    endif()
+endforeach()
+if(NOT _osc_target_found)
+    message(FATAL_ERROR
+        "Pulp::osc is not in the exported target set (PulpTargets*.cmake under "
+        "${_pulp_cmake_dir}).\n"
+        "Add pulp-osc to PULP_SDK_TARGETS in PulpInstallRules.cmake so "
+        "find_package(Pulp) consumers can link pulp::osc.")
+endif()
+file(READ "${_pulp_config}" _installed_config_alias_text)
+if(NOT _installed_config_alias_text MATCHES "pulp-osc")
+    message(FATAL_ERROR
+        "pulp-osc is not in the lower-case alias loop's export-target list in "
+        "PulpConfig.cmake, so the `pulp::osc` alias consumers link would never "
+        "be created.\n"
+        "Ensure pulp-osc is in PULP_SDK_TARGETS in PulpInstallRules.cmake.")
+endif()
+
 message(STATUS
     "Install layout: PulpUtils.cmake at ${_pulp_utils}, encoder at "
     "${_installed_encoder} (${_installed_size} bytes), PulpMinOs.cmake + "
-    "min_os.json bundled and wired into PulpConfig.cmake. All present.")
+    "min_os.json bundled and wired into PulpConfig.cmake, pulp::osc header + "
+    "target exported. All present.")
