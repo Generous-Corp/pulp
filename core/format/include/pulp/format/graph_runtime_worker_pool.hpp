@@ -9,14 +9,14 @@ namespace pulp::format {
 
 /// Persistent fork-join worker pool for the levelized parallel graph executor.
 ///
-/// Threads are spawned once at start() (off the audio thread) and wait on a
-/// bounded spin followed by C++20 atomic parking until run() publishes a batch.
-/// run() executes `task_count`
-/// tasks across the pool's threads PLUS the calling (audio) thread, then returns
-/// when every task has completed — no allocation, no lock, no condition variable
-/// in run(). It is the persistent-worker / epoch-publish / bounded-atomic-wait
-/// pattern (masterwork §6.1): the audio callback owns the fork-join, workers
-/// never allocate or steal.
+/// Threads are spawned once at start() (off the audio thread). After a batch
+/// they stay hot briefly with a bounded spin/yield loop, then fall back to short
+/// cold-idle sleeps. If a later run() arrives while workers are cold, that batch
+/// runs inline and requests worker reheating for subsequent batches. run() executes
+/// `task_count` tasks across the pool's threads PLUS the calling (audio) thread,
+/// then returns when every participant has completed — no allocation, no lock, no
+/// condition variable, and no OS wakeup from run(). The audio callback owns the
+/// fork-join; workers never allocate or steal.
 ///
 /// Tasks are claimed cooperatively via an atomic cursor, so a task is a small
 /// index the caller maps to a unit of work (e.g. a node in the current level).
@@ -53,8 +53,14 @@ public:
 
     std::uint32_t worker_count() const noexcept { return worker_count_; }
     bool running() const noexcept { return running_.load(std::memory_order_acquire); }
+    std::uint64_t worker_backoff_count() const noexcept {
+        return worker_backoff_count_.load(std::memory_order_relaxed);
+    }
+    std::uint64_t worker_idle_sleep_count() const noexcept {
+        return worker_idle_sleep_count_.load(std::memory_order_relaxed);
+    }
     std::uint64_t worker_park_count() const noexcept {
-        return worker_park_count_.load(std::memory_order_relaxed);
+        return worker_idle_sleep_count();
     }
 
     // RT-safe: run `fn(context, i)` for every i in [0, task_count) exactly once,
@@ -78,16 +84,21 @@ private:
 
     // Published batch (valid for the current epoch). Written by run() before the
     // epoch bump (release), read by workers after observing the new epoch
-    // (acquire).
+    // (acquire). run() must not notify parked OS waiters. If not every worker is
+    // hot, run() executes inline and lets sleepers reheat on their next cold-idle
+    // tick.
     TaskFn fn_ = nullptr;
     void* context_ = nullptr;
     std::uint32_t task_count_ = 0;
 
-    // Epoch a worker waits on; bumped by run() to publish a batch. stop() bumps
-    // it with `stopping_` set so workers exit.
+    // Epoch a worker polls; bumped by run() to publish a batch. stop() bumps it
+    // with `stopping_` set so workers exit.
     alignas(64) std::atomic<std::uint64_t> epoch_{0};
     alignas(64) std::atomic<bool> stopping_{false};
     alignas(64) std::atomic<bool> running_{false};
+    alignas(64) std::atomic<bool> cold_transition_gate_{false};
+    alignas(64) std::atomic<bool> reheat_requested_{false};
+    alignas(64) std::atomic<std::uint32_t> active_worker_threads_{0};
 
     // MONOTONIC count of tasks completed across all batches (each worker adds its
     // range size with release; the caller acquire-waits until it reaches the
@@ -102,7 +113,8 @@ private:
     // threads at once — the load-bearing invariant the lock-free barrier relies
     // on. Compiled out (and never touched) in release builds.
     alignas(64) std::atomic<bool> in_run_{false};
-    alignas(64) std::atomic<std::uint64_t> worker_park_count_{0};
+    alignas(64) std::atomic<std::uint64_t> worker_backoff_count_{0};
+    alignas(64) std::atomic<std::uint64_t> worker_idle_sleep_count_{0};
 };
 
 } // namespace pulp::format
