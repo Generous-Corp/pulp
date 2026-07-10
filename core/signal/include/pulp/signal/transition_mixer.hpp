@@ -95,14 +95,24 @@ inline bool blend_fade_out(Mixer& mixer, OutView& out, const OldView& old_render
     const std::size_t frames = std::min<std::size_t>(out.num_samples(), old_render.num_samples());
     const std::size_t ch = std::min<std::size_t>(out.num_channels(), old_render.num_channels());
     const std::size_t base = mixer.position();
-    for (std::size_t c = 0; c < ch; ++c) {
-        auto o = out.channel(c);
-        auto old_ch = old_render.channel(c);
-        for (std::size_t n = 0; n < frames; ++n) {
-            float old_gain = 0.0f;
-            float new_gain = 0.0f;
-            mixer.gains_at(base + n, old_gain, new_gain);
-            o[n] = old_ch[n] * old_gain + o[n] * new_gain;
+    // The old/new gain pair depends only on the (shared) fade position, not the
+    // channel, so compute each pair ONCE per frame and reuse it across channels
+    // instead of re-evaluating gains_at (two transcendentals for EqualPower) per
+    // channel per sample. Precompute in bounded stack chunks to stay alloc-free
+    // while keeping the per-channel apply loop contiguous. Bit-identical to the
+    // previous channel-outer form (gains_at is a pure function of base+n).
+    constexpr std::size_t kChunk = 64;
+    float old_gain[kChunk];
+    float new_gain[kChunk];
+    for (std::size_t start = 0; start < frames; start += kChunk) {
+        const std::size_t len = std::min<std::size_t>(kChunk, frames - start);
+        for (std::size_t j = 0; j < len; ++j)
+            mixer.gains_at(base + start + j, old_gain[j], new_gain[j]);
+        for (std::size_t c = 0; c < ch; ++c) {
+            auto o = out.channel(c);
+            auto old_ch = old_render.channel(c);
+            for (std::size_t j = 0; j < len; ++j)
+                o[start + j] = old_ch[start + j] * old_gain[j] + o[start + j] * new_gain[j];
         }
     }
     mixer.advance(frames);
