@@ -16,6 +16,8 @@
 
 #include <brew/ui/panel.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdio>
 #include <functional>
 #include <string>
@@ -51,55 +53,71 @@ public:
             return std::string(buf);
         };
 
-        auto add = [&](view::View& row, state::ParamID id, const char* label,
-                       std::function<std::string(float)> fmt) {
-            auto k = ui::param_knob(store_, id, label, std::move(fmt));
+        auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
+                       const char* label, std::function<std::string(float)> fmt) {
+            auto k = ui::param_knob(store_,
+                                    static_cast<state::ParamID>(param_for(id, ch)),
+                                    label, std::move(fmt));
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        // Labels are abbreviated to the knob's width. A Knob centres its label on
-        // its own box, so a longer one silently overlaps its neighbours.
-        auto levels = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*levels, DcProcessor::kValue, "Value", signed_number);
-        add(*levels, DcProcessor::kUnipolar, "Unipolar", number);
-        add(*levels, DcProcessor::kMultiplier, "Mult", signed_number);
-        add(*levels, DcProcessor::kSmoothMs, "Smooth", millis);
+        // One block per channel. They are two unrelated control voltages, not a
+        // stereo pair, so each gets its own controls, its own readout, and its own
+        // rail — and the block is labelled, because sending a voltage down the
+        // wrong cable is the failure this layout exists to prevent.
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+            add_child(ui::channel_label(ch == 0 ? "LEFT" : "RIGHT"));
 
-        auto inputs = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*inputs, DcProcessor::kInputAdd, "In Add", signed_number);
-        add(*inputs, DcProcessor::kInputMul, "In Mul", number);
-        add(*inputs, DcProcessor::kOutputScale, "Out", pct);
-        auto invert = ui::param_toggle(store_, DcProcessor::kInvert, "Invert");
-        // Toggle draws its label at the bottom of its own box, so the box must
-        // be tall enough for both the switch and the text.
-        ui::toggle_size(*invert);
-        inputs->add_child(std::move(invert));
+            // Labels are abbreviated to the knob's width. A Knob centres its label
+            // on its own box, so a longer one silently overlaps its neighbours.
+            auto levels = ui::row(ui::kRowGap, ui::kKnobHeight);
+            add(*levels, DcProcessor::kValue, ch, "Value", signed_number);
+            add(*levels, DcProcessor::kUnipolar, ch, "Unipolar", number);
+            add(*levels, DcProcessor::kMultiplier, ch, "Mult", signed_number);
+            add(*levels, DcProcessor::kSmoothMs, ch, "Smooth", millis);
 
-        auto readout = ui::caption_label("", 14.0f);
-        readout->set_text_color(ui::palette::text);
-        readout_ = readout.get();
+            auto inputs = ui::row(ui::kRowGap, ui::kKnobHeight);
+            add(*inputs, DcProcessor::kInputAdd, ch, "In Add", signed_number);
+            add(*inputs, DcProcessor::kInputMul, ch, "In Mul", number);
+            add(*inputs, DcProcessor::kOutputScale, ch, "Out", pct);
+            auto invert = ui::param_toggle(
+                store_, static_cast<state::ParamID>(param_for(DcProcessor::kInvert, ch)),
+                "Invert");
+            // Toggle draws its label at the bottom of its own box, so the box must
+            // be tall enough for both the switch and the text.
+            ui::toggle_size(*invert);
+            inputs->add_child(std::move(invert));
 
-        auto rail = std::make_unique<ui::VoltageRail>([this] { return emitted(); });
-        rail->flex().preferred_height = 14.0f;
-        rail->flex().align_self = view::FlexAlign::stretch;
+            auto readout = ui::caption_label("", 13.0f);
+            readout->set_text_color(ui::palette::text);
+            readout_[ch] = readout.get();
 
-        add_child(std::move(levels));
-        add_child(std::move(inputs));
-        add_child(std::move(readout));
-        add_child(std::move(rail));
+            auto rail = std::make_unique<ui::VoltageRail>(
+                [this, ch] { return emitted(ch); });
+            rail->flex().preferred_height = 14.0f;
+            rail->flex().align_self = view::FlexAlign::stretch;
+
+            add_child(std::move(levels));
+            add_child(std::move(inputs));
+            add_child(std::move(readout));
+            add_child(std::move(rail));
+        }
+
         // Full scale, never volts: the plug-in cannot know the interface's rail.
         add_child(ui::caption_label(
             "-1 . centre 0 . +1     full scale, not volts"));
     }
 
     void paint(canvas::Canvas& canvas) override {
-        // The parent paints before its children, so the readout's text must be
+        // The parent paints before its children, so the readouts' text must be
         // updated here — not drawn here. A caption drawn under a child's bounds
         // is invisible.
-        char buf[64];
-        std::snprintf(buf, sizeof(buf), "%+.3f  full scale", emitted());
-        readout_->set_text(buf);
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "%+.3f  full scale", emitted(ch));
+            readout_[ch]->set_text(buf);
+        }
 
         ui::BrewPanel::paint(canvas);
 
@@ -108,13 +126,13 @@ public:
         request_repaint();
     }
 
-    /// The sample the processor last wrote to the bus.
-    float emitted() const { return proc_.display_output(); }
+    /// The sample the processor last wrote to a channel of the bus.
+    float emitted(std::size_t ch = 0) const { return proc_.display_output(ch); }
 
 private:
     state::StateStore& store_;
     const DcProcessor& proc_;
-    view::Label* readout_ = nullptr;
+    std::array<view::Label*, kChannelCount> readout_{};
 };
 
 }  // namespace pulp::examples::brew

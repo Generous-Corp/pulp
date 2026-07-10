@@ -834,7 +834,11 @@ TEST_CASE("Sync sums its inputs into its outputs", "[brew][sync][routing]") {
         REQUIRE(all_equal(rig.run(), 1.0f));  // 1.0 + 0.25, clamped at the jack
     }
 
-    SECTION("bypass is a wire, not a mute") {
+    // A bypassed generator emits zero, and does NOT pass its input through. The
+    // wire reading is tempting — it is what "remove this plug-in" means for an
+    // audio effect — but this output ends at a patch cable. A track carrying
+    // audio would arrive at a VCO's pitch input at full scale.
+    SECTION("bypass is silent, and does not pass the input through") {
         SyncRig rig;
         rig.set_input_level(0.25f);
         format::ProcessContext ctx;
@@ -846,7 +850,7 @@ TEST_CASE("Sync sums its inputs into its outputs", "[brew][sync][routing]") {
         ctx.position_beats = 0.0;
         ctx.is_bypassed = true;
         rig.render(ctx);
-        REQUIRE(all_equal(rig.clock(), 0.25f));
-        REQUIRE(all_equal(rig.run(), 0.25f));
+        REQUIRE(all_equal(rig.clock(), 0.0f));
+        REQUIRE(all_equal(rig.run(), 0.0f));
     }
 }

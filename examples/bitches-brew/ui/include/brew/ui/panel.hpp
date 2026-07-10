@@ -166,6 +166,23 @@ inline std::unique_ptr<vw::Toggle> param_toggle(state::StateStore& store,
 inline void knob_size(vw::View& v) { fixed_size(v, kKnobWidth, kKnobHeight); }
 inline void toggle_size(vw::View& v) { fixed_size(v, kToggleWidth, kToggleHeight); }
 
+/// Names the channel a block of controls belongs to.
+///
+/// The two channels of a brew plug-in are two unrelated control voltages, not a
+/// stereo pair, so the editor has to say which is which. Brighter than a caption
+/// and set in the panel's text colour, because getting this wrong sends a
+/// voltage down the wrong cable.
+inline std::unique_ptr<vw::Label> channel_label(std::string text) {
+    auto l = std::make_unique<vw::Label>();
+    l->set_text(std::move(text));
+    l->set_font_size(11.0f);
+    l->set_text_color(palette::text);
+    l->flex().preferred_height = 14.0f;
+    l->flex().flex_grow = 0;
+    l->flex().flex_shrink = 0;
+    return l;
+}
+
 /// A bipolar voltage rail: full-scale negative at the left, zero at the centre,
 /// full-scale positive at the right, with a marker at the current output.
 ///
