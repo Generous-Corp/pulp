@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace {
@@ -236,74 +237,106 @@ void bench_multi() {
 
 }  // namespace
 
-// ── 3. Partitioned FDL vs the current non-partitioned multi_convolve ──
-// The finding-#1 payoff: does keeping the FFT at block size (partitioned FDL)
-// beat one full-length-n FFT (n = next_pow2(block + IR))? One input × num_ir
-// IRs → stereo, both driven through GpuCompute directly. Wall-clock (the timed
-// GPU-busy variant lands with the multi_convolve_timed harness).
+// ── 3. The finding-#1 payoff: CPU vs non-partitioned GPU vs partitioned FDL ──
+// Fixed 1 s IR, sweeping the room count — the demo-decisive comparison. The
+// SuperConvolver v1.2 KILL verdict said the CPU beats the GPU; it was measured
+// against the non-partitioned kernel (one full-length FFT/block). Does the
+// partitioned FDL flip it? Real reverb IRs, real CPU partitioned convolvers,
+// GPU FDL driven directly. Wall-clock (the GPU-busy timed variant lands with the
+// multi_convolve_timed harness; wall-clock UNDERstates the GPU compute win
+// because the ~0.5 ms readback floor hits every GPU row).
 void bench_fdl() {
     auto gpu = pulp::render::GpuCompute::create();
     if (!gpu || !gpu->initialize_standalone()) { std::printf("\n(no GPU — skipping FDL)\n"); return; }
-    std::printf("\n=== Partitioned FDL vs non-partitioned multi_convolve "
-                "(block=%zu, num_ir=8) ===\n", kBlock);
-    std::printf("real-time budget: %.1f us/block\n", kBudgetUs);
-    std::printf("%-8s %-8s %-8s %14s %14s %10s\n",
-                "IR(s)", "n_full", "n_fdl", "full us/blk", "fdl us/blk", "speedup");
-    constexpr uint32_t NUM_IR = 8, BLK = static_cast<uint32_t>(kBlock), N_FDL = 2 * BLK;
-    constexpr int ITERS = 60, WARM = 12;
+    constexpr uint32_t BLK = static_cast<uint32_t>(kBlock), N_FDL = 2 * BLK;
+    constexpr double SECS = 1.0;
+    const uint32_t ir_len = static_cast<uint32_t>(SECS * kSR);
+    const uint32_t P = (ir_len + BLK - 1u) / BLK;
+    uint32_t n_full = 1; while (n_full < BLK + ir_len) n_full <<= 1;
 
-    for (double secs : {0.25, 0.5, 1.0, 2.0}) {
-        const uint32_t ir_len = static_cast<uint32_t>(secs * kSR);
-        uint32_t n_full = 1; while (n_full < BLK + ir_len) n_full <<= 1;
-        const uint32_t P = (ir_len + BLK - 1u) / BLK;
+    std::printf("\n=== SuperConvolver payoff: CPU vs GPU(full-FFT) vs GPU(FDL) "
+                "(1 s IR, block=%u) ===\n", BLK);
+    std::printf("real-time budget: %.1f us/block. Sweeping room count.\n", kBudgetUs);
+    std::printf("%-6s %12s %14s %12s %10s %10s\n",
+                "rooms", "CPU us/blk", "GPU full us", "GPU FDL us", "FDL/CPU", "FDL/full");
+    constexpr int ITERS = 50, WARM = 10;
 
-        std::vector<float> pl(NUM_IR, 0.5f), pr(NUM_IR, 0.5f);
-        std::vector<float> in_full(2u * n_full, 0.0f), out(2u * n_full, 0.0f);
-        for (uint32_t i = 0; i < BLK; ++i) in_full[2u * i] = 0.1f * std::sin(0.01f * i);
+    for (uint32_t N : {8u, 16u, 32u, 64u, 128u}) {
+        std::vector<std::vector<float>> irs(N);
+        for (uint32_t k = 0; k < N; ++k) irs[k] = make_reverb_ir(ir_len, 0x2000u + k * 2654435761u);
+        std::vector<float> pl, pr; make_pans(N, pl, pr);
+        auto x = noise_block(BLK, 11);
 
-        // Non-partitioned: one full-length IR spectrum per room.
+        // CPU: N partitioned convolvers, panned + summed.
+        double cpu_med = -1.0;
+        {
+            std::vector<pulp::signal::PartitionedConvolver> cpu(N);
+            for (uint32_t k = 0; k < N; ++k) cpu[k].load_ir(irs[k].data(), irs[k].size(), BLK);
+            std::vector<float> y(BLK), aL(BLK), aR(BLK);
+            std::vector<double> t;
+            for (int it = 0; it < ITERS + WARM; ++it) {
+                auto t0 = Clock::now();
+                std::fill(aL.begin(), aL.end(), 0.0f); std::fill(aR.begin(), aR.end(), 0.0f);
+                for (uint32_t k = 0; k < N; ++k) { cpu[k].process(x.data(), y.data(), BLK);
+                    for (uint32_t i = 0; i < BLK; ++i) { aL[i] += pl[k]*y[i]; aR[i] += pr[k]*y[i]; } }
+                if (it >= WARM) t.push_back(std::chrono::duration<double,std::micro>(Clock::now()-t0).count());
+            }
+            cpu_med = median_us(t);
+        }
+
+        // Non-partitioned GPU: one full-length IR spectrum per room.
         double full_med = -1.0;
         {
-            std::vector<float> ir_specs(static_cast<size_t>(2) * n_full * NUM_IR, 0.0f);
-            for (size_t i = 0; i < ir_specs.size(); ++i) ir_specs[i] = 0.005f * std::sin(0.001f * i);
-            if (gpu->prepare_multi_convolution(n_full, ir_specs.data(), NUM_IR)) {
-                for (int w = 0; w < WARM; ++w)
-                    gpu->multi_convolve(in_full.data(), pl.data(), pr.data(), out.data(), n_full, NUM_IR);
+            std::vector<float> ir_specs(static_cast<size_t>(2) * n_full * N, 0.0f);
+            for (uint32_t k = 0; k < N; ++k) {
+                std::vector<float> pad(2u * n_full, 0.0f);
+                for (uint32_t i = 0; i < ir_len && i < n_full; ++i) pad[2u*i] = irs[k][i];
+                gpu->fft_forward(pad.data(), ir_specs.data() + static_cast<size_t>(k)*n_full*2u, n_full);
+            }
+            if (gpu->prepare_multi_convolution(n_full, ir_specs.data(), N)) {
+                std::vector<float> in(2u*n_full, 0.0f), out(2u*n_full, 0.0f);
+                for (uint32_t i = 0; i < BLK; ++i) in[2u*i] = x[i];
+                for (int w = 0; w < WARM; ++w) gpu->multi_convolve(in.data(), pl.data(), pr.data(), out.data(), n_full, N);
                 std::vector<double> t;
                 for (int r = 0; r < ITERS; ++r) { auto t0 = Clock::now();
-                    gpu->multi_convolve(in_full.data(), pl.data(), pr.data(), out.data(), n_full, NUM_IR);
-                    t.push_back(std::chrono::duration<double, std::micro>(Clock::now() - t0).count()); }
+                    gpu->multi_convolve(in.data(), pl.data(), pr.data(), out.data(), n_full, N);
+                    t.push_back(std::chrono::duration<double,std::micro>(Clock::now()-t0).count()); }
                 full_med = median_us(t);
             }
         }
 
-        // Partitioned FDL: n = 2*block, P partition spectra per room.
+        // Partitioned FDL: block-size FFT, P partition spectra per room.
         double fdl_med = -1.0;
         {
-            std::vector<float> part_specs(static_cast<size_t>(2) * N_FDL * NUM_IR * P, 0.0f);
-            for (size_t i = 0; i < part_specs.size(); ++i) part_specs[i] = 0.005f * std::sin(0.0013f * i);
-            std::vector<float> in_blk(BLK), fout(2u * BLK);
-            for (uint32_t i = 0; i < BLK; ++i) in_blk[i] = 0.1f * std::sin(0.01f * i);
-            if (gpu->prepare_multi_fdl(N_FDL, part_specs.data(), NUM_IR, P)) {
-                for (int w = 0; w < WARM; ++w)
-                    gpu->multi_fdl_convolve(in_blk.data(), pl.data(), pr.data(), fout.data(), N_FDL, NUM_IR);
+            std::vector<float> part(static_cast<size_t>(2) * N_FDL * N * P, 0.0f);
+            for (uint32_t k = 0; k < N; ++k)
+                for (uint32_t p = 0; p < P; ++p) {
+                    std::vector<float> pad(2u*N_FDL, 0.0f);
+                    const uint32_t off = p*BLK, cnt = std::min<uint32_t>(BLK, ir_len-off);
+                    for (uint32_t i = 0; i < cnt; ++i) pad[2u*i] = irs[k][off+i];
+                    gpu->fft_forward(pad.data(), part.data() + (static_cast<size_t>(k)*P+p)*N_FDL*2u, N_FDL);
+                }
+            if (gpu->prepare_multi_fdl(N_FDL, part.data(), N, P)) {
+                std::vector<float> fout(2u*BLK);
+                for (int w = 0; w < WARM; ++w) gpu->multi_fdl_convolve(x.data(), pl.data(), pr.data(), fout.data(), N_FDL, N);
                 std::vector<double> t;
                 for (int r = 0; r < ITERS; ++r) { auto t0 = Clock::now();
-                    gpu->multi_fdl_convolve(in_blk.data(), pl.data(), pr.data(), fout.data(), N_FDL, NUM_IR);
-                    t.push_back(std::chrono::duration<double, std::micro>(Clock::now() - t0).count()); }
+                    gpu->multi_fdl_convolve(x.data(), pl.data(), pr.data(), fout.data(), N_FDL, N);
+                    t.push_back(std::chrono::duration<double,std::micro>(Clock::now()-t0).count()); }
                 fdl_med = median_us(t);
             }
         }
 
-        if (full_med > 0 && fdl_med > 0)
-            std::printf("%-8.2f %-8u %-8u %14.1f %14.1f %9.2fx\n",
-                        secs, n_full, N_FDL, full_med, fdl_med, full_med / fdl_med);
-        else
-            std::printf("%-8.2f %-8u %-8u %14s %14s %10s\n", secs, n_full, N_FDL,
-                        full_med > 0 ? "" : "(fail)", fdl_med > 0 ? "" : "(fail)", "n/a");
+        auto ratio = [](double a, double b){ return (a>0&&b>0) ? b/a : -1.0; };
+        std::printf("%-6u %12.1f %14s %12s %10.2f %10.2f\n", N, cpu_med,
+                    full_med>0 ? (std::to_string((long)full_med)).c_str() : "(fail)",
+                    fdl_med>0 ? (std::to_string((long)fdl_med)).c_str() : "(fail)",
+                    ratio(cpu_med, fdl_med), ratio(full_med, fdl_med));
     }
-    std::printf("\nspeedup > 1 = the partitioned FDL beats the non-partitioned kernel.\n");
-    std::printf("This is the number that settles the SuperConvolver v1.2 KILL verdict.\n");
+    std::printf("\nFDL/CPU < 1 = the partitioned GPU beats N CPU convolvers (the KILL\n");
+    std::printf("verdict flips). FDL/full < 1 = FDL beats the non-partitioned GPU.\n");
+    std::printf("Wall-clock UNDERstates the GPU win (readback floor); the timed variant\n");
+    std::printf("gives GPU-busy. Settles SuperConvolver v1.2: audit finding #1.\n");
 }
 
 int main() {
