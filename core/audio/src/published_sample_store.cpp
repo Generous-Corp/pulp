@@ -1,4 +1,5 @@
 #include <pulp/audio/published_sample_store.hpp>
+#include <pulp/audio/sample_converter.hpp>
 
 #include <cmath>
 #include <limits>
@@ -92,13 +93,14 @@ bool PublishedSampleStore::load_interleaved_stereo(
 
     float* left = load_scratch_.data();
     float* right = load_scratch_.data() + frames;
-    for (std::size_t i = 0; i < frames; ++i) {
-        left[i] = interleaved[i * 2u];
-        right[i] = interleaved[i * 2u + 1u];
-    }
+    float* channels[] = {left, right};
+    SampleConverter converter(SampleFormat::Float32,
+                              Endianness::Native,
+                              Layout::Interleaved);
+    converter.to_float(interleaved, channels, frames, 2);
 
-    const float* channels[] = {left, right};
-    BufferView<const float> view(channels, 2, frames);
+    const float* const_channels[] = {left, right};
+    BufferView<const float> view(const_channels, 2, frames);
     return publish_locked(view, frame_count, sample_rate, audio_safe_generation);
 }
 

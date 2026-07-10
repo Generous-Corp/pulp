@@ -24,8 +24,12 @@ static constexpr int kMaxChannels = 8;
 
 // LV2 plugin instance — wraps a Pulp Processor
 struct PulpLv2Instance {
-    std::unique_ptr<Processor> processor;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
+    std::unique_ptr<Processor> processor;
     // Param-events sidecar, set on the Processor each run() so the contract is
     // uniform across formats. LV2 control-port values are applied through
     // `store` as before; this queue carries no events yet (atom-based

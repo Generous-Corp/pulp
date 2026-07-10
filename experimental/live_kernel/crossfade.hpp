@@ -17,6 +17,45 @@
 
 namespace pulp::live_kernel {
 
+// Equal-power old->new crossfade of one audio block.
+//
+// The fade angle theta = clamp(t,0,1) * (pi/2) advances by a CONSTANT step per
+// sample (t = (fade_pos + i) / fade_len), so instead of calling cos/sin every
+// sample we seed cos/sin once from the absolute block-start angle and rotate
+// them forward with the standard angle-addition recurrence. Samples at or past
+// the fade end clamp to (cos(pi/2), sin(pi/2)) exactly as the direct t-clamp
+// did. The recurrence is re-seeded from a fresh cos/sin at every block start
+// (fade_pos advances per block), so drift is bounded by at most LK_MAX_BLOCK
+// (128) rotation steps in double precision — well below float resolution.
+// Numerically equivalent to the previous per-sample cos/sin evaluation; the
+// bound is proven by test_live_kernel_crossfade_null.
+inline void equal_power_fade_block(float* dst, const float* ob, const float* nb,
+                                    int n, int fade_pos, int fade_len) noexcept {
+    constexpr double kHalfPi = 1.57079632679489661923;
+    const double dtheta = (1.0 / static_cast<double>(fade_len)) * kHalfPi;
+    double c = std::cos(static_cast<double>(fade_pos) * dtheta);
+    double s = std::sin(static_cast<double>(fade_pos) * dtheta);
+    const double cd = std::cos(dtheta);
+    const double sd = std::sin(dtheta);
+    const float go_end = static_cast<float>(std::cos(kHalfPi));
+    const float gn_end = static_cast<float>(std::sin(kHalfPi));
+    for (int i = 0; i < n; ++i) {
+        float go, gn;
+        if (fade_pos + i >= fade_len) {
+            go = go_end;
+            gn = gn_end;
+        } else {
+            go = static_cast<float>(c);
+            gn = static_cast<float>(s);
+        }
+        dst[i] = ob[i] * go + nb[i] * gn;
+        const double cn = c * cd - s * sd;
+        const double sn = s * cd + c * sd;
+        c = cn;
+        s = sn;
+    }
+}
+
 class Kernel {
 public:
     void init(double sample_rate, int /*max_block*/) {
@@ -98,14 +137,7 @@ public:
         Plan& newp = plan_[active_ ^ 1];
         const float* ob = render_block(oldp, n, meter_);
         const float* nb = render_block(newp, n, meter_);
-        const double inv = 1.0 / (double)fade_len_;
-        for (int i = 0; i < n; ++i) {
-            double t = (double)(fade_pos_ + i) * inv;
-            if (t > 1.0) t = 1.0;
-            const float go = (float)std::cos(t * kHalfPi);
-            const float gn = (float)std::sin(t * kHalfPi);
-            dst[i] = ob[i] * go + nb[i] * gn;
-        }
+        equal_power_fade_block(dst, ob, nb, n, fade_pos_, fade_len_);
         fade_pos_ += n;
         if (fade_pos_ >= fade_len_) { active_ ^= 1; fading_ = false; }
     }
@@ -113,7 +145,6 @@ public:
     double sample_rate() const { return sr_; }
 
 private:
-    static constexpr double kHalfPi = 1.57079632679489661923;
     Plan   plan_[2];
     PlanDesc desc_;
     double sr_ = 48000.0;

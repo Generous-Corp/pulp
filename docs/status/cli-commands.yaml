@@ -788,7 +788,7 @@ commands:
 
   - name: minos
     status: experimental
-    summary: Minimum-OS tooling. Reports the lowest OS a build needs, derived from the artifact itself (the MAX minimum among everything linked in). `measure` reads one binary; `sweep` rebuilds every downstream consumer against one installed SDK and compares each project's floor to the SDK floor. Wraps `tools/scripts/measure_min_os.py` and `tools/scripts/sdk_consumer_sweep.py`.
+    summary: Minimum-OS tooling. Reports the lowest OS a build needs, derived from the artifact itself (the MAX minimum among everything linked in). `measure` reads one binary; `sweep` rebuilds every downstream consumer against one installed SDK and compares each project's floor to the SDK floor; `update` bumps every consumer's SDK pin; `publish-runbook` prints the republish steps. Wraps `tools/scripts/measure_min_os.py`, `tools/scripts/sdk_consumer_sweep.py`, and `tools/scripts/sdk_consumer_update.py`.
     subcommands:
       - name: measure
         summary: Report the minimum OS one built binary needs (macOS deployment target / Linux glibc symbol version / Windows PE subsystem).
@@ -803,6 +803,18 @@ commands:
           - name: sweep-args
             kind: passthrough
             description: Forwarded to sdk_consumer_sweep.py (e.g. --sdk-prefix <path>, --only <repo>, --dry-run, --json <path>).
+      - name: update
+        summary: Rewrite every buildable consumer's SDK pin to a new version. Dry-run by default; pass --open-prs to clone, edit, branch, commit, push, and open a PR per repo.
+        args:
+          - name: update-args
+            kind: passthrough
+            description: Forwarded to sdk_consumer_update.py update (requires --to <version>; optional --only <repo>, --open-prs, --workdir <path>).
+      - name: publish-runbook
+        summary: Print the rebuild + package + publish steps for the packaged demos. Prints only — it never builds, signs, or touches a release.
+        args:
+          - name: runbook-args
+            kind: passthrough
+            description: Forwarded to sdk_consumer_update.py publish-runbook (optional --to <version>, --only <repo>).
     docs: reference/cli.md#minos
 
   - name: design

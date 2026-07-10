@@ -34,6 +34,10 @@ void print_minos_usage() {
     std::cout << "                     installed SDK and report each project's floor vs\n";
     std::cout << "                     the SDK floor. Args pass through to the sweep\n";
     std::cout << "                     (e.g. --sdk-prefix <path> --only <repo> --dry-run).\n";
+    std::cout << "  update --to <ver>  Bump every consumer's SDK pin to <ver>. Dry-run by\n";
+    std::cout << "                     default; add --open-prs to open the update PRs.\n";
+    std::cout << "  publish-runbook    Print the rebuild + package + publish steps for the\n";
+    std::cout << "                     packaged demos (prints only; runs nothing).\n";
     std::cout << "\nThe floor of any binary is the MAX minimum among everything linked\n";
     std::cout << "into it — the SDK's own libraries, the C++ runtime, and a plugin's\n";
     std::cout << "own code. See docs/guides/minimum-os-support.md.\n";
@@ -81,6 +85,14 @@ int cmd_minos(const std::vector<std::string>& args) {
 
     if (sub == "sweep") {
         return run_script(root, "sdk_consumer_sweep.py", rest);
+    }
+
+    // `update` and `publish-runbook` are subcommands OF sdk_consumer_update.py,
+    // so forward the subcommand name plus the rest to the script.
+    if (sub == "update" || sub == "publish-runbook") {
+        std::vector<std::string> forwarded{sub};
+        forwarded.insert(forwarded.end(), rest.begin(), rest.end());
+        return run_script(root, "sdk_consumer_update.py", forwarded);
     }
 
     std::cerr << "Error: unknown `pulp minos` subcommand: " << sub << "\n\n";

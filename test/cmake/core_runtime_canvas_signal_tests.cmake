@@ -162,6 +162,11 @@ pulp_add_test_suite(pulp-test-fft-backends LIBRARIES pulp::signal-fft-backend)
 pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
+# PF-2 null test: live_kernel equal-power fade angle recurrence vs direct cos/sin.
+pulp_add_test_suite(pulp-test-live-kernel-crossfade-null
+    SOURCES test_live_kernel_crossfade_null.cpp
+    LIBRARIES pulp::signal
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/experimental)
 # DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
 add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
 target_link_libraries(pulp-test-dsl-processor PRIVATE

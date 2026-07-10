@@ -14,8 +14,11 @@ struct SampleVoiceRenderState {
     bool active = false;
     SamplePoolResolution sample{};
     double position_frames = 0.0;
+    double host_sample_rate = 0.0;
     double playback_rate = 1.0;
     float gain = 1.0f;
+    std::uint32_t fade_out_frames = 0;
+    std::uint32_t fade_out_position = 0;
     bool use_playback_region = false;
     LoopRegion playback_region{};
 };
@@ -60,6 +63,9 @@ public:
         std::uint64_t frames,
         std::span<const float*> channel_scratch,
         const SampleVoiceRenderOptions& options = {}) noexcept;
+
+    static void begin_fade_out(SampleVoiceRenderState& state,
+                               std::uint32_t fade_frames) noexcept;
 };
 
 }  // namespace pulp::audio

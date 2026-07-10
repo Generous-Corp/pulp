@@ -227,3 +227,16 @@ REQUIRE(comp->gain_reduction_db() > 0.0f);   // internal state, not just output
 `processor()` returns the base `Processor*`; `processor_as<T>()` is a checked
 `dynamic_cast` (null on mismatch). Lets a scene pin a regression at the source
 instead of inferring it from a downstream silence.
+
+## The StateStore must outlive the Processor
+
+`HeadlessHost` declares its `state::StateStore` before its
+`std::unique_ptr<Processor>`, so the store is destroyed *after* the Processor.
+That order is load-bearing, not incidental: `Processor::state()` dereferences a
+pointer into the host, and a Processor may follow it from its destructor and from
+any worker thread that destructor is about to `join()`.
+
+If you write a headless scene around a Processor that owns a background thread,
+this is what keeps `~Processor` from joining that thread against a freed store. It
+crashes only on teardown, only sometimes, so a scene that "passes" a hundred times
+can still be wrong. `test/test_store_lifetime.cpp` pins the ordering.

@@ -3,6 +3,8 @@
 /// @file ballistics_filter.hpp
 /// Peak/RMS envelope follower with independent attack and release curves.
 
+#include <pulp/signal/denormal.hpp>
+
 #include <cmath>
 #include <algorithm>
 
@@ -52,7 +54,9 @@ public:
     SampleType process(SampleType input) {
         SampleType value = (mode_ == Mode::rms) ? input * input : std::abs(input);
         SampleType coeff = (value > state_) ? attack_coeff_ : release_coeff_;
-        state_ = state_ + coeff * (value - state_);
+        // Snap the envelope state so a long release into silence flushes to
+        // zero instead of stalling in the denormal range. No-op above 1e-15.
+        state_ = snap_to_zero(state_ + coeff * (value - state_));
         return (mode_ == Mode::rms) ? std::sqrt(state_) : state_;
     }
 

@@ -9,16 +9,19 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
-float blend(float a, float b, double t, LoopCrossfadeCurve curve) noexcept {
+struct BlendGains {
+    double dry;
+    double wet;
+};
+
+// Old->new blend gains for a crossfade position `t`. Computes the equal-power
+// cos/sin (or the linear pair) ONCE so callers can reuse the gains across every
+// channel of a frame. Bit-identical to the previous inline `blend()` math.
+BlendGains blend_gains(double t, LoopCrossfadeCurve curve) noexcept {
     t = std::clamp(t, 0.0, 1.0);
-    if (curve == LoopCrossfadeCurve::EqualPower) {
-        const auto dry = std::cos(t * 0.5 * kPi);
-        const auto wet = std::sin(t * 0.5 * kPi);
-        return static_cast<float>(static_cast<double>(a) * dry +
-                                  static_cast<double>(b) * wet);
-    }
-    return static_cast<float>(static_cast<double>(a) * (1.0 - t) +
-                              static_cast<double>(b) * t);
+    if (curve == LoopCrossfadeCurve::EqualPower)
+        return {std::cos(t * 0.5 * kPi), std::sin(t * 0.5 * kPi)};
+    return {1.0 - t, t};
 }
 
 }  // namespace
@@ -113,24 +116,30 @@ float LoopRenderer::fade_gain() noexcept {
     return static_cast<float>(std::clamp(gain, 0.0, 1.0));
 }
 
-float LoopRenderer::sample_with_crossfade(BufferView<const float> source,
-                                          std::uint32_t output_channel,
-                                          double position,
-                                          double step,
-                                          bool& wrapped) const noexcept {
-    // The wrap-crossfade is only for the STEADY loop wrap (jump start<->end in the
-    // loop's direction). Skip it for OneShot/ReverseOnce/PingPong (PingPong
-    // reflects, so it is already continuous), when disabled, and during a
-    // MISMATCHED first pass (step_dir_ != the loop's steady dir) — there the first
-    // pass turns around by reflection, not a wrap, so a crossfade toward the wrap
-    // target would be wrong.
+// Decide the wrap-crossfade for one frame (channel-independent). Computes the
+// blend gains (equal-power cos/sin) once here; apply_crossfade_plan() then reuses
+// them for every channel. Extracted verbatim from the old per-channel
+// sample_with_crossfade — same branches, same positions, same t — so output is
+// bit-identical, only with the transcendentals hoisted out of the channel loop.
+//
+// The wrap-crossfade is only for the STEADY loop wrap (jump start<->end in the
+// loop's direction). Skip it for OneShot/ReverseOnce/PingPong (PingPong
+// reflects, so it is already continuous), when disabled, and during a
+// MISMATCHED first pass (step_dir_ != the loop's steady dir) — there the first
+// pass turns around by reflection, not a wrap, so a crossfade toward the wrap
+// target would be wrong.
+LoopRenderer::CrossfadePlan LoopRenderer::compute_crossfade_plan(
+    double position, double step) const noexcept {
+    CrossfadePlan plan;
+
     const int loop_dir = (region_.playback_mode == LoopPlaybackMode::Reverse) ? -1 : 1;
     if (region_.playback_mode == LoopPlaybackMode::OneShot ||
         region_.playback_mode == LoopPlaybackMode::ReverseOnce ||
         region_.playback_mode == LoopPlaybackMode::PingPong ||
         region_.crossfade_frames == 0 ||
         step_dir_ != loop_dir) {
-        return LoopReader::read_validated(source, region_, output_channel, position);
+        plan.read_pos = position;
+        return plan;
     }
 
     const auto crossfade = static_cast<double>(region_.crossfade_frames);
@@ -138,51 +147,60 @@ float LoopRenderer::sample_with_crossfade(BufferView<const float> source,
     const auto end = static_cast<double>(region_.end_frame);
     const auto normalized = LoopReader::normalize_position(region_, position);
 
+    auto make_blend = [&](double t, double wrapped_position) {
+        const auto gains = blend_gains(t, region_.crossfade_curve);
+        plan.blend = true;
+        plan.wrapped = true;
+        plan.read_pos = normalized;
+        plan.blend_pos = wrapped_position;
+        plan.primary_gain = gains.dry;
+        plan.blend_gain = gains.wet;
+    };
+
     if (step >= 0.0 && normalized >= end - crossfade) {
-        const auto t = (normalized - (end - crossfade)) / crossfade;
-        const auto wrapped_position = start + (normalized - (end - crossfade));
-        wrapped = true;
-        return blend(LoopReader::read_validated(source, region_, output_channel, normalized),
-                     LoopReader::read_validated(source, region_, output_channel, wrapped_position),
-                     t,
-                     region_.crossfade_curve);
+        make_blend((normalized - (end - crossfade)) / crossfade,
+                   start + (normalized - (end - crossfade)));
+        return plan;
     }
 
     if (step > 0.0 && normalized < end - crossfade &&
         normalized + step >= end - crossfade) {
         const auto probe = std::min(normalized + step, end);
-        const auto t = (probe - (end - crossfade)) / crossfade;
-        const auto wrapped_position = start + (probe - (end - crossfade));
-        wrapped = true;
-        return blend(LoopReader::read_validated(source, region_, output_channel, normalized),
-                     LoopReader::read_validated(source, region_, output_channel, wrapped_position),
-                     t,
-                     region_.crossfade_curve);
+        make_blend((probe - (end - crossfade)) / crossfade,
+                   start + (probe - (end - crossfade)));
+        return plan;
     }
 
     if (step < 0.0 && normalized < start + crossfade) {
-        const auto t = ((start + crossfade) - normalized) / crossfade;
-        const auto wrapped_position = end - ((start + crossfade) - normalized);
-        wrapped = true;
-        return blend(LoopReader::read_validated(source, region_, output_channel, normalized),
-                     LoopReader::read_validated(source, region_, output_channel, wrapped_position),
-                     t,
-                     region_.crossfade_curve);
+        make_blend(((start + crossfade) - normalized) / crossfade,
+                   end - ((start + crossfade) - normalized));
+        return plan;
     }
 
     if (step < 0.0 && normalized >= start + crossfade &&
         normalized + step < start + crossfade) {
         const auto probe = std::max(normalized + step, start);
-        const auto t = ((start + crossfade) - probe) / crossfade;
-        const auto wrapped_position = end - ((start + crossfade) - probe);
-        wrapped = true;
-        return blend(LoopReader::read_validated(source, region_, output_channel, normalized),
-                     LoopReader::read_validated(source, region_, output_channel, wrapped_position),
-                     t,
-                     region_.crossfade_curve);
+        make_blend(((start + crossfade) - probe) / crossfade,
+                   end - ((start + crossfade) - probe));
+        return plan;
     }
 
-    return LoopReader::read_validated(source, region_, output_channel, normalized);
+    plan.read_pos = normalized;
+    return plan;
+}
+
+float LoopRenderer::apply_crossfade_plan(BufferView<const float> source,
+                                         std::uint32_t output_channel,
+                                         const CrossfadePlan& plan) const noexcept {
+    if (!plan.blend) {
+        return LoopReader::read_validated(source, region_, output_channel,
+                                          plan.read_pos);
+    }
+    const auto a = static_cast<double>(
+        LoopReader::read_validated(source, region_, output_channel, plan.read_pos));
+    const auto b = static_cast<double>(
+        LoopReader::read_validated(source, region_, output_channel, plan.blend_pos));
+    return static_cast<float>(a * plan.primary_gain + b * plan.blend_gain);
 }
 
 double LoopRenderer::advance_position(double position, double step, bool& wrapped) noexcept {
@@ -261,16 +279,21 @@ LoopRenderResult LoopRenderer::render(BufferView<const float> source,
         const bool should_advance = active_ && valid_source;
         const auto gain = should_advance ? fade_gain() : 0.0f;
         bool sample_wrapped = false;
+        // Compute the wrap-crossfade plan ONCE per frame (channel-independent),
+        // so the equal-power cos/sin runs once instead of once per channel.
+        CrossfadePlan plan;
+        if (gain != 0.0f) {
+            plan = compute_crossfade_plan(position_, step);
+            sample_wrapped = plan.wrapped;
+        }
         for (std::size_t ch = 0; ch < destination.num_channels(); ++ch) {
             float* channel = destination.channel_ptr(ch);
             const auto sample =
                 gain == 0.0f
                     ? 0.0f
-                    : sample_with_crossfade(source,
-                                            static_cast<std::uint32_t>(ch),
-                                            position_,
-                                            step,
-                                            sample_wrapped) * gain;
+                    : apply_crossfade_plan(source,
+                                           static_cast<std::uint32_t>(ch),
+                                           plan) * gain;
             channel[i] = sample;
             if (i > 0) {
                 result.max_sample_delta =

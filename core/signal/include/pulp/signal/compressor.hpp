@@ -2,6 +2,7 @@
 
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/denormal.hpp>
 
 #include <cmath>
 #include <algorithm>
@@ -98,7 +99,10 @@ public:
         const SampleType coeff = (gain_db < envelope_db_)
             ? attack_coeff()
             : release_coeff();
-        envelope_db_ = envelope_db_ + coeff * (gain_db - envelope_db_);
+        // Snap the recursive gain-reduction envelope: when the signal sits above
+        // threshold it settles toward 0 dB and otherwise stalls in denormals
+        // with no FTZ guard. No-op above 1e-15.
+        envelope_db_ = snap_to_zero(envelope_db_ + coeff * (gain_db - envelope_db_));
 
         const SampleType gain_linear =
             std::pow(SampleType{10.0f},
@@ -236,7 +240,10 @@ public:
             SampleType coeff = SampleType{1.0f} -
                 std::exp(SampleType{-1.0f} /
                          (release_ms_ * SampleType{0.001f} * sample_rate_));
-            envelope_ += coeff * (abs_input - envelope_);
+            // Snap the release envelope so a decay into silence flushes to zero
+            // instead of stalling in denormals with no FTZ guard. No-op above
+            // 1e-15.
+            envelope_ = snap_to_zero(envelope_ + coeff * (abs_input - envelope_));
         }
 
         // Compute gain
