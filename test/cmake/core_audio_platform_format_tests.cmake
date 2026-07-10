@@ -163,6 +163,15 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-store-lifetime PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-store-lifetime)
 
+    # An in-place host can hand the adapter an output buffer still carrying the
+    # constant_mask of the input it aliases. Pin that the adapter clears it, so a
+    # varying (CV-rate) output is never read back as one held sample. Link-only
+    # against pulp::format, keeping the diff-cover TU attribution single.
+    add_executable(pulp-test-clap-constant-mask test_clap_constant_mask.cpp)
+    target_link_libraries(pulp-test-clap-constant-mask PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-constant-mask PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-constant-mask)
+
     # Empirical proof the CLAP adapter respects clamp_latency_to_nonneg
     # end-to-end (negative latency → 0 when the
     # quirk is enforced, raw-wrapped when PULP_HOST_QUIRKS=off). Drives the
