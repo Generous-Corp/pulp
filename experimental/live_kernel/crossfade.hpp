@@ -21,8 +21,8 @@ class Kernel {
 public:
     void init(double sample_rate, int /*max_block*/) {
         sr_ = sample_rate;
-        plan_[0].prepare_pool();
-        plan_[1].prepare_pool();
+        plan_[0].prepare_pool(sr_);
+        plan_[1].prepare_pool(sr_);
         active_ = 0;
         fading_ = false;
         plan_[0].valid = false;
@@ -67,21 +67,37 @@ public:
     bool is_fading() const { return fading_; }
     bool active_valid() const { return plan_[active_].valid; }
 
+    // Enable/disable the per-node level tap. Off = measurement mode (CPU numbers
+    // free of the meter cost, design §1.5); the worklet leaves it on.
+    void set_meter(bool on) { meter_ = on; }
+
+    // Copy the current graph's per-node output RMS into dst (alloc-free readout
+    // for the signal-flow graph). While a structural fade is in flight the
+    // INCOMING plan is reported — it matches the topology the editor already
+    // drew. Returns the node count written (0 if no valid plan).
+    int node_levels(float* dst, int max) const {
+        const Plan& p = fading_ ? plan_[active_ ^ 1] : plan_[active_];
+        if (!p.valid) return 0;
+        int count = p.num_nodes < max ? p.num_nodes : max;
+        for (int i = 0; i < count; ++i) dst[i] = std::sqrt(p.node_rms[i]); // mean-square → RMS
+        return count;
+    }
+
     // Render one block of mono audio into dst. Zero-alloc.
     void process(float* dst, int n) {
         if (n > LK_MAX_BLOCK) n = LK_MAX_BLOCK;
         if (!plan_[active_].valid) { for (int i = 0; i < n; ++i) dst[i] = 0.f; return; }
 
         if (!fading_) {
-            const float* a = render_block(plan_[active_], n);
+            const float* a = render_block(plan_[active_], n, meter_);
             for (int i = 0; i < n; ++i) dst[i] = a[i];
             return;
         }
 
         Plan& oldp = plan_[active_];
         Plan& newp = plan_[active_ ^ 1];
-        const float* ob = render_block(oldp, n);
-        const float* nb = render_block(newp, n);
+        const float* ob = render_block(oldp, n, meter_);
+        const float* nb = render_block(newp, n, meter_);
         const double inv = 1.0 / (double)fade_len_;
         for (int i = 0; i < n; ++i) {
             double t = (double)(fade_pos_ + i) * inv;
@@ -103,6 +119,7 @@ private:
     double sr_ = 48000.0;
     int    active_ = 0;
     bool   fading_ = false;
+    bool   meter_ = true;
     int    fade_len_ = 1;
     int    fade_pos_ = 0;
 };

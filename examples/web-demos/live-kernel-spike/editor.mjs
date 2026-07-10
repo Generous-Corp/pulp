@@ -5,13 +5,13 @@
 // and the filter sweeps under your finger — the edit re-parses, diffs against the
 // running graph, and lands as a set_param on the resident kernel in ~3 ms, with a
 // badge proving it. Value edits are instant (set_param); structural edits (new
-// node, saw→sine) crossfade click-free on idle. All inside ONE ~39 KB single-
+// node, saw→sine) crossfade click-free on idle. All inside ONE ~48 KB single-
 // thread wasm worklet — no server, no COOP/COEP, no copyleft.
 //
 // Paths are RELATIVE so this runs identically under the repo-root dev server and
 // as a FLAT static deploy (GitHub Pages / Cloudflare Pages, no headers).
 
-import { parsePatch, encodeLKB0, diffGraphs, PARAM_META, VERBS, convertUnit, EXAMPLES } from "./lk-dsl.mjs";
+import { parsePatch, encodeLKB0, diffGraphs, PARAM_META, VERBS, convertUnit, EXAMPLES, T } from "./lk-dsl.mjs";
 
 const WASM_URL = "./dist/lk_kernel.wasm";
 const WORKLET_URL = "./lk-worklet.js";
@@ -28,9 +28,11 @@ const state = {
   hasSAB: (typeof SharedArrayBuffer !== "undefined"),
   lastMeter: null, lastLatencyMs: null, lastKind: null, lastParseMs: null,
   parseOk: true, parseErrors: [], patchBytes: 0, kernelBytes: 0,
-  latencies: [], hist: [],
+  latencies: [], hist: [], levels: [],
 };
 window.__lkm = state;
+let graphView = null;        // laid-out signal-flow graph of the current patch
+let graphHoverLine = -1;     // editor line highlighted from a node hover
 
 let ctx, node, analyser, tdBuf;
 let lastApplied = null;      // graph currently in the kernel
@@ -60,6 +62,7 @@ function applyEdit(force) {
   const blob = encodeLKB0(g);
   state.patchBytes = blob.length;
   renderBytes(blob, g);
+  graphView = buildGraphView(g);
 
   if (!lastApplied) { hardLoad(g, blob); paintReceipts(); return { kind: "load", editId: null }; }
   const d = diffGraphs(lastApplied, g);
@@ -368,9 +371,10 @@ async function boot() {
     node.connect(ctx.destination); node.connect(analyser);
     node.port.onmessage = (e) => {
       const m = e.data;
-      if (m.type === "ready") { applyEdit(true); state.ready = true; setLatch(true); drawScope(); }
-      else if (m.type === "meter") { state.lastMeter = m; if (uptimeT0 == null) uptimeT0 = m.currentTime; paintReceipts(); const st = $("status"); if (st) st.textContent = `${(m.peak || 0).toFixed(3)} peak · ${m.fading ? "fading" : "live"}`; }
+      if (m.type === "ready") { applyEdit(true); state.ready = true; setLatch(true); drawScope(); drawGraph(); }
+      else if (m.type === "meter") { state.lastMeter = m; if (m.levels) state.levels = m.levels; if (uptimeT0 == null) uptimeT0 = m.currentTime; paintReceipts(); const st = $("status"); if (st) st.textContent = `${(m.peak || 0).toFixed(3)} peak · ${m.fading ? "fading" : "live"}`; }
       else if (m.type === "applied") onApplied(m);
+      else if (m.type === "allocProbe") { const r = allocProbes.get(m.id); if (r) { allocProbes.delete(m.id); r(m.count); } }
       else if (m.type === "error") { state.error = m.message; console.error("worklet:", m.message); }
     };
     const bytes = await (await fetch(WASM_URL)).arrayBuffer();
@@ -390,6 +394,142 @@ function drawScope() {
     g.stroke();
   };
   draw();
+}
+
+// ── live signal-flow graph ───────────────────────────────────────────────────
+// The graph IS the parsed IR — the same node/edge tables that lower to the LKB0
+// blob the kernel runs. Each node glows with its live per-node RMS (the kernel's
+// alloc-free tap, posted ~20 Hz on the meter channel), so you watch the envelope
+// pump the VCA and the signal march down the chain. Hovering a node highlights
+// its source line — text and graph are visibly the same object.
+const NODE_COLOR = (type) => {
+  if (type === T.OSC || type === T.NOISE) return [167, 139, 250];   // source — purple
+  if (type === T.BIQUAD || type === T.LADDER || type === T.SVF) return [79, 209, 197]; // filter — teal
+  if (type === T.SHAPER || type === T.COMP || type === T.DCBLOCK) return [240, 180, 41]; // shape/dyn — amber
+  if (type === T.DELAY || type === T.CHORUS || type === T.REVERB) return [247, 120, 186]; // time fx — pink
+  if (type === T.ADSR) return [63, 185, 80];                        // envelope — green
+  return [122, 162, 247];                                           // gain/mixer — blue
+};
+
+// Longest-path layering over non-feedback edges → left-to-right columns.
+function buildGraphView(g) {
+  const N = g.nodes.length;
+  const layer = new Array(N).fill(0);
+  for (let pass = 0; pass < N + 1; pass++) {
+    let changed = false;
+    for (const e of g.edges) { if (e.fb) continue; if (layer[e.dst] < layer[e.src] + 1) { layer[e.dst] = layer[e.src] + 1; changed = true; } }
+    if (!changed) break;
+  }
+  const maxLayer = N ? Math.max(...layer) : 0;
+  const cols = Array.from({ length: maxLayer + 1 }, () => []);
+  for (let i = 0; i < N; i++) cols[layer[i]].push(i);
+  return { nodes: g.nodes, edges: g.edges, output: g.output, layer, cols, boxes: [] };
+}
+
+function drawGraph() {
+  const cv = $("graph"); if (!cv) return;
+  const ctx2 = cv.getContext("2d");
+  const roundRect = (c, x, y, w, h, r) => { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); };
+  const loop = () => {
+    requestAnimationFrame(loop);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cw = cv.clientWidth || 560, ch = cv.clientHeight || 238;
+    if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
+    ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx2.clearRect(0, 0, cw, ch);
+    const gv = graphView; if (!gv || !gv.nodes.length) return;
+    const lv = state.levels || [];
+    const bright = (i) => Math.min(1, Math.sqrt(Math.max(0, lv[i] || 0)) * 1.7);
+
+    // positions
+    const padX = 18, padY = 16;
+    const nCols = gv.cols.length;
+    const colW = (cw - padX * 2) / Math.max(1, nCols);
+    const boxes = new Array(gv.nodes.length);
+    const bw = Math.max(46, Math.min(colW - 12, 104));
+    const bh = 30;
+    for (let c = 0; c < nCols; c++) {
+      const rows = gv.cols[c].length;
+      const rowH = (ch - padY * 2) / rows;
+      for (let r = 0; r < rows; r++) {
+        const idx = gv.cols[c][r];
+        const cx = padX + c * colW + colW * 0.5;
+        const cy = padY + (r + 0.5) * rowH;
+        boxes[idx] = { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh, cx, cy };
+      }
+    }
+    gv.boxes = boxes;
+
+    // edges first (behind nodes)
+    for (const e of gv.edges) {
+      const a = boxes[e.src], b = boxes[e.dst]; if (!a || !b) continue;
+      const bl = bright(e.src);
+      const x0 = a.x + a.w, y0 = a.cy, x1 = b.x, y1 = b.cy;
+      ctx2.save();
+      if (e.fb) { // feedback cable — dashed pink, bows outward
+        ctx2.strokeStyle = `rgba(247,120,186,${0.35 + 0.5 * bl})`;
+        ctx2.setLineDash([4, 3]); ctx2.lineWidth = 1.4;
+        ctx2.beginPath(); ctx2.moveTo(x0, y0);
+        ctx2.bezierCurveTo(x0 + 26, y0 - 34, x1 - 26, y1 - 34, x1, y1); ctx2.stroke();
+      } else {
+        ctx2.strokeStyle = `rgba(120,150,175,${0.22 + 0.62 * bl})`;
+        ctx2.lineWidth = 1 + 2.4 * bl;
+        ctx2.shadowColor = "rgba(79,209,197,0.6)"; ctx2.shadowBlur = 8 * bl;
+        const mx = (x0 + x1) / 2;
+        ctx2.beginPath(); ctx2.moveTo(x0, y0);
+        ctx2.bezierCurveTo(mx, y0, mx, y1, x1, y1); ctx2.stroke();
+      }
+      ctx2.restore();
+    }
+
+    // nodes
+    ctx2.textAlign = "center"; ctx2.textBaseline = "middle";
+    for (let i = 0; i < gv.nodes.length; i++) {
+      const bx = boxes[i]; if (!bx) continue;
+      const n = gv.nodes[i];
+      const [cr, cg, cb] = NODE_COLOR(n.type);
+      const bl = bright(i);
+      const isOut = i === gv.output;
+      const hov = graphHoverLine >= 0 && n.line === graphHoverLine;
+      ctx2.save();
+      // fill
+      roundRect(ctx2, bx.x, bx.y, bx.w, bx.h, 7);
+      ctx2.fillStyle = `rgba(${cr},${cg},${cb},${0.08 + 0.28 * bl})`;
+      ctx2.shadowColor = `rgba(${cr},${cg},${cb},0.75)`; ctx2.shadowBlur = 2 + 16 * bl;
+      ctx2.fill();
+      ctx2.shadowBlur = 0;
+      // border
+      roundRect(ctx2, bx.x, bx.y, bx.w, bx.h, 7);
+      ctx2.lineWidth = hov ? 2.2 : (isOut ? 1.8 : 1.2);
+      ctx2.strokeStyle = hov ? "#e7eef6" : `rgba(${cr},${cg},${cb},${0.5 + 0.5 * bl})`;
+      ctx2.stroke();
+      // label
+      ctx2.fillStyle = `rgba(231,238,246,${0.66 + 0.34 * Math.max(bl, hov ? 1 : 0)})`;
+      ctx2.font = "600 12px ui-monospace, Menlo, monospace";
+      const label = (n.verb || "?") + (isOut ? " ▶" : "");
+      ctx2.fillText(label, bx.cx, bx.cy - 3, bx.w - 8);
+      // level micro-bar
+      const bwi = (bx.w - 12) * bl;
+      ctx2.fillStyle = `rgba(${cr},${cg},${cb},0.9)`;
+      ctx2.fillRect(bx.x + 6, bx.y + bx.h - 6, bwi, 2.5);
+      ctx2.restore();
+    }
+  };
+  loop();
+}
+
+function graphNodeAt(cssX, cssY) {
+  if (!graphView || !graphView.boxes) return -1;
+  const b = graphView.boxes;
+  for (let i = 0; i < b.length; i++) { const bx = b[i]; if (bx && cssX >= bx.x && cssX <= bx.x + bx.w && cssY >= bx.y && cssY <= bx.y + bx.h) return i; }
+  return -1;
+}
+function setGraphHover(line) {
+  if (line === graphHoverLine) return;
+  graphHoverLine = line;
+  const ov = $("overlay"); if (!ov) return;
+  ov.querySelectorAll(".ln.nodehi").forEach((el) => el.classList.remove("nodehi"));
+  if (line >= 1) { const ln = ov.children[line - 1]; if (ln) ln.classList.add("nodehi"); }
 }
 
 // ── headless-test API ────────────────────────────────────────────────────────
@@ -419,6 +559,16 @@ function waitApplied(id, kind, resolve) {
 }
 state.latch = (on) => { resume(); setLatch(!!on); };
 state.riff = (on) => setRiff(!!on);
+// zero-alloc probe: round-trips lk_alloc_count() from the render thread.
+const allocProbes = new Map();
+let allocProbeSeq = 0;
+state.allocCount = () => new Promise((resolve) => {
+  const id = ++allocProbeSeq; allocProbes.set(id, resolve);
+  post({ type: "allocProbe", id });
+  setTimeout(() => { if (allocProbes.has(id)) { allocProbes.delete(id); resolve(-1); } }, 1000);
+});
+// live per-node RMS of the running graph (signal-flow graph readout).
+state.nodeLevels = () => state.levels.slice();
 state.noteOn = noteOn; state.noteOff = noteOff;
 state.peak = () => { if (!analyser) return 0; analyser.getFloatTimeDomainData(tdBuf); let p = 0; for (const v of tdBuf) { const a = v < 0 ? -v : v; if (a > p) p = a; } return p; };
 state.captureClick = async (ms) => {
@@ -484,6 +634,18 @@ function init() {
     document.querySelectorAll(".pane").forEach((x) => x.classList.remove("on"));
     t.classList.add("on"); $("pane-" + t.dataset.tab)?.classList.add("on");
   }));
+
+  // signal-flow graph: hover a node to spotlight its source line
+  const gcv = $("graph");
+  if (gcv) {
+    gcv.addEventListener("pointermove", (e) => {
+      const r = gcv.getBoundingClientRect();
+      const idx = graphNodeAt(e.clientX - r.left, e.clientY - r.top);
+      gcv.style.cursor = idx >= 0 ? "pointer" : "default";
+      setGraphHover(idx >= 0 && graphView ? graphView.nodes[idx].line : -1);
+    });
+    gcv.addEventListener("pointerleave", () => setGraphHover(-1));
+  }
 
   // computer keyboard
   window.addEventListener("keydown", (e) => {

@@ -55,6 +55,7 @@ function loadBlob(k, patch) {
 const K = makeInstance("dist/lk_kernel.wasm");
 const A = makeInstance("dist/aot_twin.wasm");
 K.exports.lk_init(SR, BLOCK);
+K.exports.lk_set_meter(0); // measurement mode: exclude the signal-flow level tap (design §1.5)
 A.exports.aot_init(SR);
 const kOut = K.exports.malloc(BLOCK * 4);
 const aOut = A.exports.malloc(BLOCK * 4);

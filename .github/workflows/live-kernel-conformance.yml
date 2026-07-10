@@ -1,0 +1,70 @@
+# Live Kernel — per-node conformance + RT-safety gate.
+#
+# The resident-worklet "live kernel" interprets a bounded graph blob by running
+# the REAL core/signal C++ node classes. As the node vocabulary grows (6 -> 14
+# and beyond), this workflow keeps it honest: it builds the kernel + its
+# hand-fused AOT twin (emsdk, pinned) and proves, headlessly in Node's V8 wasm
+# engine, that
+#   * every node type is BIT-EXACT to its AOT twin through the full
+#     DSL -> encode -> decode -> executor path (conformance.mjs, maxAbsDiff = 0),
+#   * the S0 RT-safety gates still hold — null test, CPU ratio, zero-alloc,
+#     plan-build budget, click-free crossfade (measure.mjs).
+#
+# Additive only: does not touch the wam_* ABI or the WebCLAP deploy workflow.
+name: Live Kernel Conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "experimental/live_kernel/**"
+      - "examples/web-demos/live-kernel-spike/**"
+      - "core/signal/include/pulp/signal/**"
+      - ".github/workflows/live-kernel-conformance.yml"
+  pull_request:
+    paths:
+      - "experimental/live_kernel/**"
+      - "examples/web-demos/live-kernel-spike/**"
+      - "core/signal/include/pulp/signal/**"
+      - ".github/workflows/live-kernel-conformance.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: live-kernel-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: Build + per-node null test + RT-safety gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up emsdk (pinned 6.0.2)
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+          actions-cache-folder: "emsdk-cache-602"
+
+      - name: Build lk_kernel.wasm + aot_twin.wasm
+        run: bash examples/web-demos/live-kernel-spike/build.sh
+
+      - name: Per-node conformance (bit-exact null test, all 14 node types)
+        working-directory: examples/web-demos/live-kernel-spike
+        run: node conformance.mjs
+
+      - name: RT-safety gates (null / CPU / zero-alloc / plan-build / click-free)
+        working-directory: examples/web-demos/live-kernel-spike
+        run: |
+          set -euo pipefail
+          out="$(node measure.mjs)"
+          echo "$out"
+          # Fail the job if any measured gate reports FAIL.
+          if echo "$out" | grep -q "FAIL"; then
+            echo "::error::a live-kernel RT-safety gate FAILed"
+            exit 1
+          fi

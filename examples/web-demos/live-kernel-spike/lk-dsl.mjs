@@ -26,9 +26,13 @@
 // then encodes to the LKB0 blob (codec.hpp). DOM-free: runs in the browser
 // editor AND in the headless test.
 
-export const T = { OSC: 0, GAIN: 1, BIQUAD: 2, LADDER: 3, ADSR: 4, DELAY: 5, MIXER: 6 };
+export const T = {
+  OSC: 0, GAIN: 1, BIQUAD: 2, LADDER: 3, ADSR: 4, DELAY: 5, MIXER: 6,
+  // iteration 2 — node-breadth expansion (6 → 14 wire types)
+  SVF: 7, SHAPER: 8, DCBLOCK: 9, NOISE: 10, CHORUS: 11, REVERB: 12, COMP: 13,
+};
 
-// verb → kernel node (+ any param the verb bakes in: waveform / filter type).
+// verb → kernel node (+ any param the verb bakes in: waveform / filter / curve).
 export const VERBS = {
   sine: { type: T.OSC, bake: [1, 0] }, saw: { type: T.OSC, bake: [1, 1] },
   square: { type: T.OSC, bake: [1, 2] }, tri: { type: T.OSC, bake: [1, 3] },
@@ -39,11 +43,23 @@ export const VERBS = {
   lowshelf: { type: T.BIQUAD, bake: [0, 6] }, highshelf: { type: T.BIQUAD, bake: [0, 7] },
   ladder: { type: T.LADDER }, adsr: { type: T.ADSR }, delay: { type: T.DELAY },
   mixer: { type: T.MIXER },
+  // ── iteration 2 verbs ──
+  svf: { type: T.SVF, bake: [0, 0] },              // modulation-stable state-variable LP
+  shape: { type: T.SHAPER, bake: [0, 2] },         // tanh soft-clip
+  fold: { type: T.SHAPER, bake: [0, 3] },          // wavefolder
+  clip: { type: T.SHAPER, bake: [0, 1] },          // hard clip
+  dcblock: { type: T.DCBLOCK },
+  noise: { type: T.NOISE },
+  chorus: { type: T.CHORUS }, reverb: { type: T.REVERB }, comp: { type: T.COMP },
 };
 const VERB_NAMES = Object.keys(VERBS);
 
 // audio input ports per node type.
-function audioIns(type) { return type === T.OSC ? 0 : type === T.MIXER ? 2 : 1; }
+function audioIns(type) {
+  if (type === T.OSC || type === T.NOISE) return 0;
+  if (type === T.MIXER) return 2;
+  return 1;
+}
 
 // Per-node-type param metadata: pid, natural unit (display), range + scrub scale.
 // The editor reads this to scale/clamp scrubbing and to format the number.
@@ -65,6 +81,24 @@ export const PARAM_META = {
                 feedback: { pid: 1, unit: "", min: 0, max: 0.98, scale: "lin", step: 0.004, def: 0.3 },
                 mix:  { pid: 2, unit: "", min: 0, max: 1, scale: "lin", step: 0.005, def: 0.35 } },
   [T.MIXER]:  { mix:  { pid: 0, unit: "", min: 0, max: 1, scale: "lin", step: 0.005, def: 0.5 } },
+  // ── iteration 2 node params ──
+  [T.SVF]:    { cutoff: { pid: 1, unit: "hz", min: 20, max: 18000, scale: "log", def: 1000 },
+                res:    { pid: 2, unit: "",   min: 0.1, max: 0.98, scale: "lin", step: 0.004, def: 0.707 } },
+  [T.SHAPER]: { drive: { pid: 1, unit: "", min: 0.1, max: 40, scale: "log", def: 1 } },
+  [T.DCBLOCK]:{ pole:  { pid: 0, unit: "", min: 0.9, max: 0.9999, scale: "lin", step: 0.0004, def: 0.995 } },
+  [T.NOISE]:  { amp:   { pid: 0, unit: "", min: 0, max: 1, scale: "lin", step: 0.005, def: 0.3 },
+                color: { pid: 1, unit: "", min: 0, max: 1, scale: "lin", step: 0.005, def: 0 } },
+  [T.CHORUS]: { rate:  { pid: 0, unit: "hz", min: 0.05, max: 8, scale: "log", def: 1 },
+                depth: { pid: 1, unit: "", min: 0, max: 1, scale: "lin", step: 0.005, def: 0.5 },
+                mix:   { pid: 2, unit: "", min: 0, max: 1, scale: "lin", step: 0.005, def: 0.4 },
+                delay: { pid: 3, unit: "ms", min: 0.001, max: 0.05, scale: "log", def: 0.015 } },
+  [T.REVERB]: { decay: { pid: 0, unit: "s", min: 0.1, max: 12, scale: "log", def: 2 },
+                damp:  { pid: 1, unit: "", min: 0, max: 0.99, scale: "lin", step: 0.004, def: 0.3 },
+                mix:   { pid: 2, unit: "", min: 0, max: 1, scale: "lin", step: 0.005, def: 0.3 } },
+  [T.COMP]:   { thresh:  { pid: 0, unit: "db", min: -60, max: 0, scale: "lin", step: 0.2, def: -20 },
+                ratio:   { pid: 1, unit: "", min: 1, max: 20, scale: "log", def: 4 },
+                attack:  { pid: 2, unit: "ms", min: 0.0001, max: 0.2, scale: "log", def: 0.005 },
+                release: { pid: 3, unit: "ms", min: 0.005, max: 2, scale: "log", def: 0.1 } },
 };
 
 // ── unit conversion ──────────────────────────────────────────────────────────
@@ -288,13 +322,19 @@ export function parsePatch(src) {
 }
 
 function shapeKey(n) {
+  // Topology identity for the shape-hash: node type + any verb-baked variant
+  // (oscillator waveform, biquad/svf mode, shaper curve) that changes the DSP,
+  // so e.g. saw→sine or shape→fold reads as a structural (crossfade) edit while
+  // a knob turn stays a param edit.
   if (n.type === T.OSC) return "O" + (n.params.find((p) => p[0] === 1)?.[1] ?? 0);
   if (n.type === T.BIQUAD) return "B" + (n.params.find((p) => p[0] === 0)?.[1] ?? 0);
-  return "NGBLADM"[n.type] || "?";
+  if (n.type === T.SVF) return "V" + (n.params.find((p) => p[0] === 0)?.[1] ?? 0);
+  if (n.type === T.SHAPER) return "S" + (n.params.find((p) => p[0] === 0)?.[1] ?? 0);
+  return "T" + n.type;
 }
 const unitOk = (want, got) => {
   if (want === "hz") return got === "hz" || got === "khz";
-  if (want === "ms") return got === "ms" || got === "s";
+  if (want === "ms" || want === "s") return got === "ms" || got === "s"; // time: ms/s interchangeable
   if (want === "db") return got === "db";
   if (want === "") return got === "ct" || got === ""; // unitless params accept bare numbers
   return false;
@@ -392,4 +432,30 @@ env  = adsr(m, a: 1ms, d: 900ms, s: 0.0, r: 900ms, gate: note.gate)
 ring = peak(env, at: 6khz, q: 4, gain: +8db)
 sh   = delay(ring, time: 90ms, feedback: 0.45, mix: 0.3)
 out  = sh * -4db`,
+  LushPad: `patch LushPad
+# 14-node flex: 3 detuned saws -> svf -> chorus -> reverb. Same grammar, new words.
+a   = saw(freq: note.hz, amp: 0.16)
+b   = saw(freq: note.hz * 1.006, amp: 0.16)
+c   = saw(freq: note.hz * 0.994, amp: 0.16)
+m1  = mixer(a, b, mix: 0.5)
+m2  = mixer(m1, c, mix: 0.34)
+env = adsr(m2, a: 280ms, d: 500ms, s: 0.85, r: 1400ms, gate: note.gate)
+flt = svf(env, cutoff: 1.4khz, res: 0.45)
+ch  = chorus(flt, rate: 0.35hz, depth: 0.6, mix: 0.5, delay: 14ms)
+rv  = reverb(ch, decay: 3.5s, damp: 0.4, mix: 0.42)
+out = rv * -5db`,
+  FuzzBass: `patch FuzzBass
+# Distortion chain: saw -> soft-clip shaper -> dc block -> ladder. Drag drive:.
+o   = saw(freq: note.hz, amp: 0.5)
+env = adsr(o, a: 3ms, d: 140ms, s: 0.7, r: 120ms, gate: note.gate)
+dist = shape(env, drive: 6)
+dc  = dcblock(dist, pole: 0.995)
+flt = ladder(dc, cutoff: 1.1khz, res: 0.3)
+out = flt * -8db`,
+  NoiseSweep: `patch NoiseSweep
+# Filtered noise. Drag cutoff: for a sweep, res: for a whistle.
+n   = noise(amp: 0.4, color: 0.3)
+env = adsr(n, a: 1ms, d: 220ms, s: 0.0, r: 200ms, gate: note.gate)
+flt = svf(env, cutoff: 2khz, res: 0.7)
+out = flt * -6db`,
 };

@@ -49,6 +49,16 @@ class LkKernel {
     // wasm-heap allocation.
     this.outView = new Float32Array(this.ex.memory.buffer, this.outPtr, 128);
     this.blobView = new Uint8Array(this.ex.memory.buffer, this.blobPtr, 4096);
+    // Per-node RMS readout for the live signal-flow graph. Preallocated once
+    // (LK_MAX_NODES = 64); lk_node_levels() copies into it in-wasm, so reading
+    // levels never allocates on the wasm heap (lk_alloc_count stays flat).
+    this.MAX_NODES = 64;
+    this.levelsPtr = this.ex.malloc(this.MAX_NODES * 4);
+    this.levelsView = new Float32Array(this.ex.memory.buffer, this.levelsPtr, this.MAX_NODES);
+  }
+  nodeLevels() {
+    const n = this.ex.lk_node_levels(this.levelsPtr, this.MAX_NODES);
+    return this.levelsView.subarray(0, n);
   }
   // Build a graph blob into the inactive plan; returns { rc, buildMs }.
   // Accepts a Uint8Array or an ArrayBuffer (transferred from the main thread).
@@ -138,10 +148,16 @@ class LkProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < frames; i++) { const v = mono[i]; s += v * v; const a = v < 0 ? -v : v; if (a > pk) pk = a; }
     this._rms += s; this._n += frames; if (pk > this._peak) this._peak = pk;
     if ((this.quanta % this.reportEvery) === 0) {
+      // Per-node levels ride the existing meter message (the one deliberate RT
+      // telemetry post, ~20 Hz, same as the scope). Array.from copies off the
+      // preallocated wasm view — no wasm-heap allocation, so lk_alloc_count is
+      // unaffected and the zero-alloc-in-process proof still holds.
+      const lv = this.kernel.nodeLevels();
       this.port.postMessage({
         type: "meter", quanta: this.quanta, currentTime, sampleRate,
         outRms: Math.sqrt(this._rms / this._n), peak: this._peak,
         fading: this.kernel.isFading(),
+        levels: Array.from(lv),
       });
       this._rms = 0; this._n = 0; this._peak = 0;
     }

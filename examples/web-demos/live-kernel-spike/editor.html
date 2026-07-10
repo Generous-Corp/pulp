@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Pulp Live — edit DSP, hear it in 3 ms</title>
-<meta name="description" content="A live DSP patch language you edit in the browser — drag any number and hear the synth change in ~3 ms, audio never stops. One 39 KB single-thread wasm kernel, no server, no cross-origin isolation." />
+<meta name="description" content="A live DSP patch language you edit in the browser — drag any number and hear the synth change in ~3 ms, audio never stops. One 48 KB single-thread wasm kernel, no server, no cross-origin isolation." />
 <style>
   :root {
     --bg: #0b0f16; --panel: #131a24; --panel2: #1a2331; --line: #263140; --line2:#2f3c4d;
@@ -69,6 +69,12 @@
   .kind.param { color:var(--good); border-color:var(--good); } .kind.struct { color:var(--accent2); border-color:var(--accent2); }
   canvas#scope { width:100%; height:88px; display:block; background:#080c12; border:1px solid var(--line); border-radius:8px; }
   #status { font:11.5px var(--mono); color:var(--dim); margin-top:.4rem; display:block; }
+
+  /* live signal-flow graph */
+  .graphwrap { position:relative; margin-bottom:.6rem; }
+  canvas#graph { width:100%; height:238px; display:block; background:radial-gradient(120% 100% at 50% 0%, #0d141d 0%, #080c12 100%); border:1px solid var(--line); border-radius:8px; cursor:default; }
+  .graphhint { position:absolute; right:.55rem; bottom:.4rem; font:10.5px var(--mono); color:var(--faint); pointer-events:none; }
+  #overlay .ln.nodehi { background:rgba(79,209,197,.12); box-shadow:inset 2px 0 0 var(--accent); }
 
   .tabs { display:flex; gap:.3rem; margin:.7rem 0 .5rem; }
   .tab { font:inherit; font-size:.72rem; letter-spacing:.05em; padding:.28rem .6rem; border-radius:7px; background:var(--panel2); color:var(--dim); border:1px solid var(--line); cursor:pointer; }
@@ -141,14 +147,18 @@
       </div>
       <div id="errors"></div>
       <div class="scrubtip">↔ <b>Drag any highlighted number</b> to sweep it live · double-nothing, it just plays.</div>
-      <div class="cheats">Nodes: <code>saw</code> <code>sine</code> <code>ladder</code> <code>lowpass/peak/…</code>
-        <code>adsr</code> <code>delay</code> <code>mixer</code> · <code>~name</code> = feedback ·
+      <div class="cheats">14 nodes: <code>saw sine square tri noise</code> · <code>ladder svf lowpass/peak/…</code>
+        <code>shape fold clip</code> <code>adsr delay chorus reverb comp dcblock mixer</code> · <code>~name</code> = feedback ·
         <code>x * -2db</code> = gain · <code>out</code> is the output · <code>⌘/Ctrl+Enter</code> forces apply.</div>
     </section>
 
     <!-- RIGHT: synth -->
     <section class="card">
-      <h2>Running synth</h2>
+      <h2>Signal flow — live</h2>
+      <div class="graphwrap">
+        <canvas id="graph" width="560" height="238"></canvas>
+        <span class="graphhint">nodes glow with their RMS · hover a node to find its line</span>
+      </div>
       <div class="readout"><span id="latency">—</span><span id="kind" class="kind">idle</span></div>
       <canvas id="scope" width="560" height="88"></canvas>
       <span id="status">booting…</span>
@@ -180,7 +190,7 @@
     <span>build <b id="rc-build">~1.2 µs</b></span>
     <span>fade <b id="rc-fade">40 ms</b></span>
     <span>audio uninterrupted <b id="rc-uptime">0m 00s</b> · <b>0</b> dropouts</span>
-    <span>kernel <b id="rc-kernel">39 KB</b></span>
+    <span>kernel <b id="rc-kernel">48 KB</b></span>
     <span>patch <b id="rc-patch">— B</b></span>
   </div>
 
@@ -200,7 +210,7 @@
   <div class="coi" id="coi">checking cross-origin isolation…</div>
 
   <footer>
-    <b>This page is static files.</b> No server, no LLVM, no compile farm — one ~39 KB single-thread
+    <b>This page is static files.</b> No server, no LLVM, no compile farm — one ~48 KB single-thread
     wasm kernel + a classic worklet script. Runs on plain GitHub Pages. Zero copyleft, MIT.
   </footer>
 </div>
