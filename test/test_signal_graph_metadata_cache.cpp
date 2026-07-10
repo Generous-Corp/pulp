@@ -174,6 +174,14 @@ TEST_CASE("compile_() is race-free vs a live process() on a PLUGIN graph "
         }
     });
 
+    // Wait for the compiler thread to reach its first recompile before rendering.
+    // Nothing guarantees it is scheduled before main finishes: if `stop` is set
+    // first, the loop body never runs, `compiles` stays zero, and there was never
+    // anything to race against. Waiting here — rather than after the render loop —
+    // makes the overlap real instead of merely making the count non-zero.
+    while (compiles.load(std::memory_order_relaxed) == 0)
+        std::this_thread::yield();
+
     for (int i = 0; i < 3000; ++i) render_block(g);
 
     stop.store(true, std::memory_order_relaxed);
