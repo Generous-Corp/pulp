@@ -369,6 +369,22 @@ std::string handle_validate(const std::string& params_json) {
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
 }
 
+std::string handle_minos(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+
+    auto binary = extract_string(params_json, "binary");
+    if (binary.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: binary is required\"}]}";
+    }
+    // Delegate to `pulp minos measure <binary>` so the CLI, slash command,
+    // and this MCP tool all share one path down to measure_min_os.py.
+    std::string cmd = shell_quote(resolve_cli_binary(root).string()) +
+                      " minos measure " + shell_quote(binary) + " 2>&1";
+    auto output = exec(cmd);
+    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+}
+
 std::string handle_kit_validate(const std::string& params_json) {
     auto root = find_project_root();
     if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
