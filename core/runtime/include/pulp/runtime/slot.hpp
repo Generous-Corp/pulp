@@ -156,6 +156,13 @@ public:
 
     void publish(std::unique_ptr<T> next) { publish(std::shared_ptr<T>(std::move(next))); }
 
+    /// Publisher thread. Drop the published value: readers immediately see
+    /// nothing, and the displaced value is reclaimed once they drain.
+    ///
+    /// Spelled out rather than `publish(nullptr)` — which is ambiguous between
+    /// the two overloads above, and reads worse at the call site.
+    void unpublish() { publish(std::shared_ptr<T>{}); }
+
     /// Publisher thread. Free any parked values if no reader is currently
     /// inside `read()`. Non-blocking: does nothing when a reader is active.
     /// Call it opportunistically (e.g. after each block) to bound memory.

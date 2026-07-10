@@ -184,6 +184,26 @@ TEST_CASE("Slot<const T> hands back a const pointer", "[runtime][slot]") {
     static_assert(std::is_same_v<decltype(pin.get()), const int*>);
 }
 
+TEST_CASE("Slot unpublish drops the value and reclaims it off the reader",
+          "[runtime][slot]") {
+    Tracked::reset();
+    Slot<Tracked> slot;
+    slot.publish(std::make_unique<Tracked>(1));
+    REQUIRE(slot.has_value());
+
+    {
+        auto pin = slot.read();       // pinned: cannot reclaim yet
+        slot.unpublish();
+        REQUIRE_FALSE(slot.has_value());
+        REQUIRE_FALSE(slot.read());   // new readers see nothing
+        REQUIRE(pin->value == 1);     // the old pin stays valid
+        REQUIRE(Tracked::destroyed().load() == 0);
+    }
+    slot.reclaim_if_quiescent();
+    REQUIRE(Tracked::destroyed().load() == 1);
+    REQUIRE(slot.retired_count() == 0);
+}
+
 TEST_CASE("Slot::live() exposes the published shared_ptr to the publisher",
           "[runtime][slot]") {
     Tracked::reset();
