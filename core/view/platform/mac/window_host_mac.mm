@@ -1845,10 +1845,24 @@ public:
     void set_idle_callback(std::function<void()> cb) override {
         idle_callback_ = std::move(cb);
         if (idle_callback_ && !idle_timer_) {
-            idle_timer_ = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
+            // Register the idle pump under kCFRunLoopCommonModes (via
+            // NSRunLoopCommonModes) rather than +scheduledTimerWithTimeInterval:,
+            // which installs the timer in NSDefaultRunLoopMode ONLY. The CPU
+            // (CoreGraphics) window host drives its standalone repaint/screenshot
+            // idle work off this timer; if it lived in the default mode it would
+            // stall the moment the run loop entered a modal / event-tracking mode
+            // — either Pulp's own (a menu / context tracking loop) or a FOREIGN
+            // framework's runModal: in a shared process (see
+            // docs/guides/foreign-framework-coexistence.md). Common-modes keeps
+            // it ticking across all of those. (The GPU host is unaffected: its
+            // idle callback rides the CVDisplayLink display thread, not the run
+            // loop.)
+            idle_timer_ = [NSTimer timerWithTimeInterval:1.0/30.0
                 repeats:YES block:^(NSTimer*) {
                     if (idle_callback_) idle_callback_();
                 }];
+            [[NSRunLoop currentRunLoop] addTimer:idle_timer_
+                                         forMode:NSRunLoopCommonModes];
         }
     }
 
