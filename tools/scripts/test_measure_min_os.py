@@ -88,5 +88,97 @@ class ElfFloorCheck(unittest.TestCase):
         self.assertEqual(self._run(["--elf", self.elf], "2.99"), 1)
 
 
+class ArtifactKind(unittest.TestCase):
+    """_artifact_kind() classifies by magic bytes; measure_artifact() dispatches
+    to the right reader (and tries both readers on an ar archive)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _load()
+
+    def _write(self, magic: bytes) -> str:
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(magic + b"\x00" * 32)
+        tmp.close()
+        self.addCleanup(pathlib.Path(tmp.name).unlink, missing_ok=True)
+        return tmp.name
+
+    def test_kind_detection(self):
+        cases = {
+            b"!<arch>\n": "ar",
+            b"MZ\x90\x00": "pe",
+            b"\x7fELF\x02\x01\x01": "elf",
+            b"\xcf\xfa\xed\xfe": "macho",   # thin 64-bit little-endian
+            b"\xca\xfe\xba\xbe": "macho",   # fat
+            b"not a binary!!!": None,
+        }
+        for magic, expected in cases.items():
+            self.assertEqual(self.mod._artifact_kind(pathlib.Path(self._write(magic))),
+                             expected, msg=f"magic={magic!r}")
+
+    def test_kind_missing_file(self):
+        self.assertIsNone(self.mod._artifact_kind(pathlib.Path("/no/such/file")))
+
+    def test_measure_dispatches_by_kind(self):
+        macho = pathlib.Path(self._write(b"\xcf\xfa\xed\xfe"))
+        elf = pathlib.Path(self._write(b"\x7fELF"))
+        pe = pathlib.Path(self._write(b"MZ\x90\x00"))
+        with mock.patch.object(self.mod, "_otool_minos", return_value="13.3"):
+            self.assertEqual(self.mod.measure_artifact(macho), ("macho", "13.3"))
+        with mock.patch.object(self.mod, "_glibc_floor", return_value="2.34"):
+            self.assertEqual(self.mod.measure_artifact(elf), ("elf", "2.34"))
+        with mock.patch.object(self.mod, "_win_os_version", return_value="10.0"):
+            self.assertEqual(self.mod.measure_artifact(pe), ("pe", "10.0"))
+
+    def test_measure_ar_tries_both_readers(self):
+        ar = pathlib.Path(self._write(b"!<arch>\n"))
+        # Mach-O member: otool returns a value.
+        with mock.patch.object(self.mod, "_otool_minos", return_value="13.3"), \
+             mock.patch.object(self.mod, "_glibc_floor", return_value=None):
+            self.assertEqual(self.mod.measure_artifact(ar), ("ar", "13.3"))
+        # ELF member: otool yields nothing, glibc reader wins.
+        with mock.patch.object(self.mod, "_otool_minos", return_value=None), \
+             mock.patch.object(self.mod, "_glibc_floor", return_value="2.34"):
+            self.assertEqual(self.mod.measure_artifact(ar), ("ar", "2.34"))
+
+    def test_measure_unrecognized(self):
+        junk = pathlib.Path(self._write(b"not a binary!!!"))
+        self.assertEqual(self.mod.measure_artifact(junk), (None, None))
+
+
+class MeasureCli(unittest.TestCase):
+    """--measure <path> prints '<kind> <floor>' and exits 0/2."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _load()
+
+    def _run(self, argv):
+        old = sys.argv
+        sys.argv = ["measure_min_os.py", *argv]
+        try:
+            return self.mod.main()
+        finally:
+            sys.argv = old
+
+    def test_missing_path(self):
+        self.assertEqual(self._run(["--measure", "/no/such/bin"]), 2)
+
+    def test_unrecognized_format(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(b"plain text, not a binary")
+        tmp.close()
+        self.addCleanup(pathlib.Path(tmp.name).unlink, missing_ok=True)
+        self.assertEqual(self._run(["--measure", tmp.name]), 2)
+
+    def test_recognized_returns_zero(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(b"\x7fELF" + b"\x00" * 32)
+        tmp.close()
+        self.addCleanup(pathlib.Path(tmp.name).unlink, missing_ok=True)
+        with mock.patch.object(self.mod, "_glibc_floor", return_value="2.34"):
+            self.assertEqual(self._run(["--measure", tmp.name]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
