@@ -3,21 +3,23 @@
 // Step sequencing, derived from the host's position.
 //
 // Same rule as the clock grid and the LFO's phase: the step index is a pure
-// function of `position_beats`, never a counter advanced one block at a time.
-// Bar 57 always plays step 3, however the playhead got to bar 57.
+// function of elapsed cycles, never a counter advanced one block at a time. Bar 57
+// always plays step 3, however the playhead got to bar 57.
 //
 // That rule collides with the idea of a "random" step value, and the collision is
-// resolved in favour of the rule. Randomness here is a pure function of the
-// *absolute* step index — a hash, not a generator — so the sequence is unbounded
-// and non-repeating along the timeline, and yet bouncing the same project twice
-// produces the same samples. A conventional RNG advanced once per step could
-// promise neither: it drifts on a locate, and it renders differently every time.
+// resolved in favour of the rule — twice, in two different ways. `Random` here is a
+// pure function of the *absolute* step index (a hash, not a generator), so the
+// dither is unbounded and non-repeating along the timeline and yet bounces
+// identically. The shift register in brew/shift_register.hpp keeps the same promise
+// by replaying itself from the origin rather than running from wherever it was.
 //
 // The cost is that "random" is really "deterministic and unpredictable", which is
 // what anyone modulating a filter actually wanted. Reroll it by changing the seed.
 
+#include <brew/lfo.hpp>   // warp_phase, wrap_phase, to_unipolar
 #include <brew/random.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -30,10 +32,10 @@ inline constexpr int kMaxSequencerSteps = 8;
 /// How a rate knob is interpreted.
 ///
 /// This is the fork between an LFO and a sequencer, and it is a real choice, not
-/// a preference. In `cycle` the whole pattern occupies the rate, so shortening it
-/// makes the steps faster and the modulation keeps its period — it stays an LFO.
-/// In `step` each step occupies the rate, so the pattern's period grows with its
-/// length — it becomes a sequencer. Neither can be derived from the other by
+/// a preference. In `cycle` the whole pattern occupies one cycle, so shortening the
+/// cycle makes the steps faster and the modulation keeps its period — it stays an
+/// LFO. In `step` each step occupies one cycle, so the pattern's period grows with
+/// its length — it becomes a sequencer. Neither can be derived from the other by
 /// scaling a knob, because in `cycle` the step duration depends on the length.
 enum class SpeedMode : int { cycle = 0, step = 1 };
 
@@ -41,13 +43,38 @@ enum class SpeedMode : int { cycle = 0, step = 1 };
     return v >= 0.5f ? SpeedMode::step : SpeedMode::cycle;
 }
 
-/// Beats occupied by one step, given the rate knob and how it is read.
-[[nodiscard]] inline double beats_per_step(SpeedMode mode, double rate_beats,
-                                           int length) noexcept {
-    if (!(rate_beats > 0.0) || length < 1) return 0.0;
-    return mode == SpeedMode::step ? rate_beats
-                                   : rate_beats / static_cast<double>(length);
-}
+/// How the played-through window of the eight steps is described.
+///
+/// Two ways to say the same thing, and both are worth having: `start_length` keeps
+/// the pattern's *duration* fixed while you slide it, `start_end` keeps its
+/// *boundaries* fixed while you change its duration. Automating one of them is a
+/// musical gesture; automating the other is a different musical gesture.
+enum class LengthMode : int { start_length = 0, start_end = 1 };
+
+inline constexpr int kLengthModeCount = 2;
+
+/// The polarity a step's programmed level reaches the jack in.
+enum class Range : int { bipolar = 0, unipolar = 1 };
+
+inline constexpr int kRangeCount = 2;
+
+/// Whether a step arrives or is arrived at.
+///
+/// `linear` is exactly a full-step glide, which is why it is not a third glide
+/// value: it is the glide knob pinned to 1.0, and the plug-in says so rather than
+/// growing a second control that does the same arithmetic.
+enum class Interpolation : int { stepped = 0, linear = 1 };
+
+inline constexpr int kInterpolationCount = 2;
+
+/// What the plug-in does with a voltage on one of its two input channels.
+///
+/// `off` by default, and for the same reason a bypassed generator is silent: a DAW
+/// will happily hand a modulation plug-in a drum loop at full scale, and a drum
+/// loop on the reset input is a sequencer that never leaves step 1.
+enum class InputRole : int { off = 0, reset = 1, trigger = 2, signal = 3 };
+
+inline constexpr int kInputRoleCount = 4;
 
 /// Euclidean modulo. `%` on a negative index would return a negative step, and a
 /// negative step means the sequencer reads outside its own array before the
@@ -60,20 +87,46 @@ enum class SpeedMode : int { cycle = 0, step = 1 };
     return r < 0 ? r + m : r;
 }
 
-/// Which step of the whole timeline a beat position falls in. Unbounded and
-/// signed: step -1 is the step before the project's origin.
-[[nodiscard]] inline std::int64_t absolute_step(double position_beats,
-                                                double beats_per_step) noexcept {
-    if (!(beats_per_step > 0.0)) return 0;
-    return static_cast<std::int64_t>(std::floor(position_beats / beats_per_step));
+/// How many of the eight steps the window covers.
+///
+/// In `start_end` an end *before* the start is not an error — it wraps around the
+/// eight, which is the only reading under which sliding `End` past `Start` keeps
+/// producing a pattern rather than an empty one.
+[[nodiscard]] inline constexpr int window_length(LengthMode mode, int start, int length,
+                                                 int end) noexcept {
+    if (mode == LengthMode::start_length) return std::clamp(length, 1, kMaxSequencerSteps);
+    const int s = std::clamp(start, 0, kMaxSequencerSteps - 1);
+    const int e = std::clamp(end, 0, kMaxSequencerSteps - 1);
+    return static_cast<int>(wrap_index(e - s, kMaxSequencerSteps)) + 1;
+}
+
+/// Which of the eight programmed steps an absolute step index plays.
+[[nodiscard]] inline constexpr int pattern_index(std::int64_t abs_step, int start,
+                                                 int window) noexcept {
+    const int s = std::clamp(start, 0, kMaxSequencerSteps - 1);
+    const std::int64_t within = wrap_index(abs_step, window);
+    return static_cast<int>(wrap_index(s + within, kMaxSequencerSteps));
+}
+
+/// Cycles, converted to a fractional position along the pattern's steps.
+///
+/// In `step` mode a cycle *is* a step. In `cycle` mode a cycle is the window, so
+/// the window's length sets the step rate — which is what makes it an LFO whose
+/// period does not change when you shorten the pattern.
+[[nodiscard]] inline constexpr double step_position(double cycles, SpeedMode mode,
+                                                    int window) noexcept {
+    return mode == SpeedMode::step ? cycles : cycles * static_cast<double>(window);
+}
+
+/// Which step of the whole timeline a fractional step position falls in.
+/// Unbounded and signed: step -1 is the step before the pattern's origin.
+[[nodiscard]] inline std::int64_t absolute_step(double position) noexcept {
+    return static_cast<std::int64_t>(std::floor(position));
 }
 
 /// How far through its step a position sits, in `[0, 1)`.
-[[nodiscard]] inline double step_fraction(double position_beats,
-                                          double beats_per_step) noexcept {
-    if (!(beats_per_step > 0.0)) return 0.0;
-    const double x = position_beats / beats_per_step;
-    const double f = x - std::floor(x);
+[[nodiscard]] inline double step_fraction(double position) noexcept {
+    const double f = position - std::floor(position);
     // `floor` is exact, but the subtraction can round up to exactly 1.0 for a
     // position just below an integer boundary. A fraction of 1.0 would place a
     // sample in the *next* step while the index says otherwise.
@@ -102,6 +155,12 @@ enum class SpeedMode : int { cycle = 0, step = 1 };
     if (!(random_amount > 0.0f)) return programmed;
     const float v = programmed + random_amount * step_random(abs_step, seed);
     return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
+}
+
+/// The glide a mode implies. `linear` is a full-step glide, and nothing else.
+[[nodiscard]] inline constexpr double effective_glide(Interpolation interp,
+                                                      double glide) noexcept {
+    return interp == Interpolation::linear ? 1.0 : std::clamp(glide, 0.0, 1.0);
 }
 
 /// Blend from the previous step's value into this one over the first `glide` of
@@ -143,5 +202,40 @@ enum class SpeedMode : int { cycle = 0, step = 1 };
                                                 double gate) noexcept {
     return step_gate_open(fraction, gate) ? value : 0.0f;
 }
+
+/// Map a bipolar step level into the range the jack is set to.
+[[nodiscard]] inline constexpr float apply_range(float bipolar, Range r) noexcept {
+    return r == Range::unipolar ? to_unipolar(bipolar) : bipolar;
+}
+
+// ── Trigger detection ────────────────────────────────────────────────────────
+
+/// The two thresholds a rising edge has to cross, in normalized full scale.
+///
+/// A Schmitt trigger, not a comparator: a modular's gate output has a slew, and a
+/// bare threshold on a slewed edge with any noise on it fires a handful of times
+/// on the way up. Two thresholds a quarter of full scale apart cost one bool.
+inline constexpr float kTriggerHigh = 0.5f;
+inline constexpr float kTriggerLow = 0.25f;
+
+/// A one-sample edge detector with hysteresis.
+class TriggerDetector {
+public:
+    void reset() noexcept { armed_ = true; }
+
+    /// True on the sample the input crosses `kTriggerHigh` going up, and not again
+    /// until it has fallen back below `kTriggerLow`.
+    [[nodiscard]] bool process(float v) noexcept {
+        if (armed_ && v >= kTriggerHigh) {
+            armed_ = false;
+            return true;
+        }
+        if (!armed_ && v < kTriggerLow) armed_ = true;
+        return false;
+    }
+
+private:
+    bool armed_ = true;
+};
 
 }  // namespace pulp::examples::brew

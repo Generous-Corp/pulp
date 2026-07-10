@@ -108,7 +108,9 @@ int main(int argc, char** argv) {
             h.state().set_value(StepProcessor::step_param(i), shape[i]);
         h.state().set_value(StepProcessor::kLength, 6.0f);
         h.state().set_value(StepProcessor::kSpeedMode, 1.0f);
-        h.state().set_value(StepProcessor::kRate, 1.0f);
+        h.state().set_value(StepProcessor::kBeats, 1.0f);
+        h.state().set_value(StepProcessor::kSyncMode,
+                            static_cast<float>(static_cast<int>(SyncMode::transport2)));
         run_block(h, playing(2.3));  // lights step 2
     });
     shoot(create_cv_osc, "cv-osc.png", [](format::HeadlessHost& h) {

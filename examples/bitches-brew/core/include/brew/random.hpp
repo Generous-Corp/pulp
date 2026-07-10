@@ -26,6 +26,15 @@ namespace pulp::examples::brew {
     return x ^ (x >> 31);
 }
 
+/// A unit value in `[0, 1)`, keyed on a signed index and a seed. The coin a
+/// probabilistic decision is tossed with.
+[[nodiscard]] inline float hash_unit(std::int64_t index, std::uint32_t seed) noexcept {
+    const std::uint64_t h =
+        mix64(static_cast<std::uint64_t>(index) * 0x9E3779B97F4A7C15ULL ^ seed);
+    // Top 24 bits, so the conversion to float is exact.
+    return static_cast<float>(static_cast<std::uint32_t>(h >> 40)) / 16777216.0f;
+}
+
 /// A bipolar value in `[-1, +1)`, keyed on a signed index and a seed.
 ///
 /// Multiplying the index by an odd constant before mixing keeps adjacent indices

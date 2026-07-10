@@ -202,10 +202,19 @@ struct LfoMix {
 /// | transport2   | beats     | holds         | locked to position   |
 /// | free2        | hertz     | holds         | from the play edge   |
 /// | free3        | hertz     | holds         | from the timeline    |
+/// | trig_free    | hertz     | keeps running | keeps running        |
+/// | trig_tempo   | beats     | keeps running | keeps running        |
 ///
 /// `free` and `tempo` are the two that keep running against wall-clock time while
 /// the playhead is parked, so they are the two that do not bounce bit-identically.
 /// `free3` is what a position-derived "free run" actually is, and it is exact.
+///
+/// The last two are a stepped generator's modes and have no meaning for a
+/// continuous one: the clock runs at the base rate, but the *pattern* refuses to
+/// cross a step boundary until a trigger arrives on the input bus. The clock is
+/// the same wall-clock accumulator `free` and `tempo` use; only the thing reading
+/// it is gated. So the LFO's `Sync` stops at `kSyncModeCount`, and the Step LFO's
+/// at `kStepSyncModeCount`.
 enum class SyncMode : int {
     free = 0,
     tempo = 1,
@@ -215,30 +224,48 @@ enum class SyncMode : int {
     transport2 = 5,
     free2 = 6,
     free3 = 7,
+    trig_free = 8,
+    trig_tempo = 9,
 };
 
+/// How many of them a continuous generator can use.
 inline constexpr int kSyncModeCount = 8;
+
+/// How many a stepped one can. The two extra pause the pattern between steps.
+inline constexpr int kStepSyncModeCount = 10;
 
 /// The rate knob a mode reads: `Speed` × `Multiplier`, or `Beats` × `Divisor`.
 [[nodiscard]] inline constexpr bool sync_uses_hertz(SyncMode m) noexcept {
-    return m == SyncMode::free || m == SyncMode::free2 || m == SyncMode::free3;
+    return m == SyncMode::free || m == SyncMode::free2 || m == SyncMode::free3 ||
+           m == SyncMode::trig_free;
 }
 
 [[nodiscard]] inline constexpr bool sync_uses_beats(SyncMode m) noexcept {
     return m == SyncMode::tempo || m == SyncMode::transport ||
-           m == SyncMode::transport2;
+           m == SyncMode::transport2 || m == SyncMode::trig_tempo;
 }
 
-/// Whether the mode keeps oscillating with the transport parked. The two that do
-/// are the two that cannot be a pure function of a position that is not moving.
+/// Whether the mode keeps oscillating with the transport parked. The ones that do
+/// are the ones that cannot be a pure function of a position that is not moving.
 [[nodiscard]] inline constexpr bool sync_runs_when_stopped(SyncMode m) noexcept {
-    return m == SyncMode::free || m == SyncMode::tempo || m == SyncMode::transport;
+    return m == SyncMode::free || m == SyncMode::tempo || m == SyncMode::transport ||
+           m == SyncMode::trig_free || m == SyncMode::trig_tempo;
 }
 
 /// Whether the mode is bit-identical across renders. The honest answer, exposed
 /// so the editor can say it rather than the README alone.
+///
+/// The trigger modes are excluded for a second reason on top of the wall clock:
+/// the step they are holding on is a count of the edges seen since the last reset,
+/// so it depends on where the render started, not only on where the playhead is.
 [[nodiscard]] inline constexpr bool sync_is_deterministic(SyncMode m) noexcept {
-    return m != SyncMode::free && m != SyncMode::tempo;
+    return m != SyncMode::free && m != SyncMode::tempo &&
+           m != SyncMode::trig_free && m != SyncMode::trig_tempo;
+}
+
+/// Whether the pattern waits at the end of each step for a trigger.
+[[nodiscard]] inline constexpr bool sync_pauses_for_trigger(SyncMode m) noexcept {
+    return m == SyncMode::trig_free || m == SyncMode::trig_tempo;
 }
 
 /// Whether the play edge snaps the phase back to `Phase`.
