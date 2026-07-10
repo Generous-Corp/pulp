@@ -16,6 +16,42 @@
       "bundleable": false,
       "bundle_note": "Developer/agent + CI tool only. Never linked into the MIT core or shipped in a plugin."
     },
+    "trace-processor": {
+      "display_name": "Perfetto trace_processor",
+      "category": "binary",
+      "description": "Perfetto trace_processor_shell — the offline SQL query engine behind `pulp trace query --trace`. Downloaded and SHA-256-verified by `pulp trace fetch` (also reachable as `pulp tool install trace-processor`).",
+      "upstream_url": "https://github.com/google/perfetto",
+      "license": "Apache-2.0",
+      "install_method": "binary_download",
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/mac-arm64/trace_processor_shell",
+          "binary_name": "trace_processor_shell"
+        },
+        "macOS-x64": {
+          "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/mac-amd64/trace_processor_shell",
+          "binary_name": "trace_processor_shell"
+        },
+        "Linux-x64": {
+          "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/linux-amd64/trace_processor_shell",
+          "binary_name": "trace_processor_shell"
+        },
+        "Linux-arm64": {
+          "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/linux-arm64/trace_processor_shell",
+          "binary_name": "trace_processor_shell"
+        },
+        "Windows-x64": {
+          "url_template": "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/${version}/windows-amd64/trace_processor_shell.exe",
+          "binary_name": "trace_processor_shell.exe"
+        }
+      },
+      "pinned_version": "v57.2",
+      "requires_tools": [],
+      "managed_by_pulp": true,
+      "bundleable": false,
+      "distribution_lane": "tool_addon",
+      "bundle_note": "Dev-only query tool for offline traces. SHA-256-verified per platform; never linked into the MIT core or shipped in a plugin. The per-platform SHA-256 pins live in experimental/pulp-rs/src/cmd/trace_fetch.rs, which performs the verified install."
+    },
     "uv": {
       "display_name": "UV (Python package manager)",
       "category": "runtime",

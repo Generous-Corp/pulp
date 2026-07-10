@@ -264,6 +264,24 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   hostile-state rejection (overflow/CRC/truncation) folded into
   `wam_feature_runner.mjs` — so a regression in the state codec or chain runtime
   fails here rather than only in a browser.
+- **`wclap-cloudflare.yml` is WebCLAP's canonical-host lane (Cloudflare Pages).**
+  Separate from `web-plugins.yml`: it builds the threaded WebCLAP PulpGain module
+  (pinned wasi-sdk), assembles a self-contained deploy dir, proves it headlessly
+  under the real `_headers`, then owner-gated-deploys. Two pages are assembled +
+  proven: the single-plugin isolation page (`assemble.mjs` → `validate-deploy.mjs`)
+  and the **shared-player** WebCLAP demo (`assemble-player.mjs` → `player/` →
+  `validate-player.mjs`) — the latter mounts the SAME `@danielraffel/web-player` shell the
+  WAM demos use, driven by the WebCLAP adapter (a worklet-resident CLAP host), and
+  asserts crossOriginIsolated, real-time render (worklet quanta ≈ `sampleRate/128`
+  per wall-second), an audible param change that updates the shared widget, and a
+  `clap.state` round-trip. The lane also runs the `@danielraffel/web-player` adapter unit
+  tests (`packages/pulp-web-player` — `npm test`), which include an ABI-parity
+  check that the worklet's inlined CLAP struct offsets match `wclap-abi.mjs`.
+  Hard-won gotchas encoded there: posting a `WebAssembly.Module` INTO an
+  AudioWorklet is silently dropped in Chrome (transfer the raw bytes and compile
+  in-worklet), and transferring an `ArrayBuffer` OUT of an AudioWorklet is
+  unreliable (the receiver gets a detached buffer) — clone small payloads (state,
+  sysex) instead, and never transfer a caller-owned buffer (it detaches theirs).
 - **Android native `.cxx` caches must be dependency-aware.** The Android workflow
   builds through Gradle's external native build, and `android/app/.cxx` can hold
   FetchContent checkouts under `_deps`. Do not cache `.cxx` under a Gradle-only

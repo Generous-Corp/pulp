@@ -68,7 +68,8 @@ with `PULP_TRACE_SERVER=1`) or tracing was compiled out; `ready_to_query:false`
 means no `trace_processor` (on `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched
 build, or `$PATH`) or no captured trace yet. For zero-install, run
 `pulp trace fetch` once — it downloads the pinned `trace_processor_shell`
-(Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`.
+(Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`. (`pulp tool install
+trace-processor` fetches the same pinned artifact via the tool registry.)
 
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates

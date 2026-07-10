@@ -1,0 +1,11 @@
+# Cloudflare Pages project config for the WebCLAP demo.
+#
+# Deploy the assembled directory with:
+#   npx wrangler pages deploy public --project-name pulp-wclap-demos
+# (the CI workflow does this; see README.md for the one-time owner setup).
+#
+# `pages_build_output_dir` is the directory `wrangler pages deploy` uploads and
+# the `_headers` file inside it is honoured by Cloudflare Pages automatically.
+name = "pulp-wclap-demos"
+pages_build_output_dir = "public"
+compatibility_date = "2026-07-09"

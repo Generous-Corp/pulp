@@ -252,6 +252,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPkgConfigImports.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkGuards.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWebGpuImportedTarget.cmake"
@@ -259,6 +260,15 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
+)
+
+# Ship the min-OS floor data next to PulpMinOs.cmake so a find_package(Pulp)
+# consumer resolves the SAME floor Pulp's own build did. Without this file the
+# consumer-side PulpMinOs.cmake finds no min_os.json and cannot pin, so the
+# plugin would silently inherit the build host's OS floor.
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/deps/min_os.json"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
 

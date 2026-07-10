@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebCLAP real-time worklet spike (WS-C2)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font: 14px/1.5 -apple-system, system-ui, sans-serif;
+      background: #0e1116; color: #e6e9ef; padding: 24px; }
+    h1 { font-size: 18px; margin: 0 0 2px; } h1 span { color: #5b8cff; }
+    #subtitle { color: #9aa4b2; margin: 0 0 16px; }
+    .panel { background: #161b22; border: 1px solid #222b36; border-radius: 10px;
+      padding: 16px; margin-bottom: 14px; }
+    .param { display: grid; grid-template-columns: 130px 1fr 64px; align-items: center;
+      gap: 12px; margin: 8px 0; }
+    .param label { color: #c8cfda; } input[type=range] { width: 100%; }
+    output { font-variant-numeric: tabular-nums; color: #9aa4b2; text-align: right; }
+    #meter { font-variant-numeric: tabular-nums; color: #c8cfda; }
+    canvas { width: 100%; height: 80px; background: #0b0e13; border-radius: 6px; display: block; }
+    #log { font: 12px/1.45 ui-monospace, Menlo, monospace; color: #8b94a3;
+      background: #0b0e13; border-radius: 6px; padding: 10px; max-height: 180px; overflow: auto; }
+    #log .ok { color: #5bd18a; } #log .err { color: #ff6b6b; }
+    button { background: #2a3441; color: #e6e9ef; border: 1px solid #3a4657;
+      border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1 id="title">WebCLAP <span>real-time worklet</span> spike</h1>
+  <p id="subtitle">Architecture A: the CLAP host runs INSIDE the AudioWorklet.</p>
+
+  <div class="panel"><div id="meter">booting…</div>
+    <canvas id="scope" width="720" height="80"></canvas></div>
+  <div class="panel"><div id="params"></div>
+    <button id="play">Un-mute output</button></div>
+  <div class="panel"><div id="log"></div></div>
+
+  <script type="module" src="./poc.js"></script>
+</body>
+</html>

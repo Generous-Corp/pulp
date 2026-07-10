@@ -103,6 +103,7 @@ secrets/
 !templates/secrets/notary.env.example
 templates/secrets/notary.env
 examples/web-demos/wasm-build/build/
+examples/web-demos/wclap-build/build/
 /.private/
 test/assets/
 android/app/.cxx/
