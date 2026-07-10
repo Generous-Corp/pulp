@@ -360,6 +360,69 @@ TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
     REQUIRE(max_dev < 1e-4);  // observed ~1.3e-5 (GPU-vs-CPU FFT rounding)
 }
 
+TEST_CASE("GpuCompute partitioned FDL matches N panned CPU convolvers (multi-IR)",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t BLOCK = 256, N = 2 * BLOCK, NUM_IR = 3, IR_LEN = 700;
+    const uint32_t P = (IR_LEN + BLOCK - 1) / BLOCK;
+
+    std::mt19937 rng(0x515151u);
+    std::uniform_real_distribution<float> d(-1.0f, 1.0f);
+    std::vector<std::vector<float>> irs(NUM_IR, std::vector<float>(IR_LEN));
+    for (auto& ir : irs) for (auto& v : ir) v = d(rng);
+
+    // Per-room per-partition IR spectra: layout (r*P + p).
+    std::vector<float> ir_specs(static_cast<size_t>(N) * 2u * NUM_IR * P, 0.0f);
+    for (uint32_t r = 0; r < NUM_IR; ++r)
+        for (uint32_t p = 0; p < P; ++p) {
+            std::vector<float> padded(static_cast<size_t>(N) * 2u, 0.0f);
+            const uint32_t off = p * BLOCK, count = std::min<uint32_t>(BLOCK, IR_LEN - off);
+            for (uint32_t i = 0; i < count; ++i) padded[2u * i] = irs[r][off + i];
+            REQUIRE(compute->fft_forward(
+                padded.data(),
+                ir_specs.data() + (static_cast<size_t>(r) * P + p) * N * 2u, N));
+        }
+    REQUIRE(compute->prepare_multi_fdl(N, ir_specs.data(), NUM_IR, P));
+
+    // Distinct constant-power pans per room.
+    std::vector<float> pan_l(NUM_IR), pan_r(NUM_IR);
+    for (uint32_t r = 0; r < NUM_IR; ++r) {
+        const float t = static_cast<float>(r) / static_cast<float>(NUM_IR - 1);
+        pan_l[r] = std::cos(t * 1.5707963f);
+        pan_r[r] = std::sin(t * 1.5707963f);
+    }
+
+    std::vector<pulp::signal::PartitionedConvolver> cpu(NUM_IR);
+    for (uint32_t r = 0; r < NUM_IR; ++r) cpu[r].load_ir(irs[r].data(), irs[r].size(), BLOCK);
+
+    std::mt19937 irng(0x2323u);
+    double max_dev = 0.0;
+    for (int blk = 0; blk < 12; ++blk) {
+        std::vector<float> in(BLOCK), gpu_out(2u * BLOCK);
+        for (auto& v : in) v = d(irng);
+        // CPU: sum each room's mono convolution with its pans into L/R.
+        std::vector<float> refL(BLOCK, 0.0f), refR(BLOCK, 0.0f), tmp(BLOCK);
+        for (uint32_t r = 0; r < NUM_IR; ++r) {
+            cpu[r].process(in.data(), tmp.data(), BLOCK);
+            for (uint32_t i = 0; i < BLOCK; ++i) {
+                refL[i] += pan_l[r] * tmp[i];
+                refR[i] += pan_r[r] * tmp[i];
+            }
+        }
+        REQUIRE(compute->multi_fdl_convolve(in.data(), pan_l.data(), pan_r.data(),
+                                            gpu_out.data(), N, NUM_IR));
+        if (blk >= 2)
+            for (uint32_t i = 0; i < BLOCK; ++i) {
+                max_dev = std::max(max_dev, static_cast<double>(std::abs(gpu_out[i] - refL[i])));
+                max_dev = std::max(max_dev, static_cast<double>(std::abs(gpu_out[BLOCK + i] - refR[i])));
+            }
+    }
+    INFO("max |FDL multi-IR - N panned CPU convolvers| = " << max_dev);
+    REQUIRE(max_dev < 1e-4);
+}
+
 TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
     if (!compute || !compute->initialize_standalone()) return;
