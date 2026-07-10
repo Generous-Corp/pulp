@@ -155,6 +155,14 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-host-validation PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-host-validation)
 
+    # A Processor may reach its StateStore from its destructor, and from a worker
+    # thread that destructor is about to join. Pin that every host destroys the
+    # store after the Processor, not before.
+    add_executable(pulp-test-store-lifetime test_store_lifetime.cpp)
+    target_link_libraries(pulp-test-store-lifetime PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-store-lifetime PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-store-lifetime)
+
     # Empirical proof the CLAP adapter respects clamp_latency_to_nonneg
     # end-to-end (negative latency → 0 when the
     # quirk is enforced, raw-wrapped when PULP_HOST_QUIRKS=off). Drives the
