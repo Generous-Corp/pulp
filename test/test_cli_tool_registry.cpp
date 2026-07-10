@@ -595,6 +595,25 @@ TEST_CASE("tool registry rejects unsupported archive formats",
     REQUIRE_FALSE(extract_archive(archive, tmp.path / "out", "rar"));
 }
 
+TEST_CASE("install_binary_tool defers a bare (un-archived) binary source",
+          "[cli][tool-registry]") {
+    // A source with no archive_format (e.g. Perfetto's trace_processor_shell) is
+    // owned by the SHA-256-verified fetcher, not this generic installer. It must
+    // skip cleanly — never download to example.invalid, never try to untar a raw
+    // binary — so an `--all` sweep reaching here does not error.
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path / "home"};
+    auto tool = binary_tool("trace-processor", "trace_processor_shell");
+    tool.binary_sources[current_platform_key()].archive_format.clear();
+
+    auto result = install_binary_tool(tool, /*force=*/false);
+    REQUIRE(result.ok);                       // skipped, not a failed download
+    REQUIRE(result.error.empty());
+    REQUIRE(result.installed_version == tool.pinned_version);
+    // Nothing was written to the managed tree.
+    REQUIRE_FALSE(fs::exists(tmp.path / "home" / "tools" / "trace-processor"));
+}
+
 TEST_CASE("tool registry coverage preserves platform sources and home helpers",
           "[cli][tool-registry]") {
     TempDir tmp;

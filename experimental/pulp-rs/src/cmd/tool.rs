@@ -491,12 +491,20 @@ fn install_trace_processor(version: Option<&str>, out: &mut impl Write) -> Resul
 fn install(
     reg: &ToolRegistry,
     id: Option<&str>,
-    _all: bool,
+    all: bool,
     version: Option<&str>,
     out: &mut impl Write,
 ) -> Result<i32> {
     if id == Some("trace-processor") {
         return install_trace_processor(version, out);
+    }
+    // `--all` sweeps every managed tool, but trace-processor is a bare binary
+    // installed only by the SHA-256-verified fetcher: the generic archive
+    // installer (Rust delegates it to pulp-cpp) cannot verify it and would try
+    // to untar a raw binary. Fetch it here so the delegated sweep finds it
+    // already present and skips it, instead of failing on "cannot extract".
+    if all && reg.tools.contains_key("trace-processor") {
+        install_trace_processor(None, out)?;
     }
     // A `--version` is a durable user pin: record it before installing so
     // resolution (and the re-fetch below) honor it, and so it survives a
@@ -766,6 +774,7 @@ mod tests {
     use super::*;
     use crate::test_support::EnvVarGuard;
     use std::fs;
+    use std::path::Path;
 
     fn plant_project(body: &str) -> tempfile::TempDir {
         let td = tempfile::tempdir().unwrap();
@@ -1481,5 +1490,108 @@ mod tests {
             s.contains("Usage: pulp tool"),
             "missing usage in help: {s:?}"
         );
+    }
+
+    // ── trace-processor: the verified-fetcher install path ─────────
+
+    /// Plant the pinned host binary under `home` so `run_fetch` short-circuits
+    /// to "already present" (no network). Returns false on a host with no pin.
+    fn plant_trace_processor(home: &Path) -> bool {
+        use crate::cmd::trace_fetch;
+        let Some(key) = trace_fetch::host_platform_key() else {
+            return false;
+        };
+        let pin = trace_fetch::pin_for(key).unwrap();
+        let path = trace_fetch::pinned_cache_path_under(home, pin);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "stub-binary").unwrap();
+        true
+    }
+
+    #[test]
+    fn install_trace_processor_reports_already_present() {
+        let td = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
+        if !plant_trace_processor(td.path()) {
+            return; // unsupported host — nothing pinned to install
+        }
+        let mut buf = Vec::new();
+        let rc = install_trace_processor(None, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("already present"), "unexpected output: {s:?}");
+    }
+
+    #[test]
+    fn install_trace_processor_ignores_a_version_override() {
+        let td = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
+        if !plant_trace_processor(td.path()) {
+            return;
+        }
+        let mut buf = Vec::new();
+        install_trace_processor(Some("v99.9"), &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.contains("ignoring --version v99.9")
+                && s.contains(crate::cmd::trace_fetch::PINNED_VERSION),
+            "expected a pin-override note: {s:?}"
+        );
+    }
+
+    #[test]
+    fn install_all_prefetches_trace_processor_via_the_fetcher() {
+        // `--all` must fetch trace-processor through the verified fetcher (not
+        // the delegated archive installer). With the binary pre-planted the
+        // fetcher short-circuits to "already present"; its appearance proves the
+        // pre-fetch ran before delegation. Fallthrough is disabled so the
+        // delegated tail is an inert stub, never a real pulp-cpp / network call.
+        let td = tempfile::tempdir().unwrap();
+        // ENV_LOCK is non-reentrant — set both vars through one guard, not two.
+        let home = td.path().to_path_buf();
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+        ]);
+        if !plant_trace_processor(td.path()) {
+            return;
+        }
+        let proj = plant_project(registry_with_trace_processor());
+        let reg = load(
+            &proj
+                .path()
+                .join("tools")
+                .join("packages")
+                .join("tool-registry.json"),
+        )
+        .unwrap();
+        assert!(reg.tools.contains_key("trace-processor"));
+
+        let mut buf = Vec::new();
+        install(&reg, None, true, None, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("already present"), "no pre-fetch marker: {s:?}");
+    }
+
+    fn registry_with_trace_processor() -> &'static str {
+        r#"{
+            "schema_version": 1,
+            "tools": {
+                "trace-processor": {
+                    "display_name": "Perfetto trace_processor",
+                    "description": "query tool",
+                    "install_method": "binary_download",
+                    "pinned_version": "v57.2",
+                    "managed_by_pulp": true,
+                    "binary_sources": {
+                        "macOS-arm64": {"url_template":"x","binary_name":"trace_processor_shell"},
+                        "macOS-x64": {"url_template":"x","binary_name":"trace_processor_shell"},
+                        "Linux-x64": {"url_template":"x","binary_name":"trace_processor_shell"},
+                        "Linux-arm64": {"url_template":"x","binary_name":"trace_processor_shell"},
+                        "Windows-x64": {"url_template":"x","binary_name":"trace_processor_shell.exe"}
+                    }
+                }
+            }
+        }"#
     }
 }

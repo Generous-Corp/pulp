@@ -500,6 +500,28 @@ Gotchas / invariants when touching this surface:
   `pulp-test-cli-tool-registry` and `pulp-test-cli-importer-install` link all
   three TUs. Adding a symbol used by `cmd_tool` means updating both targets.
 
+### `pulp tool install` — bare binaries vs archives, and the verified-fetcher lane
+
+The generic `binary_download` path in `install_binary_tool` (`tool_registry.cpp`)
+assumes an **archive**: with no `archive_format` it defaults the download
+extension to `.tar.xz` and runs `extract_archive`. A **bare** binary source (no
+`archive_format`, e.g. Perfetto's `trace_processor_shell`) would fail there
+("cannot extract" on a raw Mach-O/ELF) — and this path never verifies a SHA
+(the `sha256` field is read but unused). So a bare-binary tool is installed
+**only** by its own SHA-256-verified fetcher, never this generic path:
+
+- `install_binary_tool` **skips** any source with an empty `archive_format`
+  (returns ok, installs nothing) so an `--all` sweep reaching it via `pulp-cpp`
+  doesn't error. The Rust front-end owns the real install: `cmd/tool.rs`
+  short-circuits `install`/`update <id>` to the verified fetcher, and its
+  `install --all` pre-fetches the bare-binary tool so the delegated C++ sweep
+  finds it already-present (C++ `locate_tool` searches `tools/<id>/`
+  recursively) and skips it.
+- trace-processor is the live example: pins + fetch live in
+  `experimental/pulp-rs/src/cmd/trace_fetch.rs`; `pulp trace fetch` and
+  `pulp tool install trace-processor` share that code. If you add another bare
+  binary, give it a verified fetcher — don't rely on the generic path.
+
 ### `pulp tool info` — Rust/C++ parity
 
 `pulp-cpp tool info <tool-id> [--json]` prints the same descriptor metadata
