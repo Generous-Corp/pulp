@@ -483,6 +483,17 @@ static constexpr const char* kWavenetLayerShader = R"wgsl(
 // One WaveNet layer: z = dilated_conv(in)[Z] + bias + input_mixin*cond (Z), then
 // a = (gated ? tanh(z[:C])*sigmoid(z[C:]) : tanh(z[:C])) (C); head += a;
 // out = in + (layer1x1_bias + layer1x1_W * a). condition_size is 1 (mono input).
+//
+// Block-parallel dispatch: ONE WORKGROUP PER SAMPLE (t = workgroup_id.x, host
+// dispatches exactly B workgroups) with WG lanes cooperating across the channel
+// dimension. Each lane owns whole output channels (oc = lid, lid+WG, ...) and
+// walks that channel's K*C convolution reduction in the SAME serial arithmetic
+// order as the scalar path — so every output element is bit-identical to the
+// one-thread-per-sample version (the correctness/determinism guards hold) — but
+// a B-sample block now fills B workgroups instead of a single one (25% of one
+// core), and the per-channel loops fill up to Z (then C) lanes each instead of
+// one. zbuf/abuf move to workgroup shared memory so the activation and 1x1
+// stages can read every channel the conv stage produced.
 struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, pad:u32,
            conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32,
            p0:u32, p1:u32, p2:u32, p3:u32 };
@@ -493,17 +504,23 @@ struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, pad:u32,
 @group(0) @binding(4) var<storage, read_write> headacc : array<f32>;  // C*B
 @group(0) @binding(5) var<uniform>             p       : P;
 
-var<private> zbuf : array<f32, 128>;  // Zmax = 2*Cmax
-var<private> abuf : array<f32, 64>;   // Cmax
+const WG : u32 = 64u;                    // lanes per sample-workgroup
+var<workgroup> zbuf : array<f32, 128>;   // Zmax = 2*Cmax, shared across the workgroup
+var<workgroup> abuf : array<f32, 64>;    // Cmax
 
-@compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) gid : vec3u) {
-    let t = gid.x;
+@compute @workgroup_size(WG)
+fn main(@builtin(workgroup_id) wid : vec3u,
+        @builtin(local_invocation_id) lid : vec3u) {
+    let t = wid.x;                       // one workgroup per sample
+    // Uniform guard: workgroup_id is identical for every lane, so the whole
+    // workgroup returns together — barriers below stay in uniform control flow.
     if (t >= p.B) { return; }
+    let lane = lid.x;
     let C = p.C; let K = p.K; let Z = p.Z;
     let acol = p.pad + t;
     let x = cond[t];
-    for (var oc = 0u; oc < Z; oc = oc + 1u) {
+    // Phase 1 — dilated conv + input mixin, one lane per output channel oc.
+    for (var oc = lane; oc < Z; oc = oc + WG) {
         var acc = wts[p.conv_b + oc];
         for (var k = 0u; k < K; k = k + 1u) {
             let back = p.dil * (K - 1u - k);   // valid: pad >= max back
@@ -516,18 +533,22 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         acc = acc + wts[p.mix_w + oc] * x;   // input_mixin (condition_size == 1)
         zbuf[oc] = acc;
     }
+    workgroupBarrier();
+    // Phase 2 — activation, one lane per channel c.
     if (p.gated == 0u) {
-        for (var c = 0u; c < C; c = c + 1u) { abuf[c] = tanh(zbuf[c]); }
+        for (var c = lane; c < C; c = c + WG) { abuf[c] = tanh(zbuf[c]); }
     } else {
-        for (var c = 0u; c < C; c = c + 1u) {
+        for (var c = lane; c < C; c = c + WG) {
             let g = 1.0 / (1.0 + exp(-zbuf[C + c]));
             abuf[c] = tanh(zbuf[c]) * g;
         }
     }
+    workgroupBarrier();
+    // Phase 3 — head accumulate + 1x1 output, one lane per channel.
     let hc = t * C;
-    for (var c = 0u; c < C; c = c + 1u) { headacc[hc + c] = headacc[hc + c] + abuf[c]; }
+    for (var c = lane; c < C; c = c + WG) { headacc[hc + c] = headacc[hc + c] + abuf[c]; }
     let tc = acol * C;
-    for (var oc = 0u; oc < C; oc = oc + 1u) {
+    for (var oc = lane; oc < C; oc = oc + WG) {
         var r = wts[p.l1_b + oc];
         let rrow = p.l1_w + oc * C;
         for (var ic = 0u; ic < C; ic = ic + 1u) { r = r + wts[rrow + ic] * abuf[ic]; }
@@ -1950,7 +1971,10 @@ public:
             for (uint32_t l = 0; l < na.num_layers; ++l) {
                 pass.SetPipeline(wavenet_layer_pipeline_);
                 pass.SetBindGroup(0, na.layer_bg[l]);
-                pass.DispatchWorkgroups(wg);
+                // The WaveNet layer shader runs one workgroup per sample (WG lanes
+                // cooperate across channels), so it needs exactly B workgroups —
+                // not the ceil(B/256) used by the one-thread-per-sample passes.
+                pass.DispatchWorkgroups(B);
             }
             pass.SetPipeline(wavenet_head_pipeline_);
             pass.SetBindGroup(0, na.head_bg);

@@ -44,3 +44,10 @@
     add_executable(pulp-test-gpu-compute test_gpu_compute.cpp)
     target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-compute ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
+    # GPU roofline / occupancy harness (tooling, not a test): drives every
+    # MAC-dense compute pass and prints a ranked GMAC/s-vs-roofline + occupancy
+    # table. Confirms the WaveNet one-thread-per-sample gap and its siblings.
+    add_executable(pulp-gpu-roofline-harness
+        "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_roofline_harness.cpp")
+    target_link_libraries(pulp-gpu-roofline-harness PRIVATE pulp::render pulp::signal)
