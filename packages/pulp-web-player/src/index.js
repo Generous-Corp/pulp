@@ -39,6 +39,13 @@ export function mountDemo(opts = {}) {
 // (e.g. a WebCLAP adapter of the same shape — see adapters/adapter.d.ts).
 export { createWamAdapter };
 
+// The WebCLAP adapter (Architecture A — a worklet-resident CLAP host). Same
+// contract as the WAM adapter, so the shell hosts a real-time WebCLAP plugin
+// unchanged. Pass it as `opts.createAdapter` (with dspUrl = the .wasm and
+// processorUrl = the wclap-processor.js worklet); a WebCLAP page needs COOP/COEP
+// (crossOriginIsolated) because the module imports a shared WebAssembly.Memory.
+export { createWclapAdapter } from "./adapters/wclap.js";
+
 // The canvas widget set, for consumers who want to build custom UI from the same
 // native-styled knob/fader/toggle/combo/meter primitives.
 export { createWidget, kindFor, formatValue } from "./widgets/index.js";
