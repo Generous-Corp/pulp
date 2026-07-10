@@ -43,7 +43,7 @@ them).
 | `LFO` | Two modulation sources, each locked to the tempo or free-running in hertz, in one of eight sync modes. |
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
 | `Quantizer` | Snaps an incoming control voltage to discrete steps, or to the notes of a scale. |
-| `Step LFO` | An eight-step pattern and a gate, locked to the host. |
+| `Step LFO` | An eight-step pattern and a gate, on the LFO's clock, with a shift-register random source. |
 | `CV To OSC` | Passes a control voltage through and reports it over OSC to a target you type. Off by default. |
 
 `Function` is the only plug-in here that reads its input bus — the others
@@ -302,27 +302,78 @@ and is not built.
 
 ![Step LFO](docs/images/step.png)
 
-An eight-step pattern. Drag in the display to draw it. Channel 1 is the stepped
-voltage, channel 2 a gate.
+An eight-step pattern on the LFO's clock. Drag in the display to draw it. Channel 1
+is the stepped voltage, channel 2 a gate.
 
-`Rate` means the whole pattern by default; `Per Step` reinterprets it as the time
-of a single step. That is a real fork, not a preference: with `Rate` as the cycle,
-shortening `Length` makes the steps faster and the pattern keeps its period — it
-stays an LFO. With `Rate` as the step, the pattern's period grows with its length
-— it becomes a sequencer.
+The timing is the LFO's, literally — the same eight sync modes, the same
+`Speed` × `Mult` and `Beats` × `Div` × `Triplet` rate pair, the same `Phase`,
+`Swing`, `16ths`, `Asym`, `Offset` and `Smooth`, out of the same shared clock. What
+a *cycle* means is the only difference, and it is a switch: with `Per Step` off one
+cycle is the whole window, so shortening the pattern makes the steps faster and the
+period never changes — it stays an LFO. With `Per Step` on one cycle is a single
+step, so the pattern's period grows with its length — it becomes a sequencer.
+Neither is a rescaling of the other.
 
-`Gate` sets how much of each step carries its value; the rest of the step falls to
-zero, on *both* the voltage and the gate. At the default of 100% nothing is punched
-out and the gate never falls, which is right — with full-length steps there is no
-gap between one note and the next to fall into. Turn it down and every step grows
-a rising edge, which is what an envelope generator downstream needs in order to
-fire once per step instead of once per phrase.
+Two sync modes exist here and nowhere else. `TrgFr` and `TrgTm` run the clock at
+the base rate but hold the pattern at the end of every step until a trigger arrives
+on the input bus, and the released step starts *at* the trigger rather than being
+skipped through because the clock ran on while the pattern waited.
+
+`Start`, `Length` and `End` describe the window played through the eight steps.
+`Bounds` picks which two it reads: `Len` keeps the pattern's duration fixed while
+you slide it, `End` keeps its boundaries fixed while you change its duration. The
+window wraps — start at 7 with a length of 3 and it plays 7, 8, 1. Steps outside it
+are drawn recessed, not hidden: their levels are still in the preset.
 
 `Glide` slews from the previous step's level into the current one over the first
 fraction of the step, so a step still spends most of its time at the level it was
-programmed to. `Random` adds a bounded offset to each step, hashed from the
-**absolute** step index — so the pattern's shape loops but its dither does not, and
-the same project bounces to the same samples every time. `Seed` rerolls it.
+programmed to. `Interp = Lin` is exactly `Glide` at 1.0, and says so rather than
+growing a second control that does the same arithmetic. `Range` sends the pattern
+out bipolar or unipolar. `Gate` sets how much of each step carries its value; the
+rest falls to zero, on *both* the voltage and the gate. At the default of 100%
+nothing is punched out and the gate never falls, which is right — with full-length
+steps there is no gap between one note and the next to fall into. Turn it down and
+every step grows a rising edge, which is what an envelope generator downstream needs
+in order to fire once per step instead of once per phrase.
+
+**The shift register.** Switch `Register` on and the step levels come from a looping
+ring of bits rather than from the eight bars. The bit that falls off the end is fed
+back to the front, inverted with a probability `Rand` sets — and one signed knob
+gives all three documented regimes, because the probability is `(1 − Rand) / 2`:
+
+| `Rand` | the ring | what you hear |
+|--------|----------|---------------|
+| `+1` | never inverts | a locked loop of `Bits` steps |
+| `0` | inverts half the time | never repeats |
+| `−1` | always inverts | a locked loop of `2 × Bits` steps, the second half the complement of the first |
+
+A weighted DAC reads a window of `DAC` bits starting at `Rotate`, with the eight
+`W1`–`W8` weights as its ladder — flatten one and that bit stops contributing.
+`Auto` divides by the weights in use so full scale is 1.0; switch it off and `Scale`
+is the divisor. `Set Next` is latched rather than momentary: while it is on every
+bit shifted in is a one, so automating it high for one step is the same operation,
+and a latch is the only form of it a preset can hold. The lamps under the bars are
+the ring, bit zero on the left, with the DAC's window outlined.
+
+The whole register is a **pure function of the absolute step index**: it is replayed
+from the origin rather than advanced from wherever it happened to be, and the coin it
+flips at step *k* is a hash of *k* rather than a draw from a generator. Bar 57 plays
+the bits bar 57 plays, and two bounces render the same samples.
+
+`Random` then adds a bounded dither on top — of the programmed level or of the
+register's, whichever is driving — hashed from the **absolute** step index, so the
+pattern's shape loops but its dither does not. `Seed` rerolls both.
+
+**Inputs.** `In L` and `In R` each pick a role for their input channel: `Off`,
+`Reset` (restart the pattern at the window's first step), `Trig` (release one step,
+in the two trigger modes), or `Sig` — summed, multiplied or both into the output by
+`Signal`. All three default to `Off`, for the same reason a bypassed generator is
+silent: a DAW will happily hand a modulation plug-in a drum loop at full scale, and
+a drum loop on the reset input is a sequencer that never leaves step 1.
+
+Not built, and named so nobody assumes otherwise: the reference's `Roll` (write a
+random pattern *into* the eight bars, where it can be hand-edited and stored), and
+its `Dynamic` scale mode, whose rule the manual does not state.
 
 ### CV To OSC
 

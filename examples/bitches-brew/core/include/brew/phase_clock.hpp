@@ -98,11 +98,15 @@ public:
                                    double n) const noexcept {
         switch (s.mode) {
             case SyncMode::free:
+            case SyncMode::trig_free:
                 // Wall clock, always. The one mode with no timeline in it at all.
+                // A trigger mode's clock is the same clock; what the trigger gates
+                // is the pattern reading it, one step boundary at a time.
                 if (!(t.sample_rate > 0.0)) return wall_;
                 return wall_ + n * s.hz / t.sample_rate;
 
             case SyncMode::tempo:
+            case SyncMode::trig_tempo:
                 // Wall clock too, but at the tempo's rate rather than a hertz knob's.
                 if (!(s.cycle_beats > 0.0)) return wall_;
                 return wall_ + n * t.beats_per_sample / s.cycle_beats;
@@ -135,9 +139,9 @@ public:
     /// Call once per block, after the sample loop. Advances whatever accumulates.
     void end_block(const ClockSettings& s, const Transport& t, int frames) noexcept {
         const double n = static_cast<double>(frames);
-        if (s.mode == SyncMode::free) {
+        if (s.mode == SyncMode::free || s.mode == SyncMode::trig_free) {
             if (t.sample_rate > 0.0) wall_ += n * s.hz / t.sample_rate;
-        } else if (s.mode == SyncMode::tempo) {
+        } else if (s.mode == SyncMode::tempo || s.mode == SyncMode::trig_tempo) {
             if (s.cycle_beats > 0.0) wall_ += n * t.beats_per_sample / s.cycle_beats;
         } else if (s.mode == SyncMode::transport && !t.playing) {
             // Only while parked. `begin_block` already zeroed it on the play edge.

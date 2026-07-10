@@ -97,6 +97,13 @@ view::Toggle* find_toggle(view::View& root, std::string_view label) {
     return nullptr;
 }
 
+view::Knob* find_knob(view::View& root, std::string_view label) {
+    if (auto* k = dynamic_cast<view::Knob*>(&root); k && k->label() == label) return k;
+    for (size_t i = 0; i < root.child_count(); ++i)
+        if (auto* hit = find_knob(*root.child_at(i), label)) return hit;
+    return nullptr;
+}
+
 /// The bottom-right corner of the furthest-extending descendant, in the root's
 /// coordinates. Yoga has already placed everything by the time this runs.
 void content_extent(const view::View& v, float ox, float oy, float& w, float& h) {
@@ -482,6 +489,37 @@ TEST_CASE("Quantizer's editor draws the staircase and the operating point",
         const auto low = ed.shoot();
         drive(ed.host, 0.7f);
         REQUIRE(differs(ed.shoot(), low));
+    }
+}
+
+TEST_CASE("Step LFO's editor reaches every control it declares",
+          "[brew][ui][step]") {
+    Editor ed(create_step);
+
+    // The step bars show eight levels and the lamps show the register's bits.
+    // Everything else — two rate pairs, the window, the register's own controls,
+    // the input routing — is a knob or a toggle, and a parameter with no widget is
+    // a parameter a user cannot reach. The processor's `controls()` and
+    // `toggles()` tables are the contract; this is what enforces them.
+    for (const auto& c : StepProcessor::controls()) {
+        CAPTURE(c.label);
+        REQUIRE(find_knob(*ed.view, c.label) != nullptr);
+    }
+    for (const auto& c : StepProcessor::toggles()) {
+        CAPTURE(c.label);
+        auto* toggle = find_toggle(*ed.view, c.label);
+        REQUIRE(toggle != nullptr);
+
+        // ...and it is wired to the parameter it names, not to a neighbour's.
+        const float before = ed.host.state().get_value(c.id);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(ed.host.state().get_value(c.id) != before);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(ed.host.state().get_value(c.id) == before);
+    }
+    for (int i = 0; i < kMaxDacBits; ++i) {
+        CAPTURE(i);
+        REQUIRE(find_knob(*ed.view, "W" + std::to_string(i + 1)) != nullptr);
     }
 }
 
