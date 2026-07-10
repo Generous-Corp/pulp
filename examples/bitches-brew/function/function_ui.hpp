@@ -118,25 +118,24 @@ public:
             row.add_child(std::move(k));
         };
 
+        // Input stage, function, output stage — left to right, the order the
+        // signal actually travels.
         auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
+        add(*top, FunctionProcessor::kInScale, "In Scale", number);
+        add(*top, FunctionProcessor::kInOffset, "In Off", number);
         add(*top, FunctionProcessor::kCurve, "Curve", curve_name);
         add(*top, FunctionProcessor::kAmount, "Amount", amount_or_dash);
-        add(*top, FunctionProcessor::kInScale, "In Scale", number);
+        add(*top, FunctionProcessor::kOutputScale, "Out", number);
 
         auto bottom = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*bottom, FunctionProcessor::kInOffset, "In Off", number);
         add(*bottom, FunctionProcessor::kOutOffset, "Out Off", number);
-        add(*bottom, FunctionProcessor::kOutputScale, "Out", number);
-
-        auto toggles = ui::row(ui::kRowGap, ui::kToggleHeight);
         auto inv = ui::param_toggle(store_, FunctionProcessor::kInvert, "Invert");
         ui::toggle_size(*inv);
-        toggles->add_child(std::move(inv));
+        bottom->add_child(std::move(inv));
 
         add_child(std::move(graph));
         add_child(std::move(top));
         add_child(std::move(bottom));
-        add_child(std::move(toggles));
         add_child(ui::caption_label(
             "the dot is where the incoming signal is sitting on the curve"));
     }
