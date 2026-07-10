@@ -66,7 +66,7 @@ and a shared, host-imported memory.
 
 | Tool | Proves |
 | --- | --- |
-| `wclap_probe.mjs` | Module is live: `_initialize` runs; `clap_entry` resolves to a CLAP 1.2.2 entry with callable init/deinit/get_factory. |
+| `wclap_probe.mjs` | Module is live: `_initialize` runs; `clap_entry` resolves to a CLAP 1.2.9 entry with callable init/deinit/get_factory. |
 | `wclap_host_runner.mjs` | Full host: `create_plugin` → `init` → `activate` → `process`. Renders a stereo block (passthrough at unity) and, with an injected param-value event, drives a parameter (PulpGain `Input Gain +6 dB` → output rises exactly +6 dB). |
 
 The host callbacks (`clap_host_t`) are synthesized from JS using tiny wasm
@@ -122,7 +122,7 @@ drift control (verify before relying on a specific revision):
 - WAM SDK: <https://github.com/webaudiomodules/sdk>
 - WebCLAP org: <https://github.com/WebCLAP>
 - WebCLAP host JS: <https://github.com/WebCLAP/wclap-host-js>
-- CLAP draft webview (`clap.webview/3`): <https://github.com/free-audio/clap/blob/main/include/clap/ext/draft/webview.h>
+- CLAP draft webview (`clap.webview/1`): <https://github.com/free-audio/clap/blob/main/include/clap/ext/draft/webview.h>
 - wasi-sdk: <https://github.com/WebAssembly/wasi-sdk>
 
 References pinned: 2026-06-29.

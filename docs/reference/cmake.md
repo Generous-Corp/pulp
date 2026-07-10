@@ -458,6 +458,7 @@ pulp_add_wam_plugin(PulpGain
 | `SOURCES` | No | Additional plugin DSP source files. |
 | `INCLUDES` | No | Additional include directories (plugin headers). |
 | `SINGLE_FILE` | No | Emit a BASE64-embedded ES-module factory for the AudioWorklet (sync compile, no fetch in worklet scope). Without it, a separate `.wasm` is emitted for the Node runner and export inspection. |
+| `NATIVE_EDITOR` | No | Record in the web-build report that the plugin's native `create_view()` editor is replaced by generated controls in the headless web build. |
 
 ### Created targets
 
