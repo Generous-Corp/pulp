@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pulp Live Kernel — S0 spike</title>
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+  h1 { font-size: 1.25rem; }
+  button { font: inherit; padding: .5rem .9rem; margin: .25rem .3rem .25rem 0; border-radius: 8px; border: 1px solid #bbb; background: #fafafa; cursor: pointer; }
+  button:hover { background: #f0f0f0; }
+  #status { font-family: ui-monospace, monospace; background: #111; color: #6f6; padding: .5rem .7rem; border-radius: 8px; display: inline-block; margin-top: .5rem; }
+  code { background: #f2f2f2; padding: 0 .25rem; border-radius: 4px; }
+  .note { color: #555; font-size: .9rem; }
+</style>
+</head>
+<body>
+  <h1>Pulp Live Kernel — S0 spike</h1>
+  <p class="note">One resident AudioWorklet wasm instance interpreting a bounded binary graph blob
+  through the real <code>core/signal</code> node classes. Edits hot-swap inside the instance under an
+  equal-power crossfade — no wasm teardown, no module handoff.</p>
+  <p>
+    <button id="btnStart">Start audio</button>
+    <button id="btnParam">Param edit (cutoff)</button>
+    <button id="btnSwap">Structural swap (musical ⇄ drone)</button>
+  </p>
+  <div id="status">booting…</div>
+  <script type="module" src="/examples/web-demos/live-kernel-spike/lk-driver.mjs"></script>
+</body>
+</html>

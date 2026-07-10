@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8"><title>Pulp compiler-spike measure</title>
+<body style="font-family:system-ui;background:#11111b;color:#cdd6f4;padding:20px">
+<h3>Pulp compiler-spike — headless measure page</h3>
+<pre id="log">loading…</pre>
+<script type="module">
+// Runs in headless system Chrome (V8 — the same engine the AudioWorklet uses),
+// so per-quantum CPU numbers are representative of the worklet. Exposes a small
+// high-level API on window; each call returns compact JSON (never megabytes of
+// samples) so the Node driver reads only the measured numbers back.
+const B = "/examples/web-demos/compiler-spike/measure/lib/";
+const core = await import(B + "measure-core.mjs");
+const { loadWamDspFromUrl } = await import(B + "dsp-adapter.mjs");
+const log = (m) => { document.getElementById("log").textContent += "\n" + m; };
+
+function configure(adapter, cfg = {}) {
+  if (cfg.params) for (const [id, v] of Object.entries(cfg.params)) adapter.setParam(id, v);
+  if (cfg.midi && adapter.midi) for (const [s, d1, d2, o] of cfg.midi) adapter.midi(s, d1, d2, o || 0);
+  // Let a synth voice settle past its attack before measuring/rendering.
+  if (cfg.settleQuanta) for (let i = 0; i < cfg.settleQuanta; i++) adapter.processQuantum();
+}
+
+window.MeasureAPI = {
+  async cpu(url, opts = {}) {
+    const a = await loadWamDspFromUrl(url, opts);
+    const input = core.genSine(opts.freqHz || 220, a.sampleRate, a.frames, opts.amp || 0.25, a.channels);
+    configure(a, opts);
+    const r = core.measureCpu(a, { ...opts, input });
+    a.dispose?.();
+    return { engine: "chrome", ...r };
+  },
+  async nullTest(cfg = {}) {
+    const {
+      urlA, urlB = cfg.urlA, sampleRate = 48000, frames = 128, channels = 2,
+      freqHz = 220, seconds = 1.0, amp = 0.25, maxShift = 0, paramsA, paramsB, midiA, midiB,
+      settleQuanta = 0,
+    } = cfg;
+    const opts = { sampleRate, frames, channels };
+    const a = await loadWamDspFromUrl(urlA, opts);
+    const b = await loadWamDspFromUrl(urlB, opts);
+    const total = Math.floor(seconds * sampleRate);
+    const input = core.genSine(freqHz, sampleRate, total, amp, channels);
+    configure(a, { params: paramsA, midi: midiA, settleQuanta });
+    configure(b, { params: paramsB, midi: midiB, settleQuanta });
+    const outA = core.renderBuffer(a, input);
+    const outB = core.renderBuffer(b, input);
+    const r = core.nullTest(outA, outB, { channels, maxShift });
+    a.dispose?.(); b.dispose?.();
+    return { engine: "chrome", frames: outA.length / channels, ...r };
+  },
+};
+window.__ready = true;
+log("ready — MeasureAPI available");
+</script>

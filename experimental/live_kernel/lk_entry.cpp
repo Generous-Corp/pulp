@@ -1,0 +1,73 @@
+// Pulp Live Kernel — S0 spike — C ABI entry point (lk_* symbols).
+//
+// A NEW routing surface with its OWN C ABI (the lk_* prefix), entirely separate
+// from the shipped wam_* four-file ABI (which this spike does not touch). One
+// process-global Kernel owns two preallocated Plan slots and the equal-power
+// crossfade. The audio thread calls lk_process(); edits arrive as either a
+// binary graph blob (lk_load_plan + lk_swap) or a param poke (lk_set_param).
+//
+// ZERO-ALLOC PROOF: every C++ heap allocation goes through the replaced global
+// operator new below, which bumps g_alloc_count. The harness reads
+// lk_alloc_count() before and after a long render / a swap and asserts the delta
+// is zero — process() and swap-fade rendering allocate nothing. (Allocation is
+// EXPECTED once, in lk_init -> prepare_pool, for the DelayLineT rings.)
+
+#include "crossfade.hpp"
+
+#include <cstdlib>
+#include <cstddef>
+#include <new>
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#define LK_EXPORT extern "C" EMSCRIPTEN_KEEPALIVE
+#else
+#define LK_EXPORT extern "C"
+#endif
+
+namespace {
+uint64_t g_alloc_count = 0;
+pulp::live_kernel::Kernel g_kernel;
+}
+
+// Replaced global allocation operators (the zero-alloc instrument). Built with
+// -fno-exceptions, so these are the non-throwing shape (abort on OOM).
+void* operator new(std::size_t n) {
+    ++g_alloc_count;
+    void* p = std::malloc(n ? n : 1);
+    if (!p) std::abort();
+    return p;
+}
+void* operator new[](std::size_t n) { return ::operator new(n); }
+void  operator delete(void* p) noexcept { std::free(p); }
+void  operator delete[](void* p) noexcept { std::free(p); }
+void  operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void  operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+
+LK_EXPORT void lk_init(double sample_rate, int max_block) {
+    g_kernel.init(sample_rate, max_block);
+}
+
+// Decode + build a graph blob into the inactive plan. Returns 0 on success,
+// negative on error (see DecodeError). Zero-alloc.
+LK_EXPORT int lk_load_plan(const unsigned char* bytes, int len) {
+    return g_kernel.load_plan(bytes, len);
+}
+
+// Arm the equal-power crossfade to the freshly-built plan.
+LK_EXPORT void lk_swap(float fade_ms) { g_kernel.swap(fade_ms); }
+
+// Zero-interruption param edit on the active plan.
+LK_EXPORT void lk_set_param(int node, int param_id, float value) {
+    g_kernel.set_param(node, param_id, value);
+}
+
+// Render `n` frames of mono audio into dst. Zero-alloc.
+LK_EXPORT void lk_process(float* dst, int n) { g_kernel.process(dst, n); }
+
+LK_EXPORT int    lk_is_fading()    { return g_kernel.is_fading() ? 1 : 0; }
+LK_EXPORT int    lk_active_valid() { return g_kernel.active_valid() ? 1 : 0; }
+LK_EXPORT double lk_sample_rate()  { return g_kernel.sample_rate(); }
+
+// The zero-alloc instrument: total C++ heap allocations since load.
+LK_EXPORT double lk_alloc_count()  { return (double)g_alloc_count; }

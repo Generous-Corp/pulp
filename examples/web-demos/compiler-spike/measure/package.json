@@ -1,0 +1,18 @@
+{
+  "name": "pulp-compiler-spike-measure",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless measurement/harness rig for the Pulp own-real-time-compiler (kernel VM) build plan: AOT baseline, CPU ratio, null test, edit->sound latency gates.",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "aot": "node harness1-aot-baseline.mjs",
+    "cpu": "node harness2-cpu.mjs",
+    "nulltest": "node harness3-nulltest.mjs",
+    "latency": "node harness4-edit-latency.mjs",
+    "selfcheck": "node harness3-nulltest.mjs --self-check --engine node --a ../../wasm-build/build/PulpGain.wasm"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.44.0"
+  }
+}
