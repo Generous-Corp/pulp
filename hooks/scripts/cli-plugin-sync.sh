@@ -61,6 +61,7 @@ if [ -n "$REPO_ROOT" ]; then
     VBC="$REPO_ROOT/tools/scripts/version_bump_check.py"
     SSC="$REPO_ROOT/tools/scripts/skill_sync_check.py"
     CSC="$REPO_ROOT/tools/scripts/compat_sync_check.py"
+    CDC="$REPO_ROOT/tools/scripts/config_doc_check.py"
     DNL="$REPO_ROOT/tools/scripts/docs_noise_lint.py"
     if [ -x "$VBC" ]; then
         "$VBC" --base origin/main --config "$REPO_ROOT/tools/scripts/versioning.json" --mode=hint 2>/dev/null || true
@@ -72,6 +73,14 @@ if [ -n "$REPO_ROOT" ]; then
     # by default; advisory only — same shape as the version/skill hints.
     if [ -x "$CSC" ]; then
         "$CSC" --base origin/main --mode=hint 2>/dev/null || true
+    fi
+
+    # Config→doc drift hint. Advisory only — surfaces a mapped config surface
+    # (Shipyard config, the shipyard pin/installer, build/release/gate
+    # workflows) changed without its guide doc, so the authoritative gate in
+    # .githooks/pre-push + version-skill-check.yml rarely hard-fails on push.
+    if [ -x "$CDC" ]; then
+        "$CDC" --base origin/main --mode=hint 2>/dev/null || true
     fi
 
     # Docs-noise lint. Advisory only — flags newly edited reference docs / shared

@@ -1,0 +1,60 @@
+{
+  "$schema": "Declarative config→doc drift map. Each entry: when any file matching `paths` changes in a diff range, at least ONE file in `docs` must change too, or the gate fails with `why`. Consumed by tools/scripts/config_doc_check.py (mirrors skill_sync_check.py). Bypass on the tip commit with `Config-Doc: skip reason=\"...\"`.",
+  "trailers": {
+    "config_doc": "Config-Doc"
+  },
+  "entries": [
+    {
+      "paths": [
+        ".shipyard/config.toml",
+        ".shipyard.local/config.toml.example"
+      ],
+      "docs": [
+        "docs/guides/versioning.md",
+        "docs/guides/local-ci.md"
+      ],
+      "why": "Shipyard validation config (targets, gates, routing) is documented in the versioning + local-ci guides; a change here without a doc edit silently drifts the operator-facing description of how CI validates and merges."
+    },
+    {
+      "paths": [
+        "tools/shipyard.toml",
+        "tools/install-shipyard.sh"
+      ],
+      "docs": [
+        "docs/guides/versioning.md"
+      ],
+      "why": "The Shipyard binary pin and installer are covered by the versioning guide's three-layer enforcement design; bumping the pin or changing install logic without a doc edit drifts the documented toolchain."
+    },
+    {
+      "paths": [
+        ".github/workflows/build.yml",
+        ".github/workflows/build-macos.yml"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The build workflow's runner routing (self-hosted macOS + GitHub-hosted lanes) is documented in local-ci.md; changing job/runner wiring without a doc edit drifts the documented CI topology."
+    },
+    {
+      "paths": [
+        ".github/workflows/auto-release.yml",
+        ".github/workflows/auto-release-watchdog.yml",
+        ".github/workflows/release-cadence-check.yml"
+      ],
+      "docs": [
+        "docs/guides/release-watchdog.md"
+      ],
+      "why": "The auto-release + watchdog + cadence-check trio is the release-watchdog design; changing any of them without a doc edit drifts the documented three-layer release-failure protection."
+    },
+    {
+      "paths": [
+        ".github/workflows/version-skill-check.yml",
+        ".github/workflows/coverage.yml"
+      ],
+      "docs": [
+        "docs/guides/versioning.md"
+      ],
+      "why": "The authoritative version/skill/coverage gate workflows are described by the versioning guide; changing the enforced gates without a doc edit drifts the documented enforcement layer."
+    }
+  ]
+}

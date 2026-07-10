@@ -105,6 +105,14 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    + `git add -A`. Drop it with
    `git restore --staged --worktree planning && git submodule update planning`,
    or add `Planning-Bump: reason="..."` for a deliberate re-pin.
+2b1. **Config→doc drift?** The `config-doc` gate (`tools/scripts/config_doc_check.py`,
+   map in `tools/scripts/config_doc_map.json`) fails if a mapped CI/release config
+   surface (`.shipyard/config.toml`, the shipyard pin/installer, the
+   `build`/`auto-release`/`version-skill-check`/`coverage` workflows) changed
+   without its guide doc (`versioning.md` / `local-ci.md` / `release-watchdog.md`).
+   Editing a workflow under `.github/workflows/` therefore usually needs a matching
+   guide edit; a genuinely doc-irrelevant change bypasses with a
+   `Config-Doc: skip reason="..."` trailer on any commit in the range.
 2b2. **Hotspot growth?** The `hotspot-size` gate is now net-delta vs merge-base:
    it fails only if THIS PR grows a frozen hotspot past its reference size (main
    growing the same file is NOT your fault and passes). If you must grow one,

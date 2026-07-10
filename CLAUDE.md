@@ -664,6 +664,30 @@ When you modify files in `core/`, `examples/`, or `tools/cli/`:
    - Example pages in `docs/examples/` if examples changed
 4. Run `tools/check-docs.sh` (or `pulp docs check`) to validate consistency.
 
+### CI / Config Docs Maintenance Rule
+
+A handful of CI/release **config surfaces** each have a human-facing guide whose
+description silently goes stale when the config changes without a matching doc
+edit. When you modify one of these, update its mapped guide in the same change:
+
+- `.shipyard/config.toml` / `.shipyard.local/config.toml.example` → `docs/guides/versioning.md` **or** `docs/guides/local-ci.md`
+- `tools/shipyard.toml` / `tools/install-shipyard.sh` → `docs/guides/versioning.md`
+- `.github/workflows/build.yml` / `build-macos.yml` → `docs/guides/local-ci.md`
+- `.github/workflows/auto-release.yml` / `auto-release-watchdog.yml` / `release-cadence-check.yml` → `docs/guides/release-watchdog.md`
+- `.github/workflows/version-skill-check.yml` / `coverage.yml` → `docs/guides/versioning.md`
+
+The full map is `tools/scripts/config_doc_map.json`. This is **enforced** by
+`tools/scripts/config_doc_check.py`: a change to a mapped config path without a
+change to at least one of its docs is rejected by CI
+(`.github/workflows/version-skill-check.yml`), the pre-push hook
+(`.githooks/pre-push`), and `tools/scripts/gates.sh`. The explicit per-push
+bypass (for a genuinely doc-irrelevant edit like a comment typo) is a trailer on
+any commit in the range:
+
+```
+Config-Doc: skip reason="..."
+```
+
 ### Skill Maintenance Rule
 
 Skills in `.agents/skills/` are living documents. When you discover a gotcha, fix a non-obvious bug, or establish a new pattern while working in a skill's domain, update the relevant skill:
@@ -752,6 +776,7 @@ Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scr
 | Auto-release   | `Release: skip reason="..."`                                     |
 | Planning bump  | `Planning-Bump: reason="..."` (authorize a deliberate `planning` submodule pointer re-pin) |
 | Hotspot grow   | `Hotspot-Grow: <path\|all> reason="..."` (authorize this PR to grow a frozen hotspot past its reference size) |
+| Config doc     | `Config-Doc: skip reason="..."` (a mapped CI/release config surface changed without its guide doc — see `tools/scripts/config_doc_map.json`) |
 
 **Reference-Lineage trailer** (required on any commit touching
 `core/format/host_quirks.cpp` or `core/format/include/pulp/format/host_quirks/`):
