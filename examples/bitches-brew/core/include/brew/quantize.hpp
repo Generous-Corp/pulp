@@ -7,21 +7,33 @@
 // one. That is a complete, useful behavior — it turns a smooth LFO into a
 // staircase, a portamento into a glissando, a random walk into a sequence.
 //
-// It is NOT a musical scale quantizer, and this file will not pretend to be one.
-// A semitone is a fixed *voltage* (1/12 V on a 1V/oct input), and mapping that to
-// a sample value requires knowing the interface's full-scale voltage. Nothing in
-// this suite knows that yet. Until it is measured, "12 steps" means twelve equal
-// divisions of full scale, which lands on semitones only by coincidence.
+// It also restricts the output to a musical scale, and that needs no calibration
+// either — see brew/scale.hpp. What *does* need calibration is telling the
+// plug-in which voltage is a semitone, and that is `Calibrated` mode, which this
+// suite does not have because the interface's full-scale voltage has not been
+// measured. Until it is, the user sets the step count so that twelve lattice
+// steps span an octave of their oscillator, and everything downstream is exact.
 //
 // The staircase is a pure function of its input, so an editor can draw it, tests
 // can pin it, and no state can drift.
 
 #include <brew/cv.hpp>
+#include <brew/scale.hpp>
 
 #include <algorithm>
 #include <cmath>
 
 namespace pulp::examples::brew {
+
+/// How the lattice is chosen. `Calibrated` is deliberately absent: it needs the
+/// interface's full-scale voltage, and inventing that number would put a wrong
+/// pitch on a patch cable.
+enum class QuantMode : int {
+    manual = 0,  ///< Equal divisions of full scale.
+    scale = 1,   ///< ...restricted to the notes of a musical scale.
+};
+
+inline constexpr int kQuantModeCount = 2;
 
 /// Fewer than two steps is not a staircase, and a division by a step size of zero
 /// is not a quantizer. Named for the quantizer because the sequencer counts steps
@@ -31,17 +43,24 @@ inline constexpr float kMaxQuantizeSteps = 64.0f;
 
 /// Everything the quantizer does to one sample.
 struct QuantizeSettings {
-    /// Divisions of the full `[-1, +1]` range. Fractional: `Fine` adds to the
-    /// coarse `Steps` knob, and the reference's is fractional too — a
-    /// non-integer count simply puts the rails between lattice points.
+    QuantMode mode = QuantMode::manual;
+    /// Divisions of the full `[-1, +1]` range. Fractional, because `Fine` adds to
+    /// the coarse `Steps` knob: a non-integer count simply puts the rails between
+    /// lattice points, which is a legitimate thing to want.
     float steps = 12.0f;
     /// Where the lattice sits within a step, in step widths. At 0 a lattice point
     /// falls exactly on zero volts; at 0.5 zero falls between two of them.
     float offset = 0.0f;
-    /// Shift the chosen step by whole steps. This is a *lattice* shift, not a
-    /// voltage offset: it moves the output by an exact number of steps, which is
-    /// the only kind of transpose that keeps a quantized signal quantized.
+    /// Shift the chosen step. In `manual` mode this is a *lattice* shift by whole
+    /// steps — the only kind of transpose that keeps a quantized signal
+    /// quantized. In `scale` mode it shifts by whole *scale degrees*, so +7 in a
+    /// seven-note scale is an octave.
     float transpose = 0.0f;
+    /// Which notes survive, in `scale` mode. Ignored in `manual`.
+    Scale scale = Scale::chromatic;
+    /// The scale's root, as a lattice step. `Key` and `Key Offset` are summed
+    /// into it: two controls so a pattern can be automated around a root.
+    int root = 0;
     float out_scale = 1.0f;
     bool invert = false;
 };
@@ -65,6 +84,17 @@ struct QuantizeSettings {
     const double w = step_width(s.steps);
     const double off = static_cast<double>(s.offset);
     const double index = std::round(x / w - off);
+
+    if (s.mode == QuantMode::scale) {
+        // The lattice is a chromatic scale once twelve steps span an octave, so
+        // the restriction is arithmetic on the step index and never touches volts.
+        // Transpose moves by scale degrees here, not by steps.
+        const int i = static_cast<int>(index);
+        const int moved = transpose_in_scale(i, s.scale, s.root,
+                                             static_cast<int>(std::lround(s.transpose)));
+        return std::clamp((static_cast<double>(moved) + off) * w, -1.0, 1.0);
+    }
+
     const double snapped = (index + off + static_cast<double>(s.transpose)) * w;
     return std::clamp(snapped, -1.0, 1.0);
 }
