@@ -8,11 +8,10 @@
 // suite does not have that number yet.
 //
 // But it is not true of the scale itself. Once the user has set the step count so
-// that twelve lattice steps span an octave of their oscillator — which is exactly
-// the calibration-by-ear the reference manual describes, turning a Multiplier
-// until the pitch reads an octave above — the lattice *is* a chromatic scale, and
-// restricting it to a mode is pure arithmetic on the step index. No volts appear
-// anywhere below.
+// that twelve lattice steps span an octave of their oscillator — calibrated by ear,
+// by turning the count until the pitch reads an octave above — the lattice *is* a
+// chromatic scale, and restricting it to a mode is pure arithmetic on the step
+// index. No volts appear anywhere below.
 //
 // So: an octave is twelve lattice steps, a scale is a twelve-bit mask of the
 // pitch classes it admits, and transposing "within the scale" means moving by

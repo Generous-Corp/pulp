@@ -26,9 +26,11 @@
 // `sync_is_deterministic`) and except for `Smooth`, which by definition carries
 // state between blocks.
 //
-// Not implemented, and named so nobody assumes otherwise: the reference's `Roll`
-// (write a random pattern *into* the eight step knobs, where it can be hand-edited
-// and stored), and its `Dynamic` scale mode, whose rule the manual does not state.
+// Two things this does not do, named so nobody assumes otherwise. It cannot roll a
+// random pattern *into* the eight step knobs, where it could then be hand-edited
+// and stored — the register's randomness stays in the register. And the DAC's
+// divisor is either the sum of the weights or a number the user sets; there is no
+// third mode that adapts it to what the register has lately been doing.
 
 #include <brew/cv.hpp>
 #include <brew/lfo.hpp>

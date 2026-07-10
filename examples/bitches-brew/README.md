@@ -393,9 +393,11 @@ in the two trigger modes), or `Sig` — summed, multiplied or both into the outp
 silent: a DAW will happily hand a modulation plug-in a drum loop at full scale, and
 a drum loop on the reset input is a sequencer that never leaves step 1.
 
-Not built, and named so nobody assumes otherwise: the reference's `Roll` (write a
-random pattern *into* the eight bars, where it can be hand-edited and stored), and
-its `Dynamic` scale mode, whose rule the manual does not state.
+Two things it does not do, named so nobody assumes otherwise. It cannot roll a
+random pattern *into* the eight bars, where it could then be hand-edited and
+stored — the register's randomness stays in the register. And the DAC's divisor is
+either the sum of the weights or a number you set; there is no third mode that
+adapts it to what the register has lately been doing.
 
 ### Trigger
 
