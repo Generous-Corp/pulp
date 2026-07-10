@@ -107,8 +107,20 @@ export const FEEDBACK = {
   output: 3,
 };
 
-export const PATCHES = [MUSICAL, TRIVIAL, FEEDBACK];
-export const PATCH_NAMES = ["musical(10-node)", "trivial(osc+9gain)", "feedback(1-block)"];
+// Patch 3 — F2-S1 representative subgraph: osc -> ladder -> gain (the suggested
+// emitter spike target; must match aot_twin.cpp setup_olg exactly).
+export const OLG = {
+  nodes: [
+    { type: T.OSC,    params: [[0, 220.0], [1, 1], [2, 0.3]] }, // 0 saw
+    { type: T.LADDER, params: [[0, 1200.0], [1, 0.4]] },        // 1
+    { type: T.GAIN,   params: [[0, -3.0]] },                     // 2 out
+  ],
+  edges: [{ src: 0, dst: 1 }, { src: 1, dst: 2 }],
+  output: 2,
+};
+
+export const PATCHES = [MUSICAL, TRIVIAL, FEEDBACK, OLG];
+export const PATCH_NAMES = ["musical(10-node)", "trivial(osc+9gain)", "feedback(1-block)", "olg(osc→ladder→gain)"];
 
 // Smooth single-oscillator patches (SINE, waveform id 0) used for the click-free
 // crossfade test: a click is an impulsive DISCONTINUITY, so it is detected as a

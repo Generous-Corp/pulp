@@ -1,4 +1,4 @@
-// @pulp/web-player — a reusable, skinnable, host-agnostic web player for Pulp
+// @danielraffel/web-player — a reusable, skinnable, host-agnostic web player for Pulp
 // (WAMv2 / WebCLAP / …) plugins.
 //
 // Public entry. This wires the host-agnostic shell (shell.js) to the default WAM
@@ -6,7 +6,7 @@
 // a built plugin's dsp/processor URLs. The shell itself imports no backend — an
 // alternate ABI or a test stub is supplied via `opts.createAdapter`.
 //
-//   import { mountDemo } from "@pulp/web-player";
+//   import { mountDemo } from "@danielraffel/web-player";
 //   mountDemo({
 //     root: document.getElementById("app"),
 //     title: "My Plugin",

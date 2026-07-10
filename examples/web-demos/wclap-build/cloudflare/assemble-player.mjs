@@ -1,6 +1,6 @@
 // Assemble the shared-player WebCLAP demo into the Cloudflare Pages deploy dir.
 //
-// WS-C2 headline: the SAME @pulp/web-player shell the WAM demos use, hosting a
+// WS-C2 headline: the SAME @danielraffel/web-player shell the WAM demos use, hosting a
 // WebCLAP plugin (PulpGain) in real time via the worklet-resident CLAP host. It
 // writes a self-contained `public/player/` containing:
 //   • index.html                       — the committed player/index.html (mounts
@@ -89,7 +89,7 @@ async function tree(dir, base = dir) {
 const rel = (p) => p.replace(REPO + "/", "");
 const fileCount = await tree(join(PLAYER_OUT, "pulp-web-player"));
 console.log("assemble-player: wrote shared-player WebCLAP demo → " + rel(PLAYER_OUT));
-console.log("  index.html                 (mounts @pulp/web-player shell + WebCLAP adapter)");
+console.log("  index.html                 (mounts @danielraffel/web-player shell + WebCLAP adapter)");
 console.log(`  pulp-web-player/**         (${fileCount} files: shell, widgets, theme, wclap adapter + worklet)`);
 console.log("  PulpGain.wasm             (from " + rel(wasmSrc) + ")");
 console.log("  _headers                   (COOP/COEP/CORP + MIME; matches /player/**)");
