@@ -84,7 +84,7 @@ jobs:
         working-directory: packages/pulp-web-player
         run: npm test
 
-      - name: Prove locally (single-plugin: crossOriginIsolated + WebCLAP audio + subresources)
+      - name: "Prove locally (single-plugin: crossOriginIsolated + WebCLAP audio + subresources)"
         working-directory: examples/web-demos/wclap-build/cloudflare
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
@@ -93,7 +93,7 @@ jobs:
           ln -s "$GITHUB_WORKSPACE/node_modules" node_modules
           node validate-deploy.mjs --screenshot /tmp/wclap-cloudflare.png
 
-      - name: Prove locally (shared player: real-time WebCLAP + param + clap.state, same UI as WAM)
+      - name: "Prove locally (shared player: real-time WebCLAP + param + clap.state, same UI as WAM)"
         working-directory: examples/web-demos/wclap-build/cloudflare
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
