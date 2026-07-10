@@ -68,16 +68,21 @@ std::string disk_image_failure_hint(const std::string& output) {
     // `hdiutil create -srcfolder` builds the image by attaching a temporary volume,
     // copying into it, and unmounting it. Any DiskArbitration client may veto that
     // unmount, and hdiutil then reports the whole operation as "Resource busy" with
-    // no clue as to who vetoed it. The veto lasts until that client is restarted, so
-    // retrying never clears it. `diskutil unmount` on any mounted volume names the
-    // offender ("Dissenter ..."); CoreSimulator's simdiskimaged is a common one.
+    // no clue as to who vetoed it. The veto lasts until that client goes away, so
+    // retrying never clears it.
+    //
+    // Only `diskutil unmount` identifies the dissenter, and only by PID. Do not
+    // trust the *text* it prints alongside: an unrelated process holding the veto
+    // can surface another subsystem's wording (a plain Console.app was once
+    // reported behind CoreSimulator's "Simulators are still shutting down"). The
+    // PID is the fact; the sentence is not.
     if (output.find("Resource busy") == std::string::npos
         && output.find("Device busy") == std::string::npos)
         return {};
     return "a process is vetoing volume unmounts machine-wide, so hdiutil cannot "
-           "release the temporary volume it built. `diskutil unmount` on any mounted "
-           "image names the dissenter; if it is CoreSimulator's simdiskimaged, "
-           "restart it with `sudo killall -9 simdiskimaged`.";
+           "release the temporary volume it built. Run `diskutil unmount` on any "
+           "mounted volume: it names the dissenting PID. Quit that process — trust "
+           "the PID, not the message text, which may name an unrelated subsystem.";
 }
 
 } // namespace detail
