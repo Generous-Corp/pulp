@@ -133,6 +133,185 @@ Built for VST3, AU (`aufx`), and CLAP. `brew-core/` holds what they share: the
 output stage above, the clock grid, the pulse-width rules, and the run-segment
 origin. `brew-ui/` holds the shared editor furniture.
 
+## The plug-ins, one at a time
+
+Every screenshot below is rendered headlessly from the real
+`Processor::create_view()` path, at exactly the size the plug-in reports from
+`editor_size()`. Regenerate them with
+`examples/bitches-brew/docs/update-screenshots.sh` and commit the result
+alongside any editor change.
+
+Every control reads in **normalized full scale**, `[-1, +1]`. Nothing here knows
+what a volt is.
+
+### DC
+
+![DC](docs/images/dc.png)
+
+A constant. It is the plug-in you patch first, because a constant is the only
+signal whose correctness you can confirm with a multimeter.
+
+`Value` sets a bipolar level and `Unipolar` a positive-only one; they are summed,
+so you can park a bipolar modulation around a positive rest voltage without a
+second plug-in. `Mult` scales that sum, which is what you automate when you have
+drawn a shape you like and only want it louder.
+
+`In Add` and `In Mul` fold the input bus in. `In Mul` at 1.0 makes the output the
+constant multiplied by the input, so an envelope arriving on the input becomes an
+envelope on the output; at 0.0 the input is ignored entirely. The multiply happens
+before the add.
+
+`Smooth` slews (positive milliseconds) or low-passes (negative), calibrated so
+that the number is the time a full `-1` to `+1` swing takes. At zero it is a wire,
+bit for bit.
+
+The rail across the bottom shows the sample the DSP actually emitted — not the
+value the knobs are asking for. Those differ whenever the input bus or the
+smoother is doing anything, and the difference is exactly what you want to see.
+Polarity is visible too: a negative value fills the other half of the rail.
+
+![DC at a negative value](docs/images/dc-negative.png)
+
+### Sync
+
+![Sync](docs/images/sync-running.png)
+
+A clock, locked to the host transport. Channel 1 is the pulse train, channel 2 a
+run/stop gate that is high while the transport plays.
+
+`PPQN` is pulses per quarter note — 24 is DIN sync, which is what a TR-606 or a
+Juno arpeggiator expects. `Mult` and `Div` scale that rate. `Width` sets the
+pulse length in milliseconds; the pulse is a fixed length, not a duty cycle, so
+the rate can change without the hardware seeing a different pulse.
+
+`Offset` advances or delays the whole clock against the transport, in
+milliseconds, which is how you compensate for a converter's latency or a
+sequencer's slow opto-isolator.
+
+`Swing` warps the beat timeline so that every second eighth (or sixteenth) lands
+late. 50% is straight, and *exactly* straight: at 50% the output is bit-identical
+to swing having never been touched. Swinging a clock swings whatever hardware is
+following it, which is otherwise hard to arrange.
+
+`Skip 1st` suppresses the pulse on the downbeat, and `Wait Bar` holds the clock
+until the next bar line. `1st Dly` delays only the first pulse after the transport
+starts, for a machine that needs a moment to arm.
+
+The two lamps read real DSP state rather than the transport flag, so a dark CLOCK
+lamp means no pulse was emitted — not merely that the host said it was stopped.
+Stopped, then running:
+
+![Sync stopped](docs/images/sync-stopped.png)
+
+### LFO
+
+![LFO](docs/images/lfo.png)
+
+A modulation source. Channel 1 carries the shape; channel 2 carries the same shape
+a quarter cycle ahead. Patch the pair into two CV inputs and they trace a circle,
+which is how one oscillator drives a two-axis modulation — a filter's cutoff and
+its resonance, a panner's X and Y.
+
+It is a **mixer, not a selector**. `Sine`, `Tri`, `Saw` and `Sqr` each have their
+own bipolar depth and are summed, so a shape can be subtracted as easily as added
+and everything between the four is reachable. One at full and the rest at zero is
+the single-shape behaviour you would expect.
+
+`Rate` is the cycle length in beats. `Free Run` swaps it for `Free`, a rate in
+hertz. `Phase` offsets the cycle against the transport. `Asym` moves the
+waveform's centre in time — a pulse-width control generalized to every shape —
+and `PW` is the square component's own width.
+
+`Random` is a sample-and-hold: one level per cycle, held flat across it, and
+**hashed from the cycle index** rather than drawn from a running generator. Reroll
+it with `Seed`, not by pressing play again. `Offset` adds a constant; `Out` and
+`Invert` are the per-instance calibration every plug-in here carries.
+
+`Swing` warps the beat timeline exactly as `Sync`'s does, so an LFO and a clock
+shuffled together stay together. `Smooth` behaves as DC's.
+
+The scope draws the unsmoothed shape — smoothing is a function of time, and the
+scope is drawn in cycles.
+
+### Function
+
+![Function](docs/images/function.png)
+
+The only plug-in here that exists to process an incoming voltage rather than
+generate one. The knobs read left to right in the order the signal travels: scale
+and offset the input, bend it through a curve, scale and offset the output.
+
+`Curve` picks between `Linear`, `Exponential` (`2^x - 1`), `Logarithm`
+(`1 + log2(x)`, zero below zero), `Absolute`, and `Power`. `Amount` is the
+exponent of the `Power` curve and is ignored by the others, which is why it reads
+as a dash when it does nothing.
+
+The graph plots the whole transfer — input stage included — and the dot rides the
+curve at the point the incoming signal is currently sitting on. Watching that dot
+is how you tell a live CV from a dead cable in a host that shows you no meter.
+
+### Quantizer
+
+![Quantizer](docs/images/quantizer.png)
+
+Snaps a continuous voltage to a staircase. It turns a smooth LFO into an arpeggio,
+a portamento into a glissando, a random walk into a sequence.
+
+`Steps` divides the full `[-1, +1]` range into that many equal treads, with `Fine`
+added on for non-integer counts. `Offset` slides the lattice within a step, which
+decides whether zero volts falls on a tread or between two. `Transpose` shifts the
+chosen step by a whole number of steps — a *lattice* shift, not a voltage offset,
+which is the only kind of transpose that keeps a quantized signal quantized.
+
+The staircase is drawn from the same transfer function the DSP runs, with the
+faint diagonal showing where the unquantized signal would have gone.
+
+**Steps divide full scale, not an octave.** A semitone is a fixed voltage, and no
+plug-in here knows what full scale is worth in volts, so twelve steps lands on
+semitones only by coincidence. Calibrated pitch quantization needs a measured rail
+and is not built.
+
+### Step LFO
+
+![Step LFO](docs/images/step.png)
+
+An eight-step pattern. Drag in the display to draw it. Channel 1 is the stepped
+voltage, channel 2 a gate.
+
+`Rate` means the whole pattern by default; `Per Step` reinterprets it as the time
+of a single step. That is a real fork, not a preference: with `Rate` as the cycle,
+shortening `Length` makes the steps faster and the pattern keeps its period — it
+stays an LFO. With `Rate` as the step, the pattern's period grows with its length
+— it becomes a sequencer.
+
+`Gate` sets how much of each step carries its value; the rest of the step falls to
+zero, on *both* the voltage and the gate. At the default of 100% nothing is punched
+out and the gate never falls, which is right — with full-length steps there is no
+gap between one note and the next to fall into. Turn it down and every step grows
+a rising edge, which is what an envelope generator downstream needs in order to
+fire once per step instead of once per phrase.
+
+`Glide` slews from the previous step's level into the current one over the first
+fraction of the step, so a step still spends most of its time at the level it was
+programmed to. `Random` adds a bounded offset to each step, hashed from the
+**absolute** step index — so the pattern's shape loops but its dither does not, and
+the same project bounces to the same samples every time. `Seed` rerolls it.
+
+### CV To OSC
+
+![CV To OSC](docs/images/cv-osc.png)
+
+Passes both channels through **bit-exactly** — it is a wire with a tap on it — and
+reports what it sees over OSC as `/brew/cv/0` and `/brew/cv/1` to `127.0.0.1`.
+
+`Send` is off by default, because a plug-in that opens a socket the moment it loads
+is a plug-in that surprises somebody. `Port` picks the destination. `Rate` caps how
+often messages go out, and `Deadband` suppresses a message when the voltage has not
+moved by at least that much — a change smaller than the deadband is noise, and
+flooding a receiver with it helps nobody.
+
+The lamp lights when a message actually left.
+
 ## The editors exist because CV is invisible
 
 A CV plug-in makes no sound and drives no meter, so from inside a DAW there is no

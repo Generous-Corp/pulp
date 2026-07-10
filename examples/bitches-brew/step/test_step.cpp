@@ -303,23 +303,75 @@ TEST_CASE("the processor glides from the step before, not from itself",
     REQUIRE_THAT(p.value_at(2.75), WithinAbs(step2, 1e-6f));
 }
 
-TEST_CASE("the gate is high for the first half of every step",
-          "[brew][step][gate]") {
-    REQUIRE(step_gate(0.0));
-    REQUIRE(step_gate(0.499));
-    REQUIRE_FALSE(step_gate(0.5));
-    REQUIRE_FALSE(step_gate(0.999));
+TEST_CASE("Gate sets how much of a step sounds", "[brew][step][gate]") {
+    REQUIRE(step_gate_open(0.0, 0.5));
+    REQUIRE(step_gate_open(0.499, 0.5));
+    REQUIRE_FALSE(step_gate_open(0.5, 0.5));
+    REQUIRE_FALSE(step_gate_open(0.999, 0.5));
 
-    // Through the processor: an edge downstream on every step.
+    // At the default nothing is punched out, so the gate never falls inside a
+    // step. That is not an oversight: with full-length steps there is no gap
+    // between one and the next for a gate to fall into.
+    REQUIRE(step_gate_open(0.0, 1.0));
+    REQUIRE(step_gate_open(0.999, 1.0));
+    // Shut: no part of the step sounds.
+    REQUIRE_FALSE(step_gate_open(0.0, 0.0));
+}
+
+TEST_CASE("the default Gate leaves both outputs unbroken", "[brew][step][gate]") {
     Rig rig;
     rig.set_ramp();
     rig.state().set_value(StepProcessor::kSpeedMode, 1.0f);
-    rig.state().set_value(StepProcessor::kRate, 0.0625f);  // a step per 31.25 ms
+    rig.state().set_value(StepProcessor::kRate, 0.0625f);
     rig.render(0.0, 4096);
+
+    // Every sample of the gate is high: nothing is punched out at the default.
+    bool all_high = true;
+    for (float g : rig.gate) if (g <= 0.5f) all_high = false;
+    REQUIRE(all_high);
+}
+
+TEST_CASE("Gate punches a hole in the CV and the gate together",
+          "[brew][step][gate]") {
+    Rig rig;
+    rig.set_ramp();
+    rig.state().set_value(StepProcessor::kSpeedMode, 1.0f);
+    rig.state().set_value(StepProcessor::kRate, 0.0625f);   // a step per 31.25 ms
+    rig.state().set_value(StepProcessor::kGate, 0.5f);
+    const auto cv = rig.render(0.0, 4096);
+
+    // An edge downstream on every step: the reason the control exists.
     bool saw_high = false, saw_low = false;
     for (float g : rig.gate) (g > 0.5f ? saw_high : saw_low) = true;
     REQUIRE(saw_high);
     REQUIRE(saw_low);
+
+    // And the CV falls silent wherever the gate does — one control, one note. A
+    // Gate that shortened the gate but not the voltage would leave the CV sitting
+    // at the old step's level after the envelope had already closed.
+    bool cv_follows_gate = true;
+    for (std::size_t n = 0; n < rig.gate.size(); ++n)
+        if (rig.gate[n] <= 0.5f && cv[n] != 0.0f) cv_follows_gate = false;
+    REQUIRE(cv_follows_gate);
+
+    // The CV is not silent everywhere — otherwise the check above is vacuous.
+    bool any_cv = false;
+    for (float v : cv) if (v != 0.0f) any_cv = true;
+    REQUIRE(any_cv);
+}
+
+TEST_CASE("Gate is exactly transparent at 1.0", "[brew][step][gate]") {
+    // The default must not alter a single sample, or every user who never touches
+    // the control pays for it.
+    Rig gated;
+    gated.set_ramp();
+    gated.state().set_value(StepProcessor::kGate, 1.0f);
+    const auto with_gate = gated.render(0.0, 1024);
+
+    Rig plain;
+    plain.set_ramp();
+    const auto without = plain.render(0.0, 1024);
+    REQUIRE(with_gate == without);
 }
 
 TEST_CASE("step_fraction never reaches one", "[brew][step][safety]") {
