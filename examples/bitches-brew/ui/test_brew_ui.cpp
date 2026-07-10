@@ -19,6 +19,11 @@
 #include "step_processor.hpp"
 #include "sync_processor.hpp"
 
+#if defined(__APPLE__)
+#include <CoreGraphics/CoreGraphics.h>
+#include <pulp/canvas/cg_canvas.hpp>
+#endif
+
 #include <pulp/format/headless.hpp>
 #include <brew/ui/panel.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -104,6 +109,55 @@ void content_extent(const view::View& v, float ox, float oy, float& w, float& h)
     }
 }
 
+#if defined(__APPLE__)
+/// Widths of the widget labels in the tree, measured with the same font the
+/// widgets paint with.
+///
+/// A Knob and a Toggle centre their label on their own box and let it overflow.
+/// Two boxes can therefore be perfectly tiled while their labels collide, so the
+/// geometry check below cannot see this class of bug — only a text measurement
+/// can. Measured, not estimated: `RecordingCanvas::measure_text` returns seven
+/// points per character and ignores the font size entirely.
+void check_labels_fit(view::View& v, const char* who, canvas::Canvas& measurer) {
+    constexpr float kWidgetLabelPt = 10.0f;   // what Knob::paint and Toggle::paint use
+    measurer.set_font("Inter", kWidgetLabelPt);
+
+    auto fits = [&](const std::string& label, float box, const char* kind) {
+        if (label.empty()) return;
+        const float text = measurer.measure_text(label);
+        INFO(who << ": " << kind << " label \"" << label << "\" measures " << text
+                 << " in a box " << box << " wide");
+        CHECK(text <= box);
+    };
+
+    if (auto* k = dynamic_cast<view::Knob*>(&v)) fits(k->label(), v.bounds().width, "knob");
+    if (auto* t = dynamic_cast<view::Toggle*>(&v)) fits(t->label(), v.bounds().width, "toggle");
+    for (size_t i = 0; i < v.child_count(); ++i)
+        check_labels_fit(*v.child_at(i), who, measurer);
+}
+#endif
+
+/// Every pair of siblings under `v`, checked for overlapping boxes.
+///
+/// Yoga will not overlap boxes it laid out itself, but `fixed_size` pins a width
+/// that a row is free to overflow: five 60-point knobs and their gaps in a row
+/// 300 points wide simply run past the edge, and Yoga does not complain.
+void check_no_sibling_overlap(const view::View& v, const char* who) {
+    for (size_t i = 0; i < v.child_count(); ++i) {
+        const auto a = v.child_at(i)->bounds();
+        for (size_t j = i + 1; j < v.child_count(); ++j) {
+            const auto b = v.child_at(j)->bounds();
+            const bool apart = a.x + a.width <= b.x + 0.01f || b.x + b.width <= a.x + 0.01f ||
+                               a.y + a.height <= b.y + 0.01f || b.y + b.height <= a.y + 0.01f;
+            INFO(who << ": sibling " << i << " (" << a.x << "," << a.y << " " << a.width
+                     << "x" << a.height << ") overlaps " << j << " (" << b.x << "," << b.y
+                     << " " << b.width << "x" << b.height << ")");
+            CHECK(apart);
+        }
+        check_no_sibling_overlap(*v.child_at(i), who);
+    }
+}
+
 /// Push a constant level through both input channels for one block, so the
 /// editors that display an operating point have a signal to point at.
 void drive(format::HeadlessHost& host, float level) {
@@ -157,6 +211,23 @@ TEST_CASE("every editor fits inside the size it asks the host for",
                     << " but its content wants " << w << "x" << h);
         CHECK(w <= static_cast<float>(ed.width));
         CHECK(h <= static_cast<float>(ed.height));
+
+        // At the real size, nothing may sit on top of anything else.
+        ed.view->set_bounds({0, 0, static_cast<float>(ed.width),
+                             static_cast<float>(ed.height)});
+        ed.view->layout_children();
+        check_no_sibling_overlap(*ed.view, c.name);
+
+#if defined(__APPLE__)
+        CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate(nullptr, 8, 8, 8, 0, space,
+                                                 kCGImageAlphaPremultipliedLast);
+        CGColorSpaceRelease(space);
+        REQUIRE(ctx != nullptr);
+        canvas::CoreGraphicsCanvas measurer(ctx, 8, 8);
+        check_labels_fit(*ed.view, c.name, measurer);
+        CGContextRelease(ctx);
+#endif
     }
 }
 
