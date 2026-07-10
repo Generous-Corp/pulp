@@ -13,6 +13,9 @@
 
 #include <brew/ui/panel.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <functional>
 #include <string>
@@ -24,7 +27,8 @@ namespace pulp::examples::brew {
 /// processor's own transfer function, so the picture cannot drift from the signal.
 class StaircaseGraph : public view::View {
 public:
-    explicit StaircaseGraph(const QuantizerProcessor& proc) : proc_(proc) {}
+    StaircaseGraph(const QuantizerProcessor& proc, std::size_t channel)
+        : proc_(proc), channel_(channel) {}
 
     void paint(canvas::Canvas& c) override {
         const float w = local_bounds().width, h = local_bounds().height;
@@ -48,7 +52,7 @@ public:
         // The identity, faint: the line the signal would follow unquantized.
         c.stroke_line(x_of(-1.0), y_of(-1.0), x_of(1.0), y_of(1.0));
 
-        const QuantizeSettings settings = proc_.settings();
+        const QuantizeSettings settings = proc_.settings(channel_);
 
         // Sample densely. The treads are flat and the risers are vertical, so a
         // coarse sweep would round the corners off a shape whose corners are the
@@ -60,8 +64,8 @@ public:
             return y_of(quantize_transfer(in, settings));
         });
 
-        const float in = proc_.display_input();
-        const float out = proc_.display_output();
+        const float in = proc_.display_input(channel_);
+        const float out = proc_.display_output(channel_);
         c.set_fill_color(ui::palette::text);
         c.fill_circle(x_of(in), y_of(out), 3.5f * s);
 
@@ -70,6 +74,7 @@ public:
 
 private:
     const QuantizerProcessor& proc_;
+    std::size_t channel_;
 };
 
 class QuantizerUi : public ui::BrewPanel {
@@ -93,37 +98,86 @@ public:
             return std::string(buf);
         };
 
-        auto graph = std::make_unique<StaircaseGraph>(proc);
-        graph->flex().preferred_height = 130.0f;
-        graph->flex().align_self = view::FlexAlign::stretch;
+        // Knobs standing in for menus, reading their own value back as a name.
+        // The index is clamped, never wrapped, so a label can never name a mode
+        // other than the one the DSP is running.
+        auto named = [](const char* const* names, int count) {
+            return [names, count](float v) {
+                int i = static_cast<int>(std::lround(v));
+                i = std::clamp(i, 0, count - 1);
+                return std::string(names[i]);
+            };
+        };
+        static const char* const kModeNames[] = {"Man", "Scale"};
+        static const char* const kScaleNames[] = {"chrom", "maj",   "min",   "harm",
+                                                  "pent+", "pent-", "blues", "whole",
+                                                  "dor",   "mixo"};
+        static const char* const kKeyNames[] = {"C",  "C#", "D",  "D#", "E",  "F",
+                                                "F#", "G",  "G#", "A",  "A#", "B"};
+        // Sign carries the mode: positive slews, negative low-passes.
+        auto millis = [](float v) {
+            char buf[20];
+            std::snprintf(buf, sizeof(buf), "%+.0f ms", v);
+            return std::string(buf);
+        };
 
-        auto add = [&](view::View& row, state::ParamID id, const char* label,
-                       std::function<std::string(float)> fmt) {
-            auto k = ui::param_knob(store_, id, label, std::move(fmt));
+        auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
+                       const char* label, std::function<std::string(float)> fmt) {
+            auto k = ui::param_knob(store_,
+                                    static_cast<state::ParamID>(param_for(id, ch)),
+                                    label, std::move(fmt));
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*top, QuantizerProcessor::kSteps, "Steps", whole);
-        add(*top, QuantizerProcessor::kFine, "Fine", number);
-        add(*top, QuantizerProcessor::kOffset, "Offset", number);
-        add(*top, QuantizerProcessor::kTranspose, "Transp", signed_whole);
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+            add_child(ui::channel_label(ch == 0 ? "LEFT" : "RIGHT"));
 
-        add(*top, QuantizerProcessor::kOutputScale, "Out", number);
+            auto graph = std::make_unique<StaircaseGraph>(proc, ch);
+            graph->flex().preferred_height = 104.0f;
+            graph->flex().align_self = view::FlexAlign::stretch;
 
-        auto bottom = ui::row(ui::kRowGap, ui::kToggleHeight);
-        auto inv = ui::param_toggle(store_, QuantizerProcessor::kInvert, "Invert");
-        ui::toggle_size(*inv);
-        bottom->add_child(std::move(inv));
+            auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
+            add(*top, QuantizerProcessor::kMode, ch, "Mode", named(kModeNames, 2));
+            add(*top, QuantizerProcessor::kSteps, ch, "Steps", whole);
+            add(*top, QuantizerProcessor::kFine, ch, "Fine", number);
+            add(*top, QuantizerProcessor::kOffset, ch, "Offset", number);
+            add(*top, QuantizerProcessor::kTranspose, ch, "Transp", signed_whole);
 
-        add_child(std::move(graph));
-        add_child(std::move(top));
-        add_child(std::move(bottom));
-        // Steps divide full scale, not an octave. A semitone is a fixed voltage,
-        // and no plug-in here knows what full scale is worth in volts.
+            auto mid = ui::row(ui::kRowGap, ui::kKnobHeight);
+            add(*mid, QuantizerProcessor::kScale, ch, "Scale",
+                named(kScaleNames, kScaleCount));
+            add(*mid, QuantizerProcessor::kKey, ch, "Key", named(kKeyNames, 12));
+            add(*mid, QuantizerProcessor::kKeyOffset, ch, "Key Off", signed_whole);
+            add(*mid, QuantizerProcessor::kSmoothMs, ch, "Smooth", millis);
+            add(*mid, QuantizerProcessor::kOutputScale, ch, "Out", number);
+
+            auto bottom = ui::row(ui::kRowGap, ui::kToggleHeight);
+            auto en = ui::param_toggle(
+                store_,
+                static_cast<state::ParamID>(param_for(QuantizerProcessor::kEnable, ch)),
+                "Enable");
+            auto inv = ui::param_toggle(
+                store_,
+                static_cast<state::ParamID>(param_for(QuantizerProcessor::kInvert, ch)),
+                "Invert");
+            ui::toggle_size(*en);
+            ui::toggle_size(*inv);
+            bottom->add_child(std::move(en));
+            bottom->add_child(std::move(inv));
+
+            add_child(std::move(graph));
+            add_child(std::move(top));
+            add_child(std::move(mid));
+            add_child(std::move(bottom));
+        }
+
+        // Steps divide full scale, not an octave. Scale mode needs no rail voltage
+        // — set Steps so twelve of them span an octave of your oscillator and the
+        // lattice is chromatic. Calibrated mode, which would do that for you,
+        // needs a number nothing here has measured.
         add_child(ui::caption_label(
-            "steps divide full scale — semitones need a calibrated rail voltage"));
+            "scale mode assumes 12 steps make an octave — set Steps to suit"));
     }
 
 private:
