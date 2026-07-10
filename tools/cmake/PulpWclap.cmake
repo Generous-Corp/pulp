@@ -142,7 +142,14 @@ function(pulp_add_wclap NAME)
         ${ARG_SOURCES}
     )
     target_include_directories(${NAME}-wclap PRIVATE ${_PULP_WCLAP_INCLUDES} ${ARG_INCLUDES})
-    target_compile_definitions(${NAME}-wclap PRIVATE PULP_WCLAP=1 PULP_WASM=1)
+    # PULP_HEADLESS gates out every editor / core-view (canvas/Skia/text-shaping)
+    # reference in a plugin header — none of that stack exists in a sandboxed
+    # wasm CLAP, and it is not on the curated include set above. Plugin headers
+    # guard their create_view()/editor bodies with `#if !PULP_HEADLESS` (same as
+    # the WAM build); the base class's headless default then returns nullptr.
+    # A pure-DSP plugin like PulpGain has no editor, so this is a harmless no-op
+    # there. The shared DSP subset never branches on it (0 references).
+    target_compile_definitions(${NAME}-wclap PRIVATE PULP_WCLAP=1 PULP_WASM=1 PULP_HEADLESS=1)
 
     # The reactor / memory / table flags are toolchain-level (see
     # wasi-toolchain.cmake), so only the clap_entry data export is per-target.
