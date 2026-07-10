@@ -3633,7 +3633,7 @@ Hard rule: **no Intel work ever routes to the self-hosted Studios** (they host
 the required `macos` gate) and **Namespace is never used**. All Intel lanes run
 on free-for-public-repo GitHub-hosted macOS runners.
 
-## Release page: ONE workflow owns the GitHub Release (2026-07-10)
+## Release page: ONE workflow owns the GitHub Release
 
 `release-cli.yml` is the **sole creator** of the GitHub Release for a `v*` tag:
 it sets the title (the **bare tag**, e.g. `v0.645.0` — no "Pulp CLI" prefix),
