@@ -1,0 +1,26 @@
+/* Inter Regular (weight 400) — matches Pulp's native widget rendering.
+ *
+ * NOTE: the Ink & Signal theme's `font.family` STRING token says "Jost",
+ * but the native widget paint code hardcodes the family "Inter" and the
+ * committed screenshot baselines are rendered in Inter. For pixel parity
+ * with the native editors, use Inter.
+ *
+ * Source: pulp external/fonts/Inter-Regular.ttf (SIL OFL-1.1).
+ * inter.woff2 was produced from that exact TTF with fonttools ttLib.woff2
+ * (lossless table recompression); the original TTF ships alongside as a
+ * fallback.
+ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block; /* avoid FOUT flashing a metric-different fallback */
+  src: url("inter.woff2") format("woff2"),
+       url("Inter-Regular.ttf") format("truetype");
+}
+
+:root {
+  /* What native actually renders with (overrides --font-family: Jost). */
+  --font-family-native: "Inter", system-ui, sans-serif;
+}

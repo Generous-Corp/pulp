@@ -96,6 +96,55 @@ def _win_os_version(pe: Path) -> str | None:
     return None
 
 
+def _artifact_kind(path: Path) -> str | None:
+    """Detect a binary's format from its magic bytes: 'macho' | 'elf' | 'pe' | 'ar'.
+
+    'ar' is a Unix static archive (`.a`), whose members may be Mach-O or ELF;
+    both otool and objdump read the archive directly, so measure_artifact tries
+    both on it."""
+    try:
+        with open(path, "rb") as fh:
+            magic = fh.read(8)
+    except OSError:
+        return None
+    if magic[:8] == b"!<arch>\n":
+        return "ar"
+    if magic[:2] == b"MZ":
+        return "pe"
+    if magic[:4] == b"\x7fELF":
+        return "elf"
+    # Mach-O thin (0xFEEDFACE/CF, either endianness) or FAT (0xCAFEBABE/0xBEBAFECA).
+    if magic[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
+                     b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe",
+                     b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"):
+        return "macho"
+    return None
+
+
+def measure_artifact(path: Path) -> tuple[str | None, str | None]:
+    """Measure the min-OS floor of any single built binary, auto-detecting the
+    format. Returns (kind, floor) where kind is 'macho'/'elf'/'pe'/'ar' and floor
+    is the measured minimum (macOS deployment minos, Linux glibc symbol version,
+    or Windows PE subsystem version), or (kind, None) if unmeasurable.
+
+    This is the "derive the floor from everything linked" primitive: the shipped
+    binary's symbol/version records already reflect every dependency compiled or
+    linked into it, so measuring the artifact is the honest floor regardless of
+    what a declared manifest lists."""
+    kind = _artifact_kind(path)
+    if kind == "macho":
+        return kind, _otool_minos(path)
+    if kind == "elf":
+        return kind, _glibc_floor(path)
+    if kind == "pe":
+        return kind, _win_os_version(path)
+    if kind == "ar":
+        # A static archive's members are Mach-O (macOS) or ELF (Linux). Try the
+        # Mach-O reader first, fall back to the glibc reader.
+        return kind, _otool_minos(path) or _glibc_floor(path)
+    return None, None
+
+
 def _find(root: Path, name: str) -> Path | None:
     if not root.exists():
         return None
@@ -154,7 +203,25 @@ def main() -> int:
     ap.add_argument("--max", metavar="VER",
                     help="max acceptable glibc floor for --elf, e.g. 2.34 "
                          "(default: min_os.json platforms.linux-x64.floor)")
+    ap.add_argument("--measure", type=Path, metavar="PATH",
+                    help="measure one built binary's min-OS floor, auto-detecting "
+                         "its format (Mach-O / ELF / PE). Prints '<kind> <floor>' "
+                         "and exits 0, or exits 2 if the file is missing or its "
+                         "format is unrecognized. The floor-derivation primitive "
+                         "the SDK-consumer sweep calls per artifact.")
     args = ap.parse_args()
+
+    # Measure one arbitrary built binary (any platform's artifact).
+    if args.measure is not None:
+        if not args.measure.exists():
+            print(f"--measure path does not exist: {args.measure}", file=sys.stderr)
+            return 2
+        kind, floor = measure_artifact(args.measure)
+        if kind is None:
+            print(f"--measure: unrecognized binary format: {args.measure}", file=sys.stderr)
+            return 2
+        print(f"{kind} {floor if floor is not None else 'unknown'}")
+        return 0
 
     doc = json.loads(MIN_OS_JSON.read_text())
 

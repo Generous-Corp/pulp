@@ -265,6 +265,20 @@ pub struct LocateResult {
 /// pulp-managed directory → python-env wrapper → npm wrapper → `$PATH`.
 #[must_use]
 pub fn locate_tool(tool: &ToolDescriptor) -> LocateResult {
+    // trace_processor is installed by the built-in verified fetcher
+    // (`pulp trace fetch`) into the canonical `~/.pulp` path that `pulp trace`
+    // resolves, not under `tools/<id>/`. Report that as its managed location so
+    // `pulp tool info/list/path/doctor` agree with `pulp trace`.
+    if tool.id == "trace-processor" {
+        if let Some(found) = crate::cmd::trace_fetch::pinned_binary_if_present() {
+            return LocateResult {
+                found: true,
+                path: found,
+                source: "pulp-managed".to_owned(),
+            };
+        }
+    }
+
     // Pulp-managed binary.
     let managed = tools_dir().join(&tool.id);
     if managed.is_dir() {
@@ -495,6 +509,38 @@ mod tests {
         assert!(loc.found);
         assert_eq!(loc.source, "pulp-managed");
         assert_eq!(loc.path, wrapper);
+    }
+
+    #[test]
+    fn locate_finds_trace_processor_at_the_fetcher_cache_path() {
+        use crate::cmd::trace_fetch;
+        // Only meaningful on a host the fetcher pins a binary for.
+        let Some(key) = trace_fetch::host_platform_key() else {
+            return;
+        };
+        let pin = trace_fetch::pin_for(key).unwrap();
+
+        let td = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
+        let t = ToolDescriptor {
+            id: "trace-processor".to_owned(),
+            install_method: "binary_download".to_owned(),
+            ..ToolDescriptor::default()
+        };
+
+        // Absent: the special-case must not fabricate a hit — it falls through
+        // to the normal search (no managed dir, so no pulp-managed source).
+        let miss = locate_tool(&t);
+        assert_ne!(miss.source, "pulp-managed");
+
+        // Present at the canonical `pulp trace fetch` cache path: reported as
+        // the managed install so `pulp tool` and `pulp trace` agree.
+        let cached = trace_fetch::pinned_cache_path_under(td.path(), pin);
+        write(&cached, "stub-binary");
+        let hit = locate_tool(&t);
+        assert!(hit.found);
+        assert_eq!(hit.source, "pulp-managed");
+        assert_eq!(hit.path, cached);
     }
 
     // ── Registry loading coverage ──────────────────────────────────

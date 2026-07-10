@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PulpGain — Pulp WebCLAP demo (shared player)</title>
+  <link rel="icon" href="data:,">
+  <meta name="description" content="PulpGain running as a threaded WebCLAP module in real time, behind the SAME shared Pulp web player as the WAM demos.">
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    // The SAME shared player (@danielraffel/web-player) the WAM demos mount — imported
+    // host-agnostically (shell.js, NOT index.js, so the WAM backend is never
+    // pulled in) and driven by the WebCLAP adapter instead of the WAM one. The
+    // page is byte-for-byte the same UI: overlay, auto-generated widgets, scope,
+    // meter, safety limiter, PLST state — only the backend (a worklet-resident
+    // CLAP host over a threaded .wasm) differs. Requires cross-origin isolation
+    // (Cloudflare _headers) because the module imports a shared WebAssembly.Memory.
+    import { mountDemo as mountShell } from "./pulp-web-player/shell.js";
+    import { createWclapAdapter } from "./pulp-web-player/adapters/wclap.js";
+
+    // Diagnostics surface for the headless real-time proof (validate-player.mjs).
+    // Not part of the UI; the shell renders its own scope/meter from the analyser.
+    window.__wclap = { meters: [], lastMeter: null };
+
+    mountShell({
+      root: document.getElementById("app"),
+      title: "PulpGain",
+      subtitle: "A clean input/output gain — hosted as a threaded WebCLAP module, rendered in real time inside the AudioWorklet, behind the same player as the WAM demos.",
+      mode: "audio-effect",
+      hostLabel: "WebCLAP",
+      hostDocsHref: "https://github.com/free-audio/clap",
+      galleryHref: "../index.html",
+      // The shell's createAdapter seam is handed { dsp, processor }; the WebCLAP
+      // adapter reads dsp as the .wasm and processor as the worklet script.
+      dspUrl: "./PulpGain.wasm",
+      processorUrl: "./pulp-web-player/vendor/pulp-wasm/wclap-processor.js",
+      createAdapter: (ctx, urls) => createWclapAdapter(ctx, urls, {
+        diag: true,
+        onDiag: (m) => {
+          window.__wclap.lastMeter = m;
+          window.__wclap.meters.push(m);
+          if (window.__wclap.meters.length > 600) window.__wclap.meters.shift();
+        },
+      }),
+    });
+  </script>
+</body>
+</html>

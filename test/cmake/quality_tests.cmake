@@ -48,6 +48,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME version-at-land-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_version_at_land.py")
 
+    # min-OS measurement: --measure/--elf floor derivation over a built binary
+    # (magic-byte format detection + Mach-O/ELF/PE/ar readers). The primitive the
+    # SDK-consumer sweep calls per artifact.
+    add_test(NAME measure-min-os-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_measure_min_os.py")
+
+    # SDK-consumer sweep: the WHAT-builds / WHICH-binaries-measured / HOW-reported
+    # decision logic of the turnkey runner that rebuilds every downstream consumer
+    # against one installed SDK and checks the min-OS floor propagated.
+    add_test(NAME sdk-consumer-sweep-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_consumer_sweep.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest

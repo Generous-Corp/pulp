@@ -30,6 +30,16 @@ set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
 # Platform detection → PULP_APPLE / PULP_LINUX / PULP_WINDOWS / etc.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPlatformConfig.cmake")
 
+# Propagate Pulp's minimum-OS floor to the consumer. Without this, a plugin
+# built against the installed SDK inherits the BUILD HOST's OS floor (e.g. a
+# macOS-26 machine ships a macOS-26-only plugin) instead of the floor Pulp's own
+# libraries were compiled at. PulpMinOs.cmake reads the min_os.json shipped
+# beside it and pins the consumer's macOS deployment target / Windows
+# _WIN32_WINNT (override-wins if the consumer set a higher value) and exposes the
+# Linux glibc floor. find_package(Pulp) must precede the consumer's plugin
+# targets for the macOS/Windows pin to take effect — the normal ordering.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpMinOs.cmake")
+
 # Linux PkgConfig::* IMPORTED target recreation. No-op on non-Linux.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPkgConfigImports.cmake")
 

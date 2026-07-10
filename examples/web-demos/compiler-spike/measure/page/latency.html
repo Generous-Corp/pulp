@@ -1,0 +1,106 @@
+<!doctype html><meta charset="utf-8"><title>Pulp compiler-spike edit→sound latency</title>
+<body style="font-family:system-ui;background:#11111b;color:#cdd6f4;padding:20px">
+<h3>Pulp compiler-spike — edit→sound latency</h3>
+<pre id="log">loading…</pre>
+<script type="module">
+// Live AudioWorklet path: oscillator → [WAM DSP in worklet] → analyser → out.
+// Times wall-clock from "apply an edit" (a param set, or a structural swap that
+// transfers fresh wasm bytes and sync-compiles them in the worklet) to "the
+// change is audible" — detected on the main thread via an AnalyserNode. Also
+// reports the tighter audio-clock delta the worklet observes internally.
+const WORKLET = "/examples/web-demos/compiler-spike/measure/worklet/latency-worklet.js";
+const log = (m) => { document.getElementById("log").textContent += "\n" + m; };
+
+// Sub-millisecond self-yield (rAF is ~16 ms — too coarse for a 30 ms gate).
+function microtask() {
+  return new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
+}
+
+let ctx, node, analyser, td;
+const applied = {}; // id -> audio-clock time the worklet applied it
+let lastSwapAt = 0, lastSwappedAt = 0;
+
+function analyserRms() {
+  analyser.getFloatTimeDomainData(td);
+  let s = 0; for (let i = 0; i < td.length; i++) s += td[i] * td[i];
+  return Math.sqrt(s / td.length);
+}
+
+async function setup(wasmUrl, sampleRate) {
+  ctx = new AudioContext({ sampleRate });
+  await ctx.audioWorklet.addModule(WORKLET);
+  const bytes = new Uint8Array(await (await fetch(wasmUrl)).arrayBuffer());
+  node = new AudioWorkletNode(ctx, "pulp-latency-processor", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+  node.port.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "applied") applied[m.id] = m.at;
+    if (m.type === "swapped") lastSwappedAt = m.at;
+  };
+  const osc = new OscillatorNode(ctx, { frequency: 440, type: "sine" });
+  analyser = new AnalyserNode(ctx, { fftSize: 32, smoothingTimeConstant: 0 });
+  td = new Float32Array(analyser.fftSize);
+  osc.connect(node); node.connect(analyser); analyser.connect(ctx.destination);
+  osc.start();
+  // Start with input gain very low (near-silent output), then confirm it loaded.
+  const loaded = new Promise((r) => { const h = (e) => { if (e.data.type === "loaded") { node.port.removeEventListener("message", h); r(); } }; node.port.addEventListener("message", h); node.port.start?.(); });
+  const buf = bytes.buffer.slice(0);
+  node.port.postMessage({ type: "load", bytes: buf, sampleRate: ctx.sampleRate, params: { "1": -80 } }, [buf]);
+  await ctx.resume();
+  await loaded;
+  return ctx.sampleRate;
+}
+
+// Poll the analyser (fast loop) until RMS crosses `threshold` or timeout.
+async function waitAudible(threshold, timeoutMs) {
+  const t0 = performance.now();
+  for (;;) {
+    if (analyserRms() > threshold) return performance.now();
+    if (performance.now() - t0 > timeoutMs) return null;
+    await microtask();
+  }
+}
+async function waitSilent(threshold, timeoutMs) {
+  const t0 = performance.now();
+  for (;;) {
+    if (analyserRms() < threshold) return true;
+    if (performance.now() - t0 > timeoutMs) return false;
+    await microtask();
+  }
+}
+
+window.LatencyAPI = {
+  async init(wasmUrl, sampleRate) { const sr = await setup(wasmUrl, sampleRate); return { sampleRate: sr }; },
+
+  // Edit = raise input gain from silent to audible; time apply→audible.
+  async paramEdit({ toDb = 0, audibleThreshold = 0.05, silentThreshold = 0.01, timeoutMs = 2000 } = {}) {
+    node.port.postMessage({ type: "setParam", id: "1", value: -80 });
+    if (!await waitSilent(silentThreshold, timeoutMs)) throw new Error("did not reach silent baseline");
+    delete applied["1"];
+    const t0 = performance.now();
+    node.port.postMessage({ type: "setParam", id: "1", value: toDb });
+    const t1 = await waitAudible(audibleThreshold, timeoutMs);
+    if (t1 === null) throw new Error("output never became audible");
+    // audio-clock delta: first audible quantum vs the quantum the param applied.
+    const audioMs = applied["1"] != null ? (ctx.currentTime - applied["1"]) * 1000 : null;
+    return { wallMs: t1 - t0, audioApplyToNowMs: audioMs, baseLatencyMs: (ctx.baseLatency || 0) * 1000 };
+  },
+
+  // Structural-swap stub: transfer fresh wasm bytes, sync-compile a new slot in
+  // the worklet at audible gain; time swap-post → audible.
+  async structuralSwap({ wasmUrl, audibleThreshold = 0.05, silentThreshold = 0.01, timeoutMs = 2000 } = {}) {
+    node.port.postMessage({ type: "setParam", id: "1", value: -80 });
+    if (!await waitSilent(silentThreshold, timeoutMs)) throw new Error("did not reach silent baseline");
+    const bytes = new Uint8Array(await (await fetch(wasmUrl)).arrayBuffer());
+    const buf = bytes.buffer.slice(0);
+    lastSwappedAt = 0;
+    const t0 = performance.now();
+    node.port.postMessage({ type: "swap", bytes: buf, sampleRate: ctx.sampleRate, params: { "1": 0 } }, [buf]);
+    const t1 = await waitAudible(audibleThreshold, timeoutMs);
+    if (t1 === null) throw new Error("output never became audible after swap");
+    const audioMs = lastSwappedAt ? (ctx.currentTime - lastSwappedAt) * 1000 : null;
+    return { wallMs: t1 - t0, audioSwapToNowMs: audioMs };
+  },
+};
+window.__ready = true;
+log("ready — LatencyAPI available");
+</script>
