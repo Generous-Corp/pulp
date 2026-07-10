@@ -2391,6 +2391,16 @@ public:
         return { (pt.x - tx) / sx, (pt.y - ty) / sy };
     }
 
+    // Forward design->window transform for embedded native children (mirrors
+    // the paint-time letterbox scale). Only active when a design viewport is
+    // set; otherwise identity/false so a native child uses raw window coords.
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        if (design_viewport_w_ <= 0.0f || design_viewport_h_ <= 0.0f)
+            return false;
+        return design_transform(sx, sy, tx, ty);
+    }
+
     void set_client_decoration(bool enabled) override {
         if (!window_) return;
         if (enabled) {

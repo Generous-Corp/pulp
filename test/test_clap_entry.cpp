@@ -983,3 +983,126 @@ TEST_CASE("CLAP params_flush ignores events outside the core namespace [issue-74
     plugin->destroy(plugin);
     clap_entry.deinit();
 }
+
+// ── G1: CLAP resize-contract honoring (WS-1b) ────────────────────────────────
+// gui_can_resize already keys off min>0 (the shipped convention). G1 makes
+// gui_get_resize_hints.preserve_aspect_ratio and gui_adjust_size honor
+// ViewSize::aspect_ratio: a resizable editor with aspect_ratio==0 drags freely
+// (no aspect lock / no snap); otherwise the aspect is held. The bridge's
+// size_hints_ are read from the processor's view_size() in the ViewBridge
+// constructor, so we build a PulpClapPlugin with a bridge directly — no editor
+// create() / attach needed to exercise the negotiation math.
+namespace {
+
+using pulp::format::ViewSize;
+
+class ClapResizeProcessor final : public pulp::format::Processor {
+public:
+    explicit ClapResizeProcessor(ViewSize vs) : vs_(vs) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "ClapResizeProcessor";
+        d.input_buses = {{"In", 2}};
+        d.output_buses = {{"Out", 2}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    ViewSize view_size() const override { return vs_; }
+private:
+    ViewSize vs_;
+};
+
+// Build a PulpClapPlugin whose bridge reports `vs` as its size hints.
+void make_clap_plugin_with_size(
+    pulp::format::clap_adapter::PulpClapPlugin& data, ViewSize vs) {
+    data.processor = std::make_unique<ClapResizeProcessor>(vs);
+    data.bridge = std::make_unique<pulp::format::ViewBridge>(*data.processor,
+                                                             data.store);
+    data.plugin.plugin_data = &data;
+}
+
+}  // namespace
+
+TEST_CASE("CLAP gui_can_resize follows the min-bounds convention",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    pulp::format::clap_adapter::PulpClapPlugin fixed;
+    make_clap_plugin_with_size(fixed, ViewSize{400, 300, 0, 0, 0, 0, 0.0});
+    REQUIRE_FALSE(gui_can_resize(&fixed.plugin));
+
+    pulp::format::clap_adapter::PulpClapPlugin resizable;
+    make_clap_plugin_with_size(
+        resizable, ViewSize{400, 300, 200, 150, 800, 600, 0.0});
+    REQUIRE(gui_can_resize(&resizable.plugin));
+}
+
+TEST_CASE("CLAP gui_get_resize_hints preserve_aspect_ratio tracks the contract",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    // Resizable + aspect_ratio>0 → aspect held.
+    pulp::format::clap_adapter::PulpClapPlugin locked;
+    make_clap_plugin_with_size(
+        locked, ViewSize{400, 300, 200, 150, 800, 600, 400.0 / 300.0});
+    clap_gui_resize_hints_t h_locked{};
+    REQUIRE(gui_get_resize_hints(&locked.plugin, &h_locked));
+    REQUIRE(h_locked.preserve_aspect_ratio);
+
+    // Resizable + aspect_ratio==0 → free drag, aspect NOT held.
+    pulp::format::clap_adapter::PulpClapPlugin free;
+    make_clap_plugin_with_size(
+        free, ViewSize{400, 300, 200, 150, 800, 600, 0.0});
+    clap_gui_resize_hints_t h_free{};
+    REQUIRE(gui_get_resize_hints(&free.plugin, &h_free));
+    REQUIRE_FALSE(h_free.preserve_aspect_ratio);
+    REQUIRE(h_free.can_resize_horizontally);
+    REQUIRE(h_free.can_resize_vertically);
+}
+
+TEST_CASE("CLAP gui_adjust_size free-resize clamps min/max without aspect snap",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    pulp::format::clap_adapter::PulpClapPlugin free;
+    make_clap_plugin_with_size(
+        free, ViewSize{400, 300, 200, 150, 800, 600, 0.0});
+
+    // Off-aspect request inside bounds returned verbatim (aspect lock would
+    // have snapped (800,300) → (400,300)).
+    uint32_t w = 800, h = 300;
+    REQUIRE(gui_adjust_size(&free.plugin, &w, &h));
+    REQUIRE(w == 800);
+    REQUIRE(h == 300);
+
+    // Below-min clamps up on each axis independently, no aspect re-snap.
+    w = 100; h = 100;
+    REQUIRE(gui_adjust_size(&free.plugin, &w, &h));
+    REQUIRE(w == 200);
+    REQUIRE(h == 150);
+
+    // Above-max clamps down on each axis.
+    w = 4000; h = 4000;
+    REQUIRE(gui_adjust_size(&free.plugin, &w, &h));
+    REQUIRE(w == 800);
+    REQUIRE(h == 600);
+}
+
+TEST_CASE("CLAP gui_adjust_size aspect-locked behavior is unchanged (regression pin)",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    // Resizable + aspect_ratio>0 keeps today's aspect snap: (800,300) → (400,300).
+    pulp::format::clap_adapter::PulpClapPlugin locked;
+    make_clap_plugin_with_size(
+        locked, ViewSize{400, 300, 200, 150, 800, 600, 400.0 / 300.0});
+    uint32_t w = 800, h = 300;
+    REQUIRE(gui_adjust_size(&locked.plugin, &w, &h));
+    REQUIRE(w == 400);
+    REQUIRE(h == 300);
+}

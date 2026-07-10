@@ -792,3 +792,25 @@ atomics from `process()` instead.
   points are main-thread-only (they forward to host undo grouping). A background
   writer must use `StateStore::run_gesture_on_main()` — see the state notes in
   `binding.hpp`.
+## Editor resize contract (aspect-lock vs free reflow)
+
+`gui_can_resize` returns resizable **iff `view_size().min_width>0 && min_height>0`** —
+a plugin on the base-class default (`ViewSize{w,h,0,0,0,0}`) is fixed-size. Do NOT
+naively "honor `aspect_ratio==0`" everywhere: that default returns `aspect_ratio==0`,
+so a naive read flips *every* hand-authored plugin to free-reflow. The three cases the
+GUI region dispatches (`gui_create`, `gui_get_resize_hints`, `gui_adjust_size`):
+
+- **min==0 (not resizable):** keep the design-viewport pin at preferred (letterbox
+  backstop for off-size panes). `gui_can_resize` already returns false.
+- **resizable + `aspect_ratio>0`:** viewport + aspect lock; `preserve_aspect_ratio=true`;
+  `gui_adjust_size` snaps to the design aspect (design-import plugins live here).
+- **resizable + `aspect_ratio==0`:** free drag — **no** `set_design_viewport`, **no**
+  `set_fixed_aspect_ratio`; `preserve_aspect_ratio=false`; `gui_adjust_size` clamps each
+  axis to `[min,max]` independently with **no aspect snap**; the root reflows via Yoga at
+  the host size.
+
+The rule is `free = (min>0 && aspect_ratio==0)`. VST3's `PulpPlugView` mirrors it exactly
+(`canResize`/`checkSizeConstraint`). Tests: the `[resize]` cases in
+`test/test_clap_entry.cpp` build a `PulpClapPlugin` whose `bridge` is constructed
+directly from a controlled `view_size()` (the `ViewBridge` ctor copies `view_size()` into
+`size_hints_`, so no `gui_create`/attach is needed to exercise the negotiation math).

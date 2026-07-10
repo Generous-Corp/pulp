@@ -424,6 +424,24 @@ public:
         return true;
     }
 
+    // Report the active design-viewport transform that maps ROOT (design-space)
+    // coordinates to HOST (window-space) coordinates:
+    //   x' = x*sx + tx,  y' = y*sy + ty,  w' = w*sx,  h' = h*sy
+    // Returns true and fills the outputs when a design viewport is active;
+    // returns false (identity — outputs untouched) when no viewport is set.
+    //
+    // Mirrors `PluginViewHost::design_viewport_transform`. `NativeViewHost`
+    // uses it to place an embedded native child at the same letterbox-scaled
+    // position as the surrounding Pulp widgets. Default: no viewport → false.
+    // Only the GPU window host (which actually scales paint) overrides it; the
+    // CPU window host does not implement a design viewport at all, so the
+    // false default is correct there.
+    virtual bool design_viewport_transform(float& sx, float& sy,
+                                           float& tx, float& ty) const {
+        (void)sx; (void)sy; (void)tx; (void)ty;
+        return false;
+    }
+
     // ── D.3 DPI / Monitor utilities ─────────────────────────────────────
     /// Get the DPI scale factor for this window.
     virtual float dpi_scale() const { return 1.0f; }
