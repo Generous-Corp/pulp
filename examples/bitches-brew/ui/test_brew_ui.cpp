@@ -18,6 +18,7 @@
 #include "quantizer_processor.hpp"
 #include "step_processor.hpp"
 #include "sync_processor.hpp"
+#include "trigger_processor.hpp"
 
 #if defined(__APPLE__)
 #include <CoreGraphics/CoreGraphics.h>
@@ -95,6 +96,24 @@ view::Toggle* find_toggle(view::View& root, std::string_view label) {
     for (size_t i = 0; i < root.child_count(); ++i)
         if (auto* hit = find_toggle(*root.child_at(i), label)) return hit;
     return nullptr;
+}
+
+/// The `n`th widget with this label, in tree order. The per-channel editors hold
+/// two of everything, and a test that only ever finds the first would pass with the
+/// right channel's toggles wired to the left channel's parameters.
+view::Toggle* find_nth_toggle(view::View& root, std::string_view label, std::size_t n) {
+    std::size_t seen = 0;
+    view::Toggle* hit = nullptr;
+    auto walk = [&](auto&& self, view::View& v) -> void {
+        if (hit) return;
+        if (auto* t = dynamic_cast<view::Toggle*>(&v); t && t->label() == label) {
+            if (seen++ == n) hit = t;
+            return;
+        }
+        for (size_t i = 0; i < v.child_count() && !hit; ++i) self(self, *v.child_at(i));
+    };
+    walk(walk, root);
+    return hit;
 }
 
 view::Knob* find_knob(view::View& root, std::string_view label) {
@@ -212,6 +231,7 @@ TEST_CASE("every editor fits inside the size it asks the host for",
         {"CV To OSC", create_cv_osc}, {"DC", create_dc},   {"Function", create_function},
         {"LFO", create_lfo},          {"Quantizer", create_quantizer},
         {"Step LFO", create_step},    {"Sync", create_sync},
+        {"Trigger", create_trigger},
     };
 
     for (const auto& c : cases) {
@@ -489,6 +509,32 @@ TEST_CASE("Quantizer's editor draws the staircase and the operating point",
         const auto low = ed.shoot();
         drive(ed.host, 0.7f);
         REQUIRE(differs(ed.shoot(), low));
+    }
+}
+
+TEST_CASE("Trigger's editor reaches every control it declares, on both channels",
+          "[brew][ui][trigger]") {
+    Editor ed(create_trigger);
+
+    // Twenty-nine controls per channel and no readout can show most of them. A
+    // parameter with no widget is a parameter a user cannot reach, and the two
+    // channels make it easy to wire the right one to the left one's id.
+    for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+        for (const auto& c : TriggerProcessor::controls()) {
+            CAPTURE(c.label, ch);
+            REQUIRE(find_knob(*ed.view, c.label) != nullptr);
+        }
+        for (const auto& c : TriggerProcessor::toggles()) {
+            CAPTURE(c.label, ch);
+            const auto id = static_cast<state::ParamID>(param_for(c.id, ch));
+            auto* toggle = find_nth_toggle(*ed.view, c.label, ch);
+            REQUIRE(toggle != nullptr);
+            const float before = ed.host.state().get_value(id);
+            toggle->on_mouse_down(view::Point{});
+            REQUIRE(ed.host.state().get_value(id) != before);
+            toggle->on_mouse_down(view::Point{});
+            REQUIRE(ed.host.state().get_value(id) == before);
+        }
     }
 }
 

@@ -16,7 +16,8 @@
 // The cost is that "random" is really "deterministic and unpredictable", which is
 // what anyone modulating a filter actually wanted. Reroll it by changing the seed.
 
-#include <brew/lfo.hpp>   // warp_phase, wrap_phase, to_unipolar
+#include <brew/gate.hpp>   // SchmittGate, kGateHysteresis
+#include <brew/lfo.hpp>    // warp_phase, wrap_phase, to_unipolar
 #include <brew/random.hpp>
 
 #include <algorithm>
@@ -210,32 +211,24 @@ inline constexpr int kInputRoleCount = 4;
 
 // ── Trigger detection ────────────────────────────────────────────────────────
 
-/// The two thresholds a rising edge has to cross, in normalized full scale.
-///
-/// A Schmitt trigger, not a comparator: a modular's gate output has a slew, and a
-/// bare threshold on a slewed edge with any noise on it fires a handful of times
-/// on the way up. Two thresholds a quarter of full scale apart cost one bool.
+/// The two thresholds an advance trigger has to cross, in normalized full scale.
+/// Fixed here, because a sequencer's trigger jack has no threshold knob.
 inline constexpr float kTriggerHigh = 0.5f;
-inline constexpr float kTriggerLow = 0.25f;
+inline constexpr float kTriggerLow = kTriggerHigh - kGateHysteresis;
 
-/// A one-sample edge detector with hysteresis.
+/// A one-sample edge detector at the sequencer's fixed thresholds.
 class TriggerDetector {
 public:
-    void reset() noexcept { armed_ = true; }
+    void reset() noexcept { gate_.reset(); }
 
     /// True on the sample the input crosses `kTriggerHigh` going up, and not again
     /// until it has fallen back below `kTriggerLow`.
     [[nodiscard]] bool process(float v) noexcept {
-        if (armed_ && v >= kTriggerHigh) {
-            armed_ = false;
-            return true;
-        }
-        if (!armed_ && v < kTriggerLow) armed_ = true;
-        return false;
+        return gate_.process(v, kTriggerHigh, kTriggerLow);
     }
 
 private:
-    bool armed_ = true;
+    SchmittGate gate_;
 };
 
 }  // namespace pulp::examples::brew

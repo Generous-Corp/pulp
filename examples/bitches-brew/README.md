@@ -44,6 +44,7 @@ them).
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
 | `Quantizer` | Snaps an incoming control voltage to discrete steps, or to the notes of a scale. |
 | `Step LFO` | An eight-step pattern and a gate, on the LFO's clock, with a shift-register random source. |
+| `Trigger` | Turns MIDI notes — or a voltage on its input — into a gate, a pulse, a multi-stage envelope, or a velocity voltage. |
 | `CV To OSC` | Passes a control voltage through and reports it over OSC to a target you type. Off by default. |
 
 `Function` is the only plug-in here that reads its input bus — the others
@@ -374,6 +375,71 @@ a drum loop on the reset input is a sequencer that never leaves step 1.
 Not built, and named so nobody assumes otherwise: the reference's `Roll` (write a
 random pattern *into* the eight bars, where it can be hand-edited and stored), and
 its `Dynamic` scale mode, whose rule the manual does not state.
+
+### Trigger
+
+![Trigger](docs/images/trigger.png)
+
+A note becomes a voltage. Two independent channels, each turning MIDI notes — or a
+voltage on its own input channel — into one of four signals:
+
+| `Mode` | What reaches the jack |
+|--------|-----------------------|
+| `Gate` | High while a note is held |
+| `Trig` | A pulse of `Length`, once per note that sounds |
+| `Env`  | The multi-stage envelope below |
+| `Vel`  | The last note's velocity, sampled and held |
+
+On an eight-output interface that is a gate and an envelope out of one instance,
+which is exactly how the two jacks get used.
+
+`Voltage Min` and `Voltage Max` set the window every signal lands in — and `Min`
+above `Max` is not an error, it is how an envelope is inverted. It is also why this
+plug-in has no `Invert` toggle where the rest of the suite does.
+
+`Note` picks which note fires the channel; `Any Note` ignores it. The gate counts
+held notes rather than latching a flag, so releasing the first of two held notes
+does not close it. `CV Trig` opens a second, independent way in: a voltage crossing
+`Thresh` on the channel's input fires it too, through a Schmitt trigger that rides
+out the slew on a real gate output. The two sources are OR-ed — as well as, or
+instead of, as the manual has it — and both default to off, because a DAW will
+happily hand a modulation plug-in a drum loop at full scale.
+
+**The envelope** has three attack stages, a sustain, and two release stages, each
+with its own target level, duration, and curve. The familiar ADSR is a subset of
+that rather than a different thing:
+
+| ADSR | here |
+|------|------|
+| Attack | `Time A2` |
+| Decay | `Time A3` |
+| Sustain | `Sustain` |
+| Release | `Time R1` |
+
+A1 is the stage before the attack: leave `Lvl A1` at zero and `Time A1` is a delay
+before the envelope starts, because a rise to zero from zero is a wait. R2 is the
+tail after the release, ending at zero. `Mult` scales every time at once, `Exp`
+switches each curve from a power of the phase to the charging curve of an RC
+network, and `RTZ` decides whether a retrigger snaps back to zero or continues from
+where the last note left it. `Vel` scales the envelope by velocity: `0` ignores it,
+`+1` hands it the whole scale, `-1` inverts it so a soft note opens the filter.
+
+A stage with no duration reaches its target instantly — an attack time of zero is a
+jump to the peak, which is what setting it to zero is asking for. The one exception
+is A1 with neither duration nor level: that is not a stage, it is the absence of a
+delay, and treating it as an instant jump to zero would leave `RTZ` a control with
+no off position.
+
+`Override` forces the jack to a voltage whatever the notes are doing, and the
+generators keep running underneath it — so releasing the override does not step into
+a frozen envelope holding whatever the last note left behind. It still passes through
+`Smooth`, so it does not snap.
+
+This is the one plug-in in the suite whose output is not a pure function of the
+host's position, and it cannot be: a note is an event, not a coordinate. What it gets
+instead is a pure function of the time *since* the note — `envelope_at` — which the
+running generator is not merely tested against but written in terms of. The curve in
+the editor is not a picture of the signal. It is the signal, sampled.
 
 ### CV To OSC
 
