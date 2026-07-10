@@ -89,6 +89,13 @@ TEST_CASE("Core runtime RT safety contracts pin expected classifications",
     CHECK(spsc->audio_callback_allowed);
     CHECK_FALSE(spsc->may_allocate);
 
+    const auto* slot = find_core_runtime_rt_safety_contract("RealtimeResourceSlot", "get");
+    REQUIRE(slot != nullptr);
+    CHECK(slot->audio_callback_allowed);
+    CHECK_FALSE(slot->requires_prepare);
+    CHECK_FALSE(slot->may_allocate);
+    CHECK_FALSE(slot->may_lock);
+
     // The load measurer is telemetry-only: callback-allowed but NOT dsp-safe.
     const auto* load =
         find_core_runtime_rt_safety_contract("AudioProcessLoadMeasurer", "begin_end");
