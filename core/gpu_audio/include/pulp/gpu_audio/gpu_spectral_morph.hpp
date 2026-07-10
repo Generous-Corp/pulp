@@ -16,8 +16,12 @@ namespace pulp::gpu_audio {
 /// real-time-safe (blocks on readback) — for the worker / offline use.
 class GpuSpectralMorph {
 public:
+    /// `shared_device` (optional) reuses an existing GpuCompute so this morph
+    /// and a sibling spectral primitive don't each spin up a device; must be
+    /// initialized and outlive the morph. null = create + own a device.
     bool prepare(uint32_t fft_size,
-                 signal::WindowFunction::Type window = signal::WindowFunction::Type::hann);
+                 signal::WindowFunction::Type window = signal::WindowFunction::Type::hann,
+                 render::GpuCompute* shared_device = nullptr);
 
     bool gpu_available() const { return stft_.gpu_available(); }
     uint32_t fft_size() const { return stft_.fft_size(); }

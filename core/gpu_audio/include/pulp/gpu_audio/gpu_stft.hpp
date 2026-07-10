@@ -20,9 +20,14 @@ namespace pulp::gpu_audio {
 /// / offline analysis, the foundation for spectral freeze / morph / paint.
 class GpuStft {
 public:
+    /// `shared_device` (optional) reuses an existing GpuCompute so this STFT and
+    /// a sibling primitive don't each spin up a device (the prerequisite for
+    /// cross-effect batching); it must already be initialized and must outlive
+    /// this GpuStft. null = create + own a private device.
     bool prepare(uint32_t fft_size,
                  signal::WindowFunction::Type window = signal::WindowFunction::Type::hann,
-                 float window_param = 0.0f);
+                 float window_param = 0.0f,
+                 render::GpuCompute* shared_device = nullptr);
 
     bool gpu_available() const { return gpu_ != nullptr; }
     uint32_t fft_size() const { return fft_size_; }
@@ -32,7 +37,7 @@ public:
     /// so a sibling primitive (e.g. the multi-layer spectral stack) can run on
     /// the SAME device and keep spectral frames GPU-resident without a second
     /// device. Worker / offline use only — not real-time-safe.
-    render::GpuCompute* compute() { return gpu_.get(); }
+    render::GpuCompute* compute() { return gpu_; }
 
     /// frame_in: fft_size real samples. spectrum_out: 2*fft_size interleaved
     /// complex (windowed forward FFT). Returns false if not GPU-ready.
@@ -45,7 +50,8 @@ public:
 private:
     uint32_t fft_size_ = 0;
     std::vector<float> window_;
-    std::unique_ptr<render::GpuCompute> gpu_;
+    render::GpuCompute* gpu_ = nullptr;             // borrowed or == owned_.get()
+    std::unique_ptr<render::GpuCompute> owned_;     // when not sharing a device
     std::vector<float> scratch_;  // 2*fft_size interleaved-complex scratch
 };
 
