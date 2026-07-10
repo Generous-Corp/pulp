@@ -22,6 +22,7 @@
 #include <brew/clock.hpp>  // beats_per_sample
 #include <brew/cv.hpp>
 #include <brew/lfo.hpp>
+#include <brew/phase_clock.hpp>
 #include <brew/smooth.hpp>
 #include <brew/sync.hpp>  // NoteUnit, enum_from_param
 
@@ -363,22 +364,7 @@ public:
 
         if (ctx.reset_requested) hard_reset();
 
-        const double sr = ctx.sample_rate > 0.0 ? ctx.sample_rate : 48000.0;
-        const double bps = beats_per_sample(ctx.tempo_bpm, sr);
-        const double start_seconds = static_cast<double>(ctx.position_samples) / sr;
-
-        // The play edge. `transport_started` is the host's own flag; the
-        // `was_playing_` comparison catches the hosts that never set it.
-        const bool play_edge = (ctx.is_playing && !was_playing_) || ctx.transport_started;
-        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
-            if (play_edge && sync_resets_on_play(sync_mode(ch)))
-                set_origin(ch, ctx.position_beats, start_seconds);
-            // Rolling means locked. The drift a parked `Transport` accumulated is
-            // discarded *before* this block renders, not after — a drift still on
-            // the books through the first playing block is a bounce that depends on
-            // how long the user left the transport stopped.
-            if (ctx.is_playing) stopped_drift_[ch] = 0.0;
-        }
+        const Transport transport = transport_from(ctx);
 
         // Noise is keyed on the sample index. While the transport runs that index is
         // the timeline's, so a bounce is identical; while it is parked the index
@@ -390,6 +376,12 @@ public:
         // allocation-free — MidiBuffer sizes its scratch for exactly this call.
         midi_in.sort();
 
+        std::array<ClockSettings, kChannelCount> settings{};
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+            settings[ch] = clock_settings(ch, ctx.is_playing);
+            clock_[ch].begin_block(settings[ch], transport);
+        }
+
         const std::size_t shared = std::min(channels, input.num_channels());
 
         for (std::size_t ch = 0; ch < kChannelCount && ch < channels; ++ch) {
@@ -397,8 +389,8 @@ public:
             if (dst == nullptr) continue;
 
             const SyncMode mode = sync_mode(ch);
-            // A follower reads the leader's clock, not its own. Its own `Phase`
-            // still applies, which is what makes the pair trace a circle at 90°.
+            // A follower reads the leader's clock, not its own. Its own `Phase` still
+            // applies, which is what makes the pair trace a circle at 90°.
             const std::size_t clock_ch = mode == SyncMode::quadrature ? 0 : ch;
             const SyncMode clock_mode = sync_mode(clock_ch);
 
@@ -411,40 +403,26 @@ public:
             const bool resets = as_toggle(get(kResetByNote, ch));
             const float* src = ch < shared ? input.channel_ptr(ch) : nullptr;
 
-            const double cycle_len = channel_cycle_beats(clock_ch);
-            const double hz = channel_hz(clock_ch);
-            // Swing warps a beat timeline. With the playhead parked there is nothing
-            // to push late, and warping a frozen position only moves the value the
-            // scope is showing.
-            const Swing swing = ctx.is_playing ? current_swing(clock_ch) : Swing{};
-            // The playhead only advances while the host says it is rolling.
-            const double pos_bps = ctx.is_playing ? bps : 0.0;
-            const double pos_sps = ctx.is_playing ? 1.0 / sr : 0.0;
-
             auto note = midi_in.begin();
             const auto notes_end = midi_in.end();
 
             double last_cycles = 0.0;
             for (int n = 0; n < frames; ++n) {
+                const double dn = static_cast<double>(n);
+
                 // Every mode measures cycles from an origin, so moving the origin at
                 // the note's own sample is the one mechanism that retriggers all of
                 // them — and the result is still a pure function of the timeline the
                 // note sits on.
                 while (resets && note != notes_end && note->sample_offset <= n) {
-                    if (note->is_note_on()) {
-                        const double dn = static_cast<double>(n);
-                        set_origin(ch, ctx.position_beats + pos_bps * dn,
-                                   start_seconds + pos_sps * dn);
-                        wall_cycles_[ch] = 0.0;
-                        stopped_drift_[ch] = 0.0;
-                    }
+                    if (note->is_note_on())
+                        clock_[ch].set_origin(transport.beats_at(dn),
+                                              transport.seconds_at(dn));
                     ++note;
                 }
 
-                const double dn = static_cast<double>(n);
-                const double cycles = cycles_at(clock_ch, clock_mode, ctx, dn, bps,
-                                                pos_bps, pos_sps, start_seconds, sr,
-                                                cycle_len, hz, swing);
+                const double cycles =
+                    clock_[clock_ch].cycles_at(settings[clock_ch], transport, dn);
                 last_cycles = cycles;
 
                 float shaped;
@@ -460,7 +438,8 @@ public:
 
                 const float in = src ? src[n] : 0.0f;
                 dst[n] = resolve_output(
-                    smooth_[ch].process(apply_input(im, shaped, in), ms, sr), scale, inv);
+                    smooth_[ch].process(apply_input(im, shaped, in), ms, sr_of(ctx)), scale,
+                    inv);
             }
 
             display_phase_[ch].store(
@@ -476,7 +455,7 @@ public:
                 for (int n = 0; n < frames; ++n) dst[n] = 0.0f;
 
         for (std::size_t ch = 0; ch < kChannelCount; ++ch)
-            commit_clocks(ch, ctx, frames, sr, bps);
+            clock_[ch].end_block(settings[ch], transport, frames);
         if (!ctx.is_playing) noise_index_ += frames;
 
         was_playing_ = ctx.is_playing;
@@ -494,79 +473,38 @@ public:
     }
 
 private:
-    /// Elapsed cycles for one channel at sample `n` of the block.
-    ///
-    /// The one place the eight modes differ. Everything downstream — the shapes, the
-    /// phase offset, the sample-and-hold, the quadrature lock — sees only a cycle
-    /// count and needs to know nothing about tempo or transport.
-    ///
-    /// `Transport` and `Transport2` are the same function while the transport rolls.
-    /// The only thing that separates them is `stopped_drift_`, which is what keeps
-    /// `Transport` oscillating with the playhead parked — and which is zeroed the
-    /// moment it rolls again, so the phase snaps back onto the timeline.
-    [[nodiscard]] double cycles_at(std::size_t ch, SyncMode mode,
-                                   const format::ProcessContext& ctx, double dn,
-                                   double bps, double pos_bps, double pos_sps,
-                                   double start_seconds, double sr, double cycle_len,
-                                   double hz, const Swing& swing) const noexcept {
-        switch (mode) {
-            case SyncMode::free:
-                // Wall clock, always. The one mode with no timeline in it at all.
-                return wall_cycles_[ch] + dn * hz / sr;
-            case SyncMode::tempo:
-                // Wall clock too, but at the tempo's rate rather than a hertz knob's.
-                if (!(cycle_len > 0.0)) return wall_cycles_[ch];
-                return wall_cycles_[ch] + dn * bps / cycle_len;
-            case SyncMode::transport: {
-                const double drift =
-                    stopped_drift_[ch] +
-                    (ctx.is_playing || !(cycle_len > 0.0) ? 0.0 : dn * bps / cycle_len);
-                return cycles_from_beats(ctx.position_beats + pos_bps * dn,
-                                         origin_beats_[ch], cycle_len, swing) +
-                       drift;
-            }
-            case SyncMode::transport2:
-                return cycles_from_beats(ctx.position_beats + pos_bps * dn,
-                                         origin_beats_[ch], cycle_len, swing);
-            case SyncMode::free2:
-            case SyncMode::free3:
-                return cycles_from_seconds(start_seconds + pos_sps * dn,
-                                           origin_seconds_[ch], hz);
-            case SyncMode::start_stop:
-                return 0.0;
-            case SyncMode::quadrature:
-                break;   // resolved to the leader's mode before this is called
-        }
-        return 0.0;
+    [[nodiscard]] static double sr_of(const format::ProcessContext& ctx) noexcept {
+        return ctx.sample_rate > 0.0 ? ctx.sample_rate : 48000.0;
     }
 
-    /// Advance whatever each mode accumulates across the block boundary.
-    void commit_clocks(std::size_t ch, const format::ProcessContext& ctx, int frames,
-                       double sr, double bps) noexcept {
-        const SyncMode mode = sync_mode(ch);
-        const double dn = static_cast<double>(frames);
-        const double len = channel_cycle_beats(ch);
-
-        if (mode == SyncMode::free) {
-            wall_cycles_[ch] += dn * channel_hz(ch) / sr;
-        } else if (mode == SyncMode::tempo) {
-            if (len > 0.0) wall_cycles_[ch] += dn * bps / len;
-        } else if (mode == SyncMode::transport && !ctx.is_playing) {
-            // Only while parked. The play edge already zeroed it.
-            if (len > 0.0) stopped_drift_[ch] += dn * bps / len;
-        }
+    [[nodiscard]] Transport transport_from(const format::ProcessContext& ctx) noexcept {
+        const double sr = sr_of(ctx);
+        Transport t;
+        t.position_beats = ctx.position_beats;
+        t.position_seconds = static_cast<double>(ctx.position_samples) / sr;
+        t.beats_per_sample = beats_per_sample(ctx.tempo_bpm, sr);
+        t.sample_rate = sr;
+        t.playing = ctx.is_playing;
+        // `transport_started` is the host's own flag; the `was_playing_` comparison
+        // catches the hosts that never set it.
+        t.play_edge = (ctx.is_playing && !was_playing_) || ctx.transport_started;
+        return t;
     }
 
-    void set_origin(std::size_t ch, double beats, double seconds) noexcept {
-        origin_beats_[ch] = beats;
-        origin_seconds_[ch] = seconds;
+    /// One channel's rate, in whichever unit its mode reads.
+    ///
+    /// Swing warps a beat timeline. With the playhead parked there is nothing to
+    /// push late, and warping a frozen position only moves the value the scope is
+    /// showing — so it is dropped while stopped rather than applied to a still frame.
+    [[nodiscard]] ClockSettings clock_settings(std::size_t ch, bool playing) const noexcept {
+        return {.mode = sync_mode(ch),
+                .hz = channel_hz(ch),
+                .cycle_beats = channel_cycle_beats(ch),
+                .swing = playing ? current_swing(ch) : Swing{}};
     }
 
     void hard_reset() noexcept {
-        origin_beats_.fill(0.0);
-        origin_seconds_.fill(0.0);
-        wall_cycles_.fill(0.0);
-        stopped_drift_.fill(0.0);
+        for (auto& c : clock_) c.reset();
         noise_index_ = 0;
         was_playing_ = false;
     }
@@ -579,18 +517,8 @@ private:
     /// is still bit-identical every render.
     std::array<Smoother, kChannelCount> smooth_{};
 
-    /// Where each channel counts its cycles from. Zero is the project origin, which
-    /// is what every mode uses until a note-on or a play edge moves it.
-    std::array<double, kChannelCount> origin_beats_{};
-    std::array<double, kChannelCount> origin_seconds_{};
-
-    /// What the two non-deterministic modes run on: an accumulator with no timeline
-    /// in it. `Free` and `Tempo` and nothing else.
-    std::array<double, kChannelCount> wall_cycles_{};
-
-    /// How far `Transport` has drifted past the timeline while the playhead was
-    /// parked. Zeroed the moment it rolls again.
-    std::array<double, kChannelCount> stopped_drift_{};
+    /// The eight sync modes, one independent counter each. See brew/phase_clock.hpp.
+    std::array<PhaseClock, kChannelCount> clock_{};
 
     std::int64_t noise_index_ = 0;
     bool was_playing_ = false;
