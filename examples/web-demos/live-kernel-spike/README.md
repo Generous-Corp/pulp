@@ -50,6 +50,22 @@ folder and pushes it to Cloudflare Pages with no headers).
 | `measure.mjs` | offline harness: null test, CPU vs AOT, zero-alloc, plan-build, click-free |
 | `validate.mjs` | S0 headless-Chrome (CDP) validator: real-time + edit→sound latency |
 | `validate-editor.mjs` | M1 headless validator: scrub→param audible + fast, structural crossfade, no-COI |
+| `f2-emitter.js` | **F2-S1 graph→wasm emitter** (classic script, no deps): LKB0 → fused straight-line wasm module, bit-exact via the kernel's `f2_*` libm bridge |
+| `f2-measure.mjs` | F2 offline harness: per-patch bit-exact null (vs twins AND interpreter), CPU multiplier vs the ≥1.5× gate, handoff click metric, emit cost |
+| `f2-validate.mjs` | F2 headless validator: in-worklet emit + compile, equal-power handoff both ways, real-time in the compiled tier |
+
+## F2 — compiled "stable" tier (`f2-emitter.js`)
+
+When a graph stops changing, the worklet can compile it: `f2Compile` runs the
+emitter **inside the worklet** (pure JS, ~0.06 ms emit + ~0.02 ms sync-compile
+for the 10-node musical patch, module ≈ 1.3 KB), then equal-power-crossfades
+interpreter→compiled. Any live edit falls back instantly (the interpreter still
+holds the editable plan) and fades back. Output is **bit-exact** to both the
+interpreter and the hand-fused AOT twins (all conformance nodes, maxAbsDiff = 0)
+because every rational f32 op mirrors the C++ source order and every
+transcendental routes through the kernel's `f2_*` musl exports. Verdict data vs
+the ≥1.5× speedup gate lives in
+`planning/2026-07-09-f2-graph-wasm-emitter-design.md`.
 
 ## Run
 ```

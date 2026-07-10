@@ -13,6 +13,7 @@ import { encodePlan, MUSICAL, T } from "./lk-patches.mjs";
 
 const WASM_URL = "/examples/web-demos/live-kernel-spike/dist/lk_kernel.wasm";
 const WORKLET_URL = "/examples/web-demos/live-kernel-spike/lk-worklet.js";
+const F2_URL = "/examples/web-demos/live-kernel-spike/f2-emitter.js";
 
 // A second, structurally-DIFFERENT patch for the swap: a darker two-osc drone
 // (different node count + topology + tuning) so the swap is unmistakably audible.
@@ -37,6 +38,7 @@ const state = {
   latencies: { param: [], structural: [] },
   planBuild: [], // buildMs per structural edit (RT-thread plan-build cost)
   current: "musical",
+  f2: null, // last {type:"f2"} status message from the worklet (armed | fallback)
   _editSeq: 0, _pending: new Map(),
 };
 window.__lk = state;
@@ -65,6 +67,14 @@ function issueStructuralEdit(patch, fadeMs = 40) {
   return editId;
 }
 state.doParamEdit = (v = 2600) => issueParamEdit(4, 0, v);       // MUSICAL ladder cutoff
+// F2: compile the CURRENT graph to the stable tier (worklet-side emit + fused
+// wasm + equal-power handoff). Any subsequent edit falls back to the
+// interpreter automatically.
+state.doF2Compile = (fadeMs = 50) => {
+  const patch = state.current === "musical" ? MUSICAL : DRONE;
+  const blob = encodePlan(patch);
+  post({ type: "f2Compile", bytes: blob.buffer, fadeMs }, [blob.buffer]);
+};
 state.doStructuralEdit = () => {
   const patch = state.current === "musical" ? DRONE : MUSICAL;
   state.current = state.current === "musical" ? "drone" : "musical";
@@ -75,6 +85,9 @@ async function boot() {
   try {
     ctx = new AudioContext();
     if (ctx.state === "suspended") { try { await ctx.resume(); } catch {} }
+    // Both are classic scripts sharing ONE AudioWorkletGlobalScope: the F2
+    // emitter must be resident before the processor so f2Compile can use it.
+    await ctx.audioWorklet.addModule(F2_URL);
     await ctx.audioWorklet.addModule(WORKLET_URL);
     node = new AudioWorkletNode(ctx, "lk-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     node.connect(ctx.destination);
@@ -89,7 +102,7 @@ async function boot() {
       } else if (m.type === "meter") {
         state.lastMeter = m;
         const el = document.getElementById("status");
-        if (el) el.textContent = `q=${m.quanta} t=${m.currentTime.toFixed(2)}s rms=${m.outRms.toFixed(3)} ${m.fading ? "[fading]" : ""}`;
+        if (el) el.textContent = `q=${m.quanta} t=${m.currentTime.toFixed(2)}s rms=${m.outRms.toFixed(3)} tier=${m.mode || "interp"} ${m.fading ? "[fading]" : ""}`;
       } else if (m.type === "applied") {
         const p = state._pending.get(m.editId);
         if (p) {
@@ -98,6 +111,9 @@ async function boot() {
           else { state.latencies.structural.push(latencyMs); state.planBuild.push(m.buildMs); }
           state._pending.delete(m.editId);
         }
+      } else if (m.type === "f2") {
+        state.f2 = m;
+        if (m.status === "fallback") console.warn("f2 fallback:", m.message);
       } else if (m.type === "error") {
         state.error = m.message; console.error("worklet:", m.message);
       }
@@ -115,6 +131,7 @@ async function boot() {
 // buttons
 document.getElementById("btnParam")?.addEventListener("click", () => state.doParamEdit(2600 + Math.random() * 1200));
 document.getElementById("btnSwap")?.addEventListener("click", () => state.doStructuralEdit());
+document.getElementById("btnF2")?.addEventListener("click", () => state.doF2Compile());
 document.getElementById("btnStart")?.addEventListener("click", () => { if (ctx?.state === "suspended") ctx.resume(); });
 
 boot();
