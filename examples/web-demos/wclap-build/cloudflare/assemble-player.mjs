@@ -1,20 +1,20 @@
-// Assemble the shared-player WebCLAP demo into the Cloudflare Pages deploy dir.
+// Assemble the shared-player WCLAP demo into the Cloudflare Pages deploy dir.
 //
 // WS-C2 headline: the SAME @danielraffel/web-player shell the WAM demos use, hosting a
-// WebCLAP plugin (PulpGain) in real time via the worklet-resident CLAP host. It
+// WCLAP plugin (PulpGain) in real time via the worklet-resident CLAP host. It
 // writes a self-contained `public/player/` containing:
 //   • index.html                       — the committed player/index.html (mounts
-//                                          the shell with the WebCLAP adapter).
+//                                          the shell with the WCLAP adapter).
 //   • pulp-web-player/**                — the package src tree (shell, widgets,
 //                                          theme, adapters/wclap.js, the worklet).
-//   • PulpGain.wasm                     — the threaded WebCLAP module.
+//   • PulpGain.wasm                     — the threaded WCLAP module.
 // The sibling `_headers` (COOP/COEP/CORP + MIME) applies to nested paths too, so
 // crossOriginIsolated holds under `/player/`. Runs standalone (copies `_headers`
 // if the dir doesn't have it yet) or after assemble.mjs (the single-plugin proof).
 //
 // Usage:  node assemble-player.mjs [--wasm <path>] [--out <dir>]
 // Defaults: --wasm ../build/PulpGain.wasm (or the packaged fallbacks)  --out ./public
-import { readdir, mkdir, copyFile, readFile, writeFile, cp } from "node:fs/promises";
+import { readdir, mkdir, copyFile, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -38,7 +38,7 @@ const wasmCandidates = [
 ].filter(Boolean);
 const wasmSrc = wasmCandidates.find((p) => existsSync(p));
 if (!wasmSrc) {
-  die(`no WebCLAP wasm found. Build it (needs wasi-sdk) or pass --wasm <path>:\n` +
+  die(`no WCLAP wasm found. Build it (needs wasi-sdk) or pass --wasm <path>:\n` +
       `  cd ${resolve(HERE, "..")}\n` +
       `  cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=../../../tools/cmake/wasi-toolchain.cmake -DCMAKE_BUILD_TYPE=Release\n` +
       `  cmake --build build`);
@@ -60,23 +60,9 @@ await copyFile(wasmSrc, join(PLAYER_OUT, "PulpGain.wasm"));
 // script is run standalone (assemble.mjs already provides it otherwise).
 if (!existsSync(join(OUT, "_headers"))) await copyFile(join(HERE, "_headers"), join(OUT, "_headers"));
 
-// Make the headline page discoverable from the WS-C1 single-plugin proof page:
-// inject a banner link into the GENERATED root index.html (not WS-C1's committed
-// source). Idempotent; skipped if the root page isn't present or already linked.
-const rootIndex = join(OUT, "index.html");
-if (existsSync(rootIndex)) {
-  let html = await readFile(rootIndex, "utf8");
-  if (!html.includes('href="./player/"') && html.includes("<body>")) {
-    const banner = `<body>\n  <div style="max-width:900px;margin:12px auto;padding:10px 14px;` +
-      `border:1px solid #2bd4be;border-radius:8px;font:14px/1.5 system-ui;background:#0c1116;color:#cde">` +
-      `<strong>Shared-player WebCLAP demo →</strong> ` +
-      `<a href="./player/" style="color:#2bd4be">PulpGain behind the same player as the WAM demos</a> ` +
-      `(real-time, worklet-resident CLAP host). The page below is the minimal single-plugin isolation proof.</div>`;
-    html = html.replace("<body>", banner);
-    await writeFile(rootIndex, html);
-    console.log("  index.html                 (+ banner link to ./player/)");
-  }
-}
+// The shared-player demo is surfaced from the root landing page produced by
+// assemble-landing.mjs (run last), so this script no longer injects a banner
+// link into the root isolation-proof page.
 
 async function tree(dir, base = dir) {
   let n = 0;
@@ -88,8 +74,8 @@ async function tree(dir, base = dir) {
 }
 const rel = (p) => p.replace(REPO + "/", "");
 const fileCount = await tree(join(PLAYER_OUT, "pulp-web-player"));
-console.log("assemble-player: wrote shared-player WebCLAP demo → " + rel(PLAYER_OUT));
-console.log("  index.html                 (mounts @danielraffel/web-player shell + WebCLAP adapter)");
+console.log("assemble-player: wrote shared-player WCLAP demo → " + rel(PLAYER_OUT));
+console.log("  index.html                 (mounts @danielraffel/web-player shell + WCLAP adapter)");
 console.log(`  pulp-web-player/**         (${fileCount} files: shell, widgets, theme, wclap adapter + worklet)`);
 console.log("  PulpGain.wasm             (from " + rel(wasmSrc) + ")");
 console.log("  _headers                   (COOP/COEP/CORP + MIME; matches /player/**)");

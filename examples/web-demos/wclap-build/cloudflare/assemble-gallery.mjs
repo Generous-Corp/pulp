@@ -1,8 +1,8 @@
-// Assemble the WebCLAP 1:1 demo gallery into the Cloudflare Pages deploy dir.
+// Assemble the WCLAP 1:1 demo gallery into the Cloudflare Pages deploy dir.
 //
-// A WebCLAP version of EVERY plugin that already has a WAM demo, so this site
+// A WCLAP version of EVERY plugin that already has a WAM demo, so this site
 // mirrors both existing WAM galleries one-for-one — same rows, same order, same
-// widgets, same copy — only the ABI underneath differs (a threaded WebCLAP
+// widgets, same copy — only the ABI underneath differs (a threaded WCLAP
 // .wasm hosted in a worklet-resident CLAP host, vs a WAM DSP module). Emits:
 //
 //   public/vendor-player/**              — ONE shared copy of @pulp/web-player
@@ -16,22 +16,22 @@
 //                                          effects gallery (15 cards).
 //   public/classic-effects/<slug>/       — per-plugin page + <Target>.wasm (15)
 //
-// The two galleries are linked from the WAM sites' "also runs as WebCLAP →"
+// The two galleries are linked from the WAM sites' "also runs as WCLAP →"
 // footer (which points at this site root); this script also injects a gallery
 // nav banner into the generated root isolation-proof page so `/` surfaces both.
 //
 // Every per-plugin page mounts the SAME shell.js the WAM demos use, driven by
-// the WebCLAP adapter instead of the WAM one, so the UI is byte-for-byte the
-// same. The MIDI-effect pages audition through the MonoSynth WebCLAP module via
+// the WCLAP adapter instead of the WAM one, so the UI is byte-for-byte the
+// same. The MIDI-effect pages audition through the MonoSynth WCLAP module via
 // the adapter's createSecondary(), exactly like the WAM pages feed mono-synth.
 //
 // The sibling `_headers` (COOP/COEP/CORP + MIME) applies to every nested path,
 // so crossOriginIsolated holds under /example-plugins/** and /classic-effects/**
-// (WebCLAP imports a shared WebAssembly.Memory → needs cross-origin isolation).
+// (WCLAP imports a shared WebAssembly.Memory → needs cross-origin isolation).
 //
 // Usage:  node assemble-gallery.mjs [--build <dir>] [--out <dir>]
 // Defaults: --build ../build   --out ./public
-import { mkdir, copyFile, readFile, writeFile, cp } from "node:fs/promises";
+import { mkdir, copyFile, writeFile, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -60,7 +60,7 @@ const SRC_CLASSIC = "https://github.com/danielraffel/pulp-classic-effects/tree/m
 const WAM_EXAMPLE = "https://www.generouscorp.com/pulp-example-plugins";
 const WAM_CLASSIC = "https://www.generouscorp.com/pulp-classic-effects";
 
-// synthUrls for the MIDI-effect pages: audition through the MonoSynth WebCLAP
+// synthUrls for the MIDI-effect pages: audition through the MonoSynth WCLAP
 // module (sibling section dir), driven by the same worklet host.
 const MONOSYNTH_DSP = "../../example-plugins/mono-synth/MonoSynth.wasm";
 const WORKLET = "../../vendor-player/vendor/pulp-wasm/wclap-processor.js";
@@ -72,7 +72,7 @@ const SECTIONS = [
     galleryTitle: "Pulp — Example Plugins",
     galleryHead: "Pulp — Example Plugin Gallery",
     galleryIntro:
-      "Eight small plugins running right here in your browser, as WebCLAP — the same " +
+      "Eight small plugins running right here in your browser, as WCLAP — the same " +
       "plugins as the WAM gallery, compiled to a threaded WebAssembly CLAP and hosted " +
       "in a worklet-resident CLAP host. Instruments give you a keyboard to play; sound " +
       "effects run a short backing loop through themselves so you can hear the change; " +
@@ -131,7 +131,7 @@ const SECTIONS = [
     galleryTitle: "Pulp Classic Effects",
     galleryHead: "Pulp — Classic Effects Gallery",
     galleryIntro:
-      "Fifteen classic audio effects running right here in your browser, as WebCLAP — the " +
+      "Fifteen classic audio effects running right here in your browser, as WCLAP — the " +
       "same plugins as the WAM gallery, compiled to a threaded WebAssembly CLAP and hosted " +
       "in a worklet-resident CLAP host. Each one runs a short backing loop through itself so " +
       "you can hear what it does — or feed it your microphone. Nothing is uploaded; it all " +
@@ -169,7 +169,7 @@ const SECTIONS = [
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const attr = (s) => esc(s).replace(/"/g, "&quot;");
 
-// A per-plugin shared-player page: the SAME shell as the WAM demos, WebCLAP adapter.
+// A per-plugin shared-player page: the SAME shell as the WAM demos, WCLAP adapter.
 function pluginPage(section, p) {
   // Serialize each per-plugin config key as its own `key: value,` line so it
   // drops straight into the mountDemo({...}) object (values are JSON-safe:
@@ -182,12 +182,12 @@ function pluginPage(section, p) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>${esc(p.title)} — Pulp WebCLAP demo</title>
+  <title>${esc(p.title)} — Pulp WCLAP demo</title>
   <meta name="description" content="${attr(p.subtitle)}">
   <meta name="pulp:source" content="${attr(section.src + "/" + p.dir)}">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Pulp">
-  <meta property="og:title" content="${attr(p.title + " — Pulp WebCLAP demo")}">
+  <meta property="og:title" content="${attr(p.title + " — Pulp WCLAP demo")}">
   <meta property="og:description" content="${attr(p.subtitle)}">
   <link rel="icon" href="data:,">
 </head>
@@ -196,7 +196,7 @@ function pluginPage(section, p) {
 <script type="module">
   // The SAME shared player (@pulp/web-player) the WAM demos mount — imported
   // host-agnostically (shell.js, NOT index.js, so the WAM backend is never
-  // pulled in) and driven by the WebCLAP adapter. Byte-for-byte the same UI as
+  // pulled in) and driven by the WCLAP adapter. Byte-for-byte the same UI as
   // the WAM page for this plugin; only the backend (a worklet-resident CLAP host
   // over a threaded .wasm) differs. Needs cross-origin isolation (the sibling
   // _headers) because the module imports a shared WebAssembly.Memory.
@@ -211,7 +211,7 @@ function pluginPage(section, p) {
     root: document.getElementById("app"),
     title: "${esc(p.title)}",
     subtitle: "${attr(p.subtitle)}",
-    hostLabel: "WebCLAP",
+    hostLabel: "WCLAP",
     hostDocsHref: "https://github.com/free-audio/clap",
     galleryHref: "../index.html",
     sourceHref: "${attr(section.src + "/" + p.dir)}",
@@ -234,7 +234,7 @@ ${cfgProps}
 }
 
 // A gallery index page mirroring the WAM gallery (same layout + card markup),
-// cross-linking WAM ↔ WebCLAP.
+// cross-linking WAM ↔ WCLAP.
 function galleryPage(section) {
   const cards = JSON.stringify(
     section.plugins.map((p) => ({ dir: p.dir, tag: p.tag, name: p.name, desc: p.card })),
@@ -244,11 +244,11 @@ function galleryPage(section) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(section.galleryHead)} (WebCLAP)</title>
+<title>${esc(section.galleryHead)} (WCLAP)</title>
 <meta name="description" content="${attr(section.galleryIntro)}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Pulp">
-<meta property="og:title" content="${attr(section.galleryHead + " (WebCLAP)")}">
+<meta property="og:title" content="${attr(section.galleryHead + " (WCLAP)")}">
 <meta property="og:description" content="${attr(section.galleryIntro)}">
 <link rel="stylesheet" href="../vendor-player/theme/tokens.css">
 <link rel="stylesheet" href="../vendor-player/theme/fonts.css">
@@ -277,17 +277,17 @@ function galleryPage(section) {
 <body>
 <div class="wrap">
   <header>
-    <h1>${esc(section.galleryTitle)} <span style="color:var(--text-secondary);font-size:14px">— WebCLAP</span></h1>
+    <h1>${esc(section.galleryTitle)} <span style="color:var(--text-secondary);font-size:14px">— WCLAP</span></h1>
     <p>${section.galleryIntro}</p>
   </header>
   <div class="grid" id="grid"></div>
   <footer>
     ${section.galleryFoot}
-    <div style="margin-top:16px">These demos run as <b>WebCLAP</b> — a threaded WebAssembly
+    <div style="margin-top:16px">These demos run as <b>WCLAP</b> — a threaded WebAssembly
       CLAP (SharedArrayBuffer + shared memory), which needs a header-capable host
       (Cloudflare, with COOP/COEP). The same Pulp plugins also run as <b>WAM</b> on plain
       GitHub Pages: <a href="${section.wamGallery}">also runs as WAM &rarr;</a></div>
-    <div style="margin-top:16px">Other Pulp WebCLAP demos:
+    <div style="margin-top:16px">Other Pulp WCLAP demos:
       <a href="${section.otherHref}">${section.otherName} &rarr;</a></div>
     <div style="margin-top:6px"><a href="${section.src.replace("/tree/main", "")}">Source on GitHub &nearr;</a></div>
   </footer>
@@ -340,25 +340,12 @@ for (const section of SECTIONS) {
   }
 }
 
-// ── 3. surface both galleries from the generated root isolation-proof page. ──
-const rootIndex = join(OUT, "index.html");
-if (existsSync(rootIndex)) {
-  let html = await readFile(rootIndex, "utf8");
-  if (!html.includes('href="./example-plugins/"') && html.includes("<body>")) {
-    const banner = `<body>\n  <div style="max-width:900px;margin:12px auto;padding:10px 14px;` +
-      `border:1px solid #2bd4be;border-radius:8px;font:14px/1.5 system-ui;background:#0c1116;color:#cde">` +
-      `<strong>WebCLAP demo gallery →</strong> ` +
-      `<a href="./example-plugins/" style="color:#2bd4be">Example Plugins (8)</a> &middot; ` +
-      `<a href="./classic-effects/" style="color:#2bd4be">Classic Effects (15)</a> ` +
-      `— every WAM demo, rebuilt as a threaded WebCLAP module behind the same player.</div>`;
-    html = html.replace("<body>", banner);
-    await writeFile(rootIndex, html);
-    console.log("  index.html                 (+ gallery banner → example-plugins / classic-effects)");
-  }
-}
+// The deploy root (`/`) is produced by assemble-landing.mjs (run last), which
+// surfaces both galleries from a clean landing page — so this script no longer
+// injects a nav banner into the root isolation-proof page.
 
 const rel = (p) => p.replace(REPO + "/", "");
-console.log("assemble-gallery: wrote WebCLAP 1:1 demo gallery → " + rel(OUT));
+console.log("assemble-gallery: wrote WCLAP 1:1 demo gallery → " + rel(OUT));
 console.log(`  vendor-player/**           (shared shell + wclap adapter + worklet)`);
 console.log(`  ${wrote} HTML pages          (2 galleries + 23 per-plugin shared-player pages)`);
-console.log(`  ${wasmCopied} WebCLAP modules     (one .wasm per plugin)`);
+console.log(`  ${wasmCopied} WCLAP modules     (one .wasm per plugin)`);
