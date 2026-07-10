@@ -2336,3 +2336,31 @@ WITHOUT opening a real audio device — `prepare_render_state()` then
 `test/test_standalone_rt.cpp`, which asserts the path is allocation/lock-free
 under the RT trap build). Keep the extraction behavior-preserving — the full
 standalone suite (start/apply-config/transport) is the regression gate.
+
+## A CTest case that shells out to a CLI command must not require `planning/`
+
+The `planning` submodule is private and optional — a public clone, a fresh
+worktree, and every CI runner can be missing it. So a `add_test(... COMMAND
+pulp-cli <cmd>)` whose command reads something under `planning/` will fail on
+those checkouts, and if it lands it turns the required macOS gate red for every
+open PR until it is fixed.
+
+`pulp minos sweep` and `pulp minos publish-runbook` read
+`planning/sdk-consumers/consumers.yaml`. Their CTest cases pair the usual
+`PASS_REGULAR_EXPRESSION` with a skip keyed on the script's own message:
+
+```cmake
+set_tests_properties(cli-minos-sweep-dryrun PROPERTIES
+    PASS_REGULAR_EXPRESSION "Planned sweep:"
+    SKIP_REGULAR_EXPRESSION "consumers registry not found")
+```
+
+CTest checks the skip regex before the pass regex and before the exit code, so a
+missing registry reports `Skipped` with the reason visible, while a checkout that
+*has* the registry still asserts the real output. Never spell the degradation as
+a second `PASS_REGULAR_EXPRESSION` — that greens a genuinely broken tool.
+
+The skip is only as strong as the agreement between the script's wording and the
+CMake property. `tools/scripts/test_minos_registry_absent.py` asserts both ends:
+the scripts really print the phrase, and the CMakeLists really keys its skip on
+it. Extend that test when you add another registry-reading CLI test.
