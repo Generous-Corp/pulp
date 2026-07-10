@@ -170,7 +170,7 @@ cmake -S . -B build-wclap \
   -DCMAKE_BUILD_TYPE=Release
 
 # Build the project-defined WCLAP target
-cmake --build build-wclap --target <YourPlugin>_WCLAP
+cmake --build build-wclap --target <YourPlugin>-wclap
 
 # Bundle as .wclap
 cd build-wclap/<YourPlugin>.wclap/
@@ -188,13 +188,13 @@ A valid WCLAP module must:
 1. **Export `clap_entry`** — the standard CLAP entry point
 2. **Export memory allocators** — `malloc`/`free` or `cabi_realloc` (for host sandbox allocation)
 3. **Export a growable function table** — for host callback registration
-4. **Target wasm32-wasi** — using WASI SDK or Emscripten with WASI compatibility
+4. **Target wasm32-wasi-threads** — using WASI SDK or Emscripten with WASI compatibility
 
 The `PULP_WCLAP_PLUGIN()` macro handles all of this automatically.
 
 ### Threading Considerations
 
-- **WASI SDK (recommended):** Full `wasi-threads` support. Use `wasi-sdk-pthread.cmake` toolchain.
+- **WASI SDK (recommended):** Full `wasi-threads` support. Use `wasi-toolchain.cmake` toolchain.
 - **Emscripten:** Plugins can be called from multiple threads, but cannot spawn their own threads.
 - **Browser hosts:** Require [cross-origin isolation](https://web.dev/coop-coep/) for SharedArrayBuffer (needed for threads).
 
