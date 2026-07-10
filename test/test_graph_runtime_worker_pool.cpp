@@ -42,6 +42,15 @@ bool wait_for_progress(const std::atomic<std::uint64_t>& counter) {
     return counter.load(std::memory_order_relaxed) > 0;
 }
 
+bool wait_for_park(GraphRuntimeWorkerPool& pool) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (pool.worker_park_count() == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    return pool.worker_park_count() > 0;
+}
+
 } // namespace
 
 TEST_CASE("WorkerPool runs every task in a batch exactly once",
@@ -156,6 +165,21 @@ TEST_CASE("WorkerPool stop is idempotent",
     pool.stop();
     pool.stop();  // second stop is a no-op, not a crash
     CHECK_FALSE(pool.running());
+}
+
+TEST_CASE("WorkerPool parks idle workers and wakes them for a later batch",
+          "[format][worker-pool][rt-safety]") {
+    GraphRuntimeWorkerPool pool;
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(pool.start(4));
+    REQUIRE(wait_for_park(pool));
+
+    SquareCtx ctx;
+    ctx.out.assign(128, 0xFFFFFFFFu);
+    pool.run(128, square_task, &ctx);
+    REQUIRE(ctx.runs.load() == 128);
+    for (std::uint32_t i = 0; i < 128; ++i) REQUIRE(ctx.out[i] == i * i);
+    pool.stop();
 }
 
 TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-free",

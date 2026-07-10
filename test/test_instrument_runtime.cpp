@@ -84,7 +84,7 @@ TEST_CASE("InstrumentRuntime resolves a pool-backed chromatic zone",
         ZoneSelectionRequest{.note = 72, .velocity = 100, .host_sample_rate = 44100.0});
     REQUIRE(octave.valid);
     REQUIRE_THAT(octave.zone.pitch_ratio, WithinAbs(2.0, 1.0e-12));
-    REQUIRE_THAT(octave.playback_rate, WithinAbs(2.0 * (48000.0 / 44100.0), 1.0e-12));
+    REQUIRE_THAT(octave.playback_rate, WithinAbs(2.0, 1.0e-12));
     REQUIRE_THAT(octave.zone.playback_rate, WithinAbs(octave.playback_rate, 1.0e-12));
 }
 

@@ -25,6 +25,8 @@ enum class VoiceTerminationReason : std::uint8_t {
     Stolen,
 };
 
+inline constexpr std::uint32_t kDefaultVoiceTerminationFadeFrames = 64;
+
 struct InstrumentVoice {
     VoiceState state = VoiceState::Free;
     std::uint64_t voice_id = 0;
@@ -39,6 +41,7 @@ struct VoiceTermination {
     std::uint32_t voice_index = 0;
     std::uint64_t voice_id = 0;
     VoiceTerminationReason reason = VoiceTerminationReason::Choked;
+    std::uint32_t fade_out_frames = kDefaultVoiceTerminationFadeFrames;
 };
 
 struct InstrumentVoiceTrigger {
@@ -81,6 +84,12 @@ public:
 
     void set_steal_policy(VoiceStealPolicy policy) noexcept { steal_policy_ = policy; }
     VoiceStealPolicy steal_policy() const noexcept { return steal_policy_; }
+    void set_termination_fade_frames(std::uint32_t frames) noexcept {
+        termination_fade_frames_ = frames;
+    }
+    std::uint32_t termination_fade_frames() const noexcept {
+        return termination_fade_frames_;
+    }
 
     // RT-safe after prepare. Mutates only prepared voice slots.
     VoiceAllocationResult trigger(
@@ -113,6 +122,7 @@ private:
     std::uint32_t max_voices_ = 0;
     std::uint64_t next_voice_id_ = 1;
     std::uint64_t trigger_counter_ = 1;
+    std::uint32_t termination_fade_frames_ = kDefaultVoiceTerminationFadeFrames;
     VoiceStealPolicy steal_policy_ = VoiceStealPolicy::PreferSameVoiceGroupOldest;
 };
 
