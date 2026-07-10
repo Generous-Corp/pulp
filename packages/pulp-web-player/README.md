@@ -150,9 +150,32 @@ createSecondary(urls) → Promise<HostAdapter>  // another instance on the SAME 
 destroy()
 ```
 
-To add e.g. a WebCLAP backend, implement a factory of the same shape as
-`adapters/wam.js` (over `wclap-host.mjs`) and pass it as `createAdapter` — nothing
-in the shell changes.
+A second backend ships: the **WebCLAP** adapter (`adapters/wclap.js`,
+`createWclapAdapter`). It hosts a threaded WebCLAP `.wasm` (a CLAP plugin compiled
+to WebAssembly) in real time via a **worklet-resident CLAP host** — the whole CLAP
+host runs inside the AudioWorklet (`vendor/pulp-wasm/wclap-processor.js`), because a
+CLAP plugin calls the host event vtable synchronously during `process()`. It
+implements the SAME contract, so the identical shell hosts it unchanged:
+
+```js
+import { mountShell, createWclapAdapter } from "@pulp/web-player";
+mountShell({
+  root, title: "PulpGain", mode: "audio-effect", hostLabel: "WebCLAP",
+  dspUrl: "./PulpGain.wasm",                 // the threaded WebCLAP module
+  processorUrl: "./…/vendor/pulp-wasm/wclap-processor.js",
+  createAdapter: createWclapAdapter,
+});
+```
+
+A WebCLAP page **must be cross-origin isolated** (`crossOriginIsolated === true`,
+i.e. COOP + COEP on the document and CORP on every subresource) because the module
+imports a shared `WebAssembly.Memory` — GitHub Pages can't send those headers, so
+WebCLAP's canonical home is Cloudflare Pages. `getState`/`setState` work when the
+wasm exposes the `clap.state` extension (Pulp's CLAP entry does — it serializes the
+same PLST blob the native builds use); if a wasm lacks it, `descriptor.hasState` is
+`false` and state degrades gracefully. To add yet another backend, implement a
+factory of the same shape and pass it as `createAdapter` — nothing in the shell
+changes.
 
 ---
 
@@ -163,11 +186,14 @@ src/
   index.js              # public entry: mountDemo (WAM-default), createWamAdapter, widgets
   shell.js              # host-agnostic shell — imports NO backend
   adapters/
-    wam.js              # default WAM adapter (the only backend import)
+    wam.js              # default WAM adapter
+    wclap.js            # WebCLAP adapter (worklet-resident CLAP host)
     adapter.d.ts        # the host-adapter interface (typed contract)
   widgets/              # canvas knob/fader/toggle/combo/meter + base
   theme/                # default Ink & Signal skin: tokens.css, fonts.css, Inter
-  vendor/pulp-wasm/     # vendored SDK WAM runtime (see Provenance)
+  vendor/pulp-wasm/     # vendored SDK WAM runtime + WebCLAP host (see Provenance)
+    wclap-processor.js  # self-contained classic AudioWorklet: the CLAP host + RT plugin
+    wclap-abi.mjs       # single source of truth for the CLAP wasm32 ABI (parity-tested)
 ```
 
 | Export | Path |

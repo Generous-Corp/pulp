@@ -11,6 +11,8 @@
     ".": "./src/index.js",
     "./shell": "./src/shell.js",
     "./adapters/wam": "./src/adapters/wam.js",
+    "./adapters/wclap": "./src/adapters/wclap.js",
+    "./wclap-processor.js": "./src/vendor/pulp-wasm/wclap-processor.js",
     "./widgets": "./src/widgets/index.js",
     "./theme/tokens.css": "./src/theme/tokens.css",
     "./theme/fonts.css": "./src/theme/fonts.css",
@@ -21,7 +23,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node test/adapter-seam.test.mjs"
+    "test": "node test/adapter-seam.test.mjs && node test/wclap-adapter.test.mjs"
   },
   "keywords": [
     "pulp",

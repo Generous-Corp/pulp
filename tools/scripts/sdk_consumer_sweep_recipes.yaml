@@ -1,0 +1,45 @@
+# Build recipes for the Managed SDK Consumer Sweep (tools/scripts/sdk_consumer_sweep.py).
+#
+# The registry of WHAT to sweep lives in the private planning submodule
+# (planning/sdk-consumers/consumers.yaml). This file holds the public HOW: the
+# per-repo build knobs a consumer needs to configure against an installed Pulp
+# SDK. Absent entries build with the defaults below, so only repos that need a
+# non-default flag appear here.
+#
+# Keys are the repo short name (the part after "danielraffel/").
+#
+# Per-repo fields (all optional):
+#   skip:            reason string — do not build this repo (it has no buildable
+#                    source: a README/PKG-only release mirror, etc.). A repo whose
+#                    consumers.yaml status.state is "not-applicable" is skipped
+#                    automatically; list it here only to add/override a reason.
+#   configure_flags: extra -D flags appended to the default cmake configure line.
+#   build_target:    a specific target to build instead of the default (all).
+
+defaults:
+  # Every consumer configures against the installed SDK the same way: Release,
+  # find_package(Pulp) via CMAKE_PREFIX_PATH (injected by the runner).
+  configure_flags: []
+
+repos:
+  pulp-gpu-nam:
+    # gpu-nam vendors a copy of the Pulp tree for its own dev loop; this flag
+    # tells it to consume the installed SDK via find_package instead.
+    configure_flags:
+      - -DGPU_NAM_USE_INSTALLED_PULP=ON
+
+  pulp-magenta-examples:
+    # A vendored transitive dependency still declares cmake_minimum_required < 3.5,
+    # which CMake 4 rejects without this compatibility shim.
+    configure_flags:
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+  # README / PKG-only release mirrors — no buildable source in the public repo.
+  # (Also auto-skipped by their consumers.yaml status.state == not-applicable;
+  # listed here so the reason is visible in the public tool too.)
+  pulp-spectral-lab:
+    skip: Public repo is a README/screenshot-only release mirror (no build source).
+  pulp-superconvolver:
+    skip: Public repo is a README/screenshot-only release mirror (no build source).
+  pulp-tempo-sampler:
+    skip: Public repo is a README-only release mirror (no build source).
