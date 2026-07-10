@@ -487,6 +487,28 @@ every secondary output channel every block — do not skip this even for
 "only bus 0 used" plugins; some hosts reuse memory across plugin
 slots.
 
+### `constant_mask` on an output bus is inherited, not given to you clean
+
+`clap_audio_buffer_t::constant_mask` is the *plugin's* promise about the
+block it just wrote: bit N set means "every frame of channel N equals
+sample 0", and a host may act on it by reading one sample instead of the
+block. The host never clears it, and CLAP explicitly permits in-place
+buffers — so an output bus can arrive still carrying the mask an upstream
+plugin set on the input it aliases. An adapter that never writes the mask
+inherits that lie, and a plugin whose output varies gets read back as one
+held sample.
+
+`clap_process` therefore clears `constant_mask` on **every** output bus
+(not just the routed ones) after the Processor call and after the bypass
+short-circuit. Zero means "no channel is known constant", which is always
+true and always safe. Never set a bit speculatively: a set bit obliges you
+to have actually filled the channel with that constant.
+
+The symptom is loudest on CV-rate outputs — where the variation *is* the
+signal, so the whole plug-in reads as a frozen DC level — and can be
+invisible on audio, because hosts are free to ignore the mask entirely.
+Never touch the *input* bus's mask; that one belongs to the host.
+
 ### ARA companion factory is returned **only after Processor exists**
 
 `clap_get_extension` may be called before `clap_init` populates
@@ -732,3 +754,26 @@ first; a per-param skip-set stops them double-reporting a param that pushed
 explicit `push_output_param_event()` events. CLAP param values are **plain
 domain** (`double`), unlike VST3 which normalizes. `test_clap_midi_events.cpp`
 asserts the `param@0, midi@8, param@16` interleave stays non-decreasing in time.
+
+## The StateStore must outlive the Processor
+
+`Processor::state()` dereferences a pointer the host installs. A Processor may
+follow it for its whole lifetime — from `process()`, from its destructor, and from
+any worker thread that destructor is about to `join()`. So the host has to keep the
+store alive until the Processor is gone.
+
+In practice that is one rule about member order: **declare the `state::StateStore`
+before the `std::unique_ptr<Processor>`.** Members are destroyed in reverse
+declaration order, so the store then dies last. Every host in `core/format` had it
+backwards until 2026-07; the effect is nothing at all for a Processor with no
+threads, and a use-after-free on plug-in close for one with a background thread that
+reads `state().get_value()` while the destructor walks to its `join()`.
+
+It crashes only on close, only sometimes, and the DAW gets the blame. The regression
+test is `test/test_store_lifetime.cpp`; it observes the store's destruction through a
+sentinel owned by a parameter's `to_string` closure rather than reading freed memory
+and hoping the result looks wrong.
+
+A Processor should not *rely* on this either: a worker thread that reads the store on
+every tick is one host away from the same crash. Publish what the thread needs to
+atomics from `process()` instead.

@@ -64,6 +64,22 @@ std::vector<std::string> parse_signing_identities(const std::string& output) {
     return identities;
 }
 
+std::string disk_image_failure_hint(const std::string& output) {
+    // `hdiutil create -srcfolder` builds the image by attaching a temporary volume,
+    // copying into it, and unmounting it. Any DiskArbitration client may veto that
+    // unmount, and hdiutil then reports the whole operation as "Resource busy" with
+    // no clue as to who vetoed it. The veto lasts until that client is restarted, so
+    // retrying never clears it. `diskutil unmount` on any mounted volume names the
+    // offender ("Dissenter ..."); CoreSimulator's simdiskimaged is a common one.
+    if (output.find("Resource busy") == std::string::npos
+        && output.find("Device busy") == std::string::npos)
+        return {};
+    return "a process is vetoing volume unmounts machine-wide, so hdiutil cannot "
+           "release the temporary volume it built. `diskutil unmount` on any mounted "
+           "image names the dissenter; if it is CoreSimulator's simdiskimaged, "
+           "restart it with `sudo killall -9 simdiskimaged`.";
+}
+
 } // namespace detail
 
 static std::string exec_cmd(const std::string& cmd, int timeout_ms = 120000) {
@@ -92,18 +108,31 @@ static bool file_exists(const std::string& path) {
     return fs::is_regular_file(fs::path(path), ec) && fs::file_size(fs::path(path), ec) > 0;
 }
 
-static bool create_dmg_image(const std::string& source_path,
-                             const std::string& output_path,
-                             const std::string& volume_name) {
+namespace detail {
+
+// On failure, `error` receives what hdiutil printed. Discarding it — as this used
+// to — turns every DMG failure into a bare `false` and leaves the caller with
+// nothing to say.
+bool create_dmg_image(const std::string& source_path,
+                      const std::string& output_path,
+                      const std::string& volume_name,
+                      std::string& error) {
     exec_status("rm -f \"" + output_path + "\"");
 
     std::string cmd = "hdiutil create"
         " -volname \"" + volume_name + "\""
         " -srcfolder \"" + source_path + "\""
         " -ov -format UDZO"
-        " \"" + output_path + "\" >/dev/null 2>&1";
-    return exec_status(cmd) == 0 && file_exists(output_path);
+        " \"" + output_path + "\" 2>&1";
+    auto r = pulp::platform::exec("/bin/sh", {"-c", cmd}, 120000);
+    if (r.exit_code == 0 && file_exists(output_path))
+        return true;
+
+    error = r.stdout_output + r.stderr_output;
+    return false;
 }
+
+} // namespace detail
 
 SigningInfo check_codesign(const std::string& path) {
     SigningInfo info;
@@ -258,12 +287,31 @@ bool create_pkg(const std::string& component_path,
     return exec_status(cmd) == 0;
 }
 
+// Reports on the last attempt only: the staged attempt failing while the direct one
+// succeeds is a normal outcome, not something to warn about.
+static void report_dmg_failure(const std::string& error) {
+    std::cerr << "pulp: hdiutil create failed";
+    if (!error.empty()) std::cerr << ": " << error;
+    std::cerr << std::endl;
+    const auto hint = detail::disk_image_failure_hint(error);
+    if (!hint.empty()) std::cerr << "pulp: " << hint << std::endl;
+}
+
 bool create_dmg(const std::string& source_path,
                 const std::string& output_path,
                 const std::string& volume_name) {
+    std::string error;
+    auto direct = [&]() {
+        error.clear();
+        if (detail::create_dmg_image(source_path, output_path, volume_name, error))
+            return true;
+        report_dmg_failure(error);
+        return false;
+    };
+
     auto staging_dir = make_temp_dir("pulp-dmg-staging");
     if (!staging_dir)
-        return create_dmg_image(source_path, output_path, volume_name);
+        return direct();
 
     std::error_code ec;
     auto cleanup = [&]() {
@@ -275,14 +323,14 @@ bool create_dmg(const std::string& source_path,
              fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
     if (!ec) {
         fs::create_directory_symlink("/Applications", *staging_dir / "Applications", ec);
-        if (create_dmg_image(staging_dir->string(), output_path, volume_name)) {
+        if (detail::create_dmg_image(staging_dir->string(), output_path, volume_name, error)) {
             cleanup();
             return true;
         }
     }
 
     cleanup();
-    return create_dmg_image(source_path, output_path, volume_name);
+    return direct();
 }
 
 // Derive a human choice title from an install location when none was given,

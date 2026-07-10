@@ -1145,6 +1145,21 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         }
     }
 
+    // constant_mask is the plugin's promise about the block it just wrote: a set
+    // bit says "every frame of this channel holds the value in sample 0". CLAP
+    // permits in-place buffers, so an output buffer can arrive carrying the mask
+    // an upstream plugin (or the host) set on the input it aliases. Nothing above
+    // writes the mask, so leaving it alone would let a stale bit make a host read
+    // one sample of a channel that in fact varies — silent, and worst on CV-rate
+    // outputs, where the whole signal is the variation. Clearing it is always
+    // sound: 0 means "no channel is known constant", which is the truth for every
+    // block a Processor writes, and it costs one store per bus. Every output bus
+    // is fully written above — bus 0 by the Processor (or the bypass copy), the
+    // rest pre-zeroed — so no bus is exempt.
+    for (uint32_t b = 0; b < process->audio_outputs_count; ++b) {
+        process->audio_outputs[b].constant_mask = 0;
+    }
+
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-event scan below so the host records the auto-reset as automation.
