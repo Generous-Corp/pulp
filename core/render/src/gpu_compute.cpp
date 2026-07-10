@@ -733,6 +733,56 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+// Cooperative modal_strike variant: ONE WORKGROUP PER SAMPLE, WG lanes split the
+// modes sum and combine it in a deterministic shared-memory tree reduction. The
+// serial kernel above maps one thread per sample, so a small sample block (few
+// ceil(S/256) workgroups) pins the device to a couple of cores AND each lane
+// walks the whole num_modes sum alone — bad when modes is large. Here the host
+// launches min(num_samples, 65535) workgroups; each grid-strides over its
+// samples, the WG lanes parallelize the modes reduction. wid.x / nwg.x are
+// uniform across the workgroup so the sample loop's trip count is uniform and
+// every workgroupBarrier() stays in uniform control flow. The host picks this
+// variant only when it wins (small sample block or many modes) — see
+// modal_strike(); the serial kernel stays best for many-sample / few-mode blocks
+// that already fill the device with barrier-free work.
+static constexpr const char* kModalStrikeCoopShader = R"wgsl(
+struct ModalParams { num_modes : u32, num_samples : u32, sample_rate : f32, t0 : f32 };
+
+@group(0) @binding(0) var<storage, read>       modes : array<f32>;
+@group(0) @binding(1) var<storage, read_write> out   : array<f32>;
+@group(0) @binding(2) var<uniform>             p     : ModalParams;
+
+const TWO_PI : f32 = 6.2831853071795864;
+const WG : u32 = 256u;
+var<workgroup> partial : array<f32, 256>;
+
+@compute @workgroup_size(WG)
+fn main(@builtin(workgroup_id) wid : vec3u,
+        @builtin(num_workgroups) nwg : vec3u,
+        @builtin(local_invocation_id) lid : vec3u) {
+    let lane = lid.x;
+    for (var s = wid.x; s < p.num_samples; s = s + nwg.x) {
+        let t = (p.t0 + f32(s)) / p.sample_rate;
+        var acc = 0.0;
+        for (var i = lane; i < p.num_modes; i = i + WG) {
+            let f  = modes[i * 4u];
+            let a  = modes[i * 4u + 1u];
+            let d  = modes[i * 4u + 2u];
+            let ph = modes[i * 4u + 3u];
+            acc = acc + a * exp(-d * t) * sin(TWO_PI * f * t + ph);
+        }
+        partial[lane] = acc;
+        workgroupBarrier();
+        for (var stride = WG / 2u; stride > 0u; stride = stride >> 1u) {
+            if (lane < stride) { partial[lane] = partial[lane] + partial[lane + stride]; }
+            workgroupBarrier();
+        }
+        if (lane == 0u) { out[s] = partial[0]; }
+        workgroupBarrier();  // finish reading partial[0] before the next sample overwrites it
+    }
+}
+)wgsl";
+
 static constexpr const char* kGranularShader = R"wgsl(
 // GPU granular synthesis: one thread per output sample, summing the contribution
 // of every active grain. grains: num_grains × [onset, duration, src_pos, pitch,
@@ -865,6 +915,7 @@ public:
         additive_pipeline_ = nullptr;
         additive_coop_pipeline_ = nullptr;
         modal_pipeline_ = nullptr;
+        modal_coop_pipeline_ = nullptr;
         granular_pipeline_ = nullptr;
         dense_tanh_pipeline_ = nullptr;
         fft_pipeline_ = nullptr;
@@ -2170,9 +2221,24 @@ public:
         queue_.WriteBuffer(m_buf, 0, modes, mbytes);
         queue_.WriteBuffer(u_buf, 0, &mp, sizeof(mp));
 
-        auto bg = create_bind_group(modal_pipeline_, {m_buf, o_buf, u_buf});
+        // Pick the dispatch strategy. The serial kernel (one thread per sample,
+        // workgroup_size 256) already fills the device when the sample block is
+        // large — ceil(S/256) workgroups — and sums the modes with no barriers, so
+        // it is best for many-sample / few-mode blocks. The cooperative kernel (one
+        // workgroup per sample, WG lanes tree-reduce the modes) wins when the serial
+        // kernel is workgroup-starved (small block) OR the modes sum is the
+        // bottleneck (many modes). Crossovers are from the gpu_roofline harness on
+        // Apple Metal: ceil(S/256) < 8 (starved) or num_modes >= 512. Both kernels
+        // share the (modes, out, params) bind-group layout.
+        const uint32_t serial_wgs = (num_samples + 255u) / 256u;
+        // Also take the cooperative route when the serial dispatch would exceed the
+        // 65535 workgroups-per-dimension limit — the coop kernel grid-strides and
+        // caps its dispatch, so it stays valid at the largest supported blocks.
+        const bool coop = serial_wgs < 8u || num_modes >= 512u || serial_wgs > 65535u;
+        const wgpu::ComputePipeline& pipe = coop ? modal_coop_pipeline_ : modal_pipeline_;
+        auto bg = create_bind_group(pipe, {m_buf, o_buf, u_buf});
         if (!bg) return false;
-        dispatch(modal_pipeline_, bg, (num_samples + 255u) / 256u);
+        dispatch(pipe, bg, coop ? std::min(num_samples, 65535u) : serial_wgs);
         copy_buffer(o_buf, rb, obytes);
         return read_back(rb, out, obytes);
     }
@@ -2604,6 +2670,7 @@ private:
     wgpu::ComputePipeline additive_pipeline_;
     wgpu::ComputePipeline additive_coop_pipeline_;  // block-parallel additive variant
     wgpu::ComputePipeline modal_pipeline_;
+    wgpu::ComputePipeline modal_coop_pipeline_;  // block-parallel modal variant
     wgpu::ComputePipeline granular_pipeline_;
     wgpu::ComputePipeline dense_tanh_pipeline_;
     wgpu::ComputePipeline fft_pipeline_;
@@ -2836,6 +2903,9 @@ private:
 
         modal_pipeline_ = create_pipeline("modal_strike", kModalStrikeShader);
         if (!modal_pipeline_) return false;
+
+        modal_coop_pipeline_ = create_pipeline("modal_strike_coop", kModalStrikeCoopShader);
+        if (!modal_coop_pipeline_) return false;
 
         granular_pipeline_ = create_pipeline("granular_cloud", kGranularShader);
         if (!granular_pipeline_) return false;

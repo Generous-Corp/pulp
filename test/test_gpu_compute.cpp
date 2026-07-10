@@ -709,6 +709,86 @@ TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
     REQUIRE_FALSE(compute->modal_strike(modes.data(), out.data(), 0, N, SR, 0.0f));
 }
 
+// Guards the block-parallel modal_strike reshape (one workgroup per sample, WG
+// lanes tree-reducing the modes sum): numeric parity with a scalar CPU reference
+// across mode counts that span below / at / above the 256-lane workgroup, a
+// sample count that is NOT a multiple of the workgroup, and run-to-run
+// determinism (the tree reduction is fixed-order and atomics-free).
+TEST_CASE("GpuCompute modal strike matches a CPU reference across workgroup sizes",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr float SR = 48000.0f;
+    constexpr double TWO_PI = 6.28318530717958647692;
+    auto cpu_modal = [&](const std::vector<float>& modes, uint32_t M, uint32_t s,
+                         float t0) {
+        const double t = (static_cast<double>(t0) + s) / SR;
+        double acc = 0.0;  // scalar reference, serial order
+        for (uint32_t i = 0; i < M; ++i) {
+            const double f = modes[i * 4], a = modes[i * 4 + 1],
+                         d = modes[i * 4 + 2], ph = modes[i * 4 + 3];
+            acc += a * std::exp(-d * t) * std::sin(TWO_PI * f * t + ph);
+        }
+        return static_cast<float>(acc);
+    };
+    auto make_modes = [](uint32_t M) {
+        std::vector<float> m(static_cast<std::size_t>(M) * 4);
+        for (uint32_t i = 0; i < M; ++i) {
+            m[i * 4 + 0] = 100.0f + 7.0f * static_cast<float>(i);   // freq
+            m[i * 4 + 1] = 1.0f / (1.0f + static_cast<float>(i));   // amp (decaying)
+            m[i * 4 + 2] = 3.0f + 0.05f * static_cast<float>(i);    // decay
+            m[i * 4 + 3] = 0.1f * static_cast<float>(i);            // phase
+        }
+        return m;
+    };
+
+    // Non-multiple-of-256 sample count; mode counts spanning the workgroup width.
+    const uint32_t S = 333;
+    for (uint32_t M : {1u, 2u, 200u, 256u, 300u, 1000u}) {
+        const auto modes = make_modes(M);
+        std::vector<float> out(S, 0.0f), out2(S, 0.0f);
+        REQUIRE(compute->modal_strike(modes.data(), out.data(), M, S, SR, 0.0f));
+        REQUIRE(compute->modal_strike(modes.data(), out2.data(), M, S, SR, 0.0f));
+        for (uint32_t s = 0; s < S; ++s) {
+            const float ref = cpu_modal(modes, M, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+            REQUIRE(out[s] == out2[s]);  // deterministic run-to-run
+        }
+    }
+
+    // Serial-routed path: a big sample block with few modes routes to the serial
+    // one-thread-per-sample kernel (ceil(S/256) >= 8, num_modes < 512). Verify
+    // that route stays correct + deterministic too.
+    {
+        const uint32_t S2 = 4096, M = 64;
+        const auto modes = make_modes(M);
+        std::vector<float> out(S2, 0.0f), out2(S2, 0.0f);
+        REQUIRE(compute->modal_strike(modes.data(), out.data(), M, S2, SR, 0.0f));
+        REQUIRE(compute->modal_strike(modes.data(), out2.data(), M, S2, SR, 0.0f));
+        for (uint32_t s = 0; s < S2; ++s) {
+            const float ref = cpu_modal(modes, M, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+            REQUIRE(out[s] == out2[s]);
+        }
+    }
+
+    // Grid-stride path in the cooperative kernel: more samples than the 65535
+    // workgroup-per-dimension cap, so each workgroup wraps to several samples.
+    // num_modes >= 512 forces the cooperative route. Spot-check a spread of
+    // indices (including across the 65535 boundary).
+    {
+        const uint32_t Sbig = 70000, M = 512;
+        const auto modes = make_modes(M);
+        std::vector<float> out(Sbig, 0.0f);
+        REQUIRE(compute->modal_strike(modes.data(), out.data(), M, Sbig, SR, 0.0f));
+        for (uint32_t s : {0u, 1u, 65534u, 65535u, 65536u, 69999u}) {
+            const float ref = cpu_modal(modes, M, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+        }
+    }
+}
+
 TEST_CASE("GpuCompute granular cloud places windowed grains", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
     if (!compute || !compute->initialize_standalone()) return;
