@@ -587,12 +587,17 @@ hdiutil detach /Volumes/SomeImage
 # Simulators are still shutting down. Please try again in a few moments.
 ```
 
-The recurring offender on a machine that has ever run an iOS Simulator is
-CoreSimulator's `simdiskimaged`, which wedges in a "still shutting down" state and
-refuses every unmount on the host — even with no booted devices. Restart it:
+**Trust the PID, not the message.** `diskutil unmount` names the dissenting process
+by PID; the sentence printed beside it can come from an entirely different subsystem.
+A wedged Mac Studio on 2026-07-10 reported `PID 1801` while printing CoreSimulator's
+"Simulators are still shutting down" with **no booted simulators** — PID 1801 was
+Console.app. Killing it cleared the veto instantly; `sudo killall -9 simdiskimaged`
+had done nothing. Identify the PID, then quit that process:
 
 ```bash
-sudo killall -9 simdiskimaged     # launchd respawns it on demand
+diskutil unmount /Volumes/AnyMountedVolume   # → "... failed to unmount: '...' (PID NNNN)"
+ps -p NNNN -o pid,user,comm=                 # what is it, really?
+kill NNNN                                    # user-owned: no sudo needed
 ```
 
 Two consequences worth knowing. Every failed `create` leaks its temporary
