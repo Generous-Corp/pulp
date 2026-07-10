@@ -38,6 +38,8 @@ concurrency:
 jobs:
   build-prove-deploy:
     name: Build + prove + (owner-gated) deploy
+    # Scheduled-workflow fork guard: forks should not burn a weekly cron.
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
