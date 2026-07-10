@@ -501,11 +501,15 @@ if(PULP_BUILD_TESTS)
 
     # `pulp minos sweep --sdk-prefix <x> --dry-run` prints the plan without
     # cloning or building — covers the CLI->sdk_consumer_sweep.py handoff.
+    # The consumer registry lives in the private `planning` submodule, which a
+    # fresh clone and every CI runner may legitimately lack; skip rather than
+    # fail there, so this stays a real assertion where the registry exists.
     add_test(NAME cli-minos-sweep-dryrun
         COMMAND pulp-cli minos sweep --sdk-prefix /nonexistent --dry-run
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-minos-sweep-dryrun PROPERTIES
-        PASS_REGULAR_EXPRESSION "Planned sweep:")
+        PASS_REGULAR_EXPRESSION "Planned sweep:"
+        SKIP_REGULAR_EXPRESSION "consumers registry not found")
 
     # `pulp minos update --to <ver>` (dry-run, --only a single repo so it clones
     # at most one; the dispatch + script-handoff is what's under test). A bad
@@ -522,7 +526,8 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli minos publish-runbook --to 0.640.0
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-minos-publish-runbook PROPERTIES
-        PASS_REGULAR_EXPRESSION "Republish runbook")
+        PASS_REGULAR_EXPRESSION "Republish runbook"
+        SKIP_REGULAR_EXPRESSION "consumers registry not found")
 
     add_test(NAME cli-audio-excerpt-find-invalid-top
         COMMAND "${CMAKE_COMMAND}"
