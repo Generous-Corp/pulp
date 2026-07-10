@@ -138,6 +138,14 @@ protected:
     /// No-GPU worker path: run the (continuously-fed) worker fallback for every
     /// prepared channel into `output`, zeroing anything else. Zero-latency
     /// partitioned convolution, so it matches the GPU path's algorithmic timing.
+    ///
+    /// This is the SOLE audio path when the device fails to init (the `!gpu_`
+    /// branch of process_block) and in the no-render build, so it carries the same
+    /// non-finite-input guard as prime_fallback(): a single NaN/Inf would otherwise
+    /// smear across every FFT bin and poison worker_fallback_'s overlap state for
+    /// the whole IR tail (~num_partitions blocks). On a poisoned block we reset the
+    /// convolver and emit silence for that channel; it self-heals on the next
+    /// finite block instead of dying for the tail.
     void render_worker_fallback(const audio::BufferView<const float>& input,
                                 audio::BufferView<float>& output,
                                 uint32_t n) noexcept {
@@ -148,7 +156,16 @@ protected:
         const uint32_t ch_count = std::min<uint32_t>(channels_, out_ch);
         for (uint32_t ch = 0; ch < ch_count && ch < worker_fallback_.size(); ++ch) {
             if (ch >= input.num_channels()) continue;
-            worker_fallback_[ch].process(input.channel_ptr(ch), output.channel_ptr(ch),
+            const float* x = input.channel_ptr(ch);
+            bool finite = true;
+            for (uint32_t i = 0; i < n; ++i) {
+                if (!std::isfinite(x[i])) { finite = false; break; }
+            }
+            if (!finite) {
+                worker_fallback_[ch].reset();  // output stays the pre-cleared silence
+                continue;
+            }
+            worker_fallback_[ch].process(x, output.channel_ptr(ch),
                                          static_cast<std::size_t>(n));
         }
     }

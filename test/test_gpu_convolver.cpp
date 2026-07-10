@@ -340,6 +340,54 @@ TEST_CASE("GpuConvolver fallback recovers from a NaN input block",
     }
 }
 
+// BUG 3 on the worker/no-GPU path: render_worker_fallback() is the SOLE audio
+// path when the device fails to init (and in the no-render build). A single NaN
+// input sample must not smear across the FFT bins and poison worker_fallback_'s
+// overlap state for the whole IR tail — it must emit one silent block and recover
+// on the very next finite block.
+TEST_CASE("GpuConvolver worker fallback recovers from a NaN input block",
+          "[gpu_audio][convolver]") {
+    constexpr uint32_t CH = 1, BS = 64, SR = 48000;
+    constexpr int M = 200;  // IR spans several blocks: a smear would last many blocks
+    std::vector<float> ir(M);
+    for (int i = 0; i < M; ++i) ir[i] = std::cos(0.05f * i) * std::exp(-0.01f * i);
+
+    GpuConvolver node(CH, BS, SR, ir);
+    REQUIRE(node.prepare());
+    if (node.gpu_available()) return;  // exercises the no-device worker path only
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> good(BS), bad(BS);
+    for (uint32_t i = 0; i < BS; ++i) { good[i] = std::sin(0.2f * i); bad[i] = good[i]; }
+    bad[BS / 2] = nan;
+
+    auto run = [&](const std::vector<float>& blk) {
+        std::vector<float> o(BS, -99.0f);
+        const float* ip[1] = {blk.data()};
+        float* op[1] = {o.data()};
+        BufferView<const float> iv(ip, 1, BS);
+        BufferView<float> ov(op, 1, BS);
+        node.process_block(iv, ov, BS);  // no GPU -> render_worker_fallback
+        return o;
+    };
+
+    run(good);                 // prime some history
+    auto poisoned = run(bad);  // the NaN block
+    for (uint32_t i = 0; i < BS; ++i) REQUIRE(poisoned[i] == 0.0f);  // silence, not NaN
+
+    // Every subsequent block must be finite (no tail smear) and, once history
+    // rebuilds, actually produce audio.
+    bool produced_audio = false;
+    for (uint32_t b = 0; b < 8; ++b) {
+        auto o = run(good);
+        for (uint32_t i = 0; i < BS; ++i) {
+            REQUIRE(std::isfinite(o[i]));
+            if (std::abs(o[i]) > 1.0e-6f) produced_audio = true;
+        }
+    }
+    REQUIRE(produced_audio);
+}
+
 // Audible-behaviour parity through the real transport: with no worker ever
 // pumping, every block past the primed latency is a miss, so the transport's
 // output IS the fallback stream. It must equal the direct convolution delayed by
