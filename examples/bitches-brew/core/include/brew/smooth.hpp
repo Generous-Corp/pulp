@@ -34,11 +34,24 @@ namespace pulp::examples::brew {
 /// The full-scale distance the slew rate is calibrated against.
 inline constexpr double kFullSwing = 2.0;
 
+/// Below this the one-pole's tail is flushed to zero.
+///
+/// A one-pole never arrives: it approaches its target geometrically, and when the
+/// target is zero it eventually lands in the denormal range, where every multiply
+/// costs an order of magnitude more than a normal one — a control-rate filter that
+/// gets *slower* the quieter it is. The floor is thirty-odd orders of magnitude
+/// below any voltage anyone can hear or measure, and eight orders above the first
+/// denormal, so nothing real is ever rounded away.
+inline constexpr float kDenormalFloor = 1e-30f;
+
 /// A one-sample smoother. One per channel — sharing one across channels makes
 /// each channel filter the last one's samples.
 class Smoother {
 public:
-    void reset(float value = 0.0f) noexcept { state_ = value; }
+    void reset(float value = 0.0f) noexcept {
+        state_ = value;
+        coeff_ms_ = 0.0f;   // force the coefficient to be recomputed
+    }
 
     [[nodiscard]] float value() const noexcept { return state_; }
 
@@ -57,18 +70,37 @@ public:
                 kFullSwing / (static_cast<double>(ms) * 0.001 * sample_rate));
             state_ = std::clamp(target, state_ - step, state_ + step);
         } else {
-            // A one-pole whose 63% point is |ms| for a full swing. `exp` here is
-            // per-sample and not free, but this runs once per sample on a control
-            // signal, not on a 512-tap filter.
-            const double tau = static_cast<double>(-ms) * 0.001;
-            const auto a = static_cast<float>(std::exp(-1.0 / (tau * sample_rate)));
+            // A one-pole whose 63% point is |ms| for a full swing. Its coefficient
+            // depends only on the control and the sample rate, so it is computed
+            // when one of those changes and not once per sample — `std::exp` in an
+            // inner loop is the most expensive thing in this suite, and it was
+            // being asked the same question forty-eight thousand times a second.
+            const float a = coefficient(ms, sample_rate);
             state_ = a * state_ + (1.0f - a) * target;
+            if (std::abs(state_) < kDenormalFloor) state_ = 0.0f;
         }
         return state_;
     }
 
 private:
+    [[nodiscard]] float coefficient(float ms, double sample_rate) noexcept {
+        if (ms != coeff_ms_ || sample_rate != coeff_sr_) {
+            const double tau = static_cast<double>(-ms) * 0.001;
+            coeff_ = static_cast<float>(std::exp(-1.0 / (tau * sample_rate)));
+            coeff_ms_ = ms;
+            coeff_sr_ = sample_rate;
+        }
+        return coeff_;
+    }
+
     float state_ = 0.0f;
+
+    /// The cached one-pole coefficient and the two inputs it was computed from.
+    /// `coeff_ms_` starts at zero, which `process()` never reaches this branch
+    /// with, so the first low-passed sample always recomputes.
+    float coeff_ = 0.0f;
+    float coeff_ms_ = 0.0f;
+    double coeff_sr_ = 0.0;
 };
 
 }  // namespace pulp::examples::brew

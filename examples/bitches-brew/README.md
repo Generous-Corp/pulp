@@ -40,11 +40,12 @@ them).
 |------|--------------|
 | `DC` | Holds one constant value, optionally shaped by the input and slewed. The connection tester, and the suite's bit-exactness guard. |
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
-| `LFO` | A modulation source locked to the tempo or free-running in hertz, plus the same shape a quarter cycle ahead. |
+| `LFO` | Two modulation sources, each locked to the tempo or free-running in hertz, in one of eight sync modes. |
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
-| `Quantizer` | Snaps an incoming control voltage to discrete steps. |
-| `Step LFO` | An eight-step pattern and a gate, locked to the host. |
-| `CV To OSC` | Passes a control voltage through and reports it over OSC. Off by default. |
+| `Quantizer` | Snaps an incoming control voltage to discrete steps, or to the notes of a scale. |
+| `Step LFO` | An eight-step pattern and a gate, on the LFO's clock, with a shift-register random source. |
+| `Trigger` | Turns MIDI notes — or a voltage on its input — into a gate, a pulse, a multi-stage envelope, or a velocity voltage. |
+| `CV To OSC` | Passes a control voltage through and reports it over OSC to a target you type. Off by default. |
 
 `Function` is the only plug-in here that reads its input bus — the others
 generate. It offers five curves, and they are not all the same kind of thing.
@@ -79,8 +80,8 @@ at zero is the single-shape behaviour you would expect. `Asymmetry` moves the
 waveform's centre in time — a pulse-width control generalized to every shape — and
 `Random` is a sample-and-hold, one level per cycle held flat across it.
 
-The sum is not clamped inside the mixer. Four depths at full reach 4.0, and
-flattening that before `Offset` and the output scale have had their say would
+The sum is not clamped inside the mixer. The depths at full reach past the rail,
+and flattening that before `Offset` and the output scale have had their say would
 silently discard a mix you asked for. It clamps once, at the jack.
 
 `Smooth` is the one control here that carries state, and it is off by default for
@@ -94,27 +95,39 @@ in, and it is the honest price of a slew limiter on a generator.
 `Swing` warps the beat timeline the same way `Sync`'s does, and for the same
 reason it is applied to the *position* before the position becomes a phase: warp
 the phase afterwards and the LFO stops agreeing with the clock it is supposed to
-shuffle alongside. 50% is straight, bit-identically so. It has no meaning in free
-run — a hertz rate that shuffled would just be a wrong hertz rate — so it is
-ignored there rather than approximated.
+shuffle alongside. 50% is straight, bit-identically so. It has no meaning in a
+hertz mode — a hertz rate that shuffled would just be a wrong hertz rate — so it is
+ignored there rather than approximated, and it only applies while the transport
+plays.
 
-`Free Run` swaps the tempo for `Free`, a rate in hertz. Both are derived from the
-host's position — one from `position_beats`, one from `position_samples` — so free
-running is not free *floating*: it stays a pure function of where the playhead is,
-and keeps every property below. It is what a modulation that should ignore a tempo
-map needs, and the two rate knobs stay visible together so switching modes never
-moves a control out from under the mouse.
+The LFO's phase is derived from the host's position rather than accumulated per
+block, so a bounce lands the modulation on the same samples every time, a locate
+puts the LFO where the timeline says it should be, and a long session cannot drift
+against the host. The `Random` level is a **hash of the cycle index** and `Noise` a
+**hash of the sample index**, not generators, for exactly that reason: render
+twice, get the same samples. Reroll them with `Seed`, not by pressing play again.
+Rendered per sample: a block-rate control voltage is an audible zipper on whatever
+it drives.
 
-Its phase is derived from the host's position rather than accumulated per block,
-so a bounce lands the modulation on the same samples every time, a locate puts the
-LFO where the timeline says it should be, and a long session cannot drift against
-the host. The `Random` level is a **hash of the cycle index**, not a generator, for
-exactly that reason: render twice, get the same samples. Reroll it with `Seed`, not
-by pressing play again. The second output leads the first by a quarter cycle: fed
-into two CV inputs the pair traces a circle, which is how one oscillator drives a
-two-axis modulation — and its sample-and-hold is keyed on the cycle *its own* phase
-sits in, or the circle would tear at every cycle boundary. Rendered per sample: a
-block-rate control voltage is an audible zipper on whatever it drives.
+There are exactly three exceptions, and none of them is a footnote hidden here.
+
+**The wall-clock sync modes.** `Free` and `Tempo` keep oscillating while the
+transport is parked, which is not a function of a position that is not moving — so
+those two do not bounce bit-identically, and the editor names them. `Free3` is what
+a position-derived "free run" actually is, and it is exact. The Step LFO adds
+`TrgFr` and `TrgTm`, which hold on a count of triggers seen rather than on the
+timeline, so they are not pure either. `sync_is_deterministic()` states all of this
+in code rather than only in prose.
+
+**`Smooth`.** A smoother carries state between blocks, so a non-zero `Smooth` makes
+the output depend on how the playhead arrived and not only on where it is. The
+dependence is bounded by the smoother's own settling time — locate to bar 57 from
+anywhere and the two renders converge — and at zero it is a wire, bit for bit. That
+is why zero is the default on every plug-in that has one.
+
+**`Trigger`.** A note is an event, not a coordinate, and no envelope can be a pure
+function of a position. It is deterministic in the only sense available: the same
+notes on the same timeline render the same samples.
 
 `Sync` also carries a **1st Delay** (hold the clock off for N ms after the
 transport starts, measured from the run origin so two runs behave identically)
@@ -123,15 +136,16 @@ filter, and the receiving gate input all add latency: a clock that is
 sample-accurate in software arrives late at the hardware, and a negative offset
 pulls the pulses back ahead of the beat.
 
-Swing and periodic reset are named in the suite's feature list but are **not
-implemented**. Their behavior is not specified anywhere this project is permitted
-to derive it from, and a plausible guess would ship as a green test asserting the
-guess. Same for FSK tape sync, which additionally needs a continuous phase
-accumulator designed rather than bolted on.
+FSK tape sync is **not implemented**. It needs a continuous phase accumulator
+designed rather than bolted on, and nothing in this suite accumulates phase.
 
-Built for VST3, AU (`aufx`), and CLAP. `brew-core/` holds what they share: the
-output stage above, the clock grid, the pulse-width rules, and the run-segment
-origin. `brew-ui/` holds the shared editor furniture.
+Built for VST3, AU, and CLAP. The AU component type follows the descriptor: `aufx`
+for the plug-ins that take no MIDI, `aumf` for `LFO`, whose `Reset` retriggers on a
+note-on, and for `Trigger`, which is nothing but notes — an AU host routes MIDI only
+to a `MusicEffect`. `brew-core/` holds what
+the plug-ins share: the output stage above, the clock grid, the pulse-width rules,
+the scales, and the run-segment origin. `brew-ui/` holds the shared editor
+furniture.
 
 ## The plug-ins, one at a time
 
@@ -163,7 +177,10 @@ before the add.
 
 `Smooth` slews (positive milliseconds) or low-passes (negative), calibrated so
 that the number is the time a full `-1` to `+1` swing takes. At zero it is a wire,
-bit for bit.
+bit for bit. It reads `slew 250` / `lpf 250` / `off` rather than as a signed
+millisecond count, here and in the host — the sign is the mode, and no user should
+have to learn that. Every plug-in in the suite that carries `Smooth` reads it the
+same way.
 
 The rail across the bottom shows the sample the DSP actually emitted — not the
 value the knobs are asking for. Those differ whenever the input bus or the
@@ -207,28 +224,57 @@ Stopped, then running:
 
 ![LFO](docs/images/lfo.png)
 
-A modulation source. Channel 1 carries the shape; channel 2 carries the same shape
-a quarter cycle ahead. Patch the pair into two CV inputs and they trace a circle,
-which is how one oscillator drives a two-axis modulation — a filter's cutoff and
-its resonance, a panner's X and Y.
+Two independent modulation sources, one per channel, with identical controls. Set
+the right channel's `Sync` to `Quad` and give it a 90° `Phase` and it locks to the
+left channel a quarter cycle ahead: patched into two CV inputs the pair traces a
+circle, which is how one oscillator drives a two-axis modulation — a filter's
+cutoff and its resonance, a panner's X and Y. The scope draws the leader faintly
+behind the follower so the lock is visible rather than asserted.
 
 It is a **mixer, not a selector**. `Sine`, `Tri`, `Saw` and `Sqr` each have their
 own bipolar depth and are summed, so a shape can be subtracted as easily as added
 and everything between the four is reachable. One at full and the rest at zero is
 the single-shape behaviour you would expect.
 
-`Rate` is the cycle length in beats. `Free Run` swaps it for `Free`, a rate in
-hertz. `Phase` offsets the cycle against the transport. `Asym` moves the
-waveform's centre in time — a pulse-width control generalized to every shape —
-and `PW` is the square component's own width.
+`Sync` picks one of eight modes:
 
-`Random` is a sample-and-hold: one level per cycle, held flat across it, and
-**hashed from the cycle index** rather than drawn from a running generator. Reroll
-it with `Seed`, not by pressing play again. `Offset` adds a constant; `Out` and
-`Invert` are the per-instance calibration every plug-in here carries.
+| Mode | Frequency | While stopped | While playing |
+|---|---|---|---|
+| `Free` | `Speed` × `Mult` | keeps running | keeps running |
+| `Tempo` | `Beats` × `Div` | keeps running | keeps running |
+| `Trans` | `Beats` × `Div` | keeps running | locked to the position |
+| `Quad` | the other channel's | the other channel's | the other channel's, plus `Phase` |
+| `St/Sp` | — | low | high |
+| `Trans2` | `Beats` × `Div` | holds | locked to the position |
+| `Free2` | `Speed` × `Mult` | holds | from the play edge |
+| `Free3` | `Speed` × `Mult` | holds | from the timeline |
+
+`Trans` is the default. `Beats` counts notes of the length `Div` names, a third
+shorter with `Triplet` — `Div` at 1/8 with `Beats` at 3 is three eighth notes.
+`Speed` × `Mult` is a rate in hertz across five decades. `Phase` offsets the cycle,
+and is where a `Reset` retrigger snaps back to. `Asym` moves the waveform's centre
+in time — a pulse-width control generalized to every shape — and `PW` is the square
+component's own width.
+
+`Random` is a sample-and-hold: one level per cycle, held flat across it. `Noise` is
+the ungated source: a new level every sample. Both are hashes rather than running
+generators — of the cycle index and the sample index respectively — so both survive
+a bounce. Reroll them with `Seed`. `Offset` adds a constant; `Out` and `Invert` are
+the per-instance calibration every plug-in here carries.
+
+`Input` decides what the plug-in does with the voltage on its input bus: `Off`,
+`Add`, `Mul`, or `Comb` (the sum of what `Add` and `Mul` would each have produced).
+It is `Off` by default, for the same reason a bypassed generator is silent — a
+modulation source that read its input by default would scream the first time it was
+dropped on an audio track.
+
+`Reset` retriggers the cycle to `Phase` on a MIDI note-on, at the note's own
+sample. The plug-in is therefore an AU `aumf`, the only AU type a host routes MIDI
+to.
 
 `Swing` warps the beat timeline exactly as `Sync`'s does, so an LFO and a clock
-shuffled together stay together. `Smooth` behaves as DC's.
+shuffled together stay together, and — like the clock's — it only applies while the
+transport plays. `Smooth` behaves as DC's.
 
 The scope draws the unsmoothed shape — smoothing is a function of time, and the
 scope is drawn in cycles.
@@ -275,42 +321,172 @@ and is not built.
 
 ![Step LFO](docs/images/step.png)
 
-An eight-step pattern. Drag in the display to draw it. Channel 1 is the stepped
-voltage, channel 2 a gate.
+An eight-step pattern on the LFO's clock. Drag in the display to draw it. Channel 1
+is the stepped voltage, channel 2 a gate.
 
-`Rate` means the whole pattern by default; `Per Step` reinterprets it as the time
-of a single step. That is a real fork, not a preference: with `Rate` as the cycle,
-shortening `Length` makes the steps faster and the pattern keeps its period — it
-stays an LFO. With `Rate` as the step, the pattern's period grows with its length
-— it becomes a sequencer.
+The timing is the LFO's, literally — the same eight sync modes, the same
+`Speed` × `Mult` and `Beats` × `Div` × `Triplet` rate pair, the same `Phase`,
+`Swing`, `16ths`, `Asym`, `Offset` and `Smooth`, out of the same shared clock. What
+a *cycle* means is the only difference, and it is a switch: with `Per Step` off one
+cycle is the whole window, so shortening the pattern makes the steps faster and the
+period never changes — it stays an LFO. With `Per Step` on one cycle is a single
+step, so the pattern's period grows with its length — it becomes a sequencer.
+Neither is a rescaling of the other.
 
-`Gate` sets how much of each step carries its value; the rest of the step falls to
-zero, on *both* the voltage and the gate. At the default of 100% nothing is punched
-out and the gate never falls, which is right — with full-length steps there is no
-gap between one note and the next to fall into. Turn it down and every step grows
-a rising edge, which is what an envelope generator downstream needs in order to
-fire once per step instead of once per phrase.
+Two sync modes exist here and nowhere else. `TrgFr` and `TrgTm` run the clock at
+the base rate but hold the pattern at the end of every step until a trigger arrives
+on the input bus, and the released step starts *at* the trigger rather than being
+skipped through because the clock ran on while the pattern waited.
+
+`Start`, `Length` and `End` describe the window played through the eight steps.
+`Bounds` picks which two it reads: `Len` keeps the pattern's duration fixed while
+you slide it, `End` keeps its boundaries fixed while you change its duration. The
+window wraps — start at 7 with a length of 3 and it plays 7, 8, 1. Steps outside it
+are drawn recessed, not hidden: their levels are still in the preset.
 
 `Glide` slews from the previous step's level into the current one over the first
 fraction of the step, so a step still spends most of its time at the level it was
-programmed to. `Random` adds a bounded offset to each step, hashed from the
-**absolute** step index — so the pattern's shape loops but its dither does not, and
-the same project bounces to the same samples every time. `Seed` rerolls it.
+programmed to. `Interp = Lin` is exactly `Glide` at 1.0, and says so rather than
+growing a second control that does the same arithmetic. `Range` sends the pattern
+out bipolar or unipolar. `Gate` sets how much of each step carries its value; the
+rest falls to zero volts, on *both* the voltage and the gate, and in *either*
+range — a gap is what a hardware gate input reads as low, so it has to be zero and
+not the middle of whatever range the pattern is using. At the default of 100%
+nothing is punched out and the gate never falls, which is right — with full-length
+steps there is no gap between one note and the next to fall into. Turn it down and
+every step grows a rising edge, which is what an envelope generator downstream needs
+in order to fire once per step instead of once per phrase. `Offset` is added after
+the gate, because it shifts the whole waveform and a gap is part of the waveform.
+
+**The shift register.** Switch `Register` on and the step levels come from a looping
+ring of bits rather than from the eight bars. The bit that falls off the end is fed
+back to the front, inverted with a probability `Rand` sets — and one signed knob
+gives all three documented regimes, because the probability is `(1 − Rand) / 2`:
+
+| `Rand` | the ring | what you hear |
+|--------|----------|---------------|
+| `+1` | never inverts | a locked loop of `Bits` steps |
+| `0` | inverts half the time | never repeats |
+| `−1` | always inverts | a locked loop of `2 × Bits` steps, the second half the complement of the first |
+
+A weighted DAC reads a window of `DAC` bits starting at `Rotate`, with the eight
+`W1`–`W8` weights as its ladder — flatten one and that bit stops contributing.
+`Auto` divides by the weights in use so full scale is 1.0; switch it off and `Scale`
+is the divisor. `Set Next` is latched rather than momentary: while it is on every
+bit shifted in is a one, so automating it high for one step is the same operation,
+and a latch is the only form of it a preset can hold. The lamps under the bars are
+the ring, bit zero on the left, with the DAC's window outlined.
+
+The whole register is a **pure function of the absolute step index**: it is replayed
+from the origin rather than advanced from wherever it happened to be, and the coin it
+flips at step *k* is a hash of *k* rather than a draw from a generator. Bar 57 plays
+the bits bar 57 plays, and two bounces render the same samples.
+
+`Random` then adds a bounded dither on top — of the programmed level or of the
+register's, whichever is driving — hashed from the **absolute** step index, so the
+pattern's shape loops but its dither does not. `Seed` rerolls both.
+
+**Inputs.** `In L` and `In R` each pick a role for their input channel: `Off`,
+`Reset` (restart the pattern at the window's first step), `Trig` (release one step,
+in the two trigger modes), or `Sig` — summed, multiplied or both into the output by
+`Signal`. All three default to `Off`, for the same reason a bypassed generator is
+silent: a DAW will happily hand a modulation plug-in a drum loop at full scale, and
+a drum loop on the reset input is a sequencer that never leaves step 1.
+
+Two things it does not do, named so nobody assumes otherwise. It cannot roll a
+random pattern *into* the eight bars, where it could then be hand-edited and
+stored — the register's randomness stays in the register. And the DAC's divisor is
+either the sum of the weights or a number you set; there is no third mode that
+adapts it to what the register has lately been doing.
+
+### Trigger
+
+![Trigger](docs/images/trigger.png)
+
+A note becomes a voltage. Two independent channels, each turning MIDI notes — or a
+voltage on its own input channel — into one of four signals:
+
+| `Mode` | What reaches the jack |
+|--------|-----------------------|
+| `Gate` | High while a note is held |
+| `Trig` | A pulse of `Length`, once per note that sounds |
+| `Env`  | The multi-stage envelope below |
+| `Vel`  | The last note's velocity, sampled and held |
+
+On an eight-output interface that is a gate and an envelope out of one instance,
+which is exactly how the two jacks get used.
+
+`Voltage Min` and `Voltage Max` set the window every signal lands in — and `Min`
+above `Max` is not an error, it is how an envelope is inverted. It is also why this
+plug-in has no `Invert` toggle where the rest of the suite does.
+
+`Note` picks which note fires the channel; `Any Note` ignores it. The gate counts
+held notes rather than latching a flag, so releasing the first of two held notes
+does not close it. `CV Trig` opens a second, independent way in: a voltage crossing
+`Thresh` on the channel's input fires it too, through a Schmitt trigger that rides
+out the slew on a real gate output. The two sources are OR-ed — as well as, or
+instead of, as the manual has it — and both default to off, because a DAW will
+happily hand a modulation plug-in a drum loop at full scale.
+
+**The envelope** has three attack stages, a sustain, and two release stages, each
+with its own target level, duration, and curve. The familiar ADSR is a subset of
+that rather than a different thing:
+
+| ADSR | here |
+|------|------|
+| Attack | `Time A2` |
+| Decay | `Time A3` |
+| Sustain | `Sustain` |
+| Release | `Time R1` |
+
+A1 is the stage before the attack: leave `Lvl A1` at zero and `Time A1` is a delay
+before the envelope starts, because a rise to zero from zero is a wait. R2 is the
+tail after the release, ending at zero. `Mult` scales every time at once, `Exp`
+switches each curve from a power of the phase to the charging curve of an RC
+network, and `RTZ` decides whether a retrigger snaps back to zero or continues from
+where the last note left it. `Vel` scales the envelope by velocity: `0` ignores it,
+`+1` hands it the whole scale, `-1` inverts it so a soft note opens the filter.
+
+A stage with no duration reaches its target instantly — an attack time of zero is a
+jump to the peak, which is what setting it to zero is asking for. The one exception
+is A1 with neither duration nor level: that is not a stage, it is the absence of a
+delay, and treating it as an instant jump to zero would leave `RTZ` a control with
+no off position.
+
+`Override` forces the jack to a voltage whatever the notes are doing, and the
+generators keep running underneath it — so releasing the override does not step into
+a frozen envelope holding whatever the last note left behind. It still passes through
+`Smooth`, so it does not snap.
+
+This is the one plug-in in the suite whose output is not a pure function of the
+host's position, and it cannot be: a note is an event, not a coordinate. What it gets
+instead is a pure function of the time *since* the note — `envelope_at` — which the
+running generator is not merely tested against but written in terms of. The curve in
+the editor is not a picture of the signal. It is the signal, sampled.
 
 ### CV To OSC
 
 ![CV To OSC](docs/images/cv-osc.png)
 
 Passes both channels through **bit-exactly** — it is a wire with a tap on it — and
-reports what it sees over OSC as `/brew/cv/0` and `/brew/cv/1` to `127.0.0.1`.
+reports what it sees over OSC. `Target` takes a `host:port` (a hostname, an IPv4
+address, or a bracketed IPv6 literal), and each channel sends one float to its own
+`OSC Path`. `Browse` lists the OSC receivers advertising themselves over mDNS;
+clicking one fills in the target. Return commits a field, Escape reverts it, and a
+target or a path the plug-in cannot use is refused rather than silently corrected —
+an address pattern like `/cv/*` is a legal thing for a receiver to match against
+and an illegal thing for a sender to put in a packet.
 
-`Send` is off by default, because a plug-in that opens a socket the moment it loads
-is a plug-in that surprises somebody. `Port` picks the destination. `Rate` caps how
-often messages go out, and `Deadband` suppresses a message when the voltage has not
-moved by at least that much — a change smaller than the deadband is noise, and
-flooding a receiver with it helps nobody.
+Both channels are `Enable`d off by default, because a plug-in that opens a socket
+the moment it loads is a plug-in that surprises somebody. `Rate` caps how often
+messages go out — one rate, because one background thread sends both channels — and
+each channel's `Threshold` suppresses a message when its voltage has not moved by
+at least that much. A change smaller than the threshold is noise, and flooding a
+receiver with it helps nobody.
 
-The lamp lights when a message actually left.
+Each lamp lights when that channel's message actually left. The audio thread never
+touches the socket: it stores one float per channel per block, and the sender runs
+on its own clock.
 
 ## The editors exist because CV is invisible
 

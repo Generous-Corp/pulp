@@ -24,24 +24,28 @@ should not arm it without knowing what is on the far end of every cable.
 ## What is already known
 
 Established 2026-07-09 on an Apogee Symphony I/O ThunderBridge (32 in / 32 out,
-48 kHz) feeding an Expert Sleepers ES-3 over ADAT:
+48 kHz) feeding a DC-coupled ADAT-to-CV expander:
 
 | Fact | Value |
 |------|-------|
-| ES-3 output 1 | host output channel **8** (a DAW shows this as **9**) |
-| ES-3 outputs 1–8 | host output channels **8–15** (DAW 9–16) |
-| ES-5 expander | rides on ES-3 channel 7 (DAW output 15) — **never drive it with raw CV** |
+| Expander output 1 | host output channel **8** (a DAW shows this as **9**) |
+| Expander outputs 1–8 | host output channels **8–15** (DAW 9–16) |
+| The clock/trigger expander | rides on expander channel 7 (DAW output 15) — **never drive it with raw CV** |
 
-The ES-5 wants an Expert-Sleepers-defined encoded bitstream. This suite emits raw
-CV and deliberately does not implement that encoder, so raw DC on its channels is
-noise it cannot decode. Pass `--skip 14,15` on any sweep.
+That second expander wants an encoded bitstream its own vendor defines. This suite
+emits raw CV and deliberately implements no such encoder, so raw DC on its channels
+is noise it cannot decode. Pass `--skip 14,15` on any sweep.
+
+Substitute your own interface's numbers. The only ones that transfer are the shape
+of the problem: a DC-coupled expander appears as a block of ordinary output
+channels at some offset, and at least one of them may not be CV at all.
 
 Still unknown, and the reason this document exists:
 
 - **How many volts is full scale?** Nothing in this suite may print a voltage until
-  this is measured. It is also what the Quantizer and Voice Controller calibration
-  are blocked on — calibration maps a note to a *voltage*, and there is nothing to
-  calibrate against without it.
+  this is measured. It is also what the Quantizer's calibrated mode is blocked on —
+  calibration maps a note to a *voltage*, and there is nothing to calibrate against
+  without it.
 - **Polarity.** Does a positive sample produce a positive voltage? The `Invert`
   control exists because at least one interface is known to wire its outputs
   backwards, and we cannot vouch for our own chain, let alone anyone else's.
@@ -53,7 +57,7 @@ Still unknown, and the reason this document exists:
 This is the shortest path and the one to take. It removes the interface's inputs,
 the DAW, and any oscillator's tracking error from the chain.
 
-1. Probe on **ES-3 output 1**: tip to the probe, sleeve to ground.
+1. Probe on **expander output 1**: tip to the probe, sleeve to ground.
 2. Scope channel to **DC coupling** (not AC — an AC-coupled scope shows a DC level
    as zero, which is the same mistake an AC-coupled interface makes).
 3. `Measure` → `Mean`.
@@ -76,7 +80,7 @@ something to the negative half that no amount of software testing would surface.
 Works, but inherits the oscillator's tracking error, and is only worth it if no
 meter or scope is to hand.
 
-Patch **ES-3 output 1 → the oscillator's `1V/OCT` input** — that exact jack, not
+Patch **expander output 1 → the oscillator's `1V/OCT` input** — that exact jack, not
 an `FM` or `LIN FM` input, and turn up any attenuator beside it. Route the
 oscillator's audio back to the DAW and put a tuner on it.
 
@@ -91,15 +95,15 @@ full scale = volts / 0.25
 
 Pitch rising for a positive level also settles polarity.
 
-**This was attempted on 2026-07-09 and failed.** ES-3 output 1's indicator lit, so
-the voltage reached the jack, but the oscillator's pitch never moved. Untriaged;
+**This was attempted on 2026-07-09 and failed.** Expander output 1's indicator lit,
+so the voltage reached the jack, but the oscillator's pitch never moved. Untriaged;
 the suspects are a wrong jack, an attenuator at zero, or a dead monitoring path.
 Use the scope.
 
 ## The automatic route (needs a loopback)
 
 With the interface's outputs wired through the modular and back into its inputs —
-e.g. ES-3 out → ES-6 in — the crossbar discovers itself:
+e.g. a CV output back into a DC-coupled input — the crossbar discovers itself:
 
 ```
 brew-rig listen --device Symphony --seconds 3          # emits nothing; which input is live?

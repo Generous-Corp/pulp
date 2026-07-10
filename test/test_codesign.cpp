@@ -172,8 +172,8 @@ TEST_CASE("a busy hdiutil failure names the unmount dissenter; other failures do
     // this one line, so the hint is the only place a user learns what to do.
     const auto busy = disk_image_failure_hint("hdiutil: create failed - Resource busy");
     CHECK_FALSE(busy.empty());
-    CHECK(busy.find("simdiskimaged") != std::string::npos);
-    CHECK(busy.find("diskutil unmount") != std::string::npos);
+    CHECK(busy.find("diskutil unmount") != std::string::npos);  // how to find the dissenter
+    CHECK(busy.find("PID") != std::string::npos);                // what to trust when you do
     CHECK_FALSE(disk_image_failure_hint("hdiutil: attach failed - Device busy").empty());
 
     // A failure the hint cannot explain must not carry it: pointing at the
