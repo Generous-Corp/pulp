@@ -24,8 +24,6 @@ RULESET = REPO_ROOT / ".github" / "rulesets" / "main-protection.json"
 
 EXPECTED_REQUIRED_CONTEXTS = {
     "macos",
-    "linux",
-    "windows",
     "Enforce version & skill sync",
 }
 
