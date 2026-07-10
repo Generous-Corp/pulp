@@ -44,9 +44,9 @@ inline constexpr float kMaxQuantizeSteps = 64.0f;
 /// Everything the quantizer does to one sample.
 struct QuantizeSettings {
     QuantMode mode = QuantMode::manual;
-    /// Divisions of the full `[-1, +1]` range. Fractional: `Fine` adds to the
-    /// coarse `Steps` knob, and the reference's is fractional too — a
-    /// non-integer count simply puts the rails between lattice points.
+    /// Divisions of the full `[-1, +1]` range. Fractional, because `Fine` adds to
+    /// the coarse `Steps` knob: a non-integer count simply puts the rails between
+    /// lattice points, which is a legitimate thing to want.
     float steps = 12.0f;
     /// Where the lattice sits within a step, in step widths. At 0 a lattice point
     /// falls exactly on zero volts; at 0.5 zero falls between two of them.

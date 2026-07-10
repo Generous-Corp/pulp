@@ -182,8 +182,8 @@ struct LfoMix {
 
 // ── Sync modes ───────────────────────────────────────────────────────────────
 
-/// How the LFO is told what time it is. Parameter values are persisted: the order
-/// is the reference taxonomy's, and it is append-only.
+/// How the LFO is told what time it is. Parameter values are persisted, so the
+/// order is a compatibility surface and is append-only.
 ///
 /// Two independent questions, and eight of the answers have names:
 ///
@@ -314,9 +314,9 @@ inline constexpr double kMaxFreeHz = 1000.0;
 /// How long one cycle lasts, in beats: `Beats` of the note `Divisor` names, and a
 /// third off if `Triplet`.
 ///
-/// `Divisor` 1/8 with `Beats` 3 is three eighth notes, which is the reference
-/// manual's own example. `Beats` is deliberately fractional, because automating it
-/// through a non-integer value is a legitimate way to sweep the rate.
+/// `Divisor` 1/8 with `Beats` 3 is three eighth notes. `Beats` is deliberately
+/// fractional, because automating it through a non-integer value is a legitimate
+/// way to sweep the rate.
 [[nodiscard]] inline double cycle_beats(double beats, NoteUnit divisor,
                                         bool triplet) noexcept {
     const double length = beats * note_unit_beats(divisor);
@@ -396,8 +396,8 @@ enum class InputMode : int {
 
 inline constexpr int kInputModeCount = 4;
 
-/// `combine` is the sum of what `add` and `multiply` would each have produced —
-/// ring modulation riding on the sum, which is what the reference documents.
+/// `combine` is the sum of what `add` and `multiply` would each have produced:
+/// ring modulation riding on the sum.
 [[nodiscard]] inline constexpr float apply_input(InputMode mode, float lfo,
                                                  float in) noexcept {
     switch (mode) {

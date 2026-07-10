@@ -67,8 +67,8 @@ struct RegisterSettings {
     /// Signed. See `flip_probability`.
     double randomness = 1.0;
     std::uint32_t seed = 0;
-    /// While engaged, every bit shifted in is a one. The reference's momentary
-    /// button, latched — automate it high for a single step and the two are the
+    /// While engaged, every bit shifted in is a one. A latch rather than a
+    /// momentary button: automate it high for a single step and the two are the
     /// same operation, and a latch is the only form of it a preset can hold.
     bool set_next = false;
 
@@ -136,8 +136,8 @@ struct RegisterSettings {
 struct DacSettings {
     /// Bits read, 1..kMaxDacBits.
     int bits = kMaxDacBits;
-    /// Where in the ring the window starts. The reference's two rotate buttons,
-    /// as one signed offset — a button that can only be pressed while the editor
+    /// Where in the ring the window starts, as one signed offset rather than a
+    /// pair of nudge buttons — a button that can only be pressed while the editor
     /// is open cannot be automated, recalled, or tested.
     int rotate = 0;
     /// Per-bit weights, most significant first.

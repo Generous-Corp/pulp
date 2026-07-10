@@ -338,8 +338,9 @@ private:
 
 // ── The four signals a note can become ───────────────────────────────────────
 
-/// What the plug-in puts on the jack. The same four the reference's voice
-/// controller defines, and the enum order is the parameter's: append only.
+/// What the plug-in puts on the jack: the four things a note can be turned into.
+/// The enum order is the parameter's, and it is append-only — a persisted patch
+/// stores the index, not the name.
 enum class TriggerSignal : int {
     gate = 0,
     trigger = 1,
