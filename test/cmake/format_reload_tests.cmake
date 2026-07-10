@@ -190,6 +190,9 @@ pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 pulp_add_test_suite(pulp-test-plugin-state-io LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics LIBRARIES pulp::format)
 
+# Shared max-block-overrun contract (clamp+zero) used by every format adapter
+pulp_add_test_suite(pulp-test-max-block-contract LIBRARIES pulp::format)
+
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
 
