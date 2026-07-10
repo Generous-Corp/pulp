@@ -42,13 +42,13 @@ bool wait_for_progress(const std::atomic<std::uint64_t>& counter) {
     return counter.load(std::memory_order_relaxed) > 0;
 }
 
-bool wait_for_park(GraphRuntimeWorkerPool& pool) {
+bool wait_for_worker_idle_sleep(GraphRuntimeWorkerPool& pool) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.worker_park_count() == 0 &&
+    while (pool.worker_idle_sleep_count() == 0 &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
     }
-    return pool.worker_park_count() > 0;
+    return pool.worker_idle_sleep_count() > 0;
 }
 
 } // namespace
@@ -167,12 +167,12 @@ TEST_CASE("WorkerPool stop is idempotent",
     CHECK_FALSE(pool.running());
 }
 
-TEST_CASE("WorkerPool parks idle workers and wakes them for a later batch",
+TEST_CASE("WorkerPool cold-idles workers without blocking later batches",
           "[format][worker-pool][rt-safety]") {
     GraphRuntimeWorkerPool pool;
     pool.set_audio_workgroup(nullptr);
     REQUIRE(pool.start(4));
-    REQUIRE(wait_for_park(pool));
+    REQUIRE(wait_for_worker_idle_sleep(pool));
 
     SquareCtx ctx;
     ctx.out.assign(128, 0xFFFFFFFFu);

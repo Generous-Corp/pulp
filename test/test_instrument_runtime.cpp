@@ -75,6 +75,8 @@ TEST_CASE("InstrumentRuntime resolves a pool-backed chromatic zone",
     REQUIRE(root.sample.sample_id == 100);
     REQUIRE(root.zone.zone.sample_id == 100);
     REQUIRE_THAT(root.zone.pitch_ratio, WithinAbs(1.0, 1.0e-12));
+    REQUIRE_THAT(root.host_sample_rate, WithinAbs(48000.0, 1.0e-12));
+    REQUIRE_THAT(root.pitch_playback_rate, WithinAbs(1.0, 1.0e-12));
     REQUIRE_THAT(root.playback_rate, WithinAbs(1.0, 1.0e-12));
     REQUIRE_THAT(root.zone.playback_rate, WithinAbs(root.playback_rate, 1.0e-12));
 
@@ -84,7 +86,10 @@ TEST_CASE("InstrumentRuntime resolves a pool-backed chromatic zone",
         ZoneSelectionRequest{.note = 72, .velocity = 100, .host_sample_rate = 44100.0});
     REQUIRE(octave.valid);
     REQUIRE_THAT(octave.zone.pitch_ratio, WithinAbs(2.0, 1.0e-12));
-    REQUIRE_THAT(octave.playback_rate, WithinAbs(2.0, 1.0e-12));
+    REQUIRE_THAT(octave.host_sample_rate, WithinAbs(44100.0, 1.0e-12));
+    REQUIRE_THAT(octave.pitch_playback_rate, WithinAbs(2.0, 1.0e-12));
+    REQUIRE_THAT(octave.playback_rate,
+                 WithinAbs(2.0 * (48000.0 / 44100.0), 1.0e-12));
     REQUIRE_THAT(octave.zone.playback_rate, WithinAbs(octave.playback_rate, 1.0e-12));
 }
 
@@ -166,5 +171,6 @@ TEST_CASE("InstrumentRuntime trigger resolution does not allocate",
 
     REQUIRE(result.valid);
     REQUIRE(result.sample.sample_id == 400);
+    REQUIRE_THAT(result.pitch_playback_rate, WithinAbs(2.0, 1.0e-12));
     REQUIRE_THAT(result.playback_rate, WithinAbs(2.0, 1.0e-12));
 }
