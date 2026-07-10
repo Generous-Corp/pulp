@@ -1,4 +1,4 @@
-// shell.js — the host-agnostic demo shell of @pulp/web-player.
+// shell.js — the host-agnostic demo shell of @danielraffel/web-player.
 //
 // This is the reusable core: the whole player UI (overlay/lifecycle, the
 // auto-generated parameter grid, the on-screen + computer keyboard + WebMIDI,
@@ -429,7 +429,7 @@ export async function mountDemo(opts) {
   if (typeof makeAdapter !== "function") {
     throw new Error(
       "mountDemo: opts.createAdapter is required. Import mountDemo from " +
-      "@pulp/web-player (which injects the WAM adapter) or pass your own factory.");
+      "@danielraffel/web-player (which injects the WAM adapter) or pass your own factory.");
   }
 
   // ABI label in the header ("Pulp WAM demo"). Overridable so a WebCLAP or other

@@ -1,4 +1,4 @@
-// adapter.d.ts — the host-adapter INTERFACE @pulp/web-player's shell drives.
+// adapter.d.ts — the host-adapter INTERFACE @danielraffel/web-player's shell drives.
 //
 // The shell (mountDemo) is host-agnostic: it talks ONLY to a `HostAdapter`
 // object produced by a `CreateAdapter` factory that the caller supplies via

@@ -270,11 +270,11 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   under the real `_headers`, then owner-gated-deploys. Two pages are assembled +
   proven: the single-plugin isolation page (`assemble.mjs` → `validate-deploy.mjs`)
   and the **shared-player** WebCLAP demo (`assemble-player.mjs` → `player/` →
-  `validate-player.mjs`) — the latter mounts the SAME `@pulp/web-player` shell the
+  `validate-player.mjs`) — the latter mounts the SAME `@danielraffel/web-player` shell the
   WAM demos use, driven by the WebCLAP adapter (a worklet-resident CLAP host), and
   asserts crossOriginIsolated, real-time render (worklet quanta ≈ `sampleRate/128`
   per wall-second), an audible param change that updates the shared widget, and a
-  `clap.state` round-trip. The lane also runs the `@pulp/web-player` adapter unit
+  `clap.state` round-trip. The lane also runs the `@danielraffel/web-player` adapter unit
   tests (`packages/pulp-web-player` — `npm test`), which include an ABI-parity
   check that the worklet's inlined CLAP struct offsets match `wclap-abi.mjs`.
   Hard-won gotchas encoded there: posting a `WebAssembly.Module` INTO an

@@ -1,4 +1,4 @@
-# @pulp/web-player
+# @danielraffel/web-player
 
 A reusable, **skinnable**, **host-agnostic** web player for [Pulp](https://github.com/danielraffel/pulp)
 audio plugins. It is the runtime behind the live WAM demo galleries
@@ -35,7 +35,7 @@ without touching the shell.
 ## Install & mount
 
 ```js
-import { mountDemo } from "@pulp/web-player";
+import { mountDemo } from "@danielraffel/web-player";
 
 mountDemo({
   root: document.getElementById("app"),
@@ -80,7 +80,7 @@ requires it. Serve `.js`/`.mjs` with a JavaScript MIME type.
 
 The player is 100% token-driven — **no hardcoded brand colors**. You skin it by
 supplying `tokensHref` (and optionally `fontHref`); the bundled Ink & Signal skin
-(`@pulp/web-player/theme/tokens.css`, `.../theme/fonts.css`) is only the default.
+(`@danielraffel/web-player/theme/tokens.css`, `.../theme/fonts.css`) is only the default.
 Your stylesheet must define these CSS custom properties on `:root` (and, if you
 want forced light/dark via `theme`, mirror them under
 `:root[data-theme="light"|"dark"]`; the shell only sets `data-theme` when `theme`
@@ -130,7 +130,7 @@ in. Tokens the bundled skin also ships (`--radius-*`, `--spacing-*`, `--meter-*`
 
 The shell (`src/shell.js`) never imports a plugin backend. It talks only to a
 `HostAdapter` produced by a `createAdapter(ctx, { dsp, processor }) → Promise<adapter>`
-factory. `@pulp/web-player` injects the **WAM** adapter (`src/adapters/wam.js`) by
+factory. `@danielraffel/web-player` injects the **WAM** adapter (`src/adapters/wam.js`) by
 default; pass `opts.createAdapter` to use another backend or a test stub. The full
 typed contract is in [`src/adapters/adapter.d.ts`](./src/adapters/adapter.d.ts):
 
@@ -158,7 +158,7 @@ CLAP plugin calls the host event vtable synchronously during `process()`. It
 implements the SAME contract, so the identical shell hosts it unchanged:
 
 ```js
-import { mountShell, createWclapAdapter } from "@pulp/web-player";
+import { mountShell, createWclapAdapter } from "@danielraffel/web-player";
 mountShell({
   root, title: "PulpGain", mode: "audio-effect", hostLabel: "WebCLAP",
   dspUrl: "./PulpGain.wasm",                 // the threaded WebCLAP module
@@ -231,8 +231,7 @@ vendored player until this package is proven; a later step re-points them here.
 
 `npm publish --dry-run` from this directory reports exactly what would ship. The
 actual `npm publish` fixes the public name/scope/support expectation and is the
-**single owner-gated step** — do not run it without the owner's go. Package-name
-availability was verified: `@pulp/web-player`, `@pulp-audio/web-player`, and
-`pulp-web-player` are all unregistered on npm; `@pulp/web-player` is the default
-(matching the sibling `@pulp/react` package), with the other two as fallbacks if
-the `@pulp` scope is unavailable to the publisher.
+**single owner-gated step** — do not run it without the owner's go. The package
+publishes as `@danielraffel/web-player`: the `@pulp` npm org was already taken by
+another party, so the package uses the publisher's own user scope (`@danielraffel`),
+which every npm account owns automatically and requires no org setup.
