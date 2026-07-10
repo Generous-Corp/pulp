@@ -20,6 +20,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <thread>
 #include <limits>
 #include <vector>
 
@@ -104,9 +105,15 @@ struct Rig {
 
     void enable(std::size_t channel) {
         store.set_value(opid(CvOscProcessor::kEnable, channel), 1.0f);
+        // A host publishes a parameter change to the sender thread on its next
+        // process block; this rig never processes, so it publishes here.
+        proc->snapshot_parameters();
     }
     void disable(std::size_t channel) {
         store.set_value(opid(CvOscProcessor::kEnable, channel), 0.0f);
+        // A host publishes a parameter change to the sender thread on its next
+        // process block; this rig never processes, so it publishes here.
+        proc->snapshot_parameters();
     }
     void enable() {
         for (std::size_t c = 0; c < kOscChannels; ++c) enable(c);
@@ -114,6 +121,9 @@ struct Rig {
     void set_threshold(float v) {
         for (std::size_t c = 0; c < kOscChannels; ++c)
             store.set_value(opid(CvOscProcessor::kThreshold, c), v);
+        // A host publishes a parameter change to the sender thread on its next
+        // process block; this rig never processes, so it publishes here.
+        proc->snapshot_parameters();
     }
 
     // Declared before `proc`: the processor holds a pointer to it and is
@@ -808,4 +818,46 @@ TEST_CASE("a real OSC float arrives on the loopback", "[brew][osc][net]") {
     receiver.stop();
     REQUIRE(received.load(std::memory_order_relaxed) >= 1);
     REQUIRE(value.load(std::memory_order_relaxed) == Catch::Approx(-0.75f));
+}
+
+// --------------------------------------------------------------- thread lifetime
+
+TEST_CASE("the sender thread survives a host that destroys its store first",
+          "[brew][osc][lifetime]") {
+    // `Processor::state()` dereferences a pointer the host installs, and Pulp's
+    // own hosts — HeadlessHost, the CLAP adapter, the VST3 adapter — all declare
+    // their Processor before their StateStore, so the store is destroyed first and
+    // the Processor's destructor runs against a corpse.
+    //
+    // For a Processor with no threads that is invisible: nothing reads the store
+    // after teardown begins. This one has a sender thread that ticks every ~16 ms,
+    // and it is still ticking while `~CvOscProcessor` walks to its `join()`. One
+    // `get_value` in that window is a use-after-free, and it crashed roughly one
+    // plug-in close in eight.
+    //
+    // The fix is that the sender thread reads no store at all: the audio thread
+    // publishes what it needs. This test pins that by doing to the processor
+    // exactly what the hosts do — destroying the store out from under a running
+    // sender thread — and requiring it to keep running.
+    auto store = std::make_unique<state::StateStore>();
+    auto proc = std::make_unique<CvOscProcessor>(std::make_unique<RecordingSink>());
+    proc->set_state_store(store.get());
+    proc->define_parameters(*store);
+
+    format::PrepareContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.max_buffer_size = 512;
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc->prepare(ctx);  // starts the sender thread
+
+    // Long enough for the thread to have completed a tick and be inside its next.
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+
+    store.reset();
+    // Long enough for several more ticks against the store that no longer exists.
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+
+    proc.reset();  // joins the sender thread
+    SUCCEED("the sender thread never read the destroyed store");
 }
