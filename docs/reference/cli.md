@@ -1923,6 +1923,9 @@ pulp minos                              # show help
 pulp minos measure <binary>             # one binary's OS floor
 pulp minos sweep --sdk-prefix <path>            # rebuild + measure every consumer
 pulp minos sweep --sdk-prefix <path> --dry-run  # print the sweep plan only
+pulp minos update --to 0.640.0          # dry-run: bump every consumer's SDK pin
+pulp minos update --to 0.640.0 --open-prs       # actually open the update PRs
+pulp minos publish-runbook --to 0.640.0         # print the republish steps
 ```
 
 `pulp minos measure` reads a single binary and prints `<kind> <floor>`, e.g.
@@ -1941,8 +1944,23 @@ release. Options pass through to `tools/scripts/sdk_consumer_sweep.py` (`--only`
 `tools/scripts/sdk_consumer_sweep_recipes.yaml`. The sweep needs PyYAML
 (`python3 -m pip install pyyaml`).
 
+`pulp minos update` bumps every buildable consumer's pinned SDK version to
+`--to <version>`. It is **dry-run by default** — it prints the per-repo pin
+changes and writes nothing. Pass `--open-prs` to actually clone each repo, apply
+the edit on a branch, commit, push, and open a PR. It rewrites the common pin
+forms (`pulp.toml` `sdk_version`, `find_package(Pulp X.Y.Z)`, FetchContent
+`GIT_TAG`) and leaves a floating `sdk_version = "latest"` untouched. Shells out to
+`tools/scripts/sdk_consumer_update.py`.
+
+`pulp minos publish-runbook` prints the rebuild + package + publish steps for
+every consumer that ships a package. It **prints only** — it never runs a build,
+signs anything, or touches a release. Full auto-publish is deliberately left to
+the per-repo step: each packaged demo has its own signing identity and release
+process, and publishing mutates public releases.
+
 `pulp minos measure` is also exposed to agents over MCP as the `pulp_minos`
-tool; the sweep is CLI-only because it clones and builds many repositories.
+tool; `sweep`, `update`, and `publish-runbook` are CLI-only because they clone,
+build, and (optionally) open PRs across many repositories.
 
 ### clean
 

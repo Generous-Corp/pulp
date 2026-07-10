@@ -1503,6 +1503,13 @@ shape as `pulp coverage`. Two subcommands, two scripts:
   every downstream consumer against one installed SDK and compares each floor to
   the SDK floor. All args pass through (`--sdk-prefix`, `--only`, `--dry-run`,
   `--json`).
+- `pulp minos update [args...]` / `pulp minos publish-runbook [args...]` →
+  `tools/scripts/sdk_consumer_update.py` (the subcommand name is prepended, then
+  args pass through). `update` bumps every consumer's SDK pin (dry-run default;
+  `--open-prs` to open PRs); `publish-runbook` prints the republish steps
+  (prints only — never builds/signs/publishes). Pin-detect/rewrite + runbook are
+  pure and unit-tested in `test_sdk_consumer_update.py`; the clone/PR side
+  effects are gated and integration-light.
 
 Surfaces that must stay in lockstep (the scripts are the single
 implementation; everything else delegates):
