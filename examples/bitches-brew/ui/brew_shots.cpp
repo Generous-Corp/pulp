@@ -5,6 +5,7 @@
 #include "quantizer_processor.hpp"
 #include "step_processor.hpp"
 #include "sync_processor.hpp"
+#include "trigger_processor.hpp"
 #include <pulp/format/headless.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <cstdio>
@@ -14,11 +15,12 @@ using namespace pulp;
 using namespace pulp::examples::brew;
 
 /// Run one block so the editors that display real DSP state (Sync's lamps, LFO's
-/// phase marker, Function's operating point) have something to show. `fill` seeds
-/// the input bus for the plug-ins that read it.
+/// phase marker, Function's operating point) have something to show. `input` seeds
+/// the input bus for the plug-ins that read it, and `midi` the note-driven ones.
 static void run_block(format::HeadlessHost& h,
                       const format::ProcessContext& base,
-                      float input = 0.0f) {
+                      float input = 0.0f,
+                      midi::MidiBuffer* midi = nullptr) {
     constexpr std::size_t kFrames = 512;
     audio::Buffer<float> in(2, kFrames), out(2, kFrames);
     in.clear();
@@ -31,7 +33,9 @@ static void run_block(format::HeadlessHost& h,
     format::ProcessContext c = base;
     c.sample_rate = 48000;
     c.num_samples = kFrames;
-    h.process(ov, iv, c);
+    midi::MidiBuffer in_midi, out_midi;
+    if (midi) in_midi = *midi;
+    h.processor()->process(ov, iv, in_midi, out_midi, c);
 }
 
 static format::ProcessContext playing(double beats) {
@@ -112,6 +116,26 @@ int main(int argc, char** argv) {
         h.state().set_value(StepProcessor::kSyncMode,
                             static_cast<float>(static_cast<int>(SyncMode::transport2)));
         run_block(h, playing(2.3));  // lights step 2
+    });
+    // A note is down, so the rail shows the gate high on the left and the envelope
+    // resting on its sustain on the right. A Trigger editor with nothing playing is
+    // a picture of two flat lines.
+    shoot(create_trigger, "trigger.png", [](format::HeadlessHost& h) {
+        h.state().set_value(
+            static_cast<state::ParamID>(param_for(TriggerProcessor::kAnyNote, 0)), 1.0f);
+        h.state().set_value(
+            static_cast<state::ParamID>(param_for(TriggerProcessor::kAnyNote, 1)), 1.0f);
+        h.state().set_value(
+            static_cast<state::ParamID>(param_for(TriggerProcessor::kMode, 1)),
+            static_cast<float>(static_cast<int>(TriggerSignal::envelope)));
+        h.state().set_value(
+            static_cast<state::ParamID>(param_for(TriggerProcessor::kCurveA2, 1)), 0.5f);
+        h.state().set_value(
+            static_cast<state::ParamID>(param_for(TriggerProcessor::kCurveA3, 1)), -0.4f);
+        midi::MidiBuffer notes;
+        notes.add(midi::MidiEvent::note_on(0, 60, 100));
+        run_block(h, playing(0.0), 0.0f, &notes);
+        for (int i = 0; i < 8; ++i) run_block(h, playing(0.0));   // reach the sustain
     });
     shoot(create_cv_osc, "cv-osc.png", [](format::HeadlessHost& h) {
         // Both channels stay off in the shot: the lamps are dark, which is what a
