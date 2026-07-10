@@ -12,6 +12,7 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -154,6 +155,43 @@ TEST_CASE("Slot survives an N-reader hammer against a hot publisher", "[runtime]
     }
     // The Slot destructor released the live value too.
     REQUIRE(Tracked::live().load() == 0);
+}
+
+TEST_CASE("Slot pins lifetime, not constness — the interior stays mutable",
+          "[runtime][slot]") {
+    // SignalGraph's CompiledGraph is published through a Slot and written
+    // through the pin every block (scratch buffers, MIDI mailboxes, telemetry).
+    // A pin must therefore hand back a mutable pointer.
+    struct Interior { int scratch = 0; };
+    Slot<Interior> slot;
+    slot.publish(std::make_unique<Interior>());
+
+    {
+        auto pin = slot.read();
+        REQUIRE(pin);
+        pin->scratch = 7;                  // writing through the pin must compile
+        static_assert(std::is_same_v<decltype(pin.get()), Interior*>);
+    }
+    REQUIRE(slot.read()->scratch == 7);
+}
+
+TEST_CASE("Slot<const T> hands back a const pointer", "[runtime][slot]") {
+    Slot<const int> slot;
+    slot.publish(std::make_unique<const int>(5));
+    auto pin = slot.read();
+    REQUIRE(pin);
+    REQUIRE(*pin == 5);
+    static_assert(std::is_same_v<decltype(pin.get()), const int*>);
+}
+
+TEST_CASE("Slot::live() exposes the published shared_ptr to the publisher",
+          "[runtime][slot]") {
+    Tracked::reset();
+    Slot<Tracked> slot;
+    REQUIRE(slot.live() == nullptr);
+    slot.publish(std::make_unique<Tracked>(3));
+    REQUIRE(slot.live() != nullptr);
+    REQUIRE(slot.live()->value == 3);
 }
 
 // ─────────────────────────── Handoff<T> ───────────────────────────

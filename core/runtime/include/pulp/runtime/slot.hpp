@@ -45,15 +45,27 @@
 
 namespace pulp::runtime {
 
-/// Lock-free publication of an immutable value to a reader that must never
-/// block. The reader pins the slot for the duration of its access; the writer
-/// swaps in a new value and parks the old one until every reader has left.
+/// Lock-free publication to a reader that must never block. The reader pins the
+/// slot for the duration of its access; the writer swaps in a new value and
+/// parks the old one until every reader has left.
+///
+/// **Slot manages the published object's LIFETIME, not its constness.** A pin
+/// guarantees only that the object will not be destroyed while you hold it. RCU
+/// is a reclamation scheme, not an immutability scheme.
+///
+/// That distinction is load-bearing. `SignalGraph`'s published `CompiledGraph`
+/// is emphatically *not* immutable: the audio thread writes every node's scratch
+/// buffer through it on every block, and control-thread readers drain telemetry
+/// and inject MIDI through the same pin. What is immutable is the *topology*.
+/// If you want a genuinely read-only value, say so in the type — `Slot<const T>`
+/// — and the guard hands back `const T*` for free.
 ///
 /// The audio thread's cost is one seq_cst increment, one atomic load, and one
 /// seq_cst decrement. No allocation, no destructor, no lock.
 ///
 /// @code
-/// Slot<CompiledGraph> graph;
+/// Slot<CompiledGraph>       graph;   // interior mutable: audio thread writes scratch
+/// Slot<const ImpulseResponse> ir;    // genuinely read-only
 ///
 /// // Control thread:
 /// graph.publish(std::make_unique<CompiledGraph>(rebuild()));
@@ -64,13 +76,19 @@ namespace pulp::runtime {
 /// }
 /// @endcode
 ///
-/// @warning Exactly one publisher thread. Any number of readers.
+/// @warning Exactly one publisher thread. Any number of readers. Whether two
+///          readers may safely mutate the same interior state concurrently is
+///          the published type's problem, not Slot's.
 template <typename T>
 class Slot {
 public:
     /// RAII pin. While one exists, the value it points at cannot be reclaimed.
     /// Holding a guard across a block boundary is legal but pointless; hold it
     /// exactly as long as you dereference.
+    ///
+    /// `read()` is const because pinning does not change the *slot* — it bumps a
+    /// `mutable` counter. The pinned object is handed back as `T*`, so a
+    /// `Slot<const T>` yields `const T*` and a `Slot<T>` yields a mutable one.
     class ReadGuard {
     public:
         ReadGuard() noexcept = default;
@@ -88,17 +106,17 @@ public:
                 owner_->readers_.fetch_sub(1, std::memory_order_seq_cst);
         }
 
-        const T* get() const noexcept { return value_; }
-        const T& operator*() const noexcept { return *value_; }
-        const T* operator->() const noexcept { return value_; }
+        T* get() const noexcept { return value_; }
+        T& operator*() const noexcept { return *value_; }
+        T* operator->() const noexcept { return value_; }
         explicit operator bool() const noexcept { return value_ != nullptr; }
 
     private:
         friend class Slot;
-        ReadGuard(const Slot* owner, const T* value) noexcept : owner_(owner), value_(value) {}
+        ReadGuard(const Slot* owner, T* value) noexcept : owner_(owner), value_(value) {}
 
         const Slot* owner_ = nullptr;
-        const T* value_ = nullptr;
+        T* value_ = nullptr;
     };
 
     Slot() = default;
@@ -118,7 +136,7 @@ public:
         // seq_cst pairs with the store in publish() and the load in
         // reclaim_if_quiescent(): either a publisher observes this pin and
         // declines to free, or this load observes the publisher's new pointer.
-        const T* value = live_raw_.load(std::memory_order_seq_cst);
+        T* value = live_raw_.load(std::memory_order_seq_cst);
         if (value == nullptr) {
             readers_.fetch_sub(1, std::memory_order_seq_cst);
             return ReadGuard{};
@@ -153,6 +171,11 @@ public:
             std::this_thread::yield();
         retired_.clear();
     }
+
+    /// Publisher thread only. The currently published value, as a shared_ptr the
+    /// publisher may keep. Readers must use `read()` — this accessor is not
+    /// synchronized against a concurrent `publish()`.
+    const std::shared_ptr<T>& live() const noexcept { return live_; }
 
     /// Number of displaced values still awaiting reclamation.
     std::size_t retired_count() const noexcept { return retired_.size(); }
