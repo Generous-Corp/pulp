@@ -612,10 +612,38 @@ Gotchas:
 
 ## Audio-thread snapshot contracts
 
-The host exposes an immutable audio-thread snapshot, not direct member
+The host exposes a reader-pinned audio-thread snapshot, not direct member
 reads. Anything you write that touches the audio thread (a
 graph editor, an MCP bridge, a preset loader) must account for these
 rules:
+
+- **The snapshot lives in `runtime::Slot<CompiledGraph>`** (`live_slot_`), the
+  shared reader-pinned RCU primitive in `core/runtime/include/pulp/runtime/slot.hpp`.
+  It owns the atomic pointer the audio thread loads, the seq_cst reader count,
+  and the retire list. `SignalGraph` no longer hand-rolls any of that; the old
+  `live_` / `live_raw_` / `retired_snapshots_` / `active_process_readers_` /
+  `ProcessReadGuard` / `retire_snapshot_` / `prune_retired_snapshots_` /
+  `wait_for_retired_snapshots_` are gone. Don't reintroduce them.
+- **A pin guarantees LIFETIME, not constness.** This is the single most
+  misread part of the contract. `CompiledGraph` is *not* immutable — the audio
+  thread writes every node's scratch buffer through the pin on every block,
+  `inject_midi` writes mailboxes, `drain()` consumes telemetry, `set_node_gain`
+  writes a gain. What is immutable is the *topology*. `Slot::ReadGuard::get()`
+  therefore hands back a mutable `T*`; a genuinely read-only publication says so
+  in the type (`Slot<const T>`).
+- **Read it, don't reach for it.** Anything that dereferences the snapshot off
+  the prepare/release thread must hold a pin for the whole dereference:
+  `auto pin = live_slot_.read(); if (auto* cg = pin.get()) { ... }`. That
+  includes control-thread readers (`inject_midi`, `extract_midi`,
+  `node_latency_samples`, `set_node_gain`, `pump_anticipation`) — without the
+  pin a concurrent `prepare()`/`release()` can retire and free the snapshot
+  mid-dereference.
+- **The `live_*()` getters are NOT pinned.** `is_prepared()`,
+  `prepared_max_block_size()`, and friends read `live_slot_.live()` directly.
+  They are control-thread-only by contract, and `Slot` will not save a caller
+  who uses them concurrently with `prepare()`.
+- **`unpublish()`, not `publish(nullptr)`.** The latter is ambiguous between
+  Slot's `shared_ptr` and `unique_ptr` overloads.
 
 - **Mutation protocol.** Every UI-thread `SignalGraph` mutator
   (`add_*`, `connect*`, `disconnect`, `remove_node`, `clear`)
