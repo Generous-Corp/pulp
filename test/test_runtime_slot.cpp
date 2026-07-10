@@ -144,6 +144,20 @@ TEST_CASE("Slot survives an N-reader hammer against a hot publisher", "[runtime]
         for (int i = 1; i <= kPublishes; ++i)
             slot.publish(std::make_unique<Tracked>(i));
 
+        // Give the readers a guaranteed opportunity to observe at least one
+        // value before we stop them. On a saturated host the reader threads can
+        // be starved for the entire publish burst, leaving reads == 0 — a
+        // scheduling artifact, not a Slot failure. The slot always holds a
+        // published value, so a reader needs only a single timeslice; wait
+        // (bounded by a 5s deadline) for one to land. A reader that cannot take
+        // a timeslice in that window is genuinely wedged and still fails the
+        // reads > 0 assertion below.
+        const auto read_deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (reads.load(std::memory_order_relaxed) == 0
+               && std::chrono::steady_clock::now() < read_deadline) {
+            std::this_thread::yield();
+        }
         stop.store(true);
         for (auto& t : readers) t.join();
 
@@ -343,6 +357,22 @@ TEST_CASE("Handoff survives a producer/consumer hammer with no audio-thread free
         for (int i = 1; i <= kPublishes; ++i) {
             h.publish(std::make_unique<Tracked>(i));
             h.drain_retired();  // producer reclaims
+        }
+        // Give the consumer a guaranteed opportunity to make progress before we
+        // stop it. On a saturated host the consumer thread can be starved for
+        // the entire publish burst, leaving consumed == 0 — a scheduling
+        // artifact, not a Handoff failure. Keep draining the retire ring so
+        // retire capacity is always available for a try_consume of the still
+        // pending value, and yield until the consumer records at least one
+        // consume. The deadline is generous: a consumer that cannot take a
+        // single timeslice in this window is genuinely wedged and still fails
+        // the consumed > 0 assertion below.
+        const auto consume_deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (consumed.load(std::memory_order_relaxed) == 0
+               && std::chrono::steady_clock::now() < consume_deadline) {
+            h.drain_retired();
+            std::this_thread::yield();
         }
         stop.store(true);
         consumer.join();
