@@ -137,17 +137,52 @@ cmake --install build --prefix /path/to/installed-sdk
 
 It also needs PyYAML: `python3 -m pip install pyyaml`.
 
+## Keeping every consumer on the latest SDK
+
+When you ship a new SDK, two more commands close the loop across all the
+downstream demos.
+
+**Bump every consumer's SDK pin** — dry-run first, then open the PRs:
+
+```bash
+pulp minos update --to 0.640.0             # dry-run: shows each repo's pin change
+pulp minos update --to 0.640.0 --open-prs  # clone, edit, branch, push, open a PR each
+```
+
+It's **dry-run by default** and writes nothing until you add `--open-prs`. It
+understands the common ways a project pins the SDK (`pulp.toml` `sdk_version`,
+`find_package(Pulp X.Y.Z)`, FetchContent `GIT_TAG`) and leaves a floating
+`sdk_version = "latest"` alone.
+
+**Print the republish steps** for the packaged demos:
+
+```bash
+pulp minos publish-runbook --to 0.640.0
+```
+
+This **only prints** the rebuild + package + publish checklist per repo — it
+never builds, signs, or touches a release. Publishing stays a human step on
+purpose: each packaged demo signs with its own identity and cuts its own
+release, and a release is public and hard to unwind.
+
+The usual flow after a new SDK: `pulp minos sweep` (does everything still build,
+and did the floors move?) → `pulp minos update --to <ver> --open-prs` (bump the
+pins) → merge those PRs → `pulp minos publish-runbook` (rebuild and republish the
+packaged demos).
+
 ## Where to run each
 
-Both commands are part of the Pulp CLI (`pulp minos ...`) and the `/minos` Claude
+All of these are part of the Pulp CLI (`pulp minos ...`) and the `/minos` Claude
 slash command. `pulp minos measure` is also available to agents over MCP as the
-`pulp_minos` tool. The sweep is CLI-only because it clones and builds many
-repositories — not something to fire off inside an editor session.
+`pulp_minos` tool. `sweep`, `update`, and `publish-runbook` are CLI-only because
+they clone, build, and (optionally) open PRs across many repositories — not
+something to fire off inside an editor session.
 
 ## Under the hood
 
 - `pulp minos measure` → `tools/scripts/measure_min_os.py --measure`
 - `pulp minos sweep`   → `tools/scripts/sdk_consumer_sweep.py`
+- `pulp minos update` / `publish-runbook` → `tools/scripts/sdk_consumer_update.py`
 - The SDK's own floor is declared in `tools/deps/min_os.json` and pinned into
   every build by `tools/cmake/PulpMinOs.cmake`.
 
