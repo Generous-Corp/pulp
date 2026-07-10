@@ -73,7 +73,22 @@ export class WebClapHost {
   }
 
   // ── low-level memory helpers ──────────────────────────────────────────────
-  get _dv() { return new DataView(this.memory.buffer); }
+  // Cache a single DataView over the wasm heap. A fresh `new DataView` per
+  // accessor call was dozens of short-lived allocations per process() block on
+  // the audio thread (every u32/f64/setU32/… goes through this). Rebuild only
+  // when the underlying buffer changes: memory.grow() detaches and replaces a
+  // non-shared buffer (identity changes) and extends a shared one (byteLength
+  // changes), so covering both keeps a grown heap from being read through a
+  // stale view while allocating zero DataViews in steady state.
+  get _dv() {
+    const buf = this.memory.buffer;
+    if (buf !== this._dvBuffer || buf.byteLength !== this._dvByteLength) {
+      this._dvBuffer = buf;
+      this._dvByteLength = buf.byteLength;
+      this._dvView = new DataView(buf);
+    }
+    return this._dvView;
+  }
   u32(p) { return this._dv.getUint32(p, true); }
   setU32(p, v) { this._dv.setUint32(p, v, true); }
   f64(p) { return this._dv.getFloat64(p, true); }
