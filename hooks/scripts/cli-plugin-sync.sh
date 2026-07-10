@@ -74,6 +74,15 @@ if [ -n "$REPO_ROOT" ]; then
         "$CSC" --base origin/main --mode=hint 2>/dev/null || true
     fi
 
+    # Screenshot-sync hint. Advisory only — in a repo that carries
+    # .pulp/screenshots.toml, surfaces when a UX-path edit left a README /
+    # og:image / gallery screenshot stale. No-op in any repo without the
+    # manifest (pulp core included). Authoritative gate is CI + pre-push.
+    SSCS="$REPO_ROOT/tools/scripts/screenshot_sync_check.py"
+    if [ -f "$SSCS" ]; then
+        python3 "$SSCS" --base origin/main --repo-root "$REPO_ROOT" --mode=hint 2>/dev/null || true
+    fi
+
     # Docs-noise lint. Advisory only — flags newly edited reference docs / shared
     # skills that reintroduce issue/PR/wave/handoff breadcrumbs.
     if [ -f "$DNL" ]; then
