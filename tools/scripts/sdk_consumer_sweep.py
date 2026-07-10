@@ -116,6 +116,22 @@ def build_plans(consumers: dict, recipes: dict, only: list[str] | None) -> list[
     return plans
 
 
+def _ver_eq(a: str | None, b: str | None) -> bool:
+    """Compare two version strings by numeric components, not textually. A
+    measured floor of "13.3.0" and a declared floor of "13.3" are the SAME floor;
+    a raw string compare would call that DRIFT. Shorter forms are zero-padded so
+    (13,3) == (13,3,0). Unparseable values fall back to a string compare."""
+    if a is None or b is None:
+        return a == b
+    try:
+        ta = tuple(int(x) for x in a.split("."))
+        tb = tuple(int(x) for x in b.split("."))
+    except ValueError:
+        return a == b
+    n = max(len(ta), len(tb))
+    return ta + (0,) * (n - len(ta)) == tb + (0,) * (n - len(tb))
+
+
 def measure_artifact(path: Path) -> tuple[str | None, str | None]:
     """Delegate to measure_min_os.measure_artifact without importing at module
     load (keeps this script importable even if that module moves)."""
@@ -293,7 +309,7 @@ def format_report(results: list[dict], skipped: list[Plan], sdk: str | None) -> 
             state = "?"
         floor = r["floor"] or "-"
         if r["floor"] and sdk:
-            vs = "match" if r["floor"] == sdk else "DRIFT"
+            vs = "match" if _ver_eq(r["floor"], sdk) else "DRIFT"
         else:
             vs = "-"
         note = "; ".join(r["notes"]) if r["notes"] else ""
@@ -378,10 +394,21 @@ def main(argv: list[str] | None = None) -> int:
     if not args.keep and not args.workdir:
         shutil.rmtree(workdir, ignore_errors=True)
 
+    # Propagation (question #2) can only be checked against a known SDK floor. If
+    # sdk_floor() came back empty, the "vs SDK" column is all "-" and a raw pass
+    # would be a silent false success — the whole reason the tool exists went
+    # unverified. Fail loudly instead.
+    if sdk is None:
+        print("\nERROR: could not determine the SDK's own min-OS floor "
+              f"(no lib/cmake/Pulp/min_os.json and no measurable lib under "
+              f"{args.sdk_prefix}/lib). Floor propagation was NOT verified.",
+              file=sys.stderr)
+        return 2
+
     # Exit non-zero if any built repo failed to build or drifted from the SDK floor.
     bad = [r for r in results
            if r["clone"] is False or r["configure"] is False or r["build"] is False
-           or (r["floor"] and sdk and r["floor"] != sdk)]
+           or (r["floor"] and not _ver_eq(r["floor"], sdk))]
     return 1 if bad else 0
 
 
