@@ -114,20 +114,30 @@ struct FunctionSettings {
     bool invert = false;
 };
 
-/// Input scale and offset, then the curve, then output offset and the suite's
-/// shared output stage.
+/// The input stage: scale, offset, and the clamp the curve is defined on.
 ///
-/// The clamp before the curve is not cosmetic. `in_scale` can push a signal past
-/// full scale, and `|x|^k` on a value greater than one runs *away* from the rail
-/// instead of toward it — an input at 1.2 with k = 2 lands at 1.44, and a
-/// negative output offset would then carry that excess all the way to the jack
-/// rather than having it absorbed by the final clamp. Clamping first means the
-/// curve only ever sees the range it is defined on.
-[[nodiscard]] inline float function_transfer(float x,
-                                             const FunctionSettings& s) noexcept {
+/// The clamp is not cosmetic. `in_scale` can push a signal past full scale, and
+/// `|x|^k` on a value greater than one runs *away* from the rail instead of
+/// toward it — an input at 1.2 with k = 2 lands at 1.44, and a negative output
+/// offset would then carry that excess all the way to the jack rather than
+/// having it absorbed by the final clamp. Clamping first means the curve only
+/// ever sees the range it is defined on.
+///
+/// Named because the editor needs it: the graph plots the curve *without* the
+/// input stage and moves its indicator *along* it, so the two must agree on
+/// exactly where the incoming signal lands on the horizontal axis.
+[[nodiscard]] inline double function_input_stage(float x,
+                                                 const FunctionSettings& s) noexcept {
     const double scaled = static_cast<double>(x) * static_cast<double>(s.in_scale) +
                           static_cast<double>(s.in_offset);
-    const double clamped = std::clamp(scaled, -1.0, 1.0);
+    return std::clamp(scaled, -1.0, 1.0);
+}
+
+/// Input scale and offset, then the curve, then output offset and the suite's
+/// shared output stage.
+[[nodiscard]] inline float function_transfer(float x,
+                                             const FunctionSettings& s) noexcept {
+    const double clamped = function_input_stage(x, s);
     const double shaped = apply_curve(s.curve, static_cast<double>(s.amount), clamped);
     return resolve_output(static_cast<float>(shaped) + s.out_offset, s.out_scale,
                           s.invert);

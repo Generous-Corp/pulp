@@ -5,7 +5,8 @@
 if(PULP_BUILD_TESTS)
     add_executable(brew-cv-osc-test test_cv_osc.cpp cv_osc_view.cpp)
     target_link_libraries(brew-cv-osc-test
-        PRIVATE pulp::format pulp::osc brew-core brew-ui Catch2::Catch2WithMain)
+        PRIVATE pulp::format pulp::osc pulp::events brew-core brew-ui
+                Catch2::Catch2WithMain)
     target_include_directories(brew-cv-osc-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(brew-cv-osc-test)
 endif()
@@ -24,11 +25,11 @@ pulp_add_plugin(BrewCvOsc
 
 if(TARGET BrewCvOsc_Core)
     target_include_directories(BrewCvOsc_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(BrewCvOsc_Core PUBLIC brew-core brew-ui pulp::osc)
+    target_link_libraries(BrewCvOsc_Core PUBLIC brew-core brew-ui pulp::osc pulp::events)
 endif()
 foreach(fmt VST3 AU CLAP)
     if(TARGET BrewCvOsc_${fmt})
-        target_link_libraries(BrewCvOsc_${fmt} PRIVATE brew-core brew-ui pulp::osc)
+        target_link_libraries(BrewCvOsc_${fmt} PRIVATE brew-core brew-ui pulp::osc pulp::events)
     endif()
 endforeach()
 

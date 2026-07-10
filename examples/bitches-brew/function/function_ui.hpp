@@ -16,6 +16,7 @@
 
 #include <brew/ui/panel.hpp>
 
+#include <cstddef>
 #include <cstdio>
 #include <functional>
 #include <string>
@@ -28,7 +29,8 @@ namespace pulp::examples::brew {
 /// picture cannot drift from the signal.
 class FunctionGraph : public view::View {
 public:
-    explicit FunctionGraph(const FunctionProcessor& proc) : proc_(proc) {}
+    FunctionGraph(const FunctionProcessor& proc, std::size_t channel)
+        : proc_(proc), channel_(channel) {}
 
     void paint(canvas::Canvas& c) override {
         const float w = local_bounds().width, h = local_bounds().height;
@@ -51,30 +53,44 @@ public:
         c.stroke_line(x_of(-1.0), y_of(0.0), x_of(1.0), y_of(0.0));
         c.stroke_line(x_of(0.0), y_of(-1.0), x_of(0.0), y_of(1.0));
 
-        const FunctionSettings settings = proc_.settings();
+        const FunctionSettings settings = proc_.settings(channel_);
 
         // The identity, faint, so the curve's departure from a wire is visible.
         c.set_stroke_color(ui::palette::border);
         c.stroke_line(x_of(-1.0), y_of(-1.0), x_of(1.0), y_of(1.0));
 
+        // The curve is drawn with the *output* stage applied and the input stage
+        // held at unity. Scaling the input does not change the shape of the
+        // function — it changes where on the function the signal lands — so a
+        // graph that redrew for the input knobs would be answering a question
+        // nobody asked, and would hide the one the indicator answers.
+        FunctionSettings plotted = settings;
+        plotted.in_scale = 1.0f;
+        plotted.in_offset = 0.0f;
+
         c.set_stroke_color(ui::palette::accent);
         c.set_line_width(2.0f * s);
         ui::plot(c, 128, x_of(-1.0), x_of(1.0), [&](float t) {
             const auto in = static_cast<float>(-1.0 + 2.0 * t);
-            return y_of(function_transfer(in, settings));
+            return y_of(function_transfer(in, plotted));
         });
 
-        const float in = proc_.display_input();
-        const float out = proc_.display_output();
+        // ...and so the indicator sits at the point the curve is *evaluated* at,
+        // which is the incoming signal after the input stage. Turn `In Scale` and
+        // the dot slides along a curve that does not move. That is what the input
+        // knobs do, drawn honestly.
+        const float in = proc_.display_input(channel_);
+        const float out = proc_.display_output(channel_);
         const float dot = 3.5f * s;
         c.set_fill_color(ui::palette::text);
-        c.fill_circle(x_of(in), y_of(out), dot);
+        c.fill_circle(x_of(function_input_stage(in, settings)), y_of(out), dot);
 
         request_repaint();
     }
 
 private:
     const FunctionProcessor& proc_;
+    std::size_t channel_;
 };
 
 class FunctionUi : public ui::BrewPanel {
@@ -82,60 +98,68 @@ public:
     explicit FunctionUi(state::StateStore& store, const FunctionProcessor& proc)
         : ui::BrewPanel("Function", "shape an incoming control voltage"),
           store_(store) {
-        auto number = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.2f", v);
-            return std::string(buf);
-        };
-        auto curve_name = [](float v) {
-            switch (curve_from_param(v)) {
-                case Curve::linear: return std::string("lin");
-                case Curve::exponential: return std::string("exp");
-                case Curve::logarithmic: return std::string("log");
-                case Curve::absolute: return std::string("abs");
-                case Curve::power: return std::string("pow");
-            }
-            return std::string("?");
-        };
-        // Amount drives only the power curve. Showing a dash rather than a stale
-        // number is how the editor says "this knob does nothing right now".
-        auto amount_or_dash = [&store](float v) {
-            char buf[16];
-            if (!curve_uses_amount(curve_from_param(store.get_value(FunctionProcessor::kCurve))))
-                return std::string("—");
-            std::snprintf(buf, sizeof(buf), "%.3g", v);
-            return std::string(buf);
-        };
-
-        auto graph = std::make_unique<FunctionGraph>(proc);
-        graph->flex().preferred_height = 120.0f;
-        graph->flex().align_self = view::FlexAlign::stretch;
-
-        auto add = [&](view::View& row, state::ParamID id, const char* label,
-                       std::function<std::string(float)> fmt) {
-            auto k = ui::param_knob(store_, id, label, std::move(fmt));
+        // `fmt` is empty for every knob but `Amount`, which cannot read its own
+        // value without consulting `Curve` — a dependency the host cannot express,
+        // so it stays here rather than in the parameter's own formatter.
+        auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
+                       const char* label,
+                       std::function<std::string(float)> fmt = {}) {
+            auto k = ui::param_knob(store_,
+                                    static_cast<state::ParamID>(param_for(id, ch)),
+                                    label, std::move(fmt));
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
 
-        // Input stage, function, output stage — left to right, the order the
-        // signal actually travels.
-        auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*top, FunctionProcessor::kInScale, "In Scale", number);
-        add(*top, FunctionProcessor::kInOffset, "In Off", number);
-        add(*top, FunctionProcessor::kCurve, "Curve", curve_name);
-        add(*top, FunctionProcessor::kAmount, "Amount", amount_or_dash);
-        add(*top, FunctionProcessor::kOutputScale, "Out", number);
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+            // Amount drives only the power curve, and only this channel's. Showing
+            // a dash rather than a stale number is how the editor says "this knob
+            // does nothing right now".
+            auto amount_or_dash = [&store, ch](float v) {
+                char buf[16];
+                const float curve = store.get_value(
+                    static_cast<state::ParamID>(param_for(FunctionProcessor::kCurve, ch)));
+                if (!curve_uses_amount(curve_from_param(curve)))
+                    return std::string("—");
+                std::snprintf(buf, sizeof(buf), "%.3g", v);
+                return std::string(buf);
+            };
 
-        auto bottom = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*bottom, FunctionProcessor::kOutOffset, "Out Off", number);
-        auto inv = ui::param_toggle(store_, FunctionProcessor::kInvert, "Invert");
-        ui::toggle_size(*inv);
-        bottom->add_child(std::move(inv));
+            add_child(ui::channel_label(ch == 0 ? "LEFT" : "RIGHT"));
 
-        add_child(std::move(graph));
-        add_child(std::move(top));
-        add_child(std::move(bottom));
+            auto graph = std::make_unique<FunctionGraph>(proc, ch);
+            graph->flex().preferred_height = 96.0f;
+            graph->flex().align_self = view::FlexAlign::stretch;
+
+            // Input stage, function, output stage — left to right, the order the
+            // signal actually travels.
+            auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
+            add(*top, FunctionProcessor::kInScale, ch, "In Scale");
+            add(*top, FunctionProcessor::kInOffset, ch, "In Off");
+            add(*top, FunctionProcessor::kCurve, ch, "Curve");
+            add(*top, FunctionProcessor::kAmount, ch, "Amount", amount_or_dash);
+            add(*top, FunctionProcessor::kOutputScale, ch, "Out");
+
+            auto bottom = ui::row(ui::kRowGap, ui::kKnobHeight);
+            add(*bottom, FunctionProcessor::kOutOffset, ch, "Out Off");
+            auto enable = ui::param_toggle(
+                store_,
+                static_cast<state::ParamID>(param_for(FunctionProcessor::kEnable, ch)),
+                "Enable");
+            auto inv = ui::param_toggle(
+                store_,
+                static_cast<state::ParamID>(param_for(FunctionProcessor::kInvert, ch)),
+                "Invert");
+            ui::toggle_size(*enable);
+            ui::toggle_size(*inv);
+            bottom->add_child(std::move(enable));
+            bottom->add_child(std::move(inv));
+
+            add_child(std::move(graph));
+            add_child(std::move(top));
+            add_child(std::move(bottom));
+        }
+
         add_child(ui::caption_label(
             "the dot is where the incoming signal is sitting on the curve"));
     }

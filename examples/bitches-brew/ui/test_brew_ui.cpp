@@ -18,6 +18,7 @@
 #include "quantizer_processor.hpp"
 #include "step_processor.hpp"
 #include "sync_processor.hpp"
+#include "trigger_processor.hpp"
 
 #if defined(__APPLE__)
 #include <CoreGraphics/CoreGraphics.h>
@@ -29,6 +30,7 @@
 #include <pulp/view/screenshot.hpp>
 
 #include <algorithm>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -97,6 +99,31 @@ view::Toggle* find_toggle(view::View& root, std::string_view label) {
     return nullptr;
 }
 
+/// The `n`th widget with this label, in tree order. The per-channel editors hold
+/// two of everything, and a test that only ever finds the first would pass with the
+/// right channel's toggles wired to the left channel's parameters.
+view::Toggle* find_nth_toggle(view::View& root, std::string_view label, std::size_t n) {
+    std::size_t seen = 0;
+    view::Toggle* hit = nullptr;
+    auto walk = [&](auto&& self, view::View& v) -> void {
+        if (hit) return;
+        if (auto* t = dynamic_cast<view::Toggle*>(&v); t && t->label() == label) {
+            if (seen++ == n) hit = t;
+            return;
+        }
+        for (size_t i = 0; i < v.child_count() && !hit; ++i) self(self, *v.child_at(i));
+    };
+    walk(walk, root);
+    return hit;
+}
+
+view::Knob* find_knob(view::View& root, std::string_view label) {
+    if (auto* k = dynamic_cast<view::Knob*>(&root); k && k->label() == label) return k;
+    for (size_t i = 0; i < root.child_count(); ++i)
+        if (auto* hit = find_knob(*root.child_at(i), label)) return hit;
+    return nullptr;
+}
+
 /// The bottom-right corner of the furthest-extending descendant, in the root's
 /// coordinates. Yoga has already placed everything by the time this runs.
 void content_extent(const view::View& v, float ox, float oy, float& w, float& h) {
@@ -118,20 +145,28 @@ void content_extent(const view::View& v, float ox, float oy, float& w, float& h)
 /// geometry check below cannot see this class of bug — only a text measurement
 /// can. Measured, not estimated: `RecordingCanvas::measure_text` returns seven
 /// points per character and ignores the font size entirely.
+///
+/// A Label does not overflow; it clips. Same measurement, different symptom: a
+/// caption that runs past the panel loses its last words, and a screenshot of a
+/// clipped sentence still looks like a caption.
 void check_labels_fit(view::View& v, const char* who, canvas::Canvas& measurer) {
     constexpr float kWidgetLabelPt = 10.0f;   // what Knob::paint and Toggle::paint use
-    measurer.set_font("Inter", kWidgetLabelPt);
 
-    auto fits = [&](const std::string& label, float box, const char* kind) {
+    auto fits = [&](const std::string& label, float box, const char* kind, float pt) {
         if (label.empty()) return;
+        measurer.set_font("Inter", pt);
         const float text = measurer.measure_text(label);
         INFO(who << ": " << kind << " label \"" << label << "\" measures " << text
-                 << " in a box " << box << " wide");
+                 << " at " << pt << "pt in a box " << box << " wide");
         CHECK(text <= box);
     };
 
-    if (auto* k = dynamic_cast<view::Knob*>(&v)) fits(k->label(), v.bounds().width, "knob");
-    if (auto* t = dynamic_cast<view::Toggle*>(&v)) fits(t->label(), v.bounds().width, "toggle");
+    if (auto* k = dynamic_cast<view::Knob*>(&v))
+        fits(k->label(), v.bounds().width, "knob", kWidgetLabelPt);
+    if (auto* t = dynamic_cast<view::Toggle*>(&v))
+        fits(t->label(), v.bounds().width, "toggle", kWidgetLabelPt);
+    if (auto* l = dynamic_cast<view::Label*>(&v))
+        fits(l->text(), v.bounds().width, "caption", l->font_size());
     for (size_t i = 0; i < v.child_count(); ++i)
         check_labels_fit(*v.child_at(i), who, measurer);
 }
@@ -197,6 +232,7 @@ TEST_CASE("every editor fits inside the size it asks the host for",
         {"CV To OSC", create_cv_osc}, {"DC", create_dc},   {"Function", create_function},
         {"LFO", create_lfo},          {"Quantizer", create_quantizer},
         {"Step LFO", create_step},    {"Sync", create_sync},
+        {"Trigger", create_trigger},
     };
 
     for (const auto& c : cases) {
@@ -347,31 +383,37 @@ TEST_CASE("LFO's editor draws the selected shape", "[brew][ui][lfo]") {
     }
 }
 
-TEST_CASE("LFO's Free Run toggle reaches the rate mode", "[brew][ui][lfo]") {
+TEST_CASE("LFO's toggles reach the parameters the scope cannot show",
+          "[brew][ui][lfo]") {
     Editor ed(create_lfo);
 
-    // The scope is deliberately mode-agnostic — it sweeps one cycle either way —
-    // so no pixel comparison can prove this switch is connected. Without this
-    // test, deleting the toggle from the editor leaves the whole suite green and
-    // strands a shipped parameter with no way to reach it.
-    auto* toggle = find_toggle(*ed.view, "Free Run");
-    REQUIRE(toggle != nullptr);
-    REQUIRE_FALSE(toggle->is_on());
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 0.0f);
+    // Triplet, the swing unit, and Reset By Note all change the signal in ways the
+    // scope cannot draw — it sweeps one cycle of whatever a cycle currently is, and
+    // a retrigger needs a note. Without this test, deleting one of them from the
+    // editor leaves the whole suite green and strands a shipped parameter with no
+    // way to reach it.
+    struct Case { const char* label; state::ParamID id; };
+    const Case cases[] = {
+        {"Triplet", LfoProcessor::kTriplet},
+        {"16ths", LfoProcessor::kSwingUnit},
+        {"Reset", LfoProcessor::kResetByNote},
+        {"Invert", LfoProcessor::kInvert},
+    };
 
-    toggle->on_mouse_down(view::Point{});
-    REQUIRE(toggle->is_on());
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 1.0f);
+    for (const auto& c : cases) {
+        CAPTURE(c.label);
+        auto* toggle = find_toggle(*ed.view, c.label);
+        REQUIRE(toggle != nullptr);
+        REQUIRE_FALSE(toggle->is_on());
+        REQUIRE(ed.host.state().get_value(c.id) == 0.0f);
 
-    toggle->on_mouse_down(view::Point{});
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 0.0f);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(toggle->is_on());
+        REQUIRE(ed.host.state().get_value(c.id) == 1.0f);
 
-    // Same blind spot, same fix: swing warps the timeline, not the shape, so the
-    // scope cannot see which unit is selected either.
-    auto* sixteenths = find_toggle(*ed.view, "16ths");
-    REQUIRE(sixteenths != nullptr);
-    sixteenths->on_mouse_down(view::Point{});
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kSwingUnit) == 1.0f);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(ed.host.state().get_value(c.id) == 0.0f);
+    }
 }
 
 TEST_CASE("Function's editor draws the curve and tracks the signal on it",
@@ -471,6 +513,63 @@ TEST_CASE("Quantizer's editor draws the staircase and the operating point",
     }
 }
 
+TEST_CASE("Trigger's editor reaches every control it declares, on both channels",
+          "[brew][ui][trigger]") {
+    Editor ed(create_trigger);
+
+    // Twenty-nine controls per channel and no readout can show most of them. A
+    // parameter with no widget is a parameter a user cannot reach, and the two
+    // channels make it easy to wire the right one to the left one's id.
+    for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+        for (const auto& c : TriggerProcessor::controls()) {
+            CAPTURE(c.label, ch);
+            REQUIRE(find_knob(*ed.view, c.label) != nullptr);
+        }
+        for (const auto& c : TriggerProcessor::toggles()) {
+            CAPTURE(c.label, ch);
+            const auto id = static_cast<state::ParamID>(param_for(c.id, ch));
+            auto* toggle = find_nth_toggle(*ed.view, c.label, ch);
+            REQUIRE(toggle != nullptr);
+            const float before = ed.host.state().get_value(id);
+            toggle->on_mouse_down(view::Point{});
+            REQUIRE(ed.host.state().get_value(id) != before);
+            toggle->on_mouse_down(view::Point{});
+            REQUIRE(ed.host.state().get_value(id) == before);
+        }
+    }
+}
+
+TEST_CASE("Step LFO's editor reaches every control it declares",
+          "[brew][ui][step]") {
+    Editor ed(create_step);
+
+    // The step bars show eight levels and the lamps show the register's bits.
+    // Everything else — two rate pairs, the window, the register's own controls,
+    // the input routing — is a knob or a toggle, and a parameter with no widget is
+    // a parameter a user cannot reach. The processor's `controls()` and
+    // `toggles()` tables are the contract; this is what enforces them.
+    for (const auto& c : StepProcessor::controls()) {
+        CAPTURE(c.label);
+        REQUIRE(find_knob(*ed.view, c.label) != nullptr);
+    }
+    for (const auto& c : StepProcessor::toggles()) {
+        CAPTURE(c.label);
+        auto* toggle = find_toggle(*ed.view, c.label);
+        REQUIRE(toggle != nullptr);
+
+        // ...and it is wired to the parameter it names, not to a neighbour's.
+        const float before = ed.host.state().get_value(c.id);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(ed.host.state().get_value(c.id) != before);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(ed.host.state().get_value(c.id) == before);
+    }
+    for (int i = 0; i < kMaxDacBits; ++i) {
+        CAPTURE(i);
+        REQUIRE(find_knob(*ed.view, "W" + std::to_string(i + 1)) != nullptr);
+    }
+}
+
 TEST_CASE("Step LFO's editor draws the pattern and marks the playing step",
           "[brew][ui][step]") {
     Editor ed(create_step);
@@ -549,19 +648,136 @@ TEST_CASE("CV To OSC's editor tracks the observed voltage", "[brew][ui][osc]") {
         WARN("no raster screenshot backend in this build — skipping");
         return;
     }
-    // Send is off, and rendering an editor must never turn it on.
-    REQUIRE(ed.host.state().get_value(CvOscProcessor::kEnabled) == 0.0f);
+    // Both channels are off, and rendering an editor must never turn one on.
+    for (std::size_t c = 0; c < kOscChannels; ++c)
+        REQUIRE(ed.host.state().get_value(
+                    static_cast<state::ParamID>(
+                        param_for(CvOscProcessor::kEnable, c))) == 0.0f);
 
     drive(ed.host, 0.2f);
     const auto low = ed.shoot();
     REQUIRE_FALSE(low.empty());
 
-    // The rail reads the input the DSP saw, so a different voltage redraws it.
+    // The rails read the input the DSP saw, so a different voltage redraws them.
     drive(ed.host, -0.8f);
     REQUIRE(differs(ed.shoot(), low));
 
     const auto* proc = static_cast<const CvOscProcessor*>(ed.host.processor());
     REQUIRE(proc->latest(0) == -0.8f);
+    REQUIRE(proc->latest(1) == -0.8f);
     // Nothing was sent, because nothing was asked for.
     REQUIRE(proc->sent_count() == 0);
+}
+
+
+// ── What the host shows ──────────────────────────────────────────────────────
+//
+// A plug-in's editor is not the only place its parameters are read. The DAW's own
+// parameter list, its automation lane, and its type-in field all call
+// `ParamInfo::to_string`. A parameter without one is a bare float there — and an
+// AU shows a continuous slider instead of a menu, because
+// `GetParameterValueStrings` returns nothing without a formatter. So this walks
+// every plug-in's live store, not the sources.
+
+namespace {
+
+struct Plugin { const char* name; format::ProcessorFactory factory; };
+
+const Plugin kPlugins[] = {
+    {"CV To OSC", create_cv_osc}, {"DC", create_dc},   {"Function", create_function},
+    {"LFO", create_lfo},          {"Quantizer", create_quantizer},
+    {"Step LFO", create_step},    {"Sync", create_sync},
+    {"Trigger", create_trigger},
+};
+
+/// A parameter a host would offer as a menu: it steps by whole numbers over a
+/// handful of values.
+bool is_menu(const state::ParamInfo& p) {
+    return p.range.step >= 1.0f && (p.range.max - p.range.min) >= 1.0f &&
+           (p.range.max - p.range.min) <= 15.0f;
+}
+
+}  // namespace
+
+TEST_CASE("Every parameter in the suite tells the host how to read it",
+          "[brew][ui][text]") {
+    for (const auto& plugin : kPlugins) {
+        format::HeadlessHost host(plugin.factory);
+        host.prepare(48000.0, 512, 2, 2);
+        const auto params = host.state().all_params();
+        REQUIRE_FALSE(params.empty());
+
+        for (const auto& p : params) {
+            INFO(plugin.name << " / " << p.name);
+            REQUIRE(p.to_string);
+            // A formatter that returns nothing leaves the host's field blank,
+            // which is worse than the number it replaced.
+            CHECK_FALSE(p.to_string(p.range.default_value).empty());
+            CHECK_FALSE(p.to_string(p.range.min).empty());
+            CHECK_FALSE(p.to_string(p.range.max).empty());
+        }
+    }
+}
+
+TEST_CASE("Every menu names each of its modes, and names them distinctly",
+          "[brew][ui][text]") {
+    // A name table one entry short of its enum clamps the last mode onto the
+    // second-to-last name. Nothing crashes; the mode just becomes unreachable by
+    // name, in the editor and in the host alike.
+    for (const auto& plugin : kPlugins) {
+        format::HeadlessHost host(plugin.factory);
+        host.prepare(48000.0, 512, 2, 2);
+
+        for (const auto& p : host.state().all_params()) {
+            if (!is_menu(p)) continue;
+            INFO(plugin.name << " / " << p.name);
+
+            std::vector<std::string> names;
+            for (float v = p.range.min; v <= p.range.max; v += p.range.step)
+                names.push_back(p.to_string(v));
+
+            auto sorted = names;
+            std::sort(sorted.begin(), sorted.end());
+            const auto dup = std::adjacent_find(sorted.begin(), sorted.end());
+            INFO("duplicate name: " << (dup == sorted.end() ? std::string("none") : *dup));
+            CHECK(dup == sorted.end());
+        }
+    }
+}
+
+TEST_CASE("Smooth reads the same on every plug-in that carries it",
+          "[brew][ui][text]") {
+    // The manual describes `Smooth` once. Four plug-ins implement it, and two of
+    // them used to print a signed millisecond count — from which no user could
+    // tell that a negative value selects a low-pass rather than a slew limit.
+    for (const auto& plugin : kPlugins) {
+        format::HeadlessHost host(plugin.factory);
+        host.prepare(48000.0, 512, 2, 2);
+
+        for (const auto& p : host.state().all_params()) {
+            if (p.name.rfind("Smooth", 0) != 0) continue;
+            INFO(plugin.name << " / " << p.name);
+            CHECK(p.to_string(0.0f) == "off");
+            CHECK(p.to_string(100.0f) == "slew 100");
+            CHECK(p.to_string(-100.0f) == "lpf 100");
+        }
+    }
+}
+
+TEST_CASE("Sync's two off-by-zero controls say so", "[brew][ui][text]") {
+    // Zero on `Reset Beats` is the off switch, not a zero-beat interval; zero on
+    // `Trigger Length` selects a 50%-duty square, not a zero-width pulse. Both are
+    // meaning, not formatting, so the host must show them too.
+    format::HeadlessHost host(create_sync);
+    host.prepare(48000.0, 512, 2, 2);
+
+    const auto* reset = host.state().info(SyncProcessor::kResetBeats);
+    REQUIRE(reset);
+    CHECK(reset->to_string(0.0f) == "Off");
+    CHECK(reset->to_string(4.0f) == "4");
+
+    const auto* width = host.state().info(SyncProcessor::kTriggerLengthMs);
+    REQUIRE(width);
+    CHECK(width->to_string(0.0f) == "50%");
+    CHECK(width->to_string(5.0f) == "5.0 ms");
 }

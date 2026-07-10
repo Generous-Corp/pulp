@@ -10,10 +10,15 @@
 
 #include <brew/clock.hpp>
 #include <brew/cv.hpp>
+#include <brew/param_text.hpp>
 #include <brew/pulse.hpp>
 #include <brew/run_segment.hpp>
+#include <brew/smooth.hpp>
 
+#include <cmath>
 #include <cstdint>
+#include <iterator>
+#include <string>
 #include <vector>
 
 using namespace pulp::examples::brew;
@@ -519,4 +524,174 @@ TEST_CASE("swing stays invertible across its whole range", "[brew][clock][swing]
             }
         }
     }
+}
+
+// ── Smoother ─────────────────────────────────────────────────────────────────
+
+TEST_CASE("Smooth at zero is a wire, bit for bit", "[brew][smooth]") {
+    Smoother s;
+    for (float v : {0.3f, -0.9f, 0.0f, 1.0f}) CHECK(s.process(v, 0.0f, 48000.0) == v);
+    // And a nonsense sample rate is a wire too, rather than a division.
+    CHECK(s.process(0.7f, -50.0f, 0.0) == 0.7f);
+}
+
+TEST_CASE("a positive Smooth slews at a constant rate", "[brew][smooth]") {
+    // Calibrated so the number is the time a full -1..+1 swing takes.
+    constexpr double kSr = 48000.0;
+    Smoother s;
+    s.reset(-1.0f);
+    constexpr float kMs = 100.0f;
+    const int expect = static_cast<int>(kMs * 0.001 * kSr);   // 4800 samples
+    for (int n = 0; n < expect - 1; ++n) CHECK(s.process(1.0f, kMs, kSr) < 1.0f);
+    CHECK_THAT(s.process(1.0f, kMs, kSr), Catch::Matchers::WithinAbs(1.0f, 1e-5f));
+    // Half the distance takes half the time.
+    s.reset(0.0f);
+    for (int n = 0; n < expect / 2 - 1; ++n) CHECK(s.process(1.0f, kMs, kSr) < 1.0f);
+    CHECK_THAT(s.process(1.0f, kMs, kSr), Catch::Matchers::WithinAbs(1.0f, 1e-5f));
+}
+
+namespace {
+/// The one-pole, written out longhand: one `exp` per sample, no cache. What the
+/// cached coefficient has to agree with, bit for bit.
+float longhand_one_pole(float state, float target, float ms, double sr) {
+    const double tau = static_cast<double>(-ms) * 0.001;
+    const auto a = static_cast<float>(std::exp(-1.0 / (tau * sr)));
+    return a * state + (1.0f - a) * target;
+}
+}  // namespace
+
+TEST_CASE("the cached one-pole coefficient is bit-identical to recomputing it",
+          "[brew][smooth]") {
+    constexpr double kSr = 48000.0;
+    constexpr float kMs = -40.0f;
+    Smoother s;
+    float longhand = 0.0f;
+    for (int n = 0; n < 2000; ++n) {
+        const float target = n < 1000 ? 0.8f : -0.4f;
+        longhand = longhand_one_pole(longhand, target, kMs, kSr);
+        INFO("sample " << n);
+        CHECK(s.process(target, kMs, kSr) == longhand);
+    }
+}
+
+TEST_CASE("changing the Smooth time or the sample rate recomputes the coefficient",
+          "[brew][smooth]") {
+    // The cache is keyed on both. A stale coefficient would leave the filter running
+    // at whatever rate the last block used, which is a smoother that ignores its own
+    // knob — and every sample of it would still look plausible.
+    constexpr double kSr = 48000.0;
+    Smoother fast, slow;
+    fast.reset(1.0f);
+    slow.reset(1.0f);
+    for (int n = 0; n < 64; ++n) {
+        (void)fast.process(0.0f, -1.0f, kSr);
+        (void)slow.process(0.0f, -200.0f, kSr);
+    }
+    CHECK(fast.value() < slow.value());
+
+    // Run one at -200 ms, then switch it to -1 ms: it must now behave like `fast`.
+    Smoother switched;
+    switched.reset(1.0f);
+    for (int n = 0; n < 64; ++n) (void)switched.process(0.0f, -200.0f, kSr);
+    CHECK_THAT(switched.value(), Catch::Matchers::WithinAbs(slow.value(), 1e-6f));
+    // Ten time constants at the new setting. A cache that ignored the change would
+    // still be crawling at the old one's rate.
+    for (int n = 0; n < 480; ++n) (void)switched.process(0.0f, -1.0f, kSr);
+    CHECK(switched.value() < 1e-3f);
+
+    // Same control, half the sample rate: half as many samples to the same place.
+    Smoother a, b;
+    a.reset(1.0f);
+    b.reset(1.0f);
+    for (int n = 0; n < 96; ++n) (void)a.process(0.0f, -1.0f, 48000.0);
+    for (int n = 0; n < 48; ++n) (void)b.process(0.0f, -1.0f, 24000.0);
+    CHECK_THAT(a.value(), Catch::Matchers::WithinAbs(b.value(), 1e-6f));
+}
+
+TEST_CASE("the one-pole's tail is flushed rather than left to go denormal",
+          "[brew][smooth]") {
+    // A one-pole never arrives. Left alone its state lands in the denormal range,
+    // where every multiply costs an order of magnitude more than a normal one — a
+    // control-rate filter that gets slower the quieter it is.
+    constexpr double kSr = 48000.0;
+    Smoother s;
+    s.reset(1.0f);
+    float last = 1.0f;
+    for (int n = 0; n < 200000 && last != 0.0f; ++n) last = s.process(0.0f, -1.0f, kSr);
+    CHECK(last == 0.0f);
+    CHECK(s.value() == 0.0f);
+    // And it stays there rather than being nudged back off zero.
+    CHECK(s.process(0.0f, -1.0f, kSr) == 0.0f);
+}
+
+TEST_CASE("reset() reprimes the coefficient cache", "[brew][smooth]") {
+    constexpr double kSr = 48000.0;
+    Smoother s;
+    for (int n = 0; n < 64; ++n) (void)s.process(0.0f, -200.0f, kSr);
+    s.reset(1.0f);
+    // A slow coefficient left in the cache would be used for this fast sample.
+    const float first = s.process(0.0f, -1.0f, kSr);
+    Smoother fresh;
+    fresh.reset(1.0f);
+    CHECK(first == fresh.process(0.0f, -1.0f, kSr));
+}
+
+// ── How a value reads ────────────────────────────────────────────────────────
+
+TEST_CASE("A menu index reads back as a name, and clamps rather than wraps",
+          "[brew][text]") {
+    static const char* const kNames[] = {"Off", "Add", "Mul"};
+
+    CHECK(text::named_at(kNames, 3, 0.0f) == "Off");
+    CHECK(text::named_at(kNames, 3, 1.0f) == "Add");
+    CHECK(text::named_at(kNames, 3, 2.0f) == "Mul");
+
+    // Rounding, so a normalized round-trip that lands a hair off an integer still
+    // names the mode the DSP will select.
+    CHECK(text::named_at(kNames, 3, 0.51f) == "Add");
+    CHECK(text::named_at(kNames, 3, 1.49f) == "Add");
+
+    // Out of range clamps to the nearest legal index. It must never wrap: a label
+    // naming a mode other than the one running is worse than no label.
+    CHECK(text::named_at(kNames, 3, -4.0f) == "Off");
+    CHECK(text::named_at(kNames, 3, 9.0f) == "Mul");
+}
+
+TEST_CASE("Smooth reads as the control it is, not as a signed millisecond count",
+          "[brew][text]") {
+    // Zero is not "0.0 ms" — the smoother is out of the circuit entirely.
+    CHECK(text::smooth(0.0f) == "off");
+    CHECK(text::smooth(250.0f) == "slew 250");
+    CHECK(text::smooth(-250.0f) == "lpf 250");
+    // The sign carries the mode, so it must never survive into the number.
+    CHECK(text::smooth(-1.0f).find('-') == std::string::npos);
+}
+
+TEST_CASE("A toggle reads as a state, and a fraction as a percentage",
+          "[brew][text]") {
+    CHECK(text::on_off(0.0f) == "off");
+    CHECK(text::on_off(1.0f) == "on");
+    // A Toggle writes exactly 0 or 1, but a host automating the same parameter
+    // may hand it anything in between; half-way is on, as `as_toggle` reads it.
+    CHECK(text::on_off(0.5f) == "on");
+    CHECK(text::on_off(0.49f) == "off");
+
+    CHECK(text::fraction_percent(0.0f) == "0%");
+    CHECK(text::fraction_percent(1.0f) == "100%");
+}
+
+TEST_CASE("The suite's shared menus are the length their consumers assume",
+          "[brew][text]") {
+    // A name table one entry short of its enum silently clamps the last mode onto
+    // the second-to-last name, which reads as a working label.
+    CHECK(std::size(text::kSyncNames) == 8);
+    CHECK(std::size(text::kStepSyncNames) == 10);
+    CHECK(std::size(text::kMultiplierNames) == 5);
+    CHECK(std::size(text::kDivisorNames) == 5);
+    CHECK(std::size(text::kInputModeNames) == 4);
+
+    // The stepped LFO's menu extends the continuous one; a user who learns "Trans"
+    // on one must not find it means something else on the other.
+    for (std::size_t i = 0; i < std::size(text::kSyncNames); ++i)
+        CHECK(std::string(text::kSyncNames[i]) == text::kStepSyncNames[i]);
 }
