@@ -9,18 +9,20 @@ namespace pulp::format {
 
 /// Persistent fork-join worker pool for the levelized parallel graph executor.
 ///
-/// Threads are spawned once at start() (off the audio thread) and parked on a
-/// bounded atomic until run() publishes a batch. run() executes `task_count`
+/// Threads are spawned once at start() (off the audio thread) and wait on a
+/// bounded spin followed by C++20 atomic parking until run() publishes a batch.
+/// run() executes `task_count`
 /// tasks across the pool's threads PLUS the calling (audio) thread, then returns
 /// when every task has completed — no allocation, no lock, no condition variable
-/// in run(). It is the persistent-worker / epoch-publish / bounded-atomic
+/// in run(). It is the persistent-worker / epoch-publish / bounded-atomic-wait
 /// pattern (masterwork §6.1): the audio callback owns the fork-join, workers
 /// never allocate or steal.
 ///
 /// Tasks are claimed cooperatively via an atomic cursor, so a task is a small
 /// index the caller maps to a unit of work (e.g. a node in the current level).
-/// The same pool is reused across blocks. Idle workers spin with a yield-backoff;
-/// OS-park / device-workgroup joins are outside the current pool contract.
+/// The same pool is reused across blocks. Worker threads enter the audio
+/// workgroup or best-effort realtime priority path once, then keep denormals
+/// flushed while running every batch.
 ///
 /// Lifetime: start()/stop() are control-thread only. run() is audio-thread only
 /// and must not overlap a stop(). A run_fn must be RT-safe (no alloc/lock) — the
@@ -44,8 +46,16 @@ public:
     // Off-RT: signal and join all worker threads. Idempotent.
     void stop() noexcept;
 
+    // Off-RT: set an optional platform audio workgroup handle before start().
+    // On macOS this is an os_workgroup_t from the device callback; other
+    // platforms ignore the value and use the best-effort priority fallback.
+    void set_audio_workgroup(void* workgroup) noexcept;
+
     std::uint32_t worker_count() const noexcept { return worker_count_; }
     bool running() const noexcept { return running_.load(std::memory_order_acquire); }
+    std::uint64_t worker_park_count() const noexcept {
+        return worker_park_count_.load(std::memory_order_relaxed);
+    }
 
     // RT-safe: run `fn(context, i)` for every i in [0, task_count) exactly once,
     // distributed across the pool threads and the calling thread, and return only
@@ -64,6 +74,7 @@ private:
 
     std::vector<std::thread> threads_;
     std::uint32_t worker_count_ = 0;
+    std::atomic<void*> audio_workgroup_{nullptr};
 
     // Published batch (valid for the current epoch). Written by run() before the
     // epoch bump (release), read by workers after observing the new epoch
@@ -74,15 +85,15 @@ private:
 
     // Epoch a worker waits on; bumped by run() to publish a batch. stop() bumps
     // it with `stopping_` set so workers exit.
-    std::atomic<std::uint64_t> epoch_{0};
-    std::atomic<bool> stopping_{false};
-    std::atomic<bool> running_{false};
+    alignas(64) std::atomic<std::uint64_t> epoch_{0};
+    alignas(64) std::atomic<bool> stopping_{false};
+    alignas(64) std::atomic<bool> running_{false};
 
     // MONOTONIC count of tasks completed across all batches (each worker adds its
     // range size with release; the caller acquire-waits until it reaches the
     // batch target). Never reset — a reset would race a lagging worker's add from
     // the previous batch. 64-bit so it never wraps in a long session.
-    std::atomic<std::uint64_t> completed_{0};
+    alignas(64) std::atomic<std::uint64_t> completed_{0};
     // The value of completed_ before the current batch (caller-only scratch, so
     // the per-batch target is completed_base_ + task_count_).
     std::uint64_t completed_base_ = 0;
@@ -90,7 +101,8 @@ private:
     // Debug-only guard asserting run() is never called re-entrantly / from two
     // threads at once — the load-bearing invariant the lock-free barrier relies
     // on. Compiled out (and never touched) in release builds.
-    std::atomic<bool> in_run_{false};
+    alignas(64) std::atomic<bool> in_run_{false};
+    alignas(64) std::atomic<std::uint64_t> worker_park_count_{0};
 };
 
 } // namespace pulp::format
