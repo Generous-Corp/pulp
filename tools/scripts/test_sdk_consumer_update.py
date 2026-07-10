@@ -188,6 +188,42 @@ class PublishRunbook(unittest.TestCase):
         self.assertIn("No packaged consumers matched", out)
 
 
+class CloneReuse(unittest.TestCase):
+    """A reused --workdir checkout is identity-verified and refreshed before we
+    rewrite its pins and open a PR — never bump a stale or foreign tree."""
+
+    def _existing(self) -> pathlib.Path:
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        checkout = d / "pulp-gpu-nam"
+        checkout.mkdir()
+        return checkout
+
+    def test_rejects_a_foreign_checkout(self):
+        dest = self._existing()
+        with mock.patch.object(MOD, "_run",
+                               return_value=(0, "git@github.com:o/some-other.git")):
+            ok, msg = MOD.clone("o/pulp-gpu-nam", dest)
+        self.assertFalse(ok)
+        self.assertIn("not o/pulp-gpu-nam", msg)
+
+    def test_refreshes_a_matching_checkout(self):
+        dest = self._existing()
+        calls = []
+
+        def fake_run(cmd, cwd=None):
+            calls.append(cmd)
+            if "get-url" in cmd:
+                return 0, "git@github.com:o/pulp-gpu-nam.git"
+            return 0, ""
+
+        with mock.patch.object(MOD, "_run", side_effect=fake_run):
+            ok, _ = MOD.clone("o/pulp-gpu-nam", dest)
+        self.assertTrue(ok)
+        self.assertTrue(any("fetch" in c for c in calls))
+        self.assertTrue(any("reset" in c for c in calls))
+
+
 class UpdateCli(unittest.TestCase):
     def _run(self, argv):
         old = sys.argv

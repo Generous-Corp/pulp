@@ -132,24 +132,33 @@ def _ver_eq(a: str | None, b: str | None) -> bool:
     return ta + (0,) * (n - len(ta)) == tb + (0,) * (n - len(tb))
 
 
+_MEASURE_MOD = None
+
+
+def _measure_mod():
+    """Load measure_min_os.py once and cache it. Deferred (not a module-level
+    import) so this script stays importable if that module moves; memoized so a
+    large sweep doesn't re-exec the module for every artifact of every repo."""
+    global _MEASURE_MOD
+    if _MEASURE_MOD is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("measure_min_os", MEASURE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _MEASURE_MOD = mod
+    return _MEASURE_MOD
+
+
 def measure_artifact(path: Path) -> tuple[str | None, str | None]:
-    """Delegate to measure_min_os.measure_artifact without importing at module
-    load (keeps this script importable even if that module moves)."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("measure_min_os", MEASURE)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.measure_artifact(path)
+    """Delegate to measure_min_os.measure_artifact (module loaded once, cached)."""
+    return _measure_mod().measure_artifact(path)
 
 
 def discover_artifacts(build_dir: Path) -> list[Path]:
     """Final linked binaries under a build tree: Mach-O / ELF / PE files that are
     the consumer's shipped output, not intermediate static archives (.a) or
     vendored dependency builds. Returns a sorted, de-duplicated list."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("measure_min_os", MEASURE)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = _measure_mod()
 
     found: set[Path] = set()
     for root, dirs, files in os.walk(build_dir):
@@ -227,11 +236,28 @@ def _run(cmd: list[str], cwd: Path | None = None, log: Path | None = None) -> tu
 def clone(repo: str, dest: Path, log: Path) -> tuple[bool, str]:
     """Clone via SSH (agent git is SSH-routed; never rewrite to HTTPS)."""
     if dest.exists():
-        # Already present (e.g. a pre-cloned checkout in --workdir) — reuse it.
-        return True, "reused existing checkout"
+        # A pre-existing checkout in --workdir. Don't blindly trust it: verify it
+        # is actually THIS repo, then refresh it to the remote tip, so the sweep
+        # never measures a stale or foreign tree and reports it as authoritative.
+        ok, reason = _refresh_existing_checkout(repo, dest, log)
+        return ok, reason
     url = f"git@github.com:{repo}.git"
     rc, out = _run(["git", "clone", "--depth", "1", url, str(dest)], log=log)
     return rc == 0, out.strip().splitlines()[-1] if out.strip() else "clone failed"
+
+
+def _refresh_existing_checkout(repo: str, dest: Path, log: Path) -> tuple[bool, str]:
+    """Verify a reused checkout is `repo` and fast-forward it to the remote tip."""
+    rc, out = _run(["git", "-C", str(dest), "remote", "get-url", "origin"], log=log)
+    url = out.strip().splitlines()[-1].strip() if rc == 0 and out.strip() else ""
+    slug = repo.split("/", 1)[-1].removesuffix(".git")
+    if rc != 0 or slug not in url:
+        return False, f"existing checkout is not {repo} (origin={url or 'unknown'})"
+    rc, _ = _run(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", "HEAD"], log=log)
+    if rc != 0:
+        return False, "reused checkout: fetch failed (stale; refusing to measure it)"
+    _run(["git", "-C", str(dest), "reset", "--hard", "FETCH_HEAD"], log=log)
+    return True, "reused + refreshed existing checkout"
 
 
 def build_one(plan: Plan, sdk_prefix: Path, checkout: Path, jobs: int,
