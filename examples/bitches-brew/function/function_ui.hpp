@@ -98,23 +98,12 @@ public:
     explicit FunctionUi(state::StateStore& store, const FunctionProcessor& proc)
         : ui::BrewPanel("Function", "shape an incoming control voltage"),
           store_(store) {
-        auto number = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.2f", v);
-            return std::string(buf);
-        };
-        auto curve_name = [](float v) {
-            switch (curve_from_param(v)) {
-                case Curve::linear: return std::string("lin");
-                case Curve::exponential: return std::string("exp");
-                case Curve::logarithmic: return std::string("log");
-                case Curve::absolute: return std::string("abs");
-                case Curve::power: return std::string("pow");
-            }
-            return std::string("?");
-        };
+        // `fmt` is empty for every knob but `Amount`, which cannot read its own
+        // value without consulting `Curve` — a dependency the host cannot express,
+        // so it stays here rather than in the parameter's own formatter.
         auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
-                       const char* label, std::function<std::string(float)> fmt) {
+                       const char* label,
+                       std::function<std::string(float)> fmt = {}) {
             auto k = ui::param_knob(store_,
                                     static_cast<state::ParamID>(param_for(id, ch)),
                                     label, std::move(fmt));
@@ -145,14 +134,14 @@ public:
             // Input stage, function, output stage — left to right, the order the
             // signal actually travels.
             auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*top, FunctionProcessor::kInScale, ch, "In Scale", number);
-            add(*top, FunctionProcessor::kInOffset, ch, "In Off", number);
-            add(*top, FunctionProcessor::kCurve, ch, "Curve", curve_name);
+            add(*top, FunctionProcessor::kInScale, ch, "In Scale");
+            add(*top, FunctionProcessor::kInOffset, ch, "In Off");
+            add(*top, FunctionProcessor::kCurve, ch, "Curve");
             add(*top, FunctionProcessor::kAmount, ch, "Amount", amount_or_dash);
-            add(*top, FunctionProcessor::kOutputScale, ch, "Out", number);
+            add(*top, FunctionProcessor::kOutputScale, ch, "Out");
 
             auto bottom = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*bottom, FunctionProcessor::kOutOffset, ch, "Out Off", number);
+            add(*bottom, FunctionProcessor::kOutOffset, ch, "Out Off");
             auto enable = ui::param_toggle(
                 store_,
                 static_cast<state::ParamID>(param_for(FunctionProcessor::kEnable, ch)),

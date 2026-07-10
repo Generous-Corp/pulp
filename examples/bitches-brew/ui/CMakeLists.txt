@@ -31,4 +31,13 @@ if(PULP_BUILD_TESTS)
     target_link_libraries(brew-shots
         PRIVATE pulp::format pulp::osc pulp::events brew-core brew-ui)
     target_include_directories(brew-shots PRIVATE ${_brew_plugin_dirs})
+
+    # Live parameter dumper: walks each plug-in's StateStore, so the parity
+    # tables describe the plug-in a host loads rather than the one a grep of
+    # `.name =` suggests. The view sources come along because each plug-in's
+    # `create_view()` lives there, and the vtable with it.
+    add_executable(brew-params brew_params.cpp ${_brew_view_sources})
+    target_link_libraries(brew-params
+        PRIVATE pulp::format pulp::osc pulp::events brew-core brew-ui)
+    target_include_directories(brew-params PRIVATE ${_brew_plugin_dirs})
 endif()

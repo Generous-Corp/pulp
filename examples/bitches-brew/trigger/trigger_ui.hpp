@@ -104,57 +104,13 @@ public:
     TriggerUi(state::StateStore& store, const TriggerProcessor& proc)
         : ui::BrewPanel("Trigger", "notes and voltages become gates and envelopes"),
           store_(store) {
-        auto plain = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.2f", v);
-            return std::string(buf);
-        };
-        auto signed_plain = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.2f", v);
-            return std::string(buf);
-        };
-        auto whole = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f", v);
-            return std::string(buf);
-        };
-        auto seconds = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.4g s", v);
-            return std::string(buf);
-        };
-        auto millis = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.4g ms", v);
-            return std::string(buf);
-        };
-        auto smooth = [](float v) {
-            char buf[24];
-            if (v == 0.0f) return std::string("off");
-            std::snprintf(buf, sizeof(buf), "%s %.0f", v > 0.0f ? "slew" : "lpf",
-                          std::abs(v));
-            return std::string(buf);
-        };
-
-        // Knobs standing in for menus, reading their own value back as a name. The
-        // index is clamped, never wrapped, so a label can never name a mode other
-        // than the one the DSP is running.
-        auto named = [](const char* const* names, int count) {
-            return [names, count](float v) {
-                int i = static_cast<int>(std::lround(v));
-                i = std::clamp(i, 0, count - 1);
-                return std::string(names[i]);
-            };
-        };
-        static const char* const kModeNames[] = {"Gate", "Trig", "Env", "Vel"};
-        static const char* const kMultNames[] = {"x0.1", "x1", "x10", "x100", "x1k"};
-
+        // Every knob reads its value through the parameter's own formatter, so a
+        // readout here and the host's automation lane are the same string.
         auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
-                       const char* label, std::function<std::string(float)> fmt) {
+                       const char* label) {
             auto k = ui::param_knob(store_,
-                                    static_cast<state::ParamID>(param_for(id, ch)), label,
-                                    std::move(fmt));
+                                    static_cast<state::ParamID>(param_for(id, ch)),
+                                    label);
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
@@ -174,43 +130,41 @@ public:
             scope->flex().align_self = view::FlexAlign::stretch;
 
             auto source = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*source, TriggerProcessor::kMode, ch, "Mode",
-                named(kModeNames, kTriggerSignalCount));
-            add(*source, TriggerProcessor::kNote, ch, "Note", whole);
-            add(*source, TriggerProcessor::kVelocityAmount, ch, "Vel", signed_plain);
-            add(*source, TriggerProcessor::kSmoothMs, ch, "Smooth", smooth);
-            add(*source, TriggerProcessor::kLengthMs, ch, "Length", millis);
+            add(*source, TriggerProcessor::kMode, ch, "Mode");
+            add(*source, TriggerProcessor::kNote, ch, "Note");
+            add(*source, TriggerProcessor::kVelocityAmount, ch, "Vel");
+            add(*source, TriggerProcessor::kSmoothMs, ch, "Smooth");
+            add(*source, TriggerProcessor::kLengthMs, ch, "Length");
 
             auto jack = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*jack, TriggerProcessor::kCvThreshold, ch, "Thresh", signed_plain);
-            add(*jack, TriggerProcessor::kVoltageMin, ch, "V Min", signed_plain);
-            add(*jack, TriggerProcessor::kVoltageMax, ch, "V Max", signed_plain);
-            add(*jack, TriggerProcessor::kOverrideValue, ch, "Value", signed_plain);
-            add(*jack, TriggerProcessor::kMult, ch, "Mult",
-                named(kMultNames, kMultiplierCount));
+            add(*jack, TriggerProcessor::kCvThreshold, ch, "Thresh");
+            add(*jack, TriggerProcessor::kVoltageMin, ch, "V Min");
+            add(*jack, TriggerProcessor::kVoltageMax, ch, "V Max");
+            add(*jack, TriggerProcessor::kOverrideValue, ch, "Value");
+            add(*jack, TriggerProcessor::kMult, ch, "Mult");
 
             // Each stage's level, time, and curve, in the order the envelope walks
             // them. A3 falls to `Sustain` and R2 falls to zero, so neither has a
             // level of its own to show.
             auto stage_a = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*stage_a, TriggerProcessor::kLevelA1, ch, "Lvl A1", plain);
-            add(*stage_a, TriggerProcessor::kTimeA1, ch, "Time A1", seconds);
-            add(*stage_a, TriggerProcessor::kCurveA1, ch, "Crv A1", signed_plain);
-            add(*stage_a, TriggerProcessor::kLevelA2, ch, "Lvl A2", plain);
-            add(*stage_a, TriggerProcessor::kTimeA2, ch, "Time A2", seconds);
+            add(*stage_a, TriggerProcessor::kLevelA1, ch, "Lvl A1");
+            add(*stage_a, TriggerProcessor::kTimeA1, ch, "Time A1");
+            add(*stage_a, TriggerProcessor::kCurveA1, ch, "Crv A1");
+            add(*stage_a, TriggerProcessor::kLevelA2, ch, "Lvl A2");
+            add(*stage_a, TriggerProcessor::kTimeA2, ch, "Time A2");
 
             auto stage_b = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*stage_b, TriggerProcessor::kCurveA2, ch, "Crv A2", signed_plain);
-            add(*stage_b, TriggerProcessor::kTimeA3, ch, "Time A3", seconds);
-            add(*stage_b, TriggerProcessor::kCurveA3, ch, "Crv A3", signed_plain);
-            add(*stage_b, TriggerProcessor::kSustain, ch, "Sustain", plain);
-            add(*stage_b, TriggerProcessor::kLevelR1, ch, "Lvl R1", plain);
+            add(*stage_b, TriggerProcessor::kCurveA2, ch, "Crv A2");
+            add(*stage_b, TriggerProcessor::kTimeA3, ch, "Time A3");
+            add(*stage_b, TriggerProcessor::kCurveA3, ch, "Crv A3");
+            add(*stage_b, TriggerProcessor::kSustain, ch, "Sustain");
+            add(*stage_b, TriggerProcessor::kLevelR1, ch, "Lvl R1");
 
             auto stage_c = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*stage_c, TriggerProcessor::kTimeR1, ch, "Time R1", seconds);
-            add(*stage_c, TriggerProcessor::kCurveR1, ch, "Crv R1", signed_plain);
-            add(*stage_c, TriggerProcessor::kTimeR2, ch, "Time R2", seconds);
-            add(*stage_c, TriggerProcessor::kCurveR2, ch, "Crv R2", signed_plain);
+            add(*stage_c, TriggerProcessor::kTimeR1, ch, "Time R1");
+            add(*stage_c, TriggerProcessor::kCurveR1, ch, "Crv R1");
+            add(*stage_c, TriggerProcessor::kTimeR2, ch, "Time R2");
+            add(*stage_c, TriggerProcessor::kCurveR2, ch, "Crv R2");
 
             auto switches = ui::row(ui::kRowGap, ui::kToggleHeight);
             toggle(*switches, TriggerProcessor::kAnyNote, ch, "Any Note");

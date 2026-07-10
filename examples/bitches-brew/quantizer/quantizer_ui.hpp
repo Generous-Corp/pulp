@@ -82,50 +82,13 @@ public:
     explicit QuantizerUi(state::StateStore& store, const QuantizerProcessor& proc)
         : ui::BrewPanel("Quantizer", "snap a control voltage to discrete steps"),
           store_(store) {
-        auto whole = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f", v);
-            return std::string(buf);
-        };
-        auto signed_whole = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.0f", v);
-            return std::string(buf);
-        };
-        auto number = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.2f", v);
-            return std::string(buf);
-        };
-
-        // Knobs standing in for menus, reading their own value back as a name.
-        // The index is clamped, never wrapped, so a label can never name a mode
-        // other than the one the DSP is running.
-        auto named = [](const char* const* names, int count) {
-            return [names, count](float v) {
-                int i = static_cast<int>(std::lround(v));
-                i = std::clamp(i, 0, count - 1);
-                return std::string(names[i]);
-            };
-        };
-        static const char* const kModeNames[] = {"Man", "Scale"};
-        static const char* const kScaleNames[] = {"chrom", "maj",   "min",   "harm",
-                                                  "pent+", "pent-", "blues", "whole",
-                                                  "dor",   "mixo"};
-        static const char* const kKeyNames[] = {"C",  "C#", "D",  "D#", "E",  "F",
-                                                "F#", "G",  "G#", "A",  "A#", "B"};
-        // Sign carries the mode: positive slews, negative low-passes.
-        auto millis = [](float v) {
-            char buf[20];
-            std::snprintf(buf, sizeof(buf), "%+.0f ms", v);
-            return std::string(buf);
-        };
-
+        // Every knob reads its value through the parameter's own formatter, so a
+        // readout here and the host's automation lane are the same string.
         auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
-                       const char* label, std::function<std::string(float)> fmt) {
+                       const char* label) {
             auto k = ui::param_knob(store_,
                                     static_cast<state::ParamID>(param_for(id, ch)),
-                                    label, std::move(fmt));
+                                    label);
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
@@ -138,19 +101,18 @@ public:
             graph->flex().align_self = view::FlexAlign::stretch;
 
             auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*top, QuantizerProcessor::kMode, ch, "Mode", named(kModeNames, 2));
-            add(*top, QuantizerProcessor::kSteps, ch, "Steps", whole);
-            add(*top, QuantizerProcessor::kFine, ch, "Fine", number);
-            add(*top, QuantizerProcessor::kOffset, ch, "Offset", number);
-            add(*top, QuantizerProcessor::kTranspose, ch, "Transp", signed_whole);
+            add(*top, QuantizerProcessor::kMode, ch, "Mode");
+            add(*top, QuantizerProcessor::kSteps, ch, "Steps");
+            add(*top, QuantizerProcessor::kFine, ch, "Fine");
+            add(*top, QuantizerProcessor::kOffset, ch, "Offset");
+            add(*top, QuantizerProcessor::kTranspose, ch, "Transp");
 
             auto mid = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*mid, QuantizerProcessor::kScale, ch, "Scale",
-                named(kScaleNames, kScaleCount));
-            add(*mid, QuantizerProcessor::kKey, ch, "Key", named(kKeyNames, 12));
-            add(*mid, QuantizerProcessor::kKeyOffset, ch, "Key Off", signed_whole);
-            add(*mid, QuantizerProcessor::kSmoothMs, ch, "Smooth", millis);
-            add(*mid, QuantizerProcessor::kOutputScale, ch, "Out", number);
+            add(*mid, QuantizerProcessor::kScale, ch, "Scale");
+            add(*mid, QuantizerProcessor::kKey, ch, "Key");
+            add(*mid, QuantizerProcessor::kKeyOffset, ch, "Key Off");
+            add(*mid, QuantizerProcessor::kSmoothMs, ch, "Smooth");
+            add(*mid, QuantizerProcessor::kOutputScale, ch, "Out");
 
             auto bottom = ui::row(ui::kRowGap, ui::kToggleHeight);
             auto en = ui::param_toggle(

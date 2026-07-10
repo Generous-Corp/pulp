@@ -88,65 +88,13 @@ public:
     LfoUi(state::StateStore& store, const LfoProcessor& proc)
         : ui::BrewPanel("LFO", "two modulation sources, tempo-locked or free"),
           store_(store) {
-        auto beats = [](float v) {
-            char buf[20];
-            std::snprintf(buf, sizeof(buf), "%.4g", v);
-            return std::string(buf);
-        };
-        auto degrees = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f°", v);
-            return std::string(buf);
-        };
-        auto depth = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.2f", v);
-            return std::string(buf);
-        };
-        auto whole = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f", v);
-            return std::string(buf);
-        };
-        auto percent = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.1f%%", v);
-            return std::string(buf);
-        };
-        auto millis = [](float v) {
-            char buf[24];
-            if (v == 0.0f) return std::string("off");
-            std::snprintf(buf, sizeof(buf), "%s %.0f", v > 0.0f ? "slew" : "lpf",
-                          std::abs(v));
-            return std::string(buf);
-        };
-        auto hertz = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.4g", v);
-            return std::string(buf);
-        };
-
-        // Knobs standing in for menus, reading their own value back as a name. The
-        // index is clamped, never wrapped, so a label can never name a mode other
-        // than the one the DSP is running.
-        auto named = [](const char* const* names, int count) {
-            return [names, count](float v) {
-                int i = static_cast<int>(std::lround(v));
-                i = std::clamp(i, 0, count - 1);
-                return std::string(names[i]);
-            };
-        };
-        static const char* const kSyncNames[] = {"Free",  "Tempo", "Trans", "Quad",
-                                                 "St/Sp", "Trans2", "Free2", "Free3"};
-        static const char* const kMultNames[] = {"x0.1", "x1", "x10", "x100", "x1k"};
-        static const char* const kDivNames[] = {"1/1", "1/2", "1/4", "1/8", "1/16"};
-        static const char* const kInputNames[] = {"Off", "Add", "Mul", "Comb"};
-
+        // Every knob reads its value through the parameter's own formatter, so a
+        // readout here and the host's automation lane are the same string.
         auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
-                       const char* label, std::function<std::string(float)> fmt) {
+                       const char* label) {
             auto k = ui::param_knob(store_,
                                     static_cast<state::ParamID>(param_for(id, ch)),
-                                    label, std::move(fmt));
+                                    label);
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
@@ -169,40 +117,36 @@ public:
             // are always shown, so changing Sync never makes a knob appear where the
             // mouse already is.
             auto timing = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*timing, LfoProcessor::kSyncMode, ch, "Sync",
-                named(kSyncNames, kSyncModeCount));
-            add(*timing, LfoProcessor::kSpeedHz, ch, "Speed", hertz);
-            add(*timing, LfoProcessor::kMultiplier, ch, "Mult",
-                named(kMultNames, kMultiplierCount));
-            add(*timing, LfoProcessor::kBeats, ch, "Beats", beats);
-            add(*timing, LfoProcessor::kDivisor, ch, "Div",
-                named(kDivNames, kNoteUnitCount));
+            add(*timing, LfoProcessor::kSyncMode, ch, "Sync");
+            add(*timing, LfoProcessor::kSpeedHz, ch, "Speed");
+            add(*timing, LfoProcessor::kMultiplier, ch, "Mult");
+            add(*timing, LfoProcessor::kBeats, ch, "Beats");
+            add(*timing, LfoProcessor::kDivisor, ch, "Div");
 
             // The four depths are summed, not selected. Sine at full and the rest at
             // zero is the single-shape behaviour this replaced.
             auto mix = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*mix, LfoProcessor::kSine, ch, "Sine", depth);
-            add(*mix, LfoProcessor::kTriangle, ch, "Tri", depth);
-            add(*mix, LfoProcessor::kSaw, ch, "Saw", depth);
-            add(*mix, LfoProcessor::kSquare, ch, "Sqr", depth);
-            add(*mix, LfoProcessor::kPulseWidth, ch, "PW", depth);
+            add(*mix, LfoProcessor::kSine, ch, "Sine");
+            add(*mix, LfoProcessor::kTriangle, ch, "Tri");
+            add(*mix, LfoProcessor::kSaw, ch, "Saw");
+            add(*mix, LfoProcessor::kSquare, ch, "Sqr");
+            add(*mix, LfoProcessor::kPulseWidth, ch, "PW");
 
             // Random steps once a cycle, Noise once a sample; both are hashes, so
             // both survive a bounce. Seed rerolls them.
             auto chaos = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*chaos, LfoProcessor::kRandom, ch, "Random", depth);
-            add(*chaos, LfoProcessor::kNoise, ch, "Noise", depth);
-            add(*chaos, LfoProcessor::kSeed, ch, "Seed", whole);
-            add(*chaos, LfoProcessor::kAsymmetry, ch, "Asym", depth);
-            add(*chaos, LfoProcessor::kOffset, ch, "Offset", depth);
+            add(*chaos, LfoProcessor::kRandom, ch, "Random");
+            add(*chaos, LfoProcessor::kNoise, ch, "Noise");
+            add(*chaos, LfoProcessor::kSeed, ch, "Seed");
+            add(*chaos, LfoProcessor::kAsymmetry, ch, "Asym");
+            add(*chaos, LfoProcessor::kOffset, ch, "Offset");
 
             auto shaping = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*shaping, LfoProcessor::kPhaseDegrees, ch, "Phase", degrees);
-            add(*shaping, LfoProcessor::kSwingPercent, ch, "Swing", percent);
-            add(*shaping, LfoProcessor::kSmoothMs, ch, "Smooth", millis);
-            add(*shaping, LfoProcessor::kInputMode, ch, "Input",
-                named(kInputNames, kInputModeCount));
-            add(*shaping, LfoProcessor::kOutputScale, ch, "Out", depth);
+            add(*shaping, LfoProcessor::kPhaseDegrees, ch, "Phase");
+            add(*shaping, LfoProcessor::kSwingPercent, ch, "Swing");
+            add(*shaping, LfoProcessor::kSmoothMs, ch, "Smooth");
+            add(*shaping, LfoProcessor::kInputMode, ch, "Input");
+            add(*shaping, LfoProcessor::kOutputScale, ch, "Out");
 
             auto switches = ui::row(ui::kRowGap, ui::kToggleHeight);
             toggle(*switches, LfoProcessor::kTriplet, ch, "Triplet");

@@ -173,82 +173,10 @@ public:
     StepUi(state::StateStore& store, const StepProcessor& proc)
         : ui::BrewPanel("Step LFO", "an eight-step pattern on the LFO's clock"),
           store_(store) {
-        auto beats = [](float v) {
-            char buf[20];
-            std::snprintf(buf, sizeof(buf), "%.4g", v);
-            return std::string(buf);
-        };
-        auto hertz = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.4g", v);
-            return std::string(buf);
-        };
-        auto number = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.2f", v);
-            return std::string(buf);
-        };
-        auto plain = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.2f", v);
-            return std::string(buf);
-        };
-        auto whole = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f", v);
-            return std::string(buf);
-        };
-        auto signed_whole = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.0f", v);
-            return std::string(buf);
-        };
-        auto pct = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f%%", v * 100.0f);
-            return std::string(buf);
-        };
-        auto percent = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.1f%%", v);
-            return std::string(buf);
-        };
-        auto degrees = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f°", v);
-            return std::string(buf);
-        };
-        auto millis = [](float v) {
-            char buf[24];
-            if (v == 0.0f) return std::string("off");
-            std::snprintf(buf, sizeof(buf), "%s %.0f", v > 0.0f ? "slew" : "lpf",
-                          std::abs(v));
-            return std::string(buf);
-        };
-
-        // Knobs standing in for menus, reading their own value back as a name. The
-        // index is clamped, never wrapped, so a label can never name a mode other
-        // than the one the DSP is running.
-        auto named = [](const char* const* names, int count) {
-            return [names, count](float v) {
-                int i = static_cast<int>(std::lround(v));
-                i = std::clamp(i, 0, count - 1);
-                return std::string(names[i]);
-            };
-        };
-        static const char* const kSyncNames[] = {"Free",  "Tempo", "Trans", "Quad",
-                                                 "St/Sp", "Trans2", "Free2", "Free3",
-                                                 "TrgFr", "TrgTm"};
-        static const char* const kMultNames[] = {"x0.1", "x1", "x10", "x100", "x1k"};
-        static const char* const kDivNames[] = {"1/1", "1/2", "1/4", "1/8", "1/16"};
-        static const char* const kBoundsNames[] = {"Len", "End"};
-        static const char* const kInterpNames[] = {"Step", "Lin"};
-        static const char* const kRoleNames[] = {"Off", "Reset", "Trig", "Sig"};
-        static const char* const kSignalNames[] = {"Off", "Add", "Mul", "Comb"};
-
-        auto add = [&](view::View& row, state::ParamID id, const char* label,
-                       std::function<std::string(float)> fmt) {
-            auto k = ui::param_knob(store_, id, label, std::move(fmt));
+        // Every knob reads its value through the parameter's own formatter, so a
+        // readout here and the host's automation lane are the same string.
+        auto add = [&](view::View& row, state::ParamID id, const char* label) {
+            auto k = ui::param_knob(store_, id, label);
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
@@ -269,44 +197,42 @@ public:
         // Rate. Speed/Mult feed the hertz modes, Beats/Div the beat modes; both are
         // always shown, so changing Sync never makes a knob appear under the mouse.
         auto rate = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*rate, StepProcessor::kSyncMode, "Sync", named(kSyncNames, kStepSyncModeCount));
-        add(*rate, StepProcessor::kSpeedHz, "Speed", hertz);
-        add(*rate, StepProcessor::kMultiplier, "Mult", named(kMultNames, kMultiplierCount));
-        add(*rate, StepProcessor::kBeats, "Beats", beats);
-        add(*rate, StepProcessor::kDivisor, "Div", named(kDivNames, kNoteUnitCount));
+        add(*rate, StepProcessor::kSyncMode, "Sync");
+        add(*rate, StepProcessor::kSpeedHz, "Speed");
+        add(*rate, StepProcessor::kMultiplier, "Mult");
+        add(*rate, StepProcessor::kBeats, "Beats");
+        add(*rate, StepProcessor::kDivisor, "Div");
 
         // The window. `Bounds` chooses which two of Start/Length/End are read.
         auto bounds = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*bounds, StepProcessor::kStart, "Start", whole);
-        add(*bounds, StepProcessor::kLength, "Length", whole);
-        add(*bounds, StepProcessor::kEnd, "End", whole);
-        add(*bounds, StepProcessor::kLengthMode, "Bounds",
-            named(kBoundsNames, kLengthModeCount));
-        add(*bounds, StepProcessor::kInterpolation, "Interp",
-            named(kInterpNames, kInterpolationCount));
+        add(*bounds, StepProcessor::kStart, "Start");
+        add(*bounds, StepProcessor::kLength, "Length");
+        add(*bounds, StepProcessor::kEnd, "End");
+        add(*bounds, StepProcessor::kLengthMode, "Bounds");
+        add(*bounds, StepProcessor::kInterpolation, "Interp");
 
         auto shape = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*shape, StepProcessor::kGlide, "Glide", plain);
-        add(*shape, StepProcessor::kGate, "Gate", pct);
-        add(*shape, StepProcessor::kPhaseDegrees, "Phase", degrees);
-        add(*shape, StepProcessor::kSwingPercent, "Swing", percent);
-        add(*shape, StepProcessor::kAsymmetry, "Asym", plain);
+        add(*shape, StepProcessor::kGlide, "Glide");
+        add(*shape, StepProcessor::kGate, "Gate");
+        add(*shape, StepProcessor::kPhaseDegrees, "Phase");
+        add(*shape, StepProcessor::kSwingPercent, "Swing");
+        add(*shape, StepProcessor::kAsymmetry, "Asym");
 
         auto output = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*output, StepProcessor::kLevelOffset, "Offset", number);
-        add(*output, StepProcessor::kSmoothMs, "Smooth", millis);
-        add(*output, StepProcessor::kRandom, "Random", plain);
-        add(*output, StepProcessor::kSeed, "Seed", whole);
-        add(*output, StepProcessor::kOutputScale, "Out", plain);
+        add(*output, StepProcessor::kLevelOffset, "Offset");
+        add(*output, StepProcessor::kSmoothMs, "Smooth");
+        add(*output, StepProcessor::kRandom, "Random");
+        add(*output, StepProcessor::kSeed, "Seed");
+        add(*output, StepProcessor::kOutputScale, "Out");
 
         // The register. `Rand` is signed: both ends lock a pattern, the middle
         // never repeats.
         auto reg = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*reg, StepProcessor::kRegisterLength, "Bits", whole);
-        add(*reg, StepProcessor::kDacBits, "DAC", whole);
-        add(*reg, StepProcessor::kRandomness, "Rand", number);
-        add(*reg, StepProcessor::kRotate, "Rotate", signed_whole);
-        add(*reg, StepProcessor::kDacScale, "Scale", plain);
+        add(*reg, StepProcessor::kRegisterLength, "Bits");
+        add(*reg, StepProcessor::kDacBits, "DAC");
+        add(*reg, StepProcessor::kRandomness, "Rand");
+        add(*reg, StepProcessor::kRotate, "Rotate");
+        add(*reg, StepProcessor::kDacScale, "Scale");
 
         // The DAC's ladder, most significant first.
         auto weights_hi = ui::row(ui::kRowGap, ui::kKnobHeight);
@@ -314,14 +240,12 @@ public:
         static const char* const kWeightLabels[] = {"W1", "W2", "W3", "W4",
                                                     "W5", "W6", "W7", "W8"};
         for (int i = 0; i < kMaxDacBits; ++i)
-            add(i < 4 ? *weights_hi : *weights_lo, StepProcessor::weight_param(i),
-                kWeightLabels[i], plain);
+            add(i < 4 ? *weights_hi : *weights_lo, StepProcessor::weight_param(i), kWeightLabels[i]);
 
         auto inputs = ui::row(ui::kRowGap, ui::kKnobHeight);
-        add(*inputs, StepProcessor::kInputLeft, "In L", named(kRoleNames, kInputRoleCount));
-        add(*inputs, StepProcessor::kInputRight, "In R", named(kRoleNames, kInputRoleCount));
-        add(*inputs, StepProcessor::kSignalMode, "Signal",
-            named(kSignalNames, kInputModeCount));
+        add(*inputs, StepProcessor::kInputLeft, "In L");
+        add(*inputs, StepProcessor::kInputRight, "In R");
+        add(*inputs, StepProcessor::kSignalMode, "Signal");
 
         auto switches_a = ui::row(ui::kRowGap, ui::kToggleHeight);
         toggle(*switches_a, StepProcessor::kTriplet, "Triplet");

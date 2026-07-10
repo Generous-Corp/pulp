@@ -19,6 +19,7 @@
 // time, and a stepped control voltage is an audible zipper on anything it drives.
 
 #include <brew/channels.hpp>
+#include <brew/param_text.hpp>
 #include <brew/clock.hpp>  // beats_per_sample
 #include <brew/cv.hpp>
 #include <brew/lfo.hpp>
@@ -112,11 +113,15 @@ public:
         };
     }
 
+    /// `fmt` is how the value reads — in this editor, and in the host's own
+    /// parameter list and automation lane. A plain function pointer rather than a
+    /// `std::function`, so the table stays `constexpr`.
     struct ControlSpec {
         state::ParamID id;
         const char* name;
         const char* unit;
         state::ParamRange range;
+        std::string (*fmt)(float);
     };
 
     /// Every control an LFO channel has. Registered once per channel: the two
@@ -128,76 +133,81 @@ public:
             // reproducible, and what a modulation source is usually wanted for.
             {kSyncMode, "Sync", "",
              {0.0f, static_cast<float>(kSyncModeCount - 1),
-              kDefaultSync, 1.0f}},
+              kDefaultSync, 1.0f},
+             text::sync_name},
 
             // Hertz modes: Speed × Multiplier.
-            {kSpeedHz, "Speed", "Hz", {0.01f, 40.0f, 1.0f, 0.01f}},
+            {kSpeedHz, "Speed", "Hz", {0.01f, 40.0f, 1.0f, 0.01f}, text::compact},
             {kMultiplier, "Multiplier", "",
              {0.0f, static_cast<float>(kMultiplierCount - 1),
-              kDefaultMultiplier, 1.0f}},
+              kDefaultMultiplier, 1.0f},
+             text::multiplier_name},
 
             // Beat modes: Beats of the note Divisor names, less a third if Triplet.
             // Beats is fractional on purpose — automating it through a non-integer
             // value is a legitimate way to sweep the rate.
-            {kBeats, "Beats", "", {0.0625f, 16.0f, 1.0f, 0.0625f}},
+            {kBeats, "Beats", "", {0.0625f, 16.0f, 1.0f, 0.0625f}, text::compact},
             {kDivisor, "Divisor", "",
              {0.0f, static_cast<float>(kNoteUnitCount - 1),
-              kDefaultDivisor, 1.0f}},
-            {kTriplet, "Triplet", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+              kDefaultDivisor, 1.0f},
+             text::divisor_name},
+            {kTriplet, "Triplet", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
 
             // A constant offset against the locked cycle, and the point a reset
             // snaps back to.
-            {kPhaseDegrees, "Phase", "deg", {0.0f, 360.0f, 0.0f, 1.0f}},
+            {kPhaseDegrees, "Phase", "deg", {0.0f, 360.0f, 0.0f, 1.0f}, text::degrees},
 
             // Four depths, summed. Bipolar, so a shape can be subtracted as easily
             // as added. Sine defaults to full and the rest to zero, which
             // reproduces the single-shape selector this replaced.
-            {kSine, "Sine", "", {-1.0f, 1.0f, 1.0f, 0.001f}},
-            {kTriangle, "Triangle", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
-            {kSaw, "Saw", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
-            {kSquare, "Square", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
-            {kPulseWidth, "Pulse Width", "", {0.01f, 0.99f, 0.5f, 0.001f}},
+            {kSine, "Sine", "", {-1.0f, 1.0f, 1.0f, 0.001f}, text::signed_plain},
+            {kTriangle, "Triangle", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_plain},
+            {kSaw, "Saw", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_plain},
+            {kSquare, "Square", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_plain},
+            {kPulseWidth, "Pulse Width", "", {0.01f, 0.99f, 0.5f, 0.001f}, text::plain},
 
             // A sample-and-hold: one level per cycle, held flat. A hash of the
             // cycle index, so a bounce lands identically. See brew/random.hpp.
-            {kRandom, "Random", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kRandom, "Random", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_plain},
             // The ungated source: a new level every sample. Hashed on the sample
             // index, so it too renders identically every time.
-            {kNoise, "Noise", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
-            {kSeed, "Seed", "", {0.0f, 255.0f, 0.0f, 1.0f}},
+            {kNoise, "Noise", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_plain},
+            {kSeed, "Seed", "", {0.0f, 255.0f, 0.0f, 1.0f}, text::whole},
 
             // Where the waveform's centre falls in time. A pulse-width control
             // generalized to every shape.
-            {kAsymmetry, "Asymmetry", "", {0.01f, 0.99f, 0.5f, 0.001f}},
+            {kAsymmetry, "Asymmetry", "", {0.01f, 0.99f, 0.5f, 0.001f}, text::plain},
             // A constant offset. Set it to +1 with a half-scale mix and the output
             // is unipolar, which is what a VCA or an envelope-depth input wants.
-            {kOffset, "Offset", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kOffset, "Offset", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_plain},
 
             // The same swing Sync applies to its clock, on the same beat timeline.
             // 50% is straight, and bit-identically so.
             {kSwingPercent, "Swing", "%",
              {static_cast<float>(kMinSwing * 100.0),
-              static_cast<float>(kMaxSwing * 100.0), 50.0f, 0.1f}},
-            {kSwingUnit, "Swing Sixteenths", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+              static_cast<float>(kMaxSwing * 100.0), 50.0f, 0.1f},
+             text::percent1},
+            {kSwingUnit, "Swing Sixteenths", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
 
             // What the plug-in does with the voltage on its input bus. Off by
             // default: a modulation source that read its input by default would
             // scream the first time it was dropped on an audio track.
             {kInputMode, "Input Mode", "",
              {0.0f, static_cast<float>(kInputModeCount - 1),
-              kDefaultInputMode, 1.0f}},
+              kDefaultInputMode, 1.0f},
+             text::input_mode_name},
 
             // A MIDI note-on snaps the phase back to `Phase`.
-            {kResetByNote, "Reset By Note", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+            {kResetByNote, "Reset By Note", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
 
             // Positive slews at a constant rate; negative low-passes. Milliseconds
             // for a full swing, as DC's does. Zero is a wire — and it is the
             // default, because a smoothed LFO is the only control here that costs
             // the plug-in its exact locate-invariance. See the note on `smooth_`.
-            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}},
+            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}, text::smooth},
 
-            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}},
-            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}, text::fraction_percent},
+            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
         }};
     }
 
@@ -208,7 +218,8 @@ public:
                     {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
                      .name = std::string(c.name) + channel_suffix(ch),
                      .unit = c.unit,
-                     .range = c.range});
+                     .range = c.range,
+                     .to_string = c.fmt});
     }
 
     // ── Reading one channel's knobs ──────────────────────────────────────────

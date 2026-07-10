@@ -10,12 +10,15 @@
 
 #include <brew/clock.hpp>
 #include <brew/cv.hpp>
+#include <brew/param_text.hpp>
 #include <brew/pulse.hpp>
 #include <brew/run_segment.hpp>
 #include <brew/smooth.hpp>
 
 #include <cmath>
 #include <cstdint>
+#include <iterator>
+#include <string>
 #include <vector>
 
 using namespace pulp::examples::brew;
@@ -631,4 +634,64 @@ TEST_CASE("reset() reprimes the coefficient cache", "[brew][smooth]") {
     Smoother fresh;
     fresh.reset(1.0f);
     CHECK(first == fresh.process(0.0f, -1.0f, kSr));
+}
+
+// ── How a value reads ────────────────────────────────────────────────────────
+
+TEST_CASE("A menu index reads back as a name, and clamps rather than wraps",
+          "[brew][text]") {
+    static const char* const kNames[] = {"Off", "Add", "Mul"};
+
+    CHECK(text::named_at(kNames, 3, 0.0f) == "Off");
+    CHECK(text::named_at(kNames, 3, 1.0f) == "Add");
+    CHECK(text::named_at(kNames, 3, 2.0f) == "Mul");
+
+    // Rounding, so a normalized round-trip that lands a hair off an integer still
+    // names the mode the DSP will select.
+    CHECK(text::named_at(kNames, 3, 0.51f) == "Add");
+    CHECK(text::named_at(kNames, 3, 1.49f) == "Add");
+
+    // Out of range clamps to the nearest legal index. It must never wrap: a label
+    // naming a mode other than the one running is worse than no label.
+    CHECK(text::named_at(kNames, 3, -4.0f) == "Off");
+    CHECK(text::named_at(kNames, 3, 9.0f) == "Mul");
+}
+
+TEST_CASE("Smooth reads as the control it is, not as a signed millisecond count",
+          "[brew][text]") {
+    // Zero is not "0.0 ms" — the smoother is out of the circuit entirely.
+    CHECK(text::smooth(0.0f) == "off");
+    CHECK(text::smooth(250.0f) == "slew 250");
+    CHECK(text::smooth(-250.0f) == "lpf 250");
+    // The sign carries the mode, so it must never survive into the number.
+    CHECK(text::smooth(-1.0f).find('-') == std::string::npos);
+}
+
+TEST_CASE("A toggle reads as a state, and a fraction as a percentage",
+          "[brew][text]") {
+    CHECK(text::on_off(0.0f) == "off");
+    CHECK(text::on_off(1.0f) == "on");
+    // A Toggle writes exactly 0 or 1, but a host automating the same parameter
+    // may hand it anything in between; half-way is on, as `as_toggle` reads it.
+    CHECK(text::on_off(0.5f) == "on");
+    CHECK(text::on_off(0.49f) == "off");
+
+    CHECK(text::fraction_percent(0.0f) == "0%");
+    CHECK(text::fraction_percent(1.0f) == "100%");
+}
+
+TEST_CASE("The suite's shared menus are the length their consumers assume",
+          "[brew][text]") {
+    // A name table one entry short of its enum silently clamps the last mode onto
+    // the second-to-last name, which reads as a working label.
+    CHECK(std::size(text::kSyncNames) == 8);
+    CHECK(std::size(text::kStepSyncNames) == 10);
+    CHECK(std::size(text::kMultiplierNames) == 5);
+    CHECK(std::size(text::kDivisorNames) == 5);
+    CHECK(std::size(text::kInputModeNames) == 4);
+
+    // The stepped LFO's menu extends the continuous one; a user who learns "Trans"
+    // on one must not find it means something else on the other.
+    for (std::size_t i = 0; i < std::size(text::kSyncNames); ++i)
+        CHECK(std::string(text::kSyncNames[i]) == text::kStepSyncNames[i]);
 }

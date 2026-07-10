@@ -28,91 +28,34 @@ public:
         : ui::BrewPanel("Sync", "a clock and a run gate, locked to the host"),
           store_(store),
           proc_(proc) {
-        auto integer = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f", v);
-            return std::string(buf);
-        };
-        auto millis = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.1f ms", v);
-            return std::string(buf);
-        };
-        // The offset is bipolar, and its sign is the whole point: negative pulls
-        // the pulses ahead of the beat to compensate hardware latency.
-        auto signed_millis = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.1f ms", v);
-            return std::string(buf);
-        };
-
-        auto percent = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f%%", v);
-            return std::string(buf);
-        };
-        auto ratio = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f%%", v * 100.0f);
-            return std::string(buf);
-        };
-        // A knob standing in for a menu: it reads its own value back as a name.
-        // The index is clamped, never wrapped, so a value a host hands back out of
-        // range shows the same mode the DSP selects — `enum_from_param` clamps
-        // too, and a label that disagreed with the audio would be worse than none.
-        auto named = [](const char* const* names, int count) {
-            return [names, count](float v) {
-                int i = static_cast<int>(std::lround(v));
-                i = std::clamp(i, 0, count - 1);
-                return std::string(names[i]);
-            };
-        };
-        // "24pp", not "24": the PPQN knob next door also reads 24 by default, and
-        // two adjacent knobs showing the same number invite the reading that one
-        // of them is doing nothing.
-        static const char* const kClockNames[] = {"Off", "24pp", "48pp", "Cust"};
-        static const char* const kRunNames[] = {"Run", "Start", "St/Sp", "Stop"};
-        static const char* const kUnitNames[] = {"1/1", "1/2", "1/4", "1/8", "1/16"};
-        // Zero beats is not a zero-length interval, it is the off switch.
-        auto beats_or_off = [integer](float v) {
-            return v < 0.5f ? std::string("Off") : integer(v);
-        };
-        // The clock's width knob has the same convention: zero selects the 50%
-        // duty square wave rather than a zero-width pulse.
-        auto width_or_square = [millis](float v) {
-            return v <= 0.0f ? std::string("50%") : millis(v);
-        };
-
         auto rate = ui::row(ui::kRowGap, ui::kKnobHeight);
         auto timing = ui::row(ui::kRowGap, ui::kKnobHeight);
         auto run = ui::row(ui::kRowGap, ui::kKnobHeight);
         auto out = ui::row(ui::kRowGap, ui::kKnobHeight);
-        auto add_knob = [&](vw_row& into, state::ParamID id, const char* label,
-                            std::function<std::string(float)> fmt) {
-            auto k = ui::param_knob(store_, id, label, std::move(fmt));
+        // Every knob reads its value through the parameter's own formatter, so a
+        // readout here and the host's automation lane are the same string.
+        auto add_knob = [&](vw_row& into, state::ParamID id, const char* label) {
+            auto k = ui::param_knob(store_, id, label);
             ui::knob_size(*k);
             into->add_child(std::move(k));
         };
-        add_knob(rate, SyncProcessor::kClockType, "Type",
-                 named(kClockNames, kClockTypeCount));
-        add_knob(rate, SyncProcessor::kPulsesPerBeat, "PPQN", integer);
-        add_knob(rate, SyncProcessor::kMultiplier, "Mult", integer);
-        add_knob(rate, SyncProcessor::kDivisor, "Div", integer);
-        add_knob(rate, SyncProcessor::kTriggerLengthMs, "Width", width_or_square);
+        add_knob(rate, SyncProcessor::kClockType, "Type");
+        add_knob(rate, SyncProcessor::kPulsesPerBeat, "PPQN");
+        add_knob(rate, SyncProcessor::kMultiplier, "Mult");
+        add_knob(rate, SyncProcessor::kDivisor, "Div");
+        add_knob(rate, SyncProcessor::kTriggerLengthMs, "Width");
 
-        add_knob(timing, SyncProcessor::kFirstDelayMs, "1st Dly", millis);
-        add_knob(timing, SyncProcessor::kOffsetMs, "Offset", signed_millis);
-        add_knob(timing, SyncProcessor::kSwingPercent, "Swing", percent);
+        add_knob(timing, SyncProcessor::kFirstDelayMs, "1st Dly");
+        add_knob(timing, SyncProcessor::kOffsetMs, "Offset");
+        add_knob(timing, SyncProcessor::kSwingPercent, "Swing");
 
-        add_knob(run, SyncProcessor::kRunType, "Run Sig",
-                 named(kRunNames, kRunSignalCount));
-        add_knob(run, SyncProcessor::kRunLevel, "Level", ratio);
-        add_knob(run, SyncProcessor::kRunPulseMs, "Pulse", millis);
-        add_knob(run, SyncProcessor::kResetBeats, "Reset", beats_or_off);
-        add_knob(run, SyncProcessor::kResetUnit, "Unit",
-                 named(kUnitNames, kNoteUnitCount));
+        add_knob(run, SyncProcessor::kRunType, "Run Sig");
+        add_knob(run, SyncProcessor::kRunLevel, "Level");
+        add_knob(run, SyncProcessor::kRunPulseMs, "Pulse");
+        add_knob(run, SyncProcessor::kResetBeats, "Reset");
+        add_knob(run, SyncProcessor::kResetUnit, "Unit");
 
-        add_knob(out, SyncProcessor::kOutputScale, "Out", ratio);
+        add_knob(out, SyncProcessor::kOutputScale, "Out");
 
         // Which note the swing moves. Off swings the eighth, on the sixteenth.
         auto sixteenths =

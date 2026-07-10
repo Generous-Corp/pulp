@@ -53,17 +53,6 @@ public:
           store_(store), proc_(proc) {
         const OscSettings settings = proc_.osc_settings();
 
-        auto hz = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f Hz", v);
-            return std::string(buf);
-        };
-        auto fine = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.4f", v);
-            return std::string(buf);
-        };
-
         // ── Destination ──────────────────────────────────────────────────────
         auto target = std::make_unique<ui::TextField>(
             "Target (host:port)", format_osc_target(settings.target),
@@ -106,7 +95,7 @@ public:
 
         // ── The rate, once, because one thread sends both channels ────────────
         auto global = ui::row(ui::kRowGap, ui::kKnobHeight);
-        auto rate = ui::param_knob(store_, CvOscProcessor::kRateHz, "Rate", hz);
+        auto rate = ui::param_knob(store_, CvOscProcessor::kRateHz, "Rate");
         ui::knob_size(*rate);
         global->add_child(std::move(rate));
         add_child(std::move(global));
@@ -124,7 +113,7 @@ public:
             auto threshold = ui::param_knob(
                 store_,
                 static_cast<state::ParamID>(param_for(CvOscProcessor::kThreshold, ch)),
-                "Threshold", fine);
+                "Threshold");
             ui::knob_size(*threshold);
             auto enable = ui::param_toggle(
                 store_,
