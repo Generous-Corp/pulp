@@ -1908,6 +1908,42 @@ same source consumed by the GitHub Actions coverage workflow.
 Set `PULP_SKIP_DIFF_COVER=1` for docs-only or workflow-only changes where the
 diff-coverage build is intentionally out of scope.
 
+### minos
+
+**Status**: experimental
+
+Minimum-OS tooling. Reports the lowest OS a build needs, read straight from the
+compiled artifact — the floor is the highest minimum among everything linked in
+(Pulp's libraries, the C++ runtime, your own code). See the
+[Minimum OS Support](../guides/minimum-os-support.md) guide for the full
+explanation.
+
+```bash
+pulp minos                              # show help
+pulp minos measure <binary>             # one binary's OS floor
+pulp minos sweep --sdk-prefix <path>            # rebuild + measure every consumer
+pulp minos sweep --sdk-prefix <path> --dry-run  # print the sweep plan only
+```
+
+`pulp minos measure` reads a single binary and prints `<kind> <floor>`, e.g.
+`macho 13.3` (macOS 13.3), `elf 2.34` (glibc 2.34), `pe 10.0` (Windows 10). It
+accepts a `.dylib`/`.so`/`.dll`, a `.a` static archive, an executable, or a
+plugin bundle's inner binary. It shells out to
+`tools/scripts/measure_min_os.py`.
+
+`pulp minos sweep` rebuilds every downstream consumer against one installed SDK
+(the directory containing `lib/cmake/Pulp`) and reports each project's floor next
+to the SDK floor, flagging `DRIFT` when a project needs a higher OS than the SDK
+declares. It exits non-zero on any build failure or drift, so it can gate a
+release. Options pass through to `tools/scripts/sdk_consumer_sweep.py` (`--only`,
+`--json`, `--dry-run`). The consumer list is
+`planning/sdk-consumers/consumers.yaml`; per-repo build knobs are in
+`tools/scripts/sdk_consumer_sweep_recipes.yaml`. The sweep needs PyYAML
+(`python3 -m pip install pyyaml`).
+
+`pulp minos measure` is also exposed to agents over MCP as the `pulp_minos`
+tool; the sweep is CLI-only because it clones and builds many repositories.
+
 ### clean
 
 **Status**: usable

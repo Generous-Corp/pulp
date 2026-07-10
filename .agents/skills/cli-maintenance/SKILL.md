@@ -1491,6 +1491,38 @@ test: `tools/scripts/test_local_diff_cover.py::WorkflowSourceOfTruthTests`
 fails if a future edit hardcodes `--fail-under=NN` back into the
 workflow.
 
+### `pulp minos` — minimum-OS tooling
+
+`pulp minos` (in `tools/cli/cmd_minos.cpp`) is a thin shell-out, same
+shape as `pulp coverage`. Two subcommands, two scripts:
+
+- `pulp minos measure <binary>` → `tools/scripts/measure_min_os.py --measure`.
+  Reports one binary's OS floor by format (`macho`/`elf`/`pe`) read from the
+  artifact itself.
+- `pulp minos sweep [args...]` → `tools/scripts/sdk_consumer_sweep.py`. Rebuilds
+  every downstream consumer against one installed SDK and compares each floor to
+  the SDK floor. All args pass through (`--sdk-prefix`, `--only`, `--dry-run`,
+  `--json`).
+
+Surfaces that must stay in lockstep (the scripts are the single
+implementation; everything else delegates):
+
+- CLI subcommand `tools/cli/cmd_minos.cpp` + table entry in `pulp_cli.cpp` +
+  decl in `cli_common.hpp` + `cmd_minos.cpp` in `tools/cli/CMakeLists.txt`.
+- Slash command `.claude/commands/minos.md`.
+- MCP tool `pulp_minos` in `tools/mcp/pulp_mcp.cpp` (tools_list_json entry +
+  dispatch arm) with `handle_minos` in `tools/mcp/mcp_tools.{hpp,cpp}`. It
+  exposes only `measure` (RPC-shaped); the `sweep` is CLI-only because it clones
+  and builds many repos — say so in the tool description, don't add a sweep arg.
+- Manifest `docs/status/cli-commands.yaml` + reference `docs/reference/cli.md#minos`.
+- User guide `docs/guides/minimum-os-support.md` (plain-language explainer).
+
+The SDK's own floor is data in `tools/deps/min_os.json`, pinned into every build
+by `tools/cmake/PulpMinOs.cmake`; the sweep registry is
+`planning/sdk-consumers/consumers.yaml` with public build knobs in
+`tools/scripts/sdk_consumer_sweep_recipes.yaml`. Shell-out coverage:
+`cli-minos-*` ctest cases in `tools/cli/CMakeLists.txt`.
+
 ## Phase 0 host-contracts touchpoints
 
 `tools/cli/cmd_host.cpp` calls `PluginSlot::process()` which now takes
