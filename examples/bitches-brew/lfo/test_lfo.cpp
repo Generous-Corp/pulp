@@ -916,3 +916,25 @@ TEST_CASE("bypass clears the smoother", "[brew][lfo][smooth]") {
     const auto resumed = render(host, 0.0, 64, 0);
     REQUIRE(std::abs(resumed[0]) < 0.01f);
 }
+
+TEST_CASE("a stopped transport is never swung", "[brew][lfo][swing]") {
+    format::HeadlessHost host(create_lfo);
+    host.prepare(kSampleRate, 512, 2, 2);
+    host.state().set_value(LfoProcessor::kBeatsPerCycle, 1.0f);
+
+    // Swing pushes every second eighth late. With the playhead parked there is no
+    // "late" — nothing is moving — so warping the frozen position would only
+    // change the voltage the plug-in is holding, and the scope with it. Beat 0.4
+    // is inside a swing pair's first half, where the warp is largest.
+    const auto straight = render(host, 0.4, 64, 0, /*playing=*/false);
+    host.state().set_value(LfoProcessor::kSwingPercent, 66.0f);
+    REQUIRE(render(host, 0.4, 64, 0, /*playing=*/false) == straight);
+
+    // ...while a running transport is swung, or the control does nothing at all.
+    const auto running_straight = [&] {
+        host.state().set_value(LfoProcessor::kSwingPercent, 50.0f);
+        return render(host, 0.4, 64, 0, /*playing=*/true);
+    }();
+    host.state().set_value(LfoProcessor::kSwingPercent, 66.0f);
+    REQUIRE(render(host, 0.4, 64, 0, /*playing=*/true) != running_straight);
+}

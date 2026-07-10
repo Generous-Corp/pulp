@@ -211,10 +211,18 @@ public:
     /// Elapsed cycles at a timeline position, in whichever mode is selected.
     [[nodiscard]] double cycles_at(double position_beats,
                                    double position_seconds) const noexcept {
+        return cycles_at(position_beats, position_seconds, current_swing());
+    }
+
+    /// The overload `process()` uses, so a stopped transport can hand in a
+    /// straight grid. Swing is a property of a *moving* timeline: with the
+    /// playhead parked there is nothing to push late, and warping the frozen
+    /// position only moves the value the scope is showing.
+    [[nodiscard]] double cycles_at(double position_beats, double position_seconds,
+                                   const Swing& swing) const noexcept {
         return lfo_cycles(rate_mode(), position_beats, position_seconds,
                           static_cast<double>(state().get_value(kBeatsPerCycle)),
-                          static_cast<double>(state().get_value(kFreeHz)),
-                          current_swing());
+                          static_cast<double>(state().get_value(kFreeHz)), swing);
     }
 
     /// The value the plug-in emits at a number of elapsed cycles, after the
@@ -302,6 +310,7 @@ public:
         const double sr = ctx.sample_rate > 0.0 ? ctx.sample_rate : 48000.0;
         const double start_seconds = static_cast<double>(ctx.position_samples) / sr;
         const double seconds_per_sample = ctx.is_playing ? 1.0 / sr : 0.0;
+        const Swing swing = ctx.is_playing ? current_swing() : Swing{};
 
         // Smoothing is the one stateful thing here. Hoisted out of the loop, and
         // the two outputs get their own filters: sharing one would make the
@@ -314,7 +323,7 @@ public:
             const double beats = ctx.position_beats + bps * static_cast<double>(n);
             const double secs =
                 start_seconds + seconds_per_sample * static_cast<double>(n);
-            const double cycles = cycles_at(beats, secs);
+            const double cycles = cycles_at(beats, secs, swing);
             if (main)
                 main[n] = resolve_output(
                     smooth_[0].process(shape_at_cycles(m, cycles), ms, sr), scale, inv);
@@ -332,7 +341,7 @@ public:
         const double offset =
             static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0;
         display_phase_.store(
-            static_cast<float>(phase_at(cycles_at(end_beats, end_seconds), offset)),
+            static_cast<float>(phase_at(cycles_at(end_beats, end_seconds, swing), offset)),
             std::memory_order_relaxed);
     }
 
