@@ -1,4 +1,4 @@
-// Assemble a self-contained Cloudflare Pages deploy directory for the WebCLAP
+// Assemble a self-contained Cloudflare Pages deploy directory for the WCLAP
 // PulpGain demo.
 //
 // The in-repo browser host (../browser-host/{index.html,main.js}) imports the
@@ -42,7 +42,7 @@ const OUT = resolve(HERE, arg("--out", "./public"));
 
 const die = (m) => { console.error("assemble: FAIL: " + m); process.exit(1); };
 if (!wasmSrc) {
-  die(`no WebCLAP wasm found. Build it first:\n` +
+  die(`no WCLAP wasm found. Build it first:\n` +
       `  cd ${resolve(HERE, "..")}\n` +
       `  cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=../../../tools/cmake/wasi-toolchain.cmake -DCMAKE_BUILD_TYPE=Release\n` +
       `  cmake --build build\n` +
@@ -88,7 +88,7 @@ await writeFile(join(OUT, "main.js"), rewriteMainJs(mainJs));
 await copyFile(join(WASM_MODULES, "wclap-host.mjs"), join(OUT, "wclap-host.mjs"));
 await copyFile(join(WASM_MODULES, "wclap-wasi.mjs"), join(OUT, "wclap-wasi.mjs"));
 
-// The WebCLAP module.
+// The WCLAP module.
 await copyFile(wasmSrc, join(OUT, "PulpGain.wasm"));
 
 // The headers that make it cross-origin isolated on Cloudflare Pages.

@@ -82,8 +82,10 @@ jobs:
       - name: Assemble self-contained deploy dir
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: |
-          node assemble.mjs                 # single-plugin isolation proof (/)
-          node assemble-player.mjs          # shared-player WebCLAP demo (/player/)
+          node assemble.mjs                 # single-plugin isolation proof
+          node assemble-player.mjs          # shared-player WCLAP demo (/player/)
+          node assemble-gallery.mjs         # WCLAP 1:1 galleries (/example-plugins/, /classic-effects/)
+          node assemble-landing.mjs         # root landing page (/) + relocate proof to /isolation-proof.html
 
       - name: Prove @danielraffel/web-player adapter unit tests
         working-directory: packages/pulp-web-player

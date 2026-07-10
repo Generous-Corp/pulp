@@ -40,7 +40,10 @@ const CANDIDATES = [
 const screenshot = arg("--screenshot", null);
 const headed = process.argv.includes("--headed");
 const PORT = Number(arg("--port", 8791));
-const PAGE = `http://localhost:${PORT}/`;
+// The single-plugin isolation proof now lives at /isolation-proof.html (the
+// deploy root `/` is a landing page produced by assemble-landing.mjs).
+const ORIGIN = `http://localhost:${PORT}/`;
+const PAGE = `${ORIGIN}isolation-proof.html`;
 
 const fail = (m) => { console.error("FAIL: " + m); process.exitCode = 1; };
 
@@ -101,7 +104,7 @@ try {
     const bad = responses.filter((r) => r.status !== 200 && !r.url.startsWith("data:"));
     console.log("subresources:");
     for (const r of responses.filter((r) => !r.url.startsWith("data:"))) {
-      console.log(`  ${r.status || "ERR"}  ${r.url.replace(PAGE, "/")}${r.error ? "  (" + r.error + ")" : ""}`);
+      console.log(`  ${r.status || "ERR"}  ${r.url.replace(ORIGIN, "/")}${r.error ? "  (" + r.error + ")" : ""}`);
     }
     if (bad.length) throw new Error(`${bad.length} subresource(s) did not return 200 (COEP block / 404): ` +
       bad.map((r) => `${r.url} → ${r.status}${r.error ? " " + r.error : ""}`).join("; "));

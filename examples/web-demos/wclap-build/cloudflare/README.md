@@ -1,6 +1,6 @@
-# WebCLAP demo — Cloudflare Pages deploy
+# WCLAP demo — Cloudflare Pages deploy
 
-Cloudflare Pages is WebCLAP's **canonical host**. WebCLAP runs the plugin as a
+Cloudflare Pages is WCLAP's **canonical host**. WCLAP runs the plugin as a
 threaded WebAssembly module with a shared `WebAssembly.Memory`, which the browser
 only permits on a **cross-origin isolated** page (`window.crossOriginIsolated ===
 true`). That requires the document to be served with:
@@ -11,7 +11,7 @@ Cross-Origin-Embedder-Policy: require-corp
 ```
 
 GitHub Pages cannot send those headers, so the WAM demos live on GitHub Pages and
-the WebCLAP demos live here. Cloudflare Pages honours a [`_headers`](./_headers)
+the WCLAP demos live here. Cloudflare Pages honours a [`_headers`](./_headers)
 file, which is how we set COOP/COEP plus the per-subresource `Cross-Origin-
 Resource-Policy` and MIME types that `COEP: require-corp` demands.
 
@@ -20,11 +20,13 @@ Resource-Policy` and MIME types that `COEP: require-corp` demands.
 | File | Role |
 |------|------|
 | `_headers` | Cloudflare Pages headers: COOP+COEP on the document, CORP + correct MIME on every subresource (`.mjs`, `.js`, `.wasm`, `.css`). Copied into the deploy dir. |
-| `assemble.mjs` | Builds a **self-contained** deploy dir (`public/`) for the **single-plugin isolation proof** (`/`). Copies the SDK modules the browser host imports (`wclap-host.mjs`, `wclap-wasi.mjs`), the built `PulpGain.wasm`, and `index.html`; rewrites the host's absolute `/core/...` and `/examples/...` paths to sibling-relative ones so the page serves standalone. |
-| `player/index.html` | **The headline (WS-C2):** mounts the SAME `@danielraffel/web-player` shell the WAM demos use, driven by the **WebCLAP adapter** (`packages/pulp-web-player/src/adapters/wclap.js`) over the worklet-resident CLAP host, hosting PulpGain in real time — identical overlay/widgets/scope/meter/tokens, only the ABI badge differs. |
-| `assemble-player.mjs` | Adds the shared-player demo to `public/player/`: copies the `@danielraffel/web-player` src tree (shell, widgets, theme, `adapters/wclap.js`, `vendor/pulp-wasm/wclap-processor.js`) + `PulpGain.wasm`, and injects a banner link from the root proof page. Runs after `assemble.mjs` (or standalone). |
+| `assemble.mjs` | Builds a **self-contained** deploy dir (`public/`) for the **single-plugin isolation proof**. Copies the SDK modules the browser host imports (`wclap-host.mjs`, `wclap-wasi.mjs`), the built `PulpGain.wasm`, and `index.html`; rewrites the host's absolute `/core/...` and `/examples/...` paths to sibling-relative ones so the page serves standalone. (`assemble-landing.mjs` later relocates this proof page to `/isolation-proof.html`.) |
+| `assemble-gallery.mjs` | Builds the WCLAP 1:1 galleries: `/example-plugins/` (8) and `/classic-effects/` (15) — one shared-player page per plugin, mirroring the two WAM galleries. |
+| `assemble-landing.mjs` | Runs **last**: writes the root landing page (`/`) — promoting the two WCLAP galleries, the two WAM galleries on generouscorp.com, and the doc pages — and relocates the single-plugin isolation proof to `/isolation-proof.html` (its sibling assets stay at the deploy root). |
+| `player/index.html` | **The headline (WS-C2):** mounts the SAME `@danielraffel/web-player` shell the WAM demos use, driven by the **WCLAP adapter** (`packages/pulp-web-player/src/adapters/wclap.js`) over the worklet-resident CLAP host, hosting PulpGain in real time — identical overlay/widgets/scope/meter/tokens, only the ABI badge differs. |
+| `assemble-player.mjs` | Adds the shared-player demo to `public/player/`: copies the `@danielraffel/web-player` src tree (shell, widgets, theme, `adapters/wclap.js`, `vendor/pulp-wasm/wclap-processor.js`) + `PulpGain.wasm`. Runs after `assemble.mjs` (or standalone). |
 | `serve-headers.mjs` | Local static server that **parses and applies `_headers`** — so local testing runs under the exact rules Cloudflare will serve. |
-| `validate-deploy.mjs` | Local proof of the single-plugin page (`/`): `crossOriginIsolated`, WebCLAP audio renders (+6 dB param lifts output ~+6 dB), every subresource returns 200. |
+| `validate-deploy.mjs` | Local proof of the single-plugin page (`/isolation-proof.html`): `crossOriginIsolated`, WCLAP audio renders (+6 dB param lifts output ~+6 dB), every subresource returns 200. |
 | `validate-player.mjs` | Local proof of the shared-player page (`/player/`): `crossOriginIsolated`, all subresources 200 under COEP, the **shared UI renders** (widget grid + scope + meter), **real-time** render (worklet quanta ≈ `sampleRate/128` per wall-second, context clock in lockstep), and a param change is **audible** (+6 dB) **and updates the shared widget**. |
 | `wrangler.toml` | Cloudflare Pages project config (`name`, `pages_build_output_dir = public`). |
 | `../../../../.github/workflows/wclap-cloudflare.yml` | CI: builds the wasm (pinned wasi-sdk 25), assembles, runs the proof, and — once the owner adds the two secrets below — deploys. |
@@ -36,7 +38,7 @@ artifact, never committed" discipline.
 ## Build + prove locally
 
 ```bash
-# 1. Build the WebCLAP module (needs wasi-sdk; export WASI_SDK_PREFIX if not /opt/wasi-sdk)
+# 1. Build the WCLAP module (needs wasi-sdk; export WASI_SDK_PREFIX if not /opt/wasi-sdk)
 cd examples/web-demos/wclap-build
 cmake -S . -B build \
   -DCMAKE_TOOLCHAIN_FILE=../../../tools/cmake/wasi-toolchain.cmake \
@@ -72,7 +74,7 @@ owner-gated step** (it consumes credentials — treat it like an `npm publish`).
    - `CLOUDFLARE_API_TOKEN` — the token from step 2.
    - `CLOUDFLARE_ACCOUNT_ID` — your account ID.
    The deploy step in `wclap-cloudflare.yml` is skipped until both exist; once
-   present, every push to `main` that touches the WebCLAP files builds, proves,
+   present, every push to `main` that touches the WCLAP files builds, proves,
    and deploys automatically.
 4. **(Optional) Custom domain.** Per the master plan's default, point a subdomain
    such as `wclap.generouscorp.com` at the Pages project (Pages → the project →

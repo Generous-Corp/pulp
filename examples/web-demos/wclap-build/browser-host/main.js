@@ -144,8 +144,8 @@ async function boot() {
     host = new WebClapHost({ onLog: (fd, t) => log(t.replace(/\n$/, "")) });
     await host.instantiate(bytes);
     plugin = host.createPlugin(0);
-    $("title").textContent = `${plugin.descriptor.name} — WebCLAP`;
-    $("subtitle").textContent = `id "${plugin.descriptor.id}", hosted in the browser via WebClapHost.`;
+    $("title").textContent = `${plugin.descriptor.name} — WCLAP`;
+    $("subtitle").textContent = `id "${plugin.descriptor.id}", hosted entirely in the browser.`;
     plugin.init();
     plugin.activate(SR, 1, BLOCK);
     params = plugin.params();
@@ -155,7 +155,7 @@ async function boot() {
     $("render").disabled = false;
     $("render").addEventListener("click", () => renderAndPlay(true));
     window.__wclapReady = true;
-    log("ready — WebCLAP plugin is hosted in the browser.", "ok");
+    log("ready — WCLAP plugin is hosted in the browser.", "ok");
   } catch (e) {
     fail(String(e && e.stack ? e.stack : e));
   }
