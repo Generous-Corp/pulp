@@ -853,8 +853,16 @@ jobs:
   # under `arch -x86_64` (Rosetta). This is the top Intel tier
   # (docs/guides/intel-support.md); it BLOCKS the release job below.
   universal-arch-gate:
-    needs: resolve-macos-runner
-    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) }}
+    # Intel/universal work NEVER routes to the self-hosted Studios (they back the
+    # required `macos` PR gate — docs/guides/intel-support.md). This gate needs an
+    # Apple Silicon macOS runner so it can build universal AND run auval both
+    # natively (arm64) and under Rosetta (x86_64), so it pins the free
+    # GitHub-hosted `macos-15` (Apple Silicon + Rosetta) — matching
+    # intel-portability.yml and nightly-intel.yml's universal-crosscheck. It does
+    # NOT consume resolve-macos-runner's output (which can resolve to the
+    # Studios). Override with the PULP_UNIVERSAL_GATE_MACOS_RUNS_ON_JSON repo var
+    # only to another Apple-Silicon-capable label.
+    runs-on: ${{ fromJSON(vars.PULP_UNIVERSAL_GATE_MACOS_RUNS_ON_JSON || '["macos-15"]') }}
     name: Universal + dual-arch auval gate
     timeout-minutes: 120
     env:
