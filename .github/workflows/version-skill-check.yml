@@ -11,6 +11,8 @@ name: Versioning & Skill-Sync
 on:
   pull_request:
     branches: [main, develop]
+  merge_group:
+    branches: [main]
   workflow_dispatch:
     inputs:
       runner_provider:
