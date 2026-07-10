@@ -1,4 +1,4 @@
-// adapters/wam.js — the default host adapter for @pulp/web-player.
+// adapters/wam.js — the default host adapter for @danielraffel/web-player.
 //
 // Wraps a Pulp WAMv2 instance (the vendored main-thread host, wam-plugin.js)
 // behind the host-adapter interface the shell drives (see adapter.d.ts). This is

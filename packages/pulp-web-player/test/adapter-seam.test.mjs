@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// adapter-seam.test.mjs — proves @pulp/web-player's shell is host-agnostic and
+// adapter-seam.test.mjs — proves @danielraffel/web-player's shell is host-agnostic and
 // the WAM adapter is the sole backend seam. Static (fast, zero-dependency, runs
 // in any Node). A runtime pack-install smoke lives in scripts/pack-smoke.mjs.
 //
