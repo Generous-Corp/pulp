@@ -53,6 +53,7 @@ using pulp_mcp::handle_build;
 using pulp_mcp::handle_test;
 using pulp_mcp::handle_status;
 using pulp_mcp::handle_validate;
+using pulp_mcp::handle_minos;
 using pulp_mcp::handle_kit;
 using pulp_mcp::handle_kit_search;
 using pulp_mcp::handle_kit_validate;
@@ -153,6 +154,7 @@ static std::string tools_list_json() {
     out += R"JSON({"name":"pulp_trace_snapshot","description":"Read the tracing subsystem state via Trace.snapshot: {compiled_in, active, categories, ring_bytes, last_trace_path}. Safe to call when nothing is being traced; compiled_in=false means the host was built without -DPULP_TRACING=ON.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_trace_query","description":"Run SQL over the live captured trace via Trace.query, or a named trace-stdlib preset. Pass exactly one of sql or preset. JSON by default. (Offline SQL over a flushed .pftrace uses the client-side CLI `pulp trace query --trace FILE`, which has no inspector RPC and therefore no MCP tool.)","inputSchema":{"type":"object","properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Named trace-stdlib preset (slowest-frames, xruns, dsp-hotspots, layout-vs-paint) instead of raw SQL"},"format":{"type":"string","enum":["json","table","csv"],"description":"Output format (default json)"}}}},)JSON";
     out += R"JSON({"name":"pulp_trace_explain","description":"One-shot narrated root-cause investigation via Trace.explain: the inspector loads the investigation protocol and returns a plain-English answer with a chain of evidence and a suggested fix.","inputSchema":{"type":"object","required":["question"],"properties":{"question":{"type":"string","description":"Plain-English question to investigate, e.g. 'why is my plugin slow to open?'"}}}},)JSON";
+    out += R"JSON({"name":"pulp_minos","description":"Measure the minimum OS a built binary needs, read straight from the artifact (macOS deployment target / Linux glibc symbol version / Windows PE subsystem). Point it at any Mach-O / ELF / PE / static archive or a plugin bundle's inner binary. The floor of a binary is the MAX minimum among everything linked into it. The multi-repo consumer sweep (rebuild every downstream project and compare floors) is CLI-only: `pulp minos sweep`, because it clones and builds many repositories.","inputSchema":{"type":"object","required":["binary"],"properties":{"binary":{"type":"string","description":"Path to a built binary: a .dylib/.so/.dll, a .a static archive, an executable, or a plugin bundle's inner binary (e.g. Foo.vst3/Contents/MacOS/Foo)"}}}},)JSON";
     out += R"JSON({"name":"pulp_compat","description":"Report pulp-mcp / MCP protocol / project SDK versions plus per-tool min_sdk_version floors so clients can pre-filter their tool list. Use this once at startup to detect SDK skew.","inputSchema":{"type":"object","properties":{}}})JSON";
     out += R"JSON(]})JSON";
     return out;
@@ -254,6 +256,7 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_test")      result = handle_test(args_json);
         else if (name == "pulp_status")    result = handle_status(args_json);
         else if (name == "pulp_validate")  result = handle_validate(args_json);
+        else if (name == "pulp_minos")     result = handle_minos(args_json);
         else if (name == "pulp_kit") result = handle_kit(args_json);
         else if (name == "pulp_kit_search") result = handle_kit_search(args_json);
         else if (name == "pulp_kit_validate") result = handle_kit_validate(args_json);

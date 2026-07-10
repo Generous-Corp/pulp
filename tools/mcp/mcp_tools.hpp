@@ -16,6 +16,7 @@ std::string handle_build(const std::string& params_json);
 std::string handle_test(const std::string& params_json);
 std::string handle_status(const std::string& params_json);
 std::string handle_validate(const std::string& params_json);
+std::string handle_minos(const std::string& params_json);
 std::string handle_kit(const std::string& params_json);
 std::string handle_kit_search(const std::string& params_json);
 std::string handle_kit_validate(const std::string& params_json);
