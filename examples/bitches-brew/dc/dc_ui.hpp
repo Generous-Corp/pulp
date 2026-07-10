@@ -30,34 +30,13 @@ public:
     DcUi(state::StateStore& store, const DcProcessor& proc)
         : ui::BrewPanel("DC", "a constant control voltage"),
           store_(store), proc_(proc) {
-        auto pct = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.0f%%", v * 100.0f);
-            return std::string(buf);
-        };
-        auto signed_number = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%+.3f", v);
-            return std::string(buf);
-        };
-        auto number = [](float v) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.3f", v);
-            return std::string(buf);
-        };
-        // Sign carries the mode, so it must be shown: positive slews, negative
-        // low-passes, and "0.0 ms" means the smoother is out of the circuit.
-        auto millis = [](float v) {
-            char buf[20];
-            std::snprintf(buf, sizeof(buf), "%+.1f ms", v);
-            return std::string(buf);
-        };
-
+        // Every knob reads its value through the parameter's own formatter, so a
+        // readout here and the host's automation lane are the same string.
         auto add = [&](view::View& row, state::ParamID id, std::size_t ch,
-                       const char* label, std::function<std::string(float)> fmt) {
+                       const char* label) {
             auto k = ui::param_knob(store_,
                                     static_cast<state::ParamID>(param_for(id, ch)),
-                                    label, std::move(fmt));
+                                    label);
             ui::knob_size(*k);
             row.add_child(std::move(k));
         };
@@ -72,15 +51,15 @@ public:
             // Labels are abbreviated to the knob's width. A Knob centres its label
             // on its own box, so a longer one silently overlaps its neighbours.
             auto levels = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*levels, DcProcessor::kValue, ch, "Value", signed_number);
-            add(*levels, DcProcessor::kUnipolar, ch, "Unipolar", number);
-            add(*levels, DcProcessor::kMultiplier, ch, "Mult", signed_number);
-            add(*levels, DcProcessor::kSmoothMs, ch, "Smooth", millis);
+            add(*levels, DcProcessor::kValue, ch, "Value");
+            add(*levels, DcProcessor::kUnipolar, ch, "Unipolar");
+            add(*levels, DcProcessor::kMultiplier, ch, "Mult");
+            add(*levels, DcProcessor::kSmoothMs, ch, "Smooth");
 
             auto inputs = ui::row(ui::kRowGap, ui::kKnobHeight);
-            add(*inputs, DcProcessor::kInputAdd, ch, "In Add", signed_number);
-            add(*inputs, DcProcessor::kInputMul, ch, "In Mul", number);
-            add(*inputs, DcProcessor::kOutputScale, ch, "Out", pct);
+            add(*inputs, DcProcessor::kInputAdd, ch, "In Add");
+            add(*inputs, DcProcessor::kInputMul, ch, "In Mul");
+            add(*inputs, DcProcessor::kOutputScale, ch, "Out");
             auto invert = ui::param_toggle(
                 store_, static_cast<state::ParamID>(param_for(DcProcessor::kInvert, ch)),
                 "Invert");

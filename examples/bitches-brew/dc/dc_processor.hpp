@@ -27,6 +27,7 @@
 // display volts once the user declares their interface's full-scale voltage.
 
 #include <brew/channels.hpp>
+#include <brew/param_text.hpp>
 #include <brew/cv.hpp>
 #include <brew/smooth.hpp>
 
@@ -74,11 +75,15 @@ public:
     /// A table rather than eight `add_parameter` calls, so that adding a control
     /// to the left channel cannot leave the right one behind. `param_for` derives
     /// the right channel's ID; nothing here enumerates it.
+    /// `fmt` is how the value reads — in this editor, and in the host's own
+    /// parameter list and automation lane. A plain function pointer rather than a
+    /// `std::function` so the table stays `constexpr`.
     struct ControlSpec {
         state::ParamID id;
         const char* name;
         const char* unit;
         state::ParamRange range;
+        std::string (*fmt)(float);
     };
 
     static constexpr std::array<ControlSpec, 8> controls() {
@@ -87,31 +92,31 @@ public:
             // instance must emit no voltage until the user asks for one. A CV
             // generator that comes up at full scale points a voltage at whatever
             // module is patched to it.
-            {kValue, "Value", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kValue, "Value", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_number},
             // Per-jack calibration against the interface's full-scale voltage.
             // Per-channel, because an interface may differ between its outputs.
-            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}},
+            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}, text::fraction_percent},
             // Some interfaces wire an output with reversed polarity. Without this
             // a CV suite is unusable on them — and it can be one output, not both.
-            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
             // A unipolar level, summed with the bipolar `Value`. Two knobs rather
             // than one because it lets an automated bipolar sweep ride on a fixed
             // unipolar offset — the shape and its resting point are separate ideas.
-            {kUnipolar, "Unipolar", "", {0.0f, 1.0f, 0.0f, 0.001f}},
+            {kUnipolar, "Unipolar", "", {0.0f, 1.0f, 0.0f, 0.001f}, text::number},
             // Scales the sum, and may invert it. Distinct from `Output Scale`,
             // which is unipolar rig calibration and belongs to the interface, not
             // the patch. Both exist because they answer different questions.
-            {kMultiplier, "Multiplier", "", {-2.0f, 2.0f, 1.0f, 0.001f}},
+            {kMultiplier, "Multiplier", "", {-2.0f, 2.0f, 1.0f, 0.001f}, text::signed_number},
             // The input bus, added to the output.
-            {kInputAdd, "Input Add", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kInputAdd, "Input Add", "", {-1.0f, 1.0f, 0.0f, 0.001f}, text::signed_number},
             // The input bus, multiplied into the output. At 0 the input is
             // ignored; at 1 the output is exactly the normal output multiplied by
             // the input. A ring modulator at the extremes, a VCA in between.
-            {kInputMul, "Input Mul", "", {0.0f, 1.0f, 0.0f, 0.001f}},
+            {kInputMul, "Input Mul", "", {0.0f, 1.0f, 0.0f, 0.001f}, text::number},
             // Positive slews at a constant rate; negative low-passes. Milliseconds
             // for a full -1 to +1 swing. Zero is a wire — see brew/smooth.hpp for
             // why an explicit smoother does not violate the no-smoothing rule.
-            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}},
+            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}, text::smooth},
         }};
     }
 
@@ -122,7 +127,8 @@ public:
                     {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
                      .name = std::string(c.name) + channel_suffix(ch),
                      .unit = c.unit,
-                     .range = c.range});
+                     .range = c.range,
+                     .to_string = c.fmt});
     }
 
     /// One channel's worth of settings, read once per block.

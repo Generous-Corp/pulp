@@ -30,6 +30,7 @@
 #include <pulp/view/screenshot.hpp>
 
 #include <algorithm>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -666,4 +667,117 @@ TEST_CASE("CV To OSC's editor tracks the observed voltage", "[brew][ui][osc]") {
     REQUIRE(proc->latest(1) == -0.8f);
     // Nothing was sent, because nothing was asked for.
     REQUIRE(proc->sent_count() == 0);
+}
+
+
+// ── What the host shows ──────────────────────────────────────────────────────
+//
+// A plug-in's editor is not the only place its parameters are read. The DAW's own
+// parameter list, its automation lane, and its type-in field all call
+// `ParamInfo::to_string`. A parameter without one is a bare float there — and an
+// AU shows a continuous slider instead of a menu, because
+// `GetParameterValueStrings` returns nothing without a formatter. So this walks
+// every plug-in's live store, not the sources.
+
+namespace {
+
+struct Plugin { const char* name; format::ProcessorFactory factory; };
+
+const Plugin kPlugins[] = {
+    {"CV To OSC", create_cv_osc}, {"DC", create_dc},   {"Function", create_function},
+    {"LFO", create_lfo},          {"Quantizer", create_quantizer},
+    {"Step LFO", create_step},    {"Sync", create_sync},
+    {"Trigger", create_trigger},
+};
+
+/// A parameter a host would offer as a menu: it steps by whole numbers over a
+/// handful of values.
+bool is_menu(const state::ParamInfo& p) {
+    return p.range.step >= 1.0f && (p.range.max - p.range.min) >= 1.0f &&
+           (p.range.max - p.range.min) <= 15.0f;
+}
+
+}  // namespace
+
+TEST_CASE("Every parameter in the suite tells the host how to read it",
+          "[brew][ui][text]") {
+    for (const auto& plugin : kPlugins) {
+        format::HeadlessHost host(plugin.factory);
+        host.prepare(48000.0, 512, 2, 2);
+        const auto params = host.state().all_params();
+        REQUIRE_FALSE(params.empty());
+
+        for (const auto& p : params) {
+            INFO(plugin.name << " / " << p.name);
+            REQUIRE(p.to_string);
+            // A formatter that returns nothing leaves the host's field blank,
+            // which is worse than the number it replaced.
+            CHECK_FALSE(p.to_string(p.range.default_value).empty());
+            CHECK_FALSE(p.to_string(p.range.min).empty());
+            CHECK_FALSE(p.to_string(p.range.max).empty());
+        }
+    }
+}
+
+TEST_CASE("Every menu names each of its modes, and names them distinctly",
+          "[brew][ui][text]") {
+    // A name table one entry short of its enum clamps the last mode onto the
+    // second-to-last name. Nothing crashes; the mode just becomes unreachable by
+    // name, in the editor and in the host alike.
+    for (const auto& plugin : kPlugins) {
+        format::HeadlessHost host(plugin.factory);
+        host.prepare(48000.0, 512, 2, 2);
+
+        for (const auto& p : host.state().all_params()) {
+            if (!is_menu(p)) continue;
+            INFO(plugin.name << " / " << p.name);
+
+            std::vector<std::string> names;
+            for (float v = p.range.min; v <= p.range.max; v += p.range.step)
+                names.push_back(p.to_string(v));
+
+            auto sorted = names;
+            std::sort(sorted.begin(), sorted.end());
+            const auto dup = std::adjacent_find(sorted.begin(), sorted.end());
+            INFO("duplicate name: " << (dup == sorted.end() ? std::string("none") : *dup));
+            CHECK(dup == sorted.end());
+        }
+    }
+}
+
+TEST_CASE("Smooth reads the same on every plug-in that carries it",
+          "[brew][ui][text]") {
+    // The manual describes `Smooth` once. Four plug-ins implement it, and two of
+    // them used to print a signed millisecond count — from which no user could
+    // tell that a negative value selects a low-pass rather than a slew limit.
+    for (const auto& plugin : kPlugins) {
+        format::HeadlessHost host(plugin.factory);
+        host.prepare(48000.0, 512, 2, 2);
+
+        for (const auto& p : host.state().all_params()) {
+            if (p.name.rfind("Smooth", 0) != 0) continue;
+            INFO(plugin.name << " / " << p.name);
+            CHECK(p.to_string(0.0f) == "off");
+            CHECK(p.to_string(100.0f) == "slew 100");
+            CHECK(p.to_string(-100.0f) == "lpf 100");
+        }
+    }
+}
+
+TEST_CASE("Sync's two off-by-zero controls say so", "[brew][ui][text]") {
+    // Zero on `Reset Beats` is the off switch, not a zero-beat interval; zero on
+    // `Trigger Length` selects a 50%-duty square, not a zero-width pulse. Both are
+    // meaning, not formatting, so the host must show them too.
+    format::HeadlessHost host(create_sync);
+    host.prepare(48000.0, 512, 2, 2);
+
+    const auto* reset = host.state().info(SyncProcessor::kResetBeats);
+    REQUIRE(reset);
+    CHECK(reset->to_string(0.0f) == "Off");
+    CHECK(reset->to_string(4.0f) == "4");
+
+    const auto* width = host.state().info(SyncProcessor::kTriggerLengthMs);
+    REQUIRE(width);
+    CHECK(width->to_string(0.0f) == "50%");
+    CHECK(width->to_string(5.0f) == "5.0 ms");
 }

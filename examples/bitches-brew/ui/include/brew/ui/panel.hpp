@@ -138,6 +138,13 @@ inline std::unique_ptr<vw::Knob> param_knob(state::StateStore& store,
     knob->on_change = [&store, id](float normalized) {
         store.set_normalized(id, normalized);
     };
+    // With no explicit formatter, read the parameter's own. That is the same
+    // string the host shows in its automation lane, so the two can never
+    // disagree. An explicit `fmt` is for the readouts a host cannot express —
+    // the ones that consult a second parameter to decide what this one means.
+    if (!fmt) {
+        if (const auto* pi = store.info(id)) fmt = pi->to_string;
+    }
     if (fmt) {
         knob->set_format([&store, id, fmt = std::move(fmt)](float) {
             return fmt(store.get_value(id));

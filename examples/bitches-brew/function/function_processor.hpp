@@ -19,6 +19,7 @@
 // signal until the user asks it to be.
 
 #include <brew/channels.hpp>
+#include <brew/param_text.hpp>
 #include <brew/cv.hpp>
 #include <brew/function.hpp>
 
@@ -61,10 +62,19 @@ public:
         };
     }
 
+    /// The five curves, by the names the editor and the host both show.
+    static std::string curve_name(float v) {
+        static const char* const kNames[] = {"lin", "exp", "log", "abs", "pow"};
+        return text::named_at(kNames, kCurveCount, v);
+    }
+
+    /// `fmt` is how the value reads — here and in the host's parameter list. A
+    /// plain function pointer, so the table stays `constexpr`.
     struct ControlSpec {
         state::ParamID id;
         const char* name;
         state::ParamRange range;
+        std::string (*fmt)(float);
     };
 
     /// Every control Function has. Registered once per channel: the two channels
@@ -73,22 +83,22 @@ public:
         return {{
             // Processing on this channel. Off passes the signal through
             // unmodified — not to zero, which would be a mute.
-            {kEnable, "Enable", {0.0f, 1.0f, 1.0f, 1.0f}},
-            {kCurve, "Curve", {0.0f, static_cast<float>(kCurveCount - 1), 0.0f, 1.0f}},
+            {kEnable, "Enable", {0.0f, 1.0f, 1.0f, 1.0f}, text::on_off},
+            {kCurve, "Curve", {0.0f, static_cast<float>(kCurveCount - 1), 0.0f, 1.0f}, curve_name},
             // The `power` curve's exponent, and only that curve's. 1 is the
             // identity; k and 1/k bend by the same factor in opposite directions,
             // which is why one knob spans both and the range is centred on 1.
-            {kAmount, "Amount", {kMinPower, kMaxPower, 1.0f, 0.001f}},
+            {kAmount, "Amount", {kMinPower, kMaxPower, 1.0f, 0.001f}, text::plain},
             // Bipolar: a negative input scale flips the polarity of the incoming
             // CV, which is how you turn a rising ramp into a falling one.
-            {kInScale, "In Scale", {-4.0f, 4.0f, 1.0f, 0.001f}},
-            {kInOffset, "In Offset", {-1.0f, 1.0f, 0.0f, 0.001f}},
-            {kOutOffset, "Out Offset", {-1.0f, 1.0f, 0.0f, 0.001f}},
-            {kOutputScale, "Output Scale", {0.0f, 1.0f, 1.0f, 0.001f}},
+            {kInScale, "In Scale", {-4.0f, 4.0f, 1.0f, 0.001f}, text::plain},
+            {kInOffset, "In Offset", {-1.0f, 1.0f, 0.0f, 0.001f}, text::plain},
+            {kOutOffset, "Out Offset", {-1.0f, 1.0f, 0.0f, 0.001f}, text::plain},
+            {kOutputScale, "Output Scale", {0.0f, 1.0f, 1.0f, 0.001f}, text::plain},
             // Rig compensation, not an artistic control: some interfaces present
             // an output with reversed polarity. Per-channel, because it can be one
             // output and not the other.
-            {kInvert, "Invert", {0.0f, 1.0f, 0.0f, 1.0f}},
+            {kInvert, "Invert", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
         }};
     }
 
@@ -99,7 +109,8 @@ public:
                     {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
                      .name = std::string(c.name) + channel_suffix(ch),
                      .unit = "",
-                     .range = c.range});
+                     .range = c.range,
+                     .to_string = c.fmt});
     }
 
     void prepare(const format::PrepareContext&) override {}

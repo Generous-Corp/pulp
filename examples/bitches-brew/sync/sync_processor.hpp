@@ -43,6 +43,7 @@
 // bolting on.
 
 #include <brew/clock.hpp>
+#include <brew/param_text.hpp>
 #include <brew/cv.hpp>
 #include <brew/pulse.hpp>
 #include <brew/run_segment.hpp>
@@ -101,6 +102,34 @@ public:
         };
     }
 
+    // ── How each control reads, here and in the host ─────────────────────────
+    //
+    // Two of these are not formatting but meaning: a zero on `Reset Beats` is the
+    // off switch, and a zero on `Trigger Length` selects a 50%-duty square rather
+    // than a zero-width pulse. A host that showed "0" for either would be
+    // describing a control that does not exist.
+
+    /// "24pp", not "24": the PPQN knob next door also reads 24 by default, and two
+    /// adjacent knobs showing the same number invite the reading that one of them
+    /// is doing nothing.
+    static std::string clock_type_name(float v) {
+        static const char* const kNames[] = {"Off", "24pp", "48pp", "Cust"};
+        return text::named_at(kNames, kClockTypeCount, v);
+    }
+    static std::string run_signal_name(float v) {
+        static const char* const kNames[] = {"Run", "Start", "St/Sp", "Stop"};
+        return text::named_at(kNames, kRunSignalCount, v);
+    }
+    static std::string note_unit_name(float v) {
+        return text::divisor_name(v);
+    }
+    static std::string beats_or_off(float v) {
+        return v < 0.5f ? std::string("Off") : text::whole(v);
+    }
+    static std::string width_or_square(float v) {
+        return v <= 0.0f ? std::string("50%") : text::millis(v);
+    }
+
     void define_parameters(state::StateStore& store) override {
         // 24 ppqn is DIN sync, and it is what most hardware expects. `Custom`
         // hands the rate to the knob below; `Off` silences the clock output, for
@@ -110,11 +139,13 @@ public:
              .name = "Clock Type",
              .unit = "",
              .range = {0.0f, static_cast<float>(kClockTypeCount - 1),
-                       static_cast<float>(static_cast<int>(ClockType::ppqn24)), 1.0f}});
+                       static_cast<float>(static_cast<int>(ClockType::ppqn24)), 1.0f},
+             .to_string = clock_type_name});
         store.add_parameter({.id = kPulsesPerBeat,
                              .name = "Pulses Per Beat",
                              .unit = "ppqn",
-                             .range = {1.0f, 48.0f, kDinSyncPulsesPerBeat, 1.0f}});
+                             .range = {1.0f, 48.0f, kDinSyncPulsesPerBeat, 1.0f},
+                             .to_string = text::whole});
         // Derived from the clock's own bounds rather than repeated here: a knob
         // whose range outruns the warp's invertible interval silently clamps, and
         // the user is left turning a control that stopped doing anything.
@@ -123,22 +154,26 @@ public:
                              .unit = "%",
                              .range = {static_cast<float>(kMinSwing * 100.0),
                                        static_cast<float>(kMaxSwing * 100.0),
-                                       50.0f, 0.1f}});
+                                       50.0f, 0.1f},
+                             .to_string = text::percent1});
         // Which subdivision's off-beat moves. Off is the eighth, on the
         // sixteenth — the same two choices every swing control offers, because
         // they are the two that correspond to how people count.
         store.add_parameter({.id = kSwingUnit,
                              .name = "Swing Sixteenths",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         store.add_parameter({.id = kMultiplier,
                              .name = "Multiplier",
                              .unit = "",
-                             .range = {1.0f, 16.0f, 1.0f, 1.0f}});
+                             .range = {1.0f, 16.0f, 1.0f, 1.0f},
+                             .to_string = text::whole});
         store.add_parameter({.id = kDivisor,
                              .name = "Divisor",
                              .unit = "",
-                             .range = {1.0f, 16.0f, 1.0f, 1.0f}});
+                             .range = {1.0f, 16.0f, 1.0f, 1.0f},
+                             .to_string = text::whole});
         // 5 ms clears the ~1 ms DAC floor with margin and stays well under the
         // 8.3 ms period of 24 ppqn at 300 BPM. Zero is not a zero-length pulse:
         // it means "not a trigger at all", and the clock becomes a 50% duty
@@ -146,7 +181,8 @@ public:
         store.add_parameter({.id = kTriggerLengthMs,
                              .name = "Trigger Length",
                              .unit = "ms",
-                             .range = {0.0f, 100.0f, 5.0f, 0.1f}});
+                             .range = {0.0f, 100.0f, 5.0f, 0.1f},
+                             .to_string = width_or_square});
         // What the run output carries. `Run` is a level held high for the whole
         // run — DIN sync needs that. The other three are pulses, and `Start` is
         // what a hardware step sequencer wants on its reset input.
@@ -154,54 +190,64 @@ public:
             {.id = kRunType,
              .name = "Run Signal",
              .unit = "",
-             .range = {0.0f, static_cast<float>(kRunSignalCount - 1), 0.0f, 1.0f}});
+             .range = {0.0f, static_cast<float>(kRunSignalCount - 1), 0.0f, 1.0f},
+             .to_string = run_signal_name});
         // The length of a run *pulse*. Separate from the clock's trigger length:
         // a reset pulse is read by a different input, on different hardware, with
         // a different minimum width.
         store.add_parameter({.id = kRunPulseMs,
                              .name = "Run Pulse Length",
                              .unit = "ms",
-                             .range = {0.1f, 100.0f, 5.0f, 0.1f}});
+                             .range = {0.1f, 100.0f, 5.0f, 0.1f},
+                             .to_string = text::millis});
         // Reset not just at transport start, but every `Reset Beats` x
         // `Reset Unit`. Zero beats is off. Only meaningful when the run output is
         // pulsed: a reset pulse cannot be picked out of a run *level*.
         store.add_parameter({.id = kResetBeats,
                              .name = "Reset Beats",
                              .unit = "",
-                             .range = {0.0f, 64.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 64.0f, 0.0f, 1.0f},
+                             .to_string = beats_or_off});
         store.add_parameter(
             {.id = kResetUnit,
              .name = "Reset Unit",
              .unit = "",
              .range = {0.0f, static_cast<float>(kNoteUnitCount - 1),
-                       static_cast<float>(static_cast<int>(NoteUnit::quarter)), 1.0f}});
+                       static_cast<float>(static_cast<int>(NoteUnit::quarter)), 1.0f},
+             .to_string = note_unit_name});
         store.add_parameter({.id = kRunLevel,
                              .name = "Run Level",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 1.0f, 0.01f}});
+                             .range = {0.0f, 1.0f, 1.0f, 0.01f},
+                             .to_string = text::fraction_percent});
         store.add_parameter({.id = kSkipFirst,
                              .name = "Skip First Pulse",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         store.add_parameter({.id = kWaitForBar,
                              .name = "Wait For Bar",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         store.add_parameter({.id = kOutputScale,
                              .name = "Output Scale",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 1.0f, 0.001f}});
+                             .range = {0.0f, 1.0f, 1.0f, 0.001f},
+                             .to_string = text::fraction_percent});
         store.add_parameter({.id = kInvert,
                              .name = "Invert",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         // Hold the clock off for this long after the transport starts. Measured
         // from the run origin, so two runs starting at different beats behave
         // identically.
         store.add_parameter({.id = kFirstDelayMs,
                              .name = "First Delay",
                              .unit = "ms",
-                             .range = {0.0f, 1000.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1000.0f, 0.0f, 1.0f},
+                             .to_string = text::millis});
         // Slide the whole pulse train earlier or later. A DAC, its reconstruction
         // filter, and the receiving gate input all add latency, so a clock that is
         // sample-accurate in software arrives late at the hardware. Negative
@@ -209,7 +255,8 @@ public:
         store.add_parameter({.id = kOffsetMs,
                              .name = "Offset",
                              .unit = "ms",
-                             .range = {-50.0f, 50.0f, 0.0f, 0.1f}});
+                             .range = {-50.0f, 50.0f, 0.0f, 0.1f},
+                             .to_string = text::signed_millis});
     }
 
     void prepare(const format::PrepareContext&) override { hard_reset(); }

@@ -35,6 +35,7 @@
 #include <brew/phase_clock.hpp>
 #include <brew/shift_register.hpp>
 #include <brew/smooth.hpp>
+#include <brew/param_text.hpp>
 #include <brew/step.hpp>
 #include <brew/sync.hpp>
 
@@ -151,128 +152,179 @@ public:
         const char* label;
     };
 
+    // ── How each control reads, here and in the host ─────────────────────────
+
+    static std::string length_mode_name(float v) {
+        static const char* const kNames[] = {"Len", "End"};
+        return text::named_at(kNames, kLengthModeCount, v);
+    }
+    static std::string interpolation_name(float v) {
+        static const char* const kNames[] = {"Step", "Lin"};
+        return text::named_at(kNames, kInterpolationCount, v);
+    }
+    static std::string input_role_name(float v) {
+        static const char* const kNames[] = {"Off", "Reset", "Trig", "Sig"};
+        return text::named_at(kNames, kInputRoleCount, v);
+    }
+    static std::string range_name(float v) {
+        static const char* const kNames[] = {"Bipolar", "Unipolar"};
+        return text::named_at(kNames, kRangeCount, v);
+    }
+    static std::string speed_mode_name(float v) {
+        static const char* const kNames[] = {"Cycle", "Step"};
+        return text::named_at(kNames, 2, v);
+    }
+
     void define_parameters(state::StateStore& store) override {
         // ── Rate ─────────────────────────────────────────────────────────────
         store.add_parameter({.id = kSyncMode,
                              .name = "Sync",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kStepSyncModeCount - 1),
-                                       kStepDefaultSync, 1.0f}});
+                                       kStepDefaultSync, 1.0f},
+                             .to_string = text::step_sync_name});
         store.add_parameter({.id = kSpeedHz,
                              .name = "Speed",
                              .unit = "Hz",
                              .range = {static_cast<float>(kMinFreeHz), 100.0f, 1.0f,
-                                       0.0f}});
+                                       0.0f},
+                             .to_string = text::compact});
         store.add_parameter({.id = kMultiplier,
                              .name = "Multiplier",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kMultiplierCount - 1),
-                                       kStepDefaultMultiplier, 1.0f}});
+                                       kStepDefaultMultiplier, 1.0f},
+                             .to_string = text::multiplier_name});
         store.add_parameter({.id = kBeats,
                              .name = "Beats",
                              .unit = "",
-                             .range = {0.0625f, 64.0f, 4.0f, 0.0f}});
+                             .range = {0.0625f, 64.0f, 4.0f, 0.0f},
+                             .to_string = text::compact});
         store.add_parameter({.id = kDivisor,
                              .name = "Divisor",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kNoteUnitCount - 1),
-                                       kStepDefaultDivisor, 1.0f}});
+                                       kStepDefaultDivisor, 1.0f},
+                             .to_string = text::divisor_name});
         store.add_parameter({.id = kTriplet,
                              .name = "Triplet",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         // Whether the cycle is the window or one step. The fork between an LFO and
         // a sequencer; see brew/step.hpp.
         store.add_parameter({.id = kSpeedMode,
                              .name = "Rate Per Step",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = speed_mode_name});
 
         // ── The window into the eight steps ───────────────────────────────────
         store.add_parameter({.id = kStart,
                              .name = "Start",
                              .unit = "",
                              .range = {1.0f, static_cast<float>(kMaxSequencerSteps),
-                                       1.0f, 1.0f}});
+                                       1.0f, 1.0f},
+                             .to_string = text::whole});
         store.add_parameter({.id = kLength,
                              .name = "Length",
                              .unit = "steps",
                              .range = {1.0f, static_cast<float>(kMaxSequencerSteps),
-                                       8.0f, 1.0f}});
+                                       8.0f, 1.0f},
+                             .to_string = text::whole});
         store.add_parameter({.id = kEnd,
                              .name = "End",
                              .unit = "",
                              .range = {1.0f, static_cast<float>(kMaxSequencerSteps),
-                                       static_cast<float>(kMaxSequencerSteps), 1.0f}});
+                                       static_cast<float>(kMaxSequencerSteps), 1.0f},
+                             .to_string = text::whole});
         store.add_parameter({.id = kLengthMode,
                              .name = "Length Mode",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kLengthModeCount - 1),
-                                       kStepDefaultLengthMode, 1.0f}});
+                                       kStepDefaultLengthMode, 1.0f},
+                             .to_string = length_mode_name});
 
         // ── The step's shape ─────────────────────────────────────────────────
         store.add_parameter({.id = kInterpolation,
                              .name = "Interpolation",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kInterpolationCount - 1),
-                                       kStepDefaultInterp, 1.0f}});
+                                       kStepDefaultInterp, 1.0f},
+                             .to_string = interpolation_name});
         // Fraction of a step spent sliding into it. Zero is a hard edge, and
         // `Interpolation = Linear` is exactly this at 1.0.
         store.add_parameter({.id = kGlide,
                              .name = "Glide",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f},
+                             .to_string = text::plain});
         // The fraction of each step that carries its value. At 1.0 nothing is
         // punched out and the gate never falls; below it, every step grows a
         // rising edge for an envelope generator to fire on.
         store.add_parameter({.id = kGate,
                              .name = "Gate",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 1.0f, 0.0f}});
+                             .range = {0.0f, 1.0f, 1.0f, 0.0f},
+                             .to_string = text::fraction_percent});
 
         // ── The LFO's shaping controls, on the same cycle ─────────────────────
         store.add_parameter({.id = kPhaseDegrees,
                              .name = "Phase",
                              .unit = "deg",
-                             .range = {-360.0f, 360.0f, 0.0f, 0.0f}});
+                             .range = {-360.0f, 360.0f, 0.0f, 0.0f},
+                             .to_string = text::degrees});
+        // Bounds from the clock's own invertible interval, exactly as Sync and the
+        // LFO take them. A knob that reached 0% or 100% would be turning through a
+        // percent of dead travel at each end, because `swing_warp` clamps there.
         store.add_parameter({.id = kSwingPercent,
                              .name = "Swing",
                              .unit = "%",
-                             .range = {0.0f, 100.0f, 50.0f, 0.0f}});
+                             .range = {static_cast<float>(kMinSwing * 100.0),
+                                       static_cast<float>(kMaxSwing * 100.0),
+                                       50.0f, 0.0f},
+                             .to_string = text::percent1});
         store.add_parameter({.id = kSwingUnit,
                              .name = "Swing Sixteenths",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         // Warps the cycle's time axis. In `cycle` mode that stretches the early
         // steps of the window against the late ones; in `step` mode it warps each
         // step's own fraction, which is only visible through a glide.
         store.add_parameter({.id = kAsymmetry,
                              .name = "Asymmetry",
                              .unit = "",
-                             .range = {0.05f, 0.95f, 0.5f, 0.0f}});
+                             .range = {0.05f, 0.95f, 0.5f, 0.0f},
+                             .to_string = text::plain});
         store.add_parameter({.id = kLevelOffset,
                              .name = "Offset",
                              .unit = "",
-                             .range = {-1.0f, 1.0f, 0.0f, 0.0f}});
+                             .range = {-1.0f, 1.0f, 0.0f, 0.0f},
+                             .to_string = text::signed_plain});
         store.add_parameter({.id = kSmoothMs,
                              .name = "Smooth",
                              .unit = "ms",
-                             .range = {-500.0f, 500.0f, 0.0f, 0.0f}});
+                             .range = {-500.0f, 500.0f, 0.0f, 0.0f},
+                             .to_string = text::smooth});
 
         // ── Output ───────────────────────────────────────────────────────────
         store.add_parameter({.id = kRange,
                              .name = "Range",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kRangeCount - 1),
-                                       kStepDefaultRange, 1.0f}});
+                                       kStepDefaultRange, 1.0f},
+                             .to_string = range_name});
         store.add_parameter({.id = kOutputScale,
                              .name = "Output Scale",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 1.0f, 0.0f}});
+                             .range = {0.0f, 1.0f, 1.0f, 0.0f},
+                             .to_string = text::fraction_percent});
         store.add_parameter({.id = kInvert,
                              .name = "Invert",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
 
         // ── Dither ───────────────────────────────────────────────────────────
         // A bounded random offset added to each step, keyed on the absolute step
@@ -280,72 +332,85 @@ public:
         store.add_parameter({.id = kRandom,
                              .name = "Random",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f},
+                             .to_string = text::plain});
         store.add_parameter({.id = kSeed,
                              .name = "Seed",
                              .unit = "",
-                             .range = {0.0f, 255.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 255.0f, 0.0f, 1.0f},
+                             .to_string = text::whole});
 
         // ── The shift register ───────────────────────────────────────────────
         store.add_parameter({.id = kRegisterOn,
                              .name = "Register",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         store.add_parameter({.id = kRegisterLength,
                              .name = "Register Length",
                              .unit = "bits",
                              .range = {1.0f, static_cast<float>(kMaxRegisterBits), 8.0f,
-                                       1.0f}});
+                                       1.0f},
+                             .to_string = text::whole});
         store.add_parameter({.id = kDacBits,
                              .name = "DAC Bits",
                              .unit = "bits",
                              .range = {1.0f, static_cast<float>(kMaxDacBits),
-                                       static_cast<float>(kMaxDacBits), 1.0f}});
+                                       static_cast<float>(kMaxDacBits), 1.0f},
+                             .to_string = text::whole});
         // Signed: +1 never inverts the fed-back bit (a locked loop), 0 inverts it
         // half the time (never repeats), -1 always (a locked loop of twice the
         // length, alternately inverted).
         store.add_parameter({.id = kRandomness,
                              .name = "Randomness",
                              .unit = "",
-                             .range = {-1.0f, 1.0f, 1.0f, 0.0f}});
+                             .range = {-1.0f, 1.0f, 1.0f, 0.0f},
+                             .to_string = text::signed_plain});
         store.add_parameter({.id = kRotate,
                              .name = "Rotate",
                              .unit = "bits",
                              .range = {-static_cast<float>(kMaxRegisterBits - 1),
                                        static_cast<float>(kMaxRegisterBits - 1), 0.0f,
-                                       1.0f}});
+                                       1.0f},
+                             .to_string = text::signed_whole});
         // Latched, not momentary: while it is on every bit shifted in is a one.
         // Automate it high for a single step and the two are the same operation —
         // and a latch is the only form of it a preset can hold.
         store.add_parameter({.id = kSetNext,
                              .name = "Set Next",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .to_string = text::on_off});
         store.add_parameter({.id = kAutoScale,
                              .name = "Auto Scale",
                              .unit = "",
-                             .range = {0.0f, 1.0f, 1.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 1.0f, 1.0f},
+                             .to_string = text::on_off});
         store.add_parameter({.id = kDacScale,
                              .name = "Scale",
                              .unit = "",
-                             .range = {0.05f, 8.0f, 1.0f, 0.0f}});
+                             .range = {0.05f, 8.0f, 1.0f, 0.0f},
+                             .to_string = text::plain});
 
         // ── The input bus ────────────────────────────────────────────────────
         store.add_parameter({.id = kInputLeft,
                              .name = "Input Left",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kInputRoleCount - 1),
-                                       kStepDefaultRole, 1.0f}});
+                                       kStepDefaultRole, 1.0f},
+                             .to_string = input_role_name});
         store.add_parameter({.id = kInputRight,
                              .name = "Input Right",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kInputRoleCount - 1),
-                                       kStepDefaultRole, 1.0f}});
+                                       kStepDefaultRole, 1.0f},
+                             .to_string = input_role_name});
         store.add_parameter({.id = kSignalMode,
                              .name = "Signal Mode",
                              .unit = "",
                              .range = {0.0f, static_cast<float>(kInputModeCount - 1),
-                                       kStepDefaultSignalMode, 1.0f}});
+                                       kStepDefaultSignalMode, 1.0f},
+                             .to_string = text::input_mode_name});
 
         // A gentle rising ramp, so an unedited instance does something visible on
         // the step editor rather than sitting flat and looking broken.
@@ -356,7 +421,8 @@ public:
             store.add_parameter({.id = step_param(i),
                                  .name = "Step " + std::to_string(i + 1),
                                  .unit = "",
-                                 .range = {-1.0f, 1.0f, def, 0.0f}});
+                                 .range = {-1.0f, 1.0f, def, 0.0f},
+                                 .to_string = text::signed_plain});
         }
 
         // A binary ladder by default, so the DAC reads the register as a number.
@@ -366,7 +432,8 @@ public:
             store.add_parameter({.id = weight_param(i),
                                  .name = "DAC Weight " + std::to_string(i + 1),
                                  .unit = "",
-                                 .range = {0.0f, 1.0f, default_dac_weight(i), 0.0f}});
+                                 .range = {0.0f, 1.0f, default_dac_weight(i), 0.0f},
+                                 .to_string = text::plain});
         }
     }
 

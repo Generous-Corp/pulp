@@ -19,6 +19,7 @@
 // and the tests measure the running state machine against, sample for sample.
 
 #include <brew/channels.hpp>
+#include <brew/param_text.hpp>
 #include <brew/cv.hpp>
 #include <brew/envelope.hpp>
 #include <brew/gate.hpp>
@@ -119,70 +120,82 @@ public:
         };
     }
 
+    /// The four signals a channel can carry, by the names the editor and the host
+    /// both show.
+    static std::string mode_name(float v) {
+        static const char* const kNames[] = {"Gate", "Trig", "Env", "Vel"};
+        return text::named_at(kNames, kTriggerSignalCount, v);
+    }
+
     void define_parameters(state::StateStore& store) override {
         for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
             const std::string s = channel_suffix(ch);
+            // `fmt` is how the value reads — in this editor, and in the host's own
+            // parameter list and automation lane.
             auto add = [&](state::ParamID id, const char* name, const char* unit,
-                           state::ParamRange range) {
+                           state::ParamRange range, std::string (*fmt)(float)) {
                 store.add_parameter({.id = static_cast<state::ParamID>(param_for(id, ch)),
                                      .name = name + s,
                                      .unit = unit,
-                                     .range = range});
+                                     .range = range,
+                                     .to_string = fmt});
             };
 
             // Which of the four signals reaches the jack.
             add(kMode, "Mode", "",
                 {0.0f, static_cast<float>(kTriggerSignalCount - 1), kTriggerDefaultMode,
-                 1.0f});
-            add(kNote, "Note", "", {0.0f, 127.0f, kDefaultNote, 1.0f});
-            add(kAnyNote, "Any Note", "", {0.0f, 1.0f, 0.0f, 1.0f});
-            add(kSmoothMs, "Smooth", "ms", {-500.0f, 500.0f, 0.0f, 0.0f});
+                 1.0f},
+                mode_name);
+            add(kNote, "Note", "", {0.0f, 127.0f, kDefaultNote, 1.0f}, text::whole);
+            add(kAnyNote, "Any Note", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off);
+            add(kSmoothMs, "Smooth", "ms", {-500.0f, 500.0f, 0.0f, 0.0f}, text::smooth);
 
             // A voltage on the input can fire the channel as well as — or instead
             // of — a note. A DC level, not an amplitude: the threshold is compared
             // against the sample, and a Schmitt trigger rides out the slew.
-            add(kCvEnable, "CV Trigger", "", {0.0f, 1.0f, 0.0f, 1.0f});
-            add(kCvThreshold, "Threshold", "", {-1.0f, 1.0f, 0.5f, 0.0f});
+            add(kCvEnable, "CV Trigger", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off);
+            add(kCvThreshold, "Threshold", "", {-1.0f, 1.0f, 0.5f, 0.0f}, text::signed_plain);
 
             // The window every signal lands in. Min above Max inverts.
-            add(kVoltageMin, "Voltage Min", "", {-1.0f, 1.0f, 0.0f, 0.0f});
-            add(kVoltageMax, "Voltage Max", "", {-1.0f, 1.0f, 1.0f, 0.0f});
+            add(kVoltageMin, "Voltage Min", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
+            add(kVoltageMax, "Voltage Max", "", {-1.0f, 1.0f, 1.0f, 0.0f}, text::signed_plain);
 
             // How long the pulse in `Trigger` mode lasts.
-            add(kLengthMs, "Length", "ms", {0.1f, 100.0f, 5.0f, 0.0f});
+            add(kLengthMs, "Length", "ms", {0.1f, 100.0f, 5.0f, 0.0f}, text::compact_millis);
 
             // Force the jack to a voltage, whatever the notes are doing. It still
             // passes through `Smooth`, so releasing it does not snap.
-            add(kOverride, "Override", "", {0.0f, 1.0f, 0.0f, 1.0f});
-            add(kOverrideValue, "Override Value", "", {-1.0f, 1.0f, 0.0f, 0.0f});
+            add(kOverride, "Override", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off);
+            add(kOverrideValue, "Override Value", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
 
             // A1 rises to its own level. Leave that level at zero and `Time A1` is
             // a delay before the envelope starts, because a rise to zero from zero
             // is a wait.
-            add(kLevelA1, "Level A1", "", {0.0f, 1.0f, 0.0f, 0.0f});
-            add(kTimeA1, "Time A1", "s", {0.0f, kMaxStageSeconds, 0.0f, 0.0f});
-            add(kCurveA1, "Curve A1", "", {-1.0f, 1.0f, 0.0f, 0.0f});
+            add(kLevelA1, "Level A1", "", {0.0f, 1.0f, 0.0f, 0.0f}, text::plain);
+            add(kTimeA1, "Time A1", "s", {0.0f, kMaxStageSeconds, 0.0f, 0.0f}, text::seconds);
+            add(kCurveA1, "Curve A1", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
             // A2 is the attack: it rises to the peak.
-            add(kLevelA2, "Level A2", "", {0.0f, 1.0f, 1.0f, 0.0f});
-            add(kTimeA2, "Time A2", "s", {0.0f, kMaxStageSeconds, 0.01f, 0.0f});
-            add(kCurveA2, "Curve A2", "", {-1.0f, 1.0f, 0.0f, 0.0f});
+            add(kLevelA2, "Level A2", "", {0.0f, 1.0f, 1.0f, 0.0f}, text::plain);
+            add(kTimeA2, "Time A2", "s", {0.0f, kMaxStageSeconds, 0.01f, 0.0f}, text::seconds);
+            add(kCurveA2, "Curve A2", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
             // A3 is the decay: it falls from the peak to the sustain.
-            add(kTimeA3, "Time A3", "s", {0.0f, kMaxStageSeconds, 0.1f, 0.0f});
-            add(kCurveA3, "Curve A3", "", {-1.0f, 1.0f, 0.0f, 0.0f});
-            add(kSustain, "Sustain", "", {0.0f, 1.0f, 0.7f, 0.0f});
+            add(kTimeA3, "Time A3", "s", {0.0f, kMaxStageSeconds, 0.1f, 0.0f}, text::seconds);
+            add(kCurveA3, "Curve A3", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
+            add(kSustain, "Sustain", "", {0.0f, 1.0f, 0.7f, 0.0f}, text::plain);
             // R1 is the release. R2 is the tail after it, ending at zero.
-            add(kLevelR1, "Level R1", "", {0.0f, 1.0f, 0.0f, 0.0f});
-            add(kTimeR1, "Time R1", "s", {0.0f, kMaxStageSeconds, 0.2f, 0.0f});
-            add(kCurveR1, "Curve R1", "", {-1.0f, 1.0f, 0.0f, 0.0f});
-            add(kTimeR2, "Time R2", "s", {0.0f, kMaxStageSeconds, 0.0f, 0.0f});
-            add(kCurveR2, "Curve R2", "", {-1.0f, 1.0f, 0.0f, 0.0f});
+            add(kLevelR1, "Level R1", "", {0.0f, 1.0f, 0.0f, 0.0f}, text::plain);
+            add(kTimeR1, "Time R1", "s", {0.0f, kMaxStageSeconds, 0.2f, 0.0f}, text::seconds);
+            add(kCurveR1, "Curve R1", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
+            add(kTimeR2, "Time R2", "s", {0.0f, kMaxStageSeconds, 0.0f, 0.0f}, text::seconds);
+            add(kCurveR2, "Curve R2", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
 
             add(kMult, "Mult", "",
                 {0.0f, static_cast<float>(kMultiplierCount - 1), kTriggerDefaultMult,
-                 1.0f});
-            add(kExponential, "Exp", "", {0.0f, 1.0f, 0.0f, 1.0f});
-            add(kResetToZero, "RTZ", "", {0.0f, 1.0f, 1.0f, 1.0f});
-            add(kVelocityAmount, "Vel", "", {-1.0f, 1.0f, 0.0f, 0.0f});
+                 1.0f},
+                text::multiplier_name);
+            add(kExponential, "Exp", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off);
+            add(kResetToZero, "RTZ", "", {0.0f, 1.0f, 1.0f, 1.0f}, text::on_off);
+            add(kVelocityAmount, "Vel", "", {-1.0f, 1.0f, 0.0f, 0.0f}, text::signed_plain);
         }
     }
 

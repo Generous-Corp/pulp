@@ -17,6 +17,7 @@
 // relaxed atomic store per channel per block.
 
 #include <brew/channels.hpp>
+#include <brew/param_text.hpp>
 #include <brew/cv.hpp>
 #include <brew/cv_osc.hpp>
 
@@ -95,20 +96,35 @@ public:
         };
     }
 
+    /// A deadband is measured in ten-thousandths of full scale — three decimals
+    /// would round every useful setting to the same string.
+    static std::string threshold_text(float v) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.4f", v);
+        return std::string(buf);
+    }
+    static std::string rate_text(float v) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.0f Hz", v);
+        return std::string(buf);
+    }
+
+    /// `fmt` is how the value reads — here and in the host's parameter list.
     struct ControlSpec {
         state::ParamID id;
         const char* name;
         const char* unit;
         state::ParamRange range;
+        std::string (*fmt)(float);
     };
 
     /// Registered once per channel: the two OSC streams are independent.
     static constexpr std::array<ControlSpec, 2> controls() {
         return {{
             // Off until asked. Nothing leaves the process before this is on.
-            {kEnable, "Enable", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+            {kEnable, "Enable", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
             // Movement smaller than this is not worth a packet.
-            {kThreshold, "Threshold", "", {0.0f, 0.5f, 0.001f, 0.0001f}},
+            {kThreshold, "Threshold", "", {0.0f, 0.5f, 0.001f, 0.0001f}, threshold_text},
         }};
     }
 
@@ -119,7 +135,8 @@ public:
                     {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
                      .name = std::string(c.name) + channel_suffix(ch),
                      .unit = c.unit,
-                     .range = c.range});
+                     .range = c.range,
+                     .to_string = c.fmt});
 
         // One rate, because one thread sends both channels. Per-channel rates
         // would need per-channel threads to mean anything, and a second thread to
@@ -127,7 +144,8 @@ public:
         store.add_parameter({.id = kRateHz,
                              .name = "Rate",
                              .unit = "Hz",
-                             .range = {kMinRateHz, kMaxRateHz, 60.0f, 1.0f}});
+                             .range = {kMinRateHz, kMaxRateHz, 60.0f, 1.0f},
+                             .to_string = rate_text});
     }
 
     void prepare(const format::PrepareContext&) override { start_sender(); }

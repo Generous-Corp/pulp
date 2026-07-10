@@ -17,6 +17,7 @@
 // patch cable.
 
 #include <brew/channels.hpp>
+#include <brew/param_text.hpp>
 #include <brew/cv.hpp>
 #include <brew/scale.hpp>
 #include <brew/smooth.hpp>
@@ -67,11 +68,30 @@ public:
         };
     }
 
+    /// The five scales' names, the twelve keys' — and how every other value
+    /// reads, here and in the host's own parameter list.
+    static std::string mode_name(float v) {
+        static const char* const kNames[] = {"Man", "Scale"};
+        return text::named_at(kNames, kQuantModeCount, v);
+    }
+    static std::string scale_name(float v) {
+        static const char* const kNames[] = {"chrom", "maj",   "min",   "harm",
+                                             "pent+", "pent-", "blues", "whole",
+                                             "dor",   "mixo"};
+        return text::named_at(kNames, kScaleCount, v);
+    }
+    static std::string key_name(float v) {
+        static const char* const kNames[] = {"C",  "C#", "D",  "D#", "E",  "F",
+                                             "F#", "G",  "G#", "A",  "A#", "B"};
+        return text::named_at(kNames, 12, v);
+    }
+
     struct ControlSpec {
         state::ParamID id;
         const char* name;
         const char* unit;
         state::ParamRange range;
+        std::string (*fmt)(float);
     };
 
     /// Every control the Quantizer has. Registered once per channel: the two
@@ -79,34 +99,34 @@ public:
     static constexpr std::array<ControlSpec, 12> controls() {
         return {{
             // Quantization on this channel. Off passes the CV through unchanged.
-            {kEnable, "Enable", "", {0.0f, 1.0f, 1.0f, 1.0f}},
+            {kEnable, "Enable", "", {0.0f, 1.0f, 1.0f, 1.0f}, text::on_off},
             // Manual divides full scale into equal steps; Scale then keeps only
             // the notes of a mode. `Calibrated` is absent — it needs the
             // interface's full-scale voltage, and guessing it is a wrong pitch.
-            {kMode, "Mode", "", {0.0f, static_cast<float>(kQuantModeCount - 1), 0.0f, 1.0f}},
+            {kMode, "Mode", "", {0.0f, static_cast<float>(kQuantModeCount - 1), 0.0f, 1.0f}, mode_name},
             // Coarse count. Twelve divisions of full scale is the obvious starting
             // point and lands on semitones only once the rail voltage is known.
-            {kSteps, "Steps", "", {kMinQuantizeSteps, kMaxQuantizeSteps, 12.0f, 1.0f}},
+            {kSteps, "Steps", "", {kMinQuantizeSteps, kMaxQuantizeSteps, 12.0f, 1.0f}, text::whole},
             // Added to Steps. A fractional step count simply puts the rails
             // between lattice points, which is a legitimate thing to want.
-            {kFine, "Fine", "", {-0.5f, 0.5f, 0.0f, 0.001f}},
+            {kFine, "Fine", "", {-0.5f, 0.5f, 0.0f, 0.001f}, text::signed_plain},
             // Where the lattice sits within a step. At 0 a step lands on zero.
-            {kOffset, "Offset", "", {0.0f, 1.0f, 0.0f, 0.001f}},
+            {kOffset, "Offset", "", {0.0f, 1.0f, 0.0f, 0.001f}, text::plain},
             // In Manual mode, whole steps — the only transpose that keeps the
             // output on the lattice it was just snapped to. In Scale mode, whole
             // scale degrees, so +7 in a seven-note scale is an octave.
-            {kTranspose, "Transpose", "steps", {-24.0f, 24.0f, 0.0f, 1.0f}},
-            {kScale, "Scale", "", {0.0f, static_cast<float>(kScaleCount - 1), 0.0f, 1.0f}},
+            {kTranspose, "Transpose", "steps", {-24.0f, 24.0f, 0.0f, 1.0f}, text::signed_whole},
+            {kScale, "Scale", "", {0.0f, static_cast<float>(kScaleCount - 1), 0.0f, 1.0f}, scale_name},
             // Key and Key Offset are summed into the scale's root. Two controls
             // rather than one so a pattern can be automated around a fixed root.
-            {kKey, "Key", "", {0.0f, 11.0f, 0.0f, 1.0f}},
-            {kKeyOffset, "Key Offset", "", {-12.0f, 12.0f, 0.0f, 1.0f}},
+            {kKey, "Key", "", {0.0f, 11.0f, 0.0f, 1.0f}, key_name},
+            {kKeyOffset, "Key Offset", "", {-12.0f, 12.0f, 0.0f, 1.0f}, text::signed_whole},
             // As DC's. Positive slews, negative low-passes; zero is a wire, and a
             // quantizer that smooths by default would un-quantize its own output.
-            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}},
+            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}, text::smooth},
             // Per-jack calibration and polarity, as everywhere else in the suite.
-            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}},
-            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}, text::fraction_percent},
+            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
         }};
     }
 
@@ -117,7 +137,8 @@ public:
                     {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
                      .name = std::string(c.name) + channel_suffix(ch),
                      .unit = c.unit,
-                     .range = c.range});
+                     .range = c.range,
+                     .to_string = c.fmt});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
