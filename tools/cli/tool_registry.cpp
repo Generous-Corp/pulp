@@ -570,6 +570,25 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     }
 
     auto& source = it->second;
+
+    // Bare, un-archived binaries (a source with no `archive_format`, e.g.
+    // Perfetto's `trace_processor_shell`) are installed by the SHA-256-verified
+    // fetcher behind `pulp tool install <id>` / `pulp trace fetch`, which the
+    // Rust front-end routes to directly. This generic path neither verifies the
+    // download nor matches that fetcher's platform-nested cache layout, and
+    // `extract_archive` below would fail trying to untar a raw binary. Defer
+    // rather than install a divergent, unverified copy — so an `--all` sweep
+    // that reaches here (e.g. via `pulp-cpp` directly) skips it cleanly instead
+    // of erroring.
+    if (source.archive_format.empty()) {
+        std::cout << "  " << tool.display_name
+                  << " is installed by the verified fetcher; run `pulp tool install "
+                  << tool.id << "`. Skipping generic download.\n";
+        result.ok = true;
+        result.installed_version = tool.pinned_version;
+        return result;
+    }
+
     auto url = expand_url(source.url_template, tool.pinned_version);
     auto download_dir = tools_dir() / ".downloads";
     fs::create_directories(download_dir);

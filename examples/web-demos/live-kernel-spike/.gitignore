@@ -1,0 +1,6 @@
+# Built wasm artifacts (reproduce with ./build.sh) and any local node deps.
+dist/
+node_modules/
+
+# Cloudflare wrangler local state
+.wrangler/

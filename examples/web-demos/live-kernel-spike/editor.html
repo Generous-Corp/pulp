@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pulp Live — edit DSP, hear it in 3 ms</title>
+<meta name="description" content="A live DSP patch language you edit in the browser — drag any number and hear the synth change in ~3 ms, audio never stops. One 39 KB single-thread wasm kernel, no server, no cross-origin isolation." />
+<style>
+  :root {
+    --bg: #0b0f16; --panel: #131a24; --panel2: #1a2331; --line: #263140; --line2:#2f3c4d;
+    --fg: #e7eef6; --dim: #8695a8; --faint:#5c6b7e;
+    --accent: #4fd1c5; --accent2: #a78bfa; --amber: #f0b429; --good: #3fb950; --bad: #f85149;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "JetBrains Mono", Consolas, monospace;
+    --num: #f0b429; --verb: #4fd1c5; --key: #7aa2f7; --com: #5c6b7e; --note: #a78bfa; --fb:#f778ba; --out:#3fb950;
+  }
+  * { box-sizing: border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1180px; margin:0 auto; padding:1.1rem 1rem 2.4rem; }
+  a { color:var(--accent); }
+
+  header { display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; margin-bottom:.2rem; }
+  .brand { font-weight:800; font-size:1.15rem; letter-spacing:.02em; }
+  .brand .l { color:var(--accent); }
+  header .chips { display:flex; gap:.35rem; flex-wrap:wrap; margin-left:.2rem; }
+  .chip { font:inherit; font-size:.8rem; padding:.28rem .6rem; border-radius:999px; background:var(--panel2); color:var(--fg); border:1px solid var(--line); cursor:pointer; }
+  .chip:hover { border-color:var(--accent); }
+  .grow { flex:1; }
+  .ghost { font:inherit; font-size:.82rem; padding:.32rem .7rem; border-radius:8px; background:transparent; color:var(--fg); border:1px solid var(--line2); cursor:pointer; }
+  .ghost:hover { border-color:var(--accent); }
+  .tagline { color:var(--dim); font-size:.9rem; margin:.15rem 0 1rem; }
+  .tagline b { color:var(--fg); }
+
+  .grid { display:grid; grid-template-columns:1.04fr .96fr; gap:1rem; align-items:start; }
+  @media (max-width:860px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:.85rem; }
+  .card h2 { font-size:.72rem; text-transform:uppercase; letter-spacing:.09em; color:var(--dim); margin:0 0 .55rem; font-weight:700; }
+
+  /* editor overlay */
+  .ed { position:relative; height:320px; border:1px solid var(--line); border-radius:9px; overflow:hidden; background:#080c12; }
+  #overlay, #editor {
+    position:absolute; inset:0; margin:0; padding:.7rem .85rem; border:0;
+    font:13.5px/1.62 var(--mono); tab-size:2; white-space:pre; overflow:auto;
+    letter-spacing:0; word-spacing:0;
+  }
+  #overlay { pointer-events:none; z-index:1; color:var(--fg); overflow:hidden; }
+  #editor { z-index:2; background:transparent; color:transparent; caret-color:var(--accent); resize:none; outline:none; }
+  #editor::selection { background:rgba(79,209,197,.25); }
+  #overlay .ln { min-height:1.62em; }
+  #overlay .errline { text-decoration:underline wavy var(--bad); text-underline-offset:3px; }
+  #overlay .infoline { text-decoration:underline dotted var(--amber); text-underline-offset:3px; }
+  .c-num { color:var(--num); cursor:ew-resize; border-bottom:1px dotted rgba(240,180,41,.45); }
+  .c-verb { color:var(--verb); font-weight:600; } .c-key { color:var(--key); } .c-com { color:var(--com); font-style:italic; }
+  .c-note { color:var(--note); } .c-fb { color:var(--fb); font-weight:700; } .c-out { color:var(--out); font-weight:700; }
+  .c-id { color:#c8d3e0; } .c-punct { color:var(--faint); }
+  #errors { display:none; margin-top:.5rem; border-radius:8px; padding:.45rem .65rem; font:12px/1.5 var(--mono); }
+  #errors.err { background:#2a1416; border:1px solid var(--bad); color:#ffb4ae; }
+  #errors.warn { background:#241d0e; border:1px solid var(--amber); color:#ffdf9e; }
+  .cheats { color:var(--dim); font-size:.76rem; margin-top:.55rem; }
+  .cheats code { background:var(--panel2); padding:0 .28rem; border-radius:4px; color:var(--fg); }
+  .scrubtip { margin-top:.5rem; font-size:.8rem; color:var(--accent); }
+  .scrubtip b { color:var(--fg); }
+
+  /* synth */
+  .readout { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; margin-bottom:.55rem; }
+  #latency { font:800 1.8rem/1 var(--mono); color:var(--accent); }
+  #latency.flash { animation:pop .45s ease; }
+  @keyframes pop { 0%{ transform:scale(1.09); color:#fff; } 100%{ transform:scale(1); } }
+  .kind { font-size:.7rem; padding:.18rem .5rem; border-radius:999px; border:1px solid var(--line); color:var(--dim); }
+  .kind.param { color:var(--good); border-color:var(--good); } .kind.struct { color:var(--accent2); border-color:var(--accent2); }
+  canvas#scope { width:100%; height:88px; display:block; background:#080c12; border:1px solid var(--line); border-radius:8px; }
+  #status { font:11.5px var(--mono); color:var(--dim); margin-top:.4rem; display:block; }
+
+  .tabs { display:flex; gap:.3rem; margin:.7rem 0 .5rem; }
+  .tab { font:inherit; font-size:.72rem; letter-spacing:.05em; padding:.28rem .6rem; border-radius:7px; background:var(--panel2); color:var(--dim); border:1px solid var(--line); cursor:pointer; }
+  .tab.on { color:var(--fg); border-color:var(--accent); }
+  .pane { display:none; }
+  .pane.on { display:block; }
+  #bytes { font:10.5px/1.5 var(--mono); background:#080c12; border:1px solid var(--line); border-radius:8px; padding:.5rem .6rem; max-height:132px; overflow:auto; word-break:break-all; }
+  .bh{color:var(--dim)} .bn{color:var(--verb)} .be{color:var(--fb)} .bp{color:var(--num)}
+  #bytesLegend { font-size:.76rem; color:var(--dim); margin-top:.4rem; }
+  #bytesLegend b{color:var(--fg)}
+  .about { font-size:.83rem; color:var(--dim); } .about b{ color:var(--fg); }
+  .about p { margin:.4rem 0; }
+
+  /* telemetry receipts */
+  .receipts { margin:1rem 0; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:.55rem .8rem;
+    display:flex; gap:1.1rem; flex-wrap:wrap; align-items:center; font:12.5px var(--mono); color:var(--dim); }
+  .receipts .dot { color:var(--good); }
+  .receipts b { color:var(--fg); font-weight:600; }
+  .receipts .spark { color:var(--accent); letter-spacing:1px; }
+
+  /* transport + keyboard */
+  .transport { display:flex; align-items:center; gap:.5rem; margin:1rem 0 .5rem; flex-wrap:wrap; }
+  .btn { font:inherit; font-size:.85rem; padding:.42rem .8rem; border-radius:9px; cursor:pointer; background:var(--panel2); color:var(--fg); border:1px solid var(--line); }
+  .btn:hover{ border-color:var(--accent); }
+  .btn.on { background:var(--amber); color:#1a1206; border-color:var(--amber); font-weight:700; }
+  #riffBtn.on { background:var(--accent2); border-color:var(--accent2); color:#160f26; }
+  #octLabel { font:12px var(--mono); color:var(--dim); min-width:3.6em; text-align:center; }
+  .kbcard { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:.85rem; }
+  #keyboard { position:relative; height:120px; user-select:none; touch-action:none; }
+  .wkey { position:absolute; top:0; bottom:0; background:#e9eef4; border:1px solid #93a1af; border-radius:0 0 5px 5px; }
+  .wkey.down { background:var(--accent); }
+  .bkey { position:absolute; top:0; height:62%; background:#0d131b; border:1px solid #04070b; border-radius:0 0 4px 4px; z-index:2; }
+  .bkey.down { background:var(--accent2); }
+  .kbhint { color:var(--dim); font-size:.76rem; margin-top:.5rem; }
+  .kbhint code { background:var(--panel2); padding:0 .28rem; border-radius:4px; color:var(--fg); font-family:var(--mono); }
+
+  .coi { margin-top:1rem; font-size:.82rem; color:var(--dim); background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--good); border-radius:9px; padding:.6rem .85rem; }
+  .coi b{ color:var(--fg); }
+  footer { margin-top:1.1rem; color:var(--dim); font-size:.8rem; }
+  footer b{ color:var(--fg); }
+
+  #toast { position:fixed; left:50%; bottom:1.4rem; transform:translateX(-50%) translateY(20px); background:#0f1620; border:1px solid var(--accent); color:var(--fg);
+    padding:.55rem .9rem; border-radius:10px; font-size:.85rem; opacity:0; pointer-events:none; transition:.25s; z-index:50; }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  #powerScrim { position:fixed; inset:0; background:rgba(5,8,13,.82); display:flex; align-items:center; justify-content:center; z-index:100; backdrop-filter:blur(2px); }
+  #powerScrim.hide { display:none; }
+  #powerBtn { font:700 1.05rem/1 -apple-system,system-ui,sans-serif; padding:1rem 1.6rem; border-radius:14px; background:var(--accent); color:#04211d; border:0; cursor:pointer; box-shadow:0 0 0 0 rgba(79,209,197,.5); animation:pulse 1.8s infinite; }
+  @keyframes pulse { 0%{ box-shadow:0 0 0 0 rgba(79,209,197,.45);} 70%{ box-shadow:0 0 0 18px rgba(79,209,197,0);} 100%{ box-shadow:0 0 0 0 rgba(79,209,197,0);} }
+  .scrubbing, .scrubbing * { cursor:ew-resize !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="brand">PULP <span class="l">LIVE</span></span>
+    <div class="chips" id="presets"></div>
+    <span class="grow"></span>
+    <button class="ghost" id="shareBtn" title="Copy a permalink — the patch travels in the URL">Share ⧉</button>
+  </header>
+  <div class="tagline"><b>Edit code · hear it in ~3 ms · audio never stops.</b> Drag any number in the patch and the synth sweeps under your finger — no run button, no compile.</div>
+
+  <div class="grid">
+    <!-- LEFT: editor -->
+    <section class="card">
+      <h2>Patch — Pulp DSL</h2>
+      <div class="ed">
+        <div id="overlay"></div>
+        <textarea id="editor" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea>
+      </div>
+      <div id="errors"></div>
+      <div class="scrubtip">↔ <b>Drag any highlighted number</b> to sweep it live · double-nothing, it just plays.</div>
+      <div class="cheats">Nodes: <code>saw</code> <code>sine</code> <code>ladder</code> <code>lowpass/peak/…</code>
+        <code>adsr</code> <code>delay</code> <code>mixer</code> · <code>~name</code> = feedback ·
+        <code>x * -2db</code> = gain · <code>out</code> is the output · <code>⌘/Ctrl+Enter</code> forces apply.</div>
+    </section>
+
+    <!-- RIGHT: synth -->
+    <section class="card">
+      <h2>Running synth</h2>
+      <div class="readout"><span id="latency">—</span><span id="kind" class="kind">idle</span></div>
+      <canvas id="scope" width="560" height="88"></canvas>
+      <span id="status">booting…</span>
+
+      <div class="tabs">
+        <button class="tab on" data-tab="bytes">BYTES</button>
+        <button class="tab" data-tab="about">ABOUT</button>
+      </div>
+      <div class="pane on" id="pane-bytes">
+        <div id="bytes"></div>
+        <div id="bytesLegend"></div>
+      </div>
+      <div class="pane about" id="pane-about">
+        <p><b>Same DSP truth as native.</b> The kernel runs the same <code>core/signal</code> C++ node
+          classes native Pulp plugins ship — bit-exact to a compiled build (S0: maxAbsDiff = 0).</p>
+        <p><b>Your last valid patch keeps playing.</b> Break the code and the sound continues while the
+          error underlines — audio is never silenced.</p>
+        <p><b>Not a compiler pitch.</b> A live patch language for Pulp's DSP primitives, parsed and
+          hot-swapped client-side in milliseconds. MIT, open source.</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- telemetry receipts -->
+  <div class="receipts">
+    <span><span class="dot">●</span> live</span>
+    <span>edit→sound <span class="spark" id="rc-spark"></span></span>
+    <span>parse <b id="rc-parse">—</b></span>
+    <span>build <b id="rc-build">~1.2 µs</b></span>
+    <span>fade <b id="rc-fade">40 ms</b></span>
+    <span>audio uninterrupted <b id="rc-uptime">0m 00s</b> · <b>0</b> dropouts</span>
+    <span>kernel <b id="rc-kernel">39 KB</b></span>
+    <span>patch <b id="rc-patch">— B</b></span>
+  </div>
+
+  <!-- keyboard -->
+  <div class="kbcard">
+    <div class="transport">
+      <button id="latchBtn" class="btn" title="Latch a drone so you can hear edits (Space)">LATCH ●</button>
+      <button id="riffBtn" class="btn" title="Auto-play a riff so filter/delay edits are obviously audible">RIFF ▸</button>
+      <span class="grow"></span>
+      <button id="octDown" class="btn">oct −</button><span id="octLabel">oct +0</span><button id="octUp" class="btn">oct +</button>
+    </div>
+    <div id="keyboard"></div>
+    <div class="kbhint">Play with the mouse or <code>a w s e d f t g y h u j k</code> · <code>z</code>/<code>x</code> octave · <code>space</code> latch.
+      Tip: hit <b>RIFF</b>, then drag <code>cutoff:</code> on AcidLine — that's the 303.</div>
+  </div>
+
+  <div class="coi" id="coi">checking cross-origin isolation…</div>
+
+  <footer>
+    <b>This page is static files.</b> No server, no LLVM, no compile farm — one ~39 KB single-thread
+    wasm kernel + a classic worklet script. Runs on plain GitHub Pages. Zero copyleft, MIT.
+  </footer>
+</div>
+
+<div id="toast"></div>
+<div id="powerScrim"><button id="powerBtn">▶ press to power on</button></div>
+<script type="module" src="./editor.mjs"></script>
+<script>
+  // power-on gate (autoplay policy): first click creates/resumes audio + latches.
+  (function () {
+    const scrim = document.getElementById("powerScrim");
+    const hide = () => scrim.classList.add("hide");
+    document.getElementById("powerBtn").addEventListener("click", () => { try { window.__lkm && window.__lkm.latch && window.__lkm.latch(true); } catch (e) {} hide(); });
+    // auto-dismiss once audio is actually running (headless autoplay path)
+    const iv = setInterval(() => { const m = window.__lkm && window.__lkm.lastMeter; if (m) { hide(); clearInterval(iv); } }, 120);
+  })();
+</script>
+</body>
+</html>

@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06381"></a>
+## [0.638.1] - 2026-07-09
+
+- M1 "Pulp Live" editor: scrub any number, hear it in ~3 ms (no COI) ([#5866](https://github.com/danielraffel/pulp/pull/5866))
+- S0 spike: resident-worklet live kernel VM (edit -> crossfade -> hear it) ([#5864](https://github.com/danielraffel/pulp/pull/5864))
+- Add headless measurement rig for the own-real-time-compiler spike ([#5860](https://github.com/danielraffel/pulp/pull/5860))
+
 <a id="v06380"></a>
 ## [0.638.0] - 2026-07-09
 
@@ -6172,6 +6179,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.638.1]: https://github.com/danielraffel/pulp/releases/tag/v0.638.1
 [0.638.0]: https://github.com/danielraffel/pulp/releases/tag/v0.638.0
 [0.637.0]: https://github.com/danielraffel/pulp/releases/tag/v0.637.0
 [0.636.0]: https://github.com/danielraffel/pulp/releases/tag/v0.636.0
