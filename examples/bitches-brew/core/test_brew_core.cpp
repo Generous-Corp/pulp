@@ -503,3 +503,20 @@ TEST_CASE("a swung grid still puts an edge on the downbeat",
     REQUIRE_FALSE(e.empty());
     REQUIRE(e.front() == 0);
 }
+
+TEST_CASE("swing stays invertible across its whole range", "[brew][clock][swing]") {
+    // The bounds exist because `swing_unwarp` divides by the length of a swing
+    // pair's half, and at 0 or 1 one of those halves has zero length. Walk the
+    // ends and the middle and assert the round trip, so widening the range again
+    // cannot quietly reintroduce the division.
+    for (double amount : {kMinSwing, 0.25, 0.5, 0.75, kMaxSwing}) {
+        for (double unit : {kEighthBeats, kSixteenthBeats}) {
+            const Swing sw{unit, amount};
+            for (double beats : {0.0, 0.1, 0.4, 0.5, 0.99, 1.0, 2.37, 7.5}) {
+                const double there = swing_warp(beats, sw);
+                REQUIRE(std::isfinite(there));
+                REQUIRE_THAT(swing_unwarp(there, sw), Catch::Matchers::WithinAbs(beats, 1e-9));
+            }
+        }
+    }
+}

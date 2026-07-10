@@ -89,10 +89,15 @@ public:
                              .name = "Pulses Per Beat",
                              .unit = "ppqn",
                              .range = {1.0f, 48.0f, kDinSyncPulsesPerBeat, 1.0f}});
+        // Derived from the clock's own bounds rather than repeated here: a knob
+        // whose range outruns the warp's invertible interval silently clamps, and
+        // the user is left turning a control that stopped doing anything.
         store.add_parameter({.id = kSwingPercent,
                              .name = "Swing",
                              .unit = "%",
-                             .range = {25.0f, 75.0f, 50.0f, 0.1f}});
+                             .range = {static_cast<float>(kMinSwing * 100.0),
+                                       static_cast<float>(kMaxSwing * 100.0),
+                                       50.0f, 0.1f}});
         // Which subdivision's off-beat moves. Off is the eighth, on the
         // sixteenth — the same two choices every swing control offers, because
         // they are the two that correspond to how people count.

@@ -79,10 +79,12 @@ inline constexpr double kEighthBeats = 0.5;
 inline constexpr double kSixteenthBeats = 0.25;
 
 /// Below 0.5 the off-beat rushes, above it drags. The bounds keep the warp
-/// invertible — at 0 or 1 the beat axis collapses and half of every pair
-/// disappears.
-inline constexpr double kMinSwing = 0.25;
-inline constexpr double kMaxSwing = 0.75;
+/// invertible: at exactly 0 or 1 the beat axis collapses, half of every pair has
+/// zero length, and `swing_unwarp` divides by zero. One percent short of each end
+/// is as far as the shuffle can be pushed and still be undone, which is far enough
+/// that the off-beat lands all but on top of its neighbour.
+inline constexpr double kMinSwing = 0.01;
+inline constexpr double kMaxSwing = 0.99;
 
 struct Swing {
     /// The subdivision whose off-beat moves. Zero or negative means no swing.
