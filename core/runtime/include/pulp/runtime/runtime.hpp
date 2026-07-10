@@ -13,7 +13,12 @@
 // | Large data swap            | TripleBuffer<T>  | Wavetables, IR buffers       |
 // | Ordered event stream       | SPSC FIFO        | MIDI events, UI commands     |
 // | Latest-value metering      | TripleBuffer<T>  | Audio→UI meter data          |
-// | Prepared resource handoff  | RealtimeResourceSlot<T,N> | IR/sample swaps |
+// | Prepared read-only pointer | RealtimeResourceSlot<T,N> | prepared samples/IRs |
+//
+// RealtimeResourceSlot is a raw-pointer publication helper, not reader-pinned
+// RCU: one non-RT owner serializes publish/reclaim and reclaims only after a
+// block-boundary grace point. Use the Slot/Handoff taxonomy where a site needs
+// multi-reader pins or audio-thread ownership transfer.
 //
 // NEVER use on the audio thread:
 //   std::mutex, std::condition_variable, heap allocation, I/O
@@ -25,7 +30,7 @@
 //   - TripleBuffer uses acquire/release on the flag word
 //   - EventLoop uses acquire/release + condition_variable (UI thread only)
 //   - RealtimeResourceSlot publishes a prepared pointer with release/acquire;
-//     reclaim retired resources away from the audio thread
+//     reclaim retired resources away from the audio thread after a grace point
 
 #include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/background_job.hpp>

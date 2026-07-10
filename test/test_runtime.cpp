@@ -447,12 +447,18 @@ TEST_CASE("RealtimeResourceSlot reports retire queue pressure",
 
     RealtimeResourceSlot<PreparedResource, 1> slot;
 
-    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{1})));
-    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{2})));
+    REQUIRE(slot.publish_with_status(
+                std::make_unique<PreparedResource>(PreparedResource{1})) ==
+            RealtimeResourceSlotPublishStatus::Published);
+    REQUIRE(slot.publish_with_status(
+                std::make_unique<PreparedResource>(PreparedResource{2})) ==
+            RealtimeResourceSlotPublishStatus::Published);
     REQUIRE(slot.retired_count_approx() == 1);
     REQUIRE(slot.retire_overflow_count() == 0);
 
-    REQUIRE_FALSE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{3})));
+    REQUIRE(slot.publish_with_status(
+                std::make_unique<PreparedResource>(PreparedResource{3})) ==
+            RealtimeResourceSlotPublishStatus::RejectedRetireQueueFull);
     REQUIRE(slot.get() != nullptr);
     REQUIRE(slot.get()->value == 2);
     REQUIRE(slot.retired_count_approx() == 1);
@@ -463,6 +469,35 @@ TEST_CASE("RealtimeResourceSlot reports retire queue pressure",
     REQUIRE(slot.get() != nullptr);
     REQUIRE(slot.get()->value == 3);
     REQUIRE(slot.retire_overflow_count() == 1);
+}
+
+TEST_CASE("RealtimeResourceSlot publish status classifies rejected resources",
+          "[runtime][background-job][rt-handoff][taxonomy]") {
+    struct PreparedResource {
+        int value = 0;
+    };
+
+    RealtimeResourceSlot<PreparedResource, 1> slot;
+
+    REQUIRE(slot.publish_with_status(nullptr) ==
+            RealtimeResourceSlotPublishStatus::RejectedEmptyResource);
+    REQUIRE(slot.get() == nullptr);
+    CHECK_FALSE(realtime_resource_slot_publish_succeeded(
+        RealtimeResourceSlotPublishStatus::RejectedEmptyResource));
+
+    REQUIRE(slot.publish_with_status(
+                std::make_unique<PreparedResource>(PreparedResource{1})) ==
+            RealtimeResourceSlotPublishStatus::Published);
+    REQUIRE(slot.publish_with_status(
+                std::make_unique<PreparedResource>(PreparedResource{2})) ==
+            RealtimeResourceSlotPublishStatus::Published);
+    REQUIRE(slot.publish_with_status(
+                std::make_unique<PreparedResource>(PreparedResource{3})) ==
+            RealtimeResourceSlotPublishStatus::RejectedRetireQueueFull);
+    CHECK_FALSE(realtime_resource_slot_publish_succeeded(
+        RealtimeResourceSlotPublishStatus::RejectedRetireQueueFull));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 2);
 }
 
 TEST_CASE("RealtimeResourceSlot audio read path allocates zero times",
@@ -660,6 +695,22 @@ TEST_CASE("SpscQueue preserves moved string payload order",
     REQUIRE(q.try_pop().value() == "gamma");
     REQUIRE_FALSE(q.try_pop().has_value());
     REQUIRE(q.empty());
+}
+
+TEST_CASE("SpscQueue failed rvalue push preserves source ownership",
+          "[runtime][spsc]") {
+    SpscQueue<std::unique_ptr<int>, 1> q;
+    REQUIRE(q.try_push(std::make_unique<int>(1)));
+
+    auto rejected = std::make_unique<int>(2);
+    REQUIRE_FALSE(q.try_push(std::move(rejected)));
+    REQUIRE(rejected != nullptr);
+    REQUIRE(*rejected == 2);
+
+    auto first = q.try_pop();
+    REQUIRE(first.has_value());
+    REQUIRE(*first != nullptr);
+    REQUIRE(**first == 1);
 }
 
 TEST_CASE("SpscQueue exposes producer overflow telemetry",
