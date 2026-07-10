@@ -64,6 +64,7 @@ static const Command commands[] = {
     // accepted by cmd_config.cpp is reachable from the installed CLI.
     {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
     {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
+    {"minos",    "Minimum-OS tooling (measure a binary; sweep all consumers)", cmd_minos},
     {"macos",    "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},
     {"ci-host",  "Onboard a Mac as a Tart-VM CI host (optional; wraps setup-ci-host.sh)", cmd_ci_host},
     {"overflow", "Configure macOS-runner overflow routing (status/enable/disable/threshold)", cmd_overflow},
