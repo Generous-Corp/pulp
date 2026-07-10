@@ -144,6 +144,18 @@ TEST_CASE("Slot survives an N-reader hammer against a hot publisher", "[runtime]
         for (int i = 1; i <= kPublishes; ++i)
             slot.publish(std::make_unique<Tracked>(i));
 
+        // Same harness race as the Handoff hammer below: the publish loop is
+        // only microseconds, so on a saturated host the reader threads may not
+        // be scheduled even once before we signal stop — leaving reads==0 and
+        // failing the assertion through pure scheduling, not a Slot defect.
+        // Keep publishing (an in-range value) until a reader has provably run;
+        // the OS guarantees a live runnable thread eventually runs, so this
+        // cannot hang while the readers are alive.
+        while (reads.load(std::memory_order_relaxed) == 0) {
+            slot.publish(std::make_unique<Tracked>(kPublishes));
+            std::this_thread::yield();
+        }
+
         stop.store(true);
         for (auto& t : readers) t.join();
 
