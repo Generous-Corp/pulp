@@ -1491,6 +1491,45 @@ test: `tools/scripts/test_local_diff_cover.py::WorkflowSourceOfTruthTests`
 fails if a future edit hardcodes `--fail-under=NN` back into the
 workflow.
 
+### `pulp minos` — minimum-OS tooling
+
+`pulp minos` (in `tools/cli/cmd_minos.cpp`) is a thin shell-out, same
+shape as `pulp coverage`. Two subcommands, two scripts:
+
+- `pulp minos measure <binary>` → `tools/scripts/measure_min_os.py --measure`.
+  Reports one binary's OS floor by format (`macho`/`elf`/`pe`) read from the
+  artifact itself.
+- `pulp minos sweep [args...]` → `tools/scripts/sdk_consumer_sweep.py`. Rebuilds
+  every downstream consumer against one installed SDK and compares each floor to
+  the SDK floor. All args pass through (`--sdk-prefix`, `--only`, `--dry-run`,
+  `--json`).
+- `pulp minos update [args...]` / `pulp minos publish-runbook [args...]` →
+  `tools/scripts/sdk_consumer_update.py` (the subcommand name is prepended, then
+  args pass through). `update` bumps every consumer's SDK pin (dry-run default;
+  `--open-prs` to open PRs); `publish-runbook` prints the republish steps
+  (prints only — never builds/signs/publishes). Pin-detect/rewrite + runbook are
+  pure and unit-tested in `test_sdk_consumer_update.py`; the clone/PR side
+  effects are gated and integration-light.
+
+Surfaces that must stay in lockstep (the scripts are the single
+implementation; everything else delegates):
+
+- CLI subcommand `tools/cli/cmd_minos.cpp` + table entry in `pulp_cli.cpp` +
+  decl in `cli_common.hpp` + `cmd_minos.cpp` in `tools/cli/CMakeLists.txt`.
+- Slash command `.claude/commands/minos.md`.
+- MCP tool `pulp_minos` in `tools/mcp/pulp_mcp.cpp` (tools_list_json entry +
+  dispatch arm) with `handle_minos` in `tools/mcp/mcp_tools.{hpp,cpp}`. It
+  exposes only `measure` (RPC-shaped); the `sweep` is CLI-only because it clones
+  and builds many repos — say so in the tool description, don't add a sweep arg.
+- Manifest `docs/status/cli-commands.yaml` + reference `docs/reference/cli.md#minos`.
+- User guide `docs/guides/minimum-os-support.md` (plain-language explainer).
+
+The SDK's own floor is data in `tools/deps/min_os.json`, pinned into every build
+by `tools/cmake/PulpMinOs.cmake`; the sweep registry is
+`planning/sdk-consumers/consumers.yaml` with public build knobs in
+`tools/scripts/sdk_consumer_sweep_recipes.yaml`. Shell-out coverage:
+`cli-minos-*` ctest cases in `tools/cli/CMakeLists.txt`.
+
 ## Phase 0 host-contracts touchpoints
 
 `tools/cli/cmd_host.cpp` calls `PluginSlot::process()` which now takes
@@ -2297,3 +2336,31 @@ WITHOUT opening a real audio device — `prepare_render_state()` then
 `test/test_standalone_rt.cpp`, which asserts the path is allocation/lock-free
 under the RT trap build). Keep the extraction behavior-preserving — the full
 standalone suite (start/apply-config/transport) is the regression gate.
+
+## A CTest case that shells out to a CLI command must not require `planning/`
+
+The `planning` submodule is private and optional — a public clone, a fresh
+worktree, and every CI runner can be missing it. So a `add_test(... COMMAND
+pulp-cli <cmd>)` whose command reads something under `planning/` will fail on
+those checkouts, and if it lands it turns the required macOS gate red for every
+open PR until it is fixed.
+
+`pulp minos sweep` and `pulp minos publish-runbook` read
+`planning/sdk-consumers/consumers.yaml`. Their CTest cases pair the usual
+`PASS_REGULAR_EXPRESSION` with a skip keyed on the script's own message:
+
+```cmake
+set_tests_properties(cli-minos-sweep-dryrun PROPERTIES
+    PASS_REGULAR_EXPRESSION "Planned sweep:"
+    SKIP_REGULAR_EXPRESSION "consumers registry not found")
+```
+
+CTest checks the skip regex before the pass regex and before the exit code, so a
+missing registry reports `Skipped` with the reason visible, while a checkout that
+*has* the registry still asserts the real output. Never spell the degradation as
+a second `PASS_REGULAR_EXPRESSION` — that greens a genuinely broken tool.
+
+The skip is only as strong as the agreement between the script's wording and the
+CMake property. `tools/scripts/test_minos_registry_absent.py` asserts both ends:
+the scripts really print the phrase, and the CMakeLists really keys its skip on
+it. Extend that test when you add another registry-reading CLI test.

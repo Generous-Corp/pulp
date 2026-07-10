@@ -90,8 +90,12 @@ static constexpr int kMaxChannels = 8;
 // bypass flag in a bridge-local atomic so the host's `setShouldBypassEffect:`
 // request is honoured at the audio thread.
 struct AUBridge {
-    std::unique_ptr<Processor> processor;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
+    std::unique_ptr<Processor> processor;
     double sample_rate = 48000.0;
     AUAudioFrameCount max_frames = 512;
     int input_channels = 0;

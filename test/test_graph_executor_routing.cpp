@@ -31,11 +31,15 @@
 namespace {
 
 using pulp::format::GraphRuntimeExecutor;
+using pulp::format::GraphRuntimeCommandDecision;
+using pulp::format::GraphRuntimeCommandStatus;
 using pulp::format::GraphRuntimeNodeBinding;
 using pulp::format::GraphRuntimeSnapshot;
+using pulp::graph::GraphCommandType;
 using pulp::graph::GraphRuntimeConnectionSpec;
 using pulp::graph::GraphRuntimeNodeKind;
 using pulp::graph::GraphRuntimeNodeSpec;
+using pulp::graph::GraphTimedCommand;
 
 // Shared routing plumbing: per-node gain state + binding, deterministic input
 // signal, snapshot/pool construction, and the per-call buffer/bus/block harness
@@ -173,6 +177,60 @@ std::vector<float> signal_graph_split(float a, float b, double sr, int frames,
 constexpr double kSr = 48000.0;
 
 } // namespace
+
+TEST_CASE("GraphRuntimeExecutor command drain uses snapshot node id index",
+          "[graph][executor][commands]") {
+    constexpr int kFrames = 16;
+    const std::array<GraphRuntimeNodeSpec, 3> nodes{{
+        {42, GraphRuntimeNodeKind::AudioInput, 0, 1},
+        {7, GraphRuntimeNodeKind::Processor, 1, 1},
+        {99, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    }};
+    const std::array<GraphRuntimeConnectionSpec, 2> conns{{
+        {42, 0, 7, 0},
+        {7, 0, 99, 0},
+    }};
+    GainState gain{1.0f};
+    const std::array<GraphRuntimeNodeBinding, 3> bindings{{
+        {42, nullptr, nullptr, false},
+        {7, routing_gain, &gain, true},
+        {99, nullptr, nullptr, false},
+    }};
+
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, conns, bindings));
+    REQUIRE(snapshot.contains_node(42));
+    REQUIRE(snapshot.contains_node(7));
+    REQUIRE(snapshot.contains_node(99));
+    REQUIRE_FALSE(snapshot.contains_node(8));
+
+    auto pool = make_pool(snapshot, kFrames);
+    const std::vector<std::vector<float>> input{{test_signal(kFrames, 0.2f)}};
+    RoutedHarness h(48000.0, kFrames, input, 1);
+
+    std::array<GraphTimedCommand, 3> commands{};
+    commands[0].command.sequence_id = 1;
+    commands[0].command.type = GraphCommandType::SetNodeGain;
+    commands[0].command.node_id = 7;
+    commands[1].command.sequence_id = 2;
+    commands[1].command.type = GraphCommandType::SetNodeGain;
+    commands[1].command.node_id = 8;
+    commands[2].command.sequence_id = 3;
+    commands[2].command.type = GraphCommandType::TransportJump;
+    commands[2].command.node_id = 123456;
+
+    std::array<GraphRuntimeCommandDecision, 3> decisions{};
+    GraphRuntimeExecutor exec;
+    const auto result = exec.process_routed(h.block, snapshot, pool, nullptr, nullptr,
+                                            commands, decisions);
+    REQUIRE(result.ok());
+    REQUIRE(result.commands_drained == commands.size());
+    REQUIRE(result.commands_accepted == 2);
+    REQUIRE(result.commands_rejected == 1);
+    REQUIRE(decisions[0].status == GraphRuntimeCommandStatus::Accepted);
+    REQUIRE(decisions[1].status == GraphRuntimeCommandStatus::Rejected);
+    REQUIRE(decisions[2].status == GraphRuntimeCommandStatus::Accepted);
+}
 
 TEST_CASE("GraphRuntimeExecutor routing matches SignalGraph for a two-gain chain",
           "[host][graph][executor][routing][parity]") {

@@ -11,6 +11,7 @@ using pulp::audio::VoiceState;
 using pulp::audio::VoiceStealPolicy;
 using pulp::audio::VoiceTermination;
 using pulp::audio::VoiceTerminationReason;
+using pulp::audio::kDefaultVoiceTerminationFadeFrames;
 using pulp::audio::kInvalidSampleId;
 
 TEST_CASE("InstrumentVoiceAllocator prepares fixed voice storage",
@@ -115,6 +116,7 @@ TEST_CASE("InstrumentVoiceAllocator steals the oldest voice when full",
     REQUIRE(terminations[0].voice_index == 0);
     REQUIRE(terminations[0].voice_id == first.voice_id);
     REQUIRE(terminations[0].reason == VoiceTerminationReason::Stolen);
+    REQUIRE(terminations[0].fade_out_frames == kDefaultVoiceTerminationFadeFrames);
     REQUIRE(third.voice_index == 0);
     REQUIRE(allocator.voices()[0].note == 64);
 }
@@ -183,8 +185,29 @@ TEST_CASE("InstrumentVoiceAllocator applies choke groups before allocation",
     REQUIRE(open_hat.termination_count == 1);
     REQUIRE(open_hat.termination_overflow_count == 0);
     REQUIRE(terminations[0].reason == VoiceTerminationReason::Choked);
+    REQUIRE(terminations[0].fade_out_frames == kDefaultVoiceTerminationFadeFrames);
     REQUIRE(allocator.active_voice_count() == 1);
     REQUIRE(allocator.voices()[open_hat.voice_index].note == 46);
+}
+
+TEST_CASE("InstrumentVoiceAllocator reports configured termination fade length",
+          "[audio][sampler][voices][steal]") {
+    InstrumentVoiceAllocator allocator;
+    REQUIRE(allocator.prepare(1));
+    allocator.set_termination_fade_frames(32);
+
+    const auto first = allocator.trigger(InstrumentVoiceTrigger{.note = 60, .sample_id = 1});
+    REQUIRE(first.allocated);
+
+    std::array<VoiceTermination, 1> terminations{};
+    const auto second = allocator.trigger(
+        InstrumentVoiceTrigger{.note = 62, .sample_id = 2},
+        terminations);
+    REQUIRE(second.allocated);
+    REQUIRE(second.stolen);
+    REQUIRE(second.termination_count == 1);
+    REQUIRE(terminations[0].voice_id == first.voice_id);
+    REQUIRE(terminations[0].fade_out_frames == 32);
 }
 
 TEST_CASE("InstrumentVoiceAllocator reports termination overflow without allocation",
