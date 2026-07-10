@@ -1135,7 +1135,7 @@ policy** falls back to CPU or silence rather than glitching.
 | `GpuAudioTransport` | Fixed-latency RT↔non-RT bridge: lock-free rings + polling worker over `GpuCompute` |
 | `GpuConvolver` | GPU-resident fused / batched partitioned convolution (long IRs, many instances) |
 | `GpuStft` | GPU STFT / ISTFT primitive — the spectral toolkit's analysis/synthesis stage |
-| `GpuSpectralFreeze` / `GpuSpectralMorph` / `GpuHyperFreeze` | Capture-and-render spectral engines (freeze, morph, N-layer cloud) |
+| `GpuSpectralFreeze` / `GpuSpectralMorph` / `GpuSpectralStack` | Capture-and-render spectral engines (single freeze, A/B morph, N-layer stack/cloud) |
 
 The node boundary is **not** real-time-safe at the device level by design — the
 GPU round-trip is amortized across a block of fixed latency, not paid per sample.
