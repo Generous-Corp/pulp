@@ -4,6 +4,11 @@
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
+# runtime::Slot<T> / runtime::Handoff<T> — the two real-time publication modes.
+# Includes N-thread hammer tests that assert reclamation never runs on the
+# reader/consumer thread.
+pulp_add_test_suite(pulp-test-runtime-slot LIBRARIES pulp::runtime)
+
 # Tracing subsystem guard (Perfetto, dev-only). Asserts a default build has
 # tracing OFF. When PULP_TRACING=OFF, also nm-scan the binary to prove no
 # Perfetto symbols leaked (best-effort; mirrors the AssertNoJsSymbols guard).
