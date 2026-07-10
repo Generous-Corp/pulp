@@ -182,6 +182,21 @@ TEST_CASE("WorkerPool cold-idles workers without blocking later batches",
     pool.stop();
 }
 
+TEST_CASE("WorkerPool clears a gate-collision reheat only when no worker parked",
+          "[format][worker-pool][rt-safety]") {
+    GraphRuntimeWorkerPool pool;
+
+    pool.seed_reheat_state_for_test(/*worker_count=*/4, /*active_worker_threads=*/3,
+                                    /*reheat_requested=*/true);
+    pool.clear_transient_reheat_if_no_worker_cold_for_test();
+    CHECK_FALSE(pool.reheat_requested_for_test());
+
+    pool.seed_reheat_state_for_test(/*worker_count=*/4, /*active_worker_threads=*/2,
+                                    /*reheat_requested=*/true);
+    pool.clear_transient_reheat_if_no_worker_cold_for_test();
+    CHECK(pool.reheat_requested_for_test());
+}
+
 TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-free",
           "[format][graph][worker-pool][threads][rt-safety]") {
     // The SignalGraph parallel path starts the pool off the control thread (during

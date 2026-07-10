@@ -182,6 +182,13 @@ void GraphRuntimeWorkerPool::run_range(std::uint32_t worker_index) noexcept {
     completed_.fetch_add(1, std::memory_order_acq_rel);
 }
 
+void GraphRuntimeWorkerPool::clear_transient_reheat_if_no_worker_cold() noexcept {
+    const auto expected_active = worker_count_ > 0 ? worker_count_ - 1 : 0;
+    if (active_worker_threads_.load(std::memory_order_acquire) >= expected_active) {
+        reheat_requested_.store(false, std::memory_order_release);
+    }
+}
+
 void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
     pulp::audio::AudioWorkgroup workgroup;
 #if defined(__APPLE__)
@@ -227,8 +234,11 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
                         continue;
                     }
                     const auto observed_epoch = local_epoch;
-                    if (reheat_requested_.load(std::memory_order_acquire) ||
+                    const bool reheat_requested =
+                        reheat_requested_.load(std::memory_order_acquire);
+                    if (reheat_requested ||
                         epoch_.load(std::memory_order_acquire) != observed_epoch) {
+                        if (reheat_requested) clear_transient_reheat_if_no_worker_cold();
                         cold_transition_gate_.store(false, std::memory_order_release);
                         hot_until = std::chrono::steady_clock::now() + kHotIdleWindow;
                         continue;
