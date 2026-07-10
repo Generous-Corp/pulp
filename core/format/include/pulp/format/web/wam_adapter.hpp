@@ -181,8 +181,12 @@ private:
     static constexpr std::size_t kSysexCapacity = 16;
     static constexpr std::size_t kSysexPayloadCapacity = 512;
 
-    std::unique_ptr<Processor> processor_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
 
     std::atomic<uint32_t> param_epoch_{0};
     state::ListenerToken param_listener_;
@@ -301,8 +305,12 @@ public:
 
 private:
     ProcessorFactory factory_;
-    std::unique_ptr<Processor> processor_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
 
     // Bumped by an audio-thread listener on every parameter change. Atomic
     // because the counter is written on the audio thread and read from a

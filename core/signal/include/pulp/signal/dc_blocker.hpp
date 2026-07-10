@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/signal/denormal.hpp>
+
 namespace pulp::signal {
 
 /// One-pole DC blocker (first-order high-pass).
@@ -37,7 +39,10 @@ public:
 
     /// Process one sample.
     T process(T x) {
-        const T y = x - last_in_ + pole_ * last_out_;
+        // Snap the recursive output state: with a pole near 1 the tail decays
+        // slowly toward zero and stalls in denormals with no FTZ guard. This is
+        // exactly the pattern denormal.hpp documents. No-op above 1e-15.
+        const T y = snap_to_zero(x - last_in_ + pole_ * last_out_);
         last_in_ = x;
         last_out_ = y;
         return y;

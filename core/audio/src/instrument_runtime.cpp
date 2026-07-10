@@ -20,7 +20,7 @@ double playback_rate_for_sample(const SamplePoolResolution& sample,
         !std::isfinite(pitch_ratio)) {
         return 0.0;
     }
-    return pitch_ratio * (sample.view.sample_rate / host_sample_rate);
+    return pitch_ratio;
 }
 
 }  // namespace

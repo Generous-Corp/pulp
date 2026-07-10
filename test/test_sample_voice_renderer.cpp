@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/audio/sample_voice_renderer.hpp>
+#include <pulp/audio/loop_reader.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <array>
@@ -12,9 +13,11 @@ using Catch::Matchers::WithinAbs;
 using pulp::audio::AhdsrEnvelope;
 using pulp::audio::AhdsrEnvelopeConfig;
 using pulp::audio::Buffer;
+using pulp::audio::BufferView;
 using pulp::audio::LoopInterpolationMode;
 using pulp::audio::LoopPlaybackMode;
 using pulp::audio::LoopRegion;
+using pulp::audio::LoopReader;
 using pulp::audio::PublishedSampleStore;
 using pulp::audio::PublishedSampleStoreConfig;
 using pulp::audio::SamplePool;
@@ -26,7 +29,9 @@ using pulp::audio::SampleVoiceRenderState;
 
 namespace {
 
-void prepare_store(PublishedSampleStore& store, std::span<const float> samples) {
+void prepare_store(PublishedSampleStore& store,
+                   std::span<const float> samples,
+                   double sample_rate = 48000.0) {
     REQUIRE(store.prepare(PublishedSampleStoreConfig{
         .slot_count = 2,
         .max_channels = 1,
@@ -34,7 +39,7 @@ void prepare_store(PublishedSampleStore& store, std::span<const float> samples) 
     }));
     REQUIRE(store.load_mono(samples.data(),
                             static_cast<int>(samples.size()),
-                            48000.0));
+                            sample_rate));
 }
 
 void prepare_stereo_store(PublishedSampleStore& store,
@@ -160,6 +165,36 @@ TEST_CASE("SampleVoiceRenderer linearly interpolates fractional playback",
         .active = true,
         .sample = resolve_sample(store),
         .playback_rate = 0.5,
+    };
+
+    const auto result = SampleVoiceRenderer::render(
+        state,
+        output.view(),
+        4,
+        source_channels,
+        SampleVoiceRenderOptions{.accumulate = false});
+
+    REQUIRE(result.rendered_frames == 4);
+    REQUIRE_FALSE(result.finished);
+    REQUIRE_THAT(output.channel(0)[0], WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE_THAT(output.channel(0)[1], WithinAbs(0.5f, 1.0e-6f));
+    REQUIRE_THAT(output.channel(0)[2], WithinAbs(1.0f, 1.0e-6f));
+    REQUIRE_THAT(output.channel(0)[3], WithinAbs(0.5f, 1.0e-6f));
+}
+
+TEST_CASE("SampleVoiceRenderer applies source-to-host sample-rate step",
+          "[audio][sampler][voice-render][sample-rate]") {
+    std::array<float, 3> samples{0.0f, 1.0f, 0.0f};
+    PublishedSampleStore store;
+    prepare_store(store, samples, 24000.0);
+
+    Buffer<float> output(1, 4);
+    std::array<const float*, 1> source_channels{};
+    SampleVoiceRenderState state{
+        .active = true,
+        .sample = resolve_sample(store),
+        .host_sample_rate = 48000.0,
+        .playback_rate = 1.0,
     };
 
     const auto result = SampleVoiceRenderer::render(
@@ -512,6 +547,88 @@ TEST_CASE("SampleVoiceRenderer applies optional envelope gain",
     REQUIRE_THAT(output.channel(0)[0], WithinAbs(0.25f, 1.0e-6f));
     REQUIRE_THAT(output.channel(0)[1], WithinAbs(0.5f, 1.0e-6f));
     REQUIRE_THAT(output.channel(0)[2], WithinAbs(0.5f, 1.0e-6f));
+}
+
+TEST_CASE("SampleVoiceRenderer fades stolen voices without a discontinuity",
+          "[audio][sampler][voice-render][steal]") {
+    std::array<float, 128> samples{};
+    samples.fill(1.0f);
+    PublishedSampleStore store;
+    prepare_store(store, samples);
+
+    Buffer<float> output(1, 64);
+    std::array<const float*, 1> source_channels{};
+    SampleVoiceRenderState state{
+        .active = true,
+        .sample = resolve_sample(store),
+        .playback_rate = 1.0,
+    };
+    SampleVoiceRenderer::begin_fade_out(state, 64);
+
+    const auto result = SampleVoiceRenderer::render(
+        state,
+        output.view(),
+        64,
+        source_channels,
+        SampleVoiceRenderOptions{.accumulate = false});
+
+    REQUIRE(result.rendered_frames == 64);
+    REQUIRE(result.finished);
+    REQUIRE_FALSE(state.active);
+    REQUIRE_THAT(output.channel(0)[0], WithinAbs(0.9992752f, 1.0e-6f));
+    REQUIRE_THAT(output.channel(0)[63], WithinAbs(0.0f, 1.0e-6f));
+    for (std::size_t i = 1; i < 64; ++i) {
+        REQUIRE(output.channel(0)[i] <= output.channel(0)[i - 1]);
+        REQUIRE(std::abs(output.channel(0)[i] - output.channel(0)[i - 1]) < 0.025f);
+    }
+}
+
+TEST_CASE("SampleVoiceRenderer matches LoopReader reference for cubic loops",
+          "[audio][sampler][voice-render][loop][null]") {
+    std::array<float, 5> samples{0.0f, 0.2f, 0.8f, 0.1f, -0.3f};
+    PublishedSampleStore store;
+    prepare_store(store, samples);
+
+    Buffer<float> output(1, 12);
+    std::array<const float*, 1> source_channels{};
+    auto sample = resolve_sample(store);
+    const LoopRegion region = playback_region(1,
+                                              5,
+                                              LoopPlaybackMode::Forward,
+                                              LoopInterpolationMode::Cubic);
+    SampleVoiceRenderState state{
+        .active = true,
+        .sample = sample,
+        .position_frames = 1.25,
+        .playback_rate = 0.375,
+        .use_playback_region = true,
+        .playback_region = region,
+    };
+
+    const auto result = SampleVoiceRenderer::render(
+        state,
+        output.view(),
+        12,
+        source_channels,
+        SampleVoiceRenderOptions{.accumulate = false});
+
+    REQUIRE(result.rendered_frames == 12);
+    auto view = sample.store->read_published_view();
+    REQUIRE(view.valid);
+    BufferView<const float> source_view(
+        source_channels.data(),
+        1,
+        static_cast<std::size_t>(view.num_frames));
+    double position = 1.25;
+    for (std::size_t frame = 0; frame < 12; ++frame) {
+        const auto expected = LoopReader::read_validated(source_view,
+                                                         region,
+                                                         0,
+                                                         position);
+        REQUIRE_THAT(output.channel(0)[frame], WithinAbs(expected, 1.0e-6f));
+        position += 0.375;
+        position = LoopReader::normalize_position(region, position);
+    }
 }
 
 TEST_CASE("SampleVoiceRenderer accumulates or overwrites by option",

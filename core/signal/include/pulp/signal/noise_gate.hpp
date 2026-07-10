@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/signal/denormal.hpp>
+
 #include <cmath>
 #include <algorithm>
 
@@ -72,6 +74,10 @@ public:
 
         // Clamp to prevent overflow
         envelope_db_ = std::max(envelope_db_, params_.range_db);
+        // Snap the recursive envelope: a fully-open gate settles toward 0 dB and
+        // otherwise stalls in the denormal range with no FTZ guard. No-op above
+        // 1e-15.
+        envelope_db_ = snap_to_zero(envelope_db_);
 
         SampleType gain_linear =
             std::pow(SampleType{10.0f}, envelope_db_ / SampleType{20.0f});

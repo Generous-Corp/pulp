@@ -2,8 +2,11 @@
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <array>
 #include <thread>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <cmath>
 
 using namespace pulp::runtime;
@@ -72,6 +75,23 @@ TEST_CASE("SeqLock explicit initial value is readable before first write",
     REQUIRE(result.beat_position == 12.25);
     REQUIRE(result.time_sig_num == 7);
     REQUIRE(result.time_sig_den == 8);
+}
+
+TEST_CASE("SeqLock preserves payload tail bytes",
+          "[runtime][seqlock]") {
+    struct OddPayload {
+        std::array<std::uint8_t, 11> bytes{};
+    };
+
+    SeqLock<OddPayload> lock;
+    OddPayload payload;
+    for (std::size_t i = 0; i < payload.bytes.size(); ++i) {
+        payload.bytes[i] = static_cast<std::uint8_t>(i * 17 + 3);
+    }
+
+    lock.write(payload);
+    const auto result = lock.read();
+    REQUIRE(result.bytes == payload.bytes);
 }
 
 TEST_CASE("SeqLock concurrent stress test", "[runtime][seqlock]") {

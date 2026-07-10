@@ -569,6 +569,41 @@ store_pass = "@env:ANDROID_STORE_PASS"
 
 ## Common Issues
 
+### `hdiutil: create failed - Resource busy` — a process is vetoing unmounts
+
+`hdiutil create -srcfolder` builds a DMG by attaching a temporary volume, copying
+into it, and unmounting it. Any DiskArbitration client may veto that unmount, and
+hdiutil then reports the whole operation as `Resource busy` and exits non-zero. The
+message names neither the volume nor the vetoing process, and it looks exactly like
+a transient collision — **it is not.** The veto persists until the offending client
+is restarted, so retrying, waiting, or detaching stale images will not clear it.
+
+Find the dissenter by unmounting any image and reading the error:
+
+```bash
+diskutil unmount /Volumes/SomeImage
+# Dissenter parent PPID 1 (/sbin/launchd)
+hdiutil detach /Volumes/SomeImage
+# Simulators are still shutting down. Please try again in a few moments.
+```
+
+The recurring offender on a machine that has ever run an iOS Simulator is
+CoreSimulator's `simdiskimaged`, which wedges in a "still shutting down" state and
+refuses every unmount on the host — even with no booted devices. Restart it:
+
+```bash
+sudo killall -9 simdiskimaged     # launchd respawns it on demand
+```
+
+Two consequences worth knowing. Every failed `create` leaks its temporary
+attachment, so failures compound and `hdiutil info` fills with orphaned images —
+that is a symptom, not the cause. And a self-hosted CI runner on a wedged host will
+fail `create_dmg produces a file from valid source` and `pulp ship release --dmg`
+on every PR while GitHub-hosted runners stay green, because they get a fresh VM.
+
+`create_dmg` prints hdiutil's own output and this remedy on failure. It used to
+redirect hdiutil to `/dev/null` and return a bare `false`.
+
 ### "No signing identity specified"
 
 Run `security find-identity -v -p codesigning` (macOS) to find your identity, then:
