@@ -91,7 +91,22 @@ inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
     info->id = static_cast<clap_id>((is_input ? 0 : 100) + index);
     runtime::copy_c_string(info->name, bus.name);
     info->channel_count = bus.default_channels;
+    // Every Pulp port accepts 64-bit buffers: clap_process() converts f64 at
+    // the adapter boundary for f32-internal processors and dispatches
+    // process_f64() natively when the descriptor opts in — the same posture as
+    // the VST3 adapter's unconditional canProcessSampleSize(kSample64). A host
+    // only offers data64 to ports carrying SUPPORTS_64BITS, so without this
+    // flag the whole f64 path is unreachable from spec-compliant hosts.
+    // PREFERS_64BITS is advertised only when the processor is natively
+    // double-precision (supports_f64_audio) — for boundary-converted plugins a
+    // 64-bit stream buys nothing, so the host shouldn't be nudged toward it.
+    // REQUIRES_COMMON_SAMPLE_SIZE is deliberately NOT set: clap_process()
+    // handles mixed 32/64 buses by demoting the block to the f32 path.
     info->flags = (index == 0) ? CLAP_AUDIO_PORT_IS_MAIN : 0;
+    info->flags |= CLAP_AUDIO_PORT_SUPPORTS_64BITS;
+    if (desc.effective_capabilities().supports_f64_audio) {
+        info->flags |= CLAP_AUDIO_PORT_PREFERS_64BITS;
+    }
     info->port_type = bus.default_channels == 1 ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
     info->in_place_pair = CLAP_INVALID_ID;
     return true;
