@@ -165,6 +165,33 @@ class Report(unittest.TestCase):
         self.assertIn("README-only", txt)
 
 
+class VersionCompare(unittest.TestCase):
+    def test_shorter_form_equals_padded_form(self):
+        # A measured "13.3.0" and a declared "13.3" are the same floor.
+        self.assertTrue(MOD._ver_eq("13.3", "13.3.0"))
+        self.assertTrue(MOD._ver_eq("2.34", "2.34.0"))
+
+    def test_genuine_difference_is_not_equal(self):
+        self.assertFalse(MOD._ver_eq("13.3", "13.4"))
+        self.assertFalse(MOD._ver_eq("13.3", "26.0"))
+
+    def test_none_handling(self):
+        self.assertTrue(MOD._ver_eq(None, None))
+        self.assertFalse(MOD._ver_eq("13.3", None))
+
+    def test_unparseable_falls_back_to_string_compare(self):
+        self.assertTrue(MOD._ver_eq("weird", "weird"))
+        self.assertFalse(MOD._ver_eq("weird", "13.3"))
+
+    def test_report_uses_numeric_compare_not_string(self):
+        # floor "13.3.0" vs SDK "13.3" must read as match, not DRIFT.
+        results = [{"name": "r", "clone": True, "configure": True, "build": True,
+                    "floor": "13.3.0", "artifacts": [], "notes": []}]
+        txt = MOD.format_report(results, [], sdk="13.3")
+        self.assertIn("match", txt)
+        self.assertNotIn("DRIFT", txt)
+
+
 class BoundedJobs(unittest.TestCase):
     def test_explicit_wins(self):
         self.assertEqual(MOD.bounded_jobs(4), 4)

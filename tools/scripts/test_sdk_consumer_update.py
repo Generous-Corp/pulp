@@ -53,6 +53,30 @@ class DetectAndRewrite(unittest.TestCase):
         self.assertIn("GIT_TAG v0.640.0", out)  # the v prefix is preserved
         self.assertEqual(len(ch), 2)
 
+    def test_fetchcontent_git_tag_only_touches_pulp(self):
+        # A common CMakeLists pins BOTH Pulp and unrelated deps via FetchContent.
+        # Only Pulp's GIT_TAG may move — Catch2's must be left exactly as-is, or
+        # the "bump SDK" PR silently repoints a dependency at a nonexistent tag.
+        text = ("FetchContent_Declare(pulp GIT_TAG v0.638.1)\n"
+                "FetchContent_Declare(Catch2 GIT_TAG v3.5.2)\n")
+        self.assertEqual(
+            MOD.detect_pins(text, "CMakeLists.txt"),
+            [("FetchContent GIT_TAG", "0.638.1")])   # Catch2 is NOT detected
+        out, ch = MOD.rewrite_pins(text, "CMakeLists.txt", "0.640.0")
+        self.assertIn("FetchContent_Declare(pulp GIT_TAG v0.640.0)", out)
+        self.assertIn("FetchContent_Declare(Catch2 GIT_TAG v3.5.2)", out)  # untouched
+        self.assertEqual(ch, [("FetchContent GIT_TAG", "0.638.1", "0.640.0")])
+
+    def test_fetchcontent_multiline_pulp_declare(self):
+        text = ("FetchContent_Declare(\n"
+                "  pulp\n"
+                "  GIT_REPOSITORY https://github.com/danielraffel/pulp.git\n"
+                "  GIT_TAG v0.638.1\n"
+                ")\n")
+        out, ch = MOD.rewrite_pins(text, "CMakeLists.txt", "0.640.0")
+        self.assertIn("GIT_TAG v0.640.0", out)
+        self.assertEqual(ch, [("FetchContent GIT_TAG", "0.638.1", "0.640.0")])
+
     def test_floating_latest_is_untouched(self):
         text = 'sdk_version = "latest"\n'
         out, ch = MOD.rewrite_pins(text, "pulp.toml", "0.640.0")
@@ -200,6 +224,26 @@ class UpdateCli(unittest.TestCase):
         opened.assert_not_called()          # dry-run must not open a PR
         # And the dry-run left the pin untouched on disk.
         self.assertIn("0.638.1", (d / "pulp-gpu-nam" / "pulp.toml").read_text())
+
+    def test_dryrun_temp_workdir_is_cleaned_up(self):
+        # With no --workdir the tool mints a temp dir; a dry run must not leave it
+        # (and its network clones) behind in /tmp.
+        temp = pathlib.Path(tempfile.mkdtemp())
+        # temp itself is our stand-in for mkdtemp's result; the tool should remove it.
+        consumers = {"repos": [{"repo": "o/pulp-gpu-nam",
+                                "status": {"state": "build-pass"}}]}
+
+        def fake_clone(repo, dest):
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "pulp.toml").write_text('sdk_version = "0.638.1"\n')
+            return True, "cloned"
+
+        args = mock.Mock(to="0.640.0", only=None, open_prs=False, workdir=None)
+        with mock.patch("tempfile.mkdtemp", return_value=str(temp)), \
+             mock.patch.object(MOD, "clone", side_effect=fake_clone):
+            rc = MOD.cmd_update(args, consumers)
+        self.assertEqual(rc, 0)
+        self.assertFalse(temp.exists())     # the minted temp dir was removed
 
 
 if __name__ == "__main__":
