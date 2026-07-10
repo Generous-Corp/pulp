@@ -4,6 +4,7 @@
 /// Fast math approximations for real-time audio DSP.
 /// All functions are branchless and SIMD-friendly (no conditionals in hot path).
 
+#include <algorithm>  // std::max / std::min, used by clamp()
 #include <cstdint>
 #include <cstring>
 #include <cmath>
