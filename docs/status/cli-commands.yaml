@@ -786,6 +786,25 @@ commands:
             description: Optional test targets to build for a faster targeted run (e.g., pulp-test-state)
     docs: reference/cli.md#coverage
 
+  - name: minos
+    status: experimental
+    summary: Minimum-OS tooling. Reports the lowest OS a build needs, derived from the artifact itself (the MAX minimum among everything linked in). `measure` reads one binary; `sweep` rebuilds every downstream consumer against one installed SDK and compares each project's floor to the SDK floor. Wraps `tools/scripts/measure_min_os.py` and `tools/scripts/sdk_consumer_sweep.py`.
+    subcommands:
+      - name: measure
+        summary: Report the minimum OS one built binary needs (macOS deployment target / Linux glibc symbol version / Windows PE subsystem).
+        args:
+          - name: binary
+            kind: positional
+            required: true
+            description: Path to a built binary — a .dylib/.so/.dll, a .a static archive, an executable, or a plugin bundle's inner binary (e.g. Foo.vst3/Contents/MacOS/Foo).
+      - name: sweep
+        summary: Rebuild every downstream consumer against one installed SDK and report each project's floor vs the SDK floor (flags DRIFT); non-zero exit on any build failure or drift.
+        args:
+          - name: sweep-args
+            kind: passthrough
+            description: Forwarded to sdk_consumer_sweep.py (e.g. --sdk-prefix <path>, --only <repo>, --dry-run, --json <path>).
+    docs: reference/cli.md#minos
+
   - name: design
     status: experimental
     summary: Build and launch the local AI-powered design tool for token and style iteration, binding to the current checkout or the SDK/build next to the CLI binary.
