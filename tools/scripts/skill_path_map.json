@@ -352,6 +352,16 @@
         "examples/threejs-*/**"
       ]
     },
+    "update-demos": {
+      "paths": [
+        "tools/scripts/sdk_consumer_sweep.py",
+        "tools/scripts/sdk_consumer_update.py",
+        "tools/scripts/sdk_consumer_sweep_recipes.yaml",
+        "tools/scripts/measure_min_os.py",
+        "tools/cmake/PulpMinOs.cmake",
+        "docs/guides/minimum-os-support.md"
+      ]
+    },
     "upgrade": {
       "paths": [
         "tools/cli/cmd_upgrade.cpp",

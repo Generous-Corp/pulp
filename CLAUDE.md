@@ -1206,6 +1206,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
 | `trace-analysis` | "Why is this slow?" investigation harness over a Perfetto `.pftrace`: chain-of-evidence loop, wall-vs-CPU-time, follow-the-blocker, exhaustive verification, Pulp domain hints (dsp/frame/js/gpu/cross-platform) |
 | `trace-sql` | SQL discipline for Pulp traces via `trace_processor`: idempotent `CREATE OR REPLACE PERFETTO` views, `GLOB`/`dur=-1`/`EXTRACT_ARG`, stable-key joins, plus the Pulp trace-stdlib views |
+| `update-demos` | Rebuild / re-pin / republish the downstream demo + example repos against a new or latest SDK via `pulp minos {sweep,update,publish-runbook}` |
 | `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
 | `video-proof` | Desktop validation videos: record raw proof, render Remotion context, publish/serve report, prepare review issue body |
 | `view-bridge` | Editor lifecycle and multi-view attach — `Processor::create_view()`, open/notify/resize/close protocol |
