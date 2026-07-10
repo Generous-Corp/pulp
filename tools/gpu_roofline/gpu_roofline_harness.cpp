@@ -163,13 +163,16 @@ int main() {
                 cfg.C + double(cfg.H) * cfg.C;
             const double macs = per_sample * B;
             const double gmacs = macs / (ms * 1e6);
-            // Shipping geometry: one thread per sample → ceil(B/256) workgroups of
-            // 256 lanes, only B doing useful work. At the real-time B=64 that is a
-            // SINGLE workgroup at 25% lane occupancy — the gap this harness surfaces.
-            const uint32_t wg = (B + 255u) / 256u;
+            // Block-parallel geometry: one workgroup per sample (B workgroups) of
+            // WG=64 lanes; the dominant conv phase fills min(Z,WG) lanes each.
+            // (Pre-fix this was a single workgroup of 256 lanes, B busy → 25% at
+            // B=64 — see the git history of this file / gpu_compute.cpp.)
+            const uint32_t WG = 64u;
+            const uint32_t wg = B;
+            const uint64_t busy = static_cast<uint64_t>(B) * std::min(Z, WG);
             rows.push_back({std::string("wavenet ") + cfg.name, "B=" + std::to_string(B),
                             macs, ms, gmacs,
-                            occupancy_of(B, wg, 256), wg, per_sample, 0});
+                            occupancy_of(busy, wg, WG), wg, per_sample, 0});
         }
     }
 
