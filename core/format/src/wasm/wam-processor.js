@@ -98,6 +98,11 @@ class PulpWamProcessor extends AudioWorkletProcessor {
         this._paramPtr = 0;
         this._lastParamEpoch = 0;
       }
+      // Reused output array for the param-echo postMessage: filled by index from
+      // the wasm heap each epoch change instead of allocating a fresh Array via
+      // Array.from on the audio thread. postMessage structured-clones it
+      // synchronously, so reusing the same array across blocks is safe.
+      this._paramValuesOut = new Array(this._paramCount);
       this._wam = wam;
       for (const m of this._pendingMsgs) this._handle(m);
       this._pendingMsgs.length = 0;
@@ -195,9 +200,12 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       if (epoch !== this._lastParamEpoch) {
         this._lastParamEpoch = epoch;
         this._wam.readParamValues(this._paramPtr, this._paramCount);
-        const values = this._wam.f32().subarray(this._paramPtr >> 2,
-                                                (this._paramPtr >> 2) + this._paramCount);
-        this.port.postMessage({ type: "paramValues", epoch, values: Array.from(values) });
+        // Copy heap → reused array by index (no per-block Array.from allocation).
+        const heap = this._wam.f32();
+        const base = this._paramPtr >> 2;
+        const values = this._paramValuesOut;
+        for (let i = 0; i < this._paramCount; i++) values[i] = heap[base + i];
+        this.port.postMessage({ type: "paramValues", epoch, values });
       }
     }
 
