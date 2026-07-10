@@ -181,20 +181,35 @@ public:
         const float s = scale();
         const float v = std::clamp(value_ ? value_() : 0.0f, -1.0f, 1.0f);
 
+        // A meter, and it must not be mistakable for a control. A rounded pill
+        // riding a recessed full-width track is the platform's scrollbar, and a
+        // reader who sees one starts looking for the content it scrolls. So:
+        // square corners, a track thinner than the graduations that cross it,
+        // and ticks at the readings the caption names.
+        const float track_h = std::max(4.0f, h * 0.5f);
+        const float top = (h - track_h) * 0.5f;
+
         canvas.set_fill_color(palette::rail);
-        canvas.fill_rounded_rect(0, 0, w, h, h * 0.5f);
+        canvas.fill_rect(0.0f, top, w, track_h);
 
         const float mid = w * 0.5f;
-        // Zero tick, so "no voltage" is visibly distinct from "not connected".
-        canvas.set_stroke_color(palette::border);
-        canvas.set_line_width(1.0f * s);
-        canvas.stroke_line(mid, 0, mid, h);
-
         if (v != 0.0f) {
             const float span = mid * std::abs(v);
             const float x = v > 0.0f ? mid : mid - span;
             canvas.set_fill_color(v > 0.0f ? palette::accent : palette::negative);
-            canvas.fill_rounded_rect(x, 0, span, h, h * 0.5f);
+            canvas.fill_rect(x, top, span, track_h);
+        }
+
+        // Graduations at -1, -0.5, 0, +0.5, +1. Zero runs the full height, so
+        // "no voltage" stays visibly distinct from "not connected" — the fill
+        // vanishes but the scale does not.
+        canvas.set_stroke_color(palette::border);
+        canvas.set_line_width(1.0f * s);
+        for (int i = 0; i <= 4; ++i) {
+            const float half = 0.5f * s;
+            const float x = std::clamp(w * static_cast<float>(i) * 0.25f, half, w - half);
+            const float inset = (i == 2) ? 0.0f : top * 0.5f;
+            canvas.stroke_line(x, inset, x, h - inset);
         }
 
         // Repaint continuously: the value is driven by parameters the host can
