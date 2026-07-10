@@ -36,7 +36,7 @@ COMMON=( -std=c++20 -O3 -fno-exceptions -fno-rtti
 
 echo "building lk_kernel.wasm ..."
 emcc "${COMMON[@]}" \
-  -sEXPORTED_FUNCTIONS="['_lk_init','_lk_load_plan','_lk_swap','_lk_set_param','_lk_process','_lk_is_fading','_lk_active_valid','_lk_sample_rate','_lk_alloc_count','_lk_node_levels','_lk_set_meter','_f2_tanhf','_f2_sinf','_f2_cosf','_f2_expf','_f2_tanf','_f2_powf','_f2_fmodf','_malloc','_free']" \
+  -sEXPORTED_FUNCTIONS="['_lk_init','_lk_load_plan','_lk_swap','_lk_set_param','_lk_process','_lk_is_fading','_lk_active_valid','_lk_sample_rate','_lk_alloc_count','_lk_node_levels','_lk_set_meter','_f2_tanhf','_f2_ladder_tanhf','_f2_sinf','_f2_cosf','_f2_expf','_f2_tanf','_f2_powf','_f2_fmodf','_malloc','_free']" \
   "$KERNEL_DIR/lk_entry.cpp" \
   -o "$DIST/lk_kernel.wasm"
 

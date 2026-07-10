@@ -109,12 +109,28 @@ class ArtifactKind(unittest.TestCase):
             b"MZ\x90\x00": "pe",
             b"\x7fELF\x02\x01\x01": "elf",
             b"\xcf\xfa\xed\xfe": "macho",   # thin 64-bit little-endian
-            b"\xca\xfe\xba\xbe": "macho",   # fat
+            # fat: magic + nfat_arch=1 + first arch cputype=x86_64 (0x01000007)
+            b"\xca\xfe\xba\xbe\x00\x00\x00\x01\x01\x00\x00\x07": "macho",
             b"not a binary!!!": None,
         }
         for magic, expected in cases.items():
             self.assertEqual(self.mod._artifact_kind(pathlib.Path(self._write(magic))),
                              expected, msg=f"magic={magic!r}")
+
+    def test_fat_macho_magic_is_disambiguated_from_java_class(self):
+        # A Java `.class` shares the 0xCAFEBABE magic. It must NOT be classified
+        # as a Mach-O: bytes 4..8 are minor+major version (major 52 = Java 8) and
+        # bytes 8..12 are the constant-pool count — never a Mach-O cputype.
+        java_class = b"\xca\xfe\xba\xbe\x00\x00\x00\x34\x00\x1b\x07\x00"
+        self.assertIsNone(
+            self.mod._artifact_kind(pathlib.Path(self._write(java_class))))
+        # A real fat Mach-O (nfat=2, first arch arm64 = 0x0100000C) IS a macho.
+        fat = b"\xca\xfe\xba\xbe\x00\x00\x00\x02\x01\x00\x00\x0c"
+        self.assertEqual(
+            self.mod._artifact_kind(pathlib.Path(self._write(fat))), "macho")
+        # A bare magic with no valid fat header (all-zero fields) is not a macho.
+        self.assertIsNone(
+            self.mod._artifact_kind(pathlib.Path(self._write(b"\xca\xfe\xba\xbe"))))
 
     def test_kind_missing_file(self):
         self.assertIsNone(self.mod._artifact_kind(pathlib.Path("/no/such/file")))
@@ -144,6 +160,34 @@ class ArtifactKind(unittest.TestCase):
     def test_measure_unrecognized(self):
         junk = pathlib.Path(self._write(b"not a binary!!!"))
         self.assertEqual(self.mod.measure_artifact(junk), (None, None))
+
+
+class OtoolMinosParse(unittest.TestCase):
+    """_parse_otool_minos reads both the modern LC_BUILD_VERSION and the legacy
+    LC_VERSION_MIN_MACOSX load commands."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _load()
+
+    def test_lc_build_version(self):
+        text = ("Load command 9\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n"
+                " platform 1\n    minos 13.3\n      sdk 14.0\n")
+        self.assertEqual(self.mod._parse_otool_minos(text), "13.3")
+
+    def test_legacy_lc_version_min_macosx(self):
+        # An older Mach-O with ONLY the legacy command must still yield a floor.
+        text = ("Load command 10\n      cmd LC_VERSION_MIN_MACOSX\n  cmdsize 16\n"
+                "  version 10.13\n      sdk 10.14\n")
+        self.assertEqual(self.mod._parse_otool_minos(text), "10.13")
+
+    def test_max_across_commands(self):
+        text = ("      cmd LC_VERSION_MIN_MACOSX\n  version 10.13\n"
+                "      cmd LC_BUILD_VERSION\n    minos 13.3\n")
+        self.assertEqual(self.mod._parse_otool_minos(text), "13.3")
+
+    def test_none_when_absent(self):
+        self.assertIsNone(self.mod._parse_otool_minos("no load commands here\n"))
 
 
 class MeasureCli(unittest.TestCase):

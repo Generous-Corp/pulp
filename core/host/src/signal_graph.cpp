@@ -313,8 +313,8 @@ bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
 // All add_*/connect/remove mutators below take graph_mutation_mutex_ for the
 // duration of the nodes_/connections_ mutation + invalidate_live_(). The lock is
 // safe to hold across invalidate_live_() because that drives only the
-// non-blocking prune_retired_snapshots_() (never the blocking reader-drain), so
-// it cannot invert lock order with the ProcessReadGuard reader-pin. See the
+// non-blocking Slot::reclaim_if_quiescent() (never the blocking reader-drain), so
+// it cannot invert lock order with the Slot reader-pin. See the
 // graph_mutation_mutex_ contract in signal_graph.hpp.
 NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
@@ -769,8 +769,8 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
     // Pin the live snapshot for the whole dereference: this control-thread API
     // is not the prepare/release thread, so without the guard a concurrent
     // prepare()/release()/invalidate could retire+free `cg` mid-use.
-    ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_seq_cst);
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -791,9 +791,9 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
 
 bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
     // Pin the live snapshot for the whole dereference (see inject_midi). const
-    // method: ProcessReadGuard only touches the mutable atomic counter.
-    ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_seq_cst);
+    // method: Slot::read() only touches the slot's mutable reader counter.
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -913,8 +913,8 @@ float SignalGraph::get_node_parameter(NodeId id, uint32_t param_id) const {
 
 int SignalGraph::node_latency_samples(NodeId id) const {
     // Pin the live snapshot for the whole dereference (see inject_midi).
-    ProcessReadGuard read_guard{*this};
-    const auto* cg = live_raw_.load(std::memory_order_seq_cst);
+    auto read_guard = live_slot_.read();
+    const auto* cg = read_guard.get();
     if (!cg) return 0;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return 0;
@@ -942,40 +942,40 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
 }
 
 int SignalGraph::prepared_max_block_size() const noexcept {
-    return live_ ? live_->max_block_size : 0;
+    return live_slot_.live() ? live_slot_.live()->max_block_size : 0;
 }
 
 std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
-    if (!live_) return nullptr;
-    auto it = live_->runtime.find(id);
-    if (it == live_->runtime.end()) return nullptr;
+    if (!live_slot_.live()) return nullptr;
+    auto it = live_slot_.live()->runtime.find(id);
+    if (it == live_slot_.live()->runtime.end()) return nullptr;
     return it->second.gain.get();
 }
 
 PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
-    if (!live_) return nullptr;
-    auto it = live_->plugins.find(id);
-    if (it == live_->plugins.end()) return nullptr;
+    if (!live_slot_.live()) return nullptr;
+    auto it = live_slot_.live()->plugins.find(id);
+    if (it == live_slot_.live()->plugins.end()) return nullptr;
     return it->second.get();
 }
 
 const CustomNodeProcessFn* SignalGraph::live_custom_processor(NodeId id) const noexcept {
-    if (!live_) return nullptr;
-    auto it = live_->custom_processors.find(id);
-    if (it == live_->custom_processors.end()) return nullptr;
+    if (!live_slot_.live()) return nullptr;
+    auto it = live_slot_.live()->custom_processors.find(id);
+    if (it == live_slot_.live()->custom_processors.end()) return nullptr;
     return &it->second;
 }
 
 const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor(
     NodeId id) const noexcept {
-    if (!live_) return nullptr;
-    auto it = live_->custom_transport_processors.find(id);
-    if (it == live_->custom_transport_processors.end()) return nullptr;
+    if (!live_slot_.live()) return nullptr;
+    auto it = live_slot_.live()->custom_transport_processors.find(id);
+    if (it == live_slot_.live()->custom_transport_processors.end()) return nullptr;
     return &it->second;
 }
 
 std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
-    return live_;  // aliases the live CompiledGraph as an opaque keepalive
+    return live_slot_.live();  // aliases the live CompiledGraph as an opaque keepalive
 }
 
 pulp::audio::AudioProcessLoadSnapshot SignalGraph::graph_load() const {
@@ -988,8 +988,8 @@ void SignalGraph::set_live_dsp_telemetry_enabled(bool enabled) {
     // without waiting for a recompile. Pinning keeps the live snapshot alive for the
     // store access; set_enabled touches only a relaxed atomic.
     desired_live_dsp_telemetry_enabled_.store(enabled, std::memory_order_relaxed);
-    ProcessReadGuard read_guard{*this};
-    if (auto* cg = live_raw_.load(std::memory_order_seq_cst)) {
+    auto read_guard = live_slot_.read();
+    if (auto* cg = read_guard.get()) {
         cg->live_dsp_telemetry.set_enabled(enabled);
     }
 }
@@ -1002,8 +1002,8 @@ pulp::audio::LiveDspTelemetrySnapshot SignalGraph::poll_live_dsp_telemetry() {
     // Single non-real-time poller (control/UI thread): pin the live snapshot, drain
     // its ring (the SPSC consumer side; the audio thread is the producer), and return
     // a copy of the latest summary while the snapshot is still pinned alive.
-    ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_seq_cst);
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
     if (!cg) return {};
     cg->live_dsp_telemetry.drain();
     return cg->live_dsp_telemetry.latest();
@@ -1124,7 +1124,7 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     }
 
     auto* n = const_cast<GraphNode*>(node(id));
-    if (!n || n->type != NodeType::Plugin || !n->plugin || !live_) {
+    if (!n || n->type != NodeType::Plugin || !n->plugin || !live_slot_.live()) {
         return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded,
                                       id,
                                       "node is not a prepared plugin node");
@@ -1153,8 +1153,8 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
                                       id,
                                       "prepared plugin metadata is unavailable");
     }
-    const auto live_shape_it = live_->shapes.find(id);
-    if (live_shape_it == live_->shapes.end()) {
+    const auto live_shape_it = live_slot_.live()->shapes.find(id);
+    if (live_shape_it == live_slot_.live()->shapes.end()) {
         return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded,
                                       id,
                                       "live snapshot shape is unavailable");
@@ -1167,7 +1167,7 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
                                       id,
                                       "replacement plugin did not load");
     }
-    if (!loaded->prepare(live_->sample_rate, live_->max_block_size)) {
+    if (!loaded->prepare(live_slot_.live()->sample_rate, live_slot_.live()->max_block_size)) {
         return fail_swap_edit_locked_(LiveSwapFallbackReason::PrepareFailed,
                                       id,
                                       "replacement plugin did not prepare");
@@ -1219,7 +1219,7 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     // estimate stays empty (callback_count 0) and admission fail-closes to eager-prepare.
     pulp::audio::AudioProcessLoadSnapshot warmed_load;
     if (auto probe = load_live_swap_plugin_(replacement_info)) {
-        if (probe->prepare(live_->sample_rate, live_->max_block_size)) {
+        if (probe->prepare(live_slot_.live()->sample_rate, live_slot_.live()->max_block_size)) {
             warmed_load = warm_staged_slot_locked_(*probe, id);
         }
     }
@@ -1262,17 +1262,17 @@ SignalGraph::load_live_swap_plugin_(const PluginInfo& info) const {
 
 pulp::audio::AudioProcessLoadSnapshot
 SignalGraph::warm_staged_slot_locked_(PluginSlot& slot, NodeId id) const {
-    if (!live_) {
+    if (!live_slot_.live()) {
         return pulp::audio::AudioProcessLoadSnapshot{};
     }
-    const auto shape_it = live_->shapes.find(id);
-    if (shape_it == live_->shapes.end()) {
+    const auto shape_it = live_slot_.live()->shapes.find(id);
+    if (shape_it == live_slot_.live()->shapes.end()) {
         return pulp::audio::AudioProcessLoadSnapshot{};
     }
 
     const auto& shape = shape_it->second;
-    const int block_size = live_->max_block_size;
-    const float sample_rate = static_cast<float>(live_->sample_rate);
+    const int block_size = live_slot_.live()->max_block_size;
+    const float sample_rate = static_cast<float>(live_slot_.live()->sample_rate);
     if (block_size <= 0 || !(sample_rate > 0.0f)) {
         return pulp::audio::AudioProcessLoadSnapshot{};
     }
@@ -1466,8 +1466,7 @@ void SignalGraph::invalidate_live_() {
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
     // always require a re-prepare before audio resumes.
-    live_raw_.store(nullptr, std::memory_order_seq_cst);
-    retire_snapshot_(std::move(live_));
+    live_slot_.unpublish();
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
 }
@@ -1626,8 +1625,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
         prepared_plugin_meta_[id] = staged.metadata;
     }
 
-    if (!live_ ||
-        !snapshot_is_plugin_reinit_free_(*live_, sample_rate, max_block_size)) {
+    if (!live_slot_.live() ||
+        !snapshot_is_plugin_reinit_free_(*live_slot_.live(), sample_rate, max_block_size)) {
         rollback_candidate_view();
         return fail(LiveSwapFallbackReason::PredicateExcluded,
                     0,
@@ -1651,8 +1650,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
         }
         return false;
     };
-    if (next->total_latency_samples != live_->total_latency_samples ||
-        has_pdc(*next) || has_pdc(*live_)) {
+    if (next->total_latency_samples != live_slot_.live()->total_latency_samples ||
+        has_pdc(*next) || has_pdc(*live_slot_.live())) {
         rollback_candidate_view();
         return fail(LiveSwapFallbackReason::PredicateExcluded,
                     0,
@@ -1672,13 +1671,12 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
     // CX4 publish: store the new raw pointer while `next` still owns it, THEN retire
     // the old — never the reverse; seq_cst pairs with process_impl's pinned load so
     // the audio thread never sees a null/torn pointer (NO silent block).
-    live_raw_.store(next.get(), std::memory_order_seq_cst);
-    retire_snapshot_(std::move(live_));
-    live_ = next;
+    live_slot_.publish(next);
     total_latency_samples_.store(next->total_latency_samples,
                                  std::memory_order_relaxed);
     publish_prepared_stats_(*next);
-    prune_retired_snapshots_();
+    // No reclaim here: Slot::publish() already parked the displaced snapshot and
+    // reclaimed it if the readers had drained.
     set_live_swap_diagnostics_locked_(LiveSwapFallbackReason::None, 0, {});
     cancel_swap_edit_locked_();
     lock.unlock();
@@ -1750,26 +1748,6 @@ void SignalGraph::publish_prepared_stats_(const CompiledGraph& cg) {
     prepared_delay_buffer_bytes_.store(delay_bytes, std::memory_order_relaxed);
     prepared_total_buffer_bytes_.store(total_buffer_bytes,
                                        std::memory_order_relaxed);
-}
-
-void SignalGraph::retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot) {
-    if (snapshot) retired_snapshots_.emplace_back(std::move(snapshot));
-    prune_retired_snapshots_();
-}
-
-void SignalGraph::prune_retired_snapshots_() {
-    // Seq-cst pairs with ProcessReadGuard and live_raw_ publication so a
-    // writer cannot miss a reader that is about to load the retired snapshot.
-    if (active_process_readers_.load(std::memory_order_seq_cst) == 0) {
-        retired_snapshots_.clear();
-    }
-}
-
-void SignalGraph::wait_for_retired_snapshots_() {
-    while (active_process_readers_.load(std::memory_order_seq_cst) != 0) {
-        std::this_thread::yield();
-    }
-    retired_snapshots_.clear();
 }
 
 void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
@@ -2368,7 +2346,7 @@ int SignalGraph::pump_anticipation(int max_blocks) {
     // rather than corrupting the lane's unsynchronized executor/pool/scratch.
     if (anticipation_pump_busy_.exchange(true, std::memory_order_acquire)) return 0;
     // Pin the live snapshot like a process() reader (the same RCU handshake
-    // prune_retired_snapshots_ waits on) so the CompiledGraph object can't be freed
+    // Slot::wait_and_clear waits on) so the CompiledGraph object can't be freed
     // while we render its lane. render_ahead is bounded (<= max_blocks), so this
     // never holds the reader count long enough to stall a re-prepare materially.
     //
@@ -2379,14 +2357,18 @@ int SignalGraph::pump_anticipation(int max_blocks) {
     // those same instances (n.plugin->prepare) and builds a new lane over them. A
     // pump concurrent with prepare() would be a data race on the plugin state. This
     // mirrors the existing "no process() concurrent with prepare()" contract.
-    active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
     int rendered = 0;
-    if (auto* cg = live_raw_.load(std::memory_order_seq_cst)) {
-        if (cg->anticipation_valid && max_blocks > 0) {
-            rendered = cg->anticipation_lane.render_ahead(max_blocks);
+    {
+        // The pin is released by the guard's destructor before the busy flag
+        // clears, so a prepare() waiting on the reader drain cannot observe a
+        // stale pin from a pump that has already finished.
+        auto read_guard = live_slot_.read();
+        if (auto* cg = read_guard.get()) {
+            if (cg->anticipation_valid && max_blocks > 0) {
+                rendered = cg->anticipation_lane.render_ahead(max_blocks);
+            }
         }
     }
-    active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
     anticipation_pump_busy_.store(false, std::memory_order_release);
     return rendered;
 }
@@ -2546,23 +2528,22 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     // lock covers two distinct shared surfaces:
     //   1. The source topology — nodes_ iteration + GraphNode plain-field reads,
     //      including GraphNode::gain in compile_() — vs the mutators' writes.
-    //   2. The snapshot-publication state (live_ / live_raw_ / retired_snapshots_)
+    //   2. The snapshot-publication state (live_slot_)
     //      mutated by the prologue's retire_snapshot_ + the epilogue's
     //      publish/prune, which a concurrent mutator's invalidate_live_() also
     //      touches. Those were previously single-control-thread-owned; with a
     //      second control thread editing the graph they must be serialized too.
     //
     // Deadlock-free: prepare() only ever drives the NON-blocking
-    // prune_retired_snapshots_() (never the blocking wait_for_retired_snapshots_),
-    // and the one place a thread holds a ProcessReadGuard reader pin AND wants this
+    // Slot::reclaim_if_quiescent() (never the blocking Slot::wait_and_clear),
+    // and the one place a thread holds a Slot reader pin AND wants this
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     std::lock_guard<std::mutex> mutation_lock(graph_mutation_mutex_);
 
     cancel_swap_edit_locked_();
 
-    live_raw_.store(nullptr, std::memory_order_seq_cst);
-    retire_snapshot_(std::move(live_));
+    live_slot_.unpublish();
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
 
@@ -2620,9 +2601,7 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     auto cg = compile_(sample_rate, max_block_size);
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
     publish_prepared_stats_(*cg);
-    live_ = std::move(cg);
-    live_raw_.store(live_.get(), std::memory_order_seq_cst);
-    prune_retired_snapshots_();
+    live_slot_.publish(std::move(cg));
     return true;
 }
 
@@ -2727,8 +2706,8 @@ SignalGraph::validate_generated_graph(int max_block_size) const {
 void SignalGraph::release() {
     // Serialize against concurrent control-thread mutators / prepare() for the
     // same two surfaces prepare() guards: the nodes_ iteration below and the
-    // snapshot-publication state (live_ / live_raw_ / retired_snapshots_).
-    // wait_for_retired_snapshots_() blocks on the reader count while holding this
+    // snapshot-publication state (live_slot_).
+    // Slot::wait_and_clear() blocks on the reader count while holding this
     // mutex; that is deadlock-free because the only thread that holds a reader pin
     // AND wants this mutex (set_node_gain) releases the mutex before pinning, and
     // the pure-snapshot readers (inject_midi / extract_midi / node_latency_samples)
@@ -2737,9 +2716,8 @@ void SignalGraph::release() {
 
     cancel_swap_edit_locked_();
 
-    live_raw_.store(nullptr, std::memory_order_seq_cst);
-    retire_snapshot_(std::move(live_));
-    wait_for_retired_snapshots_();
+    live_slot_.unpublish();
+    live_slot_.wait_and_clear();
 
     for (auto& n : nodes_) if (n.plugin) n.plugin->release();
     // Release stateful custom instances on the UI thread, mirroring the plugin
@@ -2815,13 +2793,13 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                                const audio::BufferView<const float>& input,
                                int num_samples,
                                const format::ProcessContext* transport) {
-    // See prune_retired_snapshots_(): this reader count and the raw snapshot
-    // pointer form one RCU-style lifetime handshake. ProcessReadGuard is a
+    // See runtime::Slot: its reader count and the raw snapshot
+    // pointer form one RCU-style lifetime handshake. Slot::ReadGuard is a
     // private nested struct (signal_graph.hpp) so the control-thread snapshot
     // readers can pin the same way.
-    ProcessReadGuard read_guard{*this};
+    auto read_guard = live_slot_.read();
 
-    auto* cg = live_raw_.load(std::memory_order_seq_cst);
+    auto* cg = read_guard.get();
     // Negative or zero block sizes mean "nothing to do" — return without
     // touching output (a memset with size_t(negative) wraps to a huge size).
     if (num_samples <= 0) return;
@@ -2882,7 +2860,7 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
     // accumulates AudioOutput itself, so a successful routed call returns before
     // the legacy zero+walk below) and SHARE the MIDI mailbox bridge (the MIDI
     // scratch + MidiInput/Output node lists are shared — identical plan). The
-    // dispatch stays inside the ProcessReadGuard, so `cg` (snapshots, pools, gain
+    // dispatch stays inside the Slot reader-pin, so `cg` (snapshots, pools, gain
     // atomics) is pinned for the whole call. Output is bit-identical across paths.
     {
         const auto frames32 = static_cast<std::uint32_t>(num_samples);
@@ -3127,7 +3105,7 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // The GraphNode::gain write + the node() scan of nodes_ are serialized under
     // graph_mutation_mutex_ against compile_()'s read of GraphNode::gain and its
     // nodes_ iteration (this API runs on the UI thread, prepare()/compile_() on a
-    // host thread). The lock is RELEASED before the ProcessReadGuard-pinned
+    // host thread). The lock is RELEASED before the Slot-pinned
     // snapshot reflection below, so it never nests inside the reader-pin / RCU
     // drain mechanism and cannot invert lock order with release()'s reader wait.
     {
@@ -3140,8 +3118,8 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // UI-thread-owned API is not the prepare/release thread, so without the
     // guard a concurrent prepare()/release() could retire+free `cg` between the
     // load and the store (use-after-free).
-    ProcessReadGuard read_guard{*this};
-    auto* cg = live_raw_.load(std::memory_order_seq_cst);
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
     if (cg) {
         auto it = cg->runtime.find(id);
         if (it != cg->runtime.end() && it->second.gain) {

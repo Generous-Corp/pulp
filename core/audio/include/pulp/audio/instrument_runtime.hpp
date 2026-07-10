@@ -10,6 +10,8 @@ struct InstrumentTriggerResult {
     ZoneSelection zone{};
     SamplePoolResolution sample{};
     double playback_rate = 0.0;
+    double host_sample_rate = 0.0;
+    double pitch_playback_rate = 0.0;
 };
 
 class InstrumentRuntime {

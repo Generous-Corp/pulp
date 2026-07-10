@@ -59,7 +59,6 @@ function(_pulp_min_os_pin_macos)
   endif()
   file(READ "${PULP_MIN_OS_JSON}" _json)
 
-  # macos-arm64 is Pulp's only supported macOS target (ARM64-only; Intel unsupported).
   # skia + dawn are always linked; libcxx is the toolchain C++ runtime, whose
   # std::format/std::to_chars(float) availability sets the real floor above the
   # Google deps target. V8 counts only when it is the selected JS engine.
@@ -68,14 +67,43 @@ function(_pulp_min_os_pin_macos)
     list(APPEND _deps v8)
   endif()
 
-  set(_floor "")
-  foreach(_dep IN LISTS _deps)
-    string(JSON _m ERROR_VARIABLE _err GET "${_json}" platforms macos-arm64 deps ${_dep} measured)
-    if(_err STREQUAL "NOTFOUND" AND _m AND NOT _m STREQUAL "null")
-      if(_floor STREQUAL "" OR _m VERSION_GREATER _floor)
-        set(_floor "${_m}")
-      endif()
+  # Map the requested TARGET arches to min_os.json platform keys. Pulp now
+  # supports arm64, x86_64, AND universal on macOS, so the floor is NOT a fixed
+  # "macos-arm64" lookup — it is the MAX floor across every requested arch
+  # (each arch's prebuilts may stamp a different minos; the final binary must
+  # satisfy the highest). CMAKE_OSX_ARCHITECTURES unset ⇒ host arch.
+  set(_req_archs "${CMAKE_OSX_ARCHITECTURES}")
+  if(_req_archs STREQUAL "")
+    execute_process(COMMAND uname -m
+                    OUTPUT_VARIABLE _host_machine
+                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_host_machine MATCHES "arm64|aarch64")
+      set(_req_archs "arm64")
+    else()
+      set(_req_archs "x86_64")
     endif()
+  endif()
+  set(_plat_keys "")
+  if(_req_archs MATCHES "arm64")
+    list(APPEND _plat_keys "macos-arm64")
+  endif()
+  if(_req_archs MATCHES "x86_64")
+    list(APPEND _plat_keys "macos-x64")
+  endif()
+  if(_plat_keys STREQUAL "")
+    return()
+  endif()
+
+  set(_floor "")
+  foreach(_plat IN LISTS _plat_keys)
+    foreach(_dep IN LISTS _deps)
+      string(JSON _m ERROR_VARIABLE _err GET "${_json}" platforms ${_plat} deps ${_dep} measured)
+      if(_err STREQUAL "NOTFOUND" AND _m AND NOT _m STREQUAL "null")
+        if(_floor STREQUAL "" OR _m VERSION_GREATER _floor)
+          set(_floor "${_m}")
+        endif()
+      endif()
+    endforeach()
   endforeach()
 
   if(_floor STREQUAL "")

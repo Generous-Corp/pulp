@@ -1,10 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/gpu_audio/gpu_spectral_freeze.hpp>
 #include <pulp/gpu_audio/gpu_spectral_morph.hpp>
+#include <pulp/render/gpu_compute.hpp>
 #include <pulp/signal/fft.hpp>
 
 #include <cmath>
 #include <complex>
+#include <memory>
 #include <vector>
 
 using namespace pulp::gpu_audio;
@@ -70,4 +73,46 @@ TEST_CASE("GpuSpectralMorph render before capture fails", "[gpu_audio][spectral]
     if (!m.gpu_available()) return;
     std::vector<float> out(256, 0.0f);
     REQUIRE_FALSE(m.render(0.5f, out.data()));  // neither endpoint captured
+}
+
+// SF-4: spectral effects thread a shared_device so siblings reuse one Dawn
+// device instead of each spinning up a private one (the prerequisite for later
+// cross-effect batching). A freeze and a morph on the SAME GpuCompute must both
+// work independently and correctly.
+TEST_CASE("GpuSpectralFreeze and GpuSpectralMorph share one device",
+          "[gpu_audio][spectral][gpu]") {
+    constexpr uint32_t FFT = 512, HOP = 128, KF = 21, KA = 15, KB = 40;
+
+    auto device = pulp::render::GpuCompute::create();
+    if (!device || !device->initialize_standalone()) return;  // no GPU adapter
+
+    GpuSpectralFreeze fz;
+    GpuSpectralMorph mo;
+    REQUIRE(fz.prepare(FFT, HOP, pulp::signal::WindowFunction::Type::hann, device.get()));
+    REQUIRE(mo.prepare(FFT, pulp::signal::WindowFunction::Type::hann, device.get()));
+    REQUIRE(fz.gpu_available());
+    REQUIRE(mo.gpu_available());
+
+    std::vector<float> ff(FFT), fa(FFT), fb(FFT);
+    for (uint32_t i = 0; i < FFT; ++i) {
+        ff[i] = std::sin(2.0f * 3.14159265f * KF * i / FFT);
+        fa[i] = std::sin(2.0f * 3.14159265f * KA * i / FFT);
+        fb[i] = std::sin(2.0f * 3.14159265f * KB * i / FFT);
+    }
+
+    REQUIRE(fz.capture(ff.data()));
+    REQUIRE(mo.capture_a(fa.data()));
+    REQUIRE(mo.capture_b(fb.data()));
+
+    // Interleave the two effects on the shared device — neither corrupts the
+    // other's spectral state.
+    std::vector<float> fo(FFT), mA(FFT), mB(FFT);
+    REQUIRE(fz.render(fo.data()));
+    REQUIRE(mo.render(0.0f, mA.data()));
+    REQUIRE(mo.render(1.0f, mB.data()));
+    REQUIRE(fz.render(fo.data()));
+
+    REQUIRE(peak_bin(fo) == KF);
+    REQUIRE(peak_bin(mA) == KA);
+    REQUIRE(peak_bin(mB) == KB);
 }

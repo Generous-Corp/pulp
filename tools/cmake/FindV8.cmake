@@ -33,6 +33,22 @@ set(_v8_key "")
 if(ANDROID)
     set(_v8_key "android-arm64")
 elseif(APPLE AND NOT IOS)
+    # A universal (arm64;x86_64) mac target has no universal libv8: v8-builder
+    # publishes only thin mac-arm64 + mac-x86_64 dylibs. The old
+    # `MATCHES "arm64"` test would silently resolve the thin arm64 dylib for a
+    # universal build, and ld64 would drop the x86_64 slice at link. Fail loud
+    # with the fix rather than ship a broken half-arch V8. (Follow-up: a
+    # lipo'd universal libv8 à la PulpWgpuUniversal.cmake — deferred.)
+    if(CMAKE_OSX_ARCHITECTURES MATCHES "arm64" AND CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+        message(FATAL_ERROR
+            "FindV8: PULP_JS_ENGINE=v8 with a universal mac target "
+            "(CMAKE_OSX_ARCHITECTURES='${CMAKE_OSX_ARCHITECTURES}') is not "
+            "supported — v8-builder ships no universal libv8, only thin "
+            "mac-arm64 and mac-x86_64 slices. Build V8 as two thin slices "
+            "(-DCMAKE_OSX_ARCHITECTURES=arm64 and =x86_64 separately) and lipo "
+            "the results, or select a different engine "
+            "(-DPULP_JS_ENGINE=quickjs, or jsc on Apple) for the universal build.")
+    endif()
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
         set(_v8_key "mac-arm64")
     else()
