@@ -679,6 +679,13 @@ Skills in `.agents/skills/` are living documents. When you discover a gotcha, fi
    - `core/view/src/webview*`, `core/view/include/*/webview*` → `webview-ui`
    - Design import paths → `import-design`
 5. **No skill exists**: If you've accumulated 3+ gotchas for a domain with no skill, create one.
+6. **Adding, renaming, or removing a skill** — every skill needs a real `name` + `description` in its SKILL.md frontmatter (the `description` is what makes it activate and what the public catalog shows), and the public catalog must be regenerated:
+
+   ```bash
+   python3 tools/scripts/skills_doc_check.py --write   # regenerate docs/reference/skills.md
+   ```
+
+   This is **enforced**: the `skills-doc-sync` ctest (in the required macOS gate) and `tools/check-docs.sh` both fail if `docs/reference/skills.md` is stale or a skill has a missing/too-short description. `docs/reference/skills.md` is generated — never hand-edit it. (Also append the skill's row to the in-context table below and register its paths in `tools/scripts/skill_path_map.json`.)
 
 This rule applies to all agents (Claude Code, Codex) and humans. Skills are checked into the repo alongside the code they document.
 
