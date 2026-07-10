@@ -49,6 +49,13 @@ const die = (m) => { console.error("assemble-gallery: FAIL: " + m); process.exit
 const BUILD = resolve(HERE, arg("--build", "../build"));
 const OUT = resolve(HERE, arg("--out", "./public"));
 
+// Absolute base URL of the deployed site — baked into every page's og:url and
+// og:image so links unfurl (social crawlers fetch the raw HTML and resolve
+// absolute URLs, matching the WAM sites' convention). Override with
+// SITE_BASE=... or --site-base; default is the canonical Pages host.
+const SITE_BASE = (arg("--site-base", process.env.SITE_BASE) || "https://pulp-wclap-demos.pages.dev")
+  .replace(/\/+$/, "");
+
 if (!existsSync(PKG_SRC)) die(`package src not found at ${PKG_SRC}`);
 if (!existsSync(BUILD)) die(`wclap build dir not found at ${BUILD} (build the 23 targets first)`);
 
@@ -169,8 +176,25 @@ const SECTIONS = [
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const attr = (s) => esc(s).replace(/"/g, "&quot;");
 
+// og:url plus the og:image / twitter block. Social crawlers fetch the raw HTML
+// and do NOT run JS, so these must be present in the <head> at rest. Mirrors the
+// WAM sites' gen-og.mjs: og:url is always emitted; the image + Twitter
+// large-image card are emitted only once a sibling og.png exists (gen-og-images.mjs
+// produces those), so a page whose shot failed still unfurls with its title +
+// description instead of a broken preview. `pageUrl` ends in a slash.
+function ogUrlAndImage(pageUrl, hasImage, indent = "  ") {
+  const lines = [`<meta property="og:url" content="${attr(pageUrl)}">`];
+  if (hasImage) {
+    const img = attr(pageUrl + "og.png");
+    lines.push(`<meta property="og:image" content="${img}">`);
+    lines.push(`<meta name="twitter:card" content="summary_large_image">`);
+    lines.push(`<meta name="twitter:image" content="${img}">`);
+  }
+  return lines.map((l) => indent + l).join("\n");
+}
+
 // A per-plugin shared-player page: the SAME shell as the WAM demos, WebCLAP adapter.
-function pluginPage(section, p) {
+function pluginPage(section, p, pageUrl, hasOgImage) {
   // Serialize each per-plugin config key as its own `key: value,` line so it
   // drops straight into the mountDemo({...}) object (values are JSON-safe:
   // strings, numbers, booleans, and the widgets / synthUrls plain objects).
@@ -189,6 +213,7 @@ function pluginPage(section, p) {
   <meta property="og:site_name" content="Pulp">
   <meta property="og:title" content="${attr(p.title + " — Pulp WebCLAP demo")}">
   <meta property="og:description" content="${attr(p.subtitle)}">
+${ogUrlAndImage(pageUrl, hasOgImage)}
   <link rel="icon" href="data:,">
 </head>
 <body>
@@ -235,7 +260,7 @@ ${cfgProps}
 
 // A gallery index page mirroring the WAM gallery (same layout + card markup),
 // cross-linking WAM ↔ WebCLAP.
-function galleryPage(section) {
+function galleryPage(section, pageUrl, hasOgImage) {
   const cards = JSON.stringify(
     section.plugins.map((p) => ({ dir: p.dir, tag: p.tag, name: p.name, desc: p.card })),
     null, 2);
@@ -250,6 +275,7 @@ function galleryPage(section) {
 <meta property="og:site_name" content="Pulp">
 <meta property="og:title" content="${attr(section.galleryHead + " (WebCLAP)")}">
 <meta property="og:description" content="${attr(section.galleryIntro)}">
+${ogUrlAndImage(pageUrl, hasOgImage, "")}
 <link rel="stylesheet" href="../vendor-player/theme/tokens.css">
 <link rel="stylesheet" href="../vendor-player/theme/fonts.css">
 <style>
@@ -324,12 +350,21 @@ let wrote = 0, wasmCopied = 0;
 for (const section of SECTIONS) {
   const sectionDir = join(OUT, section.slug);
   await mkdir(sectionDir, { recursive: true });
-  await writeFile(join(sectionDir, "index.html"), galleryPage(section));
+  // og.png is produced by gen-og-images.mjs AFTER this assemble pass; on the
+  // second pass (post-render) the file exists and the og:image block is baked
+  // in. Absolute URLs end in a slash so `${url}og.png` resolves colocated.
+  const galleryUrl = `${SITE_BASE}/${section.slug}/`;
+  await writeFile(
+    join(sectionDir, "index.html"),
+    galleryPage(section, galleryUrl, existsSync(join(sectionDir, "og.png"))));
   wrote++;
   for (const p of section.plugins) {
     const pdir = join(sectionDir, p.dir);
     await mkdir(pdir, { recursive: true });
-    await writeFile(join(pdir, "index.html"), pluginPage(section, p));
+    const pageUrl = `${SITE_BASE}/${section.slug}/${p.dir}/`;
+    await writeFile(
+      join(pdir, "index.html"),
+      pluginPage(section, p, pageUrl, existsSync(join(pdir, "og.png"))));
     wrote++;
     const wasm = join(BUILD, `${p.target}.wclap`, "module.wasm");
     const wasmFlat = join(BUILD, `${p.target}.wasm`);
