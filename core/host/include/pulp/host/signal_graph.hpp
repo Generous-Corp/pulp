@@ -22,6 +22,7 @@
 #include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
+#include <pulp/runtime/slot.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
@@ -601,7 +602,7 @@ public:
     // signal_graph_executor_routing.{hpp,cpp}; these are control-thread only.
 
     // True once prepare() has published a live compiled snapshot.
-    bool is_prepared() const noexcept { return live_ != nullptr; }
+    bool is_prepared() const noexcept { return live_slot_.live() != nullptr; }
     // Max block size the live snapshot was prepared for (0 if not prepared).
     int prepared_max_block_size() const noexcept;
     // The live compiled snapshot's per-node gain atomic (Gain nodes only), or
@@ -1017,7 +1018,7 @@ private:
         // Gain bindings reference this snapshot's own `runtime[id].gain` atomics,
         // its Plugin/Custom bindings invoke this snapshot's own slots/callbacks,
         // so it carries no keepalive — it lives and dies exactly with this
-        // CompiledGraph, published atomically with it via live_raw_. The legacy
+        // CompiledGraph, published atomically with it via live_slot_. The legacy
         // walk remains the reference/fallback path for ineligible or
         // routing-failed graphs, not a retired one.
         format::GraphRuntimeSnapshot routing_snapshot;
@@ -1160,12 +1161,13 @@ private:
     LiveSwapDiagnostics last_swap_diagnostics_;
     PluginLoaderForTest live_swap_plugin_loader_for_test_;
 
-    // Audio-thread snapshot, published by prepare() / mutators. The audio
-    // thread reads live_raw_ only; live_ and retired_snapshots_ keep pointed-to
-    // storage alive from the control thread until active process readers drain.
-    std::shared_ptr<CompiledGraph> live_;
-    std::atomic<CompiledGraph*> live_raw_{nullptr};
-    std::vector<std::shared_ptr<CompiledGraph>> retired_snapshots_;
+    // Audio-thread snapshot, published by prepare() / mutators through the
+    // shared reader-pinned RCU primitive. `runtime::Slot` owns the atomic
+    // pointer the audio thread loads, the reader count, and the retire list;
+    // the pointed-to CompiledGraph stays alive until every pinned reader
+    // leaves. See runtime/slot.hpp — a pin guarantees LIFETIME, not constness:
+    // the audio thread writes this snapshot's scratch buffers every block.
+    runtime::Slot<CompiledGraph> live_slot_;
 
     // Canonical-executor routing (control toggle, read relaxed on the audio
     // thread). DEFAULT ON: the routed executor is the primary inter-node backend
@@ -1213,32 +1215,6 @@ private:
     // transport). Control-thread writer (compile_) only.
     std::atomic<std::uint64_t> transport_suppressed_for_anticipation_{0};
     format::GraphRuntimeWorkerPool worker_pool_;
-    // mutable: const snapshot readers (extract_midi / node_latency_samples) must
-    // bump this reader pin via ProcessReadGuard. Pinning does not change logical
-    // const-ness of the graph.
-    mutable std::atomic<std::uint32_t> active_process_readers_{0};
-
-    // RCU-style read pin for the live CompiledGraph snapshot. Any thread that
-    // dereferences live_raw_ must hold one of these for the entire duration of
-    // the dereference so prune_retired_snapshots_() / wait_for_retired_snapshots_()
-    // can see it and defer the free. The audio process path uses it; so do the
-    // control-thread snapshot readers (inject_midi / extract_midi /
-    // node_latency_samples / set_node_gain) — none of which run on the
-    // prepare/release thread, so without the pin a concurrent prepare()/release()
-    // could retire+free the snapshot mid-dereference (use-after-free). The seq_cst
-    // add/sub pairs with prune/wait's seq_cst load (see prune_retired_snapshots_()).
-    struct ProcessReadGuard {
-        explicit ProcessReadGuard(const SignalGraph& owner) noexcept
-            : owner_(owner) {
-            owner_.active_process_readers_.fetch_add(1, std::memory_order_seq_cst);
-        }
-        ~ProcessReadGuard() noexcept {
-            owner_.active_process_readers_.fetch_sub(1, std::memory_order_seq_cst);
-        }
-        ProcessReadGuard(const ProcessReadGuard&) = delete;
-        ProcessReadGuard& operator=(const ProcessReadGuard&) = delete;
-        const SignalGraph& owner_;
-    };
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};
     std::atomic<std::size_t> prepared_ordered_node_count_{0};
@@ -1280,7 +1256,7 @@ private:
     // Serializes CONTROL-THREAD access to the source-of-truth topology — the
     // nodes_ / connections_ vectors and the plain (non-atomic) GraphNode fields
     // they own (gain, ports, plugin/custom identity, custom state) — AND the
-    // snapshot-publication state (live_ / live_raw_ / retired_snapshots_) that a
+    // snapshot-publication state (live_slot_) that a
     // re-prepare and a concurrent invalidate_live_() both mutate. The control
     // surface is multi-threaded: a host thread calls prepare()/compile_() (which
     // iterates nodes_/connections_ and reads GraphNode::gain) while a UI thread
@@ -1311,7 +1287,7 @@ private:
     // self-deadlock on this non-recursive mutex.
     //
     // The nodes() / connections() accessors hand out a reference to the live
-    // vector and the live_*() snapshot getters read live_; both are governed by
+    // vector and the live_slot_.live()*() snapshot getters read live_slot_.live(); both are governed by
     // the same caller-side keepalive/serialization contract they always were and
     // are intentionally NOT locked here (locking a reference-returning accessor
     // can't protect the caller's later iteration anyway).
@@ -1322,11 +1298,11 @@ private:
     //    CompiledGraph snapshot — never nodes_ or GraphNode fields — so it must
     //    never take this lock. Taking a mutex on the audio thread would be an
     //    RT-safety violation.
-    //  - NEVER held while acquiring a ProcessReadGuard reader-pin. The methods
+    //  - NEVER held while acquiring a Slot reader-pin. The methods
     //    that both edit source state AND reflect into the live snapshot
     //    (set_node_gain) take this mutex for the source write, RELEASE it, then
     //    separately pin the snapshot — so this mutex can never invert lock order
-    //    with the RCU drain (prune_retired_snapshots_ / wait_for_retired_snapshots_,
+    //    with the RCU drain (Slot::reclaim_if_quiescent / Slot::wait_and_clear,
     //    the latter busy-waited under this mutex by release()).
     mutable std::mutex graph_mutation_mutex_;
 
@@ -1404,9 +1380,6 @@ private:
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
     void invalidate_live_();
-    void retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot);
-    void prune_retired_snapshots_();
-    void wait_for_retired_snapshots_();
     static void compute_latencies_for_(CompiledGraph& cg,
                                        const std::vector<Connection>& connections,
                                        const std::unordered_map<NodeId, PreparedPluginMetadata>&
