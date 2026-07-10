@@ -84,6 +84,10 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
         if (processor_) {
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
+            // Cache the immutable descriptor so the render path can view its bus
+            // names without a per-block copy (which would allocate on the audio
+            // thread).
+            descriptor_ = processor_->descriptor();
 
             // Resolve host accommodations once via the runtime policy.
             const auto host_info = detect_host_info();
@@ -617,24 +621,33 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // channels, which the AU non-interleaved float model does not do.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
-    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
-        {
-            .info = {
-                .name = "Audio In",
-                .index = 0,
-                .direction = BusDirection::Input,
-                .role = BusRole::Main,
-                .declared_channels = static_cast<int>(in_channels),
-                .optional = in_channels == 0,
-                .active = input_view.num_channels() > 0,
-            },
-            .buffer = input_view,
-        },
-    }};
+
+    // Input bus views: the main input (index 0), plus — when the descriptor
+    // declares a sidechain input bus — an INACTIVE Sidechain view (index 1).
+    // AUEffectBase pulls only the main input element, so the sidechain view stays
+    // inactive/null: Processor::sidechain_input() returns nullptr gracefully
+    // rather than exposing a bus the stock AU-effect render path cannot feed.
+    // For the common single-input effect this is exactly one Main view, so the
+    // bus->buffer mapping and behaviour are unchanged. Bus names come from the
+    // cached descriptor (build_input_bus_infos), which owns the strings.
+    std::array<ProcessBusBufferInfo, 2> in_infos{};
+    const std::size_t n_in =
+        build_input_bus_infos(descriptor_, in_infos.data(), in_infos.size());
+    in_infos[0].declared_channels = static_cast<int>(in_channels);
+    in_infos[0].active = input_view.num_channels() > 0;
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{};
+    input_buses[0] = {.info = in_infos[0], .buffer = input_view};
+    for (std::size_t i = 1; i < n_in; ++i) {
+        input_buses[i] = {.info = in_infos[i],
+                          .buffer = audio::BufferView<const float>{}};
+    }
+
     std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {
-                .name = "Audio Out",
+                .name = descriptor_.output_buses.empty()
+                            ? std::string_view{"Audio Out"}
+                            : std::string_view{descriptor_.output_buses[0].name},
                 .index = 0,
                 .direction = BusDirection::Output,
                 .role = BusRole::Main,
@@ -646,7 +659,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         },
     }};
     ProcessBuffers process_buffers{
-        ProcessBusBufferSet<const float>{std::span(input_buses)},
+        ProcessBusBufferSet<const float>{std::span(input_buses.data(), n_in)},
         ProcessBusBufferSet<float>{std::span(output_buses)},
     };
     {

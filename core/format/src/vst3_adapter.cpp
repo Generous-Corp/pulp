@@ -5,6 +5,7 @@
 
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/detail/vst3_frame_rate.hpp>
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
@@ -1894,7 +1895,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (data.outputEvents && !midi_out_.empty()) {
         for (const auto& me : midi_out_) {
             Event evt{};
-            evt.sampleOffset = me.sample_offset;
+            // Shared cross-format outbound-offset contract (offset N in -> N out;
+            // see detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp).
+            evt.sampleOffset =
+                pulp::format::detail::vst3_output_offset(me.sample_offset);
             if (me.is_note_on()) {
                 evt.type = Event::kNoteOnEvent;
                 evt.noteOn.channel = me.channel();

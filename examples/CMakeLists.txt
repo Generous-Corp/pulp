@@ -71,6 +71,10 @@ add_subdirectory(PulpSynth)
 # MPE demo: MPE-aware sine synth validating the per-note expression path
 add_subdirectory(mpe-synth)
 
+# Multi-out demo: 8-voice instrument, one stereo output bus per voice
+# (1 main + 7 aux). Exercises the AU v2 aumu multi-output-element path.
+add_subdirectory(pulp-multi-out)
+
 # PulpSampler: sample-buffer sampler with MIDI + ADSR
 add_subdirectory(PulpSampler)
 add_subdirectory(virtual-list-sample-manager)

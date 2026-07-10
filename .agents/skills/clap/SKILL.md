@@ -231,7 +231,13 @@ debug log. See the `mpe` skill for tracker details.
 **Outbound MIDI**: the processor's `midi_out` emits short messages as
 `CLAP_EVENT_MIDI` and sysex entries as
 `CLAP_EVENT_MIDI_SYSEX`, both via `out_events->try_push`.
-`sample_offset` carries through to `header.time`. The sysex
+`sample_offset` carries through to `header.time` via the shared cross-format
+helper `detail::clap_output_offset(sample_offset)` (clamps a negative offset up
+to 0, since `header.time` is unsigned) — the same "offset N in → offset N out"
+contract AU v2 and VST3 share, defined once in
+`core/format/include/pulp/format/detail/midi_out_offset.hpp` and pinned by
+`test/test_midi_out_offset_parity.cpp`. Do NOT re-open-code the offset clamp.
+The sysex
 `clap_event_midi_sysex_t.buffer` field is non-owning — the backing
 vector is alive for the duration of `clap_process()`, which is all
 CLAP's push contract requires (the host copies before returning).

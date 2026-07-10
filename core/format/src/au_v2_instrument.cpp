@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cstring>
+#include <span>
 
 namespace pulp::format::au {
 
@@ -25,8 +26,27 @@ namespace pulp::format::au {
 // listener (fires inline on the same thread) skips echoing it back.
 namespace { thread_local bool g_host_writing_param = false; }
 
+namespace {
+// Number of AU output elements to hand the MusicDeviceBase base constructor.
+// The base ctor stores the count and CreateElements() materialises exactly that
+// many output elements, so the count MUST be known before the base runs — hence
+// a throwaway probe of the registered factory here (instrument construction is
+// not on the audio thread, so the extra allocation is harmless). Falls back to a
+// single output bus if no factory is registered.
+UInt32 registry_output_element_count() {
+    auto& factory = registered_factory();
+    if (!factory) return 1;
+    auto probe = factory();
+    if (!probe) return 1;
+    return static_cast<UInt32>(
+        instrument_output_element_count(probe->descriptor()));
+}
+}  // namespace
+
 PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
-    : MusicDeviceBase(ci, /*numInputs=*/0, /*numOutputs=*/1, /*numGroups=*/0)
+    : MusicDeviceBase(ci, /*numInputs=*/0,
+                      /*numOutputs=*/registry_output_element_count(),
+                      /*numGroups=*/0)
 {
     auto factory = registered_factory();
     if (factory) {
@@ -34,6 +54,29 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
         if (processor_) {
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
+            // Cache the immutable descriptor once so the render path can view its
+            // bus-name strings without copying it per block (which would allocate
+            // on the audio thread).
+            descriptor_ = processor_->descriptor();
+
+            // Materialise the output elements now (guarded/idempotent — DoInitialize
+            // calls CreateElements() again later as a no-op) so each declared bus's
+            // channel count is set from the descriptor before the host queries
+            // stream formats. The default AU IO element is stereo; only a bus that
+            // declares a different width needs adjusting, and for non-interleaved
+            // float only mChannelsPerFrame changes.
+            CreateElements();
+            const UInt32 n_elements = Outputs().GetNumberOfElements();
+            for (UInt32 e = 0;
+                 e < n_elements && e < descriptor_.output_buses.size(); ++e) {
+                const int ch = descriptor_.output_buses[e].default_channels;
+                if (ch <= 0) continue;
+                AudioStreamBasicDescription asbd = GetOutput(e)->GetStreamFormat();
+                if (asbd.mChannelsPerFrame != static_cast<UInt32>(ch)) {
+                    asbd.mChannelsPerFrame = static_cast<UInt32>(ch);
+                    GetOutput(e)->SetStreamFormat(asbd);
+                }
+            }
 
             // Resolve host accommodations once so GetLatency() can apply
             // the same policy-gated clamp as the effect adapter.
@@ -233,8 +276,18 @@ OSStatus PulpAUInstrument::Initialize()
         // clobber a restored preset with construction defaults.
     }
 
-    runtime::log_info("AU v2 instrument: initialized at {} Hz",
-                      GetOutput(0)->GetStreamFormat().mSampleRate);
+    // Pre-reserve each output bus's channel-pointer vector to its declared width
+    // so the per-block resize in Render() never grows a vector on the audio
+    // thread. Only the elements the host actually created are reserved.
+    const UInt32 n_out = Outputs().GetNumberOfElements();
+    for (UInt32 e = 0; e < n_out && e < output_bus_ptrs_.size(); ++e) {
+        const UInt32 ch = GetOutput(e)->GetStreamFormat().mChannelsPerFrame;
+        output_bus_ptrs_[e].reserve(ch == 0 ? 2 : ch);
+    }
+
+    runtime::log_info("AU v2 instrument: initialized at {} Hz, {} output bus(es)",
+                      GetOutput(0)->GetStreamFormat().mSampleRate,
+                      Outputs().GetNumberOfElements());
     return noErr;
 }
 
@@ -291,17 +344,6 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     // No Globals->store pull: GetParameter/SetParameter are store-backed, so
     // host automation already landed in the store and process() reads it below.
 
-    auto* output = GetOutput(0);
-    AudioBufferList& outBL = output->PrepareBuffer(inNumberFrames);
-
-    UInt32 out_channels = outBL.mNumberBuffers;
-    output_ptrs_.resize(out_channels);
-    for (UInt32 i = 0; i < out_channels; ++i)
-        output_ptrs_[i] = static_cast<float*>(outBL.mBuffers[i].mData);
-
-    audio::BufferView<float> output_view(
-        output_ptrs_.data(), out_channels, inNumberFrames);
-
     audio::BufferView<const float> input_view;
 
     midi::MidiBuffer midi_in, midi_out;
@@ -315,6 +357,8 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 
+    // Instruments have no audio input; the single input bus view is inactive so
+    // process(ProcessBuffers&) projects a null main input.
     std::array<ProcessBusBufferView<const float>, 1> input_buses{{
         {
             .info = {
@@ -329,23 +373,55 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
             .buffer = input_view,
         },
     }};
-    std::array<ProcessBusBufferView<float>, 1> output_buses{{
-        {
-            .info = {
-                .name = "Audio Out",
-                .index = 0,
-                .direction = BusDirection::Output,
-                .role = BusRole::Main,
-                .declared_channels = static_cast<int>(out_channels),
-                .optional = false,
-                .active = output_view.num_channels() > 0,
-            },
-            .buffer = output_view,
-        },
-    }};
+
+    // Build one output bus view per AU output element. The AU host renders each
+    // output element with its own DoRenderBus/PrepareBuffer, but a single Render()
+    // is expected to fill ALL of them (NeedsToRender gates the re-render for the
+    // remaining buses pulled at the same timestamp — see AUBase::RenderBus). So we
+    // prepare and fill every output element here. Bus name/index/role metadata
+    // comes from the cached descriptor via build_output_bus_infos, so a multi-out
+    // processor that overrides process(ProcessBuffers&) sees stable bus identity.
+    //
+    // Each bus is pre-zeroed BEFORE process(): a processor that only implements the
+    // simple main-in/main-out process() writes just the main bus, so aux buses must
+    // read silence rather than uninitialised memory. A host that leaves an aux bus
+    // disconnected still gets a prepared (silent) element here without disturbing
+    // the bus->buffer index mapping.
+    std::array<ProcessBusBufferInfo, kMaxOutputBuses> infos{};
+    const std::size_t n_declared =
+        build_output_bus_infos(descriptor_, infos.data(), kMaxOutputBuses);
+
+    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    std::size_t routed = 0;
+    const UInt32 n_elements = Outputs().GetNumberOfElements();
+    for (UInt32 e = 0; e < n_elements && routed < kMaxOutputBuses; ++e) {
+        AudioBufferList& bl = GetOutput(e)->PrepareBuffer(inNumberFrames);
+        const UInt32 ch = bl.mNumberBuffers;
+        auto& ptrs = output_bus_ptrs_[e];
+        ptrs.resize(ch);
+        for (UInt32 c = 0; c < ch; ++c) {
+            ptrs[c] = static_cast<float*>(bl.mBuffers[c].mData);
+            if (ptrs[c] != nullptr)
+                std::memset(ptrs[c], 0, sizeof(float) * inNumberFrames);
+        }
+        ProcessBusBufferInfo info =
+            (e < n_declared)
+                ? infos[e]
+                : ProcessBusBufferInfo{"Aux Out", e, BusDirection::Output,
+                                       BusRole::Aux, static_cast<int>(ch), true,
+                                       ch > 0};
+        info.active = ch > 0;
+        output_buses[routed] = {
+            .info = info,
+            .buffer = audio::BufferView<float>(ptrs.data(), ch, inNumberFrames),
+        };
+        ++routed;
+    }
+
     ProcessBuffers process_buffers{
         ProcessBusBufferSet<const float>{std::span(input_buses)},
-        ProcessBusBufferSet<float>{std::span(output_buses)},
+        ProcessBusBufferSet<float>{
+            std::span(output_buses.data(), routed)},
     };
 
     // Audio-thread render: the Processor's process() must neither allocate nor

@@ -111,6 +111,23 @@ Features:
 - Decay, brightness, and volume parameters
 - Native plugin targets plus WAM demo reuse
 
+## PulpMultiOut
+
+**Path**: `examples/pulp-multi-out/`
+**Type**: Instrument
+**Formats**: VST3, AU v2 (aumu), CLAP
+**Purpose**: An 8-voice synth that renders each voice to its OWN stereo output
+bus (1 main + 7 aux). Demonstrates the multi-bus output path — the AU v2 adapter
+turns the descriptor's eight output buses into eight AU output elements, so a DAW
+lists the aux outputs and routes each voice to its own mixer channel.
+
+Features:
+- Eight stereo output buses addressed by index via `process(ProcessBuffers&)`
+- Round-robin voice assignment from incoming MIDI notes
+- `auval`-validated multi-output aumu; headless routing + bus-contract tests
+- See `docs/guides/multi-bus-audio.md` for the multi-bus contract and the manual
+  DAW bus-visibility checklist
+
 ## UI Preview
 
 **Path**: `examples/ui-preview/`

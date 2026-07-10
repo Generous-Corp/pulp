@@ -210,7 +210,20 @@ short events and SysEx live in separate `MidiBuffer` sidecars. `build()` merges
 both into one ascending-`sample_offset` order (stable insertion sort over a
 fixed-capacity index — no allocation) before appending, so a SysEx@0 is
 delivered before a note@64. `build(midi_out, frame_count)` clamps every offset to
-`[0, frame_count - 1]` (mirrors the AU v3 input-side defensive clamp).
+`[0, frame_count - 1]` via the shared `detail::au_output_offset()` helper
+(mirrors the AU v3 input-side defensive clamp).
+
+**Cross-format offset parity — one shared contract.** The invariant "an event
+emitted at in-block offset N is delivered at offset N" must hold identically for
+AU v2, VST3, and CLAP. The per-format mapping lives in ONE header,
+`core/format/include/pulp/format/detail/midi_out_offset.hpp`
+(`au_output_offset` / `vst3_output_offset` / `clap_output_offset`), and all three
+adapters route through it — do NOT re-open-code the clamp in an adapter. Only the
+out-of-range handling differs by host type (CLAP `time` is unsigned → clamp neg
+to 0; AU `timeStamp` is in-block → clamp past-block to `frame-1`; VST3
+`sampleOffset` is signed → pass through). Pinned by
+`test/test_midi_out_offset_parity.cpp` (`[midi-out][parity]`), which exercises
+the REAL AU builder plus the shared VST3/CLAP helpers.
 
 **RT-safety + capacity.** The builder owns a fixed byte buffer sized to the
 per-block event budget (`kMaxOutputEvents == kMaxEventsPerBlock`, ~16 B/event)
@@ -222,6 +235,50 @@ scope (it is host code), matching the AU v3 `MIDIOutputEventBlock` pattern in
 packet-list builders. The instrument adapter (`PulpAUInstrument`) does not yet
 deliver its local `midi_out` — only the effect path is wired, and it does NOT
 half-advertise the property.
+
+### Multi-bus output — instruments carry it, effects can't (SDK wall)
+
+The genuine AU v2 multi-bus vehicle is the **instrument** (`aumu` /
+`MusicDeviceBase`), NOT the effect.
+
+- **Instrument (`PulpAUInstrument`)** advertises one AU **output element** per
+  declared `descriptor().output_buses` entry. The element count must be known
+  *before* the `MusicDeviceBase(ci, 0, N, 0)` base constructor runs (it stores
+  the count and `CreateElements()` materialises exactly that many), so the ctor
+  probes the registered factory once (`registry_output_element_count()`) — a
+  throwaway processor purely to read the descriptor. `instrument_output_element_count(desc)`
+  and `build_output_bus_infos(desc, …)` are pure/header-inline and unit-tested in
+  `test_au_v2_busses.cpp` (`[bus]`).
+- **The multi-output render idiom.** An AU host pulls each output element with its
+  own `DoRenderBus`/`PrepareBuffer`, but a single `Render()` is expected to fill
+  ALL output elements — `AUBase::RenderBus` gates the re-render for the remaining
+  buses pulled at the same timestamp on `NeedsToRender`. So `PulpAUInstrument::Render`
+  loops every element, calls `GetOutput(e)->PrepareBuffer(frames)`, **pre-zeroes**
+  each bus (a processor that only implements the simple `process()` writes just
+  the main bus — aux buses must read silence, not garbage), and hands all buses to
+  `process(ProcessBuffers&)`. Bus 0 = Main, 1..N-1 = Aux. `PrepareBuffer` is
+  idempotent and does not clobber contents, so the copy on each later bus pull
+  reads what `Render` wrote. Verified by `auval -v aumu` on `examples/pulp-multi-out`.
+- **Effect (`PulpAUEffect` / AUEffectBase) is a hard single-in/single-out wall.**
+  `AUEffectBase` is `AUBase(ci, 1, 1)` and its `Render` pulls ONLY input element 0,
+  so an AU effect cannot receive live sidechain/aux audio through the stock render
+  path — the `std::array<…,1>` at the effect's `ProcessBufferLists` is NOT an
+  arbitrary cap, it reflects the SDK model. A descriptor-declared sidechain
+  surfaces as an **inactive** Sidechain bus (`build_input_bus_infos`), so
+  `sidechain_input()` returns null gracefully rather than exposing a bus the host
+  would try to feed. Gate any sidechain-view emission on `input_buses.size() > 1`
+  so the common single-input effect stays byte-identical (auval `aufx` regression).
+  Real AU-effect sidechain needs a 2nd input element + manual pull, which auval
+  cannot exercise — do not add it without a real sidechain-capable DAW to verify.
+- **RT-safety.** Cache the descriptor once (`descriptor_` member) in the ctor —
+  `descriptor()` returns by value (allocating std::string members), so copying it
+  per block on the audio thread is a bug. Bus `string_view`s point into the cached
+  descriptor. Per-bus channel-pointer vectors are pre-reserved in `Initialize()`.
+
+`kAudioUnitProperty_SupportedNumChannels` / `build_channel_info` stays MAIN-bus
+only — that AU property describes (main-in, main-out) channel pairs; sidechain and
+aux are separate elements, not `AUChannelInfo` rows. Do not try to fold multi-bus
+into it.
 
 ## Current Gaps
 

@@ -333,7 +333,14 @@ Load-bearing constraints:
   sort stays allocation-free on the audio thread.
 
 MIDI output mirrors the inverse: note_on / note_off in
-`midi_out_` are written back into `data.outputEvents`.
+`midi_out_` are written back into `data.outputEvents`, with each event's
+`Event.sampleOffset` set from the shared cross-format helper
+`detail::vst3_output_offset(me.sample_offset)` (identity for VST3 — the host
+clamps the signed offset). That helper lives in
+`core/format/include/pulp/format/detail/midi_out_offset.hpp` and is the single
+source of truth for the "offset N in → offset N out" contract shared with AU v2
+and CLAP; do NOT re-open-code the offset mapping here. Parity is pinned by
+`test/test_midi_out_offset_parity.cpp`.
 
 **Real-time-safe MIDI buffers (no per-block allocation).** `midi_in_` /
 `midi_out_` are reused `MidiBuffer` *members*, not block-local: `setupProcessing()`

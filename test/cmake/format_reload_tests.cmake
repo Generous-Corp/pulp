@@ -284,6 +284,24 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     set_target_properties(pulp-test-au-v2-effect PROPERTIES CXX_STANDARD 23)
     catch_discover_tests(pulp-test-au-v2-effect)
 
+    # AU v2 multi-bus contract — guards the multi-output-element lift (instrument
+    # advertises one output element per declared bus) and the effect's Sidechain
+    # input surface. Pure descriptor->bus helpers, so no live AU host needed.
+    add_executable(pulp-test-au-v2-busses test_au_v2_busses.cpp)
+    target_link_libraries(pulp-test-au-v2-busses PRIVATE
+        pulp::format pulp::midi ausdk Catch2::Catch2WithMain)
+    set_target_properties(pulp-test-au-v2-busses PROPERTIES CXX_STANDARD 23)
+    catch_discover_tests(pulp-test-au-v2-busses)
+
+    # Cross-format outbound-MIDI sample-offset parity. Exercises the real AU v2
+    # MidiOutputPacketBuilder (hence ausdk + C++23) plus the shared VST3/CLAP
+    # offset helpers the adapters route through.
+    add_executable(pulp-test-midi-out-offset-parity test_midi_out_offset_parity.cpp)
+    target_link_libraries(pulp-test-midi-out-offset-parity PRIVATE
+        pulp::format pulp::midi ausdk Catch2::Catch2WithMain)
+    set_target_properties(pulp-test-midi-out-offset-parity PROPERTIES CXX_STANDARD 23)
+    catch_discover_tests(pulp-test-midi-out-offset-parity)
+
     # AU v2 Cocoa editor-view advertisement (kAudioUnitProperty_CocoaUI). Compiles
     # the Cocoa view module with PULP_AU_GUI + a test-unique factory class name and
     # asserts the cross-TU filler registers + advertises the right, resolvable class.
