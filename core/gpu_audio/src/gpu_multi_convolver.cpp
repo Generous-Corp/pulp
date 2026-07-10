@@ -1,5 +1,7 @@
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 
+#include <pulp/gpu_audio/detail/gpu_ola.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -105,19 +107,13 @@ bool GpuMultiConvolver::convolve_stereo(const float* mono_in, float* out_l,
     }
 
     // Overlap-add per channel: out_lr_ holds the full-length (fft_size) panned
-    // L and R results; add into the carry, emit the first n, shift the carry.
+    // L and R results (packed real, stride 1); add into the carry, emit the first
+    // n, shift the carry. The guarded add resets a channel's carry and emits
+    // silence on a non-finite readback rather than poisoning it for the session.
     const float* res_l = out_lr_.data();              // [0, fft_size)
     const float* res_r = out_lr_.data() + fft_size_;  // [fft_size, 2*fft_size)
-    for (uint32_t i = 0; i < fft_size_; ++i) {
-        carry_l_[i] += res_l[i];
-        carry_r_[i] += res_r[i];
-    }
-    for (uint32_t i = 0; i < n; ++i) { out_l[i] = carry_l_[i]; out_r[i] = carry_r_[i]; }
-    for (uint32_t i = 0; i + n < fft_size_; ++i) {
-        carry_l_[i] = carry_l_[i + n];
-        carry_r_[i] = carry_r_[i + n];
-    }
-    for (uint32_t i = fft_size_ - n; i < fft_size_; ++i) { carry_l_[i] = 0.0f; carry_r_[i] = 0.0f; }
+    detail::overlap_add_block(carry_l_.data(), res_l, /*src_stride=*/1, out_l, fft_size_, n);
+    detail::overlap_add_block(carry_r_.data(), res_r, /*src_stride=*/1, out_r, fft_size_, n);
     return true;
 }
 

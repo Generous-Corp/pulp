@@ -159,7 +159,7 @@ latency-delayed output, never blocking. On a miss the node's `MissPolicy`
 
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
-- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; `signal::Convolver` CPU fallback.
+- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::PartitionedConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
 - `GpuStft` — STFT/ISTFT (windowed analyze / synthesize) — the spectral toolkit base.
 - `GpuSpectralFreeze` — capture + sustain a spectral frame (infinite pad).
 - `GpuSpectralMorph` — blend between two captured spectra (t ∈ [0,1]).
