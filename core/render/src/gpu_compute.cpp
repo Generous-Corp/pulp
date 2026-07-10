@@ -232,6 +232,52 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kMultiFdlMacShader = R"wgsl(
+// Partitioned frequency-delay-line MAC for multi-IR convolution. Instead of one
+// full-length-n FFT per block (n = next_pow2(block + IR_len)), each IR is split
+// into `num_part` block-size partitions, so the FFT stays at the small block
+// size and this kernel does the convolution as a sum of spectral products over
+// a ring of the last `num_part` input spectra:
+//   accum[r][i] = sum_p  ring[(head - p + P) % P][i] * ir[r][p][i]
+// One thread per (room r, bin i). ring holds P input spectra (each n complex);
+// ir holds num_ir*num_part IR-partition spectra; accum holds num_ir room spectra.
+
+struct FdlParams { n : u32, num_ir : u32, num_part : u32, head : u32 };
+
+@group(0) @binding(0) var<storage, read>       ring  : array<f32>;  // 2n*P
+@group(0) @binding(1) var<storage, read>       ir    : array<f32>;  // 2n*num_ir*num_part
+@group(0) @binding(2) var<storage, read_write> accum : array<f32>;  // 2n*num_ir
+@group(0) @binding(3) var<uniform>             p     : FdlParams;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let flat = gid.x;
+    let total = p.num_ir * p.n;
+    if (flat >= total) { return; }
+    let r = flat / p.n;   // room
+    let i = flat % p.n;   // bin
+    let P = p.num_part;
+    var accr = 0.0;
+    var acci = 0.0;
+    for (var pp = 0u; pp < P; pp = pp + 1u) {
+        // Partition 0 pairs with the newest input spectrum (head), partition
+        // pp with the input pp blocks ago — the delay line.
+        let slot = (p.head + P - (pp % P)) % P;
+        let xi = (slot * p.n + i) * 2u;
+        let iri = ((r * P + pp) * p.n + i) * 2u;
+        let xr  = ring[xi];
+        let xim = ring[xi + 1u];
+        let br  = ir[iri];
+        let bim = ir[iri + 1u];
+        accr = accr + (xr * br - xim * bim);
+        acci = acci + (xr * bim + xim * br);
+    }
+    let o = flat * 2u;
+    accum[o]      = accr;
+    accum[o + 1u] = acci;
+}
+)wgsl";
+
 static constexpr const char* kSpectralAdvanceShader = R"wgsl(
 // Per-bin phase advance + conjugate-symmetric jitter for a stack of frozen
 // layers. One thread per (layer, bin) over the resident phase buffer (num_layers
