@@ -118,20 +118,28 @@ void content_extent(const view::View& v, float ox, float oy, float& w, float& h)
 /// geometry check below cannot see this class of bug — only a text measurement
 /// can. Measured, not estimated: `RecordingCanvas::measure_text` returns seven
 /// points per character and ignores the font size entirely.
+///
+/// A Label does not overflow; it clips. Same measurement, different symptom: a
+/// caption that runs past the panel loses its last words, and a screenshot of a
+/// clipped sentence still looks like a caption.
 void check_labels_fit(view::View& v, const char* who, canvas::Canvas& measurer) {
     constexpr float kWidgetLabelPt = 10.0f;   // what Knob::paint and Toggle::paint use
-    measurer.set_font("Inter", kWidgetLabelPt);
 
-    auto fits = [&](const std::string& label, float box, const char* kind) {
+    auto fits = [&](const std::string& label, float box, const char* kind, float pt) {
         if (label.empty()) return;
+        measurer.set_font("Inter", pt);
         const float text = measurer.measure_text(label);
         INFO(who << ": " << kind << " label \"" << label << "\" measures " << text
-                 << " in a box " << box << " wide");
+                 << " at " << pt << "pt in a box " << box << " wide");
         CHECK(text <= box);
     };
 
-    if (auto* k = dynamic_cast<view::Knob*>(&v)) fits(k->label(), v.bounds().width, "knob");
-    if (auto* t = dynamic_cast<view::Toggle*>(&v)) fits(t->label(), v.bounds().width, "toggle");
+    if (auto* k = dynamic_cast<view::Knob*>(&v))
+        fits(k->label(), v.bounds().width, "knob", kWidgetLabelPt);
+    if (auto* t = dynamic_cast<view::Toggle*>(&v))
+        fits(t->label(), v.bounds().width, "toggle", kWidgetLabelPt);
+    if (auto* l = dynamic_cast<view::Label*>(&v))
+        fits(l->text(), v.bounds().width, "caption", l->font_size());
     for (size_t i = 0; i < v.child_count(); ++i)
         check_labels_fit(*v.child_at(i), who, measurer);
 }
@@ -347,31 +355,37 @@ TEST_CASE("LFO's editor draws the selected shape", "[brew][ui][lfo]") {
     }
 }
 
-TEST_CASE("LFO's Free Run toggle reaches the rate mode", "[brew][ui][lfo]") {
+TEST_CASE("LFO's toggles reach the parameters the scope cannot show",
+          "[brew][ui][lfo]") {
     Editor ed(create_lfo);
 
-    // The scope is deliberately mode-agnostic — it sweeps one cycle either way —
-    // so no pixel comparison can prove this switch is connected. Without this
-    // test, deleting the toggle from the editor leaves the whole suite green and
-    // strands a shipped parameter with no way to reach it.
-    auto* toggle = find_toggle(*ed.view, "Free Run");
-    REQUIRE(toggle != nullptr);
-    REQUIRE_FALSE(toggle->is_on());
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 0.0f);
+    // Triplet, the swing unit, and Reset By Note all change the signal in ways the
+    // scope cannot draw — it sweeps one cycle of whatever a cycle currently is, and
+    // a retrigger needs a note. Without this test, deleting one of them from the
+    // editor leaves the whole suite green and strands a shipped parameter with no
+    // way to reach it.
+    struct Case { const char* label; state::ParamID id; };
+    const Case cases[] = {
+        {"Triplet", LfoProcessor::kTriplet},
+        {"16ths", LfoProcessor::kSwingUnit},
+        {"Reset", LfoProcessor::kResetByNote},
+        {"Invert", LfoProcessor::kInvert},
+    };
 
-    toggle->on_mouse_down(view::Point{});
-    REQUIRE(toggle->is_on());
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 1.0f);
+    for (const auto& c : cases) {
+        CAPTURE(c.label);
+        auto* toggle = find_toggle(*ed.view, c.label);
+        REQUIRE(toggle != nullptr);
+        REQUIRE_FALSE(toggle->is_on());
+        REQUIRE(ed.host.state().get_value(c.id) == 0.0f);
 
-    toggle->on_mouse_down(view::Point{});
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kRateMode) == 0.0f);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(toggle->is_on());
+        REQUIRE(ed.host.state().get_value(c.id) == 1.0f);
 
-    // Same blind spot, same fix: swing warps the timeline, not the shape, so the
-    // scope cannot see which unit is selected either.
-    auto* sixteenths = find_toggle(*ed.view, "16ths");
-    REQUIRE(sixteenths != nullptr);
-    sixteenths->on_mouse_down(view::Point{});
-    REQUIRE(ed.host.state().get_value(LfoProcessor::kSwingUnit) == 1.0f);
+        toggle->on_mouse_down(view::Point{});
+        REQUIRE(ed.host.state().get_value(c.id) == 0.0f);
+    }
 }
 
 TEST_CASE("Function's editor draws the curve and tracks the signal on it",
