@@ -21,10 +21,17 @@ namespace pulp::gpu_audio {
 /// batched, and the num_ir results are reduced to a stereo pair ON the GPU — so
 /// only one stereo block is read back regardless of how many rooms there are.
 ///
-/// The rooms are NOT collapsible to a single summed IR: each is panned to its
-/// own stereo position (distinct L/R weights), so the two output channels are
-/// genuinely different linear combinations of the rooms. That is what makes the
-/// CPU baseline (N panned convolutions) a fair, irreducible comparison.
+/// Reducibility caveat: with CONSTANT per-room pans this batch is mathematically
+/// collapsible. Every room convolves the same input and is summed with fixed
+/// weights, so the whole bank folds to two convolutions — one combined IR per
+/// stereo channel (A·x + B·x = (A+B)·x) — and a folding CPU implementation wins.
+/// So a static-pan N-room batch measures raw N-way parallel-convolution
+/// throughput, not a result that musically requires the GPU. The genuinely
+/// irreducible regime is TIME-VARYING per-room weights (pan/level that change
+/// per block): the combined IR would change every block, so folding costs
+/// O(N·IR_len) per block and the CPU can no longer pre-sum. That is where the
+/// batched GPU — N resident IR spectra, one flat MAC, a cheap per-block reweight
+/// — structurally beats the CPU. Pass fresh pans per block to drive it.
 ///
 /// Implements GpuAudioNode so it can run RT-safe behind GpuAudioTransport (GPU
 /// work on the non-RT worker; the audio thread reads a fixed-latency result).
