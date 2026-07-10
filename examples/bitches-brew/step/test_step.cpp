@@ -1036,3 +1036,42 @@ TEST_CASE("a zero-length block is survivable", "[brew][step][safety]") {
     Rig r;
     CHECK(r.render(0.0, 0).empty());
 }
+
+TEST_CASE("a closed gate reads as zero volts in either range", "[brew][step][gate]") {
+    // `Gate` exists so one channel of the Step LFO can drive a hardware envelope's
+    // gate input: the CV must fall all the way to zero for the tail of the step, or
+    // the envelope never releases. `Range` is a separate idea — it remaps what a
+    // step knob means, full scale or its upper half.
+    //
+    // Applying the gate to the level and *then* the range put a unipolar gap at
+    // mid-scale, which every gate input in the world reads as high.
+    for (const auto range : {Range::bipolar, Range::unipolar}) {
+        Rig r;
+        r.one_step_per_beat();
+        r.set(StepProcessor::kRange, as_param(range));
+        r.set(StepProcessor::kGate, 0.5f);
+        r.set_ramp();
+
+        // Early in step 2: the gate is open, so the programmed level reaches the
+        // jack, mapped through the range.
+        const float open = r.at_beat(2.1);
+        CHECK_THAT(open, WithinAbs(apply_range(Rig::ramp_level(2), range), 1e-5));
+
+        // Late in the same step: the gate has closed.
+        CHECK_THAT(r.at_beat(2.9), WithinAbs(0.0, 1e-6));
+    }
+}
+
+TEST_CASE("Offset lifts the gap, because it shifts the whole waveform",
+          "[brew][step][gate]") {
+    // The gap is zero volts *of the pattern*. A DC offset is added to the pattern,
+    // gaps and all — otherwise a patch that needs the gate to rest at anything but
+    // zero has no control that can put it there.
+    Rig r;
+    r.one_step_per_beat();
+    r.set(StepProcessor::kGate, 0.5f);
+    r.set(StepProcessor::kLevelOffset, 0.25f);
+    r.set_ramp();
+
+    CHECK_THAT(r.at_beat(2.9), WithinAbs(0.25, 1e-6));
+}

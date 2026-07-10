@@ -177,7 +177,10 @@ before the add.
 
 `Smooth` slews (positive milliseconds) or low-passes (negative), calibrated so
 that the number is the time a full `-1` to `+1` swing takes. At zero it is a wire,
-bit for bit.
+bit for bit. It reads `slew 250` / `lpf 250` / `off` rather than as a signed
+millisecond count, here and in the host — the sign is the mode, and no user should
+have to learn that. Every plug-in in the suite that carries `Smooth` reads it the
+same way.
 
 The rail across the bottom shows the sample the DSP actually emitted — not the
 value the knobs are asking for. Those differ whenever the input bus or the
@@ -346,11 +349,14 @@ fraction of the step, so a step still spends most of its time at the level it wa
 programmed to. `Interp = Lin` is exactly `Glide` at 1.0, and says so rather than
 growing a second control that does the same arithmetic. `Range` sends the pattern
 out bipolar or unipolar. `Gate` sets how much of each step carries its value; the
-rest falls to zero, on *both* the voltage and the gate. At the default of 100%
+rest falls to zero volts, on *both* the voltage and the gate, and in *either*
+range — a gap is what a hardware gate input reads as low, so it has to be zero and
+not the middle of whatever range the pattern is using. At the default of 100%
 nothing is punched out and the gate never falls, which is right — with full-length
 steps there is no gap between one note and the next to fall into. Turn it down and
 every step grows a rising edge, which is what an envelope generator downstream needs
-in order to fire once per step instead of once per phrase.
+in order to fire once per step instead of once per phrase. `Offset` is added after
+the gate, because it shifts the whole waveform and a gap is part of the waveform.
 
 **The shift register.** Switch `Register` on and the step levels come from a looping
 ring of bits rather than from the eight bars. The bit that falls off the end is fed
