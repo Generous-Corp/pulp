@@ -1196,6 +1196,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
 | `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
 | `installable-tools` | Acceptance bar for anything Pulp can install (`pulp tool` / `pulp add`): validate install AND uninstall from OUTSIDE a checkout before the README ships; uninstall-safety contract |
+| `intel-canary` | macOS Intel (x86_64) portability: PULP_INTEL_CANARY lint + allowlist, Tier 0-3 CI (build.yml canary, intel-portability, nightly-intel, release universal gate) |
 | `ios` | iOS platform: AUv3 app extensions, Simulator builds, UIKit host, CoreAudio, touch + Pencil input |
 | `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp kit manifests |

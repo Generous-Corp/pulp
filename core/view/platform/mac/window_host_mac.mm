@@ -208,8 +208,13 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
             });
             return true;
         },
-        [alive] {
+        [alive]() -> bool {
             if (!alive || !alive->load(std::memory_order_acquire)) return false;
+            // Explicit -> bool: `-[NSThread isMainThread]` returns ObjC `BOOL`,
+            // which is `bool` on arm64 but `signed char` on x86_64. Without the
+            // explicit return type the two `return`s deduce different types and
+            // this lambda fails to compile on Intel (universal/x86_64 builds)
+            // while compiling fine on Apple Silicon.
             return [NSThread isMainThread];
         },
     };

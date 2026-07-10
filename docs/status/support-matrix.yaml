@@ -5,13 +5,22 @@ schema_version: 2
 platforms:
   macos:
     status: usable
-    notes: Primary development platform. ARM64 (Apple Silicon) only. Minimum macOS 13.3
-      (Ventura). Skia/Dawn allow macOS 13.0 (Google's Chromium mac_deployment_target at
-      the pinned milestone), but Apple's libc++ gates std::to_chars(float) — reached via
-      std::format in Pulp's logging — at macOS 13.3, which sets the real floor. The
-      per-dependency floor is tracked in tools/deps/min_os.json (Pulp targets the max of
-      every linked dependency's minimum, libc++ included) and pinned into the build by
-      tools/cmake/PulpMinOs.cmake.
+    notes: Primary development platform. ARM64 (Apple Silicon) is the usable, primary
+      target. x86_64 (Intel) and universal (arm64;x86_64) builds are supported and
+      configure+build via -DCMAKE_OSX_ARCHITECTURES, but ship experimental — GitHub
+      CI VMs have no representative Intel GPU and Rosetta caps SIMD at SSE4.2/AVX2, so
+      Metal-on-Intel-GPU behavior, AVX3 dispatch, and Intel-native DAW hosting are not
+      yet verified on real Intel hardware. skia-builder publishes all three mac Skia
+      slices (mac-arm64, mac-x86_64, mac-universal); wgpu-native ships no universal
+      dylib, so a universal build lipo's the two thin slices and ad-hoc re-signs the fat
+      dylib (tools/cmake/PulpWgpuUniversal.cmake). Minimum macOS 13.3 (Ventura),
+      arch-independent. Skia/Dawn allow macOS 13.0 (Google's Chromium
+      mac_deployment_target at the pinned milestone) on both arm64 and x86_64, but
+      Apple's libc++ gates std::to_chars(float) — reached via std::format in Pulp's
+      logging — at macOS 13.3, which sets the real floor. The per-dependency floor is
+      tracked in tools/deps/min_os.json (macos-arm64 + macos-x64; Pulp targets the max
+      of every linked dependency's minimum across all requested arches, libc++ included)
+      and pinned into the build by tools/cmake/PulpMinOs.cmake.
   windows:
     status: experimental
     notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
@@ -28,6 +37,42 @@ platforms:
   web:
     status: experimental
     notes: WAMv2 builds a Pulp Processor to a browser AudioWorklet plugin via pulp_add_wam_plugin — the PulpGain canary loads, renders audio, and exposes generated parameter controls in Chrome (verified via an OfflineAudioContext fixture and a Node runner). WebCLAP builds a Pulp Processor to a CLAP-in-WebAssembly module via pulp_add_wclap (wasi-sdk); the PulpGain WebCLAP is hosted in Node through the full CLAP lifecycle with audio and parameter control proven, but is not yet hosted in-browser. Browser validation is fixture-based, not yet a CI lane.
+
+# macOS CPU-architecture tiers. macOS as a platform is `usable` (see
+# platforms.macos), but that maturity is the arm64 (Apple Silicon) primary
+# target. x86_64 and universal builds configure+build via
+# -DCMAKE_OSX_ARCHITECTURES and are verified by the tiered Intel CI
+# (docs/guides/intel-support.md), but ship experimental. Full rationale, the
+# Tier 0-3 tiering, the honest canary catch/miss list, and the promotion
+# criteria live in docs/guides/intel-support.md.
+macos_architectures:
+  arm64:
+    status: usable
+    notes: Apple Silicon — the primary, `usable` macOS target. Required `macos` CI gate.
+  x86_64:
+    status: experimental
+    notes: >
+      Intel builds configure+build via -DCMAKE_OSX_ARCHITECTURES=x86_64 and are
+      exercised by the Intel CI tiering (Tier 0 canary per PR, Tier 1 advisory
+      x86_64 build+test on path match, Tier 2 native macos-15-intel nightly,
+      Tier 3 blocking universal+dual-arch-auval release gate — see
+      docs/guides/intel-support.md). Ships experimental because two classes stay
+      untestable in GitHub's macOS VMs: Metal on real AMD/Intel GPUs (the runners
+      are VMs without a representative discrete GPU, so not even the native
+      macos-15-intel runner exercises a real Intel/AMD Metal driver) and
+      Intel-native DAW-in-the-loop hosting. Tier 4 (a dedicated Intel Mac /
+      tartci Intel host) is CUT: macos-15-intel already covers the native Intel
+      CPU + toolchain, leaving only those two GPU/DAW gaps. Highway runtime SIMD
+      dispatch is arch-portable; there is no raw NEON in core/.
+  universal:
+    status: experimental
+    notes: >
+      Universal (arm64;x86_64) builds fetch the fat mac Skia slice and lipo the
+      two thin wgpu-native dylibs into a fat dylib that is ad-hoc re-signed
+      (tools/cmake/PulpWgpuUniversal.cmake) — a raw lipo output fails
+      codesign --verify and the arm64 slice is killed at load. The Tier 3
+      release gate asserts lipo -archs + codesign --verify on every shipped
+      bundle and embedded dylib before publish.
 
 formats:
   vst3:

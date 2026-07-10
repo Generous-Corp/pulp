@@ -734,6 +734,42 @@ jobs:
           set -euo pipefail
           python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
 
+      # ── Tier-0 Intel canary (docs/guides/intel-support.md) ────────────────
+      # Cheap cross-arch (x86_64) portability early-warning that rides inside
+      # the already-running ARM macOS job. Two halves:
+      #   (1) the static lint (sub-second; changed-files on PRs, whole-tree on
+      #       push) — catches the build-system arch class the compile can't;
+      #   (2) a GPU-OFF, x86_64-thin compile of the arch-sensitive TU set (the
+      #       proven sanitizer-matrix config — no Skia download, ~3-5 min) —
+      #       catches `#if` gating that drops the SSE/scalar fallback.
+      # Gated on the PULP_INTEL_CANARY repo variable so forks (which default
+      # OFF) never pay for it; danielraffel/pulp sets it to `1`. It is a
+      # canary, never a substitute for the Tier-2 nightly Intel build.
+      - name: Intel canary — lint + x86_64 GPU-off compile
+        if: runner.os == 'macOS' && vars.PULP_INTEL_CANARY == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            echo "Intel canary lint (changed vs ${base})"
+            python3 tools/scripts/intel_canary_lint.py --mode=changed --base "${base}"
+          else
+            echo "Intel canary lint (whole tree)"
+            python3 tools/scripts/intel_canary_lint.py --mode=tree
+          fi
+          echo "Intel canary x86_64 GPU-off compile (sanitizer-matrix config)"
+          cmake -S . -B build-intel-canary \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64
+          # pulp-signal is an INTERFACE (header-only) library, so its SIMD/DSP
+          # TUs compile through pulp-signal-fft-backend (the real STATIC target).
+          cmake --build build-intel-canary -j"$(sysctl -n hw.ncpu)" \
+            --target pulp-runtime pulp-signal-fft-backend pulp-platform pulp-state pulp-format
+
       - name: Ccache effective config (proof of override)
         if: always()
         shell: bash
