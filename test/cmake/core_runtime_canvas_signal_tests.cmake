@@ -162,10 +162,18 @@ pulp_add_test_suite(pulp-test-fft-backends LIBRARIES pulp::signal-fft-backend)
 pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
-# PF-2 null test: live_kernel equal-power fade angle recurrence vs direct cos/sin.
+# SF-2 crossfade unification: live_kernel structural-swap fade now matches the
+# native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
+# documented behavior change (the fade previously used a linear theta).
 pulp_add_test_suite(pulp-test-live-kernel-crossfade-null
     SOURCES test_live_kernel_crossfade_null.cpp
     LIBRARIES pulp::signal
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/experimental)
+# SF-2 crossfade unification: the ONE fixture covering every SIGNAL-side fade —
+# shared-law invariants + TransitionMixer / live_kernel / LoopRenderer parity.
+pulp_add_test_suite(pulp-test-crossfade
+    SOURCES test_crossfade.cpp
+    LIBRARIES pulp::signal pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/experimental)
 # DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
 add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
