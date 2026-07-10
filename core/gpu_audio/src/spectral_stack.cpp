@@ -27,6 +27,25 @@ void smear_kernel(float smear, uint32_t n, uint32_t& radius, float& inv_kernel) 
 
 }  // namespace
 
+void detail::circular_box_blur(const std::vector<float>& m, std::vector<float>& out,
+                               uint32_t radius, float inv_kernel, uint32_t n) {
+    const int r = static_cast<int>(radius);
+    const int ni = static_cast<int>(n);
+    auto wrap = [ni](int j) { j %= ni; return j < 0 ? j + ni : j; };
+
+    // Seed the window centered at k=0: bins [-r, r] mod n.
+    float s = 0.0f;
+    for (int d = -r; d <= r; ++d) s += m[static_cast<uint32_t>(wrap(d))];
+    out[0] = s * inv_kernel;
+
+    // Slide: at each k, add bin (k+r) and drop bin (k-r-1), both mod n.
+    for (int k = 1; k < ni; ++k) {
+        s += m[static_cast<uint32_t>(wrap(k + r))] -
+             m[static_cast<uint32_t>(wrap(k - r - 1))];
+        out[static_cast<uint32_t>(k)] = s * inv_kernel;
+    }
+}
+
 // ───────────────────────────── CpuSpectralStack ────────────────────────────
 
 bool CpuSpectralStack::prepare(uint32_t fft_size, uint32_t hop,
@@ -38,6 +57,7 @@ bool CpuSpectralStack::prepare(uint32_t fft_size, uint32_t hop,
     hop_ratio_ = static_cast<float>(hop) / static_cast<float>(fft_size);
     fft_ = std::make_unique<signal::Fft>(static_cast<int>(fft_size));
     scratch_.assign(fft_size, {0.0f, 0.0f});
+    smear_scratch_.assign(fft_size, 0.0f);
     weights_.assign(num_layers, 0.0f);
     layers_.clear();
     layers_.resize(num_layers);
@@ -109,29 +129,29 @@ bool CpuSpectralStack::render(float* frame_out, const float* weights, float smea
     }
 
     // Smear + weighted complex sum across layers, then one inverse FFT.
-    for (uint32_t k = 0; k < n_; ++k) {
-        float accR = 0.0f, accI = 0.0f;
-        for (uint32_t L = 0; L < layers_.size(); ++L) {
-            const float w = weights_[L];
-            if (w == 0.0f) continue;
-            const auto& m = layers_[L].mag;
-            float mag = m[k];
-            if (radius > 0u) {
-                float s = 0.0f;
-                const int r = static_cast<int>(radius);
-                const int ni = static_cast<int>(n_);
-                for (int d = -r; d <= r; ++d) {
-                    int j = (static_cast<int>(k) + d) % ni;
-                    if (j < 0) j += ni;
-                    s += m[static_cast<uint32_t>(j)];
-                }
-                mag = s * inv_kernel;
-            }
-            const float p = layers_[L].phase[k];
-            accR += w * mag * std::cos(p);
-            accI += w * mag * std::sin(p);
+    //
+    // Layer-outer so each layer's circular box blur is computed ONCE in O(n)
+    // (circular_box_blur) rather than O(n*radius) recomputed per bin. Each bin's
+    // cross-layer accumulation still runs L = 0,1,2,... in order, so the weighted
+    // sum is identical to the old bin-outer form up to the box blur's own
+    // rounding. w == 0 layers are skipped exactly as before.
+    for (uint32_t k = 0; k < n_; ++k) scratch_[k] = {0.0f, 0.0f};
+    for (uint32_t L = 0; L < layers_.size(); ++L) {
+        const float w = weights_[L];
+        if (w == 0.0f) continue;
+        const auto& m = layers_[L].mag;
+        const auto& ph = layers_[L].phase;
+        const float* mag_src = m.data();
+        if (radius > 0u) {
+            detail::circular_box_blur(m, smear_scratch_, radius, inv_kernel, n_);
+            mag_src = smear_scratch_.data();
         }
-        scratch_[k] = {accR, accI};
+        for (uint32_t k = 0; k < n_; ++k) {
+            const float mag = mag_src[k];
+            const float p = ph[k];
+            scratch_[k] += std::complex<float>(w * mag * std::cos(p),
+                                               w * mag * std::sin(p));
+        }
     }
     fft_->inverse(scratch_.data());  // 1/N normalized
     for (uint32_t k = 0; k < n_; ++k) frame_out[k] = scratch_[k].real();

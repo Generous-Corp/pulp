@@ -12,6 +12,19 @@
 
 namespace pulp::gpu_audio {
 
+namespace detail {
+/// Circular box blur of width (2*radius+1) over `m[0..n)` into `out[0..n)`, in
+/// O(n) via a sliding running sum (not O(n*radius) direct summation, and not a
+/// prefix sum — a windowed add-one/drop-one sum, which only ever holds the
+/// current window and so does not accumulate the precision loss of subtracting
+/// two large cumulative totals). `radius` must be < n/2 so the window is shorter
+/// than the circle and the add/drop bins never alias; `smear_kernel` bounds it
+/// at n/32. Exposed for unit testing against the direct summation.
+void circular_box_blur(const std::vector<float>& m, std::vector<float>& out,
+                       std::uint32_t radius, float inv_kernel, std::uint32_t n);
+}  // namespace detail
+
+
 /// A stack of N captured spectral "moments" (layers) that can be sustained and
 /// morphed. capture() freezes the windowed spectrum of one frame into a layer;
 /// render() advances every layer's phase, optionally smears (magnitude blur)
@@ -77,6 +90,7 @@ private:
     std::vector<Layer> layers_;
     std::unique_ptr<signal::Fft> fft_;
     std::vector<std::complex<float>> scratch_;  // n: capture + combine workspace
+    std::vector<float> smear_scratch_;  // n: per-layer blurred magnitude (running-sum)
     std::vector<float> weights_;     // local copy (null weights => all 1)
     uint32_t seed_ = 0x9E3779B9u;    // jitter RNG seed, advanced each render
 };
