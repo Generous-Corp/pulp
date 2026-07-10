@@ -78,6 +78,11 @@ pub struct ToolDescriptor {
     /// Short one-line description.
     #[serde(default)]
     pub description: String,
+    /// Friendly alternate names that resolve to this tool's `id`, so a user (or
+    /// an agent driving the plugin) can say `pulp tool install perfetto` for
+    /// `trace-processor`. Resolution is exact-match, case-sensitive.
+    #[serde(default)]
+    pub aliases: Vec<String>,
     /// SPDX identifier.
     #[serde(default)]
     pub license: String,
@@ -158,6 +163,25 @@ pub struct ToolRegistry {
     pub tools: BTreeMap<String, ToolDescriptor>,
 }
 
+impl ToolRegistry {
+    /// Resolve a user-supplied name to a canonical tool id: the name itself if
+    /// it's a real id, else the id of any tool that lists it in `aliases`, else
+    /// the name unchanged (so the verb reports an honest "not found"). Lets
+    /// `pulp tool install perfetto` reach `trace-processor`.
+    #[must_use]
+    pub fn canonical_id(&self, name: &str) -> String {
+        if self.tools.contains_key(name) {
+            return name.to_owned();
+        }
+        for (id, t) in &self.tools {
+            if t.aliases.iter().any(|a| a == name) {
+                return id.clone();
+            }
+        }
+        name.to_owned()
+    }
+}
+
 /// Read the registry at `path`.
 ///
 /// # Errors
@@ -165,14 +189,62 @@ pub struct ToolRegistry {
 /// Surfaces I/O / JSON parse failures wrapped as [`CliError`].
 pub fn load(path: &Path) -> Result<ToolRegistry> {
     let raw = fs::read_to_string(path).map_err(|e| CliError::io(path.to_path_buf(), e))?;
-    let mut reg: ToolRegistry = serde_json::from_str(&raw).map_err(|e| CliError::Json {
-        path: path.to_path_buf(),
+    load_str(&raw, path)
+}
+
+/// The repo's `tools/packages/tool-registry.json`, compiled into the binary.
+/// This is what makes `pulp tool` work for **installed** users, who have no Pulp
+/// source checkout on their cwd's parent chain: when the walk-up in
+/// [`find_tool_registry_path`] finds nothing, we parse this instead. A repo copy
+/// still wins when present, so a Pulp dev iterating on the registry sees their
+/// edits without a rebuild.
+pub const EMBEDDED_REGISTRY_JSON: &str =
+    include_str!("../../../tools/packages/tool-registry.json");
+
+/// Parse a registry from JSON text, imprinting each tool's id. `source` only
+/// labels errors (a file path, or a synthetic label for the embedded copy).
+///
+/// # Errors
+///
+/// [`CliError::Json`] when the text is not a valid registry.
+pub fn load_str(raw: &str, source: &Path) -> Result<ToolRegistry> {
+    let mut reg: ToolRegistry = serde_json::from_str(raw).map_err(|e| CliError::Json {
+        path: source.to_path_buf(),
         source: e,
     })?;
     for (id, t) in &mut reg.tools {
         t.id.clone_from(id);
     }
     Ok(reg)
+}
+
+/// The embedded registry, parsed. Used as the fallback for installed users.
+///
+/// # Errors
+///
+/// [`CliError::Json`] only if the compiled-in JSON is malformed (a build-time
+/// bug — the same file is validated by the C++ registry tests and CI).
+pub fn load_embedded() -> Result<ToolRegistry> {
+    load_str(EMBEDDED_REGISTRY_JSON, Path::new("<embedded tool-registry.json>"))
+}
+
+/// Resolve the active registry: the repo's `tools/packages/tool-registry.json`
+/// (walking up from `cwd`) when present, else the compiled-in copy. The returned
+/// path is `Some` only for the on-disk case — callers that must hand a file to a
+/// child process (the pulp-cpp archive installer) materialize the embedded copy
+/// via [`EMBEDDED_REGISTRY_JSON`] themselves.
+///
+/// # Errors
+///
+/// Propagates a parse error from whichever source is used.
+pub fn resolve_registry(cwd: &Path) -> Result<(ToolRegistry, Option<PathBuf>)> {
+    match find_tool_registry_path(cwd) {
+        Some(p) => {
+            let reg = load(&p)?;
+            Ok((reg, Some(p)))
+        }
+        None => Ok((load_embedded()?, None)),
+    }
 }
 
 /// `$PULP_HOME` — mirrors `tool_registry.cpp::pulp_home`.
@@ -375,29 +447,62 @@ pub fn find_tool_registry_path(start: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Remove a tool from the pulp-managed area. Mirrors C++
-/// `uninstall_tool` — returns `true` when something was removed.
+/// A tool id is only ever a single directory *name* under the managed tree.
+/// Reject anything that could make `tools_dir().join(id)` escape it — a path
+/// separator, `..`, `.`, an absolute path, or an empty string — BEFORE it
+/// reaches `remove_dir_all`. Without this, `uninstall ../../foo` or an absolute
+/// id would delete outside `~/.pulp/tools`. Pure; unit-tested with hostile ids.
 ///
 /// # Errors
 ///
-/// Surfaces filesystem errors from `remove_dir_all`.
-pub fn uninstall_tool(id: &str) -> Result<bool> {
-    let dir = tools_dir().join(id);
-    if dir.is_dir() {
-        fs::remove_dir_all(&dir).map_err(|e| CliError::io(dir, e))?;
-        return Ok(true);
+/// [`CliError::BadUsage`] when `id` is not a single safe path component.
+pub fn validate_tool_id(id: &str) -> Result<()> {
+    let mut comps = Path::new(id).components();
+    let single_normal = matches!(
+        (comps.next(), comps.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    );
+    if id.is_empty()
+        || id.contains('/')
+        || id.contains('\\')
+        || Path::new(id).is_absolute()
+        || !single_normal
+    {
+        return Err(CliError::BadUsage(format!(
+            "refusing to uninstall {id:?}: a tool id must be a single name \
+             (no '/', '\\', '..', or absolute path)"
+        )));
     }
-    let venv = tools_dir().join("python-envs").join(id);
-    if venv.is_dir() {
-        fs::remove_dir_all(&venv).map_err(|e| CliError::io(venv, e))?;
-        return Ok(true);
+    Ok(())
+}
+
+/// Remove a tool from the pulp-managed area. Returns the directory that was
+/// removed (so the caller can tell the user exactly what was deleted), or
+/// `None` when nothing pulp-managed matched. Mirrors C++ `uninstall_tool`.
+///
+/// Only ever deletes a **direct child** of the managed roots (`tools/<id>`,
+/// `tools/python-envs/<id>`, `tools/npm-packages/<id>`): the id is validated to
+/// a single component and each candidate is confirmed to sit directly under its
+/// expected parent before removal — two independent guards, because this calls
+/// `remove_dir_all`.
+///
+/// # Errors
+///
+/// [`CliError::BadUsage`] for an unsafe id; filesystem errors from
+/// `remove_dir_all`.
+pub fn uninstall_tool(id: &str) -> Result<Option<PathBuf>> {
+    validate_tool_id(id)?;
+    let base = tools_dir();
+    for parent in [base.clone(), base.join("python-envs"), base.join("npm-packages")] {
+        let dir = parent.join(id);
+        // Defense in depth: after joining a validated id, the target must still
+        // be a direct child of the intended parent.
+        if dir.is_dir() && dir.parent() == Some(parent.as_path()) {
+            fs::remove_dir_all(&dir).map_err(|e| CliError::io(dir.clone(), e))?;
+            return Ok(Some(dir));
+        }
     }
-    let npm = tools_dir().join("npm-packages").join(id);
-    if npm.is_dir() {
-        fs::remove_dir_all(&npm).map_err(|e| CliError::io(npm, e))?;
-        return Ok(true);
-    }
-    Ok(false)
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -643,7 +748,7 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
         let removed = uninstall_tool("__never_installed_xyz__").unwrap();
-        assert!(!removed, "should be Ok(false), nothing to remove");
+        assert!(removed.is_none(), "should be Ok(None), nothing to remove");
     }
 
     #[test]
@@ -655,7 +760,7 @@ mod tests {
         std::fs::write(tool_dir.join("uv"), "stub").unwrap();
         assert!(tool_dir.exists());
         let removed = uninstall_tool("uv").unwrap();
-        assert!(removed);
+        assert_eq!(removed.as_deref(), Some(tool_dir.as_path()));
         assert!(!tool_dir.exists());
     }
 
@@ -672,7 +777,81 @@ mod tests {
         std::fs::write(tool_dir.join(wrapper_file_name()), "stub").unwrap();
         assert!(tool_dir.exists());
         let removed = uninstall_tool("video-proof").unwrap();
-        assert!(removed);
+        assert_eq!(removed.as_deref(), Some(tool_dir.as_path()));
         assert!(!tool_dir.exists());
+    }
+
+    #[test]
+    fn uninstall_tool_rejects_hostile_ids_without_deleting() {
+        // A sibling of the managed tree that a traversal id would target.
+        let td = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("PULP_HOME", td.path().join("home").to_str().unwrap());
+        let victim = td.path().join("victim");
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("keep.txt"), "precious").unwrap();
+
+        // tools_dir() is <home>/tools, so "../../victim" from there would reach
+        // it. Every hostile shape must be refused BEFORE any removal.
+        for bad in [
+            "..",
+            ".",
+            "",
+            "/",
+            "a/b",
+            "../victim",
+            "../../victim",
+            "tools/uv",
+        ] {
+            let err = uninstall_tool(bad).unwrap_err();
+            assert!(
+                matches!(err, CliError::BadUsage(_)),
+                "id {bad:?} should be rejected as bad usage, got {err:?}"
+            );
+        }
+        // Absolute path to the victim: also refused.
+        let abs = victim.to_str().unwrap();
+        assert!(matches!(
+            uninstall_tool(abs).unwrap_err(),
+            CliError::BadUsage(_)
+        ));
+
+        assert!(victim.join("keep.txt").exists(), "nothing outside the tree was touched");
+    }
+
+    #[test]
+    fn validate_tool_id_accepts_ordinary_names() {
+        for ok in ["uv", "trace-processor", "video-proof", "ffmpeg"] {
+            assert!(validate_tool_id(ok).is_ok(), "{ok} should be valid");
+        }
+    }
+
+    #[test]
+    fn embedded_registry_parses_and_carries_core_tools() {
+        // The compiled-in registry is what installed users resolve against.
+        let reg = load_embedded().unwrap();
+        assert!(reg.tools.contains_key("trace-processor"));
+        assert!(reg.tools.contains_key("uv"));
+        assert_eq!(reg.tools["trace-processor"].id, "trace-processor");
+    }
+
+    #[test]
+    fn canonical_id_resolves_the_perfetto_alias() {
+        let reg = load_embedded().unwrap();
+        // "install perfetto" reaches trace-processor.
+        assert_eq!(reg.canonical_id("perfetto"), "trace-processor");
+        // A real id passes through, and an unknown name is returned unchanged
+        // (so the verb reports an honest "not found").
+        assert_eq!(reg.canonical_id("trace-processor"), "trace-processor");
+        assert_eq!(reg.canonical_id("definitely-not-a-tool"), "definitely-not-a-tool");
+    }
+
+    #[test]
+    fn resolve_registry_falls_back_to_embedded_outside_a_checkout() {
+        // A tempdir has no tools/packages/tool-registry.json on its parent
+        // chain, so resolution must use the embedded copy (path = None).
+        let td = tempfile::tempdir().unwrap();
+        let (reg, path) = resolve_registry(td.path()).unwrap();
+        assert!(path.is_none(), "no repo registry should be found above a tempdir");
+        assert!(reg.tools.contains_key("trace-processor"));
     }
 }
