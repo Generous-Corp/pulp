@@ -507,6 +507,23 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-minos-sweep-dryrun PROPERTIES
         PASS_REGULAR_EXPRESSION "Planned sweep:")
 
+    # `pulp minos update --to <ver>` (dry-run, --only a single repo so it clones
+    # at most one; the dispatch + script-handoff is what's under test). A bad
+    # --to is rejected fast without cloning.
+    add_test(NAME cli-minos-update-bad-version
+        COMMAND pulp-cli minos update --to not-a-version
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-update-bad-version PROPERTIES
+        WILL_FAIL TRUE)
+
+    # `pulp minos publish-runbook` reads the registry and prints steps — no clone,
+    # no build. Covers the CLI->sdk_consumer_update.py handoff deterministically.
+    add_test(NAME cli-minos-publish-runbook
+        COMMAND pulp-cli minos publish-runbook --to 0.640.0
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-publish-runbook PROPERTIES
+        PASS_REGULAR_EXPRESSION "Republish runbook")
+
     add_test(NAME cli-audio-excerpt-find-invalid-top
         COMMAND "${CMAKE_COMMAND}"
             "-DCLI=$<TARGET_FILE:pulp-cli>"
