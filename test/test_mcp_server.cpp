@@ -529,6 +529,37 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
     require_contains(unknown, "Method not found: nope");
 }
 
+TEST_CASE("MCP pulp_minos tool measures a binary and validates its arg",
+          "[mcp][minos]") {
+    // A project root so handle_minos gets past its "not in a Pulp project"
+    // guard and exercises the full body (resolve CLI, shell out, return).
+    TempDir temp;
+    auto project = temp.path / "project";
+    std::filesystem::create_directories(project / "core");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.25)\n";
+    }
+    ScopedCurrentPath cwd(project);
+
+    // pulp_minos appears in the advertised tool list.
+    require_contains(tools_list_json(), R"JSON("name":"pulp_minos")JSON");
+
+    // With a binary argument the whole handler runs and wraps the CLI's
+    // measurement output in an MCP text-content envelope. (The measured value
+    // depends on the host binary; we only assert the envelope shape so the test
+    // is deterministic regardless of whether a CLI binary is resolvable here.)
+    auto ok = handle_request(
+        R"JSON({"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"pulp_minos","arguments":{"binary":"/some/binary"}}})JSON");
+    require_contains(ok, R"JSON("id":41)JSON");
+    require_contains(ok, R"JSON("content")JSON");
+
+    // Missing the required binary is a clear, shell-out-free error.
+    auto err = handle_request(
+        R"JSON({"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"pulp_minos","arguments":{}}})JSON");
+    require_contains(err, "binary is required");
+}
+
 TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop",
           "[mcp][main]") {
     std::ostringstream out;

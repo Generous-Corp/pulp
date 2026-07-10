@@ -348,6 +348,7 @@ int cmd_projects(const std::vector<std::string>& args);
 int cmd_project(const std::vector<std::string>& args);
 int cmd_config(const std::vector<std::string>& args);
 int cmd_coverage(const std::vector<std::string>& args);
+int cmd_minos(const std::vector<std::string>& args);
 int cmd_macos(const std::vector<std::string>& args);
 int cmd_ci_host(const std::vector<std::string>& args);
 int cmd_overflow(const std::vector<std::string>& args);
