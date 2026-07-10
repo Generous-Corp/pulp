@@ -627,12 +627,17 @@ public:
         const float v = glide_toward(level_at(abs - 1, reg), level_at(abs, reg), frac,
                                      effective_glide(interpolation(),
                                                      static_cast<double>(state().get_value(kGlide))));
-        // Gated before the range and the output stage, so `Range`, `Out` and
-        // `Invert` act on the gap exactly as they act on the note. A gap is a
-        // voltage like any other.
-        const float gated = step_gated(v, frac, gate_fraction());
-        const float ranged = apply_range(gated, range()) + state().get_value(kLevelOffset);
-        return resolve_output(apply_input(signal_mode(), ranged, input), scale(),
+        // `Range` remaps what a step knob *means* — full scale, or its upper half.
+        // `Gate` silences the jack for the tail of the step. So the range is applied
+        // to the programmed level and the gate to the result: a gap is zero volts in
+        // either range, which is the only value a hardware gate input reads as low.
+        // Gating the level instead would put a unipolar gap at mid-scale, high
+        // enough to hold an envelope open for the whole pattern.
+        const float ranged = apply_range(v, range());
+        const float gated = step_gated(ranged, frac, gate_fraction());
+        // `Offset` is a DC shift of the whole waveform, gaps included.
+        const float shifted = gated + state().get_value(kLevelOffset);
+        return resolve_output(apply_input(signal_mode(), shifted, input), scale(),
                               inverted());
     }
 
