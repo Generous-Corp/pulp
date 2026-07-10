@@ -1,43 +1,76 @@
 #pragma once
 
-// LFO — a modulation source, tempo-locked or free-running, and its quadrature partner.
+// LFO — two independent modulation sources, tempo-locked or free-running.
 //
-// Two outputs: the shape on channel 0, and the same shape a quarter cycle ahead
-// on channel 1. Patched into two CV inputs they trace a circle, which is how you
-// drive a two-axis modulation (a filter's cutoff and resonance, a panner's X and
-// Y) from a single oscillator.
+// Two channels with identical, independent controls. Set the right channel's sync
+// mode to `Quad` and give it a 90° `Phase` and the pair traces a circle, which is
+// how a two-axis modulation (a filter's cutoff and resonance, a panner's X and Y)
+// is driven from one oscillator. That used to be hard-wired into channel 1; making
+// it a mode means the second LFO can also just be a second LFO.
 //
 // The phase is derived from the host's position, never accumulated — see
-// brew/lfo.hpp. So the modulation is bit-identical across bounces, lands where
-// the timeline says it should after a locate, and never drifts against the host
-// over a long session.
+// brew/lfo.hpp. So the modulation is bit-identical across bounces, lands where the
+// timeline says it should after a locate, and never drifts against the host over a
+// long session. The two exceptions are `Free` and `Tempo`, which by definition keep
+// running while the transport is parked and therefore cannot be a function of a
+// position that is not moving. The editor says which modes those are.
 //
 // Per-sample, not per-block. A block-rate LFO steps its value 512 samples at a
 // time, and a stepped control voltage is an audible zipper on anything it drives.
 
+#include <brew/channels.hpp>
 #include <brew/clock.hpp>  // beats_per_sample
 #include <brew/cv.hpp>
 #include <brew/lfo.hpp>
 #include <brew/smooth.hpp>
+#include <brew/sync.hpp>  // NoteUnit, enum_from_param
 
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
-#include <tuple>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace pulp::examples::brew {
 
+/// Keeps the two channels' hashes apart. Two LFOs with the same `Seed` are still
+/// two LFOs, and a sample-and-hold that stepped to the same level on both would be
+/// one LFO wearing a second cable.
+[[nodiscard]] inline constexpr std::uint32_t channel_hash_salt(std::size_t ch) noexcept {
+    return ch == 0 ? 0u : 0x5bf03635u;
+}
+
+/// Enum defaults, as the floats a parameter range wants. Spelled through `int`
+/// because a scoped enum's conversion straight to a floating-point type is not
+/// something every toolchain in the matrix agrees about.
+inline constexpr float kDefaultSync = static_cast<float>(static_cast<int>(SyncMode::transport));
+inline constexpr float kDefaultMultiplier = static_cast<float>(static_cast<int>(Multiplier::one));
+inline constexpr float kDefaultDivisor = static_cast<float>(static_cast<int>(NoteUnit::quarter));
+inline constexpr float kDefaultInputMode = static_cast<float>(static_cast<int>(InputMode::off));
+
 class LfoProcessor : public format::Processor {
 public:
+    /// The scope marker hides until a block has been rendered. A marker at phase
+    /// zero on a plug-in that has never run says the LFO is sitting at zero, which
+    /// is a different claim from "nothing has happened yet".
+    LfoProcessor() {
+        for (auto& p : display_phase_) p.store(-1.0f, std::memory_order_relaxed);
+    }
+
     // Parameter IDs are part of the persisted state contract. Never renumber.
+    //
+    // Id 14 was a `Free Run` toggle before the eight sync modes replaced it. It
+    // stays retired rather than reused: a project restoring a boolean into an
+    // enum's slot would select a mode nobody chose.
     enum ParamId : state::ParamID {
-        kBeatsPerCycle = 1,
+        kBeats = 1,
         kPhaseDegrees = 2,
         kSine = 3,
         kTriangle = 4,
@@ -50,11 +83,17 @@ public:
         kSeed = 11,
         kOutputScale = 12,
         kInvert = 13,
-        kRateMode = 14,
-        kFreeHz = 15,
+        kSpeedHz = 15,
         kSwingPercent = 16,
         kSwingUnit = 17,
         kSmoothMs = 18,
+        kSyncMode = 19,
+        kMultiplier = 20,
+        kDivisor = 21,
+        kTriplet = 22,
+        kNoise = 23,
+        kInputMode = 24,
+        kResetByNote = 25,
     };
 
     format::PluginDescriptor descriptor() const override {
@@ -65,284 +104,382 @@ public:
             .version = "0.1.0",
             .category = format::PluginCategory::Effect,
             .input_buses = {{"Main In", 2}},
-            .output_buses = {{"LFO / Quadrature", 2}},
+            .output_buses = {{"LFO L / R", 2}},
+            // `Reset By Note` needs note-ons. An AU host only routes MIDI to an
+            // effect packaged `aumf`, which this flag is what selects.
+            .accepts_midi = true,
         };
     }
 
+    struct ControlSpec {
+        state::ParamID id;
+        const char* name;
+        const char* unit;
+        state::ParamRange range;
+    };
+
+    /// Every control an LFO channel has. Registered once per channel: the two
+    /// channels are independent and identical.
+    static constexpr std::array<ControlSpec, 24> controls() {
+        return {{
+            // How the LFO is told what time it is. See brew/lfo.hpp for the table.
+            // `Transport` is the default: locked to the timeline, exactly
+            // reproducible, and what a modulation source is usually wanted for.
+            {kSyncMode, "Sync", "",
+             {0.0f, static_cast<float>(kSyncModeCount - 1),
+              kDefaultSync, 1.0f}},
+
+            // Hertz modes: Speed × Multiplier.
+            {kSpeedHz, "Speed", "Hz", {0.01f, 40.0f, 1.0f, 0.01f}},
+            {kMultiplier, "Multiplier", "",
+             {0.0f, static_cast<float>(kMultiplierCount - 1),
+              kDefaultMultiplier, 1.0f}},
+
+            // Beat modes: Beats of the note Divisor names, less a third if Triplet.
+            // Beats is fractional on purpose — automating it through a non-integer
+            // value is a legitimate way to sweep the rate.
+            {kBeats, "Beats", "", {0.0625f, 16.0f, 1.0f, 0.0625f}},
+            {kDivisor, "Divisor", "",
+             {0.0f, static_cast<float>(kNoteUnitCount - 1),
+              kDefaultDivisor, 1.0f}},
+            {kTriplet, "Triplet", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+
+            // A constant offset against the locked cycle, and the point a reset
+            // snaps back to.
+            {kPhaseDegrees, "Phase", "deg", {0.0f, 360.0f, 0.0f, 1.0f}},
+
+            // Four depths, summed. Bipolar, so a shape can be subtracted as easily
+            // as added. Sine defaults to full and the rest to zero, which
+            // reproduces the single-shape selector this replaced.
+            {kSine, "Sine", "", {-1.0f, 1.0f, 1.0f, 0.001f}},
+            {kTriangle, "Triangle", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kSaw, "Saw", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kSquare, "Square", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kPulseWidth, "Pulse Width", "", {0.01f, 0.99f, 0.5f, 0.001f}},
+
+            // A sample-and-hold: one level per cycle, held flat. A hash of the
+            // cycle index, so a bounce lands identically. See brew/random.hpp.
+            {kRandom, "Random", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            // The ungated source: a new level every sample. Hashed on the sample
+            // index, so it too renders identically every time.
+            {kNoise, "Noise", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            {kSeed, "Seed", "", {0.0f, 255.0f, 0.0f, 1.0f}},
+
+            // Where the waveform's centre falls in time. A pulse-width control
+            // generalized to every shape.
+            {kAsymmetry, "Asymmetry", "", {0.01f, 0.99f, 0.5f, 0.001f}},
+            // A constant offset. Set it to +1 with a half-scale mix and the output
+            // is unipolar, which is what a VCA or an envelope-depth input wants.
+            {kOffset, "Offset", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+
+            // The same swing Sync applies to its clock, on the same beat timeline.
+            // 50% is straight, and bit-identically so.
+            {kSwingPercent, "Swing", "%",
+             {static_cast<float>(kMinSwing * 100.0),
+              static_cast<float>(kMaxSwing * 100.0), 50.0f, 0.1f}},
+            {kSwingUnit, "Swing Sixteenths", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+
+            // What the plug-in does with the voltage on its input bus. Off by
+            // default: a modulation source that read its input by default would
+            // scream the first time it was dropped on an audio track.
+            {kInputMode, "Input Mode", "",
+             {0.0f, static_cast<float>(kInputModeCount - 1),
+              kDefaultInputMode, 1.0f}},
+
+            // A MIDI note-on snaps the phase back to `Phase`.
+            {kResetByNote, "Reset By Note", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+
+            // Positive slews at a constant rate; negative low-passes. Milliseconds
+            // for a full swing, as DC's does. Zero is a wire — and it is the
+            // default, because a smoothed LFO is the only control here that costs
+            // the plug-in its exact locate-invariance. See the note on `smooth_`.
+            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}},
+
+            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}},
+            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+        }};
+    }
+
     void define_parameters(state::StateStore& store) override {
-        // Beats per cycle: 4 is one cycle per bar of 4/4, 0.25 is four per beat.
-        store.add_parameter({.id = kBeatsPerCycle,
-                             .name = "Rate",
-                             .unit = "beats",
-                             .range = {0.0625f, 16.0f, 1.0f, 0.0625f}});
-        store.add_parameter({.id = kPhaseDegrees,
-                             .name = "Phase",
-                             .unit = "deg",
-                             .range = {0.0f, 360.0f, 0.0f, 1.0f}});
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch)
+            for (const auto& c : controls())
+                store.add_parameter(
+                    {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
+                     .name = std::string(c.name) + channel_suffix(ch),
+                     .unit = c.unit,
+                     .range = c.range});
+    }
 
-        // Four depths, summed. Bipolar, so a shape can be subtracted as easily as
-        // added. Sine defaults to full and the rest to zero, which reproduces the
-        // single-shape selector this replaced.
-        for (auto [id, name, def] :
-             {std::tuple{kSine, "Sine", 1.0f}, std::tuple{kTriangle, "Triangle", 0.0f},
-              std::tuple{kSaw, "Saw", 0.0f}, std::tuple{kSquare, "Square", 0.0f}})
-            store.add_parameter({.id = id, .name = name, .unit = "",
-                                 .range = {-1.0f, 1.0f, def, 0.001f}});
+    // ── Reading one channel's knobs ──────────────────────────────────────────
 
-        store.add_parameter({.id = kPulseWidth,
-                             .name = "Pulse Width",
-                             .unit = "",
-                             .range = {0.01f, 0.99f, 0.5f, 0.001f}});
-        // A sample-and-hold: one level per cycle, held flat. A hash of the cycle
-        // index, so a bounce lands identically. See brew/random.hpp.
-        store.add_parameter({.id = kRandom,
-                             .name = "Random",
-                             .unit = "",
-                             .range = {-1.0f, 1.0f, 0.0f, 0.001f}});
-        // Where the waveform's centre falls in time. A pulse-width control
-        // generalized to every shape.
-        store.add_parameter({.id = kAsymmetry,
-                             .name = "Asymmetry",
-                             .unit = "",
-                             .range = {0.01f, 0.99f, 0.5f, 0.001f}});
-        // A constant offset. Set it to +1 with a half-scale mix and the output is
-        // unipolar, which is what a VCA or an envelope-depth input wants.
-        store.add_parameter({.id = kOffset,
-                             .name = "Offset",
-                             .unit = "",
-                             .range = {-1.0f, 1.0f, 0.0f, 0.001f}});
-        store.add_parameter({.id = kSeed,
-                             .name = "Seed",
-                             .unit = "",
-                             .range = {0.0f, 255.0f, 0.0f, 1.0f}});
-        store.add_parameter({.id = kOutputScale,
-                             .name = "Output Scale",
-                             .unit = "",
-                             .range = {0.0f, 1.0f, 1.0f, 0.001f}});
-        store.add_parameter({.id = kInvert,
-                             .name = "Invert",
-                             .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
-        // Off: locked to the host's musical grid. On: free-running in hertz.
-        store.add_parameter({.id = kRateMode,
-                             .name = "Free Run",
-                             .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
-        store.add_parameter({.id = kFreeHz,
-                             .name = "Free Rate",
-                             .unit = "Hz",
-                             .range = {static_cast<float>(kMinFreeHz),
-                                       static_cast<float>(kMaxFreeHz), 1.0f, 0.01f}});
-        // The same swing Sync applies to its clock, applied to the same beat
-        // timeline. 50% is straight, and bit-identically so.
-        store.add_parameter({.id = kSwingPercent,
-                             .name = "Swing",
-                             .unit = "%",
-                             .range = {static_cast<float>(kMinSwing * 100.0),
-                                       static_cast<float>(kMaxSwing * 100.0),
-                                       50.0f, 0.1f}});
-        store.add_parameter({.id = kSwingUnit,
-                             .name = "Swing Sixteenths",
-                             .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
-        // Positive slews at a constant rate; negative low-passes. Milliseconds
-        // for a full swing, as DC's does. Zero is a wire — and it is the default,
-        // because a smoothed LFO is the only control here that costs the plug-in
-        // its exact locate-invariance. See the note on `smooth_`.
-        store.add_parameter({.id = kSmoothMs,
-                             .name = "Smooth",
-                             .unit = "ms",
-                             .range = {-1000.0f, 1000.0f, 0.0f, 0.1f}});
+    [[nodiscard]] float get(state::ParamID id, std::size_t ch) const noexcept {
+        return state().get_value(static_cast<state::ParamID>(param_for(id, ch)));
+    }
+
+    [[nodiscard]] SyncMode sync_mode(std::size_t ch) const noexcept {
+        const auto mode = enum_from_param<SyncMode>(get(kSyncMode, ch), kSyncModeCount);
+        // The left channel has no other channel to follow. Rather than lock it to
+        // itself — a silent no-op that would look like a broken mode — it falls
+        // back to the mode `Quad` is a phase-shifted copy of.
+        if (mode == SyncMode::quadrature && ch == 0) return SyncMode::transport;
+        return mode;
+    }
+
+    [[nodiscard]] InputMode input_mode(std::size_t ch) const noexcept {
+        return enum_from_param<InputMode>(get(kInputMode, ch), kInputModeCount);
+    }
+
+    [[nodiscard]] double channel_hz(std::size_t ch) const noexcept {
+        return free_hz(static_cast<double>(get(kSpeedHz, ch)),
+                       enum_from_param<Multiplier>(get(kMultiplier, ch),
+                                                   kMultiplierCount));
+    }
+
+    [[nodiscard]] double channel_cycle_beats(std::size_t ch) const noexcept {
+        return cycle_beats(static_cast<double>(get(kBeats, ch)),
+                           enum_from_param<NoteUnit>(get(kDivisor, ch), kNoteUnitCount),
+                           as_toggle(get(kTriplet, ch)));
     }
 
     /// The swing the beat timeline is warped by. At 50% this returns a `Swing`
     /// that `swing_active` reports inactive, so the phase is untouched.
-    [[nodiscard]] Swing current_swing() const noexcept {
-        return {.unit_beats = as_toggle(state().get_value(kSwingUnit))
-                                  ? kSixteenthBeats
-                                  : kEighthBeats,
-                .amount = static_cast<double>(state().get_value(kSwingPercent)) /
-                          100.0};
+    [[nodiscard]] Swing current_swing(std::size_t ch = 0) const noexcept {
+        return {.unit_beats = as_toggle(get(kSwingUnit, ch)) ? kSixteenthBeats
+                                                             : kEighthBeats,
+                .amount = static_cast<double>(get(kSwingPercent, ch)) / 100.0};
     }
 
-    /// A snapshot of the mix, taken once per block rather than once per sample.
-    /// The editor's scope reads the same struct, so the picture cannot drift.
-    [[nodiscard]] LfoMix mix() const noexcept {
+    /// A snapshot of one channel's mix, taken once per block rather than once per
+    /// sample. The editor's scope reads the same struct, so the picture cannot
+    /// drift from the signal.
+    [[nodiscard]] LfoMix mix(std::size_t ch = 0) const noexcept {
         return {
-            .sine = state().get_value(kSine),
-            .triangle = state().get_value(kTriangle),
-            .saw = state().get_value(kSaw),
-            .square = state().get_value(kSquare),
-            .random = state().get_value(kRandom),
-            .pulse_width = state().get_value(kPulseWidth),
-            .asymmetry = state().get_value(kAsymmetry),
-            .offset = state().get_value(kOffset),
-            .seed = static_cast<std::uint32_t>(state().get_value(kSeed)),
+            .sine = get(kSine, ch),
+            .triangle = get(kTriangle, ch),
+            .saw = get(kSaw, ch),
+            .square = get(kSquare, ch),
+            .random = get(kRandom, ch),
+            .noise = get(kNoise, ch),
+            .pulse_width = get(kPulseWidth, ch),
+            .asymmetry = get(kAsymmetry, ch),
+            .offset = get(kOffset, ch),
+            .seed = static_cast<std::uint32_t>(get(kSeed, ch)) ^ channel_hash_salt(ch),
         };
+    }
+
+    /// The phase offset a channel's waveform carries: its `Phase` knob, plus the
+    /// quarter cycle a follower stands behind its leader.
+    [[nodiscard]] double phase_offset(std::size_t ch) const noexcept {
+        return static_cast<double>(get(kPhaseDegrees, ch)) / 360.0;
     }
 
     void prepare(const format::PrepareContext&) override {
         for (auto& s : smooth_) s.reset(0.0f);
+        hard_reset();
     }
 
-    /// The size this editor actually needs. Without this override a host opens
-    /// the plug-in at Processor's 400x300 default, and the layout is laid out to
-    /// a geometry the editor was never checked against. The scope, three knobs, and the two toggles.
-    std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 528};
-    }
+    /// The size this editor actually needs: two channel blocks, each a scope and
+    /// four rows. Without this override a host opens the plug-in at Processor's
+    /// 400x300 default — a geometry the layout was never checked at.
+    std::pair<uint32_t, uint32_t> editor_size() const override { return {380, 1116}; }
 
     /// Defined in lfo_view.cpp so the audio translation units never see the
     /// view stack.
     std::unique_ptr<view::View> create_view() override;
 
-    /// Phase at the end of the last rendered block, for the editor's scope
-    /// marker. Written once per block on the audio thread with relaxed ordering:
-    /// a marker one frame stale is invisible, and synchronizing for it would not
-    /// be. Negative means "not running" — the marker hides rather than lying.
-    [[nodiscard]] float display_phase() const noexcept {
-        return display_phase_.load(std::memory_order_relaxed);
+    /// Phase at the end of the last rendered block, for the editor's scope marker.
+    /// Written once per block on the audio thread with relaxed ordering: a marker
+    /// one frame stale is invisible, and synchronizing for it would not be.
+    /// Negative means "not running" — the marker hides rather than lying.
+    [[nodiscard]] float display_phase(std::size_t ch = 0) const noexcept {
+        return display_phase_[std::min(ch, kChannelCount - 1)].load(
+            std::memory_order_relaxed);
     }
 
-    [[nodiscard]] RateMode rate_mode() const noexcept {
-        return rate_mode_from_param(state().get_value(kRateMode));
-    }
+    // ── The pure transfer, shared by process(), the editor, and the tests ─────
 
-    /// Elapsed cycles at a timeline position, in whichever mode is selected.
-    [[nodiscard]] double cycles_at(double position_beats,
-                                   double position_seconds) const noexcept {
-        return cycles_at(position_beats, position_seconds, current_swing());
-    }
-
-    /// The overload `process()` uses, so a stopped transport can hand in a
-    /// straight grid. Swing is a property of a *moving* timeline: with the
-    /// playhead parked there is nothing to push late, and warping the frozen
-    /// position only moves the value the scope is showing.
-    [[nodiscard]] double cycles_at(double position_beats, double position_seconds,
-                                   const Swing& swing) const noexcept {
-        return lfo_cycles(rate_mode(), position_beats, position_seconds,
-                          static_cast<double>(state().get_value(kBeatsPerCycle)),
-                          static_cast<double>(state().get_value(kFreeHz)), swing);
-    }
-
-    /// The value the plug-in emits at a number of elapsed cycles, after the
-    /// shared output stage. Pure, and shared by process(), the editor and the
-    /// tests, so none of them can silently diverge from the DSP.
-    [[nodiscard]] float value_at_cycles(double cycles,
-                                        double quadrature = 0.0) const noexcept {
-        return value_at_cycles(mix(), cycles, quadrature);
-    }
-
-    /// The shape itself, before the output stage and before any smoothing.
+    /// The shape at a number of elapsed cycles, before the output stage and before
+    /// any smoothing.
     ///
-    /// Phase and cycle index take the *same* offset. Keying the sample-and-hold
-    /// on an un-offset index while the phase is offset makes the held value step
-    /// in the middle of the visible cycle. It also keeps the quadrature output's
-    /// hold aligned with its own wrap, so the circle the two outputs trace does
-    /// not tear at a cycle boundary.
-    [[nodiscard]] float shape_at_cycles(const LfoMix& m, double cycles,
-                                        double quadrature = 0.0) const noexcept {
-        const double offset =
-            static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0 + quadrature;
-        return lfo_mix_value(m, phase_at(cycles, offset), cycle_at(cycles, offset));
+    /// Phase and cycle index take the *same* offset. Keying the sample-and-hold on
+    /// an un-offset index while the phase is offset makes the held value step in
+    /// the middle of the visible cycle.
+    [[nodiscard]] float shape_at_cycles(const LfoMix& m, double cycles, double offset,
+                                        std::int64_t sample = 0) const noexcept {
+        return lfo_mix_value(m, phase_at(cycles, offset), cycle_at(cycles, offset),
+                             sample);
     }
 
-    /// The overload the audio callback uses, with the mix hoisted out of the
-    /// per-sample loop. Unsmoothed: smoothing has state, so only `process()` can
-    /// apply it, and the scope draws this.
-    [[nodiscard]] float value_at_cycles(const LfoMix& m, double cycles,
-                                        double quadrature = 0.0) const noexcept {
-        return resolve_output(shape_at_cycles(m, cycles, quadrature),
-                              state().get_value(kOutputScale),
-                              as_toggle(state().get_value(kInvert)));
+    /// The value a channel emits at a number of elapsed cycles, after the shared
+    /// output stage. Unsmoothed: smoothing has state, so only `process()` can apply
+    /// it, and the scope draws this.
+    [[nodiscard]] float value_at_cycles(std::size_t ch, double cycles,
+                                        float input = 0.0f) const noexcept {
+        const float shaped = shape_at_cycles(mix(ch), cycles, phase_offset(ch));
+        return resolve_output(apply_input(input_mode(ch), shaped, input),
+                              get(kOutputScale, ch), as_toggle(get(kInvert, ch)));
     }
 
-    /// Tempo-mode convenience: the value at a beat position.
+    /// Beat-mode convenience: the value at a beat position, measured from the
+    /// project origin.
     [[nodiscard]] float value_at(double position_beats,
-                                 double quadrature = 0.0) const noexcept {
-        return value_at_cycles(cycles_at(position_beats, 0.0), quadrature);
+                                 std::size_t ch = 0) const noexcept {
+        return value_at_cycles(
+            ch, cycles_from_beats(position_beats, 0.0, channel_cycle_beats(ch),
+                                  current_swing(ch)));
     }
 
-    /// Free-run convenience: the value at a number of seconds.
+    /// Hertz-mode convenience: the value at a number of seconds.
     [[nodiscard]] float value_at_time(double position_seconds,
-                                      double quadrature = 0.0) const noexcept {
-        return value_at_cycles(cycles_at(0.0, position_seconds), quadrature);
+                                      std::size_t ch = 0) const noexcept {
+        return value_at_cycles(
+            ch, cycles_from_seconds(position_seconds, 0.0, channel_hz(ch)));
     }
+
+    // ── The audio callback ───────────────────────────────────────────────────
 
     void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>&,
-                 midi::MidiBuffer&,
+                 const audio::BufferView<const float>& input,
+                 midi::MidiBuffer& midi_in,
                  midi::MidiBuffer&,
                  const format::ProcessContext& ctx) override {
         const std::size_t channels = output.num_channels();
         const int frames = static_cast<int>(output.num_samples());
         if (channels == 0 || frames <= 0) return;
 
-        float* main = output.channel_ptr(0);
-        float* quad = channels > 1 ? output.channel_ptr(1) : nullptr;
-
-        // Bypass means stop driving the patch: hold the outputs at zero rather
-        // than freeze them at whatever voltage the cycle happened to reach.
+        // Bypass means stop driving the patch: hold the outputs at zero rather than
+        // freeze them at whatever voltage the cycle happened to reach. A bypassed
+        // *generator* is silent — see brew/cv.hpp — because the far end of the cable
+        // is a VCO's pitch input, and a held voltage there is a held wrong note.
         if (ctx.is_bypassed) {
-            for (int n = 0; n < frames; ++n) {
-                if (main) main[n] = 0.0f;
-                if (quad) quad[n] = 0.0f;
-            }
-            // The smoother must forget the voltage it was holding, or the first
-            // block after bypass ramps down from a level that is no longer on
-            // the patch cable.
+            for (std::size_t c = 0; c < channels; ++c)
+                if (float* dst = output.channel_ptr(c))
+                    for (int n = 0; n < frames; ++n) dst[n] = 0.0f;
             for (auto& sm : smooth_) sm.reset(0.0f);
-            display_phase_.store(-1.0f, std::memory_order_relaxed);
+            for (auto& p : display_phase_) p.store(-1.0f, std::memory_order_relaxed);
+            was_playing_ = ctx.is_playing;
             return;
         }
 
-        // Walk the block per sample. The position advances even when the host is
-        // stopped only if the host says so — a stopped transport holds the LFO
-        // where the playhead sits, which is what a user parked on a beat expects
-        // to see on a scope.
-        const double bps = ctx.is_playing
-                               ? beats_per_sample(ctx.tempo_bpm, ctx.sample_rate)
-                               : 0.0;
-        const LfoMix m = mix();
-        // Seconds advance with the sample position, which a host reports whether
-        // or not it reports beats — so a free-running LFO stays a pure function of
-        // the timeline, exactly as the tempo-locked one is.
+        if (ctx.reset_requested) hard_reset();
+
         const double sr = ctx.sample_rate > 0.0 ? ctx.sample_rate : 48000.0;
+        const double bps = beats_per_sample(ctx.tempo_bpm, sr);
         const double start_seconds = static_cast<double>(ctx.position_samples) / sr;
-        const double seconds_per_sample = ctx.is_playing ? 1.0 / sr : 0.0;
-        const Swing swing = ctx.is_playing ? current_swing() : Swing{};
 
-        // Smoothing is the one stateful thing here. Hoisted out of the loop, and
-        // the two outputs get their own filters: sharing one would make the
-        // quadrature channel filter the main channel's samples.
-        const float ms = state().get_value(kSmoothMs);
-        const float scale = state().get_value(kOutputScale);
-        const bool inv = as_toggle(state().get_value(kInvert));
-
-        for (int n = 0; n < frames; ++n) {
-            const double beats = ctx.position_beats + bps * static_cast<double>(n);
-            const double secs =
-                start_seconds + seconds_per_sample * static_cast<double>(n);
-            const double cycles = cycles_at(beats, secs, swing);
-            if (main)
-                main[n] = resolve_output(
-                    smooth_[0].process(shape_at_cycles(m, cycles), ms, sr), scale, inv);
-            if (quad)
-                quad[n] = resolve_output(
-                    smooth_[1].process(shape_at_cycles(m, cycles, kQuadratureOffset),
-                                       ms, sr),
-                    scale, inv);
+        // The play edge. `transport_started` is the host's own flag; the
+        // `was_playing_` comparison catches the hosts that never set it.
+        const bool play_edge = (ctx.is_playing && !was_playing_) || ctx.transport_started;
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+            if (play_edge && sync_resets_on_play(sync_mode(ch)))
+                set_origin(ch, ctx.position_beats, start_seconds);
+            // Rolling means locked. The drift a parked `Transport` accumulated is
+            // discarded *before* this block renders, not after — a drift still on
+            // the books through the first playing block is a bounce that depends on
+            // how long the user left the transport stopped.
+            if (ctx.is_playing) stopped_drift_[ch] = 0.0;
         }
 
-        const double end_beats =
-            ctx.position_beats + bps * static_cast<double>(frames - 1);
-        const double end_seconds =
-            start_seconds + seconds_per_sample * static_cast<double>(frames - 1);
-        const double offset =
-            static_cast<double>(state().get_value(kPhaseDegrees)) / 360.0;
-        display_phase_.store(
-            static_cast<float>(phase_at(cycles_at(end_beats, end_seconds, swing), offset)),
-            std::memory_order_relaxed);
+        // Noise is keyed on the sample index. While the transport runs that index is
+        // the timeline's, so a bounce is identical; while it is parked the index
+        // keeps climbing, because a noise source that froze with the playhead would
+        // look broken rather than deterministic.
+        if (ctx.is_playing) noise_index_ = ctx.position_samples;
+
+        // Sample-accurate note resets need the events in time order. The sort is
+        // allocation-free — MidiBuffer sizes its scratch for exactly this call.
+        midi_in.sort();
+
+        const std::size_t shared = std::min(channels, input.num_channels());
+
+        for (std::size_t ch = 0; ch < kChannelCount && ch < channels; ++ch) {
+            float* dst = output.channel_ptr(ch);
+            if (dst == nullptr) continue;
+
+            const SyncMode mode = sync_mode(ch);
+            // A follower reads the leader's clock, not its own. Its own `Phase`
+            // still applies, which is what makes the pair trace a circle at 90°.
+            const std::size_t clock_ch = mode == SyncMode::quadrature ? 0 : ch;
+            const SyncMode clock_mode = sync_mode(clock_ch);
+
+            const LfoMix m = mix(ch);
+            const double offset = phase_offset(ch);
+            const float ms = get(kSmoothMs, ch);
+            const float scale = get(kOutputScale, ch);
+            const bool inv = as_toggle(get(kInvert, ch));
+            const InputMode im = input_mode(ch);
+            const bool resets = as_toggle(get(kResetByNote, ch));
+            const float* src = ch < shared ? input.channel_ptr(ch) : nullptr;
+
+            const double cycle_len = channel_cycle_beats(clock_ch);
+            const double hz = channel_hz(clock_ch);
+            // Swing warps a beat timeline. With the playhead parked there is nothing
+            // to push late, and warping a frozen position only moves the value the
+            // scope is showing.
+            const Swing swing = ctx.is_playing ? current_swing(clock_ch) : Swing{};
+            // The playhead only advances while the host says it is rolling.
+            const double pos_bps = ctx.is_playing ? bps : 0.0;
+            const double pos_sps = ctx.is_playing ? 1.0 / sr : 0.0;
+
+            auto note = midi_in.begin();
+            const auto notes_end = midi_in.end();
+
+            double last_cycles = 0.0;
+            for (int n = 0; n < frames; ++n) {
+                // Every mode measures cycles from an origin, so moving the origin at
+                // the note's own sample is the one mechanism that retriggers all of
+                // them — and the result is still a pure function of the timeline the
+                // note sits on.
+                while (resets && note != notes_end && note->sample_offset <= n) {
+                    if (note->is_note_on()) {
+                        const double dn = static_cast<double>(n);
+                        set_origin(ch, ctx.position_beats + pos_bps * dn,
+                                   start_seconds + pos_sps * dn);
+                        wall_cycles_[ch] = 0.0;
+                        stopped_drift_[ch] = 0.0;
+                    }
+                    ++note;
+                }
+
+                const double dn = static_cast<double>(n);
+                const double cycles = cycles_at(clock_ch, clock_mode, ctx, dn, bps,
+                                                pos_bps, pos_sps, start_seconds, sr,
+                                                cycle_len, hz, swing);
+                last_cycles = cycles;
+
+                float shaped;
+                if (clock_mode == SyncMode::start_stop) {
+                    // Not really an LFO: the transport, as a square wave whose period
+                    // is the session. `Offset` still applies, and `Smooth` turns the
+                    // play edge into a fade-in.
+                    shaped = start_stop_value(ctx.is_playing) + m.offset;
+                } else {
+                    shaped = shape_at_cycles(m, cycles, offset,
+                                             noise_index_ + static_cast<std::int64_t>(n));
+                }
+
+                const float in = src ? src[n] : 0.0f;
+                dst[n] = resolve_output(
+                    smooth_[ch].process(apply_input(im, shaped, in), ms, sr), scale, inv);
+            }
+
+            display_phase_[ch].store(
+                clock_mode == SyncMode::start_stop
+                    ? (ctx.is_playing ? 0.0f : -1.0f)
+                    : static_cast<float>(phase_at(last_cycles, offset)),
+                std::memory_order_relaxed);
+        }
+
+        // An output channel with no LFO behind it is silent, not left uninitialized.
+        for (std::size_t c = kChannelCount; c < channels; ++c)
+            if (float* dst = output.channel_ptr(c))
+                for (int n = 0; n < frames; ++n) dst[n] = 0.0f;
+
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch)
+            commit_clocks(ch, ctx, frames, sr, bps);
+        if (!ctx.is_playing) noise_index_ += frames;
+
+        was_playing_ = ctx.is_playing;
     }
 
     void process(format::ProcessBuffers& audio,
@@ -350,21 +487,115 @@ public:
                  midi::MidiBuffer& midi_out,
                  const format::ProcessContext& ctx) override {
         if (auto* out = audio.main_output()) {
-            audio::BufferView<const float> unused_input;
-            process(*out, unused_input, midi_in, midi_out, ctx);
+            audio::BufferView<const float> empty;
+            const auto* in = audio.main_input();
+            process(*out, in ? *in : empty, midi_in, midi_out, ctx);
         }
     }
 
 private:
-    /// One per output. Zero milliseconds is a wire — bit for bit — which is why
-    /// it is the default: a smoother carries state between blocks, so a non-zero
-    /// `Smooth` is the only control on this plug-in that makes the output depend
-    /// on how the playhead arrived rather than only on where it is. The
-    /// dependence is bounded by the smoother's own settling time, and a bounce
-    /// from a fixed start is still bit-identical every render.
-    std::array<Smoother, 2> smooth_{};
+    /// Elapsed cycles for one channel at sample `n` of the block.
+    ///
+    /// The one place the eight modes differ. Everything downstream — the shapes, the
+    /// phase offset, the sample-and-hold, the quadrature lock — sees only a cycle
+    /// count and needs to know nothing about tempo or transport.
+    ///
+    /// `Transport` and `Transport2` are the same function while the transport rolls.
+    /// The only thing that separates them is `stopped_drift_`, which is what keeps
+    /// `Transport` oscillating with the playhead parked — and which is zeroed the
+    /// moment it rolls again, so the phase snaps back onto the timeline.
+    [[nodiscard]] double cycles_at(std::size_t ch, SyncMode mode,
+                                   const format::ProcessContext& ctx, double dn,
+                                   double bps, double pos_bps, double pos_sps,
+                                   double start_seconds, double sr, double cycle_len,
+                                   double hz, const Swing& swing) const noexcept {
+        switch (mode) {
+            case SyncMode::free:
+                // Wall clock, always. The one mode with no timeline in it at all.
+                return wall_cycles_[ch] + dn * hz / sr;
+            case SyncMode::tempo:
+                // Wall clock too, but at the tempo's rate rather than a hertz knob's.
+                if (!(cycle_len > 0.0)) return wall_cycles_[ch];
+                return wall_cycles_[ch] + dn * bps / cycle_len;
+            case SyncMode::transport: {
+                const double drift =
+                    stopped_drift_[ch] +
+                    (ctx.is_playing || !(cycle_len > 0.0) ? 0.0 : dn * bps / cycle_len);
+                return cycles_from_beats(ctx.position_beats + pos_bps * dn,
+                                         origin_beats_[ch], cycle_len, swing) +
+                       drift;
+            }
+            case SyncMode::transport2:
+                return cycles_from_beats(ctx.position_beats + pos_bps * dn,
+                                         origin_beats_[ch], cycle_len, swing);
+            case SyncMode::free2:
+            case SyncMode::free3:
+                return cycles_from_seconds(start_seconds + pos_sps * dn,
+                                           origin_seconds_[ch], hz);
+            case SyncMode::start_stop:
+                return 0.0;
+            case SyncMode::quadrature:
+                break;   // resolved to the leader's mode before this is called
+        }
+        return 0.0;
+    }
 
-    std::atomic<float> display_phase_{-1.0f};
+    /// Advance whatever each mode accumulates across the block boundary.
+    void commit_clocks(std::size_t ch, const format::ProcessContext& ctx, int frames,
+                       double sr, double bps) noexcept {
+        const SyncMode mode = sync_mode(ch);
+        const double dn = static_cast<double>(frames);
+        const double len = channel_cycle_beats(ch);
+
+        if (mode == SyncMode::free) {
+            wall_cycles_[ch] += dn * channel_hz(ch) / sr;
+        } else if (mode == SyncMode::tempo) {
+            if (len > 0.0) wall_cycles_[ch] += dn * bps / len;
+        } else if (mode == SyncMode::transport && !ctx.is_playing) {
+            // Only while parked. The play edge already zeroed it.
+            if (len > 0.0) stopped_drift_[ch] += dn * bps / len;
+        }
+    }
+
+    void set_origin(std::size_t ch, double beats, double seconds) noexcept {
+        origin_beats_[ch] = beats;
+        origin_seconds_[ch] = seconds;
+    }
+
+    void hard_reset() noexcept {
+        origin_beats_.fill(0.0);
+        origin_seconds_.fill(0.0);
+        wall_cycles_.fill(0.0);
+        stopped_drift_.fill(0.0);
+        noise_index_ = 0;
+        was_playing_ = false;
+    }
+
+    /// One per channel. Zero milliseconds is a wire — bit for bit — which is why it
+    /// is the default: a smoother carries state between blocks, so a non-zero
+    /// `Smooth` is the only control on this plug-in that makes the output depend on
+    /// how the playhead arrived rather than only on where it is. The dependence is
+    /// bounded by the smoother's own settling time, and a bounce from a fixed start
+    /// is still bit-identical every render.
+    std::array<Smoother, kChannelCount> smooth_{};
+
+    /// Where each channel counts its cycles from. Zero is the project origin, which
+    /// is what every mode uses until a note-on or a play edge moves it.
+    std::array<double, kChannelCount> origin_beats_{};
+    std::array<double, kChannelCount> origin_seconds_{};
+
+    /// What the two non-deterministic modes run on: an accumulator with no timeline
+    /// in it. `Free` and `Tempo` and nothing else.
+    std::array<double, kChannelCount> wall_cycles_{};
+
+    /// How far `Transport` has drifted past the timeline while the playhead was
+    /// parked. Zeroed the moment it rolls again.
+    std::array<double, kChannelCount> stopped_drift_{};
+
+    std::int64_t noise_index_ = 0;
+    bool was_playing_ = false;
+
+    std::array<std::atomic<float>, kChannelCount> display_phase_{};
 };
 
 inline std::unique_ptr<format::Processor> create_lfo() {

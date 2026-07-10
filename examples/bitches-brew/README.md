@@ -40,11 +40,11 @@ them).
 |------|--------------|
 | `DC` | Holds one constant value, optionally shaped by the input and slewed. The connection tester, and the suite's bit-exactness guard. |
 | `Sync` | A clock pulse train and a run/stop gate, locked to the host transport. |
-| `LFO` | A modulation source locked to the tempo or free-running in hertz, plus the same shape a quarter cycle ahead. |
+| `LFO` | Two modulation sources, each locked to the tempo or free-running in hertz, in one of eight sync modes. |
 | `Function` | Math on an incoming control voltage: a curve, plus scale and offset at each end. |
-| `Quantizer` | Snaps an incoming control voltage to discrete steps. |
+| `Quantizer` | Snaps an incoming control voltage to discrete steps, or to the notes of a scale. |
 | `Step LFO` | An eight-step pattern and a gate, locked to the host. |
-| `CV To OSC` | Passes a control voltage through and reports it over OSC. Off by default. |
+| `CV To OSC` | Passes a control voltage through and reports it over OSC to a target you type. Off by default. |
 
 `Function` is the only plug-in here that reads its input bus — the others
 generate. It offers five curves, and they are not all the same kind of thing.
@@ -79,8 +79,8 @@ at zero is the single-shape behaviour you would expect. `Asymmetry` moves the
 waveform's centre in time — a pulse-width control generalized to every shape — and
 `Random` is a sample-and-hold, one level per cycle held flat across it.
 
-The sum is not clamped inside the mixer. Four depths at full reach 4.0, and
-flattening that before `Offset` and the output scale have had their say would
+The sum is not clamped inside the mixer. The depths at full reach past the rail,
+and flattening that before `Offset` and the output scale have had their say would
 silently discard a mix you asked for. It clamps once, at the jack.
 
 `Smooth` is the one control here that carries state, and it is off by default for
@@ -94,27 +94,25 @@ in, and it is the honest price of a slew limiter on a generator.
 `Swing` warps the beat timeline the same way `Sync`'s does, and for the same
 reason it is applied to the *position* before the position becomes a phase: warp
 the phase afterwards and the LFO stops agreeing with the clock it is supposed to
-shuffle alongside. 50% is straight, bit-identically so. It has no meaning in free
-run — a hertz rate that shuffled would just be a wrong hertz rate — so it is
-ignored there rather than approximated.
+shuffle alongside. 50% is straight, bit-identically so. It has no meaning in a
+hertz mode — a hertz rate that shuffled would just be a wrong hertz rate — so it is
+ignored there rather than approximated, and it only applies while the transport
+plays.
 
-`Free Run` swaps the tempo for `Free`, a rate in hertz. Both are derived from the
-host's position — one from `position_beats`, one from `position_samples` — so free
-running is not free *floating*: it stays a pure function of where the playhead is,
-and keeps every property below. It is what a modulation that should ignore a tempo
-map needs, and the two rate knobs stay visible together so switching modes never
-moves a control out from under the mouse.
+The LFO's phase is derived from the host's position rather than accumulated per
+block, so a bounce lands the modulation on the same samples every time, a locate
+puts the LFO where the timeline says it should be, and a long session cannot drift
+against the host. The `Random` level is a **hash of the cycle index** and `Noise` a
+**hash of the sample index**, not generators, for exactly that reason: render
+twice, get the same samples. Reroll them with `Seed`, not by pressing play again.
+Rendered per sample: a block-rate control voltage is an audible zipper on whatever
+it drives.
 
-Its phase is derived from the host's position rather than accumulated per block,
-so a bounce lands the modulation on the same samples every time, a locate puts the
-LFO where the timeline says it should be, and a long session cannot drift against
-the host. The `Random` level is a **hash of the cycle index**, not a generator, for
-exactly that reason: render twice, get the same samples. Reroll it with `Seed`, not
-by pressing play again. The second output leads the first by a quarter cycle: fed
-into two CV inputs the pair traces a circle, which is how one oscillator drives a
-two-axis modulation — and its sample-and-hold is keyed on the cycle *its own* phase
-sits in, or the circle would tear at every cycle boundary. Rendered per sample: a
-block-rate control voltage is an audible zipper on whatever it drives.
+Two of the LFO's eight sync modes are the exception, and the editor names them.
+`Free` and `Tempo` keep oscillating while the transport is parked, which is not a
+function of a position that is not moving — so those two, and only those two, do
+not bounce bit-identically. `Free3` is what a position-derived "free run" actually
+is, and it is exact.
 
 `Sync` also carries a **1st Delay** (hold the clock off for N ms after the
 transport starts, measured from the run origin so two runs behave identically)
@@ -123,15 +121,15 @@ filter, and the receiving gate input all add latency: a clock that is
 sample-accurate in software arrives late at the hardware, and a negative offset
 pulls the pulses back ahead of the beat.
 
-Swing and periodic reset are named in the suite's feature list but are **not
-implemented**. Their behavior is not specified anywhere this project is permitted
-to derive it from, and a plausible guess would ship as a green test asserting the
-guess. Same for FSK tape sync, which additionally needs a continuous phase
-accumulator designed rather than bolted on.
+FSK tape sync is **not implemented**. It needs a continuous phase accumulator
+designed rather than bolted on, and nothing in this suite accumulates phase.
 
-Built for VST3, AU (`aufx`), and CLAP. `brew-core/` holds what they share: the
-output stage above, the clock grid, the pulse-width rules, and the run-segment
-origin. `brew-ui/` holds the shared editor furniture.
+Built for VST3, AU, and CLAP. The AU component type follows the descriptor: `aufx`
+for the plug-ins that take no MIDI, `aumf` for `LFO`, whose `Reset` retriggers on a
+note-on — an AU host routes MIDI only to a `MusicEffect`. `brew-core/` holds what
+the plug-ins share: the output stage above, the clock grid, the pulse-width rules,
+the scales, and the run-segment origin. `brew-ui/` holds the shared editor
+furniture.
 
 ## The plug-ins, one at a time
 
@@ -207,28 +205,57 @@ Stopped, then running:
 
 ![LFO](docs/images/lfo.png)
 
-A modulation source. Channel 1 carries the shape; channel 2 carries the same shape
-a quarter cycle ahead. Patch the pair into two CV inputs and they trace a circle,
-which is how one oscillator drives a two-axis modulation — a filter's cutoff and
-its resonance, a panner's X and Y.
+Two independent modulation sources, one per channel, with identical controls. Set
+the right channel's `Sync` to `Quad` and give it a 90° `Phase` and it locks to the
+left channel a quarter cycle ahead: patched into two CV inputs the pair traces a
+circle, which is how one oscillator drives a two-axis modulation — a filter's
+cutoff and its resonance, a panner's X and Y. The scope draws the leader faintly
+behind the follower so the lock is visible rather than asserted.
 
 It is a **mixer, not a selector**. `Sine`, `Tri`, `Saw` and `Sqr` each have their
 own bipolar depth and are summed, so a shape can be subtracted as easily as added
 and everything between the four is reachable. One at full and the rest at zero is
 the single-shape behaviour you would expect.
 
-`Rate` is the cycle length in beats. `Free Run` swaps it for `Free`, a rate in
-hertz. `Phase` offsets the cycle against the transport. `Asym` moves the
-waveform's centre in time — a pulse-width control generalized to every shape —
-and `PW` is the square component's own width.
+`Sync` picks one of eight modes:
 
-`Random` is a sample-and-hold: one level per cycle, held flat across it, and
-**hashed from the cycle index** rather than drawn from a running generator. Reroll
-it with `Seed`, not by pressing play again. `Offset` adds a constant; `Out` and
-`Invert` are the per-instance calibration every plug-in here carries.
+| Mode | Frequency | While stopped | While playing |
+|---|---|---|---|
+| `Free` | `Speed` × `Mult` | keeps running | keeps running |
+| `Tempo` | `Beats` × `Div` | keeps running | keeps running |
+| `Trans` | `Beats` × `Div` | keeps running | locked to the position |
+| `Quad` | the other channel's | the other channel's | the other channel's, plus `Phase` |
+| `St/Sp` | — | low | high |
+| `Trans2` | `Beats` × `Div` | holds | locked to the position |
+| `Free2` | `Speed` × `Mult` | holds | from the play edge |
+| `Free3` | `Speed` × `Mult` | holds | from the timeline |
+
+`Trans` is the default. `Beats` counts notes of the length `Div` names, a third
+shorter with `Triplet` — `Div` at 1/8 with `Beats` at 3 is three eighth notes.
+`Speed` × `Mult` is a rate in hertz across five decades. `Phase` offsets the cycle,
+and is where a `Reset` retrigger snaps back to. `Asym` moves the waveform's centre
+in time — a pulse-width control generalized to every shape — and `PW` is the square
+component's own width.
+
+`Random` is a sample-and-hold: one level per cycle, held flat across it. `Noise` is
+the ungated source: a new level every sample. Both are hashes rather than running
+generators — of the cycle index and the sample index respectively — so both survive
+a bounce. Reroll them with `Seed`. `Offset` adds a constant; `Out` and `Invert` are
+the per-instance calibration every plug-in here carries.
+
+`Input` decides what the plug-in does with the voltage on its input bus: `Off`,
+`Add`, `Mul`, or `Comb` (the sum of what `Add` and `Mul` would each have produced).
+It is `Off` by default, for the same reason a bypassed generator is silent — a
+modulation source that read its input by default would scream the first time it was
+dropped on an audio track.
+
+`Reset` retriggers the cycle to `Phase` on a MIDI note-on, at the note's own
+sample. The plug-in is therefore an AU `aumf`, the only AU type a host routes MIDI
+to.
 
 `Swing` warps the beat timeline exactly as `Sync`'s does, so an LFO and a clock
-shuffled together stay together. `Smooth` behaves as DC's.
+shuffled together stay together, and — like the clock's — it only applies while the
+transport plays. `Smooth` behaves as DC's.
 
 The scope draws the unsmoothed shape — smoothing is a function of time, and the
 scope is drawn in cycles.

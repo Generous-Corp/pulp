@@ -1,4 +1,8 @@
-# LFO — modulation source, tempo-locked or free-running, with a quadrature partner.
+# LFO — two modulation sources, tempo-locked or free-running.
+#
+# ACCEPTS_MIDI, because `Reset By Note` reads note-ons. It types the AU bundle
+# `aumf` (kAudioUnitType_MusicEffect) — the only AU type a host routes MIDI to —
+# and au_v2_entry.cpp must use PULP_AU_MIDI_PLUGIN to match.
 
 if(PULP_BUILD_TESTS)
     # lfo_view.cpp defines create_view(); without it the Processor's vtable is
@@ -18,6 +22,7 @@ pulp_add_plugin(BrewLFO
     MANUFACTURER    "Bitches Brew"
     VERSION         "0.1.0"
     CATEGORY        Effect
+    ACCEPTS_MIDI
     PLUGIN_CODE     "BbLf"
     MANUFACTURER_CODE "BtBr"
 )
