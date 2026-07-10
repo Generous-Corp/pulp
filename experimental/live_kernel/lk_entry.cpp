@@ -69,5 +69,15 @@ LK_EXPORT int    lk_is_fading()    { return g_kernel.is_fading() ? 1 : 0; }
 LK_EXPORT int    lk_active_valid() { return g_kernel.active_valid() ? 1 : 0; }
 LK_EXPORT double lk_sample_rate()  { return g_kernel.sample_rate(); }
 
+// Copy the current graph's per-node output RMS into dst[0..max). Returns the
+// node count written. Alloc-free: dst is a preallocated wasm buffer, node_rms is
+// filled in-place by render_block, so this never touches the heap (the signal-
+// flow graph's live readout keeps lk_alloc_count flat).
+LK_EXPORT int lk_node_levels(float* dst, int max) { return g_kernel.node_levels(dst, max); }
+
+// Toggle the per-node level tap. 0 = measurement mode (skip the tap so CPU
+// benchmarks exclude the meter cost); nonzero = on (the worklet default).
+LK_EXPORT void lk_set_meter(int on) { g_kernel.set_meter(on != 0); }
+
 // The zero-alloc instrument: total C++ heap allocations since load.
 LK_EXPORT double lk_alloc_count()  { return (double)g_alloc_count; }

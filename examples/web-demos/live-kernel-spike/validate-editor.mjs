@@ -119,8 +119,31 @@ try {
   if (!(parseErrs > 0)) fail("broken patch produced no error"); else ok("errors surfaced");
   if (!(stillPlaying > 0.005)) fail("broken patch silenced the audio (should keep last valid)"); else ok("last valid patch keeps playing through an error");
 
-  const summary = { crossOriginIsolated: coi.coi, paramLatencyMedianMs: +pMed.toFixed(1), paramLatencyMaxMs: +pMax.toFixed(1), filterSweepPeakSpread: +peakSpread.toFixed(3), structuralKind: sres.kind, structuralLatencyMs: +(sres.latencyMs || 0).toFixed(1), crossfadeClickDbfs: +clickDb.toFixed(1), errorsKeepPlaying: stillPlaying > 0.005 };
+  // 5. iteration-2 nodes: load LushPad (svf + chorus + reverb) and hear it
+  const lush = await cdp.ev(S, `(async()=>{const {EXAMPLES}=await import('./lk-dsl.mjs'); const r=await window.__lkm.setPatchText(EXAMPLES.LushPad); return r;})()`, true);
+  await cdp.ev(S, "window.__lkm.latch(true)"); await sleep(500);
+  let lushPeak = 0; for (let i = 0; i < 25 && lushPeak < 0.02; i++) { lushPeak = await cdp.ev(S, "window.__lkm.peak()"); await sleep(60); }
+  console.log(`  LushPad (svf→chorus→reverb): ${lush.kind}, peak ${lushPeak.toFixed(3)}`);
+  if (!(lushPeak > 0.02)) fail("LushPad (new nodes: svf/chorus/reverb) produced no sound"); else ok("new nodes (svf, chorus, reverb) play in a real patch");
+
+  // 6. the signal-flow graph is LIVE — per-node RMS is arriving and non-trivial
+  let levels = [];
+  for (let i = 0; i < 25; i++) { levels = await cdp.ev(S, "window.__lkm.nodeLevels()"); if (levels.length && Math.max(...levels) > 0) break; await sleep(60); }
+  const liveNodes = levels.filter((v) => v > 1e-5).length;
+  console.log(`  signal-flow graph: ${levels.length} node levels, ${liveNodes} lit (max ${Math.max(0, ...levels).toFixed(3)})`);
+  if (!(levels.length >= 8 && liveNodes >= 3)) fail(`per-node RMS tap not live (levels=${levels.length}, lit=${liveNodes})`); else ok("per-node RMS tap feeds the live signal-flow graph");
+
+  // 7. zero-alloc holds across a burst of scrubs + a structural swap (the RT contract)
+  const allocBefore = await cdp.ev(S, "window.__lkm.allocCount()", true);
+  for (const hz of [0.6, 1.4, 0.5, 2.0, 0.8]) await cdp.ev(S, `window.__lkm.editNumber('cutoff', ${hz}, 'khz')`, true);
+  await cdp.ev(S, `(async()=>{const {EXAMPLES}=await import('./lk-dsl.mjs'); await window.__lkm.setPatchText(EXAMPLES.FuzzBass); return true;})()`, true);
+  await sleep(300);
+  const allocAfter = await cdp.ev(S, "window.__lkm.allocCount()", true);
+  console.log(`  lk_alloc_count: ${allocBefore} -> ${allocAfter} (delta ${allocAfter - allocBefore})`);
+  if (allocBefore < 0 || allocAfter < 0) fail("alloc probe did not round-trip"); else if (allocAfter - allocBefore !== 0) fail(`zero-alloc broken: ${allocAfter - allocBefore} allocations during edits`); else ok("zero-alloc holds across scrubs + structural swaps (delta 0)");
+
+  const summary = { crossOriginIsolated: coi.coi, paramLatencyMedianMs: +pMed.toFixed(1), paramLatencyMaxMs: +pMax.toFixed(1), filterSweepPeakSpread: +peakSpread.toFixed(3), structuralKind: sres.kind, structuralLatencyMs: +(sres.latencyMs || 0).toFixed(1), crossfadeClickDbfs: +clickDb.toFixed(1), errorsKeepPlaying: stillPlaying > 0.005, lushPadPlays: lushPeak > 0.02, graphNodeLevels: levels.length, graphLitNodes: liveNodes, allocDelta: allocAfter - allocBefore };
   console.log("\nEDITOR_RESULTS_JSON " + JSON.stringify(summary));
-  console.log(problems.length === 0 ? "\nPASS: scrub-a-number is the ~3 ms param path, structural morph crossfades, all with crossOriginIsolated === false." : `\nFAIL: ${problems.length} problem(s).`);
+  console.log(problems.length === 0 ? "\nPASS: scrub-a-number is the ~3 ms param path, structural morph crossfades, 14 nodes, live signal-flow graph, zero-alloc — all with crossOriginIsolated === false." : `\nFAIL: ${problems.length} problem(s).`);
 } catch (e) { fail(String(e && e.message ? e.message : e)); }
 finally { try { chrome.kill("SIGTERM"); } catch {} server.kill("SIGTERM"); await sleep(150); process.exit(problems.length ? 1 : 0); }

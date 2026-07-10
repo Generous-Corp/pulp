@@ -40,14 +40,22 @@ inline constexpr int LK_MAX_BLOCK  = 128; // one AudioWorklet quantum
 
 // Node type ids (stable wire values).
 enum class NodeType : uint8_t {
-    Oscillator = 0, // 0 in, 1 out. params: 0=freq_hz 1=waveform 2=amp
-    Gain       = 1, // 1 in, 1 out. params: 0=gain_db
-    Biquad     = 2, // 1 in, 1 out. params: 0=type 1=cutoff_hz 2=q 3=gain_db
-    Ladder     = 3, // 1 in, 1 out. params: 0=cutoff_hz 1=resonance
-    Adsr       = 4, // 1 in, 1 out (VCA). params: 0=a 1=d 2=s 3=r(seconds) 4=gate
-    Delay      = 5, // 1 in, 1 out. params: 0=time_s 1=feedback 2=mix
-    Mixer      = 6, // 2 in, 1 out. params: 0=mix (dry/wet)
-    Count      = 7,
+    Oscillator = 0,  // 0 in, 1 out. params: 0=freq_hz 1=waveform 2=amp
+    Gain       = 1,  // 1 in, 1 out. params: 0=gain_db
+    Biquad     = 2,  // 1 in, 1 out. params: 0=type 1=cutoff_hz 2=q 3=gain_db
+    Ladder     = 3,  // 1 in, 1 out. params: 0=cutoff_hz 1=resonance
+    Adsr       = 4,  // 1 in, 1 out (VCA). params: 0=a 1=d 2=s 3=r(seconds) 4=gate
+    Delay      = 5,  // 1 in, 1 out. params: 0=time_s 1=feedback 2=mix
+    Mixer      = 6,  // 2 in, 1 out. params: 0=mix (dry/wet)
+    // ── iteration 2: node-breadth expansion (all mono, alloc-safe) ──
+    Svf        = 7,  // 1 in, 1 out. params: 0=mode 1=cutoff_hz 2=res  (TPT state-variable, mod-stable)
+    Shaper     = 8,  // 1 in, 1 out. params: 0=curve 1=drive          (WaveShaperT distortion)
+    DcBlock    = 9,  // 1 in, 1 out. params: 0=pole                    (one-pole DC blocker)
+    Noise      = 10, // 0 in, 1 out. params: 0=amp 1=color(0=white,1=pink)
+    Chorus     = 11, // 1 in, 1 out. params: 0=rate_hz 1=depth 2=mix 3=delay_ms (pool-backed)
+    Reverb     = 12, // 1 in, 1 out. params: 0=decay_s 1=damp 2=mix   (FDN reverb, pool-backed)
+    Comp       = 13, // 1 in, 1 out. params: 0=thresh_db 1=ratio 2=attack_ms 3=release_ms (pool-backed)
+    Count      = 14,
 };
 
 enum class DecodeError : int32_t {

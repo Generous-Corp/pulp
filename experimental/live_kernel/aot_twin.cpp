@@ -53,6 +53,22 @@ TrivialTwin  T;
 FeedbackTwin F;
 double g_sr = 48000.0;
 
+// ── generic per-node twin (iteration-2 conformance oracle) ───────────────────
+// A hand-wired osc → NODE chain that bypasses the executor entirely (no
+// topo-sort / CSR gather / feedback capture), so a null test isolates whether
+// the executor's routing adds any error for each node type. Reuses the registry
+// init/set_param/process_node so the DSP config cannot drift from the kernel.
+struct ChainTwin {
+    NodeInstance src, node;
+    Delay  delay_dl;
+    Chorus chorus;
+    Reverb reverb;
+    NodeType type = NodeType::Gain;
+    int  nin = 1;
+    float srcbuf[MAXB];
+};
+ChainTwin C;
+
 void setup_musical(double sr) {
     M.dl.prepare(48000);
     M.delay.delay = &M.dl;
@@ -137,6 +153,45 @@ AOT_EXPORT void aot_init(double sr) {
     setup_musical(sr);
     setup_trivial(sr);
     setup_feedback(sr);
+}
+
+// ── generic per-node twin C ABI (aot_chain_*) ────────────────────────────────
+// Set up an osc(saw 220 Hz, amp 0.3) → NODE(type) chain. The node's params are
+// applied afterwards with aot_chain_setparam using the SAME values the kernel
+// decoded from the LKB0 blob (so config cannot drift). Source-type nodes
+// (Oscillator, Noise) have no upstream — the node IS index 0.
+AOT_EXPORT void aot_chain_setup(int type, double sr) {
+    g_sr = sr;
+    C.type = (NodeType)type;
+    int nout = 1;
+    ports_for(C.type, C.nin, nout);
+    C.delay_dl.prepare(48000);
+    C.chorus.prepare((float)sr);
+    C.reverb.prepare((float)sr);
+    C.node = NodeInstance{};
+    if (C.type == NodeType::Delay)       C.node.delay  = &C.delay_dl;
+    else if (C.type == NodeType::Chorus) C.node.chorus = &C.chorus;
+    else if (C.type == NodeType::Reverb) C.node.reverb = &C.reverb;
+    init_node(C.node, C.type, sr);
+    C.src = NodeInstance{};
+    init_node(C.src, NodeType::Oscillator, sr);
+    set_node_param(C.src, NodeType::Oscillator, 0, 220.0f, sr); // freq
+    set_node_param(C.src, NodeType::Oscillator, 1, 1.0f, sr);   // saw
+    set_node_param(C.src, NodeType::Oscillator, 2, 0.3f, sr);   // amp
+}
+
+AOT_EXPORT void aot_chain_setparam(int pid, float v) {
+    set_node_param(C.node, C.type, pid, v, g_sr);
+}
+
+AOT_EXPORT void aot_chain_process(float* dst, int n) {
+    if (n > MAXB) n = MAXB;
+    const float* ins[LK_MAX_IN];
+    if (C.nin >= 1) {
+        process_node(C.src, NodeType::Oscillator, nullptr, 0, C.srcbuf, n);
+        for (int p = 0; p < C.nin && p < LK_MAX_IN; ++p) ins[p] = C.srcbuf;
+    }
+    process_node(C.node, C.type, ins, C.nin, dst, n);
 }
 
 // patch: 0=musical, 1=trivial, 2=feedback

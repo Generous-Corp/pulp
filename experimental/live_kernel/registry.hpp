@@ -20,25 +20,58 @@
 #include <pulp/signal/biquad.hpp>        // BiquadT
 #include <pulp/signal/ladder_filter.hpp> // LadderFilterT
 #include <pulp/signal/delay_line.hpp>    // DelayLineT
+#include <pulp/signal/svf.hpp>           // SvfT (iter2)
+#include <pulp/signal/waveshaper.hpp>    // WaveShaperT (iter2)
+#include <pulp/signal/dc_blocker.hpp>    // DcBlocker (iter2)
+#include <pulp/signal/chorus.hpp>        // ChorusT (iter2)
+#include <pulp/signal/reverb.hpp>        // ReverbT (iter2)
+#include <pulp/signal/compressor.hpp>    // CompressorT (iter2)
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace pulp::live_kernel {
 
-using Osc    = pulp::signal::OscillatorT<float>;
-using Gain   = pulp::signal::GainT<float>;
-using Biquad = pulp::signal::BiquadT<float>;
-using Ladder = pulp::signal::LadderFilterT<float>;
-using Adsr   = pulp::signal::AdsrT<float>;
-using Delay  = pulp::signal::DelayLineT<float>;
-using Mixer  = pulp::signal::SimpleMixerT<float>;
+using Osc     = pulp::signal::OscillatorT<float>;
+using Gain    = pulp::signal::GainT<float>;
+using Biquad  = pulp::signal::BiquadT<float>;
+using Ladder  = pulp::signal::LadderFilterT<float>;
+using Adsr    = pulp::signal::AdsrT<float>;
+using Delay   = pulp::signal::DelayLineT<float>;
+using Mixer   = pulp::signal::SimpleMixerT<float>;
+using Svf     = pulp::signal::SvfT<float>;
+using Shaper  = pulp::signal::WaveShaperT<float>;
+using DcBlk   = pulp::signal::DcBlocker<float>;
+using Chorus  = pulp::signal::ChorusT<float>;
+using Reverb  = pulp::signal::ReverbT<float>;
+using Comp    = pulp::signal::CompressorT<float>;
+
+// A tiny deterministic noise source (kernel-local — core/signal has no plain
+// noise generator). White via xorshift32; "pink" via a one-pole tilt. Fully
+// alloc-free and bit-reproducible, so its AOT twin matches to maxAbsDiff = 0.
+struct NoiseGen {
+    uint32_t s = 0x1234567u;
+    float pink = 0.f;
+    float white() {
+        s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+        return (float)((int32_t)s) * (1.f / 2147483648.f); // [-1,1)
+    }
+    // color 0 = white, 1 = pink-ish (one-pole low-passed, gain-compensated).
+    float next(float color) {
+        float w = white();
+        pink = 0.98f * pink + 0.02f * w;
+        return w + color * (pink * 6.f - w);
+    }
+    void reset() { s = 0x1234567u; pink = 0.f; }
+};
 
 // Number of input / output ports implied by a node type (authoritative — the
 // wire table's num_in/num_out are informational and validated against these).
 inline void ports_for(NodeType t, int& num_in, int& num_out) {
     switch (t) {
-        case NodeType::Oscillator: num_in = 0; num_out = 1; break;
+        case NodeType::Oscillator:
+        case NodeType::Noise:      num_in = 0; num_out = 1; break;
         case NodeType::Mixer:      num_in = 2; num_out = 1; break;
         default:                   num_in = 1; num_out = 1; break;
     }
@@ -47,13 +80,20 @@ inline void ports_for(NodeType t, int& num_in, int& num_out) {
 // One node's live state: every class inlined (all tiny, alloc-free) except the
 // delay ring, which is bound from the executor's pre-prepared pool.
 struct NodeInstance {
-    Osc    osc;
-    Gain   gain;
-    Biquad biquad;
-    Ladder ladder;
-    Adsr   adsr;
-    Mixer  mixer;
-    Delay* delay = nullptr; // bound from the plan's pool (Delay nodes only)
+    Osc     osc;
+    Gain    gain;
+    Biquad  biquad;
+    Ladder  ladder;
+    Adsr    adsr;
+    Mixer   mixer;
+    Svf     svf;      // inline (alloc-free)
+    Shaper  shaper;   // inline (alloc-free)
+    DcBlk   dcb;      // inline (alloc-free)
+    NoiseGen noise;   // inline (alloc-free)
+    Comp    comp;     // inline: default-constructed lookahead buffer is empty (no heap)
+    Delay*  delay  = nullptr; // bound from the plan's pool (Delay nodes only)
+    Chorus* chorus = nullptr; // bound from the plan's pool (Chorus nodes only)
+    Reverb* reverb = nullptr; // bound from the plan's pool (Reverb nodes only)
 
     // Cached params so a set_param on one field recomputes only what it must.
     float  osc_amp   = 0.3f;
@@ -70,6 +110,11 @@ struct NodeInstance {
     float  dl_fb     = 0.f;
     float  dl_mix    = 0.5f;
     float  dl_samps  = 0.f;    // cached time in samples (clamped)
+    // noise
+    float  ns_amp    = 0.3f;
+    float  ns_color  = 0.f;
+    // compressor (feed-forward; lookahead/sidechain unused → no per-edit alloc)
+    Comp::Params cmp_p{};
 };
 
 // (Re)initialise a node to its defaults for a fresh plan bind. Alloc-free:
@@ -113,6 +158,41 @@ inline void init_node(NodeInstance& ni, NodeType t, double sr) {
             break;
         case NodeType::Mixer:
             ni.mixer.set_mix(0.5f);
+            break;
+        case NodeType::Svf:
+            ni.svf.reset();
+            ni.svf.set_sample_rate((float)sr);
+            ni.svf.set_mode(Svf::Mode::lowpass);
+            ni.svf.set_frequency(1000.f);
+            ni.svf.set_resonance(0.707f);
+            break;
+        case NodeType::Shaper:
+            ni.shaper.set_curve(Shaper::Curve::tanh_clip);
+            ni.shaper.set_drive(1.f);
+            break;
+        case NodeType::DcBlock:
+            ni.dcb.reset();
+            ni.dcb.set_pole(0.995f);
+            break;
+        case NodeType::Noise:
+            ni.noise.reset();
+            ni.ns_amp = 0.3f;
+            ni.ns_color = 0.f;
+            break;
+        case NodeType::Chorus:
+            if (ni.chorus) { ni.chorus->reset(); ni.chorus->set_rate(1.f);
+                             ni.chorus->set_depth(0.5f); ni.chorus->set_mix(0.4f);
+                             ni.chorus->set_delay_ms(15.f); }
+            break;
+        case NodeType::Reverb:
+            if (ni.reverb) { ni.reverb->reset(); ni.reverb->set_decay(2.f);
+                             ni.reverb->set_damping(0.3f); ni.reverb->set_mix(0.3f); }
+            break;
+        case NodeType::Comp:
+            ni.cmp_p = Comp::Params{-20.f, 4.f, 5.f, 100.f, 6.f, 0.f};
+            ni.comp.set_sample_rate((float)sr); // alloc-free at 0 lookahead/sidechain
+            ni.comp.reset();
+            ni.comp.set_params(ni.cmp_p);
             break;
         default: break;
     }
@@ -164,6 +244,42 @@ inline void set_node_param(NodeInstance& ni, NodeType t, int param_id,
             break;
         case NodeType::Mixer:
             if (param_id == 0) ni.mixer.set_mix(v);
+            break;
+        case NodeType::Svf:
+            if (param_id == 0) ni.svf.set_mode((Svf::Mode)(int)v);
+            else if (param_id == 1) ni.svf.set_frequency(v);
+            else if (param_id == 2) ni.svf.set_resonance(v);
+            break;
+        case NodeType::Shaper:
+            if (param_id == 0) ni.shaper.set_curve((Shaper::Curve)(int)v);
+            else if (param_id == 1) ni.shaper.set_drive(v);
+            break;
+        case NodeType::DcBlock:
+            if (param_id == 0) ni.dcb.set_pole(v);
+            break;
+        case NodeType::Noise:
+            if (param_id == 0) ni.ns_amp = v;
+            else if (param_id == 1) ni.ns_color = std::clamp(v, 0.f, 1.f);
+            break;
+        case NodeType::Chorus:
+            if (!ni.chorus) break;
+            if (param_id == 0) ni.chorus->set_rate(v);
+            else if (param_id == 1) ni.chorus->set_depth(v);
+            else if (param_id == 2) ni.chorus->set_mix(v);
+            else if (param_id == 3) ni.chorus->set_delay_ms(v * 1000.f); // seconds→ms (unit-normalized)
+            break;
+        case NodeType::Reverb:
+            if (!ni.reverb) break;
+            if (param_id == 0) ni.reverb->set_decay(v);
+            else if (param_id == 1) ni.reverb->set_damping(v);
+            else if (param_id == 2) ni.reverb->set_mix(v);
+            break;
+        case NodeType::Comp:
+            if (param_id == 0) ni.cmp_p.threshold_db = v;
+            else if (param_id == 1) ni.cmp_p.ratio = v;
+            else if (param_id == 2) ni.cmp_p.attack_ms = v * 1000.f;  // seconds→ms
+            else if (param_id == 3) ni.cmp_p.release_ms = v * 1000.f; // seconds→ms
+            ni.comp.set_params(ni.cmp_p);
             break;
         default: break;
     }
@@ -217,6 +333,51 @@ inline void process_node(NodeInstance& ni, NodeType t,
             const float* dry = ins[0];
             const float* wet = (num_in > 1) ? ins[1] : ins[0];
             ni.mixer.process(dry, wet, out, n);
+            break;
+        }
+        case NodeType::Svf: {
+            const float* in = ins[0];
+            for (int i = 0; i < n; ++i) out[i] = ni.svf.process(in[i]);
+            break;
+        }
+        case NodeType::Shaper: {
+            const float* in = ins[0];
+            for (int i = 0; i < n; ++i) out[i] = ni.shaper.process(in[i]);
+            break;
+        }
+        case NodeType::DcBlock: {
+            const float* in = ins[0];
+            for (int i = 0; i < n; ++i) out[i] = ni.dcb.process(in[i]);
+            break;
+        }
+        case NodeType::Noise: {
+            const float a = ni.ns_amp, col = ni.ns_color;
+            for (int i = 0; i < n; ++i) out[i] = ni.noise.next(col) * a;
+            break;
+        }
+        case NodeType::Chorus: {
+            const float* in = ins[0];
+            Chorus* c = ni.chorus;
+            if (!c) { for (int i = 0; i < n; ++i) out[i] = in[i]; break; }
+            for (int i = 0; i < n; ++i) {
+                auto s = c->process(in[i]);
+                out[i] = 0.5f * (s.left + s.right); // stereo→mono collapse
+            }
+            break;
+        }
+        case NodeType::Reverb: {
+            const float* in = ins[0];
+            Reverb* r = ni.reverb;
+            if (!r) { for (int i = 0; i < n; ++i) out[i] = in[i]; break; }
+            for (int i = 0; i < n; ++i) {
+                auto s = r->process(in[i]);
+                out[i] = 0.5f * (s.left + s.right); // stereo→mono collapse
+            }
+            break;
+        }
+        case NodeType::Comp: {
+            const float* in = ins[0];
+            for (int i = 0; i < n; ++i) out[i] = ni.comp.process(in[i]);
             break;
         }
         default:

@@ -20,12 +20,15 @@
 #include "codec.hpp"
 #include "registry.hpp"
 
+#include <cmath>
 #include <cstring>
 
 namespace pulp::live_kernel {
 
 inline constexpr int LK_MAX_DELAY_NODES   = 8;
 inline constexpr int LK_MAX_DELAY_SAMPLES = 48000; // 1.0 s @ 48 kHz
+inline constexpr int LK_MAX_CHORUS_NODES  = 4;     // iter2: pooled modulated-delay nodes
+inline constexpr int LK_MAX_REVERB_NODES  = 2;     // iter2: pooled FDN reverbs (4 lines each)
 
 struct Plan {
     double sample_rate = 48000.0;
@@ -56,15 +59,28 @@ struct Plan {
     int order[LK_MAX_NODES];
     int order_count = 0;
 
-    // Delay-line pool, prepared once (off the audio thread) in prepare_pool().
-    Delay delay_pool[LK_MAX_DELAY_NODES];
-    int   delay_used = 0;
-    bool  pool_ready = false;
+    // Per-node output mean-square, refreshed every render_block (alloc-free
+    // readout for the signal-flow graph). node_rms[i] holds node i's mean-square
+    // this block (the readout sqrt's it to RMS); unreachable nodes read 0.
+    float node_rms[LK_MAX_NODES] = {0};
 
-    // Prepare the delay pool ONCE. Allocates (DelayLineT::prepare); MUST be
-    // called off the steady-state audio path (kernel construction).
-    void prepare_pool() {
-        for (auto& d : delay_pool) d.prepare(LK_MAX_DELAY_SAMPLES);
+    // Pools of the nodes whose DSP owns prepare-time buffers (DelayLineT). All
+    // prepared ONCE at kernel init (off the audio path); build_plan only binds +
+    // reset()s them, so a structural edit stays zero-alloc.
+    Delay  delay_pool[LK_MAX_DELAY_NODES];
+    Chorus chorus_pool[LK_MAX_CHORUS_NODES];
+    Reverb reverb_pool[LK_MAX_REVERB_NODES];
+    int   delay_used  = 0;
+    int   chorus_used = 0;
+    int   reverb_used = 0;
+    bool  pool_ready  = false;
+
+    // Prepare every pool ONCE. Allocates (DelayLineT::prepare); MUST be called
+    // off the steady-state audio path (kernel construction).
+    void prepare_pool(double sr) {
+        for (auto& d : delay_pool)  d.prepare(LK_MAX_DELAY_SAMPLES);
+        for (auto& c : chorus_pool) c.prepare((float)sr);
+        for (auto& r : reverb_pool) r.prepare((float)sr);
         pool_ready = true;
     }
 };
@@ -103,16 +119,24 @@ inline bool build_plan(Plan& p, const PlanDesc& d, double sr) {
     p.output_node = d.output_node;
     p.num_edges = d.num_edges;
     p.delay_used = 0;
+    p.chorus_used = 0;
+    p.reverb_used = 0;
     p.has_feedback = false;
 
     for (int i = 0; i < d.num_nodes; ++i) {
         p.type[i] = d.nodes[i].type;
         ports_for(p.type[i], p.num_in[i], p.num_out[i]);
         NodeInstance& ni = p.inst[i];
-        ni = NodeInstance{}; // reset cached scalars (no heap members)
+        ni = NodeInstance{}; // reset cached scalars (Comp/Noise inline, no heap)
         if (p.type[i] == NodeType::Delay) {
             ni.delay = (p.delay_used < LK_MAX_DELAY_NODES)
                            ? &p.delay_pool[p.delay_used++] : nullptr;
+        } else if (p.type[i] == NodeType::Chorus) {
+            ni.chorus = (p.chorus_used < LK_MAX_CHORUS_NODES)
+                            ? &p.chorus_pool[p.chorus_used++] : nullptr;
+        } else if (p.type[i] == NodeType::Reverb) {
+            ni.reverb = (p.reverb_used < LK_MAX_REVERB_NODES)
+                            ? &p.reverb_pool[p.reverb_used++] : nullptr;
         }
         init_node(ni, p.type[i], sr);
     }
@@ -157,8 +181,10 @@ inline void plan_set_param(Plan& p, int node, int param_id, float value) {
 
 // Render one block; returns a pointer to the output node's buffer (length n).
 // Zero-alloc.
-inline const float* render_block(Plan& p, int n) {
+inline const float* render_block(Plan& p, int n, bool meter = true) {
     if (n > LK_MAX_BLOCK) n = LK_MAX_BLOCK;
+    if (meter) for (int i = 0; i < p.num_nodes; ++i) p.node_rms[i] = 0.f; // unreachable → 0
+    const float inv_n = n > 0 ? 1.f / (float)n : 0.f;
     for (int oi = 0; oi < p.order_count; ++oi) {
         const int node = p.order[oi];
         const int nin = p.num_in[node];
@@ -180,7 +206,18 @@ inline const float* render_block(Plan& p, int n) {
         for (int port = 0; port < nin; ++port)
             if (!filled[port]) std::memset(p.inscratch[port], 0, sizeof(float) * n);
         // run
-        process_node(p.inst[node], p.type[node], ins, nin, p.outbuf[node], n);
+        float* ob = p.outbuf[node];
+        process_node(p.inst[node], p.type[node], ins, nin, ob, n);
+        // per-node level tap (alloc-free) for the live signal-flow graph. Store
+        // the mean-square here; the ~20 Hz readout (Kernel::node_levels) takes
+        // the sqrt, keeping the per-block hot loop free of a sqrt per node. The
+        // tap is skipped entirely in measurement mode so CPU numbers stay clean
+        // (design §1.5).
+        if (meter) {
+            float ss = 0.f;
+            for (int i = 0; i < n; ++i) ss += ob[i] * ob[i];
+            p.node_rms[node] = ss * inv_n;
+        }
     }
     // capture feedback (source current output -> its previous-block slot)
     if (p.has_feedback) {

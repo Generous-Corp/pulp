@@ -36,13 +36,13 @@ COMMON=( -std=c++20 -O3 -fno-exceptions -fno-rtti
 
 echo "building lk_kernel.wasm ..."
 emcc "${COMMON[@]}" \
-  -sEXPORTED_FUNCTIONS="['_lk_init','_lk_load_plan','_lk_swap','_lk_set_param','_lk_process','_lk_is_fading','_lk_active_valid','_lk_sample_rate','_lk_alloc_count','_malloc','_free']" \
+  -sEXPORTED_FUNCTIONS="['_lk_init','_lk_load_plan','_lk_swap','_lk_set_param','_lk_process','_lk_is_fading','_lk_active_valid','_lk_sample_rate','_lk_alloc_count','_lk_node_levels','_lk_set_meter','_malloc','_free']" \
   "$KERNEL_DIR/lk_entry.cpp" \
   -o "$DIST/lk_kernel.wasm"
 
 echo "building aot_twin.wasm ..."
 emcc "${COMMON[@]}" \
-  -sEXPORTED_FUNCTIONS="['_aot_init','_aot_process','_malloc','_free']" \
+  -sEXPORTED_FUNCTIONS="['_aot_init','_aot_process','_aot_chain_setup','_aot_chain_setparam','_aot_chain_process','_malloc','_free']" \
   "$KERNEL_DIR/aot_twin.cpp" \
   -o "$DIST/aot_twin.wasm"
 

@@ -178,3 +178,75 @@ bash examples/web-demos/live-kernel-spike/build.sh   # -> dist/*.wasm
 node examples/web-demos/live-kernel-spike/measure.mjs # null / CPU / zero-alloc / plan-build / click-free
 node examples/web-demos/live-kernel-spike/validate.mjs # headless Chrome: real-time + edit->sound latency
 ```
+
+---
+
+## Iteration 2 addendum (node breadth + live signal-flow graph)
+
+Built on top of the S0 kernel, additive only (no `wam_*` ABI touched). Same
+grammar — only vocabulary and a level readout grew.
+
+**Node breadth 6 → 14 wire types.** New `core/signal` classes registered behind
+the same init/set_param/process surface, each default-constructible + alloc-safe
+(scalar) or pool-backed (buffer-owning), each given DSL verbs:
+
+| New node | Class | Verbs | RT-alloc strategy |
+|---|---|---|---|
+| Svf | `SvfT` | `svf` | inline (scalar) |
+| Shaper | `WaveShaperT` | `shape` `fold` `clip` | inline (scalar) |
+| DcBlock | `DcBlocker` | `dcblock` | inline (scalar) |
+| Noise | kernel-local `NoiseGen` | `noise` | inline (scalar) |
+| Chorus | `ChorusT` | `chorus` | pool (pre-`prepare()`d ×4) |
+| Reverb | `ReverbT` | `reverb` | pool (pre-`prepare()`d ×2) |
+| Comp | `CompressorT` | `comp` | inline (0 lookahead → no heap) |
+
+Chorus/Reverb are stereo classes collapsed to mono (`0.5·(L+R)`); their delay
+buffers are pooled and `prepare()`d once at kernel init, so a structural edit
+that adds one stays zero-alloc.
+
+**Per-node level tap (the signal-flow graph).** `render_block` writes each node's
+output mean-square into a preallocated `float[LK_MAX_NODES]`; `lk_node_levels()`
+copies it out (sqrt on read). The worklet posts it on the existing ~20 Hz meter
+channel; the demo renders a live node graph that glows with the audio. The tap is
+alloc-free and is gated off in measurement mode (`lk_set_meter(0)`) so CPU
+numbers stay clean.
+
+**Conformance (`conformance.mjs`).** Every one of the 14 node types is rendered
+through the full DSL→encode→decode→executor path and null-tested against a
+hand-wired AOT twin that bypasses the executor: **maxAbsDiff = 0 for all 17
+node/variant cases** (residual −∞ dBFS, gate ≤ −60). All 7 shipped presets parse
++ encode cleanly.
+
+**Re-measured (meter gated off), all S0 gates still pass:**
+
+| Gate | S0 | Iteration 2 |
+|---|---|---|
+| null test (musical) | −∞ dBFS | −∞ dBFS |
+| CPU musical (representative) | 1.17× | 1.17× |
+| CPU trivial (pathological) | 2.9–3.1× | 2.80× |
+| CPU feedback | 1.8× | 1.65× |
+| plan-build (64 nodes) | 2.3 µs | 2.5 µs |
+| zero-alloc (process / swap) | 0 / 0 | 0 / 0 |
+| click-free (50 ms fade) | −64.4 dBFS | −64.4 dBFS |
+
+Kernel size grew ~39 KB → **~48 KB** for the 8 extra node classes.
+
+Headless editor (system Chrome, no COOP/COEP): scrub param latency **~2.4 ms
+median**, `crossOriginIsolated === false`, live graph shows 10 lit nodes on
+LushPad, `lk_alloc_count` delta **0** across a burst of scrubs + a structural
+swap.
+
+**Design challenge deferred to Fable — FauxFM / oscillator `pm:`.** True FM needs
+an audio-rate phase/pitch input on the oscillator, but `OscillatorT::next()`
+exposes no external phase term, and adding one would (a) reimplement the
+oscillator's polyBLEP DSP in the kernel rather than reusing the shipped class
+(breaking the bit-exact-to-native guarantee), and (b) make the oscillator's port
+arity dynamic (0 inputs normally, 1 when `pm:` is wired), which the static
+`ports_for()` model doesn't express. Left gated per the original design. LushPad
+(the other gated preset) is now unlocked and shipping.
+
+**Reproduce (iteration 2):**
+```
+node examples/web-demos/live-kernel-spike/conformance.mjs    # per-node bit-exact null test
+node examples/web-demos/live-kernel-spike/validate-editor.mjs # headless: scrub + graph + zero-alloc
+```

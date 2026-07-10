@@ -14,23 +14,24 @@ class CDP { constructor(u){ this.ws=new WebSocket(u); this.id=0; this.p=new Map(
 
 const server = spawn(process.execPath, [new URL("./serve.mjs", import.meta.url).pathname, String(PORT)], { stdio: ["ignore", "pipe", "inherit"] });
 await sleep(400);
-const chrome = spawn(EXE, ["--headless=new", "--remote-debugging-port=9347", "--remote-allow-origins=*", "--autoplay-policy=no-user-gesture-required", "--mute-audio", "--hide-scrollbars", "--force-device-scale-factor=2", "--window-size=1280,940", `--user-data-dir=/tmp/lk-shot-${process.pid}`, "about:blank"], { stdio: ["ignore", "pipe", "pipe"] });
+const chrome = spawn(EXE, ["--headless=new", "--remote-debugging-port=9347", "--remote-allow-origins=*", "--autoplay-policy=no-user-gesture-required", "--mute-audio", "--hide-scrollbars", "--force-device-scale-factor=2", "--window-size=1280,1120", `--user-data-dir=/tmp/lk-shot-${process.pid}`, "about:blank"], { stdio: ["ignore", "pipe", "pipe"] });
 const wsUrl = await new Promise((res, rej) => { let b = ""; const to = setTimeout(() => rej(new Error("timeout")), 15000); chrome.stderr.on("data", d => { b += d; const m = b.match(/ws:\/\/[^\s]+/); if (m) { clearTimeout(to); res(m[0]); } }); });
 
 const cdp = new CDP(wsUrl); await cdp.open;
 const { targetId } = await cdp.send("Target.createTarget", { url: PAGE });
 const { sessionId: S } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
 await cdp.send("Runtime.enable", {}, S);
-await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 940, deviceScaleFactor: 2, mobile: false }, S);
+await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1120, deviceScaleFactor: 2, mobile: false }, S);
 for (let i = 0; i < 100; i++) { if (await cdp.ev(S, "!!window.__lkm?.ready")) break; await sleep(100); }
-// AcidLine showcase + riff + a cutoff scrub so the badge + receipts are populated
-await cdp.ev(S, `(async()=>{const {EXAMPLES}=await import('./lk-dsl.mjs'); await window.__lkm.setPatchText(EXAMPLES.AcidLine); return true;})()`, true).catch(() => {});
+// LushPad showcase (10 nodes: svf → chorus → reverb) + riff so the signal-flow
+// graph lights up, plus a cutoff scrub so the badge + receipts are populated.
+await cdp.ev(S, `(async()=>{const {EXAMPLES}=await import('./lk-dsl.mjs'); await window.__lkm.setPatchText(EXAMPLES.LushPad); return true;})()`, true).catch(() => {});
 await cdp.ev(S, "window.__lkm.latch(true)");
 await sleep(150);
 await cdp.ev(S, "window.__lkm.riff(true)");
-await sleep(500);
-for (const hz of [0.55, 1.1, 0.42, 0.9]) { await cdp.ev(S, `window.__lkm.editNumber('cutoff', ${hz}, 'khz')`, true); await sleep(140); }
-await sleep(500);
+await sleep(800);
+for (const hz of [0.9, 1.6, 0.7, 1.4]) { await cdp.ev(S, `window.__lkm.editNumber('cutoff', ${hz}, 'khz')`, true); await sleep(160); }
+await sleep(700);
 const { data } = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, S);
 writeFileSync(out, Buffer.from(data, "base64"));
 console.log("wrote " + out);
