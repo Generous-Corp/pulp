@@ -302,15 +302,24 @@ the same project bounces to the same samples every time. `Seed` rerolls it.
 ![CV To OSC](docs/images/cv-osc.png)
 
 Passes both channels through **bit-exactly** — it is a wire with a tap on it — and
-reports what it sees over OSC as `/brew/cv/0` and `/brew/cv/1` to `127.0.0.1`.
+reports what it sees over OSC. `Target` takes a `host:port` (a hostname, an IPv4
+address, or a bracketed IPv6 literal), and each channel sends one float to its own
+`OSC Path`. `Browse` lists the OSC receivers advertising themselves over mDNS;
+clicking one fills in the target. Return commits a field, Escape reverts it, and a
+target or a path the plug-in cannot use is refused rather than silently corrected —
+an address pattern like `/cv/*` is a legal thing for a receiver to match against
+and an illegal thing for a sender to put in a packet.
 
-`Send` is off by default, because a plug-in that opens a socket the moment it loads
-is a plug-in that surprises somebody. `Port` picks the destination. `Rate` caps how
-often messages go out, and `Deadband` suppresses a message when the voltage has not
-moved by at least that much — a change smaller than the deadband is noise, and
-flooding a receiver with it helps nobody.
+Both channels are `Enable`d off by default, because a plug-in that opens a socket
+the moment it loads is a plug-in that surprises somebody. `Rate` caps how often
+messages go out — one rate, because one background thread sends both channels — and
+each channel's `Threshold` suppresses a message when its voltage has not moved by
+at least that much. A change smaller than the threshold is noise, and flooding a
+receiver with it helps nobody.
 
-The lamp lights when a message actually left.
+Each lamp lights when that channel's message actually left. The audio thread never
+touches the socket: it stores one float per channel per block, and the sender runs
+on its own clock.
 
 ## The editors exist because CV is invisible
 

@@ -17,15 +17,18 @@ foreach(plugin ${_brew_plugins})
 endforeach()
 
 if(PULP_BUILD_TESTS)
-    # pulp::osc because CV To OSC's editor pulls in its processor header.
+    # pulp::osc and pulp::events because CV To OSC's editor pulls in its
+    # processor header and its mDNS Browse.
     add_executable(brew-ui-test test_brew_ui.cpp ${_brew_view_sources})
     target_link_libraries(brew-ui-test
-        PRIVATE pulp::format pulp::osc brew-core brew-ui Catch2::Catch2WithMain)
+        PRIVATE pulp::format pulp::osc pulp::events brew-core brew-ui
+                Catch2::Catch2WithMain)
     target_include_directories(brew-ui-test PRIVATE ${_brew_plugin_dirs})
     catch_discover_tests(brew-ui-test)
 
     # Headless screenshot dumper: renders each editor to PNG with no window.
     add_executable(brew-shots brew_shots.cpp ${_brew_view_sources})
-    target_link_libraries(brew-shots PRIVATE pulp::format pulp::osc brew-core brew-ui)
+    target_link_libraries(brew-shots
+        PRIVATE pulp::format pulp::osc pulp::events brew-core brew-ui)
     target_include_directories(brew-shots PRIVATE ${_brew_plugin_dirs})
 endif()

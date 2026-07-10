@@ -21,6 +21,8 @@
 
 #include <cstddef>
 #include <vector>
+#include <pulp/view/buttons.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -181,6 +183,75 @@ inline std::unique_ptr<vw::Label> channel_label(std::string text) {
     l->flex().flex_grow = 0;
     l->flex().flex_shrink = 0;
     return l;
+}
+
+/// A captioned single-line text field that only keeps text the plug-in accepts.
+///
+/// `commit` is the plug-in's own validator, and its `false` puts the last accepted
+/// text back. A field that displayed a rejected hostname would show a destination
+/// the sender thread is not using — which is worse than showing nothing, because
+/// the user would go looking for the fault at the far end of the cable.
+class TextField : public vw::View {
+public:
+    TextField(std::string label, std::string initial,
+              std::function<bool(const std::string&)> commit)
+        : accepted_(initial) {
+        flex().direction = vw::FlexDirection::column;
+        flex().gap = 2.0f;
+        // Never grow or shrink on the cross axis: in a column panel a growable
+        // field eats the whole window, and a shrinkable one collapses its editor
+        // to nothing the moment a sibling wants room.
+        flex().flex_grow = 0;
+        flex().flex_shrink = 0;
+        flex().preferred_height = kFieldHeight;
+
+        auto caption = caption_label(std::move(label));
+        add_child(std::move(caption));
+
+        auto editor = std::make_unique<vw::TextEditor>();
+        editor->set_text(initial);
+        editor->set_font_size(12.0f);
+        editor->flex().preferred_height = kTextFieldHeight;
+        editor->flex().align_self = vw::FlexAlign::stretch;
+        editor_ = editor.get();
+
+        // Commit on Return, revert on Escape. Not commit-on-every-keystroke: a
+        // half-typed hostname is a valid prefix of a different hostname, and
+        // reconnecting a socket to each one as it is typed is a burst of UDP at
+        // machines the user never meant to name.
+        editor_->on_return = [this, commit = std::move(commit)](const std::string& t) {
+            if (commit(t))
+                accepted_ = t;
+            else
+                editor_->set_text(accepted_);
+        };
+        editor_->on_escape = [this] { editor_->set_text(accepted_); };
+
+        add_child(std::move(editor));
+    }
+
+    /// Replace the text without going through the validator — for a value the
+    /// plug-in already accepted, such as one picked out of a discovery list.
+    void set_accepted(const std::string& text) {
+        accepted_ = text;
+        editor_->set_text(text);
+    }
+
+    [[nodiscard]] const std::string& text() const { return editor_->text(); }
+    [[nodiscard]] const std::string& accepted() const { return accepted_; }
+
+    /// The height a field occupies: caption, gap, editor.
+    static constexpr float kTextFieldHeight = 24.0f;
+    static constexpr float kFieldHeight = 14.0f + 2.0f + kTextFieldHeight;
+
+private:
+    vw::TextEditor* editor_ = nullptr;
+    std::string accepted_;
+};
+
+/// Size a text field from the shared metrics.
+inline void field_size(vw::View& v, float width) {
+    fixed_size(v, width, TextField::kFieldHeight);
 }
 
 /// A bipolar voltage rail: full-scale negative at the left, zero at the centre,

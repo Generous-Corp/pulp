@@ -549,19 +549,23 @@ TEST_CASE("CV To OSC's editor tracks the observed voltage", "[brew][ui][osc]") {
         WARN("no raster screenshot backend in this build — skipping");
         return;
     }
-    // Send is off, and rendering an editor must never turn it on.
-    REQUIRE(ed.host.state().get_value(CvOscProcessor::kEnabled) == 0.0f);
+    // Both channels are off, and rendering an editor must never turn one on.
+    for (std::size_t c = 0; c < kOscChannels; ++c)
+        REQUIRE(ed.host.state().get_value(
+                    static_cast<state::ParamID>(
+                        param_for(CvOscProcessor::kEnable, c))) == 0.0f);
 
     drive(ed.host, 0.2f);
     const auto low = ed.shoot();
     REQUIRE_FALSE(low.empty());
 
-    // The rail reads the input the DSP saw, so a different voltage redraws it.
+    // The rails read the input the DSP saw, so a different voltage redraws them.
     drive(ed.host, -0.8f);
     REQUIRE(differs(ed.shoot(), low));
 
     const auto* proc = static_cast<const CvOscProcessor*>(ed.host.processor());
     REQUIRE(proc->latest(0) == -0.8f);
+    REQUIRE(proc->latest(1) == -0.8f);
     // Nothing was sent, because nothing was asked for.
     REQUIRE(proc->sent_count() == 0);
 }

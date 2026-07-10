@@ -112,9 +112,8 @@ int main(int argc, char** argv) {
         run_block(h, playing(2.3));  // lights step 2
     });
     shoot(create_cv_osc, "cv-osc.png", [](format::HeadlessHost& h) {
-        // Send stays off in the shot: the lamp is dark, which is what a fresh
-        // instance looks like, and no packet leaves a screenshot run.
-        h.state().set_value(CvOscProcessor::kPort, 9001.0f);
+        // Both channels stay off in the shot: the lamps are dark, which is what a
+        // fresh instance looks like, and no packet leaves a screenshot run.
         run_block(h, playing(0.0), -0.35f);
     });
     shoot(create_sync, "sync-stopped.png", nullptr);
