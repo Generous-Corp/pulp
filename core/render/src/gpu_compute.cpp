@@ -1441,10 +1441,35 @@ public:
     bool multi_convolve(const float* in_complex, const float* pan_l,
                         const float* pan_r, float* out_lr, uint32_t n,
                         uint32_t num_ir) override {
+        return multi_convolve_impl(in_complex, pan_l, pan_r, out_lr, n, num_ir,
+                                   /*gpu_ns=*/nullptr);
+    }
+
+    bool multi_convolve_timed(const float* in_complex, const float* pan_l,
+                              const float* pan_r, float* out_lr, uint32_t n,
+                              uint32_t num_ir, double* gpu_compute_us) override {
+        double ns = -1.0;
+        const bool ok = multi_convolve_impl(in_complex, pan_l, pan_r, out_lr, n,
+                                            num_ir, &ns);
+        if (gpu_compute_us) *gpu_compute_us = (ns >= 0.0) ? ns / 1000.0 : -1.0;
+        return ok;
+    }
+
+    // Shared implementation. When `gpu_ns` is non-null and timestamps are
+    // available, brackets the fused pass sequence with a compute-pass timestamp
+    // query (begin on the forward FFT's first pass, end on the combine pass) and
+    // writes the GPU-busy nanoseconds; the untimed public entry passes null and
+    // pays nothing. Not real-time-safe (blocks on the readback).
+    bool multi_convolve_impl(const float* in_complex, const float* pan_l,
+                             const float* pan_r, float* out_lr, uint32_t n,
+                             uint32_t num_ir, double* gpu_ns) {
         if (!initialized_ || !in_complex || !pan_l || !pan_r || !out_lr) return false;
         auto it = multi_conv_plans_.find(n);
         if (it == multi_conv_plans_.end() || it->second.num_ir != num_ir) return false;
         MultiConvPlan& plan = it->second;
+
+        if (gpu_ns) *gpu_ns = -1.0;
+        bool do_ts = (gpu_ns != nullptr) && has_timestamp_ && ensure_device_ts();
 
         const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));
         const uint32_t fwd_wg = ((n / 2u) + 255u) / 256u;             // 1 transform
@@ -1461,7 +1486,9 @@ public:
         // single stereo block to readback. Only 2n floats leave the GPU.
         wgpu::CommandEncoderDescriptor enc_desc{};
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
-        encode_fft_passes(encoder, plan.fwd_bgs, fwd_wg);
+        // Begin timestamp rides the forward FFT's first pass.
+        encode_fft_passes(encoder, plan.fwd_bgs, fwd_wg,
+                          do_ts ? dev_ts_qs_ : wgpu::QuerySet{});
         {
             wgpu::ComputePassDescriptor pd{};
             auto pass = encoder.BeginComputePass(&pd);
@@ -1473,6 +1500,13 @@ public:
         encode_fft_passes(encoder, plan.inv_bgs, inv_wg);
         {
             wgpu::ComputePassDescriptor pd{};
+            wgpu::PassTimestampWrites tw{};
+            if (do_ts) {  // End timestamp on the final (combine) pass.
+                tw.querySet = dev_ts_qs_;
+                tw.beginningOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+                tw.endOfPassWriteIndex = 1;
+                pd.timestampWrites = &tw;
+            }
             auto pass = encoder.BeginComputePass(&pd);
             pass.SetPipeline(multi_ir_combine_pipeline_);
             pass.SetBindGroup(0, plan.combine_bg);
@@ -1480,10 +1514,24 @@ public:
             pass.End();
         }
         encoder.CopyBufferToBuffer(plan.out_lr, 0, plan.readback, 0, small);
+        if (do_ts) {
+            encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
+            encoder.CopyBufferToBuffer(dev_ts_resolve_, 0, dev_ts_readback_, 0,
+                                       2u * sizeof(uint64_t));
+        }
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
 
-        return read_back(plan.readback, out_lr, small);
+        if (!read_back(plan.readback, out_lr, small)) return false;
+
+        if (do_ts) {
+            uint64_t ticks[2] = {0, 0};
+            if (read_back(dev_ts_readback_, ticks, 2u * sizeof(uint64_t))
+                && ticks[1] >= ticks[0]) {
+                *gpu_ns = static_cast<double>(ticks[1] - ticks[0]);  // WebGPU ns
+            }
+        }
+        return true;
     }
 
     // ── Multi-layer spectral stack ──────────────────────────────────────────
@@ -2582,6 +2630,31 @@ private:
     bool owns_device_ = false;
     bool has_timestamp_ = false;  // TimestampQuery feature enabled on device_
 
+    // Device-level 2-slot timestamp probe, shared by any op that reports
+    // GPU-busy time and whose plan struct does not carry its own QuerySet
+    // (multi_convolve). Safe to share because every timed op blocks on its
+    // readback before returning, so no two use it concurrently.
+    wgpu::QuerySet dev_ts_qs_;
+    wgpu::Buffer dev_ts_resolve_, dev_ts_readback_;
+    bool ensure_device_ts() {
+        if (dev_ts_qs_) return true;
+        if (!has_timestamp_) return false;
+        wgpu::QuerySetDescriptor qd{};
+        qd.type = wgpu::QueryType::Timestamp;
+        qd.count = 2;
+        dev_ts_qs_ = device_.CreateQuerySet(&qd);
+        const uint64_t bytes = 2u * sizeof(uint64_t);
+        wgpu::BufferDescriptor rd{};
+        rd.size = bytes;
+        rd.usage = wgpu::BufferUsage::QueryResolve | wgpu::BufferUsage::CopySrc;
+        dev_ts_resolve_ = device_.CreateBuffer(&rd);
+        wgpu::BufferDescriptor bd{};
+        bd.size = bytes;
+        bd.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+        dev_ts_readback_ = device_.CreateBuffer(&bd);
+        return dev_ts_qs_ && dev_ts_resolve_ && dev_ts_readback_;
+    }
+
 #ifdef PULP_BENCHMARK
     bench::PerfCounters* bench_counters_ = nullptr;
 #endif
@@ -2900,16 +2973,29 @@ private:
     // Encode one Stockham FFT pass per bind group into an existing encoder (no
     // submit). Each pass is its own compute pass so Dawn inserts the required
     // cross-pass synchronization. Shared by the fused convolution path.
+    // Optionally writes a beginning-of-pass timestamp into slot 0 of `ts_qs` on
+    // the FIRST pass encoded here — used to bracket a multi-pass op's GPU-busy
+    // time from its very first compute pass. Pass a null QuerySet to disable.
     void encode_fft_passes(wgpu::CommandEncoder& encoder,
                            const std::vector<wgpu::BindGroup>& stage_bgs,
-                           uint32_t workgroups) {
+                           uint32_t workgroups,
+                           const wgpu::QuerySet& ts_qs = {}) {
+        bool first = true;
         for (const auto& bg : stage_bgs) {
             wgpu::ComputePassDescriptor pd{};
+            wgpu::PassTimestampWrites tw{};
+            if (ts_qs && first) {
+                tw.querySet = ts_qs;
+                tw.beginningOfPassWriteIndex = 0;
+                tw.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+                pd.timestampWrites = &tw;
+            }
             auto pass = encoder.BeginComputePass(&pd);
             pass.SetPipeline(fft_pipeline_);
             pass.SetBindGroup(0, bg);
             pass.DispatchWorkgroups(workgroups);
             pass.End();
+            first = false;
         }
     }
 
