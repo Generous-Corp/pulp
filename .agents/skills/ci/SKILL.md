@@ -3632,3 +3632,20 @@ full design in `docs/guides/intel-support.md`). CI-relevant facts:
 Hard rule: **no Intel work ever routes to the self-hosted Studios** (they host
 the required `macos` gate) and **Namespace is never used**. All Intel lanes run
 on free-for-public-repo GitHub-hosted macOS runners.
+
+## Release page: ONE workflow owns the GitHub Release (2026-07-10)
+
+`release-cli.yml` is the **sole creator** of the GitHub Release for a `v*` tag:
+it sets the title (the **bare tag**, e.g. `v0.645.0` — no "Pulp CLI" prefix),
+the body (humanized highlights from `tools/scripts/compose_release_notes.py
+--footer`, which appends the `**Full changelog:** CHANGELOG.md § X` +
+`**Previous release:** vA.B.C` footer), and uploads the CLI/SDK binaries.
+`sign-and-release.yml` must **only** `gh release upload` `appcast.xml` onto that
+release — it must NOT create/name/draft it. Both fire on the same `v*` tag, so if
+sign-and-release creates/renames/drafts a release it RACES release-cli and
+last-writer-wins produces inconsistent titles (`Pulp CLI vX` vs `vX`),
+draft/published flips, stray `release-untagged-*` entries, and GitHub's
+`Full Changelog: A...B` compare footer instead of the CHANGELOG-§ one. Release
+notes link a PR (`#N`) for every entry via `compose_release_notes.py`'s
+`pr_for_commit` GitHub commit→PR lookup; only genuine direct-to-main commits show
+a short SHA. See `planning/2026-07-10-release-page-hygiene.md`.
