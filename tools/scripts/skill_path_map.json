@@ -311,7 +311,9 @@
         "tools/build-skia.sh",
         "tools/build-skia-android.sh",
         "tools/cmake/PulpBundleRelocatable.cmake",
-        "tools/cmake/scripts/check_bundle_relocatable.py"
+        "tools/cmake/PulpWgpuUniversal.cmake",
+        "tools/cmake/scripts/check_bundle_relocatable.py",
+        "tools/scripts/check_bundle_architectures.py"
       ]
     },
     "ship": {

@@ -5,13 +5,22 @@ schema_version: 2
 platforms:
   macos:
     status: usable
-    notes: Primary development platform. ARM64 (Apple Silicon) only. Minimum macOS 13.3
-      (Ventura). Skia/Dawn allow macOS 13.0 (Google's Chromium mac_deployment_target at
-      the pinned milestone), but Apple's libc++ gates std::to_chars(float) — reached via
-      std::format in Pulp's logging — at macOS 13.3, which sets the real floor. The
-      per-dependency floor is tracked in tools/deps/min_os.json (Pulp targets the max of
-      every linked dependency's minimum, libc++ included) and pinned into the build by
-      tools/cmake/PulpMinOs.cmake.
+    notes: Primary development platform. ARM64 (Apple Silicon) is the usable, primary
+      target. x86_64 (Intel) and universal (arm64;x86_64) builds are supported and
+      configure+build via -DCMAKE_OSX_ARCHITECTURES, but ship experimental — GitHub
+      CI VMs have no representative Intel GPU and Rosetta caps SIMD at SSE4.2/AVX2, so
+      Metal-on-Intel-GPU behavior, AVX3 dispatch, and Intel-native DAW hosting are not
+      yet verified on real Intel hardware. skia-builder publishes all three mac Skia
+      slices (mac-arm64, mac-x86_64, mac-universal); wgpu-native ships no universal
+      dylib, so a universal build lipo's the two thin slices and ad-hoc re-signs the fat
+      dylib (tools/cmake/PulpWgpuUniversal.cmake). Minimum macOS 13.3 (Ventura),
+      arch-independent. Skia/Dawn allow macOS 13.0 (Google's Chromium
+      mac_deployment_target at the pinned milestone) on both arm64 and x86_64, but
+      Apple's libc++ gates std::to_chars(float) — reached via std::format in Pulp's
+      logging — at macOS 13.3, which sets the real floor. The per-dependency floor is
+      tracked in tools/deps/min_os.json (macos-arm64 + macos-x64; Pulp targets the max
+      of every linked dependency's minimum across all requested arches, libc++ included)
+      and pinned into the build by tools/cmake/PulpMinOs.cmake.
   windows:
     status: experimental
     notes: WASAPI audio, Win32 MIDI, FFTW3/MKL FFT acceleration (dynamic-loaded), NSIS installer, Authenticode signing. CI enabled.
