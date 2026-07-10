@@ -200,6 +200,7 @@ jobs:
           python3 tools/scripts/test_compat_sync_check.py
           python3 tools/scripts/test_compat_aggregate.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
+          python3 tools/scripts/test_intel_canary_lint.py
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest

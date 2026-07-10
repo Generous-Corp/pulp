@@ -19,8 +19,12 @@ namespace pulp::gpu_audio {
 /// the hardcore multi-layer "hyper-freeze" modes.
 class GpuSpectralFreeze {
 public:
+    /// `shared_device` (optional) reuses an existing GpuCompute so this freeze
+    /// and a sibling spectral primitive don't each spin up a device; must be
+    /// initialized and outlive the freeze. null = create + own a device.
     bool prepare(uint32_t fft_size, uint32_t hop,
-                 signal::WindowFunction::Type window = signal::WindowFunction::Type::hann);
+                 signal::WindowFunction::Type window = signal::WindowFunction::Type::hann,
+                 render::GpuCompute* shared_device = nullptr);
 
     bool gpu_available() const { return stft_.gpu_available(); }
     uint32_t fft_size() const { return stft_.fft_size(); }
@@ -33,8 +37,10 @@ public:
 
     /// Render the next synthesis frame (fft_size real samples), advancing each
     /// bin's phase by its nominal per-hop increment. `phase_jitter` (0..1) adds
-    /// a small random phase wander for a less static tail. Returns false if
-    /// nothing captured or not GPU-ready.
+    /// per-hop phase wander using the shared spectral-jitter contract (see
+    /// spectral_jitter.hpp): a full-turn-at-1 stateless-hash wander identical to
+    /// the SpectralStack, so the knob means the same thing (and sounds the same)
+    /// here as in the stack. Returns false if nothing captured or not GPU-ready.
     bool render(float* frame_out, float phase_jitter = 0.0f);
 
 private:
@@ -43,7 +49,7 @@ private:
     std::vector<float> mag_;     // per-bin magnitude (fft_size)
     std::vector<float> phase_;   // per-bin running phase (fft_size)
     std::vector<float> scratch_; // 2*fft_size interleaved-complex rebuild buffer
-    std::uint32_t rng_ = 0x9e3779b9u;
+    std::uint32_t seed_ = 0x9E3779B9u;  // jitter seed, advanced each render
     bool captured_ = false;
 };
 

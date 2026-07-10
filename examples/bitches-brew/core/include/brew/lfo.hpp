@@ -1,17 +1,22 @@
 #pragma once
 
-// LFO shapes and phase, derived from the host's position.
+// LFO shapes, phase, and the eight ways a modulation source can be told what time
+// it is.
 //
-// Same decision as the clock grid (brew/clock.hpp), for the same reason: the
-// phase is a pure function of `position_beats`, never an accumulator advanced one
-// block at a time. An accumulator drifts against the host over a long session,
-// has to be re-synced on every locate, and lands somewhere arbitrary when the
-// user hits play at bar 57. Deriving it means bar 57 always sounds like bar 57.
+// The default is the same decision as the clock grid (brew/clock.hpp), for the
+// same reason: the phase is a pure function of `position_beats`, never an
+// accumulator advanced one block at a time. An accumulator drifts against the host
+// over a long session, has to be re-synced on every locate, and lands somewhere
+// arbitrary when the user hits play at bar 57. Deriving it means bar 57 always
+// sounds like bar 57, and bouncing the same project twice lands the modulation on
+// the same samples.
 //
-// It also means the LFO is exactly reproducible: bounce the same project twice
-// and the modulation lands on the same samples. For a CV signal patched into a
-// filter cutoff, that is the difference between a repeatable take and a
-// suspicious one.
+// Two of the eight sync modes cannot work that way, and the header says so rather
+// than pretending. `Free` and `Tempo` keep oscillating while the transport is
+// parked, which is not a function of a position that is not moving. Those two run
+// off an accumulator and are the only modes in this plug-in that do not bounce
+// bit-identically. Everything else — including `Free3`, which is what a
+// position-derived "free run" actually is — stays pure.
 //
 // Everything here returns bipolar [-1, +1]. The unipolar conversion is one
 // multiply at the output stage, and keeping the shapes bipolar means `invert`
@@ -19,6 +24,7 @@
 
 #include <brew/clock.hpp>   // Swing, swing_unwarp
 #include <brew/random.hpp>
+#include <brew/sync.hpp>    // NoteUnit, note_unit_beats, enum_from_param
 
 #include <algorithm>
 #include <cmath>
@@ -93,8 +99,9 @@ inline constexpr double kTau = 6.283185307179586476925286766559;
     return 0.0f;
 }
 
-/// A quarter cycle ahead. Patched alongside the main output it gives a circular
-/// (X, Y) pair — the usual way to drive a two-axis modulation from one LFO.
+/// A quarter cycle. The offset one channel takes when it is locked to the other:
+/// patched into two CV inputs the pair traces a circle, which is how a two-axis
+/// modulation is driven from a single oscillator.
 inline constexpr double kQuadratureOffset = 0.25;
 
 /// Bend the time axis so the waveform's centre falls at `centre` rather than at
@@ -117,6 +124,13 @@ inline constexpr double kQuadratureOffset = 0.25;
     return wrap_phase(phase) < std::clamp(pulse_width, 0.0, 1.0) ? 1.0f : -1.0f;
 }
 
+// ── The mix ──────────────────────────────────────────────────────────────────
+
+/// Separates the noise hash from the sample-and-hold hash. Without it a cycle
+/// index and a sample index that happened to collide would hand both generators
+/// the same number, and the two would move together.
+inline constexpr std::uint32_t kNoiseSalt = 0x9E3779B9u;
+
 /// How much of each shape is summed into the output.
 ///
 /// A mixer, not a selector. Four depths subsume the five-way enum this replaced
@@ -124,15 +138,18 @@ inline constexpr double kQuadratureOffset = 0.25;
 /// bipolar, so a shape can be subtracted as easily as added.
 ///
 /// `random` is a sample-and-hold: one level per cycle, held flat across it, in the
-/// manner of a noise source feeding a hardware S&H. It is a hash of the cycle
-/// index rather than a generator, so it renders identically every time — see
-/// brew/random.hpp.
+/// manner of a noise source feeding a hardware S&H. `noise` is the ungated source
+/// itself: a new value every sample. Both are hashes of an index rather than
+/// generators, so they render identically every time — see brew/random.hpp. A
+/// white-noise LFO that could not be bounced twice would be a strange thing to put
+/// in a suite built around bounce determinism.
 struct LfoMix {
     float sine = 1.0f;
     float triangle = 0.0f;
     float saw = 0.0f;
     float square = 0.0f;
     float random = 0.0f;
+    float noise = 0.0f;
     float pulse_width = 0.5f;
     float asymmetry = 0.5f;
     float offset = 0.0f;
@@ -141,11 +158,16 @@ struct LfoMix {
 
 /// The mixed waveform at a phase, before the output stage.
 ///
-/// The sum is *not* clamped here. Four depths at full can reach 4.0, and clamping
+/// The sum is *not* clamped here. Five depths at full can reach 5.0, and clamping
 /// mid-chain would silently flatten a mix the user asked for before `offset` and
 /// the output scale have had their say. `resolve_output` clamps once, at the jack.
+///
+/// `cycle` keys the sample-and-hold; `sample` keys the noise. They are different
+/// indices because the two are different things: one changes once per cycle, the
+/// other once per sample.
 [[nodiscard]] inline float lfo_mix_value(const LfoMix& m, double phase,
-                                         std::int64_t cycle) noexcept {
+                                         std::int64_t cycle,
+                                         std::int64_t sample = 0) noexcept {
     const double p = warp_phase(phase, static_cast<double>(m.asymmetry));
     float v = 0.0f;
     if (m.sine != 0.0f) v += m.sine * lfo_shape(Waveform::sine, p);
@@ -154,49 +176,178 @@ struct LfoMix {
     if (m.square != 0.0f) v += m.square * square_shape(p, static_cast<double>(m.pulse_width));
     // Held across the whole cycle, so it is keyed on the cycle, not the phase.
     if (m.random != 0.0f) v += m.random * hash_bipolar(cycle, m.seed);
+    if (m.noise != 0.0f) v += m.noise * hash_bipolar(sample, m.seed ^ kNoiseSalt);
     return v + m.offset;
 }
 
-/// How the rate knob is read.
-///
-/// `tempo` locks the LFO to the host's musical grid; `free` runs it in hertz,
-/// independent of tempo. Free-running does *not* mean accumulating: the phase is
-/// still a pure function of the host's absolute sample position, so a bounce is
-/// bit-identical and a locate lands where the timeline says. An LFO that
-/// accumulated would drift against the host over a long session, and render
-/// differently every time.
-enum class RateMode : int { tempo = 0, free = 1 };
+// ── Sync modes ───────────────────────────────────────────────────────────────
 
-[[nodiscard]] inline RateMode rate_mode_from_param(float v) noexcept {
-    return v >= 0.5f ? RateMode::free : RateMode::tempo;
+/// How the LFO is told what time it is. Parameter values are persisted, so the
+/// order is a compatibility surface and is append-only.
+///
+/// Two independent questions, and eight of the answers have names:
+///
+///   frequency source     — hertz, or beats of the host's tempo
+///   transport behaviour  — free-run always / free-run then lock while playing /
+///                          lock while playing and hold when stopped /
+///                          ...and hold, resetting the phase on the play edge
+///
+/// | mode         | frequency | while stopped | while playing        |
+/// |--------------|-----------|---------------|----------------------|
+/// | free         | hertz     | keeps running | keeps running        |
+/// | tempo        | beats     | keeps running | keeps running        |
+/// | transport    | beats     | keeps running | locked to position   |
+/// | quadrature   | (other's) | (other's)     | (other's) + Phase    |
+/// | start_stop   | —         | low           | high                 |
+/// | transport2   | beats     | holds         | locked to position   |
+/// | free2        | hertz     | holds         | from the play edge   |
+/// | free3        | hertz     | holds         | from the timeline    |
+/// | trig_free    | hertz     | keeps running | keeps running        |
+/// | trig_tempo   | beats     | keeps running | keeps running        |
+///
+/// `free` and `tempo` are the two that keep running against wall-clock time while
+/// the playhead is parked, so they are the two that do not bounce bit-identically.
+/// `free3` is what a position-derived "free run" actually is, and it is exact.
+///
+/// The last two are a stepped generator's modes and have no meaning for a
+/// continuous one: the clock runs at the base rate, but the *pattern* refuses to
+/// cross a step boundary until a trigger arrives on the input bus. The clock is
+/// the same wall-clock accumulator `free` and `tempo` use; only the thing reading
+/// it is gated. So the LFO's `Sync` stops at `kSyncModeCount`, and the Step LFO's
+/// at `kStepSyncModeCount`.
+enum class SyncMode : int {
+    free = 0,
+    tempo = 1,
+    transport = 2,
+    quadrature = 3,
+    start_stop = 4,
+    transport2 = 5,
+    free2 = 6,
+    free3 = 7,
+    trig_free = 8,
+    trig_tempo = 9,
+};
+
+/// How many of them a continuous generator can use.
+inline constexpr int kSyncModeCount = 8;
+
+/// How many a stepped one can. The two extra pause the pattern between steps.
+inline constexpr int kStepSyncModeCount = 10;
+
+/// The rate knob a mode reads: `Speed` × `Multiplier`, or `Beats` × `Divisor`.
+[[nodiscard]] inline constexpr bool sync_uses_hertz(SyncMode m) noexcept {
+    return m == SyncMode::free || m == SyncMode::free2 || m == SyncMode::free3 ||
+           m == SyncMode::trig_free;
 }
 
-/// Slow enough to sweep a filter over a minute; fast enough to reach the bottom
-/// of the audio band, where a CV becomes a tone.
-inline constexpr double kMinFreeHz = 0.01;
-inline constexpr double kMaxFreeHz = 40.0;
+[[nodiscard]] inline constexpr bool sync_uses_beats(SyncMode m) noexcept {
+    return m == SyncMode::tempo || m == SyncMode::transport ||
+           m == SyncMode::transport2 || m == SyncMode::trig_tempo;
+}
 
-/// Elapsed cycles at a point on the timeline — the LFO's one time coordinate.
+/// Whether the mode keeps oscillating with the transport parked. The ones that do
+/// are the ones that cannot be a pure function of a position that is not moving.
+[[nodiscard]] inline constexpr bool sync_runs_when_stopped(SyncMode m) noexcept {
+    return m == SyncMode::free || m == SyncMode::tempo || m == SyncMode::transport ||
+           m == SyncMode::trig_free || m == SyncMode::trig_tempo;
+}
+
+/// Whether the mode is bit-identical across renders. The honest answer, exposed
+/// so the editor can say it rather than the README alone.
 ///
-/// Both modes reduce to this, which is why the shapes, the phase offset, the
-/// quadrature and the sample-and-hold need to know nothing about tempo.
+/// The trigger modes are excluded for a second reason on top of the wall clock:
+/// the step they are holding on is a count of the edges seen since the last reset,
+/// so it depends on where the render started, not only on where the playhead is.
+[[nodiscard]] inline constexpr bool sync_is_deterministic(SyncMode m) noexcept {
+    return m != SyncMode::free && m != SyncMode::tempo &&
+           m != SyncMode::trig_free && m != SyncMode::trig_tempo;
+}
+
+/// Whether the pattern waits at the end of each step for a trigger.
+[[nodiscard]] inline constexpr bool sync_pauses_for_trigger(SyncMode m) noexcept {
+    return m == SyncMode::trig_free || m == SyncMode::trig_tempo;
+}
+
+/// Whether the play edge snaps the phase back to `Phase`.
+[[nodiscard]] inline constexpr bool sync_resets_on_play(SyncMode m) noexcept {
+    return m == SyncMode::free2;
+}
+
+// ── Frequency ────────────────────────────────────────────────────────────────
+
+/// The decade switch beside `Speed`. Persisted as an index: append only.
+enum class Multiplier : int {
+    tenth = 0,
+    one = 1,
+    ten = 2,
+    hundred = 3,
+    thousand = 4,
+};
+
+inline constexpr int kMultiplierCount = 5;
+
+[[nodiscard]] inline constexpr double multiplier_value(Multiplier m) noexcept {
+    switch (m) {
+        case Multiplier::tenth: return 0.1;
+        case Multiplier::one: return 1.0;
+        case Multiplier::ten: return 10.0;
+        case Multiplier::hundred: return 100.0;
+        case Multiplier::thousand: return 1000.0;
+    }
+    return 1.0;
+}
+
+/// Slow enough to sweep a filter over a couple of minutes. The ceiling is well
+/// into the audio band, because `Speed` × 1000 asks for it — but the shapes here
+/// are naive, not band-limited, so a saw or a square up there will alias. An LFO
+/// is not an oscillator; the range exists so the decade switch means something,
+/// not as a claim about spectral purity.
+inline constexpr double kMinFreeHz = 0.001;
+inline constexpr double kMaxFreeHz = 1000.0;
+
+/// `Speed` × `Multiplier`, clamped. A rate of zero is a phase that never advances
+/// and a rate of a million is a stepped voltage pretending to be a waveform.
+[[nodiscard]] inline double free_hz(double speed, Multiplier m) noexcept {
+    return std::clamp(speed * multiplier_value(m), kMinFreeHz, kMaxFreeHz);
+}
+
+/// How long one cycle lasts, in beats: `Beats` of the note `Divisor` names, and a
+/// third off if `Triplet`.
+///
+/// `Divisor` 1/8 with `Beats` 3 is three eighth notes. `Beats` is deliberately
+/// fractional, because automating it through a non-integer value is a legitimate
+/// way to sweep the rate.
+[[nodiscard]] inline double cycle_beats(double beats, NoteUnit divisor,
+                                        bool triplet) noexcept {
+    const double length = beats * note_unit_beats(divisor);
+    return triplet ? length * (2.0 / 3.0) : length;
+}
+
+// ── Elapsed cycles ───────────────────────────────────────────────────────────
+
+/// Cycles elapsed at a beat position, relative to an origin.
+///
 /// Swing warps the beat timeline, so it is applied to the *position* before the
 /// position becomes a phase — not to the phase afterwards. `swing_unwarp` maps a
 /// sounding beat back to the straight beat it stands for, which is exactly the
 /// coordinate the cycle count is measured in.
-///
-/// It has no meaning in free-run mode. Swing is a subdivision of a beat, and a
-/// free-running LFO has no beats; a hertz rate that shuffled would just be a
-/// wrong hertz rate. The parameter is ignored there rather than approximated.
-[[nodiscard]] inline double lfo_cycles(RateMode mode, double position_beats,
-                                       double position_seconds,
-                                       double beats_per_cycle,
-                                       double free_hz,
-                                       const Swing& swing = {}) noexcept {
-    if (mode == RateMode::free)
-        return position_seconds * std::clamp(free_hz, kMinFreeHz, kMaxFreeHz);
+[[nodiscard]] inline double cycles_from_beats(double position_beats,
+                                              double origin_beats,
+                                              double beats_per_cycle,
+                                              const Swing& swing = {}) noexcept {
     if (!(beats_per_cycle > 0.0)) return 0.0;
-    return swing_unwarp(position_beats, swing) / beats_per_cycle;
+    return (swing_unwarp(position_beats, swing) - swing_unwarp(origin_beats, swing)) /
+           beats_per_cycle;
+}
+
+/// Cycles elapsed at a time position, relative to an origin.
+///
+/// Swing has no meaning here. It is a subdivision of a beat, and a plug-in running
+/// in hertz has no beats; a shuffled hertz rate would just be a wrong hertz rate.
+[[nodiscard]] inline double cycles_from_seconds(double position_seconds,
+                                                double origin_seconds,
+                                                double hz) noexcept {
+    return (position_seconds - origin_seconds) * hz;
 }
 
 /// The phase within the current cycle, given elapsed cycles and an offset.
@@ -213,6 +364,49 @@ inline constexpr double kMaxFreeHz = 40.0;
 /// than where the shape wraps.
 [[nodiscard]] inline std::int64_t cycle_at(double cycles, double offset) noexcept {
     return static_cast<std::int64_t>(std::floor(cycles + offset));
+}
+
+// ── Start/Stop ───────────────────────────────────────────────────────────────
+
+/// `Start/Stop` mode's whole waveform: the transport, as a square wave whose
+/// period is the length of the session.
+///
+/// Not really an LFO. It exists so a patch can know the transport is running
+/// without a clock cable, and it is exactly as useful as `Smooth` makes it — set
+/// a long smoothing time and the play edge becomes a fade-in.
+[[nodiscard]] inline constexpr float start_stop_value(bool playing) noexcept {
+    return playing ? 1.0f : -1.0f;
+}
+
+// ── Input ────────────────────────────────────────────────────────────────────
+
+/// What the plug-in does with the voltage on its input bus.
+///
+/// `off` is the default, and for the same reason a bypassed generator is silent:
+/// the output ends at a patch cable, and whatever a DAW happens to have on the
+/// track — a drum loop, at full scale — would otherwise arrive at a VCO's pitch
+/// input. A modulation source that reads its input by default is a modulation
+/// source that screams the first time it is dropped on an audio track.
+enum class InputMode : int {
+    off = 0,
+    add = 1,
+    multiply = 2,
+    combine = 3,
+};
+
+inline constexpr int kInputModeCount = 4;
+
+/// `combine` is the sum of what `add` and `multiply` would each have produced:
+/// ring modulation riding on the sum.
+[[nodiscard]] inline constexpr float apply_input(InputMode mode, float lfo,
+                                                 float in) noexcept {
+    switch (mode) {
+        case InputMode::off: return lfo;
+        case InputMode::add: return lfo + in;
+        case InputMode::multiply: return lfo * in;
+        case InputMode::combine: return (lfo + in) + (lfo * in);
+    }
+    return lfo;
 }
 
 /// Map bipolar [-1, +1] to unipolar [0, 1]. Some CV inputs (a VCA, an envelope

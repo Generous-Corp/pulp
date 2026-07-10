@@ -4,18 +4,20 @@
 //
 // An insert, not a generator: the input passes through to the output bit-exactly,
 // so this sits anywhere in a chain without changing the voltage that reaches the
-// jack. What it adds is a side-channel — the value of each channel, sent as an
-// OSC float to `127.0.0.1` on a port you choose.
+// jack. What it adds is a side-channel — the value of each channel, sent as an OSC
+// float to an address and a destination the user types.
 //
-// It is **off by default**, and that is a safety property rather than a style
-// choice. A plug-in that begins emitting UDP the moment a project loads will trip
-// a firewall prompt on some machines and quietly stream a user's patch on others.
-// Nothing leaves this process until the switch is on.
+// Each channel is **off by default**, and that is a safety property rather than a
+// style choice. A plug-in that begins emitting UDP the moment a project loads will
+// trip a firewall prompt on some machines and quietly stream a user's patch on
+// others. Nothing leaves this process until a switch is on.
 //
 // The send happens on a background thread. See brew/cv_osc.hpp for why the audio
 // thread must not touch a socket. The audio thread's entire contribution is one
 // relaxed atomic store per channel per block.
 
+#include <brew/channels.hpp>
+#include <brew/param_text.hpp>
 #include <brew/cv.hpp>
 #include <brew/cv_osc.hpp>
 
@@ -33,8 +35,11 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <span>
+#include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace pulp::examples::brew {
 
@@ -60,16 +65,18 @@ private:
     osc::Sender sender_;
 };
 
-inline constexpr std::size_t kOscChannels = 2;
-
 class CvOscProcessor : public format::Processor {
 public:
     // Parameter IDs are part of the persisted state contract. Never renumber.
+    //
+    // Id 2 was a `Port` knob before the destination became text. It stays retired
+    // rather than reused: a float parameter cannot hold `host:port`, and a stale
+    // project restoring a port into whatever id 2 means next is exactly the class
+    // of bug an id contract exists to prevent.
     enum ParamId : state::ParamID {
-        kEnabled = 1,
-        kPort = 2,
-        kRateHz = 3,
-        kDeadband = 4,
+        kEnable = 1,       ///< Per channel. Right is kEnable + kRightChannelStride.
+        kRateHz = 3,       ///< Global: the sender thread has one clock.
+        kThreshold = 4,    ///< Per channel.
     };
 
     explicit CvOscProcessor(std::unique_ptr<MessageSink> sink = nullptr)
@@ -89,36 +96,120 @@ public:
         };
     }
 
+    /// A deadband is measured in ten-thousandths of full scale — three decimals
+    /// would round every useful setting to the same string.
+    static std::string threshold_text(float v) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.4f", v);
+        return std::string(buf);
+    }
+    static std::string rate_text(float v) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.0f Hz", v);
+        return std::string(buf);
+    }
+
+    /// `fmt` is how the value reads — here and in the host's parameter list.
+    struct ControlSpec {
+        state::ParamID id;
+        const char* name;
+        const char* unit;
+        state::ParamRange range;
+        std::string (*fmt)(float);
+    };
+
+    /// Registered once per channel: the two OSC streams are independent.
+    static constexpr std::array<ControlSpec, 2> controls() {
+        return {{
+            // Off until asked. Nothing leaves the process before this is on.
+            {kEnable, "Enable", "", {0.0f, 1.0f, 0.0f, 1.0f}, text::on_off},
+            // Movement smaller than this is not worth a packet.
+            {kThreshold, "Threshold", "", {0.0f, 0.5f, 0.001f, 0.0001f}, threshold_text},
+        }};
+    }
+
     void define_parameters(state::StateStore& store) override {
-        // Off until asked. Nothing leaves the process before this is on.
-        store.add_parameter({.id = kEnabled,
-                             .name = "Send",
-                             .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
-        // Above the privileged range: binding below 1024 needs root, and a CV
-        // plug-in has no business asking for it.
-        store.add_parameter({.id = kPort,
-                             .name = "Port",
-                             .unit = "",
-                             .range = {1024.0f, 65535.0f, 9000.0f, 1.0f}});
+        for (std::size_t ch = 0; ch < kOscChannels; ++ch)
+            for (const auto& c : controls())
+                store.add_parameter(
+                    {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
+                     .name = std::string(c.name) + channel_suffix(ch),
+                     .unit = c.unit,
+                     .range = c.range,
+                     .to_string = c.fmt});
+
+        // One rate, because one thread sends both channels. Per-channel rates
+        // would need per-channel threads to mean anything, and a second thread to
+        // send a second float is not a trade worth making.
         store.add_parameter({.id = kRateHz,
                              .name = "Rate",
                              .unit = "Hz",
-                             .range = {kMinRateHz, kMaxRateHz, 60.0f, 1.0f}});
-        // Movement smaller than this is not worth a packet.
-        store.add_parameter({.id = kDeadband,
-                             .name = "Deadband",
-                             .unit = "",
-                             .range = {0.0f, 0.5f, 0.001f, 0.0001f}});
+                             .range = {kMinRateHz, kMaxRateHz, 60.0f, 1.0f},
+                             .to_string = rate_text});
     }
 
-    void prepare(const format::PrepareContext&) override { start_sender(); }
-
-    std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 274};
+    void prepare(const format::PrepareContext&) override {
+        snapshot_parameters();
+        start_sender();
     }
+
+    std::pair<uint32_t, uint32_t> editor_size() const override { return {380, 640}; }
 
     std::unique_ptr<view::View> create_view() override;
+
+    // ── Text state ───────────────────────────────────────────────────────────
+    //
+    // A hostname is not a float, so the destination and the two OSC addresses
+    // live outside the StateStore, in the plug-in blob every adapter already
+    // round-trips. They are read on the sender thread and written on the UI
+    // thread, so every access takes the send lock.
+
+    [[nodiscard]] OscSettings osc_settings() const {
+        const std::lock_guard<std::mutex> lock(send_mutex_);
+        return settings_;
+    }
+
+    /// Rejects a target it cannot parse, and says so, so the editor can put the
+    /// old text back rather than leave a typo looking accepted.
+    bool set_target(std::string_view text) {
+        const auto parsed = parse_osc_target(text);
+        if (!parsed) return false;
+        const std::lock_guard<std::mutex> lock(send_mutex_);
+        if (settings_.target == *parsed) return true;
+        settings_.target = *parsed;
+        // A new destination has never heard the resting value.
+        connected_ = false;
+        return true;
+    }
+
+    /// Rejects an address pattern, an empty path, or anything the OSC spec
+    /// forbids. A sender may not send `/cv/*`.
+    bool set_path(std::size_t channel, std::string_view path) {
+        if (channel >= kOscChannels || !is_valid_osc_path(path)) return false;
+        const std::lock_guard<std::mutex> lock(send_mutex_);
+        settings_.paths[channel] = std::string(path);
+        return true;
+    }
+
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        const std::string text = serialize_osc_settings(osc_settings());
+        return {text.begin(), text.end()};
+    }
+
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        // An empty blob is a project saved before this plug-in had text state, and
+        // a fresh instance's defaults are the right answer for it.
+        if (data.empty()) return true;
+        const auto parsed = deserialize_osc_settings(
+            std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
+        if (!parsed) return false;
+        const std::lock_guard<std::mutex> lock(send_mutex_);
+        settings_ = *parsed;
+        connected_ = false;
+        return true;
+    }
+
+    // ── Observation ──────────────────────────────────────────────────────────
 
     /// The last sample seen on a channel. Read by the editor and by the sender.
     [[nodiscard]] float latest(std::size_t channel) const noexcept {
@@ -127,11 +218,55 @@ public:
                    : 0.0f;
     }
 
-    /// Messages actually handed to the sink since construction. The editor's lamp
-    /// reads it — a counter that never moves is how a user learns the receiver
-    /// is not listening, or that they never turned Send on.
+    /// Messages this channel's sink accepted since construction. The editor's lamp
+    /// reads it — a counter that never moves is how a user learns the receiver is
+    /// not listening, or that they never turned the channel on.
+    [[nodiscard]] std::uint64_t sent_count(std::size_t channel) const noexcept {
+        return channel < kOscChannels
+                   ? sent_count_[channel].load(std::memory_order_relaxed)
+                   : 0;
+    }
+
     [[nodiscard]] std::uint64_t sent_count() const noexcept {
-        return sent_count_.load(std::memory_order_relaxed);
+        std::uint64_t total = 0;
+        for (std::size_t c = 0; c < kOscChannels; ++c) total += sent_count(c);
+        return total;
+    }
+
+    /// Whether a channel is switched on, according to the store. For the editor
+    /// and for tests — both of which run on a thread that owns the store's
+    /// lifetime. The sender thread must use `enabled_now()` instead.
+    [[nodiscard]] bool enabled(std::size_t channel) const noexcept {
+        return channel < kOscChannels &&
+               as_toggle(state().get_value(
+                   static_cast<state::ParamID>(param_for(kEnable, channel))));
+    }
+
+    /// Copy the parameters the sender thread needs out of the store, on a thread
+    /// that owns the store's lifetime. Called from `process()` every block, and
+    /// once from `prepare()` before the thread starts, so a plug-in that is loaded
+    /// and enabled but never processed still comes up with its real settings.
+    ///
+    /// The sender thread must never read `state()` itself. `Processor::state()`
+    /// dereferences a pointer the *host* installs, and a host is free to destroy
+    /// its StateStore before the Processor it handed that pointer to — Pulp's own
+    /// HeadlessHost and format adapters all do, because they declare the Processor
+    /// first. The sender thread is still ticking while `~CvOscProcessor` walks to
+    /// its `join()`, so one `get_value` in that window is a use-after-free. It
+    /// crashed about one plug-in close in eight.
+    ///
+    /// Real-time safe: `get_value` is a relaxed atomic load, and every store here
+    /// is a relaxed atomic store. No allocation, no lock.
+    void snapshot_parameters() noexcept {
+        for (std::size_t c = 0; c < kOscChannels; ++c) {
+            enabled_[c].store(as_toggle(state().get_value(static_cast<state::ParamID>(
+                                  param_for(kEnable, c)))),
+                              std::memory_order_relaxed);
+            threshold_[c].store(state().get_value(static_cast<state::ParamID>(
+                                    param_for(kThreshold, c))),
+                                std::memory_order_relaxed);
+        }
+        rate_hz_.store(state().get_value(kRateHz), std::memory_order_relaxed);
     }
 
     /// Publish one tick's worth of values. Exposed so a test can drive the send
@@ -139,28 +274,37 @@ public:
     /// means it can run concurrently with the sender thread, so the send state it
     /// mutates is locked. Never called from the audio thread.
     void publish_once() {
-        std::lock_guard<std::mutex> lock(send_mutex_);
-        if (!as_toggle(state().get_value(kEnabled))) return;
+        const std::lock_guard<std::mutex> lock(send_mutex_);
 
-        const auto port = static_cast<std::uint16_t>(
-            std::lround(state().get_value(kPort)));
-        if (port != connected_port_) {
-            if (!sink_->connect(kOscHost, port)) return;
-            connected_port_ = port;
-            // A new destination has never heard the resting value.
+        bool any_enabled = false;
+        for (std::size_t c = 0; c < kOscChannels; ++c) any_enabled |= enabled_now(c);
+        // Connecting a socket for a plug-in whose channels are both off is exactly
+        // the firewall prompt the default-off rule exists to avoid.
+        if (!any_enabled) return;
+
+        if (!connected_) {
+            if (!sink_->connect(settings_.target.host, settings_.target.port)) return;
+            connected_ = true;
             for (auto& f : first_send_) f = true;
         }
 
-        const float deadband = state().get_value(kDeadband);
         for (std::size_t c = 0; c < kOscChannels; ++c) {
+            if (!enabled_now(c)) {
+                // A channel switched off should re-announce its resting value when
+                // it comes back, not resume mid-deadband against a value the
+                // receiver last heard minutes ago.
+                first_send_[c] = true;
+                continue;
+            }
+            const float threshold = threshold_[c].load(std::memory_order_relaxed);
             const float v = latest(c);
-            if (!should_send(first_send_[c], last_sent_[c], v, deadband)) continue;
-            osc::Message msg(osc_address(c));
+            if (!should_send(first_send_[c], last_sent_[c], v, threshold)) continue;
+            osc::Message msg(settings_.paths[c]);
             msg.add(v);
             if (!sink_->send(msg)) continue;   // a dropped send is not a state change
             last_sent_[c] = v;
             first_send_[c] = false;
-            sent_count_.fetch_add(1, std::memory_order_relaxed);
+            sent_count_[c].fetch_add(1, std::memory_order_relaxed);
         }
     }
 
@@ -197,12 +341,23 @@ public:
         // no syscall, no allocation, no lock.
         for (std::size_t c = 0; c < kOscChannels; ++c) {
             const float* src = c < shared ? input.channel_ptr(c) : nullptr;
-            latest_[c].store(src ? src[frames - 1] : 0.0f,
-                             std::memory_order_relaxed);
+            latest_[c].store(src ? src[frames - 1] : 0.0f, std::memory_order_relaxed);
         }
+
+        // The sender thread never touches the store, so the audio thread publishes
+        // to it. One block of latency on an Enable or a Threshold change, against a
+        // send interval of at least two milliseconds.
+        snapshot_parameters();
     }
 
 private:
+    /// The sender thread's view of `enabled`: what the audio thread last published,
+    /// never the store.
+    [[nodiscard]] bool enabled_now(std::size_t channel) const noexcept {
+        return channel < kOscChannels &&
+               enabled_[channel].load(std::memory_order_relaxed);
+    }
+
     void start_sender() {
         if (thread_.joinable()) return;
         running_.store(true, std::memory_order_relaxed);
@@ -212,7 +367,7 @@ private:
     void stop_sender() {
         if (!thread_.joinable()) return;
         {
-            std::lock_guard<std::mutex> lock(wake_mutex_);
+            const std::lock_guard<std::mutex> lock(wake_mutex_);
             running_.store(false, std::memory_order_relaxed);
         }
         wake_.notify_all();
@@ -226,7 +381,7 @@ private:
         while (running_.load(std::memory_order_relaxed)) {
             publish_once();
             const auto interval = std::chrono::duration<double>(
-                send_interval_seconds(state().get_value(kRateHz)));
+                send_interval_seconds(rate_hz_.load(std::memory_order_relaxed)));
             std::unique_lock<std::mutex> lock(wake_mutex_);
             wake_.wait_for(lock, interval, [this] {
                 return !running_.load(std::memory_order_relaxed);
@@ -237,13 +392,22 @@ private:
     std::unique_ptr<MessageSink> sink_;
     std::array<std::atomic<float>, kOscChannels> latest_{};
 
-    // Sender-thread state. Not shared with the audio thread.
+    // Guarded by send_mutex_: shared between the sender thread and the UI thread,
+    // never touched by the audio thread.
+    mutable std::mutex send_mutex_;
+    OscSettings settings_{};
     std::array<float, kOscChannels> last_sent_{};
     std::array<bool, kOscChannels> first_send_{true, true};
-    std::uint16_t connected_port_ = 0;
-    std::mutex send_mutex_;
+    bool connected_ = false;
 
-    std::atomic<std::uint64_t> sent_count_{0};
+    // Published by the audio thread in `snapshot_parameters()`, read by the sender
+    // thread. Everything the sender needs from the store lives here instead, so its
+    // reads cannot outlive a store the host owns.
+    std::array<std::atomic<bool>, kOscChannels> enabled_{};
+    std::array<std::atomic<float>, kOscChannels> threshold_{};
+    std::atomic<float> rate_hz_{60.0f};
+
+    std::array<std::atomic<std::uint64_t>, kOscChannels> sent_count_{};
     std::atomic<bool> running_{false};
     std::thread thread_;
     std::mutex wake_mutex_;

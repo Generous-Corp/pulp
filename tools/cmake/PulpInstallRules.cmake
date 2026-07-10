@@ -283,6 +283,11 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
+    # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures
+    # (PulpBundleRelocatable.cmake) resolves this next to itself, so ship it in
+    # lib/cmake/Pulp/scripts too — the authoritative copy lives at
+    # tools/scripts/check_bundle_architectures.py.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/check_bundle_architectures.py"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp/scripts
 )
 

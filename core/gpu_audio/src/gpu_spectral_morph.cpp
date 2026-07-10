@@ -4,10 +4,11 @@
 
 namespace pulp::gpu_audio {
 
-bool GpuSpectralMorph::prepare(uint32_t fft_size, signal::WindowFunction::Type window) {
+bool GpuSpectralMorph::prepare(uint32_t fft_size, signal::WindowFunction::Type window,
+                               render::GpuCompute* shared_device) {
     has_a_ = false;
     has_b_ = false;
-    if (!stft_.prepare(fft_size, window)) return false;
+    if (!stft_.prepare(fft_size, window, 0.0f, shared_device)) return false;
     const std::size_t cplx = static_cast<std::size_t>(fft_size) * 2u;
     a_.assign(cplx, 0.0f);
     b_.assign(cplx, 0.0f);

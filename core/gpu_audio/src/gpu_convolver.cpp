@@ -53,8 +53,10 @@ bool GpuConvolver::prepare() {
     while (fft_size_ < block_ + static_cast<uint32_t>(ir_.size())) fft_size_ <<= 1;
 
     const uint32_t cplx = fft_size_ * 2u;
-    in_pad_.assign(cplx, 0.0f);
-    time_.assign(cplx, 0.0f);
+    // Batched across channels: one submit, one readback per block. The IR is
+    // mono and resident, so every channel convolves against the same spectrum.
+    in_pad_.assign(static_cast<std::size_t>(cplx) * channels_, 0.0f);
+    time_.assign(static_cast<std::size_t>(cplx) * channels_, 0.0f);
     ir_spec_.assign(cplx, 0.0f);
     carry_.assign(channels_, std::vector<float>(fft_size_, 0.0f));
 
@@ -70,8 +72,10 @@ bool GpuConvolver::prepare() {
         for (uint32_t i = 0; i < ir_.size() && i < fft_size_; ++i) {
             in_pad_[2u * i] = ir_[i];  // real; imag stays 0
         }
+        // fft_forward reads only the first block; the rest of in_pad_ is the
+        // batch scratch used per process_block.
         if (!gpu_->fft_forward(in_pad_.data(), ir_spec_.data(), fft_size_) ||
-            !gpu_->prepare_convolution(fft_size_, ir_spec_.data())) {
+            !gpu_->prepare_convolution_batch(fft_size_, ir_spec_.data(), channels_)) {
             gpu_.reset();
         }
     } else {
@@ -94,28 +98,36 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         return;
     }
 
+    const uint32_t cplx = fft_size_ * 2u;
+
+    // Pack every channel's zero-padded complex block back to back.
+    std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
     for (uint32_t ch = 0; ch < channels_; ++ch) {
         const float* x = input.channel_ptr(ch);
+        float* slot = in_pad_.data() + static_cast<std::size_t>(ch) * cplx;
+        for (uint32_t i = 0; i < n; ++i) slot[2u * i] = x[i];
+    }
+
+    // ONE fused, GPU-resident convolution for all channels — forward FFT,
+    // complex multiply by the resident IR spectrum, inverse FFT — in a single
+    // submit with a single readback. The ~0.5 ms map round trip is paid once
+    // per block, not once per channel.
+    //
+    // On failure emit silence and DO NOT mutate any overlap carry: feeding a
+    // stale time_ into the accumulators would poison every subsequent block.
+    if (!gpu_->convolve_batch(in_pad_.data(), time_.data(), fft_size_, channels_)) {
+        output.clear();
+        return;
+    }
+
+    for (uint32_t ch = 0; ch < channels_; ++ch) {
         float* y = output.channel_ptr(ch);
-
-        // Zero-padded complex input.
-        std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
-        for (uint32_t i = 0; i < n; ++i) in_pad_[2u * i] = x[i];
-
-        // One fused GPU-resident convolution (forward FFT → complex-mul by the
-        // resident IR spectrum → inverse FFT) with a single readback. If it
-        // fails, emit silence for this channel and DO NOT mutate its overlap
-        // carry — feeding a stale time_ into the accumulator would poison all
-        // subsequent output for the channel.
-        if (!gpu_->convolve(in_pad_.data(), time_.data(), fft_size_)) {
-            for (uint32_t i = 0; i < n; ++i) y[i] = 0.0f;
-            continue;
-        }
+        const float* t = time_.data() + static_cast<std::size_t>(ch) * cplx;
 
         // Overlap-add accumulator: add this block's full result, emit the first
         // n samples, shift the carry left by n.
         std::vector<float>& c = carry_[ch];
-        for (uint32_t i = 0; i < fft_size_; ++i) c[i] += time_[2u * i];
+        for (uint32_t i = 0; i < fft_size_; ++i) c[i] += t[2u * i];
         for (uint32_t i = 0; i < n; ++i) y[i] = c[i];
         for (uint32_t i = 0; i + n < fft_size_; ++i) c[i] = c[i + n];
         for (uint32_t i = fft_size_ - n; i < fft_size_; ++i) c[i] = 0.0f;

@@ -1,18 +1,21 @@
 #include <pulp/gpu_audio/gpu_spectral_freeze.hpp>
 
+#include <pulp/gpu_audio/spectral_jitter.hpp>
+
 #include <cmath>
 
 namespace pulp::gpu_audio {
 
 namespace {
-constexpr float kTwoPi = 6.2831853071795864f;
+constexpr float kTwoPi = kSpectralTwoPi;
 }  // namespace
 
 bool GpuSpectralFreeze::prepare(uint32_t fft_size, uint32_t hop,
-                                signal::WindowFunction::Type window) {
+                                signal::WindowFunction::Type window,
+                                render::GpuCompute* shared_device) {
     captured_ = false;
     if (hop == 0u) return false;
-    if (!stft_.prepare(fft_size, window)) return false;
+    if (!stft_.prepare(fft_size, window, 0.0f, shared_device)) return false;
     hop_ = hop;
     mag_.assign(fft_size, 0.0f);
     phase_.assign(fft_size, 0.0f);
@@ -48,15 +51,18 @@ bool GpuSpectralFreeze::render(float* frame_out, float phase_jitter) {
                                    kTwoPi);
     }
 
-    // Optional phase jitter — applied CONJUGATE-SYMMETRICALLY (mirror into n-k)
-    // and skipping DC (k=0) and Nyquist (k=n/2) so the rebuilt spectrum stays
-    // Hermitian and the output stays real. Clamped to [0,1].
+    // Optional phase jitter — the SHARED spectral-jitter contract (identical to
+    // CpuSpectralStack / GpuSpectralStack, see spectral_jitter.hpp). Full-turn-
+    // at-1 stateless-hash wander, applied CONJUGATE-ANTISYMMETRICALLY (bin k
+    // gets +h, bin n-k gets -h) and skipping DC (k=0) and Nyquist (k=n/2) so the
+    // rebuilt spectrum stays Hermitian and the output stays real. Clamped to
+    // [0,1]. The seed advances each render so successive hops differ.
     if (phase_jitter > 0.0f) {
         const float amt = phase_jitter > 1.0f ? 1.0f : phase_jitter;
+        const uint32_t seed = seed_;
+        seed_ = advance_spectral_seed(seed_);
         for (uint32_t k = 1; k < n / 2u; ++k) {
-            rng_ = rng_ * 1664525u + 1013904223u;  // LCG
-            const float u = static_cast<float>(rng_ >> 8) / 16777216.0f - 0.5f;  // [-0.5,0.5)
-            const float j = amt * u;
+            const float j = amt * kTwoPi * spectral_phase_hash(k, seed);
             phase_[k] += j;
             phase_[n - k] -= j;  // keep the conjugate pair
         }

@@ -116,6 +116,20 @@ public:
         const Steinberg::Vst::TChar* string /*in*/,
         Steinberg::Vst::NoteExpressionValue& valueNormalized /*out*/) override;
 
+    // IEditController — parameter value/string conversion. Route through the
+    // author-supplied ParamInfo::to_string / from_string so a host's generic
+    // editor and text-entry field show and accept the plugin's own formatting
+    // (e.g. "-6.0 dB", "1.2 kHz"). Both decline to SingleComponentEffect's
+    // stock numeric formatting when the parameter declares no converter, so
+    // existing plugins are unchanged.
+    Steinberg::tresult PLUGIN_API getParamStringByValue(
+        Steinberg::Vst::ParamID tag,
+        Steinberg::Vst::ParamValue valueNormalized,
+        Steinberg::Vst::String128 string) override;
+    Steinberg::tresult PLUGIN_API getParamValueByString(
+        Steinberg::Vst::ParamID tag, Steinberg::Vst::TChar* string,
+        Steinberg::Vst::ParamValue& valueNormalized) override;
+
     // IEditController — editor view creation
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) override;
 

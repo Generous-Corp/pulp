@@ -4,6 +4,11 @@
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
+# runtime::Slot<T> / runtime::Handoff<T> — the two real-time publication modes.
+# Includes N-thread hammer tests that assert reclamation never runs on the
+# reader/consumer thread.
+pulp_add_test_suite(pulp-test-runtime-slot LIBRARIES pulp::runtime)
+
 # Tracing subsystem guard (Perfetto, dev-only). Asserts a default build has
 # tracing OFF. When PULP_TRACING=OFF, also nm-scan the binary to prove no
 # Perfetto symbols leaked (best-effort; mirrors the AssertNoJsSymbols guard).
@@ -223,9 +228,10 @@ if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-gpu-spectral-morph
         SOURCES test_gpu_spectral_morph.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
-    # Hyper-Freeze: multi-layer frozen stack, weighted morph, and spectral smear.
-    pulp_add_test_suite(pulp-test-gpu-hyper-freeze
-        SOURCES test_gpu_hyper_freeze.cpp
+    # Spectral stack: multi-layer frozen stack, weighted morph, and spectral
+    # smear — the batched engine that superseded the retired GpuHyperFreeze.
+    pulp_add_test_suite(pulp-test-gpu-spectral-stack
+        SOURCES test_gpu_spectral_stack.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
 endif()
 

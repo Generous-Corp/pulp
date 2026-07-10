@@ -348,3 +348,105 @@ TEST_CASE("Function publishes its operating point for the editor",
     REQUIRE_THAT(proc->display_input(), WithinAbs(-0.75f, 1e-6f));
     REQUIRE_THAT(proc->display_output(), WithinAbs(0.75f, 1e-6f));  // rectified
 }
+
+// --------------------------------------------------- Enable, and two channels
+//
+// `shape()` above returns channel 0 only, which is why every test before this
+// point is blind to the right channel. These are the ones that look at both.
+
+namespace {
+
+state::ParamID fpid(state::ParamID id, std::size_t ch) {
+    return static_cast<state::ParamID>(param_for(id, ch));
+}
+
+/// Render a constant on both inputs; return the last sample of each output.
+std::pair<float, float> both(format::HeadlessHost& host, float level) {
+    constexpr std::size_t n = 16;
+    audio::Buffer<float> in(2, n), out(2, n);
+    in.clear();
+    out.clear();
+    for (std::size_t c = 0; c < 2; ++c)
+        for (std::size_t i = 0; i < n; ++i) in.channel(c)[i] = level;
+    const float* ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    audio::BufferView<const float> iv(ptrs, 2, n);
+    auto ov = out.view();
+    host.process(ov, iv);
+    return {out.channel(0)[n - 1], out.channel(1)[n - 1]};
+}
+
+}  // namespace
+
+TEST_CASE("Function's Enable passes the channel through unmodified",
+          "[brew][function][enable]") {
+    format::HeadlessHost host{create_function};
+    host.prepare(48000.0, 512, 2, 2);
+    // Absolute would rectify a negative input to +0.75.
+    host.state().set_value(fpid(FunctionProcessor::kCurve, 0),
+                           static_cast<float>(static_cast<int>(Curve::absolute)));
+    host.state().set_value(fpid(FunctionProcessor::kCurve, 1),
+                           static_cast<float>(static_cast<int>(Curve::absolute)));
+
+    SECTION("enabled by default, so a fresh instance shapes") {
+        const auto [l, r] = both(host, -0.75f);
+        REQUIRE(l == 0.75f);
+        REQUIRE(r == 0.75f);
+    }
+
+    // Off is a wire, not a mute. Zeroing here would drop the voltage the upstream
+    // plug-in is generating, which is not what disabling a shaping stage means.
+    SECTION("disabling one channel wires it, and leaves the other shaping") {
+        host.state().set_value(fpid(FunctionProcessor::kEnable, 0), 0.0f);
+        const auto [l, r] = both(host, -0.75f);
+        REQUIRE(l == -0.75f);
+        REQUIRE(r == 0.75f);
+    }
+
+    SECTION("a disabled channel is bit-exact, not merely close") {
+        host.state().set_value(fpid(FunctionProcessor::kEnable, 1), 0.0f);
+        // A value that no curve leaves untouched, and that no rounding survives.
+        const auto [l, r] = both(host, -0.3333333f);
+        REQUIRE(r == -0.3333333f);
+        REQUIRE(l == 0.3333333f);
+    }
+}
+
+TEST_CASE("Function's channels shape independently", "[brew][function][stereo]") {
+    format::HeadlessHost host{create_function};
+    host.prepare(48000.0, 512, 2, 2);
+
+    SECTION("each channel follows its own curve") {
+        host.state().set_value(fpid(FunctionProcessor::kCurve, 0),
+                               static_cast<float>(static_cast<int>(Curve::absolute)));
+        host.state().set_value(fpid(FunctionProcessor::kCurve, 1),
+                               static_cast<float>(static_cast<int>(Curve::linear)));
+        const auto [l, r] = both(host, -0.5f);
+        REQUIRE(l == 0.5f);
+        REQUIRE(r == -0.5f);
+    }
+
+    SECTION("each channel follows its own scale and offset") {
+        host.state().set_value(fpid(FunctionProcessor::kOutOffset, 1), 0.25f);
+        const auto [l, r] = both(host, 0.5f);
+        REQUIRE(l == 0.5f);
+        REQUIRE(std::abs(r - 0.75f) < 1e-6f);
+    }
+
+    SECTION("polarity is per-jack") {
+        host.state().set_value(fpid(FunctionProcessor::kInvert, 1), 1.0f);
+        const auto [l, r] = both(host, 0.5f);
+        REQUIRE(l == 0.5f);
+        REQUIRE(r == -0.5f);
+    }
+}
+
+TEST_CASE("Function registers every control on both channels",
+          "[brew][function][stereo]") {
+    state::StateStore store;
+    auto proc = create_function();
+    proc->define_parameters(store);
+    for (const auto& c : FunctionProcessor::controls()) {
+        REQUIRE(store.info(fpid(c.id, 0)) != nullptr);
+        REQUIRE(store.info(fpid(c.id, 1)) != nullptr);
+    }
+}

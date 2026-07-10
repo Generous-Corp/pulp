@@ -158,11 +158,37 @@ void NativeViewHost::compute_geometry(Rect& frame, Rect& visible,
     }
 }
 
+bool NativeViewHost::active_viewport_transform(float& sx, float& sy, float& tx,
+                                               float& ty) const {
+    // Prefer the host we are attached through (stable across the attach's
+    // lifetime); fall back to the active host before the first attach.
+    if (attached_kind_ == HostKind::plugin && attached_plugin_)
+        return attached_plugin_->design_viewport_transform(sx, sy, tx, ty);
+    if (attached_kind_ == HostKind::window && attached_window_)
+        return attached_window_->design_viewport_transform(sx, sy, tx, ty);
+    if (PluginViewHost* p = plugin_view_host())
+        return p->design_viewport_transform(sx, sy, tx, ty);
+    if (WindowHost* w = window_host())
+        return w->design_viewport_transform(sx, sy, tx, ty);
+    return false;
+}
+
 bool NativeViewHost::try_attach() {
     if (attached_ || !handle_) return false;
     Rect frame, visible;
     bool clipped = false;
     compute_geometry(frame, visible, clipped);
+
+    // Transform the ROOT-space geometry through the active design viewport so
+    // the native child lands at the same letterbox-scaled position + size as
+    // the surrounding (paint-scaled) Pulp widgets. Identity when no viewport
+    // is active — every pre-viewport caller keeps today's raw host coords.
+    float sx, sy, tx, ty;
+    if (active_viewport_transform(sx, sy, tx, ty)) {
+        apply_viewport(frame, sx, sy, tx, ty);
+        apply_viewport(visible, sx, sy, tx, ty);
+    }
+    last_frame_host_ = frame;
 
     // A view tree has at most one host kind; the plugin host takes precedence if
     // both were ever set (they normally are not).
@@ -263,15 +289,26 @@ void NativeViewHost::update_native_layout() {
     Rect frame, visible_rect;
     bool clipped = false;
     compute_geometry(frame, visible_rect, clipped);
-    // Keep introspection getters current regardless of platform/attach state.
+    // Introspection getters stay in ROOT/design space (the pure layout frame).
     last_frame_ = frame;
     last_visible_ = visible_rect;
     last_clipped_ = clipped;
 
     if (!attached_) {
-        try_attach();  // recomputes + pushes internally on success
+        try_attach();  // recomputes + transforms + pushes internally on success
         return;
     }
+
+    // Transform ROOT-space geometry to HOST space before pushing (identity when
+    // no viewport). The pushed-geometry cache stores HOST-space values, so a
+    // host resize — which changes the viewport scale — naturally invalidates
+    // the cache and re-pushes even when the design-space layout is unchanged.
+    float sx, sy, tx, ty;
+    if (active_viewport_transform(sx, sy, tx, ty)) {
+        apply_viewport(frame, sx, sy, tx, ty);
+        apply_viewport(visible_rect, sx, sy, tx, ty);
+    }
+    last_frame_host_ = frame;
     push_geometry(frame, visible_rect, clipped);
 }
 

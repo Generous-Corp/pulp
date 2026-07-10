@@ -23,6 +23,8 @@ The `pulp ship` command handles the full distribution pipeline: code signing, Ap
 
 For the end-to-end release pipeline that turns a merged PR into a published GitHub Release (auto-release.yml → sign-and-release.yml → release-cli.yml, the 11 published assets, and the failure-mode triage by which asset is missing), see [`docs/guides/release-pipeline.md`](../../../docs/guides/release-pipeline.md). Cross-reference comments at the top of `release-cli.yml` and `sign-and-release.yml` point back to that doc — keep them in sync when either workflow changes ownership of appcast generation, draft creation, or the matrix-tarball upload.
 
+`release-cli.yml` also carries the **Tier-3 Intel gate** (`universal-arch-gate`, owned by the `intel-canary` skill): before the `release` job publishes, it builds the PulpGain example universal (`arm64;x86_64`), asserts `lipo -archs` + `codesign --verify` on every shipped bundle and embedded dylib via `tools/scripts/check_bundle_architectures.py --strict` (a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is killed at load — always re-sign after lipo), and runs `auval` both natively and under `arch -x86_64`. It is in `release`'s `needs:`, so it BLOCKS the release on any universal/lipo/signature/auval failure. See `docs/guides/intel-support.md`.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before running `pulp ship ...`, source the shared skew-check helper so
@@ -587,12 +589,17 @@ hdiutil detach /Volumes/SomeImage
 # Simulators are still shutting down. Please try again in a few moments.
 ```
 
-The recurring offender on a machine that has ever run an iOS Simulator is
-CoreSimulator's `simdiskimaged`, which wedges in a "still shutting down" state and
-refuses every unmount on the host — even with no booted devices. Restart it:
+**Trust the PID, not the message.** `diskutil unmount` names the dissenting process
+by PID; the sentence printed beside it can come from an entirely different subsystem.
+A wedged Mac Studio on 2026-07-10 reported `PID 1801` while printing CoreSimulator's
+"Simulators are still shutting down" with **no booted simulators** — PID 1801 was
+Console.app. Killing it cleared the veto instantly; `sudo killall -9 simdiskimaged`
+had done nothing. Identify the PID, then quit that process:
 
 ```bash
-sudo killall -9 simdiskimaged     # launchd respawns it on demand
+diskutil unmount /Volumes/AnyMountedVolume   # → "... failed to unmount: '...' (PID NNNN)"
+ps -p NNNN -o pid,user,comm=                 # what is it, really?
+kill NNNN                                    # user-owned: no sudo needed
 ```
 
 Two consequences worth knowing. Every failed `create` leaks its temporary

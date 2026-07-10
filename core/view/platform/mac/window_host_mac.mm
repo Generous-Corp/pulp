@@ -208,8 +208,13 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
             });
             return true;
         },
-        [alive] {
+        [alive]() -> bool {
             if (!alive || !alive->load(std::memory_order_acquire)) return false;
+            // Explicit -> bool: `-[NSThread isMainThread]` returns ObjC `BOOL`,
+            // which is `bool` on arm64 but `signed char` on x86_64. Without the
+            // explicit return type the two `return`s deduce different types and
+            // this lambda fails to compile on Intel (universal/x86_64 builds)
+            // while compiling fine on Apple Silicon.
             return [NSThread isMainThread];
         },
     };
@@ -1845,10 +1850,24 @@ public:
     void set_idle_callback(std::function<void()> cb) override {
         idle_callback_ = std::move(cb);
         if (idle_callback_ && !idle_timer_) {
-            idle_timer_ = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
+            // Register the idle pump under kCFRunLoopCommonModes (via
+            // NSRunLoopCommonModes) rather than +scheduledTimerWithTimeInterval:,
+            // which installs the timer in NSDefaultRunLoopMode ONLY. The CPU
+            // (CoreGraphics) window host drives its standalone repaint/screenshot
+            // idle work off this timer; if it lived in the default mode it would
+            // stall the moment the run loop entered a modal / event-tracking mode
+            // — either Pulp's own (a menu / context tracking loop) or a FOREIGN
+            // framework's runModal: in a shared process (see
+            // docs/guides/foreign-framework-coexistence.md). Common-modes keeps
+            // it ticking across all of those. (The GPU host is unaffected: its
+            // idle callback rides the CVDisplayLink display thread, not the run
+            // loop.)
+            idle_timer_ = [NSTimer timerWithTimeInterval:1.0/30.0
                 repeats:YES block:^(NSTimer*) {
                     if (idle_callback_) idle_callback_();
                 }];
+            [[NSRunLoop currentRunLoop] addTimer:idle_timer_
+                                         forMode:NSRunLoopCommonModes];
         }
     }
 
@@ -2375,6 +2394,16 @@ public:
         if (!design_transform(sx, sy, tx, ty)) return pt;
         if (sx <= 0.0f || sy <= 0.0f) return pt;
         return { (pt.x - tx) / sx, (pt.y - ty) / sy };
+    }
+
+    // Forward design->window transform for embedded native children (mirrors
+    // the paint-time letterbox scale). Only active when a design viewport is
+    // set; otherwise identity/false so a native child uses raw window coords.
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        if (design_viewport_w_ <= 0.0f || design_viewport_h_ <= 0.0f)
+            return false;
+        return design_transform(sx, sy, tx, ty);
     }
 
     void set_client_decoration(bool enabled) override {

@@ -48,10 +48,29 @@ Fields:
 - `unit` — display unit string ("dB", "Hz", "%", "ms")
 - `range` — min/max/default/step
 - `group_id` — for hierarchical organization (0 = ungrouped)
-- `to_string` — optional display formatter
-- `from_string` — optional string parser
+- `to_string` — optional display formatter (plain value → text)
+- `from_string` — optional string parser (text → plain value)
 - `rate` — `ControlRate` by default; `AudioRate` marks the parameter as audio-rate capable for adapters and graph/modulation integrations
 - `smoothing_ramp_seconds` — optional control-rate smoothing time; `0` means off
+
+`to_string` / `from_string` are surfaced to the host's generic editor and
+text-entry fields by every format adapter: VST3 `getParamStringByValue` /
+`getParamValueByString`, AU `kAudioUnitProperty_ParameterStringFromValue` /
+`...ValueFromString` (plus `GetParameterValueStrings` for discrete params), and
+CLAP `value_to_text` / `text_to_value`. Adapters convert between the host's
+normalized domain and your plain (min..max) value automatically; a parameter
+that declares neither converter keeps the host's stock numeric formatting.
+
+### Ordering / identity stability across versions
+
+A parameter's host-facing ID (`ParamID`, mapped 1:1 onto the VST3 `ParameterInfo::id`,
+AU `AudioUnitParameterID`, and CLAP `clap_param_info_t::id`) and its registration
+index are the keys a DAW session, preset, and automation lane persist against.
+The only always-safe way to evolve a shipped plugin is **append-only**: keep every
+existing parameter at its existing index and ID, and add new ones at the end.
+`pulp/state/param_ordering.hpp` (`diff_param_ordering` / `param_ordering_stable`)
+is an author-side guard you can assert in a unit test to catch a re-order, re-ID,
+or removal before release.
 
 ### ParamValue
 
@@ -260,7 +279,14 @@ gain_binding.set_normalized(knob_position);
 gain_binding.end_gesture();
 ```
 
-### Change Notification
+`begin_gesture()` / `end_gesture()` forward to the host's undo grouping (VST3
+`beginEdit`/`endEdit`, AU parameter-change gesture events, CLAP gesture events),
+which are **main-thread only**. A background writer — e.g. a MIDI-learn engine
+setting a mapped parameter from a timer thread — must not call them directly.
+Use `Binding::set_from_background(value)` (or `StateStore::run_gesture_on_main`
+for a custom body), which marshals the whole begin→set→end gesture onto the host
+main thread via `MainThreadDispatcher`. Plain `set()` / `set_normalized()` remain
+safe from any thread; only the gesture entry points are confined.
 
 Register callbacks that fire when the value changes (from user interaction or host automation):
 

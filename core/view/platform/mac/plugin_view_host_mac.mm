@@ -1381,6 +1381,19 @@ public:
         return { (pt.x - tx) / sx, (pt.y - ty) / sy };
     }
 
+    // Forward design->host transform for embedded native children. The CPU
+    // NSView paint centers the design surface (no top-align setter), so this
+    // matches the paint transform exactly.
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        if (design_viewport_w_ <= 0.0f || design_viewport_h_ <= 0.0f)
+            return false;
+        return WindowHost::compute_design_viewport_transform(
+            static_cast<float>(size_.width), static_cast<float>(size_.height),
+            design_viewport_w_, design_viewport_h_, sx, sy, tx, ty,
+            design_top_align_);
+    }
+
     void on_native_frame_changed(uint32_t w, uint32_t h) {
         if (w == size_.width && h == size_.height) return;
         if (w == 0 || h == 0) return;
@@ -1903,6 +1916,18 @@ public:
         }
         if (sx <= 0.0f || sy <= 0.0f) return pt;
         return { (pt.x - tx) / sx, (pt.y - ty) / sy };
+    }
+
+    // Forward design->host transform for embedded native children — mirrors
+    // paint_scene()'s letterbox scale (design_top_align_ honored).
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        if (design_viewport_w_ <= 0.0f || design_viewport_h_ <= 0.0f)
+            return false;
+        return WindowHost::compute_design_viewport_transform(
+            static_cast<float>(size_.width), static_cast<float>(size_.height),
+            design_viewport_w_, design_viewport_h_, sx, sy, tx, ty,
+            design_top_align_);
     }
 
 private:

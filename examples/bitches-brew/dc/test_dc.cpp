@@ -26,6 +26,23 @@ using namespace pulp::examples::brew;
 
 namespace {
 
+/// The parameter ID of `id` on `channel`, as a StateStore key.
+state::ParamID pid(state::ParamID id, std::size_t channel) {
+    return static_cast<state::ParamID>(param_for(id, channel));
+}
+
+/// Set a control on both channels.
+///
+/// The two channels are independent, so a test that wants to assert something
+/// about the whole buffer has to say so on both. The tests that care about the
+/// independence itself set the channels separately, and are the only ones that
+/// should — a helper that quietly wrote one channel would make every other
+/// assertion in this file a statement about the left channel only.
+void set_both(state::StateStore& store, state::ParamID id, float v) {
+    for (std::size_t ch = 0; ch < kChannelCount; ++ch)
+        store.set_value(pid(id, ch), v);
+}
+
 /// Render one block and return every output sample, so a test can assert on the
 /// whole buffer rather than spot-checking sample 0.
 std::vector<float> render_block(format::HeadlessHost& host,
@@ -139,7 +156,7 @@ TEST_CASE("DC holds its value bit-exactly across block sizes and sample rates",
             for (float v : values) {
                 format::HeadlessHost host(create_dc);
                 host.prepare(sr, 4096, 2, 2);
-                host.state().set_value(DcProcessor::kValue, v);
+                set_both(host.state(), DcProcessor::kValue, v);
 
                 CAPTURE(sr, block, v);
                 REQUIRE(all_equal(render_block(host, block), v));
@@ -157,11 +174,11 @@ TEST_CASE("DC scale and invert reach the rendered buffer", "[brew][dc]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 512, 2, 2);
 
-    host.state().set_value(DcProcessor::kValue, 1.0f);
-    host.state().set_value(DcProcessor::kOutputScale, 0.25f);
+    set_both(host.state(), DcProcessor::kValue, 1.0f);
+    set_both(host.state(), DcProcessor::kOutputScale, 0.25f);
     REQUIRE(all_equal(render_block(host, 512), 0.25f));
 
-    host.state().set_value(DcProcessor::kInvert, 1.0f);
+    set_both(host.state(), DcProcessor::kInvert, 1.0f);
     REQUIRE(all_equal(render_block(host, 512), -0.25f));
 }
 
@@ -171,7 +188,7 @@ TEST_CASE("DC scale and invert reach the rendered buffer", "[brew][dc]") {
 TEST_CASE("DC emits nothing while bypassed", "[brew][dc][safety][bypass]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 512, 2, 2);
-    host.state().set_value(DcProcessor::kValue, 0.75f);
+    set_both(host.state(), DcProcessor::kValue, 0.75f);
 
     format::ProcessContext ctx;
     ctx.sample_rate = 48000.0;
@@ -190,7 +207,7 @@ TEST_CASE("DC emits nothing while bypassed", "[brew][dc][safety][bypass]") {
 TEST_CASE("DC ignores its input bus", "[brew][dc]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 256, 2, 2);
-    host.state().set_value(DcProcessor::kValue, 0.75f);
+    set_both(host.state(), DcProcessor::kValue, 0.75f);
     REQUIRE(all_equal(render_block(host, 256), 0.75f));
 }
 
@@ -202,27 +219,27 @@ TEST_CASE("the two output knobs sum", "[brew][dc]") {
     // merely replaced `Value` there would be no reason for it to exist.
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 2, 2);
-    host.state().set_value(DcProcessor::kValue, -0.25f);
-    host.state().set_value(DcProcessor::kUnipolar, 0.75f);
+    set_both(host.state(), DcProcessor::kValue, -0.25f);
+    set_both(host.state(), DcProcessor::kUnipolar, 0.75f);
     REQUIRE(all_equal(render_block(host, 32), 0.5f));
 
     // And the sum is clamped once, at the jack, not inside the knobs.
-    host.state().set_value(DcProcessor::kValue, 0.9f);
-    host.state().set_value(DcProcessor::kUnipolar, 0.9f);
+    set_both(host.state(), DcProcessor::kValue, 0.9f);
+    set_both(host.state(), DcProcessor::kUnipolar, 0.9f);
     REQUIRE(all_equal(render_block(host, 32), 1.0f));
 }
 
 TEST_CASE("Multiplier scales the sum and may invert it", "[brew][dc]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 2, 2);
-    host.state().set_value(DcProcessor::kValue, 0.4f);
-    host.state().set_value(DcProcessor::kMultiplier, -1.5f);
+    set_both(host.state(), DcProcessor::kValue, 0.4f);
+    set_both(host.state(), DcProcessor::kMultiplier, -1.5f);
     REQUIRE(all_equal(render_block(host, 32), -0.6f));
 
     // It scales the *sum*, not just Value: otherwise the unipolar offset would
     // survive a multiplier of zero.
-    host.state().set_value(DcProcessor::kUnipolar, 0.5f);
-    host.state().set_value(DcProcessor::kMultiplier, 0.0f);
+    set_both(host.state(), DcProcessor::kUnipolar, 0.5f);
+    set_both(host.state(), DcProcessor::kMultiplier, 0.0f);
     REQUIRE(all_equal(render_block(host, 32), 0.0f));
 }
 
@@ -231,9 +248,9 @@ TEST_CASE("Multiplier and Output Scale are not the same control", "[brew][dc]") 
     // Multiplier is bipolar and belongs to the patch. Both apply.
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 2, 2);
-    host.state().set_value(DcProcessor::kValue, 0.8f);
-    host.state().set_value(DcProcessor::kMultiplier, -1.0f);
-    host.state().set_value(DcProcessor::kOutputScale, 0.5f);
+    set_both(host.state(), DcProcessor::kValue, 0.8f);
+    set_both(host.state(), DcProcessor::kMultiplier, -1.0f);
+    set_both(host.state(), DcProcessor::kOutputScale, 0.5f);
     REQUIRE(all_equal(render_block(host, 32), -0.4f));
 }
 
@@ -242,13 +259,13 @@ TEST_CASE("Multiplier and Output Scale are not the same control", "[brew][dc]") 
 TEST_CASE("Input Mul gates the output with the input", "[brew][dc]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 2, 2);
-    host.state().set_value(DcProcessor::kValue, 0.6f);
+    set_both(host.state(), DcProcessor::kValue, 0.6f);
 
     // At zero the input is ignored entirely — the documented resting behavior.
     REQUIRE(all_equal(render_with_input(host, 32, 0.5f), 0.6f));
 
     // At one the output is the product.
-    host.state().set_value(DcProcessor::kInputMul, 1.0f);
+    set_both(host.state(), DcProcessor::kInputMul, 1.0f);
     REQUIRE(all_equal(render_with_input(host, 32, 0.5f), 0.3f));
     // ...so an input at zero closes the gate completely.
     REQUIRE(all_equal(render_with_input(host, 32, 0.0f), 0.0f));
@@ -256,19 +273,19 @@ TEST_CASE("Input Mul gates the output with the input", "[brew][dc]") {
     // And halfway is halfway between "ignored" and "fully gated". Tolerant:
     // 0.6 * 0.75 lands one ulp off 0.45f, and this is an arithmetic claim, not a
     // bit-exactness one.
-    host.state().set_value(DcProcessor::kInputMul, 0.5f);
+    set_both(host.state(), DcProcessor::kInputMul, 0.5f);
     REQUIRE(all_near(render_with_input(host, 32, 0.5f), 0.45f));
 }
 
 TEST_CASE("Input Add sums the input into the output", "[brew][dc]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 2, 2);
-    host.state().set_value(DcProcessor::kValue, 0.25f);
-    host.state().set_value(DcProcessor::kInputAdd, 1.0f);
+    set_both(host.state(), DcProcessor::kValue, 0.25f);
+    set_both(host.state(), DcProcessor::kInputAdd, 1.0f);
     REQUIRE(all_equal(render_with_input(host, 32, 0.5f), 0.75f));
 
     // Bipolar: it can subtract.
-    host.state().set_value(DcProcessor::kInputAdd, -1.0f);
+    set_both(host.state(), DcProcessor::kInputAdd, -1.0f);
     REQUIRE(all_equal(render_with_input(host, 32, 0.5f), -0.25f));
 }
 
@@ -277,9 +294,9 @@ TEST_CASE("the added input is not fed through the multiplier", "[brew][dc]") {
     // signal would be gated by itself — a ring modulator eating its own input.
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 2, 2);
-    host.state().set_value(DcProcessor::kValue, 0.5f);
-    host.state().set_value(DcProcessor::kInputMul, 1.0f);
-    host.state().set_value(DcProcessor::kInputAdd, 1.0f);
+    set_both(host.state(), DcProcessor::kValue, 0.5f);
+    set_both(host.state(), DcProcessor::kInputMul, 1.0f);
+    set_both(host.state(), DcProcessor::kInputAdd, 1.0f);
     // 0.5 * 0.4 + 0.4 = 0.6, not (0.5 + 0.4) * 0.4 = 0.36.
     const auto out = render_with_input(host, 32, 0.4f);
     REQUIRE(out.front() == Catch::Approx(0.6f).margin(1e-6));
@@ -291,9 +308,9 @@ TEST_CASE("DC ignores an input bus that is not there", "[brew][dc][safety]") {
     // a voltage the user did not ask for.
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 0, 2);
-    host.state().set_value(DcProcessor::kValue, 0.5f);
-    host.state().set_value(DcProcessor::kInputMul, 1.0f);
-    host.state().set_value(DcProcessor::kInputAdd, 1.0f);
+    set_both(host.state(), DcProcessor::kValue, 0.5f);
+    set_both(host.state(), DcProcessor::kInputMul, 1.0f);
+    set_both(host.state(), DcProcessor::kInputAdd, 1.0f);
 
     audio::Buffer<float> out(2, 32);
     out.clear();
@@ -367,8 +384,8 @@ TEST_CASE("Smooth ramps DC's output rather than stepping it",
           "[brew][dc][smooth]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 512, 2, 2);
-    host.state().set_value(DcProcessor::kSmoothMs, 100.0f);
-    host.state().set_value(DcProcessor::kValue, 1.0f);
+    set_both(host.state(), DcProcessor::kSmoothMs, 100.0f);
+    set_both(host.state(), DcProcessor::kValue, 1.0f);
 
     const auto out = render_block(host, 512);
     REQUIRE(out.front() > 0.0f);
@@ -389,8 +406,8 @@ TEST_CASE("bypass zeroes the output and parks the smoother",
     // is the failure this guards.
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 512, 2, 2);
-    host.state().set_value(DcProcessor::kSmoothMs, 100.0f);
-    host.state().set_value(DcProcessor::kValue, 1.0f);
+    set_both(host.state(), DcProcessor::kSmoothMs, 100.0f);
+    set_both(host.state(), DcProcessor::kValue, 1.0f);
     (void)render_block(host, 512);   // climb partway
 
     format::ProcessContext ctx;
@@ -408,8 +425,78 @@ TEST_CASE("bypass zeroes the output and parks the smoother",
 TEST_CASE("DC publishes its emitted value for the rail", "[brew][dc]") {
     format::HeadlessHost host(create_dc);
     host.prepare(48000.0, 64, 2, 2);
-    host.state().set_value(DcProcessor::kValue, -0.4f);
+    set_both(host.state(), DcProcessor::kValue, -0.4f);
     (void)render_block(host, 32);
     const auto* dc = static_cast<const DcProcessor*>(host.processor());
     REQUIRE(dc->display_output() == Catch::Approx(-0.4f).margin(1e-6));
+}
+
+// ------------------------------------------------------- two independent channels
+//
+// The two output channels are not a stereo pair. They are two unrelated control
+// voltages that happen to share a plug-in, and on an eight-output DC-coupled
+// interface that is the difference between two CVs per instance and one CV plus a
+// copy of it. Every control is registered twice; the right channel's parameter ID
+// is its left twin's plus `kRightChannelStride`.
+
+TEST_CASE("DC's channels carry independent voltages", "[brew][dc][stereo]") {
+    format::HeadlessHost host{create_dc};
+    host.prepare(48000.0, 512, 2, 2);
+
+    SECTION("each channel follows its own Value knob") {
+        host.state().set_value(pid(DcProcessor::kValue, 0), 0.25f);
+        host.state().set_value(pid(DcProcessor::kValue, 1), -0.75f);
+        const auto out = render_block(host, 64);
+        for (int n = 0; n < 64; ++n) {
+            REQUIRE(out[static_cast<std::size_t>(n)] == 0.25f);
+            REQUIRE(out[static_cast<std::size_t>(64 + n)] == -0.75f);
+        }
+    }
+
+    // Full-scale voltage and output polarity are properties of the physical jack,
+    // and an interface is free to differ between its own outputs. That is why
+    // these two are per-channel rather than shared: an instance driving a
+    // correctly-wired output and a reversed one must be able to say so.
+    SECTION("polarity and scale are per-jack, not per-instance") {
+        set_both(host.state(), DcProcessor::kValue, 0.5f);
+        host.state().set_value(pid(DcProcessor::kInvert, 1), 1.0f);
+        host.state().set_value(pid(DcProcessor::kOutputScale, 1), 0.5f);
+        const auto out = render_block(host, 8);
+        REQUIRE(out[0] == 0.5f);
+        REQUIRE(out[8] == -0.25f);
+    }
+
+    SECTION("the input knobs are per-channel too") {
+        set_both(host.state(), DcProcessor::kValue, 1.0f);
+        // Left multiplies the input in; right ignores it.
+        host.state().set_value(pid(DcProcessor::kInputMul, 0), 1.0f);
+        format::ProcessContext ctx;
+        ctx.sample_rate = 48000.0;
+        ctx.num_samples = 8;
+        const auto out = render_with_input(host, 8, 0.5f, 2, &ctx);
+        REQUIRE(out[0] == 0.5f);  // 1.0 * input
+        REQUIRE(out[8] == 1.0f);  // untouched by the input
+    }
+
+    SECTION("a mono host simply never asks for the right channel's controls") {
+        host.state().set_value(pid(DcProcessor::kValue, 0), 0.3f);
+        host.state().set_value(pid(DcProcessor::kValue, 1), 0.9f);
+        const auto out = render_block(host, 8, /*channels=*/1);
+        for (float s : out) REQUIRE(s == 0.3f);
+    }
+}
+
+TEST_CASE("DC registers every control on both channels", "[brew][dc][stereo]") {
+    state::StateStore store;
+    auto proc = create_dc();
+    proc->define_parameters(store);
+
+    // Eight controls, twice. A control added to the table is added to both
+    // channels by construction — `param_for` derives the right channel's ID and
+    // nothing enumerates it, so the two sets cannot drift apart.
+    REQUIRE(DcProcessor::controls().size() == 8);
+    for (const auto& c : DcProcessor::controls()) {
+        REQUIRE(store.info(pid(c.id, 0)) != nullptr);
+        REQUIRE(store.info(pid(c.id, 1)) != nullptr);
+    }
 }

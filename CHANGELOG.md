@@ -8,6 +8,22 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06450"></a>
+## [0.645.0] - 2026-07-10
+
+- refactor(gpu_audio): SF-4 GPU spectral family consolidation ([#5929](https://github.com/danielraffel/pulp/pull/5929))
+- fix(format): clear transient worker-pool reheat latch ([#5926](https://github.com/danielraffel/pulp/pull/5926))
+- perf(signal): fast-tanh the ladder filter, cache panner gains ([#5880](https://github.com/danielraffel/pulp/pull/5880))
+- perf(gpu-audio): batch GpuConvolver channels into one submit + one readback ([#5883](https://github.com/danielraffel/pulp/pull/5883))
+
+<a id="v06440"></a>
+## [0.644.0] - 2026-07-10
+
+- feat(runtime): add Slot<T> and Handoff<T>; port ConvolverIrSwapper onto Handoff ([#5876](https://github.com/danielraffel/pulp/pull/5876))
+- fix(audio): close runtime post-merge review gaps ([#5917](https://github.com/danielraffel/pulp/pull/5917))
+- docs: fix web-plugin doc inaccuracies (toolchain/target names, CLAP + webview versions) ([#5884](https://github.com/danielraffel/pulp/pull/5884))
+- perf(web): remove audio-thread allocations in WAM/WCLAP worklet paths ([#5887](https://github.com/danielraffel/pulp/pull/5887))
+
 <a id="v06430"></a>
 ## [0.643.0] - 2026-07-10
 
@@ -6204,6 +6220,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.645.0]: https://github.com/danielraffel/pulp/releases/tag/v0.645.0
+[0.644.0]: https://github.com/danielraffel/pulp/releases/tag/v0.644.0
 [0.643.0]: https://github.com/danielraffel/pulp/releases/tag/v0.643.0
 [0.641.0]: https://github.com/danielraffel/pulp/releases/tag/v0.641.0
 [0.639.0]: https://github.com/danielraffel/pulp/releases/tag/v0.639.0
