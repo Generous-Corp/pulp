@@ -1,5 +1,8 @@
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 
+#include <pulp/audio/workgroup.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
+
 #include <cassert>
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
 #include <intrin.h>
@@ -45,6 +48,7 @@ bool GraphRuntimeWorkerPool::start(std::uint32_t worker_count) {
     stopping_.store(false, std::memory_order_release);
     epoch_.store(0, std::memory_order_release);
     completed_.store(0, std::memory_order_release);
+    worker_park_count_.store(0, std::memory_order_release);
     completed_base_ = 0;
     // worker_count includes the run() caller as participant 0; spawn the rest.
     if (worker_count_ <= 1) {
@@ -71,6 +75,7 @@ void GraphRuntimeWorkerPool::stop() noexcept {
         // epoch wait observes a change immediately.
         stopping_.store(true, std::memory_order_release);
         epoch_.fetch_add(1, std::memory_order_release);
+        epoch_.notify_all();
         for (auto& t : threads_) {
             if (t.joinable()) t.join();
         }
@@ -80,11 +85,18 @@ void GraphRuntimeWorkerPool::stop() noexcept {
     running_.store(false, std::memory_order_release);
 }
 
+void GraphRuntimeWorkerPool::set_audio_workgroup(void* workgroup) noexcept {
+    if (worker_count_ == 0 && threads_.empty()) {
+        audio_workgroup_.store(workgroup, std::memory_order_release);
+    }
+}
+
 void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
                                  void* context) noexcept {
     if (task_count == 0 || fn == nullptr) return;
     // No worker threads: run everything inline on the caller.
     if (worker_count_ <= 1 || threads_.empty()) {
+        pulp::signal::ScopedFlushDenormals flush_denormals;
         for (std::uint32_t i = 0; i < task_count; ++i) fn(context, i);
         return;
     }
@@ -108,6 +120,7 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     context_ = context;
     task_count_ = task_count;
     epoch_.fetch_add(1, std::memory_order_release);
+    epoch_.notify_all();
 
     // The caller is participant 0.
     run_range(0);
@@ -130,6 +143,7 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
 }
 
 void GraphRuntimeWorkerPool::run_range(std::uint32_t worker_index) noexcept {
+    pulp::signal::ScopedFlushDenormals flush_denormals;
     const Range r = range_for(worker_index, worker_count_, task_count_);
     for (std::uint32_t i = r.begin; i < r.end; ++i) {
         fn_(context_, i);
@@ -141,16 +155,25 @@ void GraphRuntimeWorkerPool::run_range(std::uint32_t worker_index) noexcept {
 }
 
 void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
+    pulp::audio::AudioWorkgroup workgroup;
+#if defined(__APPLE__)
+    if (void* handle = audio_workgroup_.load(std::memory_order_acquire)) {
+        workgroup.set_workgroup(reinterpret_cast<os_workgroup_t>(handle));
+    }
+#endif
+    (void)workgroup.join_from_audio_thread();
+
     std::uint64_t local_epoch = 0;
     for (;;) {
         std::uint32_t spins = 0;
         std::uint64_t e;
         while ((e = epoch_.load(std::memory_order_acquire)) == local_epoch) {
             if (stopping_.load(std::memory_order_acquire)) return;
-            if (++spins < 1024) {
+            if (++spins < 256) {
                 cpu_relax();
             } else {
-                std::this_thread::yield();
+                worker_park_count_.fetch_add(1, std::memory_order_relaxed);
+                epoch_.wait(local_epoch, std::memory_order_acquire);
                 spins = 0;
             }
         }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/signal/denormal.hpp>
+
 #include <cmath>
 #include <algorithm>
 
@@ -29,7 +31,11 @@ public:
         // 4 cascaded one-pole filters with tanh saturation
         for (int i = 0; i < 4; ++i) {
             SampleType prev = i > 0 ? stage_[i - 1] : x;
-            stage_[i] += g_ * (std::tanh(prev) - std::tanh(stage_[i]));
+            // Snap each ladder stage: at high resonance the stages self-
+            // oscillate and their tails otherwise decay into denormals with
+            // no FTZ guard. No-op above 1e-15.
+            stage_[i] = snap_to_zero(
+                stage_[i] + g_ * (std::tanh(prev) - std::tanh(stage_[i])));
         }
 
         return stage_[3];

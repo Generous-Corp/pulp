@@ -73,8 +73,12 @@ public:
     Float64 GetLatency() override;
 
 private:
-    std::unique_ptr<Processor> processor_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
 
     // Host accommodations, resolved once at init via the runtime policy.
     HostQuirks host_quirks_{};

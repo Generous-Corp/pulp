@@ -173,6 +173,7 @@ void InstrumentVoiceAllocator::record_termination(
             .voice_index = voice_index,
             .voice_id = voice_id,
             .reason = reason,
+            .fade_out_frames = termination_fade_frames_,
         };
     } else {
         ++result.termination_overflow_count;

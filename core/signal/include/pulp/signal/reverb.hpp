@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/denormal.hpp>
 #include <array>
 #include <cmath>
 
@@ -51,8 +52,12 @@ public:
         // Feedback with decay and damping
         SampleType feedback = decay_feedback();
         for (int i = 0; i < 4; ++i) {
-            // One-pole lowpass for damping
-            lp_state_[i] += (h[i] - lp_state_[i]) * (SampleType{1.0f} - damping_);
+            // One-pole lowpass for damping. Snap the damping state so the
+            // (long) reverb tail flushes to zero instead of recirculating
+            // denormals through the feedback loop on FTZ-less targets (wasm,
+            // MSVC/ARM64). No-op above 1e-15.
+            lp_state_[i] = snap_to_zero(
+                lp_state_[i] + (h[i] - lp_state_[i]) * (SampleType{1.0f} - damping_));
             lines_[i].push(input + lp_state_[i] * feedback);
         }
 

@@ -4,6 +4,8 @@
 /// First-order topology-preserving transform (TPT) filter.
 /// Modulation-stable: no transients when sweeping cutoff.
 
+#include <pulp/signal/denormal.hpp>
+
 #include <cmath>
 #include <algorithm>
 
@@ -46,7 +48,9 @@ public:
     SampleType process_lowpass(SampleType input) {
         SampleType v = g_ * (input - state_);
         SampleType lp = v + state_;
-        state_ = lp + v;
+        // Snap the integrator state to flush denormal tails where no FTZ guard
+        // applies. No-op above 1e-15.
+        state_ = snap_to_zero(lp + v);
         return lp;
     }
 
@@ -67,7 +71,7 @@ public:
     Outputs process(SampleType input) {
         SampleType v = g_ * (input - state_);
         SampleType lp = v + state_;
-        state_ = lp + v;
+        state_ = snap_to_zero(lp + v);  // flush denormal tails (see above)
         SampleType hp = input - lp;
         SampleType ap = lp - hp; // = 2*lp - input
         return {lp, hp, ap};
