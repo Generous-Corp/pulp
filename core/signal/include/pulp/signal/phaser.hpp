@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/signal/denormal.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <array>
@@ -46,7 +48,9 @@ public:
             ap_state_[i * 2 + 1] = y;
             x = y;
         }
-        feedback_state_ = x;
+        // Snap the feedback state so the allpass recirculation flushes denormal
+        // tails into silence with no FTZ guard. No-op above 1e-15.
+        feedback_state_ = snap_to_zero(x);
 
         return input * (SampleType{1.0f} - mix_) + x * mix_;
     }

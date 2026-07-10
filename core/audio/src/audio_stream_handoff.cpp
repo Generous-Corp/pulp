@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <new>
 
 namespace pulp::audio {
 
@@ -43,14 +44,13 @@ void AudioStreamHandoff::clear_unprepared() noexcept {
     std::vector<float*>().swap(pending_write_ptrs_);
     std::vector<const float*>().swap(pending_read_ptrs_);
     std::vector<float*>().swap(resampled_output_ptrs_);
+    pending_fifo_.reset();
 
     source_channels_ = 0;
     host_channels_ = 0;
     source_sample_rate_ = 0.0;
     host_sample_rate_ = 0.0;
     pending_capacity_frames_ = 0;
-    pending_read_offset_ = 0;
-    pending_source_frames_ = 0;
     max_host_block_frames_ = 0;
     prepared_ = false;
     same_rate_ = true;
@@ -64,10 +64,15 @@ void AudioStreamHandoff::clear_unprepared() noexcept {
 }
 
 void AudioStreamHandoff::allocate_scratch(std::uint64_t pending_capacity_frames) {
+    if (pending_capacity_frames >
+        static_cast<std::uint64_t>(std::numeric_limits<int>::max() - 1)) {
+        throw std::bad_alloc();
+    }
+    const auto storage_frames = static_cast<std::size_t>(pending_capacity_frames + 1u);
     pending_source_.assign(source_channels_, {});
     resampled_output_.assign(source_channels_, {});
     for (auto& channel : pending_source_) {
-        channel.assign(static_cast<std::size_t>(pending_capacity_frames), 0.0f);
+        channel.assign(storage_frames, 0.0f);
     }
     for (auto& channel : resampled_output_) {
         channel.assign(static_cast<std::size_t>(max_host_block_frames_), 0.0f);
@@ -75,6 +80,8 @@ void AudioStreamHandoff::allocate_scratch(std::uint64_t pending_capacity_frames)
     pending_write_ptrs_.assign(source_channels_, nullptr);
     pending_read_ptrs_.assign(source_channels_, nullptr);
     resampled_output_ptrs_.assign(source_channels_, nullptr);
+    pending_fifo_ = std::make_unique<runtime::AbstractFifo>(
+        static_cast<int>(pending_capacity_frames + 1u));
 }
 
 bool AudioStreamHandoff::prepare(const AudioStreamHandoffConfig& config) {
@@ -125,8 +132,7 @@ bool AudioStreamHandoff::prepare(const AudioStreamHandoffConfig& config) {
 void AudioStreamHandoff::reset() noexcept {
     ring_.reset();
     resampler_.reset();
-    pending_read_offset_ = 0;
-    pending_source_frames_ = 0;
+    if (pending_fifo_) pending_fifo_->reset();
     source_frames_pushed_.store(0, std::memory_order_relaxed);
     source_frames_consumed_.store(0, std::memory_order_relaxed);
     output_frames_pulled_.store(0, std::memory_order_relaxed);
@@ -158,86 +164,83 @@ void AudioStreamHandoff::zero_fill(BufferView<float> destination,
 }
 
 void AudioStreamHandoff::refill_pending_from_ring() noexcept {
-    if (pending_capacity_frames_ == 0 ||
-        pending_source_frames_ >= pending_capacity_frames_) {
+    if (pending_capacity_frames_ == 0 || !pending_fifo_) {
         return;
     }
 
-    auto available = ring_.available_frames();
-    auto free = pending_capacity_frames_ - pending_source_frames_;
-    while (available > 0 && free > 0) {
-        const auto write_index =
-            (pending_read_offset_ + pending_source_frames_) % pending_capacity_frames_;
-        const auto contiguous = std::min({free,
-                                          available,
-                                          pending_capacity_frames_ - write_index});
-        if (contiguous == 0) break;
+    while (ring_.available_frames() > 0 && pending_fifo_->free_space() > 0) {
+        const auto request = static_cast<int>(std::min<std::uint64_t>(
+            ring_.available_frames(),
+            static_cast<std::uint64_t>(pending_fifo_->free_space())));
+        int start_1 = 0;
+        int size_1 = 0;
+        int start_2 = 0;
+        int size_2 = 0;
+        pending_fifo_->prepare_to_write(request, start_1, size_1, start_2, size_2);
 
-        for (std::uint32_t ch = 0; ch < source_channels_; ++ch) {
-            pending_write_ptrs_[ch] =
-                pending_source_[ch].data() + static_cast<std::size_t>(write_index);
-        }
+        auto fill_segment = [&](int start, int size) noexcept -> bool {
+            if (size <= 0) return true;
+            for (std::uint32_t ch = 0; ch < source_channels_; ++ch) {
+                pending_write_ptrs_[ch] =
+                    pending_source_[ch].data() + static_cast<std::size_t>(start);
+            }
+            BufferView<float> tail(pending_write_ptrs_.data(),
+                                   source_channels_,
+                                   static_cast<std::size_t>(size));
+            const bool read = ring_.read(tail, static_cast<std::uint64_t>(size));
+            pending_fifo_->finish_write(size);
+            return read;
+        };
 
-        BufferView<float> tail(pending_write_ptrs_.data(),
-                               source_channels_,
-                               static_cast<std::size_t>(contiguous));
-        ring_.read(tail, contiguous);
-        pending_source_frames_ += contiguous;
-        available -= contiguous;
-        free -= contiguous;
+        if (!fill_segment(start_1, size_1)) break;
+        if (!fill_segment(start_2, size_2)) break;
+        if (size_1 == 0 && size_2 == 0) break;
     }
-    pending_source_frames_snapshot_.store(pending_source_frames_, std::memory_order_relaxed);
+    pending_source_frames_snapshot_.store(
+        static_cast<std::uint64_t>(pending_fifo_->num_ready()),
+        std::memory_order_relaxed);
 }
 
 void AudioStreamHandoff::consume_pending(std::uint64_t frames) noexcept {
-    if (frames == 0) return;
-    if (frames >= pending_source_frames_) {
-        pending_read_offset_ = 0;
-        pending_source_frames_ = 0;
-        pending_source_frames_snapshot_.store(0, std::memory_order_relaxed);
-        return;
-    }
-
-    pending_read_offset_ =
-        (pending_read_offset_ + frames) % pending_capacity_frames_;
-    pending_source_frames_ -= frames;
-    pending_source_frames_snapshot_.store(pending_source_frames_, std::memory_order_relaxed);
-}
-
-void AudioStreamHandoff::copy_resampled_to_destination(BufferView<float> destination,
-                                                       std::uint64_t destination_offset,
-                                                       std::uint64_t frames) noexcept {
-    if (frames == 0) return;
-    for (std::size_t ch = 0; ch < destination.num_channels(); ++ch) {
-        float* output = destination.channel_ptr(ch) + destination_offset;
-        if (ch < source_channels_) {
-            std::copy_n(resampled_output_[ch].data(), static_cast<std::size_t>(frames), output);
-        } else {
-            std::fill_n(output, static_cast<std::size_t>(frames), 0.0f);
-        }
-    }
+    if (frames == 0 || !pending_fifo_) return;
+    pending_fifo_->finish_read(static_cast<int>(frames));
+    pending_source_frames_snapshot_.store(
+        static_cast<std::uint64_t>(pending_fifo_->num_ready()),
+        std::memory_order_relaxed);
 }
 
 AudioStreamHandoff::ResampledChunkResult AudioStreamHandoff::pull_resampled_chunk(
     BufferView<float> destination,
     std::uint64_t frames) noexcept {
     ResampledChunkResult chunk_result;
+    if (!pending_fifo_) {
+        return chunk_result;
+    }
     while (chunk_result.output_frames < frames) {
         refill_pending_from_ring();
-        if (pending_source_frames_ == 0) break;
+        if (pending_fifo_->num_ready() == 0) break;
 
-        const auto contiguous_pending =
-            std::min(pending_source_frames_,
-                     pending_capacity_frames_ - pending_read_offset_);
+        int start_1 = 0;
+        int size_1 = 0;
+        int start_2 = 0;
+        int size_2 = 0;
+        pending_fifo_->prepare_to_read(
+            static_cast<int>(std::min<std::uint64_t>(
+                pending_fifo_->num_ready(),
+                static_cast<std::uint64_t>(std::numeric_limits<int>::max()))),
+            start_1, size_1, start_2, size_2);
+        static_cast<void>(start_2);
+        static_cast<void>(size_2);
+        if (size_1 == 0) break;
         for (std::uint32_t ch = 0; ch < source_channels_; ++ch) {
             pending_read_ptrs_[ch] =
-                pending_source_[ch].data() + static_cast<std::size_t>(pending_read_offset_);
+                pending_source_[ch].data() + static_cast<std::size_t>(start_1);
             resampled_output_ptrs_[ch] = resampled_output_[ch].data();
         }
 
         const auto result = resampler_.process_block_detailed(
             pending_read_ptrs_.data(),
-            static_cast<std::size_t>(contiguous_pending),
+            static_cast<std::size_t>(size_1),
             resampled_output_ptrs_.data(),
             static_cast<std::size_t>(frames - chunk_result.output_frames));
 
@@ -259,6 +262,20 @@ AudioStreamHandoff::ResampledChunkResult AudioStreamHandoff::pull_resampled_chun
     }
 
     return chunk_result;
+}
+
+void AudioStreamHandoff::copy_resampled_to_destination(BufferView<float> destination,
+                                                       std::uint64_t destination_offset,
+                                                       std::uint64_t frames) noexcept {
+    if (frames == 0) return;
+    for (std::size_t ch = 0; ch < destination.num_channels(); ++ch) {
+        float* output = destination.channel_ptr(ch) + destination_offset;
+        if (ch < source_channels_) {
+            std::copy_n(resampled_output_[ch].data(), static_cast<std::size_t>(frames), output);
+        } else {
+            std::fill_n(output, static_cast<std::size_t>(frames), 0.0f);
+        }
+    }
 }
 
 AudioStreamHandoffPullResult AudioStreamHandoff::pull(BufferView<float> destination,

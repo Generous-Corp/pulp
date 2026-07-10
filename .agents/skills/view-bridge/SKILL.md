@@ -1282,3 +1282,26 @@ Two subtleties:
 - Better still, derive event positions from `position_beats` outright rather than
   from an accumulator. Then a start, a seek, and a loop wrap are the same case,
   and none of them can produce a burst.
+
+## The StateStore must outlive the Processor
+
+`Processor::state()` dereferences a pointer the host installs. A Processor may
+follow it for its whole lifetime — from `process()`, from its destructor, and from
+any worker thread that destructor is about to `join()`. So the host has to keep the
+store alive until the Processor is gone.
+
+In practice that is one rule about member order: **declare the `state::StateStore`
+before the `std::unique_ptr<Processor>`.** Members are destroyed in reverse
+declaration order, so the store then dies last. Every host in `core/format` had it
+backwards until 2026-07; the effect is nothing at all for a Processor with no
+threads, and a use-after-free on plug-in close for one with a background thread that
+reads `state().get_value()` while the destructor walks to its `join()`.
+
+It crashes only on close, only sometimes, and the DAW gets the blame. The regression
+test is `test/test_store_lifetime.cpp`; it observes the store's destruction through a
+sentinel owned by a parameter's `to_string` closure rather than reading freed memory
+and hoping the result looks wrong.
+
+A Processor should not *rely* on this either: a worker thread that reads the store on
+every tick is one host away from the same crash. Publish what the thread needs to
+atomics from `process()` instead.

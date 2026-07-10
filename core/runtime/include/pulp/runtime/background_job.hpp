@@ -115,12 +115,26 @@ private:
     std::thread worker_;
 };
 
+enum class RealtimeResourceSlotPublishStatus : std::uint8_t {
+    Published,
+    RejectedEmptyResource,
+    RejectedRetireQueueFull,
+};
+
+constexpr bool realtime_resource_slot_publish_succeeded(
+    RealtimeResourceSlotPublishStatus status) noexcept {
+    return status == RealtimeResourceSlotPublishStatus::Published;
+}
+
 /// Control-thread owner for resources prepared off the audio thread and read
 /// from the audio thread through an atomic raw pointer.
 ///
-/// `publish()` and `reclaim_retired()` are non-RT control-thread calls. The
+/// A single non-RT owner serializes `publish*()` and `reclaim_retired()`. The
 /// audio thread only calls `get()`, which is a single acquire load and does not
-/// allocate, lock, wait, or take ownership.
+/// allocate, lock, wait, or take ownership. Because `get()` returns an unpinned
+/// raw pointer, the owner must call `reclaim_retired()` only after a host/block
+/// boundary or other grace point proves callbacks that may have loaded an old
+/// pointer have left it.
 template <typename T, std::size_t RetireCapacity>
 class RealtimeResourceSlot {
     static_assert(RetireCapacity > 0, "RetireCapacity must be > 0");
@@ -137,29 +151,25 @@ public:
     }
 
     [[nodiscard]] bool publish(std::unique_ptr<const T> next) {
-        if (!next) return false;
+        return realtime_resource_slot_publish_succeeded(
+            publish_with_status(std::move(next)));
+    }
 
-        if (active_ && retired_.size_approx() >= RetireCapacity) {
-            retire_overflow_count_.fetch_add(1, std::memory_order_relaxed);
-            return false;
-        }
+    [[nodiscard]] RealtimeResourceSlotPublishStatus publish_with_status(
+        std::unique_ptr<const T> next) {
+        if (!next) return RealtimeResourceSlotPublishStatus::RejectedEmptyResource;
 
         auto previous = std::move(active_);
+        if (previous && !retired_.try_push(std::move(previous))) {
+            active_ = std::move(previous);
+            retire_overflow_count_.fetch_add(1, std::memory_order_relaxed);
+            return RealtimeResourceSlotPublishStatus::RejectedRetireQueueFull;
+        }
+
         const T* next_ptr = next.get();
         active_ = std::move(next);
         current_.store(next_ptr, std::memory_order_release);
-
-        if (previous && !retired_.try_push(std::move(previous))) {
-            // Preserve audio-thread safety over immediate cleanup: leaking an
-            // old resource is preferable to deleting storage that a callback may
-            // still be reading. A control thread should drain retired resources
-            // before the fixed queue reaches capacity.
-            static_cast<void>(previous.release());
-            retire_overflow_count_.fetch_add(1, std::memory_order_relaxed);
-            return false;
-        }
-
-        return true;
+        return RealtimeResourceSlotPublishStatus::Published;
     }
 
     std::size_t reclaim_retired(std::size_t max_to_reclaim = RetireCapacity) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/signal/denormal.hpp>
+
 #include <cmath>
 #include <type_traits>
 
@@ -144,8 +146,11 @@ public:
     // Process a single sample (Direct Form II Transposed)
     SampleType process(SampleType input) {
         SampleType output = b0_ * input + s1_;
-        s1_ = b1_ * input - a1_ * output + s2_;
-        s2_ = b2_ * input - a2_ * output;
+        // Snap the recursive state to zero to keep denormals out of the DF2T
+        // feedback path on platforms/threads without an FTZ guard (wasm,
+        // MSVC/ARM64, graph worker threads). No-op for any state >= 1e-15.
+        s1_ = snap_to_zero(b1_ * input - a1_ * output + s2_);
+        s2_ = snap_to_zero(b2_ * input - a2_ * output);
         return output;
     }
 

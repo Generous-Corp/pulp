@@ -133,6 +133,7 @@ public:
 
     bool valid() const noexcept;
     const graph::GraphRuntimePlan& plan() const noexcept { return plan_; }
+    bool contains_node(graph::NodeId node_id) const noexcept;
     std::span<const GraphRuntimeNodeBinding> bindings() const noexcept {
         return bindings_;
     }
@@ -149,6 +150,7 @@ public:
 private:
     graph::GraphRuntimePlan plan_;
     std::vector<GraphRuntimeNodeBinding> bindings_;
+    std::vector<graph::NodeId> node_ids_sorted_;
     graph::GraphRuntimeBufferAssignment assignment_;
     bool parallel_safe_ = false;
 };
@@ -423,8 +425,9 @@ public:
     // Per-node DENSE transient gather state — one slot per distinct audio-rate
     // parameter the node receives (same i-indexing as dense_param_id /
     // dense_buffer). dense_replace/dense_add are the per-param "saw a Replace /
-    // Add edge" flags; dense_lo/dense_hi the clamp bounds. These hold no state
-    // between blocks (the gather re-zeroes its node slice each call); they live in
+    // Add edge" flags; dense_lo/dense_hi the clamp bounds. dense_touched is the
+    // per-node emit list used by the gather so it only clears and emits params
+    // reached this block. These hold no state between blocks; they live in
     // per-node scratch only so the gather needs no on-stack arrays, and disjoint
     // per-node slices keep the parallel gather race-free.
     std::span<float> dense_lo(std::uint32_t node_index) noexcept {
@@ -438,6 +441,9 @@ public:
     }
     std::span<std::uint8_t> dense_add(std::uint32_t node_index) noexcept {
         return dense_span(dense_add_, node_index);
+    }
+    std::span<std::uint32_t> dense_touched(std::uint32_t node_index) noexcept {
+        return dense_span(dense_touched_, node_index);
     }
 
     // Per-node SPARSE accumulator slice (one SparseAccum per distinct control-rate
@@ -482,6 +488,7 @@ private:
     std::vector<float> dense_hi_;
     std::vector<std::uint8_t> dense_replace_;
     std::vector<std::uint8_t> dense_add_;
+    std::vector<std::uint32_t> dense_touched_;
     // Per-node SPARSE accumulators, flattened (one slice per node).
     std::vector<SparseAccum> sparse_accum_storage_;
     std::vector<std::uint32_t> node_sparse_first_;    // per node: index into storage
@@ -640,7 +647,7 @@ private:
     // and updates result + stats. Returns false if command_results is too small.
     bool drain_commands(
         ProcessBlock& block,
-        const graph::GraphRuntimePlan& plan,
+        const GraphRuntimeSnapshot& snapshot,
         std::span<const graph::GraphTimedCommand> commands,
         std::span<GraphRuntimeCommandDecision> command_results,
         GraphRuntimeCommandHandler command_handler,
