@@ -80,7 +80,7 @@ jobs:
           node assemble.mjs                 # single-plugin isolation proof (/)
           node assemble-player.mjs          # shared-player WebCLAP demo (/player/)
 
-      - name: Prove @pulp/web-player adapter unit tests
+      - name: Prove @danielraffel/web-player adapter unit tests
         working-directory: packages/pulp-web-player
         run: npm test
 

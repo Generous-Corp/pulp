@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// pack-smoke.mjs — prove @pulp/web-player works when installed FROM A TARBALL,
+// pack-smoke.mjs — prove @danielraffel/web-player works when installed FROM A TARBALL,
 // not from the source tree. This is the dogfood-second half: `npm pack`, install
 // the tarball into a fresh scratch consumer, drop a REAL built Pulp WAM plugin
 // beside a page that imports `mountDemo` from the installed package alone, and
@@ -96,7 +96,7 @@ async function main() {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>pack-smoke — @pulp/web-player</title>
+  <title>pack-smoke — @danielraffel/web-player</title>
   <script type="importmap">
   { "imports": { "${pkgName}": "${pkgEntry}" } }
   </script>
@@ -110,7 +110,7 @@ async function main() {
   mountDemo({
     root: document.getElementById("app"),
     title: "Pack Smoke — State Memo",
-    subtitle: "Installed from the @pulp/web-player tarball alone.",
+    subtitle: "Installed from the @danielraffel/web-player tarball alone.",
     dspUrl: "./wam-dsp.js", processorUrl: "./wam-processor.js",
     mode: "audio-effect", paramRows: 1,
     stateMemo: true,

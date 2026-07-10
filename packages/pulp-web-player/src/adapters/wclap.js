@@ -1,4 +1,4 @@
-// adapters/wclap.js — the WebCLAP host adapter for @pulp/web-player.
+// adapters/wclap.js — the WebCLAP host adapter for @danielraffel/web-player.
 //
 // The WebCLAP twin of adapters/wam.js: it exposes the SAME host-adapter contract
 // the shell drives (see adapter.d.ts) so the identical shared player can host a
