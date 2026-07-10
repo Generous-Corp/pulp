@@ -109,11 +109,25 @@ twice, get the same samples. Reroll them with `Seed`, not by pressing play again
 Rendered per sample: a block-rate control voltage is an audible zipper on whatever
 it drives.
 
-Two of the LFO's eight sync modes are the exception, and the editor names them.
-`Free` and `Tempo` keep oscillating while the transport is parked, which is not a
-function of a position that is not moving — so those two, and only those two, do
-not bounce bit-identically. `Free3` is what a position-derived "free run" actually
-is, and it is exact.
+There are exactly three exceptions, and none of them is a footnote hidden here.
+
+**The wall-clock sync modes.** `Free` and `Tempo` keep oscillating while the
+transport is parked, which is not a function of a position that is not moving — so
+those two do not bounce bit-identically, and the editor names them. `Free3` is what
+a position-derived "free run" actually is, and it is exact. The Step LFO adds
+`TrgFr` and `TrgTm`, which hold on a count of triggers seen rather than on the
+timeline, so they are not pure either. `sync_is_deterministic()` states all of this
+in code rather than only in prose.
+
+**`Smooth`.** A smoother carries state between blocks, so a non-zero `Smooth` makes
+the output depend on how the playhead arrived and not only on where it is. The
+dependence is bounded by the smoother's own settling time — locate to bar 57 from
+anywhere and the two renders converge — and at zero it is a wire, bit for bit. That
+is why zero is the default on every plug-in that has one.
+
+**`Trigger`.** A note is an event, not a coordinate, and no envelope can be a pure
+function of a position. It is deterministic in the only sense available: the same
+notes on the same timeline render the same samples.
 
 `Sync` also carries a **1st Delay** (hold the clock off for N ms after the
 transport starts, measured from the run origin so two runs behave identically)
@@ -127,7 +141,8 @@ designed rather than bolted on, and nothing in this suite accumulates phase.
 
 Built for VST3, AU, and CLAP. The AU component type follows the descriptor: `aufx`
 for the plug-ins that take no MIDI, `aumf` for `LFO`, whose `Reset` retriggers on a
-note-on — an AU host routes MIDI only to a `MusicEffect`. `brew-core/` holds what
+note-on, and for `Trigger`, which is nothing but notes — an AU host routes MIDI only
+to a `MusicEffect`. `brew-core/` holds what
 the plug-ins share: the output stage above, the clock grid, the pulse-width rules,
 the scales, and the run-segment origin. `brew-ui/` holds the shared editor
 furniture.

@@ -1297,3 +1297,45 @@ TEST_CASE("the two channels smooth independently", "[brew][lfo][smooth][stereo]"
     REQUIRE(out.channel(1)[0] == 1.0f);   // unsmoothed: straight to the rail
     REQUIRE(out.channel(0)[0] < 1.0f);    // smoothed: still climbing
 }
+
+TEST_CASE("a non-zero Smooth makes a locate converge rather than diverge",
+          "[brew][lfo][safety]") {
+    // `Smooth` is the one control on this plug-in that makes the output depend on
+    // how the playhead arrived rather than only on where it is: a smoother carries
+    // state between blocks. The README says the dependence is bounded by the
+    // smoother's own settling time. This is what says it in code.
+    constexpr float kMs = -5.0f;   // a one-pole, ~5 ms to settle a full swing
+
+    Lfo played, located;
+    for (Lfo* h : {&played, &located}) {
+        set_sync(*h, SyncMode::transport2);
+        set_both(*h, LfoProcessor::kBeats, 1.0f);
+        set_both(*h, LfoProcessor::kSmoothMs, kMs);
+    }
+
+    // One arrives at beat 8 by playing there; the other drops in cold.
+    for (int b = 0; b < 8; ++b) (void)at_beat(played, static_cast<double>(b), 512);
+
+    // Twenty settling times' worth of samples, rendered from beat 8 in both hosts.
+    constexpr int kFrames = 4800;   // 100 ms at 48 kHz
+    const auto a = at_beat(played, 8.0, kFrames);
+    const auto b = at_beat(located, 8.0, kFrames);
+
+    // They start apart — the smoother's state is the whole point.
+    const float first = std::abs(a[0] - b[0]);
+    CHECK(first > 1e-4f);
+    // ...and they converge, rather than staying apart or drifting further. The gap
+    // is bounded by the smoother's settling time, which is the whole claim.
+    const float last = std::abs(a[kFrames - 1] - b[kFrames - 1]);
+    CHECK(last < first * 1e-3f);
+    CHECK(last < 1e-6f);
+
+    // At zero it is a wire, so the same locate is bit-identical.
+    Lfo exact_played, exact_located;
+    for (Lfo* h : {&exact_played, &exact_located}) {
+        set_sync(*h, SyncMode::transport2);
+        set_both(*h, LfoProcessor::kBeats, 1.0f);
+    }
+    for (int i = 0; i < 8; ++i) (void)at_beat(exact_played, static_cast<double>(i), 512);
+    CHECK(at_beat(exact_played, 8.0, 64) == at_beat(exact_located, 8.0, 64));
+}

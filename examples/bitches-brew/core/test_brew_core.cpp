@@ -12,7 +12,9 @@
 #include <brew/cv.hpp>
 #include <brew/pulse.hpp>
 #include <brew/run_segment.hpp>
+#include <brew/smooth.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -519,4 +521,114 @@ TEST_CASE("swing stays invertible across its whole range", "[brew][clock][swing]
             }
         }
     }
+}
+
+// ── Smoother ─────────────────────────────────────────────────────────────────
+
+TEST_CASE("Smooth at zero is a wire, bit for bit", "[brew][smooth]") {
+    Smoother s;
+    for (float v : {0.3f, -0.9f, 0.0f, 1.0f}) CHECK(s.process(v, 0.0f, 48000.0) == v);
+    // And a nonsense sample rate is a wire too, rather than a division.
+    CHECK(s.process(0.7f, -50.0f, 0.0) == 0.7f);
+}
+
+TEST_CASE("a positive Smooth slews at a constant rate", "[brew][smooth]") {
+    // Calibrated so the number is the time a full -1..+1 swing takes.
+    constexpr double kSr = 48000.0;
+    Smoother s;
+    s.reset(-1.0f);
+    constexpr float kMs = 100.0f;
+    const int expect = static_cast<int>(kMs * 0.001 * kSr);   // 4800 samples
+    for (int n = 0; n < expect - 1; ++n) CHECK(s.process(1.0f, kMs, kSr) < 1.0f);
+    CHECK_THAT(s.process(1.0f, kMs, kSr), Catch::Matchers::WithinAbs(1.0f, 1e-5f));
+    // Half the distance takes half the time.
+    s.reset(0.0f);
+    for (int n = 0; n < expect / 2 - 1; ++n) CHECK(s.process(1.0f, kMs, kSr) < 1.0f);
+    CHECK_THAT(s.process(1.0f, kMs, kSr), Catch::Matchers::WithinAbs(1.0f, 1e-5f));
+}
+
+namespace {
+/// The one-pole, written out longhand: one `exp` per sample, no cache. What the
+/// cached coefficient has to agree with, bit for bit.
+float longhand_one_pole(float state, float target, float ms, double sr) {
+    const double tau = static_cast<double>(-ms) * 0.001;
+    const auto a = static_cast<float>(std::exp(-1.0 / (tau * sr)));
+    return a * state + (1.0f - a) * target;
+}
+}  // namespace
+
+TEST_CASE("the cached one-pole coefficient is bit-identical to recomputing it",
+          "[brew][smooth]") {
+    constexpr double kSr = 48000.0;
+    constexpr float kMs = -40.0f;
+    Smoother s;
+    float longhand = 0.0f;
+    for (int n = 0; n < 2000; ++n) {
+        const float target = n < 1000 ? 0.8f : -0.4f;
+        longhand = longhand_one_pole(longhand, target, kMs, kSr);
+        INFO("sample " << n);
+        CHECK(s.process(target, kMs, kSr) == longhand);
+    }
+}
+
+TEST_CASE("changing the Smooth time or the sample rate recomputes the coefficient",
+          "[brew][smooth]") {
+    // The cache is keyed on both. A stale coefficient would leave the filter running
+    // at whatever rate the last block used, which is a smoother that ignores its own
+    // knob — and every sample of it would still look plausible.
+    constexpr double kSr = 48000.0;
+    Smoother fast, slow;
+    fast.reset(1.0f);
+    slow.reset(1.0f);
+    for (int n = 0; n < 64; ++n) {
+        (void)fast.process(0.0f, -1.0f, kSr);
+        (void)slow.process(0.0f, -200.0f, kSr);
+    }
+    CHECK(fast.value() < slow.value());
+
+    // Run one at -200 ms, then switch it to -1 ms: it must now behave like `fast`.
+    Smoother switched;
+    switched.reset(1.0f);
+    for (int n = 0; n < 64; ++n) (void)switched.process(0.0f, -200.0f, kSr);
+    CHECK_THAT(switched.value(), Catch::Matchers::WithinAbs(slow.value(), 1e-6f));
+    // Ten time constants at the new setting. A cache that ignored the change would
+    // still be crawling at the old one's rate.
+    for (int n = 0; n < 480; ++n) (void)switched.process(0.0f, -1.0f, kSr);
+    CHECK(switched.value() < 1e-3f);
+
+    // Same control, half the sample rate: half as many samples to the same place.
+    Smoother a, b;
+    a.reset(1.0f);
+    b.reset(1.0f);
+    for (int n = 0; n < 96; ++n) (void)a.process(0.0f, -1.0f, 48000.0);
+    for (int n = 0; n < 48; ++n) (void)b.process(0.0f, -1.0f, 24000.0);
+    CHECK_THAT(a.value(), Catch::Matchers::WithinAbs(b.value(), 1e-6f));
+}
+
+TEST_CASE("the one-pole's tail is flushed rather than left to go denormal",
+          "[brew][smooth]") {
+    // A one-pole never arrives. Left alone its state lands in the denormal range,
+    // where every multiply costs an order of magnitude more than a normal one — a
+    // control-rate filter that gets slower the quieter it is.
+    constexpr double kSr = 48000.0;
+    Smoother s;
+    s.reset(1.0f);
+    float last = 1.0f;
+    for (int n = 0; n < 200000 && last != 0.0f; ++n) last = s.process(0.0f, -1.0f, kSr);
+    CHECK(last == 0.0f);
+    CHECK(s.value() == 0.0f);
+    // And it stays there rather than being nudged back off zero.
+    CHECK(s.process(0.0f, -1.0f, kSr) == 0.0f);
+}
+
+TEST_CASE("reset() reprimes the coefficient cache", "[brew][smooth]") {
+    constexpr double kSr = 48000.0;
+    Smoother s;
+    for (int n = 0; n < 64; ++n) (void)s.process(0.0f, -200.0f, kSr);
+    s.reset(1.0f);
+    // A slow coefficient left in the cache would be used for this fast sample.
+    const float first = s.process(0.0f, -1.0f, kSr);
+    Smoother fresh;
+    fresh.reset(1.0f);
+    CHECK(first == fresh.process(0.0f, -1.0f, kSr));
 }
