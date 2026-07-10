@@ -115,8 +115,28 @@ export function parseMidiOutRecords(bytes, len) {
 // invalidates old ArrayBuffer references.
 export function makeBridge(exports) {
   const mem = () => exports.memory;
-  const u8 = () => new Uint8Array(mem().buffer);
-  const f32 = () => new Float32Array(mem().buffer);
+  // Cache the heap views instead of rebuilding a Uint8Array/Float32Array on
+  // every call. These are hit on the audio render thread — f32() twice per
+  // process() (interleave in, de-interleave out) and u8() on every MIDI drain —
+  // so a fresh view per call was steady per-block GC pressure. Rebuild only when
+  // the heap buffer changes: ALLOW_MEMORY_GROWTH swaps the ArrayBuffer (identity
+  // changes) and a shared/growable buffer extends in place (byteLength changes),
+  // so covering both never reads a grown heap through a stale, too-short view.
+  let viewBuffer = null;
+  let viewByteLength = -1;
+  let u8View = null;
+  let f32View = null;
+  const refreshViews = () => {
+    const buf = mem().buffer;
+    if (buf !== viewBuffer || buf.byteLength !== viewByteLength) {
+      viewBuffer = buf;
+      viewByteLength = buf.byteLength;
+      u8View = new Uint8Array(buf);
+      f32View = new Float32Array(buf);
+    }
+  };
+  const u8 = () => { refreshViews(); return u8View; };
+  const f32 = () => { refreshViews(); return f32View; };
   const writeCStr = (s) => {
     const bytes = utf8Encode(s + "\0");
     const p = exports.malloc(bytes.length);
