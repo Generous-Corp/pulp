@@ -94,3 +94,17 @@ Use MCP tools when available:
 - `pulp_kit_pack`
 - `pulp_kit_publish_check`
 - `pulp_kit_init`
+
+## Related extend surfaces
+
+`packages`, `kits`, `content`, and `installable-tools` are Pulp's four ways to
+extend a project or machine, and they share one lifecycle contract: **add is
+validated, remove is confirmed + confined to the surface's own area + names what
+it deleted, and both add and remove ship tests.** Pick the right surface and read
+the shared contract in
+[extending-pulp.md](../../../docs/reference/extending-pulp.md).
+
+- [`packages`](../packages/SKILL.md) — third-party audio DSP libraries → a project
+- [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
+- [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
+- [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
