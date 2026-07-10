@@ -63,6 +63,22 @@ public:
         return worker_idle_sleep_count();
     }
 
+#ifdef PULP_GRAPH_RUNTIME_WORKER_POOL_TEST_HOOKS
+    void seed_reheat_state_for_test(std::uint32_t worker_count,
+                                    std::uint32_t active_worker_threads,
+                                    bool reheat_requested) noexcept {
+        worker_count_ = worker_count;
+        active_worker_threads_.store(active_worker_threads, std::memory_order_release);
+        reheat_requested_.store(reheat_requested, std::memory_order_release);
+    }
+    void clear_transient_reheat_if_no_worker_cold_for_test() noexcept {
+        clear_transient_reheat_if_no_worker_cold();
+    }
+    bool reheat_requested_for_test() const noexcept {
+        return reheat_requested_.load(std::memory_order_acquire);
+    }
+#endif
+
     // RT-safe: run `fn(context, i)` for every i in [0, task_count) exactly once,
     // distributed across the pool threads and the calling thread, and return only
     // after all have completed. Allocation-free and lock-free. With no worker
@@ -71,6 +87,7 @@ public:
 
 private:
     void worker_loop(std::uint32_t worker_index) noexcept;
+    void clear_transient_reheat_if_no_worker_cold() noexcept;
     // Run this worker's STATIC contiguous task range for the current batch and
     // add its size to the completion counter. Static partitioning (no shared
     // claim cursor) means a lagging worker can never re-claim tasks after run()
