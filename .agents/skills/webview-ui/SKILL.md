@@ -167,15 +167,45 @@ content bounds, attach the child with that size, and keep it in sync via
 `WindowHost::set_resize_callback(...)`. `examples/webview-monaco/main.cpp`
 is the current reference pattern.
 
-For plugin-editor embedding:
-- use `View::plugin_view_host()` instead of creating a separate `WindowHost`
-- attach the `WebViewPanel` native handle through
-  `PluginViewHost::attach_native_child_view(...)`
-- resize from `on_view_resized()` via
-  `PluginViewHost::set_native_child_view_bounds(...)`
-- detach in `on_view_closed()` or the owning view destructor
-- see `examples/webview-plugin/` for the minimal Processor-backed example
-  that hosts a `WebViewPanel` directly inside a plugin editor subtree
+For plugin-editor embedding, use the `view::NativeViewHost` widget — do NOT
+hand-roll `plugin_view_host()->attach_native_child_view(...)`:
+- add a `NativeViewHost` to the editor tree, size it with flex
+  (`host->flex().flex_grow = 1.0f` to fill), and call
+  `set_native_child(panel->native_handle(), snapshot_fn)`
+- the widget drives attach / bounds / clip / detach itself from its host
+  back-reference + Yoga layout, so it works under BOTH a `PluginViewHost`
+  (editor) and a `WindowHost` (standalone). It falls back from
+  `plugin_view_host()` to `window_host()`
+  (`core/view/src/native_view_host.cpp` `try_attach()` / `active_viewport_transform()`)
+- it also honors the active design-viewport transform and routes headless
+  snapshot capture for free — no `on_view_opened/resized/closed` plumbing
+- see `examples/webview-plugin/` for the reference Processor-backed editor
+
+### Native-editor gotchas (G2, learned building `examples/webview-plugin`)
+
+- **Retention: own the `WebViewPanel` on the `Processor`, never in the view
+  tree.** `ViewBridge::close()` destroys the whole view tree on editor close
+  (`core/format/src/view_bridge.cpp`). A view-owned `WebViewPanel` is recreated
+  every close/reopen, discarding the WKWebView's JS heap + page/scroll state. Put
+  the panel on the `Processor` (create once, lazily in `create_view()`); the
+  `NativeViewHost` only BORROWS `native_handle()`. Rule of thumb: *anything that
+  must survive editor close lives on the `Processor`.* Pinned by a pointer-identity
+  test across two open/close cycles in `test/test_webview_plugin_example.cpp`.
+- **The old `plugin_view_host()`-only attach SILENTLY no-ops in standalone.** In
+  standalone the root is hosted by a `WindowHost`, not a `PluginViewHost`
+  (`core/format/src/standalone.cpp`), so `plugin_view_host()` is null and a
+  hand-rolled attach returns without attaching — the WebView never appears and
+  nothing errors. `NativeViewHost`'s `window_host()` fallback is the fix.
+- **WKWebView frame scaling REFLOWS, it does not zoom.** CSS px track the frame,
+  so a letterbox-scaled native child does not visually match a scaled Pulp
+  sibling. `WKWebView.pageZoom = scale` parity is deliberately DEFERRED (not a
+  native-editor blocker).
+- **Headless `snapshot_png()` returns ZERO bytes even when `is_ready()==true`** —
+  WKWebView's `takeSnapshot` needs an on-screen window with painted content.
+  Example/headless tests therefore assert the snapshot ROUTE by equality
+  (`NativeViewHost::capture_native_overlay_png == panel->snapshot_png()`), not a
+  literal non-empty size; the non-empty forwarding guarantee is pinned at the
+  widget level in `test/test_native_view_host.cpp`.
 
 For a standalone app that should behave like a single-pane WebView shell:
 - use `pulp::format::StandaloneApp::run_with_editor(...)`

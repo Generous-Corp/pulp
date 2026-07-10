@@ -1344,3 +1344,36 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## Native children under a design viewport, and the resize contract
+
+Two coupled seams a native-editor (WebView) plugin depends on:
+
+**1. Native-child geometry honors the viewport transform.** When a host paints under a
+design viewport it scales+letterboxes Pulp widgets, but `NativeViewHost::compute_geometry`
+produces frames in ROOT/design space. If those raw coords are pushed to the OS view, a
+tree mixing Pulp widgets and a native child drifts by scale+letterbox on any off-size DAW
+pane. The fix is a **forward** transform companion to `window_to_root_point`'s inverse:
+`bool design_viewport_transform(float& sx,float& sy,float& tx,float& ty)` on both
+`PluginViewHost` and `WindowHost` (default false = identity; overridden by the mac CPU/GPU
+plugin hosts and the GPU window host — the CPU window host has no viewport, so false is
+correct). **Do the transform in the WIDGET (`native_view_host.cpp`), never in the host
+`attach_native_child_view`/`set_native_child_view_bounds` primitives** — other callers
+(`hosted_editor_attachment.hpp`, `examples/webview-{palette,monaco}`, `test_web_view.cpp`)
+already pass HOST-space coords and would double-transform. Introspection getters stay in
+design space; `computed_child_frame_host()` exposes the transformed frame for tests. The
+pushed-geometry cache stores HOST-space, so a host resize (which changes the scale)
+invalidates it and re-pushes even when the design-space layout is unchanged. WKWebView
+caveat: scaling the frame **reflows** web content (CSS px track the frame), it does not
+zoom — a `pageZoom = s` parity hook is deferred, not wired.
+
+**2. The resize contract.** `ViewSize::aspect_ratio==0` means "free drag within [min,max]".
+VST3 (`vst3_plug_view.cpp`) + CLAP (`clap_entry.hpp`) must honor it, but the migration
+hazard is that the default `view_size()` returns `{w,h,0,0,0,0}` → `aspect_ratio==0`, so a
+naive read flips every hand-authored plugin to free-reflow. Rule: `resizable = min>0 on
+both axes` (CLAP's shipped convention); `free = resizable && aspect_ratio==0`. min==0 keeps
+today's viewport pin (and VST3 `canResize()` now returns false there, aligning with CLAP);
+resizable+aspect>0 is unchanged (viewport+lock+snap); free ⇒ no viewport/lock, clamp
+min/max only, no aspect snap. Tests live in `test/test_vst3_plugin_state.cpp` and
+`test/test_clap_entry.cpp` (`[resize]`), plus fake-host viewport-transform cases in
+`test/test_native_view_host.cpp` (`[viewport]`).
