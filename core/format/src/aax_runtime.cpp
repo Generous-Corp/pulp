@@ -80,6 +80,16 @@ static_assert(kAudioInputField == AAX_FIELD_INDEX(AlgorithmContext, audio_input)
 // block clamps + zero-fills per the shared max-block contract instead.
 constexpr int kAaxPreparedMaxBlock = 8192;
 
+// Worst-case per-block MIDI capacities the render-thread MIDI buffers are
+// reserved to (mirrors CLAP/VST3/AU). A MIDI-effect / generator / arpeggiator
+// with supports_midi_output writes into midi_out from inside process(); the
+// buffers are reserved off the render thread and capacity-limited so those
+// add()/add_sysex() calls never allocate under the ScopedNoAlloc guard. Kept
+// in sync with test_aax_rt_safety.cpp.
+constexpr std::size_t kAaxMaxMidiEventsPerBlock = 2048;
+constexpr std::size_t kAaxMaxSysexPerBlock = 64;
+constexpr std::size_t kAaxMaxSysexPayloadBytes = 512;
+
 // AAX has no host-type/version detection here, so it reports latency through
 // the shared quirk helper with the always-on defaults (clamp-negative-to-zero),
 // exactly like CLAP/VST3/AU rather than calling SetSignalLatency raw.
@@ -360,6 +370,19 @@ struct InstanceState {
             descriptor = processor->descriptor();
             store.reset_all_to_defaults();
         }
+
+        // Pre-size + capacity-limit the render-thread MIDI buffers here, off the
+        // render thread (instance construction), exactly like CLAP/VST3/AU. A
+        // supports_midi_output plugin appends to midi_out from inside process(),
+        // which runs under the ScopedNoAlloc guard below — without this reserve
+        // the first add() would push_back on a zero-capacity vector and allocate
+        // on the AAX render thread (the very hazard this adapter closes).
+        midi_in.reserve(kAaxMaxMidiEventsPerBlock, kAaxMaxSysexPerBlock,
+                        kAaxMaxSysexPayloadBytes);
+        midi_out.reserve(kAaxMaxMidiEventsPerBlock, kAaxMaxSysexPerBlock,
+                         kAaxMaxSysexPayloadBytes);
+        midi_in.set_realtime_capacity_limit(true);
+        midi_out.set_realtime_capacity_limit(true);
     }
 
     ~InstanceState() {
@@ -377,20 +400,25 @@ struct InstanceState {
             return false;
         }
 
-        // Re-prepare ONLY on a stable-configuration change (sample rate or
-        // channel count) — never on block size. Block size is governed by the
-        // shared max-block contract: the first prepare sizes scratch to a
-        // generous ceiling, ordinary blocks (always <= that) reuse it, and a
-        // pathological over-ceiling block clamps + zero-fills in the caller.
-        // This is what removes the render-thread re-prepare (allocation) that a
-        // per-block size change used to trigger.
+        // Re-prepare only on a stable-configuration change (sample rate /
+        // channel count) OR to GROW the scratch for a block larger than any we
+        // have prepared for. The first prepare sizes scratch to a generous
+        // ceiling (kAaxPreparedMaxBlock) that covers every real-time host buffer
+        // size, so the real-time Insert path — where re-preparing would be an
+        // allocation on the audio thread (the bug this fix removes) — never
+        // re-prepares after the first block: shorter blocks reuse the scratch.
+        //
+        // The only path that can exceed the ceiling is offline AudioSuite
+        // rendering (this plugin ships AAX_ePlugInRole_InsertOrAudioSuite),
+        // which is NOT the real-time audio thread and where a one-time grow is
+        // acceptable — and correct, versus silently clamping the tail of a large
+        // offline block to silence.
         if (prepared
             && prepared_sample_rate == sample_rate
             && prepared_input_channels == input_channels
-            && prepared_output_channels == output_channels)
+            && prepared_output_channels == output_channels
+            && block_size <= prepared_max_buffer)
         {
-            // Block size — including an over-ceiling overrun — is handled by
-            // the clamp contract in the caller, never by re-preparing here.
             return true;
         }
 
@@ -399,7 +427,7 @@ struct InstanceState {
         }
 
         // Grow-only ceiling: never shrink below a size we've already prepared
-        // for, and always cover at least kAaxPreparedMaxBlock so real host
+        // for, and always cover at least kAaxPreparedMaxBlock so real-time host
         // buffer sizes never re-prepare on the audio thread.
         const int prepared_block = std::max({block_size,
                                              prepared_max_buffer,
@@ -638,11 +666,12 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
                               component.main_input_channels,
                               component.main_output_channels);
 
-        // Shared max-block contract (matching CLAP/VST3/AU-v3): clamp the
-        // processed region to the prepared max and zero-fill the un-processable
-        // tail [process_count, sample_count) on each output channel below,
-        // instead of re-preparing on the render thread. A well-behaved host
-        // never overruns, so this is purely defensive.
+        // Defensive backstop only: ensure_prepared() above grew the scratch to
+        // cover this block, so prepared_max_buffer >= sample_count and this
+        // clamp is normally a no-op. It fires (clamp + zero-fill the tail below)
+        // only if a prepare() could not grow (e.g. allocation failure), keeping
+        // the processed region inside the scratch that actually exists rather
+        // than overrunning it. Shares the clamp helper with CLAP/VST3.
         const int process_count =
             clamp_block_to_prepared_max(sample_count, state.prepared_max_buffer);
 

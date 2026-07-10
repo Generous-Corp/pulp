@@ -65,7 +65,6 @@
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
-#include <pulp/format/max_block_contract.hpp>
 #include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -723,18 +722,19 @@ struct ScopedAuV3HostWriting {
             return noErr;
         }
         if (!outputData) return noErr;
-
-        // Max-block contract (defensive; an AU host guarantees it never renders
-        // more than maximumFramesToRender). Per the shared max-block contract
-        // (max_block_contract.hpp) — matching CLAP/VST3/AAX — clamp the
-        // processed region to the prepared max (max_frames) and zero the
-        // un-processable tail on each output buffer below, instead of rejecting
-        // the block. The Processor + its scratch were sized to max_frames in
-        // allocateRenderResources; a larger render would overrun them.
-        const AUAudioFrameCount requestedFrames = frameCount;
-        frameCount = static_cast<AUAudioFrameCount>(
-            pulp::format::clamp_block_to_prepared_max(
-                static_cast<int>(frameCount), static_cast<int>(bridge->max_frames)));
+        // Max-block contract for AU v3 is REJECT, not clamp. Unlike the
+        // push-based adapters (CLAP/VST3 clamp+zero-fill; AAX grows its offline
+        // scratch), AU renders through a pull graph: pullInputBlock feeds
+        // upstream at `frameCount`, so clamping would advance this node by fewer
+        // frames than the host and its siblings, desyncing the pull chain.
+        // `maximumFramesToRender` is a hard host contract (queried up front and
+        // never exceeded; auval never overruns it), and kAudioUnitErr_TooMany-
+        // FramesToProcess is the spec-defined response. Returning it here also
+        // upholds the frameCount <= max_frames invariant the scratch asserts
+        // below rely on.
+        if (frameCount > bridge->max_frames) {
+            return kAudioUnitErr_TooManyFramesToProcess;
+        }
 
         // Flush denormals to zero for the whole render-block body so quiet
         // tails in recursive filter/reverb/feedback state can't stall the
@@ -759,10 +759,7 @@ struct ScopedAuV3HostWriting {
             "pre-size to kMaxChannels * max_frames");
 
         // Output buffer view (uses preallocated scratch when the host passes
-        // null mData during validation/probing). When the render was clamped
-        // above, the processor only writes the first `frameCount` frames, so
-        // zero the un-processable tail of each real host buffer here (scratch
-        // buffers are sized exactly to `frameCount`, so their tail is empty).
+        // null mData during validation/probing).
         for (UInt32 i = 0; i < outChans; ++i) {
             auto& buffer = outputData->mBuffers[i];
             if (!buffer.mData || buffer.mDataByteSize < frameCount * sizeof(float)) {
@@ -772,21 +769,6 @@ struct ScopedAuV3HostWriting {
                     static_cast<std::size_t>(i) * frameCount;
             }
             bridge->output_ptrs[i] = static_cast<float*>(buffer.mData);
-
-            // Zero the clamped tail [frameCount, requestedFrames) — bounded by
-            // the buffer's real capacity so a null-mData scratch substitution
-            // (sized to frameCount) is a no-op and a real host buffer is zeroed
-            // up to what it actually holds.
-            if (requestedFrames > frameCount) {
-                const std::size_t bufferFrames =
-                    buffer.mDataByteSize / sizeof(float);
-                const std::size_t tailEnd =
-                    std::min<std::size_t>(requestedFrames, bufferFrames);
-                if (tailEnd > frameCount) {
-                    std::memset(bridge->output_ptrs[i] + frameCount, 0,
-                                (tailEnd - frameCount) * sizeof(float));
-                }
-            }
         }
         pulp::audio::BufferView<float> output_view(bridge->output_ptrs, outChans, frameCount);
 
