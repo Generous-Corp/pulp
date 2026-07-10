@@ -38,8 +38,22 @@ UInt32 registry_output_element_count() {
     if (!factory) return 1;
     auto probe = factory();
     if (!probe) return 1;
-    return static_cast<UInt32>(
-        instrument_output_element_count(probe->descriptor()));
+    const auto& desc = probe->descriptor();
+    const std::size_t declared = desc.output_buses.size();
+    const std::size_t count = instrument_output_element_count(desc);
+    if (declared > count) {
+        // instrument_output_element_count clamps to BusBufferSet::kMaxBuses
+        // because Render() only fills that many output views. Advertising the
+        // extra elements would leave permanently silent buses in the host, so
+        // surface the truncation instead of dropping the buses silently.
+        runtime::log_warn(
+            "AU v2 instrument: descriptor declares {} output buses but the AU "
+            "render path supports at most {}; clamping to {} output element(s). "
+            "Output buses beyond the cap are dropped and would never receive "
+            "audio.",
+            declared, count, count);
+    }
+    return static_cast<UInt32>(count);
 }
 }  // namespace
 

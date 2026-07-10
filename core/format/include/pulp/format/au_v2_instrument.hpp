@@ -21,16 +21,30 @@
 namespace pulp::format::au {
 
 /// Number of AU output ELEMENTS (buses) a multi-output instrument advertises:
-/// one per declared output bus, floored at 1. Passed to the `MusicDeviceBase`
-/// base constructor so an AU host (Logic, Live, Cubase) lists each output bus —
-/// main plus every aux — and can route them to separate mixer channels.
+/// one per declared output bus, floored at 1 and capped at
+/// `BusBufferSet::kMaxBuses`. Passed to the `MusicDeviceBase` base constructor
+/// so an AU host (Logic, Live, Cubase) lists each output bus — main plus every
+/// aux — and can route them to separate mixer channels.
+///
+/// The cap is load-bearing, not cosmetic: `Render()` only fills output views up
+/// to `kMaxOutputBuses` (== `BusBufferSet::kMaxBuses`), so advertising more AU
+/// elements than that would materialise output elements the render path never
+/// touches — the host would show buses that stay permanently silent. Clamp here
+/// so the advertised element count and the routed count agree; the constructor's
+/// caller (`registry_output_element_count`) logs a warning when a descriptor's
+/// declared bus count exceeds the cap so the truncation is observable, not
+/// silent.
 ///
 /// Pure so the multi-output element-count contract is unit-testable without an
 /// `AudioComponentInstance`. Mirrors how VST3 (`addAudioOutput` per bus) and
-/// CLAP (audio-ports per bus) already iterate `descriptor().output_buses`.
+/// CLAP (audio-ports per bus) already iterate `descriptor().output_buses`, and
+/// how CLAP caps routed output buses at its own `kMaxOutputBuses`.
 inline std::size_t instrument_output_element_count(
     const PluginDescriptor& desc) noexcept {
-    return desc.output_buses.empty() ? std::size_t{1} : desc.output_buses.size();
+    const std::size_t declared =
+        desc.output_buses.empty() ? std::size_t{1} : desc.output_buses.size();
+    return declared < BusBufferSet::kMaxBuses ? declared
+                                              : BusBufferSet::kMaxBuses;
 }
 
 /// Fill one `ProcessBusBufferInfo` per declared output bus (index 0 = Main, the

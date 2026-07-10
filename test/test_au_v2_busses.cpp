@@ -48,6 +48,25 @@ TEST_CASE("AU v2 instrument: output element count is one per declared output bus
     REQUIRE(pulp::format::au::instrument_output_element_count(none) == 1);
 }
 
+TEST_CASE("AU v2 instrument: output element count is clamped to the bus cap",
+          "[au][au-v2][bus]") {
+    // Render() fills at most BusBufferSet::kMaxBuses output views, so the
+    // advertised AU element count MUST be clamped there — otherwise a descriptor
+    // with more output buses than the cap would materialise AU elements that the
+    // render path never routes audio to (permanently silent buses in the host).
+    constexpr std::size_t kCap = pulp::format::BusBufferSet::kMaxBuses;
+
+    // Exactly at the cap: every declared bus fits, nothing is dropped.
+    REQUIRE(pulp::format::au::instrument_output_element_count(
+                multi_out_instrument(kCap)) == kCap);
+
+    // Above the cap: clamp to the cap rather than advertising unroutable buses.
+    REQUIRE(pulp::format::au::instrument_output_element_count(
+                multi_out_instrument(kCap + 1)) == kCap);
+    REQUIRE(pulp::format::au::instrument_output_element_count(
+                multi_out_instrument(kCap + 32)) == kCap);
+}
+
 TEST_CASE("AU v2 instrument: output bus infos map index 0 -> Main, rest -> Aux",
           "[au][au-v2][bus]") {
     const auto desc = multi_out_instrument(8);

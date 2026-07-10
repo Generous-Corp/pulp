@@ -202,14 +202,13 @@ TEST_CASE("ParamRange skew honors step quantization on denormalize",
 // ---------------------------------------------------------------------------
 // JUCE NormalisableRange reference cross-check (WS-4 / G5 "prove the skew").
 //
-// Pulp's NormalisableRange<T> is a clean-room reimplementation of the same
-// skew convention JUCE uses, so a port that relied on JUCE's curve gets the
-// identical mapping. This is a reference match: an independent transcription of
-// JUCE's convertTo0to1 / convertFrom0to1 math (skew via pow, symmetric mirror
-// about the middle, exp/log formulation for the inverse) computed alongside
-// Pulp's, asserted equal across skew in [0.05, 20]. Uses double so the only
-// residual difference is exp/log-vs-pow rounding (a handful of ULP), not the
-// float32 precision wall the shaped tests above already document.
+// Verifies Pulp's NormalisableRange<T> maps values with the same skew
+// convention a JUCE-based port expects, so migrated automation lanes keep the
+// identical curve. A reference computation of that skew math (skew via pow,
+// symmetric mirror about the middle, exp/log formulation for the inverse) runs
+// alongside Pulp's and is asserted equal across skew in [0.05, 20]. Uses double
+// so the only residual difference is exp/log-vs-pow rounding (a handful of ULP),
+// not the float32 precision wall the shaped tests above already document.
 // ---------------------------------------------------------------------------
 
 namespace juce_ref {

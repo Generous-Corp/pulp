@@ -266,6 +266,45 @@ Remote views attach through `ViewBridge::attach_remote_channel(channel, label)`
 as `ViewRole::Remote` secondaries. The bridge does not own URL parsing or socket
 creation; callers connect a `MessageChannel` first and hand it to the bridge.
 
+## Parameter type-in round-trips through `ParamInfo` (shared with the editor)
+
+The same `StateStore` every attached view polls (see *Secondary views*) is
+also the source of truth for the host's parameter **display strings** and its
+**generic type-in field**. As of G5 all four format adapters route the
+host-facing text↔value conversion through the *same* `ParamInfo::to_string` /
+`from_string` your editor draws from:
+
+| Format | Host callback that now honors `ParamInfo` |
+|---|---|
+| VST3 | `getParamStringByValue` / `getParamValueByString` |
+| AU v2 | `kAudioUnitProperty_ParameterStringFromValue` / `...ValueFromString` (+ `kAudioUnitParameterFlag_ValuesHaveStrings` when a `to_string` exists) |
+| CLAP | `params_value_to_text` / `params_text_to_value` |
+
+The CLAP `params_text_to_value` change is the one that lands on the shared
+`clap_entry.hpp` (hence this skill is dual-mapped with `clap`): it now tries
+`ParamInfo::from_string` **before** the generic locale-independent `strtod`, so
+a fully custom rendering ("quality=0.75", an enum label, "12 o'clock")
+round-trips instead of being rejected by a bare numeric parse. CLAP values are
+plain (`min..max`) — the exact domain `from_string` returns — so no
+normalization step is needed; VST3 converts to/from the host's normalized
+domain around the same call.
+
+**Editor consequence.** A parameter's on-screen value string (drawn by your
+view) and the host's generic type-in field now agree, because both derive from
+the same `ParamInfo` converters on the shared store. Two rules for editor
+authors:
+
+- **Don't add a parallel text parser in the editor.** Type-in a user enters in
+  your own field should call the SAME `ParamInfo::from_string` (or bind through
+  the store) so your field and the host's stay consistent.
+- **Decline by returning a non-finite value.** A `from_string` that yields
+  NaN/±inf is rejected: CLAP falls through to the numeric parse, VST3/AU decline
+  to the base class. So a parameter with no meaningful string form should return
+  NaN rather than a garbage value.
+
+Tests: `test/test_clap_entry.cpp`, `test/test_vst3_param_display.cpp`,
+`test/test_au_v2_param_display.mm`.
+
 ## Trackpad / Scroll-Wheel Zoom Event Path
 
 **Searchable keywords**: trackpad zoom, scroll-wheel zoom, mouse wheel, "1.00x zoom" stuck, deltaY missing, deltaY=0, wheel event not firing, FilterBank zoom, Spectr zoom, onWheel, addEventListener('wheel'), registerWheel never called, wheel bubble, ancestor not receiving wheel, canvas-child captures wheel, wheel handler short-circuits.
