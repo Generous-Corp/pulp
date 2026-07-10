@@ -307,21 +307,28 @@ public:
         float* clock_ch = output.channel_ptr(0);
         float* run_ch = channels > 1 ? output.channel_ptr(1) : nullptr;
 
-        // Bypass means stop driving the patch, and this plug-in can be sitting on
-        // an insert with signal flowing through it. So bypass is a wire, not a
-        // mute: with nothing patched in the host hands us a zeroed buffer and a
-        // wire carrying zeros is silence anyway. Drop the in-flight pulses so
-        // un-bypassing cannot resume a gate mid-high, but leave the edge grid
-        // alone — it is position-derived, so it resumes on the correct edge by
-        // itself.
+        // Bypass means stop driving the patch. Some hosts bypass by
+        // short-circuiting process(); others keep calling it, and on those a
+        // clock that ignores the flag keeps pulsing after the user pressed Bypass.
+        //
+        // Zero, not a wire. Sync sums its inputs into its outputs, so passing them
+        // through looks like the natural reading of "take this plug-in out of the
+        // chain" — but the chain ends at a modular system. Whatever a bypassed
+        // generator emits goes straight to a jack, and a track carrying audio
+        // would arrive at a VCO's pitch input at full scale. Hence the suite's
+        // rule: a bypassed *generator* is silent, and a bypassed *processor*
+        // (Function, Quantizer, CV To OSC) passes its input through untouched.
+        //
+        // Drop the in-flight pulses so un-bypassing cannot resume a gate mid-high,
+        // but leave the edge grid alone — it is position-derived, so it resumes on
+        // the correct edge by itself.
         if (ctx.is_bypassed) {
             pulse_.reset();
             run_pulse_.reset();
             was_playing_ = ctx.is_playing;
-            fill(clock_ch, frames, 0.0f);
-            fill(run_ch, frames, 0.0f);
-            add_input(clock_ch, input, 0, frames);
-            add_input(run_ch, input, 1, frames);
+            const float off = resolve_output(0.0f, scale, invert);
+            fill(clock_ch, frames, off);
+            fill(run_ch, frames, off);
             publish_lamps(0.0f, 0.0f);
             return;
         }

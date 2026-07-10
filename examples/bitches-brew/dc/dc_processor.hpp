@@ -26,6 +26,7 @@
 // `output_scale` and `invert` are the user's per-instance calibration; a UI may
 // display volts once the user declares their interface's full-scale voltage.
 
+#include <brew/channels.hpp>
 #include <brew/cv.hpp>
 #include <brew/smooth.hpp>
 
@@ -37,6 +38,7 @@
 #include <atomic>
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace pulp::examples::brew {
@@ -67,75 +69,82 @@ public:
         };
     }
 
+    /// Every control DC has, with its range. Registered once per channel.
+    ///
+    /// A table rather than eight `add_parameter` calls, so that adding a control
+    /// to the left channel cannot leave the right one behind. `param_for` derives
+    /// the right channel's ID; nothing here enumerates it.
+    struct ControlSpec {
+        state::ParamID id;
+        const char* name;
+        const char* unit;
+        state::ParamRange range;
+    };
+
+    static constexpr std::array<ControlSpec, 8> controls() {
+        return {{
+            // Default 0.0 is a safety property, not a style choice: a fresh
+            // instance must emit no voltage until the user asks for one. A CV
+            // generator that comes up at full scale points a voltage at whatever
+            // module is patched to it.
+            {kValue, "Value", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            // Per-jack calibration against the interface's full-scale voltage.
+            // Per-channel, because an interface may differ between its outputs.
+            {kOutputScale, "Output Scale", "", {0.0f, 1.0f, 1.0f, 0.001f}},
+            // Some interfaces wire an output with reversed polarity. Without this
+            // a CV suite is unusable on them — and it can be one output, not both.
+            {kInvert, "Invert", "", {0.0f, 1.0f, 0.0f, 1.0f}},
+            // A unipolar level, summed with the bipolar `Value`. Two knobs rather
+            // than one because it lets an automated bipolar sweep ride on a fixed
+            // unipolar offset — the shape and its resting point are separate ideas.
+            {kUnipolar, "Unipolar", "", {0.0f, 1.0f, 0.0f, 0.001f}},
+            // Scales the sum, and may invert it. Distinct from `Output Scale`,
+            // which is unipolar rig calibration and belongs to the interface, not
+            // the patch. Both exist because they answer different questions.
+            {kMultiplier, "Multiplier", "", {-2.0f, 2.0f, 1.0f, 0.001f}},
+            // The input bus, added to the output.
+            {kInputAdd, "Input Add", "", {-1.0f, 1.0f, 0.0f, 0.001f}},
+            // The input bus, multiplied into the output. At 0 the input is
+            // ignored; at 1 the output is exactly the normal output multiplied by
+            // the input. A ring modulator at the extremes, a VCA in between.
+            {kInputMul, "Input Mul", "", {0.0f, 1.0f, 0.0f, 0.001f}},
+            // Positive slews at a constant rate; negative low-passes. Milliseconds
+            // for a full -1 to +1 swing. Zero is a wire — see brew/smooth.hpp for
+            // why an explicit smoother does not violate the no-smoothing rule.
+            {kSmoothMs, "Smooth", "ms", {-1000.0f, 1000.0f, 0.0f, 0.1f}},
+        }};
+    }
+
     void define_parameters(state::StateStore& store) override {
-        // Default 0.0 is a safety property, not a style choice: a fresh
-        // instance must emit no voltage until the user asks for one. A CV
-        // generator that comes up at full scale points a voltage at whatever
-        // module is patched to it.
-        store.add_parameter({
-            .id = kValue,
-            .name = "Value",
-            .unit = "",
-            .range = {-1.0f, 1.0f, 0.0f, 0.001f},
-        });
-        // Per-instance calibration against the interface's full-scale voltage.
-        store.add_parameter({
-            .id = kOutputScale,
-            .name = "Output Scale",
-            .unit = "",
-            .range = {0.0f, 1.0f, 1.0f, 0.001f},
-        });
-        // Some interfaces wire their outputs with reversed polarity. Without
-        // this a CV suite is unusable on them.
-        store.add_parameter({
-            .id = kInvert,
-            .name = "Invert",
-            .unit = "",
-            .range = {0.0f, 1.0f, 0.0f, 1.0f},
-        });
-        // A unipolar level, summed with the bipolar `Value`. Two knobs rather
-        // than one because it lets an automated bipolar sweep ride on a fixed
-        // unipolar offset — the shape and its resting point are separate ideas.
-        store.add_parameter({
-            .id = kUnipolar,
-            .name = "Unipolar",
-            .unit = "",
-            .range = {0.0f, 1.0f, 0.0f, 0.001f},
-        });
-        // Scales the sum, and may invert it. Distinct from `Output Scale`, which
-        // is unipolar rig calibration and belongs to the interface, not the
-        // patch. Both exist because they are answers to different questions.
-        store.add_parameter({
-            .id = kMultiplier,
-            .name = "Multiplier",
-            .unit = "",
-            .range = {-2.0f, 2.0f, 1.0f, 0.001f},
-        });
-        // The input bus, added to the output.
-        store.add_parameter({
-            .id = kInputAdd,
-            .name = "Input Add",
-            .unit = "",
-            .range = {-1.0f, 1.0f, 0.0f, 0.001f},
-        });
-        // The input bus, multiplied into the output. At 0 the input is ignored;
-        // at 1 the output is fully gated by it. A ring modulator at the extremes,
-        // a VCA in between.
-        store.add_parameter({
-            .id = kInputMul,
-            .name = "Input Mul",
-            .unit = "",
-            .range = {0.0f, 1.0f, 0.0f, 0.001f},
-        });
-        // Positive slews at a constant rate; negative low-passes. Milliseconds
-        // for a full -1 to +1 swing. Zero is a wire — see brew/smooth.hpp for why
-        // an explicit smoother does not violate the suite's no-smoothing rule.
-        store.add_parameter({
-            .id = kSmoothMs,
-            .name = "Smooth",
-            .unit = "ms",
-            .range = {-1000.0f, 1000.0f, 0.0f, 0.1f},
-        });
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch)
+            for (const auto& c : controls())
+                store.add_parameter(
+                    {.id = static_cast<state::ParamID>(param_for(c.id, ch)),
+                     .name = std::string(c.name) + channel_suffix(ch),
+                     .unit = c.unit,
+                     .range = c.range});
+    }
+
+    /// One channel's worth of settings, read once per block.
+    struct ChannelSettings {
+        float base = 0.0f;  ///< (unipolar + value) * multiplier
+        float scale = 1.0f;
+        bool invert = false;
+        float in_add = 0.0f;
+        float in_mul = 0.0f;
+        float smooth_ms = 0.0f;
+    };
+
+    [[nodiscard]] ChannelSettings settings_for(std::size_t ch) const noexcept {
+        const auto get = [&](state::ParamID id) {
+            return state().get_value(static_cast<state::ParamID>(param_for(id, ch)));
+        };
+        return {.base = (get(kUnipolar) + get(kValue)) * get(kMultiplier),
+                .scale = get(kOutputScale),
+                .invert = as_toggle(get(kInvert)),
+                .in_add = get(kInputAdd),
+                .in_mul = get(kInputMul),
+                .smooth_ms = get(kSmoothMs)};
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -143,31 +152,33 @@ public:
         for (auto& s : smooth_) s.reset(0.0f);
     }
 
-    /// The size this editor actually needs: the rail, two rows of knobs, and a
-    /// polarity switch. Without this override a host opens the plug-in at
-    /// Processor's 400x300 default — a geometry the layout was never checked at.
+    /// The size this editor actually needs: two channel blocks, each a pair of
+    /// knob rows, a readout and a rail. Without this override a host opens the
+    /// plug-in at Processor's 400x300 default — a geometry the layout was never
+    /// checked at, and one the two channels no longer fit in.
     std::pair<uint32_t, uint32_t> editor_size() const override {
-        return {360, 300};
+        return {360, 540};
     }
 
     /// Defined in dc_view.cpp so the audio translation units never see the
     /// view stack.
     std::unique_ptr<view::View> create_view() override;
 
-    /// The steady value the knobs ask for, after the suite's shared output stage
-    /// (clamp, scale, invert — see brew/cv.hpp). Ignores the input bus and the
-    /// smoother, both of which need a signal and a clock. It is what DC emits
-    /// with nothing patched in, which is how it is used.
-    float current_output() const noexcept {
-        return resolve_output(target(), state().get_value(kOutputScale),
-                              as_toggle(state().get_value(kInvert)));
+    /// The steady value one channel's knobs ask for, after the suite's shared
+    /// output stage (clamp, scale, invert — see brew/cv.hpp). Ignores the input
+    /// bus and the smoother, both of which need a signal and a clock. It is what
+    /// DC emits with nothing patched in, which is how it is used.
+    float current_output(std::size_t ch = 0) const noexcept {
+        const ChannelSettings s = settings_for(ch);
+        return resolve_output(s.base, s.scale, s.invert);
     }
 
-    /// The last sample actually emitted, for the editor's rail. Written once per
-    /// block on the audio thread with relaxed ordering: a rail one block stale is
-    /// invisible, and synchronizing for it would not be.
-    [[nodiscard]] float display_output() const noexcept {
-        return display_out_.load(std::memory_order_relaxed);
+    /// The last sample actually emitted on a channel, for the editor's rail.
+    /// Written once per block on the audio thread with relaxed ordering: a rail
+    /// one block stale is invisible, and synchronizing for it would not be.
+    [[nodiscard]] float display_output(std::size_t ch = 0) const noexcept {
+        return display_out_[std::min(ch, kChannelCount - 1)].load(
+            std::memory_order_relaxed);
     }
 
     void process(audio::BufferView<float>& output,
@@ -196,52 +207,45 @@ public:
             // Park the smoothers at zero so releasing bypass ramps up from
             // silence rather than jumping to a value the patch last saw.
             for (auto& s : smooth_) s.reset(0.0f);
-            display_out_.store(0.0f, std::memory_order_relaxed);
+            for (auto& d : display_out_) d.store(0.0f, std::memory_order_relaxed);
             return;
         }
 
-        const float base = target();
-        const float scale = state().get_value(kOutputScale);
-        const bool inv = as_toggle(state().get_value(kInvert));
-        const float in_add = state().get_value(kInputAdd);
-        const float in_mul = state().get_value(kInputMul);
-        const float ms = state().get_value(kSmoothMs);
         const double sr = ctx.sample_rate > 0.0 ? ctx.sample_rate : sample_rate_;
-
         const std::size_t in_channels = input.num_channels();
-        float last = 0.0f;
 
         for (std::size_t c = 0; c < channels; ++c) {
             float* dst = output.channel_ptr(c);
             if (dst == nullptr) continue;
             const float* src = c < in_channels ? input.channel_ptr(c) : nullptr;
+            // A host that hands us more channels than we have controls for runs
+            // the last channel's settings on the extra ones. Its own smoother,
+            // though: sharing one would make each channel filter the previous
+            // channel's samples.
+            const ChannelSettings s = settings_for(std::min(c, kChannelCount - 1));
             Smoother& sm = smooth_[std::min(c, smooth_.size() - 1)];
 
             for (std::size_t n = 0; n < frames; ++n) {
                 const float x = src ? src[n] : 0.0f;
                 // Multiply first, then add: the added signal is a signal, not
-                // something for the ring modulator to chew on.
-                float v = base * (1.0f - in_mul + in_mul * x);
-                v += in_add * x;
-                dst[n] = resolve_output(sm.process(v, ms, sr), scale, inv);
+                // something for the ring modulator to chew on. At `in_mul` 0 the
+                // output is untouched by the input; at 1 it is exactly the normal
+                // output multiplied by the input.
+                float v = s.base * (1.0f - s.in_mul + s.in_mul * x);
+                v += s.in_add * x;
+                dst[n] = resolve_output(sm.process(v, s.smooth_ms, sr), s.scale,
+                                        s.invert);
             }
-            if (c == 0) last = dst[frames - 1];
+            if (c < kChannelCount)
+                display_out_[c].store(dst[frames - 1], std::memory_order_relaxed);
         }
-        display_out_.store(last, std::memory_order_relaxed);
     }
 
 private:
-    /// The two output knobs, summed and scaled. Not clamped here: the shared
-    /// output stage clamps once, at the jack.
-    [[nodiscard]] float target() const noexcept {
-        return (state().get_value(kUnipolar) + state().get_value(kValue)) *
-               state().get_value(kMultiplier);
-    }
-
     // One smoother per channel. Sharing one would make each channel filter the
     // previous channel's samples.
     std::array<Smoother, 8> smooth_{};
-    std::atomic<float> display_out_{0.0f};
+    std::array<std::atomic<float>, kChannelCount> display_out_{};
     double sample_rate_ = 48000.0;
 };
 
