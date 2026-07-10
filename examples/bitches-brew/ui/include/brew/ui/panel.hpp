@@ -21,6 +21,8 @@
 
 #include <cstddef>
 #include <vector>
+#include <pulp/view/buttons.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -136,6 +138,13 @@ inline std::unique_ptr<vw::Knob> param_knob(state::StateStore& store,
     knob->on_change = [&store, id](float normalized) {
         store.set_normalized(id, normalized);
     };
+    // With no explicit formatter, read the parameter's own. That is the same
+    // string the host shows in its automation lane, so the two can never
+    // disagree. An explicit `fmt` is for the readouts a host cannot express —
+    // the ones that consult a second parameter to decide what this one means.
+    if (!fmt) {
+        if (const auto* pi = store.info(id)) fmt = pi->to_string;
+    }
     if (fmt) {
         knob->set_format([&store, id, fmt = std::move(fmt)](float) {
             return fmt(store.get_value(id));
@@ -166,6 +175,92 @@ inline std::unique_ptr<vw::Toggle> param_toggle(state::StateStore& store,
 inline void knob_size(vw::View& v) { fixed_size(v, kKnobWidth, kKnobHeight); }
 inline void toggle_size(vw::View& v) { fixed_size(v, kToggleWidth, kToggleHeight); }
 
+/// Names the channel a block of controls belongs to.
+///
+/// The two channels of a brew plug-in are two unrelated control voltages, not a
+/// stereo pair, so the editor has to say which is which. Brighter than a caption
+/// and set in the panel's text colour, because getting this wrong sends a
+/// voltage down the wrong cable.
+inline std::unique_ptr<vw::Label> channel_label(std::string text) {
+    auto l = std::make_unique<vw::Label>();
+    l->set_text(std::move(text));
+    l->set_font_size(11.0f);
+    l->set_text_color(palette::text);
+    l->flex().preferred_height = 14.0f;
+    l->flex().flex_grow = 0;
+    l->flex().flex_shrink = 0;
+    return l;
+}
+
+/// A captioned single-line text field that only keeps text the plug-in accepts.
+///
+/// `commit` is the plug-in's own validator, and its `false` puts the last accepted
+/// text back. A field that displayed a rejected hostname would show a destination
+/// the sender thread is not using — which is worse than showing nothing, because
+/// the user would go looking for the fault at the far end of the cable.
+class TextField : public vw::View {
+public:
+    TextField(std::string label, std::string initial,
+              std::function<bool(const std::string&)> commit)
+        : accepted_(initial) {
+        flex().direction = vw::FlexDirection::column;
+        flex().gap = 2.0f;
+        // Never grow or shrink on the cross axis: in a column panel a growable
+        // field eats the whole window, and a shrinkable one collapses its editor
+        // to nothing the moment a sibling wants room.
+        flex().flex_grow = 0;
+        flex().flex_shrink = 0;
+        flex().preferred_height = kFieldHeight;
+
+        auto caption = caption_label(std::move(label));
+        add_child(std::move(caption));
+
+        auto editor = std::make_unique<vw::TextEditor>();
+        editor->set_text(initial);
+        editor->set_font_size(12.0f);
+        editor->flex().preferred_height = kTextFieldHeight;
+        editor->flex().align_self = vw::FlexAlign::stretch;
+        editor_ = editor.get();
+
+        // Commit on Return, revert on Escape. Not commit-on-every-keystroke: a
+        // half-typed hostname is a valid prefix of a different hostname, and
+        // reconnecting a socket to each one as it is typed is a burst of UDP at
+        // machines the user never meant to name.
+        editor_->on_return = [this, commit = std::move(commit)](const std::string& t) {
+            if (commit(t))
+                accepted_ = t;
+            else
+                editor_->set_text(accepted_);
+        };
+        editor_->on_escape = [this] { editor_->set_text(accepted_); };
+
+        add_child(std::move(editor));
+    }
+
+    /// Replace the text without going through the validator — for a value the
+    /// plug-in already accepted, such as one picked out of a discovery list.
+    void set_accepted(const std::string& text) {
+        accepted_ = text;
+        editor_->set_text(text);
+    }
+
+    [[nodiscard]] const std::string& text() const { return editor_->text(); }
+    [[nodiscard]] const std::string& accepted() const { return accepted_; }
+
+    /// The height a field occupies: caption, gap, editor.
+    static constexpr float kTextFieldHeight = 24.0f;
+    static constexpr float kFieldHeight = 14.0f + 2.0f + kTextFieldHeight;
+
+private:
+    vw::TextEditor* editor_ = nullptr;
+    std::string accepted_;
+};
+
+/// Size a text field from the shared metrics.
+inline void field_size(vw::View& v, float width) {
+    fixed_size(v, width, TextField::kFieldHeight);
+}
+
 /// A bipolar voltage rail: full-scale negative at the left, zero at the centre,
 /// full-scale positive at the right, with a marker at the current output.
 ///
@@ -181,20 +276,35 @@ public:
         const float s = scale();
         const float v = std::clamp(value_ ? value_() : 0.0f, -1.0f, 1.0f);
 
+        // A meter, and it must not be mistakable for a control. A rounded pill
+        // riding a recessed full-width track is the platform's scrollbar, and a
+        // reader who sees one starts looking for the content it scrolls. So:
+        // square corners, a track thinner than the graduations that cross it,
+        // and ticks at the readings the caption names.
+        const float track_h = std::max(4.0f, h * 0.5f);
+        const float top = (h - track_h) * 0.5f;
+
         canvas.set_fill_color(palette::rail);
-        canvas.fill_rounded_rect(0, 0, w, h, h * 0.5f);
+        canvas.fill_rect(0.0f, top, w, track_h);
 
         const float mid = w * 0.5f;
-        // Zero tick, so "no voltage" is visibly distinct from "not connected".
-        canvas.set_stroke_color(palette::border);
-        canvas.set_line_width(1.0f * s);
-        canvas.stroke_line(mid, 0, mid, h);
-
         if (v != 0.0f) {
             const float span = mid * std::abs(v);
             const float x = v > 0.0f ? mid : mid - span;
             canvas.set_fill_color(v > 0.0f ? palette::accent : palette::negative);
-            canvas.fill_rounded_rect(x, 0, span, h, h * 0.5f);
+            canvas.fill_rect(x, top, span, track_h);
+        }
+
+        // Graduations at -1, -0.5, 0, +0.5, +1. Zero runs the full height, so
+        // "no voltage" stays visibly distinct from "not connected" — the fill
+        // vanishes but the scale does not.
+        canvas.set_stroke_color(palette::border);
+        canvas.set_line_width(1.0f * s);
+        for (int i = 0; i <= 4; ++i) {
+            const float half = 0.5f * s;
+            const float x = std::clamp(w * static_cast<float>(i) * 0.25f, half, w - half);
+            const float inset = (i == 2) ? 0.0f : top * 0.5f;
+            canvas.stroke_line(x, inset, x, h - inset);
         }
 
         // Repaint continuously: the value is driven by parameters the host can

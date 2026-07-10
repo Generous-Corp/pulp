@@ -149,7 +149,9 @@ TEST_CASE("Quantizer never leaves [-1, +1]", "[brew][quantizer][safety]") {
         for (float offset : {0.0f, 0.37f, 1.0f})
             for (float transpose : {-24.0f, 0.0f, 24.0f})
                 for (float x : ramp(33)) {
-                    QuantizeSettings s{steps, offset, transpose, 1.0f, false};
+                    QuantizeSettings s{.steps = steps,
+                                       .offset = offset,
+                                       .transpose = transpose};
                     CAPTURE(steps, offset, transpose, x);
                     const float y = quantize_transfer(x, s);
                     REQUIRE(y >= -1.0f);
@@ -202,4 +204,215 @@ TEST_CASE("Quantizer publishes its operating point for the editor",
     REQUIRE_THAT(proc->display_input(), WithinAbs(0.6f, 1e-6f));
     // Four steps over [-1,1] → width 0.5 → 0.6 snaps to 0.5.
     REQUIRE_THAT(proc->display_output(), WithinAbs(0.5f, 1e-6f));
+}
+
+// ---------------------------------------------------------------- scales
+//
+// A scale quantizer is usually said to need calibration, because a semitone is a
+// fixed voltage. That is true of Calibrated mode. It is not true of the scale:
+// once twelve lattice steps span an octave, restricting the lattice to a mode is
+// arithmetic on the step index. Nothing below mentions volts.
+
+TEST_CASE("scale masks name the right notes", "[brew][quantizer][scale]") {
+    // Semitones above the root. These are definitions, not measurements: a
+    // regression here means the mask literals were transcribed wrong.
+    const auto degrees = [](Scale s) {
+        std::vector<int> v;
+        for (int i = 0; i < kSemitonesPerOctave; ++i)
+            if (scale_admits(s, i)) v.push_back(i);
+        return v;
+    };
+    REQUIRE(degrees(Scale::chromatic) ==
+            std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11});
+    REQUIRE(degrees(Scale::major) == std::vector<int>{0, 2, 4, 5, 7, 9, 11});
+    REQUIRE(degrees(Scale::natural_minor) == std::vector<int>{0, 2, 3, 5, 7, 8, 10});
+    REQUIRE(degrees(Scale::harmonic_minor) == std::vector<int>{0, 2, 3, 5, 7, 8, 11});
+    REQUIRE(degrees(Scale::pentatonic_major) == std::vector<int>{0, 2, 4, 7, 9});
+    REQUIRE(degrees(Scale::pentatonic_minor) == std::vector<int>{0, 3, 5, 7, 10});
+    REQUIRE(degrees(Scale::blues) == std::vector<int>{0, 3, 5, 6, 7, 10});
+    REQUIRE(degrees(Scale::whole_tone) == std::vector<int>{0, 2, 4, 6, 8, 10});
+    REQUIRE(degrees(Scale::dorian) == std::vector<int>{0, 2, 3, 5, 7, 9, 10});
+    REQUIRE(degrees(Scale::mixolydian) == std::vector<int>{0, 2, 4, 5, 7, 9, 10});
+
+    REQUIRE(scale_degree_count(Scale::major) == 7);
+    REQUIRE(scale_degree_count(Scale::pentatonic_minor) == 5);
+    REQUIRE(scale_degree_count(Scale::chromatic) == 12);
+}
+
+TEST_CASE("floor_mod is Euclidean, because step indices go negative",
+          "[brew][quantizer][scale]") {
+    REQUIRE(floor_mod(-1, 12) == 11);
+    REQUIRE(floor_mod(-12, 12) == 0);
+    REQUIRE(floor_mod(-13, 12) == 11);
+    REQUIRE(floor_mod(13, 12) == 1);
+}
+
+TEST_CASE("snap_to_scale finds the nearest note, ties low",
+          "[brew][quantizer][scale]") {
+    // C major from a root of 0. Semitone 1 (C#) sits between C and D, one step
+    // from each; the tie goes to the lower.
+    REQUIRE(snap_to_scale(0, Scale::major, 0) == 0);
+    REQUIRE(snap_to_scale(1, Scale::major, 0) == 0);
+    REQUIRE(snap_to_scale(3, Scale::major, 0) == 2);  // D# -> D (tie, low)
+    REQUIRE(snap_to_scale(6, Scale::major, 0) == 5);  // F# -> F (tie, low)
+    REQUIRE(snap_to_scale(11, Scale::major, 0) == 11);
+
+    SECTION("below zero, where floor_mod earns its keep") {
+        REQUIRE(snap_to_scale(-1, Scale::major, 0) == -1);  // B, in the scale
+        REQUIRE(snap_to_scale(-2, Scale::major, 0) == -3);  // A# -> A (tie, low)
+    }
+
+    SECTION("a root other than zero moves the whole lattice") {
+        // D major admits D, E, F#... so semitone 2 is in, 3 is not.
+        REQUIRE(snap_to_scale(2, Scale::major, 2) == 2);
+        REQUIRE(snap_to_scale(3, Scale::major, 2) == 2);
+    }
+}
+
+// The manual's own example: "for a normal major scale, a Transpose value of +7
+// will transpose up by an octave."
+TEST_CASE("transpose moves by scale degrees, so +7 in a major scale is an octave",
+          "[brew][quantizer][scale]") {
+    REQUIRE(transpose_in_scale(0, Scale::major, 0, 7) == 12);
+    REQUIRE(transpose_in_scale(0, Scale::major, 0, -7) == -12);
+    REQUIRE(transpose_in_scale(0, Scale::major, 0, 1) == 2);   // C -> D
+    REQUIRE(transpose_in_scale(4, Scale::major, 0, 1) == 5);   // E -> F, a semitone
+    REQUIRE(transpose_in_scale(0, Scale::major, 0, 0) == 0);
+
+    SECTION("a five-note scale needs five degrees to make an octave") {
+        REQUIRE(transpose_in_scale(0, Scale::pentatonic_minor, 0, 5) == 12);
+        REQUIRE(transpose_in_scale(0, Scale::pentatonic_minor, 0, 1) == 3);
+    }
+
+    SECTION("an out-of-scale start is snapped before it is moved") {
+        REQUIRE(transpose_in_scale(1, Scale::major, 0, 1) == 2);  // snaps to C, then D
+    }
+
+    SECTION("chromatic transposes by semitones, as a twelve-note scale must") {
+        REQUIRE(transpose_in_scale(0, Scale::chromatic, 0, 7) == 7);
+        REQUIRE(transpose_in_scale(0, Scale::chromatic, 0, 12) == 12);
+    }
+}
+
+TEST_CASE("scale mode restricts the staircase to the scale's notes",
+          "[brew][quantizer][scale]") {
+    QuantizeSettings s;
+    s.mode = QuantMode::scale;
+    s.steps = 24.0f;  // 24 divisions of [-1,+1] -> one octave per full-scale unit
+    s.scale = Scale::major;
+
+    // Sweep the whole range and check every output lands on a major-scale step.
+    const double w = step_width(s.steps);
+    for (float x : ramp(97)) {
+        const double y = quantize_value(static_cast<double>(x), s);
+        const int i = static_cast<int>(std::lround(y / w));
+        CAPTURE(x, y, i);
+        // The rails are clamps, not lattice points, so let them through.
+        if (std::abs(y) >= 1.0 - 1e-9) continue;
+        REQUIRE(scale_admits(Scale::major, i));
+    }
+}
+
+// -------------------------------------------- Enable, Smooth, and two channels
+
+namespace {
+
+state::ParamID qpid(state::ParamID id, std::size_t ch) {
+    return static_cast<state::ParamID>(param_for(id, ch));
+}
+
+/// Render a constant on both inputs; return the last sample of each output.
+std::pair<float, float> both_channels(format::HeadlessHost& host, float level) {
+    constexpr std::size_t n = 16;
+    audio::Buffer<float> in(2, n), out(2, n);
+    in.clear();
+    out.clear();
+    for (std::size_t c = 0; c < 2; ++c)
+        for (std::size_t i = 0; i < n; ++i) in.channel(c)[i] = level;
+    const float* ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    audio::BufferView<const float> iv(ptrs, 2, n);
+    auto ov = out.view();
+    host.process(ov, iv);
+    return {out.channel(0)[n - 1], out.channel(1)[n - 1]};
+}
+
+}  // namespace
+
+// A control missing from `controls()` does not fail to compile — it simply never
+// gets registered, and `get_value` then reads zero. That is how Output Scale
+// vanished from this plug-in during the stereo split: the staircase went silent
+// and only the operating-point test noticed. Parameter IDs are contiguous from 1,
+// so the table can be checked against them directly.
+TEST_CASE("Quantizer's control table covers every parameter id",
+          "[brew][quantizer][stereo]") {
+    state::StateStore store;
+    auto proc = create_quantizer();
+    proc->define_parameters(store);
+
+    constexpr int kLastId = QuantizerProcessor::kSmoothMs;
+    REQUIRE(static_cast<int>(QuantizerProcessor::controls().size()) == kLastId);
+    for (int id = 1; id <= kLastId; ++id)
+        for (std::size_t ch = 0; ch < kChannelCount; ++ch) {
+            CAPTURE(id, ch);
+            REQUIRE(store.info(qpid(static_cast<state::ParamID>(id), ch)) != nullptr);
+        }
+    REQUIRE(store.all_params().size() ==
+            QuantizerProcessor::controls().size() * kChannelCount);
+}
+
+TEST_CASE("Quantizer's Enable passes the channel through unchanged",
+          "[brew][quantizer][enable]") {
+    format::HeadlessHost host{create_quantizer};
+    host.prepare(48000.0, 512, 2, 2);
+    // Four steps over [-1,+1]: width 0.5, so 0.6 snaps to 0.5.
+    host.state().set_value(qpid(QuantizerProcessor::kSteps, 0), 4.0f);
+    host.state().set_value(qpid(QuantizerProcessor::kSteps, 1), 4.0f);
+
+    SECTION("enabled by default") {
+        const auto [l, r] = both_channels(host, 0.6f);
+        REQUIRE(l == 0.5f);
+        REQUIRE(r == 0.5f);
+    }
+
+    SECTION("off is a wire, bit-exactly, and scoped to one channel") {
+        host.state().set_value(qpid(QuantizerProcessor::kEnable, 0), 0.0f);
+        const auto [l, r] = both_channels(host, 0.6f);
+        REQUIRE(l == 0.6f);
+        REQUIRE(r == 0.5f);
+    }
+}
+
+TEST_CASE("Quantizer's channels quantize independently",
+          "[brew][quantizer][stereo]") {
+    format::HeadlessHost host{create_quantizer};
+    host.prepare(48000.0, 512, 2, 2);
+    host.state().set_value(qpid(QuantizerProcessor::kSteps, 0), 4.0f);   // width 0.5
+    host.state().set_value(qpid(QuantizerProcessor::kSteps, 1), 2.0f);   // width 1.0
+    const auto [l, r] = both_channels(host, 0.6f);
+    REQUIRE(l == 0.5f);
+    REQUIRE(r == 1.0f);
+}
+
+TEST_CASE("Quantizer's Smooth glides between lattice points, and is a wire at zero",
+          "[brew][quantizer][smooth]") {
+    format::HeadlessHost host{create_quantizer};
+    host.prepare(48000.0, 512, 2, 2);
+    host.state().set_value(qpid(QuantizerProcessor::kSteps, 0), 4.0f);
+
+    SECTION("zero is a wire: the staircase stays exact") {
+        const auto out = shape(host, {0.6f, 0.6f, 0.6f});
+        for (float v : out) REQUIRE(v == 0.5f);
+    }
+
+    // Smoothing runs after the snap, so the output glides between lattice points
+    // rather than the glide being quantized. A slew of 1000 ms cannot cross half a
+    // full swing in three samples, so the first samples must be short of the step.
+    SECTION("a slew limit holds the output short of the step it snapped to") {
+        host.state().set_value(qpid(QuantizerProcessor::kSmoothMs, 0), 1000.0f);
+        const auto out = shape(host, {0.6f, 0.6f, 0.6f});
+        REQUIRE(out.front() > 0.0f);
+        REQUIRE(out.front() < 0.5f);
+        REQUIRE(out.back() < 0.5f);
+        REQUIRE(out.back() > out.front());
+    }
 }
