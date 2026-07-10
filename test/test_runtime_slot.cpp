@@ -344,6 +344,19 @@ TEST_CASE("Handoff survives a producer/consumer hammer with no audio-thread free
             h.publish(std::make_unique<Tracked>(i));
             h.drain_retired();  // producer reclaims
         }
+
+        // The 5000-publish loop above is only microseconds of work, so on a
+        // saturated host the consumer thread can fail to be scheduled even
+        // once before we signal stop — leaving `consumed == 0` and failing the
+        // assertion below through a pure harness race, not a Handoff defect.
+        // Keep a value pending and drain until the consumer has provably made
+        // progress; the OS scheduler guarantees a runnable thread eventually
+        // runs, so this cannot hang while the consumer is still alive.
+        while (consumed.load(std::memory_order_relaxed) == 0) {
+            h.publish(std::make_unique<Tracked>(1));
+            h.drain_retired();
+            std::this_thread::yield();
+        }
         stop.store(true);
         consumer.join();
         h.drain_retired();
