@@ -1,5 +1,7 @@
 #include <pulp/gpu_audio/spectral_stack.hpp>
 
+#include <pulp/gpu_audio/spectral_jitter.hpp>
+
 #include <algorithm>
 #include <cmath>
 
@@ -21,15 +23,6 @@ void smear_kernel(float smear, uint32_t n, uint32_t& radius, float& inv_kernel) 
         if (radius < 1u) radius = 1u;
     }
     inv_kernel = 1.0f / static_cast<float>(2u * radius + 1u);
-}
-
-// Same integer hash the advance shader uses, mapping a bin index to [-0.5, 0.5].
-float hash01(uint32_t x, uint32_t seed) {
-    uint32_t h = x * 2654435761u + seed * 40503u;
-    h = (h ^ (h >> 15u)) * 2246822519u;
-    h = (h ^ (h >> 13u)) * 3266489917u;
-    h = h ^ (h >> 16u);
-    return static_cast<float>(h >> 8u) / 16777216.0f - 0.5f;
 }
 
 }  // namespace
@@ -91,7 +84,7 @@ bool CpuSpectralStack::render(float* frame_out, const float* weights, float smea
     smear_kernel(smear, n_, radius, inv_kernel);
     const float jit = jitter < 0.0f ? 0.0f : (jitter > 1.0f ? 1.0f : jitter);
     const uint32_t seed = seed_;
-    seed_ = seed_ * 1664525u + 1013904223u;  // advance for next render
+    seed_ = advance_spectral_seed(seed_);  // advance for next render
 
     // Advance every active layer's persistent phase by the per-bin frequency,
     // plus conjugate-symmetric jitter, wrapped to [-pi, pi].
@@ -106,9 +99,9 @@ bool CpuSpectralStack::render(float* frame_out, const float* weights, float smea
                 // Full-turn-at-1 per-hop wander → a random walk that breaks the
                 // FFT-period repetition; conjugate-antisymmetric to stay real.
                 if (k > 0u && k < half)
-                    p += jit * static_cast<float>(kTwoPi) * hash01(k, seed);
+                    p += jit * static_cast<float>(kTwoPi) * spectral_phase_hash(k, seed);
                 else if (k > half && k < n_)
-                    p -= jit * static_cast<float>(kTwoPi) * hash01(n_ - k, seed);
+                    p -= jit * static_cast<float>(kTwoPi) * spectral_phase_hash(n_ - k, seed);
             }
             p -= static_cast<float>(kTwoPi) * std::round(p / static_cast<float>(kTwoPi));
             ph[k] = p;
@@ -210,7 +203,7 @@ bool GpuSpectralStack::render(float* frame_out, const float* weights, float smea
     }
     if (!any) { std::fill(frame_out, frame_out + n_, 0.0f); return false; }
     const uint32_t seed = seed_;
-    seed_ = seed_ * 1664525u + 1013904223u;
+    seed_ = advance_spectral_seed(seed_);
     return gpu_->spectral_stack_render(weights_.data(), num_layers_, smear, jitter,
                                        seed, frame_out, n_);
 }
