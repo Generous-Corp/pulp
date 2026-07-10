@@ -8,7 +8,12 @@
 #   * every node type is BIT-EXACT to its AOT twin through the full
 #     DSL -> encode -> decode -> executor path (conformance.mjs, maxAbsDiff = 0),
 #   * the S0 RT-safety gates still hold — null test, CPU ratio, zero-alloc,
-#     plan-build budget, click-free crossfade (measure.mjs).
+#     plan-build budget, click-free crossfade (measure.mjs),
+#   * the F2 COMPILED tier is bit-exact too: the graph→wasm emitter's output is
+#     null-tested per node (conformance.mjs F2 section) and per patch against
+#     BOTH the AOT twins and the interpreter, plus the handoff gates
+#     (f2-measure.mjs; the GO/KILL speedup line is informational, correctness
+#     fails the job).
 #
 # Additive only: does not touch the wam_* ABI or the WebCLAP deploy workflow.
 name: Live Kernel Conformance
@@ -53,7 +58,7 @@ jobs:
       - name: Build lk_kernel.wasm + aot_twin.wasm
         run: bash examples/web-demos/live-kernel-spike/build.sh
 
-      - name: Per-node conformance (bit-exact null test, all 14 node types)
+      - name: Per-node conformance (bit-exact null test, interpreter + F2 emitter)
         working-directory: examples/web-demos/live-kernel-spike
         run: node conformance.mjs
 
@@ -68,3 +73,7 @@ jobs:
             echo "::error::a live-kernel RT-safety gate FAILed"
             exit 1
           fi
+
+      - name: F2 emitter gates (bit-exact null / handoff / zero-alloc)
+        working-directory: examples/web-demos/live-kernel-spike
+        run: node f2-measure.mjs

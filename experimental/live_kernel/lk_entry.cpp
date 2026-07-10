@@ -14,6 +14,7 @@
 
 #include "crossfade.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstddef>
 #include <new>
@@ -81,3 +82,20 @@ LK_EXPORT void lk_set_meter(int on) { g_kernel.set_meter(on != 0); }
 
 // The zero-alloc instrument: total C++ heap allocations since load.
 LK_EXPORT double lk_alloc_count()  { return (double)g_alloc_count; }
+
+// ── F2 libm bridge ────────────────────────────────────────────────────────────
+// The F2 graph→wasm emitter (examples/web-demos/live-kernel-spike/f2-emitter.js)
+// folds derived parameters (gain dB→linear, ladder g, biquad/SVF coefficients)
+// at emit time and calls per-sample transcendentals (ladder tanh, sine osc) at
+// run time THROUGH these exports — i.e. through the exact same emcc-linked musl
+// libm bits the interpreter itself executes. That is what makes the emitted
+// module bit-exact to the kernel VM and the AOT twins: every non-rational
+// operation routes to the same compiled code; every rational f32 op is IEEE-754
+// exact by definition. Pure float→float, no memory access, alloc-free.
+LK_EXPORT float f2_tanhf(float x)          { return std::tanh(x); }
+LK_EXPORT float f2_sinf(float x)           { return std::sin(x); }
+LK_EXPORT float f2_cosf(float x)           { return std::cos(x); }
+LK_EXPORT float f2_expf(float x)           { return std::exp(x); }
+LK_EXPORT float f2_tanf(float x)           { return std::tan(x); }
+LK_EXPORT float f2_powf(float x, float y)  { return std::pow(x, y); }
+LK_EXPORT float f2_fmodf(float x, float y) { return std::fmod(x, y); }

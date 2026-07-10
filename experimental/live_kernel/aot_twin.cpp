@@ -47,10 +47,15 @@ struct FeedbackTwin {
     Delay dl;
     float fb_prev[MAXB];
 };
+// F2-S1: the suggested representative subgraph (osc → ladder → gain), fused.
+struct OlgTwin {
+    NodeInstance osc, ladder, gain;
+};
 
 MusicalTwin  M;
 TrivialTwin  T;
 FeedbackTwin F;
+OlgTwin      G;
 double g_sr = 48000.0;
 
 // ── generic per-node twin (iteration-2 conformance oracle) ───────────────────
@@ -139,6 +144,19 @@ void setup_feedback(double sr) {
     set_node_param(F.gain, NodeType::Gain, 0, -6.0f, sr);
 }
 
+void setup_olg(double sr) {
+    init_node(G.osc, NodeType::Oscillator, sr);
+    init_node(G.ladder, NodeType::Ladder, sr);
+    init_node(G.gain, NodeType::Gain, sr);
+    // params (MUST match the JS-built LKB0 OLG blob in lk-patches.mjs)
+    set_node_param(G.osc, NodeType::Oscillator, 0, 220.0f, sr);
+    set_node_param(G.osc, NodeType::Oscillator, 1, 1.0f, sr); // saw
+    set_node_param(G.osc, NodeType::Oscillator, 2, 0.3f, sr);
+    set_node_param(G.ladder, NodeType::Ladder, 0, 1200.0f, sr);
+    set_node_param(G.ladder, NodeType::Ladder, 1, 0.4f, sr);
+    set_node_param(G.gain, NodeType::Gain, 0, -3.0f, sr);
+}
+
 } // namespace
 
 void* operator new(std::size_t n) { void* p = std::malloc(n ? n : 1); if (!p) std::abort(); return p; }
@@ -153,6 +171,7 @@ AOT_EXPORT void aot_init(double sr) {
     setup_musical(sr);
     setup_trivial(sr);
     setup_feedback(sr);
+    setup_olg(sr);
 }
 
 // ── generic per-node twin C ABI (aot_chain_*) ────────────────────────────────
@@ -194,9 +213,17 @@ AOT_EXPORT void aot_chain_process(float* dst, int n) {
     process_node(C.node, C.type, ins, C.nin, dst, n);
 }
 
-// patch: 0=musical, 1=trivial, 2=feedback
+// patch: 0=musical, 1=trivial, 2=feedback, 3=osc→ladder→gain (F2-S1)
 AOT_EXPORT void aot_process(int patch, float* dst, int n) {
     if (n > MAXB) n = MAXB;
+    if (patch == 3) {
+        for (int i = 0; i < n; ++i) {
+            float o = G.osc.osc.next() * G.osc.osc_amp;
+            float l = G.ladder.ladder.process(o);
+            dst[i] = G.gain.gain.process(l);
+        }
+        return;
+    }
     if (patch == 0) {
         for (int i = 0; i < n; ++i) {
             float o1 = M.osc1.osc.next() * M.osc1.osc_amp;

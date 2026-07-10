@@ -38,7 +38,12 @@ concurrency:
 jobs:
   build-prove-deploy:
     name: Build + prove + (owner-gated) deploy
+    # Scheduled-workflow fork guard: forks should not burn a weekly cron.
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
+    env:
+      # Owner-gated deploy switch (a step `if:` cannot read `secrets` directly).
+      HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -112,8 +117,10 @@ jobs:
       # ── Owner-gated deploy ─────────────────────────────────────────────────
       # Runs only after the owner adds CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
       # repo secrets (see cloudflare/README.md). Until then this step is skipped.
+      # (`secrets` is not a valid context in a step `if:` — actionlint — so the
+      # presence check is hoisted into the job-level HAS_CF_TOKEN env var.)
       - name: Deploy to Cloudflare Pages
-        if: ${{ github.event_name != 'pull_request' && secrets.CLOUDFLARE_API_TOKEN != '' }}
+        if: ${{ github.event_name != 'pull_request' && env.HAS_CF_TOKEN == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
