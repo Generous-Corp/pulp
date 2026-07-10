@@ -3,7 +3,7 @@
 // Step LFO — an eight-step pattern, derived from the host's position.
 //
 // Two outputs: the stepped control voltage on channel 0, and a gate on channel 1
-// that goes high for the first half of every step. The gate is what lets a step
+// that goes high for the gated part of every step. The gate is what lets a step
 // pattern drive an envelope downstream rather than only a level.
 //
 // Like the LFO and the clock, the step index is a pure function of the position:
@@ -51,6 +51,7 @@ public:
         kOutputScale = 7,
         kInvert = 8,
         /// The eight step levels occupy 16..23, leaving room below for controls.
+        kGate = 9,
         kStep1 = 16,
     };
 
@@ -90,6 +91,13 @@ public:
                              .name = "Glide",
                              .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 0.001f}});
+        // The fraction of each step that carries its value. At 1.0 nothing is
+        // punched out and the gate never falls; below it, every step grows a
+        // rising edge for an envelope generator to fire on.
+        store.add_parameter({.id = kGate,
+                             .name = "Gate",
+                             .unit = "",
+                             .range = {0.0f, 1.0f, 1.0f, 0.001f}});
         // A bounded random offset added to each step, keyed on the absolute step
         // index. At zero the pattern is exactly what the editor shows.
         store.add_parameter({.id = kRandom,
@@ -151,7 +159,13 @@ public:
                           static_cast<std::uint32_t>(state().get_value(kSeed)));
     }
 
-    /// The value emitted at a beat position, after glide and the output stage.
+    /// How much of each step carries its value; the rest is silent.
+    [[nodiscard]] double gate_fraction() const noexcept {
+        return static_cast<double>(state().get_value(kGate));
+    }
+
+    /// The value emitted at a beat position, after glide, the gate, and the
+    /// output stage.
     [[nodiscard]] float value_at(double position_beats) const noexcept {
         const double bps_step = step_beats();
         if (!(bps_step > 0.0)) return resolve_output(0.0f, scale(), inverted());
@@ -159,7 +173,9 @@ public:
         const double frac = step_fraction(position_beats, bps_step);
         const float v = glide_toward(level_at(abs - 1), level_at(abs), frac,
                                      static_cast<double>(state().get_value(kGlide)));
-        return resolve_output(v, scale(), inverted());
+        // Gated before the output stage, so `Out` and `Invert` act on the gap the
+        // same way they act on the note — a gap is a voltage like any other.
+        return resolve_output(step_gated(v, frac, gate_fraction()), scale(), inverted());
     }
 
     /// Which step of the pattern is playing, or -1 when nothing is. The editor
@@ -195,6 +211,7 @@ public:
                                ? beats_per_sample(ctx.tempo_bpm, ctx.sample_rate)
                                : 0.0;
         const double bps_step = step_beats();
+        const double gate_open = gate_fraction();
         const float high = resolve_output(kFullScale, scale(), inverted());
         const float low = resolve_output(0.0f, scale(), inverted());
 
@@ -203,7 +220,8 @@ public:
             const double pos = ctx.position_beats + bps * n;
             if (cv) cv[n] = value_at(pos);
             if (gate) {
-                const bool on = bps_step > 0.0 && step_gate(step_fraction(pos, bps_step));
+                const bool on = bps_step > 0.0 &&
+                                step_gate_open(step_fraction(pos, bps_step), gate_open);
                 gate[n] = on ? high : low;
             }
             last_abs = bps_step > 0.0 ? absolute_step(pos, bps_step) : 0;

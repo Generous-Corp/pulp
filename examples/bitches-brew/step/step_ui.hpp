@@ -132,6 +132,12 @@ public:
         bars->flex().preferred_height = 130.0f;
         bars->flex().align_self = view::FlexAlign::stretch;
 
+        auto pct = [](float v) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.0f%%", v * 100.0f);
+            return std::string(buf);
+        };
+
         auto add = [&](view::View& row, state::ParamID id, const char* label,
                        std::function<std::string(float)> fmt) {
             auto k = ui::param_knob(store_, id, label, std::move(fmt));
@@ -142,6 +148,8 @@ public:
         auto top = ui::row(ui::kRowGap, ui::kKnobHeight);
         add(*top, StepProcessor::kRate, "Rate", beats);
         add(*top, StepProcessor::kLength, "Length", whole);
+        // How much of each step sounds. At 100% the gate never falls.
+        add(*top, StepProcessor::kGate, "Gate", pct);
         add(*top, StepProcessor::kGlide, "Glide", number);
         add(*top, StepProcessor::kRandom, "Random", number);
 

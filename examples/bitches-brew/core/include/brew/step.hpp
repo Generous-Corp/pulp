@@ -118,13 +118,30 @@ enum class SpeedMode : int { cycle = 0, step = 1 };
     return previous + (current - previous) * t;
 }
 
-/// The gate that accompanies each step: high for the first half of it.
+/// The fraction of a step that carries the step's value. The rest of the step is
+/// silent.
 ///
-/// Half is a choice, not a discovery. It gives an envelope generator downstream a
-/// rising edge on every step and a falling edge before the next, at any rate,
-/// which is the property that makes a gate useful.
-[[nodiscard]] inline constexpr bool step_gate(double fraction) noexcept {
-    return fraction < 0.5;
+/// One control, two consequences. It punches a hole in the *control voltage* — the
+/// tail of each step falls to zero — and it sets the width of the gate that
+/// accompanies it. That is deliberate: a sequencer with a `Gate` that shortened the
+/// CV but not the gate, or the other way round, would be describing two different
+/// notes.
+///
+/// At the default of 1.0 nothing is punched out: the CV holds for the whole step
+/// and the gate never falls, which is right, because with a full-length step there
+/// is no gap between one note and the next to fall into. Turn it down and every
+/// step grows a rising edge, which is what an envelope generator downstream needs
+/// in order to fire once per step rather than once per phrase. It is the reason you
+/// no longer have to program a silent step between every sounding one.
+[[nodiscard]] inline constexpr bool step_gate_open(double fraction,
+                                                   double gate) noexcept {
+    return fraction < gate;
+}
+
+/// A step whose gate has closed emits zero, not its programmed level.
+[[nodiscard]] inline constexpr float step_gated(float value, double fraction,
+                                                double gate) noexcept {
+    return step_gate_open(fraction, gate) ? value : 0.0f;
 }
 
 }  // namespace pulp::examples::brew
