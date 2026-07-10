@@ -293,6 +293,21 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     set_target_properties(pulp-test-au-v2-busses PROPERTIES CXX_STANDARD 23)
     catch_discover_tests(pulp-test-au-v2-busses)
 
+    # AU v2 continuous-parameter display — GetParameterInfo ValuesHaveStrings
+    # flag + kAudioUnitProperty_ParameterStringFromValue / ...ValueFromString
+    # round-tripping through ParamInfo::to_string / from_string. Instantiates a
+    # live PulpAUEffect, so it links the AU/CoreFoundation frameworks like the
+    # other .mm AU tests.
+    add_executable(pulp-test-au-v2-param-display test_au_v2_param_display.mm)
+    target_link_libraries(pulp-test-au-v2-param-display PRIVATE
+        pulp::format pulp::midi ausdk Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework CoreFoundation"
+        "-framework Foundation")
+    set_target_properties(pulp-test-au-v2-param-display PROPERTIES
+        CXX_STANDARD 23 OBJCXX_STANDARD 23)
+    catch_discover_tests(pulp-test-au-v2-param-display)
+
     # Cross-format outbound-MIDI sample-offset parity. Exercises the real AU v2
     # MidiOutputPacketBuilder (hence ausdk + C++23) plus the shared VST3/CLAP
     # offset helpers the adapters route through.

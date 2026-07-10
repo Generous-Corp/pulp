@@ -23,6 +23,7 @@
 #include <pluginterfaces/base/ustring.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <span>
 #include <cstdio>
 #include <cstdlib>
@@ -253,6 +254,49 @@ tresult PLUGIN_API PulpVst3Processor::getNoteExpressionValueByString(
         valueNormalized = std::clamp(parsed, 0.0, 1.0);
     }
     return kResultTrue;
+}
+
+// ── Parameter value <-> display string ──────────────────────────────────────
+//
+// VST3 hands these methods a NORMALIZED [0,1] value; the plugin author's
+// ParamInfo::to_string / from_string work in PLAIN (min..max) units, so we
+// denormalize/normalize through the parameter's ParamRange on the way in/out.
+// When a parameter declares no converter, defer to SingleComponentEffect so
+// the host's stock formatting is preserved (zero behavior change for existing
+// plugins). The hidden MIDI-controller parameters have no ParamInfo, so they
+// take the base path automatically.
+
+tresult PLUGIN_API PulpVst3Processor::getParamStringByValue(
+    ParamID tag, ParamValue valueNormalized, String128 string) {
+    const auto* info = store_.info(static_cast<state::ParamID>(tag));
+    if (info && info->to_string) {
+        const float plain =
+            info->range.denormalize(static_cast<float>(valueNormalized));
+        const std::string text = info->to_string(plain);
+        // fromAscii matches the rest of this adapter's String128 handling
+        // (parameter titles/units are converted the same way). Typical display
+        // units (dB, Hz, %, semitones) are ASCII.
+        Steinberg::UString(string, 128).fromAscii(text.c_str());
+        return kResultTrue;
+    }
+    return SingleComponentEffect::getParamStringByValue(tag, valueNormalized, string);
+}
+
+tresult PLUGIN_API PulpVst3Processor::getParamValueByString(
+    ParamID tag, TChar* string, ParamValue& valueNormalized) {
+    const auto* info = store_.info(static_cast<state::ParamID>(tag));
+    if (info && info->from_string && string) {
+        char ascii[256] = {0};
+        Steinberg::UString(string, 128).toAscii(ascii, sizeof(ascii));
+        const float plain = info->from_string(ascii);
+        if (std::isfinite(plain)) {
+            valueNormalized = info->range.normalize(plain);
+            return kResultTrue;
+        }
+        // Non-finite parse — fall through to the base numeric parser rather
+        // than write a garbage normalized value.
+    }
+    return SingleComponentEffect::getParamValueByString(tag, string, valueNormalized);
 }
 
 // ── noteId -> (channel, note) linkage ──────────────────────────────────────

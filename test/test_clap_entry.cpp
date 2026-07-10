@@ -59,6 +59,16 @@ public:
             std::snprintf(buffer, sizeof(buffer), "quality=%.2f", value);
             return std::string(buffer);
         };
+        // Inverse of to_string: parse the number after "quality=". A bare
+        // numeric parser (the fallback) rejects this string outright because it
+        // starts with 'q', so it is a clean discriminator that from_string is
+        // actually invoked by params_text_to_value.
+        quality.from_string = [](const std::string& s) -> float {
+            const auto pos = s.find('=');
+            if (pos == std::string::npos)
+                return std::numeric_limits<float>::quiet_NaN();
+            return static_cast<float>(std::atof(s.c_str() + pos + 1));
+        };
         store.add_parameter(quality);
     }
     void prepare(const pulp::format::PrepareContext&) override {}
@@ -574,6 +584,53 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     REQUIRE(params->text_to_value(plugin, 1, "-3.25 dB", &value));
     REQUIRE_THAT(value, WithinAbs(-3.25, 0.01));
     REQUIRE_FALSE(params->text_to_value(plugin, 1, "dB", &value));
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("CLAP text_to_value routes through ParamInfo::from_string",
+          "[clap][entry][params][from-string]") {
+    // The "Quality" param (id 4) declares a custom to_string/from_string pair
+    // whose rendering ("quality=0.75") a bare numeric parse cannot decode.
+    // params_text_to_value must prefer from_string so a host's text-entry field
+    // round-trips the plugin's own formatting. The generic strtod fallback must
+    // still handle plain-numeric params (and reject junk) unchanged.
+    ScopedHostQuirkPolicy quirk_guard(pulp::format::kQuirkFilterOff);
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    REQUIRE(factory != nullptr);
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    REQUIRE(desc != nullptr);
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* params = static_cast<const clap_plugin_params_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+
+    double value = 0.0;
+    // Custom rendering decoded via from_string — a bare numeric parse would
+    // fail on the leading 'q'.
+    REQUIRE(params->text_to_value(plugin, 4, "quality=0.42", &value));
+    REQUIRE_THAT(value, WithinAbs(0.42, 1e-6));
+
+    // Round-trip: value_to_text then text_to_value returns the original value.
+    char text[64]{};
+    REQUIRE(params->value_to_text(plugin, 4, 0.63, text, sizeof(text)));
+    REQUIRE(std::string(text) == "quality=0.63");
+    value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 4, text, &value));
+    REQUIRE_THAT(value, WithinAbs(0.63, 1e-6));
+
+    // A param WITHOUT from_string (Gain, id 1) still uses the numeric fallback.
+    REQUIRE(params->text_to_value(plugin, 1, "-3.25 dB", &value));
+    REQUIRE_THAT(value, WithinAbs(-3.25, 1e-6));
+    REQUIRE_FALSE(params->text_to_value(plugin, 1, "not a number", &value));
 
     plugin->destroy(plugin);
     clap_entry.deinit();

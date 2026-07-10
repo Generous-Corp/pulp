@@ -890,3 +890,24 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## Parameter display strings — override the EditController methods, convert domains
+
+Hosts show and accept per-parameter text through the `IEditController` pair
+`getParamStringByValue` / `getParamValueByString`. `SingleComponentEffect`
+provides stock numeric formatting, so if the adapter does NOT override these,
+a plugin's `ParamInfo::to_string` / `from_string` are silently ignored and the
+host shows the base class's generic number instead. `PulpVst3Processor`
+overrides both (`vst3_adapter.cpp`):
+
+- These methods work in the **normalized [0,1]** domain, but `to_string` /
+  `from_string` work in **plain (min..max)** units. Denormalize on the way in
+  (`info->range.denormalize(valueNormalized)` before `to_string`) and normalize
+  on the way out (`info->range.normalize(plain)`). Skipping this shows the
+  normalized 0..1 number, not the real value.
+- Decline to the base class (`return SingleComponentEffect::...`) when the
+  parameter has no converter, so existing plugins and the hidden MIDI-controller
+  params (which have no `ParamInfo`) keep the stock path.
+- `from_string` is author code: guard with `std::isfinite` and fall through to
+  the base parser on a non-finite result rather than writing a garbage
+  normalized value. Test: `test/test_vst3_param_display.cpp`.

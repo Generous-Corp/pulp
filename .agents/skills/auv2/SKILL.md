@@ -669,3 +669,21 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## Continuous-parameter value strings (DISPLAY region)
+
+`GetParameterValueStrings` only serves DISCRETE params (an enumerated list;
+Pulp gates it on `range.step >= 1`). A CONTINUOUS param with a custom
+`ParamInfo::to_string` reaches the host through a different door:
+
+1. Set `kAudioUnitParameterFlag_ValuesHaveStrings` in `GetParameterInfo` when
+   the param declares a `to_string` (both discrete and continuous). Without the
+   flag the host never asks for strings.
+2. AUBase does NOT implement `kAudioUnitProperty_ParameterStringFromValue` /
+   `...ValueFromString` — handle them in `GetPropertyInfo`/`GetProperty`. The
+   host passes the target `ParamID` inside the in/out struct (not `inElement`),
+   so advertise at global scope and validate the specific param in GetProperty.
+   For StringFromValue the host owns/releases `outString` (create with +1
+   retain); `inValue == nullptr` means "use the current value".
+   Guard from_string with `std::isfinite`. Test:
+   `test/test_au_v2_param_display.mm`.

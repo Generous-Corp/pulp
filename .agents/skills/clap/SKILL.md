@@ -775,3 +775,20 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## Param text entry + gesture threading (PARAMS region)
+
+- `params_text_to_value` must try `ParamInfo::from_string` BEFORE the generic
+  numeric parse. from_string is the inverse of the `to_string` used by
+  `value_to_text`, so a custom rendering ("quality=0.75", an enum label)
+  round-trips; a bare strtod would reject it. CLAP values are plain (min..max),
+  the same domain from_string returns — no normalization step. Guard the result
+  with `std::isfinite` and fall through to the locale-independent strtod path on
+  a non-finite parse. Keep the locale-independent fallback (`parse_double_c_locale`)
+  for plain-numeric params. Test: `test/test_clap_entry.cpp`
+  ("text_to_value routes through ParamInfo::from_string").
+- CLAP delivers `CLAP_EVENT_PARAM_GESTURE_BEGIN/END` on the process/flush path
+  and calls `store.begin_gesture/end_gesture` directly. Those StateStore entry
+  points are main-thread-only (they forward to host undo grouping). A background
+  writer must use `StateStore::run_gesture_on_main()` — see the state notes in
+  `binding.hpp`.
