@@ -46,11 +46,22 @@ public:
                             std::uint64_t frames) noexcept;
 
 private:
-    float sample_with_crossfade(BufferView<const float> source,
-                                std::uint32_t output_channel,
-                                double position,
-                                double step,
-                                bool& wrapped) const noexcept;
+    // Per-frame wrap-crossfade descriptor. The branch decision, the read
+    // positions, and the blend gains depend only on (position, step) — not on
+    // the channel — so render() computes this ONCE per frame and every channel
+    // reuses it, instead of recomputing the equal-power cos/sin per channel.
+    struct CrossfadePlan {
+        double read_pos = 0.0;       // primary read position
+        double blend_pos = 0.0;      // wrap-target read position (blend only)
+        double primary_gain = 1.0;   // dry gain applied to read_pos
+        double blend_gain = 0.0;     // wet gain applied to blend_pos
+        bool blend = false;          // true => mix the two reads
+        bool wrapped = false;        // whether this frame crosses the loop wrap
+    };
+    CrossfadePlan compute_crossfade_plan(double position, double step) const noexcept;
+    float apply_crossfade_plan(BufferView<const float> source,
+                               std::uint32_t output_channel,
+                               const CrossfadePlan& plan) const noexcept;
     double advance_position(double position, double step, bool& wrapped) noexcept;
     void init_entry() noexcept;  // seed position + step_dir_ from the entry direction
     float fade_gain() noexcept;

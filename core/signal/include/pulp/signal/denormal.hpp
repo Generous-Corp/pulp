@@ -11,7 +11,9 @@ namespace pulp::signal {
 /// they enter recursive paths like IIR filter state or reverb feedback.
 /// `snap_to_zero` returns 0 when the input is below a threshold whose
 /// magnitude is large enough to catch denormals (and very-quiet tails)
-/// but small enough not to be audible (-150 dB FS).
+/// but small enough not to be audible. The threshold is 1e-15 (~-300 dB
+/// FS for `float`; see `snap_threshold()` below) — the single source of
+/// truth for the magnitude quoted here.
 ///
 /// Use at the end of each recursive state update in IIR / SVF / TPT /
 /// Ladder / Ballistics / Reverb feedback paths.

@@ -8,6 +8,31 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06430"></a>
+## [0.643.0] - 2026-07-10
+
+- core/signal: denormal policy (MF-3) + inner-loop transcendental eviction (PF-2) ([#5889](https://github.com/danielraffel/pulp/pull/5889))
+
+<a id="v06410"></a>
+## [0.641.0] - 2026-07-10
+
+- Harden sampler runtime and executor audio paths ([#5888](https://github.com/danielraffel/pulp/pull/5888))
+
+<a id="v06390"></a>
+## [0.639.0] - 2026-07-10
+
+- perf(gpu): block-parallel modal_strike — cooperate across the modes sum ([#5881](https://github.com/danielraffel/pulp/pull/5881))
+- feat(gpu): roofline/occupancy harness for the gpu_audio compute passes ([#5877](https://github.com/danielraffel/pulp/pull/5877))
+- WebCLAP 1:1 demo gallery: all 23 plugins + two gallery indexes ([#5874](https://github.com/danielraffel/pulp/pull/5874))
+- perf(gpu): block-parallel WaveNet layer — fill the device at real-time B ([#5878](https://github.com/danielraffel/pulp/pull/5878))
+- Redesign in-page synthLoop: seamless, evolving 8-bar loop ([#5872](https://github.com/danielraffel/pulp/pull/5872))
+- F2-S1: graph→wasm emitter spike — bit-exact fused compiled tier + measured KILL verdict ([#5875](https://github.com/danielraffel/pulp/pull/5875))
+- Rename package to @danielraffel/web-player for npm publish ([#5873](https://github.com/danielraffel/pulp/pull/5873))
+- Remove private flag from @pulp/web-player for npm publish ([#5871](https://github.com/danielraffel/pulp/pull/5871))
+- Live kernel iter 2: 14 nodes, live signal-flow graph, per-node conformance ([#5867](https://github.com/danielraffel/pulp/pull/5867))
+- feat(tools): turnkey Managed SDK Consumer Sweep runner ([#5865](https://github.com/danielraffel/pulp/pull/5865))
+- WS-C2: production real-time WebCLAP behind the shared @pulp/web-player ([#5861](https://github.com/danielraffel/pulp/pull/5861))
+
 <a id="v06381"></a>
 ## [0.638.1] - 2026-07-09
 
@@ -6179,6 +6204,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.643.0]: https://github.com/danielraffel/pulp/releases/tag/v0.643.0
+[0.641.0]: https://github.com/danielraffel/pulp/releases/tag/v0.641.0
+[0.639.0]: https://github.com/danielraffel/pulp/releases/tag/v0.639.0
 [0.638.1]: https://github.com/danielraffel/pulp/releases/tag/v0.638.1
 [0.638.0]: https://github.com/danielraffel/pulp/releases/tag/v0.638.0
 [0.637.0]: https://github.com/danielraffel/pulp/releases/tag/v0.637.0

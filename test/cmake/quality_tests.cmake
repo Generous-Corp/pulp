@@ -60,6 +60,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME sdk-consumer-sweep-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_consumer_sweep.py")
 
+    # SDK-consumer update: SDK-pin detection/rewrite across pin forms, per-repo
+    # update planning, the buildable-consumer filter, and the publish runbook —
+    # the pure logic behind `pulp minos update` / `publish-runbook`.
+    add_test(NAME sdk-consumer-update-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_consumer_update.py")
+
+    # The consumer registry lives in the private `planning` submodule. Both the
+    # scripts and the two CTest cases that read it must agree on how its absence
+    # is announced, or those cases fail on every checkout that lacks planning.
+    add_test(NAME minos-registry-absent-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_minos_registry_absent.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest

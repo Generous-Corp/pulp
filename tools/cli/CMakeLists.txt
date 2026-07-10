@@ -50,6 +50,7 @@ add_executable(pulp-cli
     cmd_config.cpp
     cmd_coverage.cpp
     cmd_create.cpp
+    cmd_minos.cpp
     cmd_macos.cpp
     cmd_ci_host.cpp
     cmd_overflow.cpp
@@ -460,6 +461,73 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-coverage-diff-skip PROPERTIES
         ENVIRONMENT "PULP_SKIP_DIFF_COVER=1"
         PASS_REGULAR_EXPRESSION "skipped via PULP_SKIP_DIFF_COVER=1")
+
+    # Exercise the `pulp minos` dispatch (cmd_minos.cpp): usage banner,
+    # help alias, unknown-subcommand error, the measure->script handoff
+    # (measure the CLI binary itself, which always exists), and the
+    # sweep dry-run plan (no clone/build cost).
+    add_test(NAME cli-minos-help
+        COMMAND pulp-cli minos
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "pulp minos")
+
+    add_test(NAME cli-minos-help-flag
+        COMMAND pulp-cli minos --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-help-flag PROPERTIES
+        PASS_REGULAR_EXPRESSION "measure <binary>")
+
+    add_test(NAME cli-minos-unknown-subcommand
+        COMMAND pulp-cli minos bogus-subcommand
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-unknown-subcommand PROPERTIES
+        WILL_FAIL TRUE)
+
+    # `pulp minos measure` with no path is a usage error (exit 1).
+    add_test(NAME cli-minos-measure-no-path
+        COMMAND pulp-cli minos measure
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-measure-no-path PROPERTIES
+        WILL_FAIL TRUE)
+
+    # `pulp minos measure <cli-binary>` measures a real Mach-O/ELF/PE and
+    # prints "<kind> <floor>" — covers the CLI->measure_min_os.py handoff.
+    add_test(NAME cli-minos-measure-self
+        COMMAND pulp-cli minos measure "$<TARGET_FILE:pulp-cli>"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-measure-self PROPERTIES
+        PASS_REGULAR_EXPRESSION "(macho|elf|pe) ")
+
+    # `pulp minos sweep --sdk-prefix <x> --dry-run` prints the plan without
+    # cloning or building — covers the CLI->sdk_consumer_sweep.py handoff.
+    # The consumer registry lives in the private `planning` submodule, which a
+    # fresh clone and every CI runner may legitimately lack; skip rather than
+    # fail there, so this stays a real assertion where the registry exists.
+    add_test(NAME cli-minos-sweep-dryrun
+        COMMAND pulp-cli minos sweep --sdk-prefix /nonexistent --dry-run
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-sweep-dryrun PROPERTIES
+        PASS_REGULAR_EXPRESSION "Planned sweep:"
+        SKIP_REGULAR_EXPRESSION "consumers registry not found")
+
+    # `pulp minos update --to <ver>` (dry-run, --only a single repo so it clones
+    # at most one; the dispatch + script-handoff is what's under test). A bad
+    # --to is rejected fast without cloning.
+    add_test(NAME cli-minos-update-bad-version
+        COMMAND pulp-cli minos update --to not-a-version
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-update-bad-version PROPERTIES
+        WILL_FAIL TRUE)
+
+    # `pulp minos publish-runbook` reads the registry and prints steps — no clone,
+    # no build. Covers the CLI->sdk_consumer_update.py handoff deterministically.
+    add_test(NAME cli-minos-publish-runbook
+        COMMAND pulp-cli minos publish-runbook --to 0.640.0
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-minos-publish-runbook PROPERTIES
+        PASS_REGULAR_EXPRESSION "Republish runbook"
+        SKIP_REGULAR_EXPRESSION "consumers registry not found")
 
     add_test(NAME cli-audio-excerpt-find-invalid-top
         COMMAND "${CMAKE_COMMAND}"

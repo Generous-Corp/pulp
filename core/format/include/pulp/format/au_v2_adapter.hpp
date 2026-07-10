@@ -456,8 +456,12 @@ private:
     /// advertise a MIDI output the host would try to wire up.
     bool plugin_produces_midi() const noexcept;
 
-    std::unique_ptr<Processor> processor_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
 
     // Main-thread listener that pushes editor parameter edits to the host
     // (AudioUnitSetParameter), kept alive for the adapter's lifetime so host
