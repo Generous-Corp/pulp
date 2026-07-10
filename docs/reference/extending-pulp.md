@@ -52,6 +52,34 @@ The split is deliberate and load-bearing:
   developer-only license terms and get the same carve-out as vendor SDKs:
   developer-supplied, never vendored, never shipped.
 
+## One consistent lifecycle: add → validate → use → remove
+
+However different their blast radius, all four surfaces follow the same lifecycle
+shape, so what you learn on one carries to the others:
+
+- **Add is validated, never blind.** Every surface checks what it is about to
+  bring in before it lands — a package is license- and pin-checked, a kit runs a
+  review/validate step, a content pack is validated against its manifest, and a
+  tool is fetched at a pinned version and (for binaries) SHA-256-verified. A
+  failed validation is a hard stop, not a warning.
+- **Remove is explicit and confined.** Every surface can undo what it added, and
+  a removal that deletes files makes you confirm it (`--yes`, or a gesture in a
+  review UI), only ever touches the area that surface owns (your project's
+  managed entries, the plugin's content directory, or `~/.pulp/tools/`), refuses
+  any id or path that would resolve outside that area, and names what it removed.
+  Nothing deletes silently or reaches beyond its own lane.
+- **Every surface ships tests.** Add *and* remove are both covered by tests that
+  run in CI — installing and uninstalling from outside a checkout, round-tripping
+  a pack, refusing a hostile id — so "it installs" and "it cleanly uninstalls"
+  are both proven, not assumed.
+
+Each surface has an agent skill carrying its surface-specific recipe (see the
+[skills catalog](skills.md) — `packages`, `kits`, `content`,
+`installable-tools`). If you are adding a *new* thing Pulp can install on any of
+these surfaces, the `installable-tools` skill codifies the acceptance bar that
+makes the lifecycle above real: validate the install **and** the uninstall from
+*outside* a checkout, and ship both tests, before the README ships.
+
 ## FAQ
 
 **Why isn't `video-proof` a `pulp add` package?**
@@ -124,6 +152,8 @@ same change that registers the tool.
 
 ## See also
 
+- [skills.md](skills.md) — the agent-skills catalog; the `packages`, `kits`,
+  `content`, and `installable-tools` skills carry the per-surface recipes
 - [cli.md](cli.md) — full command reference for `add`, `tool`, `kit`, `content`
 - [framework-importer-packaging.md](framework-importer-packaging.md) — the
   importer/tool packaging contract
