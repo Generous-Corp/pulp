@@ -148,7 +148,10 @@ public:
                              .to_string = rate_text});
     }
 
-    void prepare(const format::PrepareContext&) override { start_sender(); }
+    void prepare(const format::PrepareContext&) override {
+        snapshot_parameters();
+        start_sender();
+    }
 
     std::pair<uint32_t, uint32_t> editor_size() const override { return {380, 640}; }
 
@@ -230,10 +233,40 @@ public:
         return total;
     }
 
+    /// Whether a channel is switched on, according to the store. For the editor
+    /// and for tests — both of which run on a thread that owns the store's
+    /// lifetime. The sender thread must use `enabled_now()` instead.
     [[nodiscard]] bool enabled(std::size_t channel) const noexcept {
         return channel < kOscChannels &&
                as_toggle(state().get_value(
                    static_cast<state::ParamID>(param_for(kEnable, channel))));
+    }
+
+    /// Copy the parameters the sender thread needs out of the store, on a thread
+    /// that owns the store's lifetime. Called from `process()` every block, and
+    /// once from `prepare()` before the thread starts, so a plug-in that is loaded
+    /// and enabled but never processed still comes up with its real settings.
+    ///
+    /// The sender thread must never read `state()` itself. `Processor::state()`
+    /// dereferences a pointer the *host* installs, and a host is free to destroy
+    /// its StateStore before the Processor it handed that pointer to — Pulp's own
+    /// HeadlessHost and format adapters all do, because they declare the Processor
+    /// first. The sender thread is still ticking while `~CvOscProcessor` walks to
+    /// its `join()`, so one `get_value` in that window is a use-after-free. It
+    /// crashed about one plug-in close in eight.
+    ///
+    /// Real-time safe: `get_value` is a relaxed atomic load, and every store here
+    /// is a relaxed atomic store. No allocation, no lock.
+    void snapshot_parameters() noexcept {
+        for (std::size_t c = 0; c < kOscChannels; ++c) {
+            enabled_[c].store(as_toggle(state().get_value(static_cast<state::ParamID>(
+                                  param_for(kEnable, c)))),
+                              std::memory_order_relaxed);
+            threshold_[c].store(state().get_value(static_cast<state::ParamID>(
+                                    param_for(kThreshold, c))),
+                                std::memory_order_relaxed);
+        }
+        rate_hz_.store(state().get_value(kRateHz), std::memory_order_relaxed);
     }
 
     /// Publish one tick's worth of values. Exposed so a test can drive the send
@@ -244,7 +277,7 @@ public:
         const std::lock_guard<std::mutex> lock(send_mutex_);
 
         bool any_enabled = false;
-        for (std::size_t c = 0; c < kOscChannels; ++c) any_enabled |= enabled(c);
+        for (std::size_t c = 0; c < kOscChannels; ++c) any_enabled |= enabled_now(c);
         // Connecting a socket for a plug-in whose channels are both off is exactly
         // the firewall prompt the default-off rule exists to avoid.
         if (!any_enabled) return;
@@ -256,15 +289,14 @@ public:
         }
 
         for (std::size_t c = 0; c < kOscChannels; ++c) {
-            if (!enabled(c)) {
+            if (!enabled_now(c)) {
                 // A channel switched off should re-announce its resting value when
                 // it comes back, not resume mid-deadband against a value the
                 // receiver last heard minutes ago.
                 first_send_[c] = true;
                 continue;
             }
-            const float threshold = state().get_value(
-                static_cast<state::ParamID>(param_for(kThreshold, c)));
+            const float threshold = threshold_[c].load(std::memory_order_relaxed);
             const float v = latest(c);
             if (!should_send(first_send_[c], last_sent_[c], v, threshold)) continue;
             osc::Message msg(settings_.paths[c]);
@@ -311,9 +343,21 @@ public:
             const float* src = c < shared ? input.channel_ptr(c) : nullptr;
             latest_[c].store(src ? src[frames - 1] : 0.0f, std::memory_order_relaxed);
         }
+
+        // The sender thread never touches the store, so the audio thread publishes
+        // to it. One block of latency on an Enable or a Threshold change, against a
+        // send interval of at least two milliseconds.
+        snapshot_parameters();
     }
 
 private:
+    /// The sender thread's view of `enabled`: what the audio thread last published,
+    /// never the store.
+    [[nodiscard]] bool enabled_now(std::size_t channel) const noexcept {
+        return channel < kOscChannels &&
+               enabled_[channel].load(std::memory_order_relaxed);
+    }
+
     void start_sender() {
         if (thread_.joinable()) return;
         running_.store(true, std::memory_order_relaxed);
@@ -337,7 +381,7 @@ private:
         while (running_.load(std::memory_order_relaxed)) {
             publish_once();
             const auto interval = std::chrono::duration<double>(
-                send_interval_seconds(state().get_value(kRateHz)));
+                send_interval_seconds(rate_hz_.load(std::memory_order_relaxed)));
             std::unique_lock<std::mutex> lock(wake_mutex_);
             wake_.wait_for(lock, interval, [this] {
                 return !running_.load(std::memory_order_relaxed);
@@ -355,6 +399,13 @@ private:
     std::array<float, kOscChannels> last_sent_{};
     std::array<bool, kOscChannels> first_send_{true, true};
     bool connected_ = false;
+
+    // Published by the audio thread in `snapshot_parameters()`, read by the sender
+    // thread. Everything the sender needs from the store lives here instead, so its
+    // reads cannot outlive a store the host owns.
+    std::array<std::atomic<bool>, kOscChannels> enabled_{};
+    std::array<std::atomic<float>, kOscChannels> threshold_{};
+    std::atomic<float> rate_hz_{60.0f};
 
     std::array<std::atomic<std::uint64_t>, kOscChannels> sent_count_{};
     std::atomic<bool> running_{false};
