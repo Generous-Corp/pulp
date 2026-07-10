@@ -8,7 +8,7 @@
 // (mode is auto-detected from the descriptor's isInstrument if omitted)
 
 import { readFileSync } from "node:fs";
-import { makeWasmImports, makeBridge } from "../../../core/format/src/wasm/wam-runtime.mjs";
+import { makeWasmImports, makeBridge, makeWamAudioPorts } from "../../../core/format/src/wasm/wam-runtime.mjs";
 
 const wasmPath = process.argv[2];
 let mode = process.argv[3];
@@ -23,19 +23,22 @@ const SR = 48000, FR = 128, CH = 2, N = CH * FR;
 if (!wam.init(SR, FR)) throw new Error("wam_init failed");
 
 const ex = instance.exports;
-const inPtr = ex.malloc(N * 4), outPtr = ex.malloc(N * 4);
+// Planar audio ports (per-channel wasm buffers + wam_process pointer arrays).
+const ports = makeWamAudioPorts(wam, CH, FR);
 const fillSine = (freq, amp = 0.5) => {
-  const h = wam.f32();
   for (let f = 0; f < FR; f++) {
     const v = amp * Math.sin(2 * Math.PI * freq * f / SR);
-    h[(inPtr >> 2) + f * CH] = v; h[(inPtr >> 2) + f * CH + 1] = v;
+    ports.setInputSample(0, f, v); ports.setInputSample(1, f, v);
   }
 };
-const silenceIn = () => { const h = wam.f32(); for (let i = 0; i < N; i++) h[(inPtr >> 2) + i] = 0; };
+const silenceIn = () => { for (let f = 0; f < FR; f++) { ports.setInputSample(0, f, 0); ports.setInputSample(1, f, 0); } };
 const proc = () => {
-  ex.wam_process(inPtr, outPtr, CH, FR);
-  const h = wam.f32(); let peak = 0, finite = true;
-  for (let i = 0; i < N; i++) { const v = h[(outPtr >> 2) + i]; if (!Number.isFinite(v)) finite = false; peak = Math.max(peak, Math.abs(v)); }
+  ex.wam_process(ports.inPtr, ports.outPtr, CH, FR);
+  let peak = 0, finite = true;
+  for (let c = 0; c < CH; c++) for (let f = 0; f < FR; f++) {
+    const v = ports.outputSample(c, f);
+    if (!Number.isFinite(v)) finite = false; peak = Math.max(peak, Math.abs(v));
+  }
   return { peak, finite };
 };
 
