@@ -213,6 +213,12 @@
         "core/view/js/import-runtime.js"
       ]
     },
+    "installable-tools": {
+      "paths": [
+        "experimental/pulp-rs/src/cmd/tool.rs",
+        "experimental/pulp-rs/src/tool_registry.rs"
+      ]
+    },
     "jsfx-subset": {
       "paths": [
         "tools/scripts/jsfx_subset.py",
