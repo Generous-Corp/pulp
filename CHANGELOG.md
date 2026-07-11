@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06470"></a>
+## [0.647.0] - 2026-07-10
+
+- fix(release): one workflow owns the release; bare title + CHANGELOG-§ footer ([#5960](https://github.com/danielraffel/pulp/pull/5960))
+- fix(release-notes): resolve direct-commit entries to PR links, not bare SHAs ([#5956](https://github.com/danielraffel/pulp/pull/5956))
+- test(runtime): close consumed==0 harness race in Handoff hammer ([#5949](https://github.com/danielraffel/pulp/pull/5949))
+- ci(intel): pin universal-arch-gate to GitHub-hosted macOS, not the Studios ([#5933](https://github.com/danielraffel/pulp/pull/5933))
+- feat(examples): retain WebView on the processor and attach via NativeViewHost ([#5932](https://github.com/danielraffel/pulp/pull/5932))
+- fix(au): clamp AU v2 instrument output elements + sync view-bridge skill ([#5934](https://github.com/danielraffel/pulp/pull/5934))
+- docs+fix(view): document foreign-framework coexistence; keep CPU idle pump alive in modal run-loop modes ([#5931](https://github.com/danielraffel/pulp/pull/5931))
+
 <a id="v06450"></a>
 ## [0.645.0] - 2026-07-10
 
@@ -6220,6 +6231,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.647.0]: https://github.com/danielraffel/pulp/releases/tag/v0.647.0
 [0.645.0]: https://github.com/danielraffel/pulp/releases/tag/v0.645.0
 [0.644.0]: https://github.com/danielraffel/pulp/releases/tag/v0.644.0
 [0.643.0]: https://github.com/danielraffel/pulp/releases/tag/v0.643.0
