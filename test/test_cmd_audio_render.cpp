@@ -307,5 +307,76 @@ TEST_CASE("audio render parser: --midi and --input-signal grammars + = forms",
 
     REQUIRE_FALSE(parse_audio_render_args(
         {"--plugin", "p", "--out", "o", "--duration-frames", "10",
-         "--input-signal", "noise"}).ok);
+         "--input-signal", "sawtooth"}).ok);
+}
+
+TEST_CASE("audio render parser: noise and impulse stimuli", "[audio-render]") {
+    // The probe stimuli. Both are seeded/positioned so a latency artifact is
+    // reproducible.
+    const auto noise = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "9600",
+         "--input-signal", "noise:42"});
+    REQUIRE(noise.ok);
+    REQUIRE(noise.input_kind == AudioRenderInputKind::Noise);
+    REQUIRE(noise.noise_seed == 42);
+
+    const auto bare = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "9600",
+         "--input-signal", "noise"});
+    REQUIRE(bare.ok);
+    REQUIRE(bare.input_kind == AudioRenderInputKind::Noise);
+
+    const auto impulse = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "9600",
+         "--input-signal", "impulse:64"});
+    REQUIRE(impulse.ok);
+    REQUIRE(impulse.input_kind == AudioRenderInputKind::Impulse);
+    REQUIRE(impulse.impulse_frame == 64);
+}
+
+TEST_CASE("audio render parser: the latency probe refuses a stimulus that cannot "
+          "measure a delay", "[audio-render][latency]") {
+    const auto base = std::vector<std::string>{
+        "--plugin", "p", "--out", "o", "--duration-frames", "9600"};
+    auto with = [&](std::vector<std::string> extra) {
+        auto args = base;
+        args.insert(args.end(), extra.begin(), extra.end());
+        return parse_audio_render_args(args);
+    };
+
+    // Silence carries no information about a delay. Fail at parse time rather
+    // than emitting an inconclusive artifact the caller has to decode.
+    REQUIRE_FALSE(with({"--latency-report", "l.json"}).ok);
+
+    // A tone whose period is a whole number of samples nulls just as well one
+    // period late, so delayed-null cannot pin the delay down.
+    REQUIRE_FALSE(with({"--input-signal", "sine:440", "--latency-report", "l.json",
+                        "--latency-policy", "delayed-null"}).ok);
+
+    // The marker policy needs exactly one onset.
+    REQUIRE_FALSE(with({"--input-signal", "noise", "--latency-report", "l.json",
+                        "--latency-policy", "marker"}).ok);
+
+    // A report path is what makes the probe produce anything.
+    REQUIRE_FALSE(with({"--input-signal", "noise", "--latency-policy",
+                        "delayed-null"}).ok);
+
+    // An intrinsic offset only means something to the marker policy.
+    REQUIRE_FALSE(with({"--input-signal", "noise", "--latency-report", "l.json",
+                        "--latency-intrinsic", "100"}).ok);
+
+    // Valid: noise defaults to delayed-null.
+    const auto null_probe = with({"--input-signal", "noise", "--latency-report", "l.json"});
+    REQUIRE(null_probe.ok);
+    REQUIRE(null_probe.latency_policy == AudioRenderLatencyPolicy::DelayedNull);
+
+    // Valid: an impulse defaults to the marker policy, and carries its intrinsic offset.
+    const auto marker_probe = with({"--input-signal", "impulse:32", "--latency-report",
+                                    "l.json", "--latency-intrinsic", "100",
+                                    "--latency-tolerance", "2"});
+    REQUIRE(marker_probe.ok);
+    REQUIRE(marker_probe.latency_policy == AudioRenderLatencyPolicy::Marker);
+    REQUIRE(marker_probe.impulse_frame == 32);
+    REQUIRE(marker_probe.latency_intrinsic == 100);
+    REQUIRE(marker_probe.latency_tolerance == 2);
 }

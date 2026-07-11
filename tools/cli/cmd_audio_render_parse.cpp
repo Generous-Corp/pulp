@@ -109,10 +109,29 @@ bool parse_midi(std::string_view spec, ParseAudioRenderResult& out) {
     return true;
 }
 
-// --input-signal silence | sine:<hz>[,<dbfs>]
+// --input-signal silence | sine:<hz>[,<dbfs>] | noise[:<seed>] | impulse[:<frame>]
 bool parse_input_signal(std::string_view spec, ParseAudioRenderResult& out) {
     if (spec == "silence") {
         out.input_kind = AudioRenderInputKind::Silence;
+        return true;
+    }
+    // Broadband and aperiodic — the stimulus a delay measurement needs.
+    if (spec == "noise" || spec.substr(0, 6) == "noise:") {
+        out.input_kind = AudioRenderInputKind::Noise;
+        if (spec.size() > 6) {
+            const auto seed = parse_u64(spec.substr(6));
+            if (!seed) return false;
+            out.noise_seed = *seed;
+        }
+        return true;
+    }
+    if (spec == "impulse" || spec.substr(0, 8) == "impulse:") {
+        out.input_kind = AudioRenderInputKind::Impulse;
+        if (spec.size() > 8) {
+            const auto frame = parse_u64(spec.substr(8));
+            if (!frame) return false;
+            out.impulse_frame = *frame;
+        }
         return true;
     }
     constexpr std::string_view kSine = "sine:";
@@ -227,8 +246,30 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
         } else if (key == "--input-signal") {
             if (!take_value(value)) return usage_error(key + " requires a value");
             if (!parse_input_signal(*value, r))
-                return usage_error("--input-signal must be 'silence' or 'sine:<hz>[,<dbfs>]'");
+                return usage_error("--input-signal must be 'silence', 'sine:<hz>[,<dbfs>]', "
+                                   "'noise[:<seed>]', or 'impulse[:<frame>]'");
             input_signal_seen = true;
+        } else if (key == "--latency-report") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            r.latency_report_path = *value;
+        } else if (key == "--latency-policy") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            if (*value == "delayed-null")
+                r.latency_policy = AudioRenderLatencyPolicy::DelayedNull;
+            else if (*value == "marker")
+                r.latency_policy = AudioRenderLatencyPolicy::Marker;
+            else
+                return usage_error("--latency-policy must be 'delayed-null' or 'marker'");
+        } else if (key == "--latency-tolerance") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            const auto v = parse_u64(*value);
+            if (!v) return usage_error("--latency-tolerance must be a nonnegative integer");
+            r.latency_tolerance = static_cast<std::int64_t>(*v);
+        } else if (key == "--latency-intrinsic") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            const auto v = parse_u64(*value);
+            if (!v) return usage_error("--latency-intrinsic must be a nonnegative integer");
+            r.latency_intrinsic = static_cast<std::int64_t>(*v);
         } else if (key == "--param") {
             if (!take_value(value)) return usage_error(key + " requires a value");
             if (!parse_param(*value, r))
@@ -255,6 +296,44 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
         return usage_error("--input and --input-signal are mutually exclusive");
     if (r.in_channels == 0 && r.input_kind != AudioRenderInputKind::Silence)
         return usage_error("--in-channels 0 cannot be combined with --input or sine --input-signal");
+
+    // Latency probe: the flags have to agree with each other, and with a
+    // stimulus that can actually reveal a delay. Failing here beats emitting an
+    // "inconclusive" artifact the caller then has to decode.
+    const bool wants_latency = !r.latency_report_path.empty() ||
+                               r.latency_policy != AudioRenderLatencyPolicy::None;
+    if (wants_latency) {
+        if (r.latency_report_path.empty())
+            return usage_error("--latency-policy requires --latency-report <file.json>");
+        // Default the policy from the stimulus the caller chose, since impulse
+        // and noise each have one policy that fits them.
+        if (r.latency_policy == AudioRenderLatencyPolicy::None) {
+            r.latency_policy = r.input_kind == AudioRenderInputKind::Impulse
+                                   ? AudioRenderLatencyPolicy::Marker
+                                   : AudioRenderLatencyPolicy::DelayedNull;
+        }
+        // A probe needs input to probe WITH.
+        if (r.in_channels == 0)
+            return usage_error("--latency-report needs an input bus; --in-channels 0 "
+                               "cannot carry a probe stimulus");
+        if (r.input_kind == AudioRenderInputKind::Silence)
+            return usage_error(
+                "--latency-report needs a stimulus that can reveal a delay; silence "
+                "cannot. Use --input-signal noise (for --latency-policy delayed-null) "
+                "or --input-signal impulse (for --latency-policy marker)");
+        if (r.latency_policy == AudioRenderLatencyPolicy::Marker &&
+            r.input_kind != AudioRenderInputKind::Impulse)
+            return usage_error("--latency-policy marker needs exactly one onset in the "
+                               "input; use --input-signal impulse[:<frame>]");
+        if (r.latency_policy == AudioRenderLatencyPolicy::DelayedNull &&
+            r.input_kind == AudioRenderInputKind::Sine)
+            return usage_error(
+                "--latency-policy delayed-null cannot measure a delay from a sine: a "
+                "tone whose period is a whole number of samples nulls just as well one "
+                "period late. Use --input-signal noise");
+    }
+    if (r.latency_intrinsic != 0 && r.latency_policy != AudioRenderLatencyPolicy::Marker)
+        return usage_error("--latency-intrinsic applies only to --latency-policy marker");
     if (has_ms && has_frames)
         return usage_error("--duration-ms and --duration-frames are mutually exclusive");
     if (!has_ms && !has_frames)

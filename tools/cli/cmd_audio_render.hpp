@@ -16,7 +16,24 @@ namespace pulp::cli {
 
 // ── Parsed render request (separated from execution so it is unit-testable) ──
 
-enum class AudioRenderInputKind { Silence, Sine, Wav };
+// `Noise` and `Impulse` exist for the latency probe: a delay cannot be measured
+// out of silence, and a tone whose period is a whole number of samples is
+// ambiguous (delays one period apart look identical). Broadband, aperiodic
+// stimuli are what the probe policies need.
+enum class AudioRenderInputKind { Silence, Sine, Wav, Noise, Impulse };
+
+/// How `--latency-report` turns the render into a delay measurement.
+enum class AudioRenderLatencyPolicy {
+    None,
+    /// Null the output against the input delayed by D, sweeping D. Requires the
+    /// plugin to be in a pass-through / bypass / fully-dry mode for the render
+    /// (arrange it with `--param`). Checks every sample.
+    DelayedNull,
+    /// Locate a single impulse in the output and subtract its position in the
+    /// input. Works for plugins that reshape the signal, where nulling is
+    /// meaningless.
+    Marker,
+};
 
 // A `--param <id>=<value>[@frame]` request. `value` is in the PLAIN parameter
 // domain (the parameter's native min..max), matching PluginSlot::set_parameter
@@ -58,6 +75,18 @@ struct ParseAudioRenderResult {
     std::string input_wav;
     double sine_hz = 0.0;
     double sine_dbfs = -6.0;
+    std::uint64_t noise_seed = 1;      ///< `--input-signal noise[:<seed>]`.
+    std::uint64_t impulse_frame = 0;   ///< `--input-signal impulse[:<frame>]`.
+
+    /// `--latency-report <file>`: write a latency-evidence artifact there. This
+    /// is a separate, versioned artifact — it never changes the shape of the
+    /// `--manifest` metrics file or `--json` stdout.
+    std::string latency_report_path;
+    AudioRenderLatencyPolicy latency_policy = AudioRenderLatencyPolicy::None;
+    std::int64_t latency_tolerance = 0;
+    /// `--latency-intrinsic <n>`: delay the plugin adds for reasons that are not
+    /// latency (leading silence in a known IR). Marker policy only.
+    std::int64_t latency_intrinsic = 0;
 
     std::vector<AudioRenderParam> params;
     std::vector<AudioRenderMidi> midi;

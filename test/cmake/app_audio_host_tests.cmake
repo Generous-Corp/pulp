@@ -176,6 +176,11 @@ add_executable(pulp-test-cli-audio-compare test_cli_audio_compare.cpp)
 target_link_libraries(pulp-test-cli-audio-compare PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-compare)
 catch_discover_tests(pulp-test-cli-audio-compare)
+
+add_executable(pulp-test-cli-audio-latency test_cli_audio_latency.cpp)
+target_link_libraries(pulp-test-cli-audio-latency PRIVATE pulp::platform Catch2::Catch2WithMain)
+pulp_bind_cli_shellout_target(pulp-test-cli-audio-latency)
+catch_discover_tests(pulp-test-cli-audio-latency)
 # Audio-probe RT output-boundary allocation counters.
 add_executable(pulp-test-audio-probe test_audio_probe.cpp harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-audio-probe PRIVATE pulp::audio pulp::runtime Catch2::Catch2WithMain)
