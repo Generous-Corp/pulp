@@ -1,12 +1,12 @@
 // WAMv2 format adapter implementation
 // Bridges Pulp Processor to WAMv2 AudioWorkletProcessor via Emscripten.
 //
-// Audio thread flow:
+// Audio thread flow (PLANAR end-to-end — the ABI passes planar channel-pointer
+// arrays, the same shape WCLAP and native CLAP use, so there is no interleave
+// round-trip):
 //   JS AudioWorkletProcessor.process()
-//     → C++ WamProcessorBridge::process()
-//       → de-interleave Web Audio buffers to planar
-//       → Pulp Processor::process()
-//       → interleave planar back to Web Audio buffers
+//     → C++ WamProcessorBridge::process(inputs[], outputs[], ch, frames)
+//       → Pulp Processor::process()  (renders inputs[] → outputs[] directly)
 
 #include <pulp/format/web/wam_adapter.hpp>
 #include <pulp/format/plugin_state_io.hpp>
@@ -172,6 +172,19 @@ std::string WamDescriptorData::to_json() const {
     ss << "\"hasMpeOutput\":" << (has_mpe_output ? "true" : "false") << ",";
     ss << "\"latencySamples\":" << latency_samples << ",";
     ss << "\"tailSamples\":" << tail_samples;
+    // A rack fills `stages` with its per-stage names; a single plugin leaves it
+    // empty, so this whole clause vanishes and the object is byte-for-byte the
+    // single-plugin descriptor it always was.
+    if (!stages.empty()) {
+        ss << ",\"stages\":[";
+        bool first_stage = true;
+        for (const auto& stage_name : stages) {
+            if (!first_stage) ss << ",";
+            first_stage = false;
+            ss << "\""; append_json_escaped(ss, stage_name); ss << "\"";
+        }
+        ss << "]";
+    }
     ss << "}";
     return ss.str();
 }
@@ -213,16 +226,8 @@ bool WamProcessorBridge::initialize(double sample_rate, int max_block_size) {
     ctx.output_channels = desc.default_output_channels();
     processor_->prepare(ctx);
 
-    // Pre-allocate planar buffers
-    input_planar_.resize(num_channels_ * max_block_size, 0.0f);
-    output_planar_.resize(num_channels_ * max_block_size, 0.0f);
-    input_ptrs_.resize(num_channels_);
-    output_ptrs_.resize(num_channels_);
-
-    for (int ch = 0; ch < num_channels_; ++ch) {
-        input_ptrs_[ch] = input_planar_.data() + ch * max_block_size;
-        output_ptrs_[ch] = output_planar_.data() + ch * max_block_size;
-    }
+    // No planar scratch to allocate: process() renders directly from the host's
+    // planar input channel pointers into the host's planar output pointers.
 
     // Reserve the MIDI buffers once, then forbid them from growing. Previously
     // process() default-constructed a MidiBuffer every block and let midi_in /
@@ -266,31 +271,112 @@ bool append_midi_record(std::vector<uint8_t>& scratch, std::size_t& used,
     return true;
 }
 
+// ── Shared bridge helpers ────────────────────────────────────────────────
+// The single-plugin bridge and the rack ran byte-identical copies of these; the
+// evidence in the audit (twin set_transport / schedule_midi / drain_midi_out /
+// read_param_values bodies) is exactly what these collapse. Free functions over
+// the members each bridge already owns, so there is one implementation to test.
+
+// Copy a host transport snapshot into the bridge's WamTransport POD.
+void store_transport(WamTransport& t, bool is_playing, double bpm,
+                     double position_beats, double position_samples,
+                     int tsig_num, int tsig_den) noexcept {
+    t.is_playing = is_playing;
+    t.tempo_bpm = bpm;
+    t.position_beats = position_beats;
+    t.position_samples = static_cast<int64_t>(position_samples);
+    t.time_sig_numerator = tsig_num;
+    t.time_sig_denominator = tsig_den;
+}
+
+// Decode one 3-byte WAM MIDI message into `pending` (feeds a bridge's midi_in).
+// Note-on velocity 0 is normalized to note-off; everything else passes through
+// verbatim (pitch-bend / program-change / pressure must reach the DSP). Drops
+// (counted) rather than growing when the RT-capacity-limited buffer is full.
+void schedule_short_midi(midi::MidiBuffer& pending, uint8_t status, uint8_t data1,
+                         uint8_t data2, int sample_offset) {
+    midi::MidiEvent event;
+    if ((status & 0xF0) == 0x90 && data2 == 0) {
+        event = midi::MidiEvent::note_off(status & 0x0F, data1, 0);
+    } else {
+        event = midi::MidiEvent{choc::midi::ShortMessage(status, data1, data2),
+                                0, 0.0};
+    }
+    event.sample_offset = sample_offset;
+    pending.add(event);
+}
+
+// Copy a variable-length SysEx payload into `pending` from the reserved pool.
+bool schedule_sysex_into(midi::MidiBuffer& pending, const uint8_t* data, int size,
+                         int sample_offset) {
+    if (!data || size <= 0) return false;
+    return pending.add_sysex_copy(data, static_cast<std::size_t>(size),
+                                  sample_offset);
+}
+
+// Serialize every event a processor emitted (short messages first, then SysEx)
+// into `scratch` as packed [offset][len][bytes] records, so drain_midi_out() is
+// a plain memcpy. Resets `used` to 0 first — one block's worth of output.
+void serialize_midi_out(std::vector<uint8_t>& scratch, std::size_t& used,
+                        const midi::MidiBuffer& out) {
+    used = 0;
+    for (const auto& event : out)
+        append_midi_record(scratch, used, event.sample_offset,
+                           event.data(), event.size());
+    for (const auto& event : out.sysex())
+        append_midi_record(scratch, used, event.sample_offset,
+                           event.data.data(), event.data.size());
+}
+
+// Copy min(cap, available) serialized MIDI-out bytes into `dst`; returns the
+// count AVAILABLE (a return > cap tells the caller the tail was truncated).
+int drain_records(const std::vector<uint8_t>& scratch, std::size_t used,
+                  uint8_t* dst, int cap) {
+    const auto available = static_cast<int>(used);
+    if (dst && cap > 0 && available > 0) {
+        std::memcpy(dst, scratch.data(),
+                    static_cast<std::size_t>((std::min)(cap, available)));
+    }
+    return available;
+}
+
+// Bulk-read a StateStore's values in all_params() declaration order. Writes
+// min(count, capacity) floats and returns the total parameter count.
+int read_store_values(const state::StateStore& store, float* dst, int capacity) {
+    const auto params = store.all_params();
+    const int count = static_cast<int>(params.size());
+    if (!dst || capacity <= 0) return count;
+    const int n = (std::min)(count, capacity);
+    for (int i = 0; i < n; ++i)
+        dst[i] = store.get_value(params[static_cast<std::size_t>(i)].id);
+    return count;
+}
+
 } // namespace
 
-void WamProcessorBridge::process(const float* input, float* output,
+void WamProcessorBridge::process(const float* const* inputs,
+                                  float* const* outputs,
                                   int num_channels, int num_frames) {
     if (!processor_) return;
 
-    int ch = (std::min)(num_channels, num_channels_);
+    const int ch = (std::min)(num_channels, num_channels_);
 
-    // Bound the frame count to the planar buffers allocated in initialize().
-    // Web Audio's render quantum is fixed at 128 today, but the host passes
-    // num_frames explicitly: a larger value would overrun input_ptrs_/
-    // output_ptrs_ (each sized to block_size_). Clamp rather than corrupt.
+    // Bound the frame count. Web Audio's render quantum is fixed at 128 today,
+    // but the host passes num_frames explicitly and the JS side allocates its
+    // channel buffers sized to block_size_; a larger value would read/write past
+    // them. Clamp rather than corrupt.
     if (num_frames > block_size_) num_frames = block_size_;
     if (num_frames <= 0) return;
 
-    // De-interleave: Web Audio [L0,R0,L1,R1,...] → planar [L0,L1,...][R0,R1,...]
-    for (int f = 0; f < num_frames; ++f) {
-        for (int c = 0; c < ch; ++c) {
-            input_ptrs_[c][f] = input[f * num_channels + c];
-        }
-    }
-
+    // Planar in, planar out — no interleave. `inputs`/`outputs` are the host's
+    // per-channel pointer arrays (same layout WCLAP/native CLAP pass), so the
+    // processor renders directly from and into them.
     audio::BufferView<const float> in_view(
-        const_cast<const float* const*>(input_ptrs_.data()), ch, num_frames);
-    audio::BufferView<float> out_view(output_ptrs_.data(), ch, num_frames);
+        inputs, static_cast<std::size_t>(ch),
+        static_cast<std::size_t>(num_frames));
+    audio::BufferView<float> out_view(
+        outputs, static_cast<std::size_t>(ch),
+        static_cast<std::size_t>(num_frames));
 
     // MIDI. pending_midi_ IS midi_in — no per-block MidiBuffer construction and
     // no move that strips its reserved capacity.
@@ -327,37 +413,17 @@ void WamProcessorBridge::process(const float* input, float* output,
     // memcpy. Previously midi_out simply went out of scope here and every MIDI
     // event a plugin produced was discarded — while the descriptor advertised
     // hasMidiOutput: true.
-    for (const auto& event : midi_out_) {
-        append_midi_record(midi_out_scratch_, midi_out_bytes_,
-                           event.sample_offset, event.data(), event.size());
-    }
-    for (const auto& event : midi_out_.sysex()) {
-        append_midi_record(midi_out_scratch_, midi_out_bytes_,
-                           event.sample_offset, event.data.data(),
-                           event.data.size());
-    }
+    serialize_midi_out(midi_out_scratch_, midi_out_bytes_, midi_out_);
 
     // The block consumed its input events.
     pending_midi_.clear();
     pending_midi_.clear_sysex();
 
-    // Re-interleave: planar → Web Audio interleaved
-    for (int f = 0; f < num_frames; ++f) {
-        for (int c = 0; c < ch; ++c) {
-            output[f * num_channels + c] = output_ptrs_[c][f];
-        }
-    }
+    // Output is already in the host's planar buffers — nothing to interleave.
 }
 
 int WamStage::read_param_values(float* dst, int capacity) const {
-    const auto params = store_.all_params();
-    const int count = static_cast<int>(params.size());
-    if (!dst || capacity <= 0) return count;
-    const int n = (std::min)(count, capacity);
-    for (int i = 0; i < n; ++i) {
-        dst[i] = store_.get_value(params[static_cast<std::size_t>(i)].id);
-    }
-    return count;
+    return read_store_values(store_, dst, capacity);
 }
 
 uint32_t WamProcessorBridge::param_epoch() const {
@@ -365,23 +431,11 @@ uint32_t WamProcessorBridge::param_epoch() const {
 }
 
 int WamProcessorBridge::read_param_values(float* dst, int capacity) const {
-    const auto params = store_.all_params();
-    const int count = static_cast<int>(params.size());
-    if (!dst || capacity <= 0) return count;
-    const int n = (std::min)(count, capacity);
-    for (int i = 0; i < n; ++i) {
-        dst[i] = store_.get_value(params[static_cast<std::size_t>(i)].id);
-    }
-    return count;   // > capacity tells the caller it truncated
+    return read_store_values(store_, dst, capacity);
 }
 
 int WamProcessorBridge::drain_midi_out(uint8_t* dst, int cap) const {
-    const auto available = static_cast<int>(midi_out_bytes_);
-    if (dst && cap > 0 && available > 0) {
-        std::memcpy(dst, midi_out_scratch_.data(),
-                    static_cast<std::size_t>((std::min)(cap, available)));
-    }
-    return available;   // > cap tells the caller the tail was truncated
+    return drain_records(midi_out_scratch_, midi_out_bytes_, dst, cap);
 }
 
 std::vector<WamParamInfo> WamProcessorBridge::get_parameter_info() const {
@@ -421,33 +475,12 @@ void WamProcessorBridge::set_parameter_value(const std::string& id, float value)
 
 void WamProcessorBridge::schedule_midi(uint8_t status, uint8_t data1,
                                         uint8_t data2, int sample_offset) {
-    midi::MidiEvent event;
-
-    // Note-on with velocity 0 is a note-off; normalize it so downstream
-    // is_note_off() checks behave the same as they do on a hardware port.
-    if ((status & 0xF0) == 0x90 && data2 == 0) {
-        event = midi::MidiEvent::note_off(status & 0x0F, data1, 0);
-    } else {
-        // Everything else passes through verbatim. This previously `return`ed
-        // for any status outside note-on/note-off/CC, silently swallowing
-        // pitch-bend (0xE0), program change (0xC0), channel pressure (0xD0)
-        // and poly aftertouch (0xA0) — so, e.g., synth-with-presets' pitch
-        // bend never reached the DSP in a browser.
-        event = midi::MidiEvent{choc::midi::ShortMessage(status, data1, data2),
-                                0, 0.0};
-    }
-
-    event.sample_offset = sample_offset;
-    pending_midi_.add(event);   // drops (counted) rather than growing when full
+    schedule_short_midi(pending_midi_, status, data1, data2, sample_offset);
 }
 
 bool WamProcessorBridge::schedule_sysex(const uint8_t* data, int size,
                                          int sample_offset) {
-    if (!data || size <= 0) return false;
-    // add_sysex_copy() honours set_realtime_capacity_limit(): it takes a payload
-    // from the reserved pool and drops when none is large enough or free.
-    return pending_midi_.add_sysex_copy(data, static_cast<std::size_t>(size),
-                                        sample_offset);
+    return schedule_sysex_into(pending_midi_, data, size, sample_offset);
 }
 
 // Single-plugin state is the framework's shared plugin_state_io format (see
@@ -543,8 +576,8 @@ int WamProcessorBridge::latency_samples() const {
 void WamProcessorBridge::prepare(double sample_rate, int block_size) {
     // Runs BETWEEN render quanta, not on a separate control thread: in an
     // AudioWorkletProcessor the port message that reaches here is dispatched on
-    // the audio render thread itself. Re-runs Processor::prepare() and may
-    // resize the planar buffers — both allocate — so never call from process().
+    // the audio render thread itself. Re-runs Processor::prepare(), which may
+    // allocate, so never call from process().
     if (!processor_ || block_size <= 0) return;
 
     sample_rate_ = sample_rate;
@@ -557,30 +590,18 @@ void WamProcessorBridge::prepare(double sample_rate, int block_size) {
     ctx.output_channels = desc.default_output_channels();
     processor_->prepare(ctx);
 
-    // Grow the planar buffers only when the block size actually increased, so a
-    // same-or-smaller block never reallocates. The de-interleave stride is
-    // block_size_, so it and the channel pointers move together on a grow.
-    if (block_size > block_size_) {
-        block_size_ = block_size;
-        input_planar_.assign(static_cast<std::size_t>(num_channels_) * block_size_, 0.0f);
-        output_planar_.assign(static_cast<std::size_t>(num_channels_) * block_size_, 0.0f);
-        for (int ch = 0; ch < num_channels_; ++ch) {
-            input_ptrs_[ch] = input_planar_.data() + ch * block_size_;
-            output_ptrs_[ch] = output_planar_.data() + ch * block_size_;
-        }
-    }
+    // Track the largest block the processor is prepared for; process() clamps
+    // num_frames to it. No planar scratch to resize — the JS side owns the
+    // channel buffers now.
+    if (block_size > block_size_) block_size_ = block_size;
 }
 
 void WamProcessorBridge::set_transport(bool is_playing, double bpm,
                                         double position_beats,
                                         double position_samples, int tsig_num,
                                         int tsig_den) noexcept {
-    transport_.is_playing = is_playing;
-    transport_.tempo_bpm = bpm;
-    transport_.position_beats = position_beats;
-    transport_.position_samples = static_cast<int64_t>(position_samples);
-    transport_.time_sig_numerator = tsig_num;
-    transport_.time_sig_denominator = tsig_den;
+    store_transport(transport_, is_playing, bpm, position_beats,
+                    position_samples, tsig_num, tsig_den);
 }
 
 // ── WamStage ────────────────────────────────────────────────────────────
@@ -674,15 +695,17 @@ audio::BufferView<const float> WamStage::output_as_input(int num_frames) const {
         static_cast<std::size_t>(num_frames));
 }
 
-void WamStage::interleave_into(float* output, int host_channels,
-                               int num_frames) const {
-    if (!output) return;
+void WamStage::copy_output_into(float* const* outputs, int host_channels,
+                                int num_frames) const {
+    if (!outputs) return;
     if (num_frames > block_size_) num_frames = block_size_;
     if (num_frames <= 0) return;
     const int ch = (std::min)(host_channels, num_channels_);
-    for (int f = 0; f < num_frames; ++f)
-        for (int c = 0; c < ch; ++c)
-            output[f * host_channels + c] = output_ptrs_[c][f];
+    for (int c = 0; c < ch; ++c) {
+        if (outputs[c])
+            std::memcpy(outputs[c], output_ptrs_[c],
+                        static_cast<std::size_t>(num_frames) * sizeof(float));
+    }
 }
 
 std::vector<uint8_t> WamStage::get_state() const {
@@ -743,15 +766,10 @@ bool WamChainBridge::initialize(double sample_rate, int max_block_size) {
         stages_.push_back(std::move(stage));
     }
 
-    // Host-facing input width = stage 0's bus width; this scratch de-interleaves
-    // the host's audio for stage 0.
+    // Host-facing input width = stage 0's bus width. Stage 0 renders directly
+    // from the host's planar input pointers (no de-interleave scratch).
     num_channels_ = stages_.front()->num_channels();
     if (num_channels_ < 1) num_channels_ = 2;
-    input_planar_.assign(
-        static_cast<std::size_t>(num_channels_) * max_block_size, 0.0f);
-    input_ptrs_.resize(num_channels_);
-    for (int ch = 0; ch < num_channels_; ++ch)
-        input_ptrs_[ch] = input_planar_.data() + ch * max_block_size;
 
     pending_midi_.reserve(kMidiEventCapacity, kSysexCapacity,
                           kSysexPayloadCapacity);
@@ -774,13 +792,9 @@ void WamChainBridge::prepare(double sample_rate, int block_size) {
     if (block_size <= 0) return;
     sample_rate_ = sample_rate;
     for (auto& st : stages_) st->prepare(sample_rate, block_size);
-    if (block_size > block_size_) {
-        block_size_ = block_size;
-        input_planar_.assign(
-            static_cast<std::size_t>(num_channels_) * block_size_, 0.0f);
-        for (int ch = 0; ch < num_channels_; ++ch)
-            input_ptrs_[ch] = input_planar_.data() + ch * block_size_;
-    }
+    // Track the largest block the stages are prepared for; process() clamps to
+    // it. No input scratch to resize — stage 0 reads the host pointers directly.
+    if (block_size > block_size_) block_size_ = block_size;
 }
 
 int WamChainBridge::latency_samples() const {
@@ -793,15 +807,11 @@ void WamChainBridge::set_transport(bool is_playing, double bpm,
                                     double position_beats,
                                     double position_samples, int tsig_num,
                                     int tsig_den) noexcept {
-    transport_.is_playing = is_playing;
-    transport_.tempo_bpm = bpm;
-    transport_.position_beats = position_beats;
-    transport_.position_samples = static_cast<int64_t>(position_samples);
-    transport_.time_sig_numerator = tsig_num;
-    transport_.time_sig_denominator = tsig_den;
+    store_transport(transport_, is_playing, bpm, position_beats,
+                    position_samples, tsig_num, tsig_den);
 }
 
-void WamChainBridge::process(const float* input, float* output,
+void WamChainBridge::process(const float* const* inputs, float* const* outputs,
                               int num_channels, int num_frames) {
     if (stages_.empty()) return;
     if (num_frames > block_size_) num_frames = block_size_;
@@ -809,14 +819,10 @@ void WamChainBridge::process(const float* input, float* output,
 
     const int host_ch = (std::min)(num_channels, num_channels_);
 
-    // De-interleave the host's audio into stage 0's input scratch.
-    for (int f = 0; f < num_frames; ++f)
-        for (int c = 0; c < host_ch; ++c)
-            input_ptrs_[c][f] = input[f * num_channels + c];
-
+    // Stage 0 renders directly from the host's planar input pointers — no
+    // de-interleave scratch (the rack is planar end-to-end).
     audio::BufferView<const float> stage0_in(
-        const_cast<const float* const*>(input_ptrs_.data()),
-        static_cast<std::size_t>(host_ch),
+        inputs, static_cast<std::size_t>(host_ch),
         static_cast<std::size_t>(num_frames));
 
     ProcessContext ctx;
@@ -852,22 +858,15 @@ void WamChainBridge::process(const float* input, float* output,
     }
 
     // The rack's drainable MIDI output is the LAST stage's midi_out.
-    midi_out_bytes_ = 0;
     const auto& last = *stages_.back();
-    for (const auto& event : last.midi_out())
-        append_midi_record(midi_out_scratch_, midi_out_bytes_,
-                           event.sample_offset, event.data(), event.size());
-    for (const auto& event : last.midi_out().sysex())
-        append_midi_record(midi_out_scratch_, midi_out_bytes_,
-                           event.sample_offset, event.data.data(),
-                           event.data.size());
+    serialize_midi_out(midi_out_scratch_, midi_out_bytes_, last.midi_out());
 
     // The block consumed its inbound events.
     pending_midi_.clear();
     pending_midi_.clear_sysex();
 
-    // The last stage's audio is the rack's audio output.
-    last.interleave_into(output, num_channels, num_frames);
+    // The last stage's planar audio is copied into the host's planar output.
+    last.copy_output_into(outputs, num_channels, num_frames);
 }
 
 std::string WamChainBridge::parameters_json() const {
@@ -919,31 +918,16 @@ void WamChainBridge::set_parameter_value(const std::string& id, float value) {
 
 void WamChainBridge::schedule_midi(uint8_t status, uint8_t data1, uint8_t data2,
                                     int sample_offset) {
-    midi::MidiEvent event;
-    if ((status & 0xF0) == 0x90 && data2 == 0) {
-        event = midi::MidiEvent::note_off(status & 0x0F, data1, 0);
-    } else {
-        event = midi::MidiEvent{choc::midi::ShortMessage(status, data1, data2),
-                                0, 0.0};
-    }
-    event.sample_offset = sample_offset;
-    pending_midi_.add(event);   // feeds stage 0; drops (counted) when full
+    schedule_short_midi(pending_midi_, status, data1, data2, sample_offset);
 }
 
 bool WamChainBridge::schedule_sysex(const uint8_t* data, int size,
                                      int sample_offset) {
-    if (!data || size <= 0) return false;
-    return pending_midi_.add_sysex_copy(data, static_cast<std::size_t>(size),
-                                        sample_offset);
+    return schedule_sysex_into(pending_midi_, data, size, sample_offset);
 }
 
 int WamChainBridge::drain_midi_out(uint8_t* dst, int cap) const {
-    const auto available = static_cast<int>(midi_out_bytes_);
-    if (dst && cap > 0 && available > 0) {
-        std::memcpy(dst, midi_out_scratch_.data(),
-                    static_cast<std::size_t>((std::min)(cap, available)));
-    }
-    return available;
+    return drain_records(midi_out_scratch_, midi_out_bytes_, dst, cap);
 }
 
 std::vector<uint8_t> WamChainBridge::get_state() const {
@@ -985,52 +969,33 @@ bool WamChainBridge::set_state(const uint8_t* data, size_t size) {
 }
 
 std::string WamChainBridge::descriptor_json() const {
-    std::ostringstream ss;
-    if (stages_.empty()) { ss << "{}"; return ss.str(); }
+    if (stages_.empty()) return "{}";
 
     const auto first = stages_.front()->plugin_descriptor();
     const auto last = stages_.back()->plugin_descriptor();
 
-    // Composite name "A → B" (U+2192 as UTF-8; the JSON escaper passes the
-    // multi-byte sequence through unchanged).
-    std::string name;
+    // Populate the ONE descriptor POD instead of hand-emitting a second JSON
+    // object: the rack is just a WamDescriptorData whose endpoints come from the
+    // first/last stages, with a non-empty `stages` list. to_json() then produces
+    // exactly the bytes this used to spell out (the single-plugin defaults for
+    // apiVersion / automation / MPE are the same values it hardcoded).
+    WamDescriptorData d;
     for (std::size_t i = 0; i < stages_.size(); ++i) {
-        if (i) name += " \xe2\x86\x92 ";
-        name += stages_[i]->plugin_descriptor().name;
+        if (i) d.name += " \xe2\x86\x92 ";   // U+2192, UTF-8; escaper passes through
+        d.name += stages_[i]->plugin_descriptor().name;
+        d.stages.push_back(stages_[i]->plugin_descriptor().name);
     }
-
-    int latency = 0;
-    for (const auto& st : stages_) latency += st->latency_samples();
-
-    const bool is_instrument = (last.category == PluginCategory::Instrument);
-    ss << "{";
-    ss << "\"name\":\""; append_json_escaped(ss, name); ss << "\",";
-    ss << "\"vendor\":\""; append_json_escaped(ss, first.manufacturer); ss << "\",";
-    ss << "\"version\":\""; append_json_escaped(ss, first.version); ss << "\",";
-    ss << "\"apiVersion\":\"2.0.0\",";
-    ss << "\"isInstrument\":" << (is_instrument ? "true" : "false") << ",";
-    ss << "\"hasAudioInput\":"
-       << (first.default_input_channels() > 0 ? "true" : "false") << ",";
-    ss << "\"hasAudioOutput\":"
-       << (last.default_output_channels() > 0 ? "true" : "false") << ",";
-    ss << "\"hasMidiInput\":" << (first.accepts_midi ? "true" : "false") << ",";
-    ss << "\"hasMidiOutput\":" << (last.produces_midi ? "true" : "false") << ",";
-    ss << "\"hasAutomationInput\":true,";
-    ss << "\"hasAutomationOutput\":false,";
-    ss << "\"hasMpeInput\":false,";
-    ss << "\"hasMpeOutput\":false,";
-    ss << "\"latencySamples\":" << latency << ",";
-    ss << "\"tailSamples\":" << last.tail_samples << ",";
-    ss << "\"stages\":[";
-    for (std::size_t i = 0; i < stages_.size(); ++i) {
-        if (i) ss << ",";
-        ss << "\"";
-        append_json_escaped(ss, stages_[i]->plugin_descriptor().name);
-        ss << "\"";
-    }
-    ss << "]";
-    ss << "}";
-    return ss.str();
+    d.vendor = first.manufacturer;
+    d.version = first.version;
+    d.is_instrument = (last.category == PluginCategory::Instrument);
+    d.has_audio_input = first.default_input_channels() > 0;
+    d.has_audio_output = last.default_output_channels() > 0;
+    d.has_midi_input = first.accepts_midi;
+    d.has_midi_output = last.produces_midi;
+    d.tail_samples = last.tail_samples;
+    d.latency_samples = 0;
+    for (const auto& st : stages_) d.latency_samples += st->latency_samples();
+    return d.to_json();
 }
 
 } // namespace pulp::format::wam
