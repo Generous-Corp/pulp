@@ -149,8 +149,26 @@ public:
         }
         canvas.set_fill_color(pal_.text_dim);
         canvas.set_font("Inter", 12.0f * s);
-        canvas.fill_text("Convolution reverb · GPU-rendered UI · " + audio_status,
-                         20 * s, 50 * s);
+        canvas.fill_text(audio_status, 20 * s, 50 * s);
+
+        // Source chip — the loaded impulse response, first-class: the one Source
+        // the field of rooms blooms from. Name via clean_source_name (pure, no
+        // per-frame file I/O); "Synthetic room" for the built-in fallback.
+        {
+            const std::string p = proc_.ir_path();
+            const std::string name = p.empty()
+                ? std::string("Synthetic room")
+                : pulp::superconvolver::clean_source_name(p);
+            const float y = 74 * s;
+            canvas.set_fill_color(pal_.accent);
+            canvas.fill_circle(25 * s, y - 4 * s, 4 * s);
+            canvas.set_fill_color(pal_.text_dim);
+            canvas.set_font("Inter", 9.5f * s);
+            canvas.fill_text("SOURCE", 38 * s, y - 9 * s);
+            canvas.set_fill_color(pal_.text);
+            canvas.set_font("Inter", 14.0f * s);
+            canvas.fill_text(name, 38 * s, y + 4 * s);
+        }
 
         paint_load_ir(canvas);
         paint_controls(canvas);
