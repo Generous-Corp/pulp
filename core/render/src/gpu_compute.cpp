@@ -232,6 +232,52 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+static constexpr const char* kMultiFdlMacShader = R"wgsl(
+// Partitioned frequency-delay-line MAC for multi-IR convolution. Instead of one
+// full-length-n FFT per block (n = next_pow2(block + IR_len)), each IR is split
+// into `num_part` block-size partitions, so the FFT stays at the small block
+// size and this kernel does the convolution as a sum of spectral products over
+// a ring of the last `num_part` input spectra:
+//   accum[r][i] = sum_p  ring[(head - p + P) % P][i] * ir[r][p][i]
+// One thread per (room r, bin i). ring holds P input spectra (each n complex);
+// ir holds num_ir*num_part IR-partition spectra; accum holds num_ir room spectra.
+
+struct FdlParams { n : u32, num_ir : u32, num_part : u32, head : u32 };
+
+@group(0) @binding(0) var<storage, read>       ring  : array<f32>;  // 2n*P
+@group(0) @binding(1) var<storage, read>       ir    : array<f32>;  // 2n*num_ir*num_part
+@group(0) @binding(2) var<storage, read_write> accum : array<f32>;  // 2n*num_ir
+@group(0) @binding(3) var<uniform>             p     : FdlParams;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let flat = gid.x;
+    let total = p.num_ir * p.n;
+    if (flat >= total) { return; }
+    let r = flat / p.n;   // room
+    let i = flat % p.n;   // bin
+    let P = p.num_part;
+    var accr = 0.0;
+    var acci = 0.0;
+    for (var pp = 0u; pp < P; pp = pp + 1u) {
+        // Partition 0 pairs with the newest input spectrum (head), partition
+        // pp with the input pp blocks ago — the delay line.
+        let slot = (p.head + P - (pp % P)) % P;
+        let xi = (slot * p.n + i) * 2u;
+        let iri = ((r * P + pp) * p.n + i) * 2u;
+        let xr  = ring[xi];
+        let xim = ring[xi + 1u];
+        let br  = ir[iri];
+        let bim = ir[iri + 1u];
+        accr = accr + (xr * br - xim * bim);
+        acci = acci + (xr * bim + xim * br);
+    }
+    let o = flat * 2u;
+    accum[o]      = accr;
+    accum[o + 1u] = acci;
+}
+)wgsl";
+
 static constexpr const char* kSpectralAdvanceShader = R"wgsl(
 // Per-bin phase advance + conjugate-symmetric jitter for a stack of frozen
 // layers. One thread per (layer, bin) over the resident phase buffer (num_layers
@@ -1488,6 +1534,118 @@ public:
         return true;
     }
 
+    // ── Partitioned FDL multi-convolution ───────────────────────────────────
+
+    bool prepare_multi_fdl(uint32_t n, const float* ir_part_specs,
+                           uint32_t num_ir, uint32_t num_part) override {
+        if (!initialized_ || !ir_part_specs || num_ir == 0 || num_part == 0) return false;
+        if (!is_power_of_two(n) || n > kMaxFftN) return false;
+
+        // ir_specs (2*n*num_ir*num_part floats) is the storage-buffer limiter.
+        const uint64_t ir_bytes =
+            static_cast<uint64_t>(n) * 2ull * num_ir * num_part * sizeof(float);
+        if (ir_bytes > 0xFFFFFFFFull) return false;
+        wgpu::Limits limits{};
+        uint64_t max_bind = 0;
+        if (device_.GetLimits(&limits) == wgpu::Status::Success)
+            max_bind = limits.maxStorageBufferBindingSize;
+        if (max_bind == 0) max_bind = static_cast<uint64_t>(kMaxFftN) * 2ull * sizeof(float);
+        if (ir_bytes >= max_bind) return false;
+        const uint64_t ring_bytes = static_cast<uint64_t>(n) * 2ull * num_part * sizeof(float);
+        const uint64_t accum_bytes = static_cast<uint64_t>(n) * 2ull * num_ir * sizeof(float);
+        if (ring_bytes >= max_bind || accum_bytes >= max_bind) return false;
+
+        MultiFdlPlan plan;
+        plan.n = n;
+        plan.block = n / 2u;
+        plan.num_ir = num_ir;
+        plan.num_part = num_part;
+        plan.head = 0;
+        plan.log2n = 0;
+        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+        plan.prev_time.assign(plan.block, 0.0f);
+
+        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));  // 2n
+        const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
+                      | wgpu::BufferUsage::CopySrc;
+        plan.fx_a = create_storage_buffer(small, sc);
+        plan.fx_b = create_storage_buffer(small, sc);
+        plan.ring = create_storage_buffer(static_cast<uint32_t>(ring_bytes), sc);
+        plan.irspecs = create_storage_buffer(static_cast<uint32_t>(ir_bytes),
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.accum_a = create_storage_buffer(static_cast<uint32_t>(accum_bytes), sc);
+        plan.accum_b = create_storage_buffer(static_cast<uint32_t>(accum_bytes), sc);
+        plan.panl = create_storage_buffer(num_ir * 4u,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.panr = create_storage_buffer(num_ir * 4u,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        plan.out_lr = create_storage_buffer(small, sc);
+        plan.readback = create_readback_buffer(small);
+        wgpu::BufferDescriptor ud16{};
+        ud16.size = 16;
+        ud16.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        plan.cuniform = device_.CreateBuffer(&ud16);
+        plan.fdl_uniform = device_.CreateBuffer(&ud16);
+        if (!plan.fx_a || !plan.fx_b || !plan.ring || !plan.irspecs || !plan.accum_a ||
+            !plan.accum_b || !plan.panl || !plan.panr || !plan.out_lr || !plan.readback ||
+            !plan.cuniform || !plan.fdl_uniform) {
+            return false;
+        }
+
+        // The ring is Dawn zero-initialized; upload the resident IR partition spectra.
+        queue_.WriteBuffer(plan.irspecs, 0, ir_part_specs, static_cast<uint32_t>(ir_bytes));
+
+        struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
+        for (uint32_t s = 0; s < plan.log2n; ++s) {
+            const bool src_is_a = (s % 2u == 0u);
+            // Forward (sign=-1, batch=1) over fx_a/fx_b.
+            {
+                wgpu::Buffer u = device_.CreateBuffer(&ud16);
+                if (!u) return false;
+                FftParams p{n, 1u << s, -1.0f, 1u};
+                queue_.WriteBuffer(u, 0, &p, sizeof(p));
+                wgpu::BindGroup bg = create_bind_group(fft_pipeline_,
+                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.fx_a, plan.fx_b, u}
+                             : std::initializer_list<wgpu::Buffer>{plan.fx_b, plan.fx_a, u});
+                if (!bg) return false;
+                plan.fwd_u.push_back(std::move(u));
+                plan.fwd_bgs.push_back(std::move(bg));
+            }
+            // Inverse (sign=+1, batch=num_ir) over accum_a/accum_b.
+            {
+                wgpu::Buffer u = device_.CreateBuffer(&ud16);
+                if (!u) return false;
+                FftParams p{n, 1u << s, 1.0f, num_ir};
+                queue_.WriteBuffer(u, 0, &p, sizeof(p));
+                wgpu::BindGroup bg = create_bind_group(fft_pipeline_,
+                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.accum_a, plan.accum_b, u}
+                             : std::initializer_list<wgpu::Buffer>{plan.accum_b, plan.accum_a, u});
+                if (!bg) return false;
+                plan.inv_u.push_back(std::move(u));
+                plan.inv_bgs.push_back(std::move(bg));
+            }
+        }
+
+        // MAC writes accum_a (inverse pass s=0 reads accum_a). head lives in
+        // fdl_uniform, rewritten each block.
+        plan.mac_bg = create_bind_group(multi_fdl_mac_pipeline_,
+            {plan.ring, plan.irspecs, plan.accum_a, plan.fdl_uniform});
+        if (!plan.mac_bg) return false;
+
+        // Inverse result lands in accum_b for odd log2n, accum_a for even.
+        wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.accum_b : plan.accum_a;
+        plan.combine_bg = create_bind_group(multi_ir_combine_pipeline_,
+            {inv_buf, plan.panl, plan.panr, plan.out_lr, plan.cuniform});
+        if (!plan.combine_bg) return false;
+
+        struct CombineParams { uint32_t n; uint32_t num_ir; float inv; uint32_t pad; };
+        CombineParams cp{n, num_ir, 1.0f / static_cast<float>(n), 0u};
+        queue_.WriteBuffer(plan.cuniform, 0, &cp, sizeof(cp));
+
+        multi_fdl_plans_.insert_or_assign(n, std::move(plan));
+        return true;
+    }
+
     bool multi_convolve(const float* in_complex, const float* pan_l,
                         const float* pan_r, float* out_lr, uint32_t n,
                         uint32_t num_ir) override {
@@ -1534,6 +1692,77 @@ public:
         queue_.Submit(1, &cmd);
 
         return read_back(plan.readback, out_lr, small);
+    }
+
+    bool multi_fdl_convolve(const float* in_block, const float* pan_l,
+                            const float* pan_r, float* out_block, uint32_t n,
+                            uint32_t num_ir) override {
+        if (!initialized_ || !in_block || !pan_l || !pan_r || !out_block) return false;
+        auto it = multi_fdl_plans_.find(n);
+        if (it == multi_fdl_plans_.end() || it->second.num_ir != num_ir) return false;
+        MultiFdlPlan& plan = it->second;
+        const uint32_t block = plan.block;
+        const uint32_t P = plan.num_part;
+        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));
+
+        // Build the [prev | current] interleaved-complex window (imag = 0).
+        std::vector<float> window(static_cast<size_t>(n) * 2u, 0.0f);
+        for (uint32_t i = 0; i < block; ++i) window[2u * i] = plan.prev_time[i];
+        for (uint32_t i = 0; i < block; ++i) window[2u * (block + i)] = in_block[i];
+        queue_.WriteBuffer(plan.fx_a, 0, window.data(), small);
+        queue_.WriteBuffer(plan.panl, 0, pan_l, num_ir * 4u);
+        queue_.WriteBuffer(plan.panr, 0, pan_r, num_ir * 4u);
+        struct FdlU { uint32_t n; uint32_t num_ir; uint32_t num_part; uint32_t head; };
+        FdlU fu{n, num_ir, P, plan.head};
+        queue_.WriteBuffer(plan.fdl_uniform, 0, &fu, sizeof(fu));
+
+        const uint32_t fwd_wg = ((n / 2u) + 255u) / 256u;
+        const uint32_t inv_wg = ((num_ir * (n / 2u)) + 255u) / 256u;
+        const uint32_t mac_wg = ((num_ir * n) + 255u) / 256u;
+        const uint32_t comb_wg = (n + 255u) / 256u;
+
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        // Forward-FFT the window into fx, copy the result into ring[head].
+        encode_fft_passes(encoder, plan.fwd_bgs, fwd_wg);
+        wgpu::Buffer& fwd_res = (plan.log2n & 1u) ? plan.fx_b : plan.fx_a;
+        encoder.CopyBufferToBuffer(fwd_res, 0, plan.ring,
+                                   static_cast<uint64_t>(plan.head) * small, small);
+        // Partitioned MAC over the delay line → accum_a.
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(multi_fdl_mac_pipeline_);
+            pass.SetBindGroup(0, plan.mac_bg);
+            pass.DispatchWorkgroups(mac_wg);
+            pass.End();
+        }
+        // Per-room inverse FFT, then pan-combine to stereo.
+        encode_fft_passes(encoder, plan.inv_bgs, inv_wg);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(multi_ir_combine_pipeline_);
+            pass.SetBindGroup(0, plan.combine_bg);
+            pass.DispatchWorkgroups(comb_wg);
+            pass.End();
+        }
+        encoder.CopyBufferToBuffer(plan.out_lr, 0, plan.readback, 0, small);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+
+        // Read back the full 2n; overlap-save keeps the SECOND half of each room.
+        std::vector<float> outbuf(static_cast<size_t>(n) * 2u);
+        if (!read_back(plan.readback, outbuf.data(), small)) return false;
+        for (uint32_t i = 0; i < block; ++i) {
+            out_block[i]         = outbuf[block + i];       // L: outlr[block .. 2*block)
+            out_block[block + i] = outbuf[n + block + i];   // R: outlr[n+block .. n+2*block)
+        }
+
+        // Advance the delay line: this block becomes prev; head moves forward.
+        for (uint32_t i = 0; i < block; ++i) plan.prev_time[i] = in_block[i];
+        plan.head = (plan.head + 1u) % P;
+        return true;
     }
 
     // ── Multi-layer spectral stack ──────────────────────────────────────────
@@ -2657,6 +2886,7 @@ private:
     wgpu::ComputePipeline conv_bmul_pipeline_;  // broadcast complex-mul (convolution)
     wgpu::ComputePipeline multi_ir_mul_pipeline_;      // one input × many IRs
     wgpu::ComputePipeline multi_ir_combine_pipeline_;  // pan-combine reduce → stereo
+    wgpu::ComputePipeline multi_fdl_mac_pipeline_;     // partitioned FDL MAC
     wgpu::ComputePipeline spectral_advance_pipeline_;  // per-bin phase advance + jitter
     wgpu::ComputePipeline spectral_combine_pipeline_;  // smear + weighted layer sum
     wgpu::ComputePipeline conv_in_pipeline_;     // conv-stack input projection
@@ -2758,6 +2988,34 @@ private:
         wgpu::BindGroup mul_bg, combine_bg;
     };
     std::unordered_map<uint32_t, MultiConvPlan> multi_conv_plans_;
+
+    // Partitioned frequency-delay-line plan. n = 2*block (small, fixed). Each IR
+    // is split into num_part block-size partitions; `ring` holds the last
+    // num_part input spectra (a delay line), advanced by `head` each block. The
+    // MAC sums ring[(head-p) % P] * ir_spectra[r][p] over partitions into accum,
+    // one room per num_ir. prev_time keeps the previous input block (overlap).
+    struct MultiFdlPlan {
+        uint32_t n = 0;          // fft size = 2*block
+        uint32_t block = 0;
+        uint32_t log2n = 0;
+        uint32_t num_ir = 0;
+        uint32_t num_part = 0;
+        uint32_t head = 0;       // newest ring slot (mutable, advanced per block)
+        wgpu::Buffer fx_a, fx_b;   // input forward FFT ping-pong (2n)
+        wgpu::Buffer ring;         // delay line of P input spectra (2n*P)
+        wgpu::Buffer irspecs;      // per-room per-partition IR spectra (2n*P*num_ir)
+        wgpu::Buffer accum_a, accum_b;  // MAC out / per-room inverse ping-pong (2n*num_ir)
+        wgpu::Buffer panl, panr;   // per-room pan gains (num_ir)
+        wgpu::Buffer out_lr;       // stereo result (2n)
+        wgpu::Buffer cuniform;     // CombineParams
+        wgpu::Buffer fdl_uniform;  // FdlParams (n, num_ir, num_part, head)
+        wgpu::Buffer readback;     // 2n
+        std::vector<wgpu::Buffer> fwd_u, inv_u;
+        std::vector<wgpu::BindGroup> fwd_bgs, inv_bgs;
+        wgpu::BindGroup mac_bg, combine_bg;
+        std::vector<float> prev_time;   // previous input block (block samples)
+    };
+    std::unordered_map<uint32_t, MultiFdlPlan> multi_fdl_plans_;
 
     // Multi-layer spectral-stack plan: num_layers frozen layer-spectra resident
     // as a magnitude buffer (mag, num_layers*n reals) and a persistent phase
@@ -2866,7 +3124,9 @@ private:
 
         multi_ir_combine_pipeline_ =
             create_pipeline("multi_ir_combine", kMultiIrCombineShader);
-        if (!multi_ir_combine_pipeline_) return false;
+        multi_fdl_mac_pipeline_ =
+            create_pipeline("multi_fdl_mac", kMultiFdlMacShader);
+        if (!multi_ir_combine_pipeline_ || !multi_fdl_mac_pipeline_) return false;
 
         spectral_advance_pipeline_ =
             create_pipeline("spectral_advance", kSpectralAdvanceShader);
