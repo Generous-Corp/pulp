@@ -1,0 +1,41 @@
+# Pulp INTEL cross-build golden — reproducible unit for the on-demand Intel
+# (x86_64) build/test lane. Bake with:
+#     tools/ci/tart-provision.sh manifest .shipyard/vm-image.intel.toml
+#     tools/ci/tart-provision.sh tag pulp-intel-build pulp-intel-build
+# then use it with tools/ci/intel-vm-cross-build.sh.
+#
+# This is an ARM macOS golden that CROSS-compiles x86_64 and Rosetta-runs the
+# result — Apple Silicon can do this with NO native Intel hardware. It derives
+# from the arm64 runner golden (Xcode + cmake/ninja + baked Skia already present)
+# and adds only the Intel layer, so re-bakes are cheap.
+#
+# To replicate to another Mac host: either copy the baked `pulp-intel-build`
+# image (tart export/clone over your network), or run this manifest there — it
+# needs `pulp-build-runner:latest` present on that host first (it's the base).
+schema   = 1
+name     = "pulp-intel-build"
+strategy = "bake"
+
+# Base is the existing local arm64 runner golden (NOT a bare OCI base), so the
+# Intel golden inherits Xcode, cmake/ninja, git-lfs, and the baked Skia/Dawn.
+base       = "pulp-build-runner:latest"
+disk_gb    = 150
+auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
+
+[toolchain]
+# The Rust CLI (`pulp`) is cross-built for Intel via
+# PULP_RUST_CLI_TARGET=x86_64-apple-darwin, so the golden needs rustup + that
+# target. Xcode is inherited from the base golden (do NOT re-declare it here —
+# that would trigger a multi-hour Xcode re-provision).
+rust         = true
+rust_targets = ["x86_64-apple-darwin"]
+# Rosetta 2 so the cross-built x86_64 binary can be RUN in-guest for the smoke
+# (`arch -x86_64 build-x64/pulp help`).
+rosetta      = true
+
+# NOTE on Skia: the base golden bakes ARM64 Skia. The cross-build recipe
+# (intel-vm-cross-build.sh) fetches the x86_64 Skia slice per build AND clears
+# external/skia-build/build first — setup.sh --ci prefetches arm64 Skia and the
+# flatten step won't clobber it, so an un-cleared tree fails x86_64 FindSkia.
+# We deliberately do NOT bake x86_64 Skia into the golden (keeps it lean; the
+# per-build fetch is fast and always matches the pinned manifest).
