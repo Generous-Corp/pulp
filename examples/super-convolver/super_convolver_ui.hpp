@@ -94,6 +94,10 @@ public:
 
     void on_resized() override { layout(); }
 
+    /// Show the info card (same overlay the header "i" glyph toggles). For
+    /// headless capture / tests; a click anywhere dismisses it at runtime.
+    void open_info() { show_info_ = true; }
+
     void paint(cv::Canvas& canvas) override {
         if (layout_dirty_) layout();
         const float W = local_bounds().width, H = local_bounds().height;
@@ -124,7 +128,8 @@ public:
         // Info glyph — a 19px circle with a dim border and a centered "i", set
         // off from the wordmark by a clear gap (concept .info token).
         const float ix = mk_end + 18 * s, iy = 25.5f * s, ir = 9.5f * s;
-        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 56));
+        info_ = {ix - ir - 4 * s, iy - ir - 4 * s, 2 * (ir + 4 * s), 2 * (ir + 4 * s)};
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, show_info_ ? 150 : 56));
         canvas.set_line_width(1.0f);
         canvas.stroke_circle(ix, iy, ir);
         canvas.set_fill_color(tk_label());
@@ -213,7 +218,60 @@ public:
 
         paint_controls(canvas);
 
+        if (show_info_) draw_info_overlay(canvas);
+
         request_repaint();  // self-driven loop for the live field
+    }
+
+    // Info card — a compact "what is this" overlay toggled by the header "i"
+    // glyph. Concept tokens: near-black scrim, hairline border, paper/dim text.
+    // Any click dismisses it (see pointer_press).
+    void draw_info_overlay(cv::Canvas& canvas) {
+        const float s = scale();
+        const float W = local_bounds().width, H = local_bounds().height;
+        // Dim the field so the card reads.
+        canvas.set_fill_color(cv::Color::rgba8(4, 5, 8, 190));
+        canvas.fill_rect(0, 0, W, H);
+        const float cw = std::min(W - 80 * s, 460 * s), chh = 250 * s;
+        const float cx = (W - cw) * 0.5f, cy = (H - chh) * 0.5f;
+        canvas.set_fill_color(cv::Color::rgba8(9, 11, 15, 245));
+        canvas.fill_rounded_rect(cx, cy, cw, chh, 14 * s);
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 34));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(cx, cy, cw, chh, 14 * s);
+
+        const float tx = cx + 28 * s;
+        float ty = cy + 40 * s;
+        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));  // --bone
+        tracked_text(canvas, "SuperConvolver", tx, ty, 14.0f * s, 0.16f);
+        ty += 30 * s;
+        // {label, description}: label in paper, description in dim. A blank label
+        // is a full-width intro sentence in dim.
+        static const std::pair<const char*, const char*> kRows[] = {
+            {"", "A convolution reverb that convolves your signal against a"},
+            {"", "cloud of decorrelated rooms in one batched GPU pass."},
+            {"Source", "load an impulse response, or use the synthetic room"},
+            {"Rooms", "how many decorrelated rooms fill the stereo field"},
+            {"Flow", "drift each room's pan into a living, moving field"},
+            {"Size", "length of the synthetic room's tail"},
+            {"CPU / GPU", "tap the badge to switch engines"},
+        };
+        for (const auto& [label, desc] : kRows) {
+            canvas.set_font("Inter", 11.5f * s);
+            if (label[0] != '\0') {
+                canvas.set_fill_color(cv::Color::rgba8(237, 239, 243));  // --paper
+                canvas.fill_text(label, tx, ty);
+                canvas.set_fill_color(cv::Color::rgba8(120, 126, 136));  // --dim
+                canvas.fill_text(desc, tx + 92 * s, ty);
+            } else {
+                canvas.set_fill_color(cv::Color::rgba8(150, 156, 166));
+                canvas.fill_text(desc, tx, ty);
+            }
+            ty += 22 * s;
+        }
+        canvas.set_fill_color(cv::Color::rgba8(120, 126, 136));
+        canvas.set_font("Inter", 10.0f * s);
+        canvas.fill_text("Click anywhere to close", tx, cy + chh - 20 * s);
     }
 
     void on_mouse_event(const vw::MouseEvent& e) override {
@@ -615,6 +673,8 @@ private:
         if (layout_dirty_) layout();
         pointer_down_ = true;
 
+        if (show_info_) { show_info_ = false; return; }  // any click closes the info card
+        if (in_rect(p, info_)) { show_info_ = true; return; }
         if (in_rect(p, load_ir_btn_)) {
             open_ir_chooser();
             return;
@@ -653,6 +713,12 @@ private:
         float v = sl.lo + frac * (sl.hi - sl.lo);
         if (sl.snap_int) v = std::round(v);   // Rooms is a whole-step control
         edit_.set(sl.id, v);
+        // Rooms is a GPU-only feature. Once it climbs past what the CPU engine
+        // sustains in real time (kCpuRoomCap), auto-switch to GPU so the extra
+        // rooms are actually heard instead of silently ignored. Fires once on the
+        // crossing (the guard sees Engine already GPU on the next drag tick).
+        if (sl.id == kRooms && v > kCpuRoomCap && store_.get_value(kEngine) < 0.5f)
+            toggle_param(kEngine);
     }
 
     // Begin/set/finish a single-shot 0<->1 toggle as a proper host gesture so the
@@ -702,6 +768,12 @@ private:
     double field_time_ = 0.0;   // advances per repaint → the field's animation clock
     int viz_mode_ = 0;          // 0 Tracers · 1 Currents · 2 Field
     vw::Rect tabs_[3]{};        // mode-tab hit rects
+    vw::Rect info_{};           // header "i" glyph hit rect (set during paint)
+    bool show_info_ = false;    // info card overlay visible
+
+    // Rooms count the CPU engine is expected to sustain in real time; above it
+    // the editor auto-switches to GPU (matches the "N / 20" CPU cap badge).
+    static constexpr float kCpuRoomCap = 20.0f;
 };
 
 } // namespace pulp::examples
