@@ -113,6 +113,8 @@ PR merge to main
 │     OFF the user-facing release page.                    │
 │   - Code-signs those bundles with Developer ID and       │
 │     notarizes them with Apple, then staples.             │
+│   - Prefers the isolated release macOS runner, then      │
+│     Namespace/hosted; never imports keys on PR runners.  │
 │   - Generates `appcast.xml` (Sparkle auto-update feed).  │
 │   - Generates a GitHub artifact attestation for          │
 │     `appcast.xml`.                                      │

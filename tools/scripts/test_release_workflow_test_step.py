@@ -55,6 +55,8 @@ RELEASE_PUBLISH = REPO_ROOT / ".github" / "workflows" / "release-publish.yml"
 RELEASE_PATH_PR_GATE = REPO_ROOT / ".github" / "workflows" / "release-path-pr-gate.yml"
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 AUTO_RELEASE = REPO_ROOT / ".github" / "workflows" / "auto-release.yml"
+WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
+VERSION_SKILL_CHECK = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 INTENT_BUMP_ON_MERGE = REPO_ROOT / ".github" / "workflows" / "intent-bump-on-merge.yml"
 POST_TAG_SYNC = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
 RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bot_ssh_signing.sh"
@@ -558,6 +560,111 @@ class ReleaseBotSshSigning(unittest.TestCase):
         self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
 
 
+class StrandedReleaseTrackerWorkflow(unittest.TestCase):
+    """The stranded-release detector must produce actionable trackers.
+
+    SHA-keyed trackers have no semantic version in their title, so the daily
+    version reaper must skip them without aborting its entire sweep.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.auto_release = AUTO_RELEASE.read_text(encoding="utf-8")
+        cls.watchdog_reaper = WATCHDOG_REAPER.read_text(encoding="utf-8")
+        cls.version_skill_check = VERSION_SKILL_CHECK.read_text(encoding="utf-8")
+
+    def test_version_gate_reruns_when_pr_title_is_edited(self) -> None:
+        self.assertRegex(
+            self.version_skill_check,
+            r"(?m)^\s{4}types:\s*\[opened, synchronize, reopened, edited\]\s*$",
+        )
+
+    def test_version_gate_reports_expected_tags_to_pr_queue(self) -> None:
+        self.assertIn("name: Report expected release tags", self.version_skill_check)
+        self.assertIn(
+            "python3 tools/scripts/pr_release_tag_report.py",
+            self.version_skill_check,
+        )
+        self.assertIn("github.event_name == 'pull_request'", self.version_skill_check)
+        self.assertIn("github.base_ref == 'main'", self.version_skill_check)
+        self.assertIn('--pr-title "$GITHUB_PR_TITLE"', self.version_skill_check)
+        self.assertIn('tee -a "$GITHUB_STEP_SUMMARY"', self.version_skill_check)
+
+    def test_catch_up_command_analyzes_the_stranded_merge(self) -> None:
+        self.assertIn(
+            "--base %s --head %s",
+            self.auto_release,
+        )
+        self.assertIn('"$range_base" "$HEAD_SHA"', self.auto_release)
+        self.assertIn("--apply-version-base HEAD", self.auto_release)
+        self.assertIn("--recover-stranded-release", self.auto_release)
+        self.assertIn("--recover-surfaces %s", self.auto_release)
+        self.assertIn("--recover-levels %s", self.auto_release)
+        self.assertIn("git fetch origin main", self.auto_release)
+        self.assertIn("origin/main", self.auto_release)
+        self.assertIn('--require-bump-for-fix-feat --pr-title ""', self.auto_release)
+        self.assertNotIn(
+            'echo "   python3 tools/scripts/version_bump_check.py --mode=apply"',
+            self.auto_release,
+            "A fresh catch-up branch equals origin/main, so the default range "
+            "is empty and --mode=apply would edit nothing.",
+        )
+
+    def test_detector_provisions_its_release_stuck_label(self) -> None:
+        self.assertIn(
+            'gh api -X POST "/repos/${GITHUB_REPOSITORY}/labels"',
+            self.auto_release,
+        )
+        self.assertIn('-f name="release-stuck"', self.auto_release)
+        self.assertIn('>/dev/null 2>&1 || true', self.auto_release)
+
+    def test_unresolved_revert_of_metadata_fails_closed(self) -> None:
+        self.assertIn(
+            'git rev-parse --verify --quiet --end-of-options "${revert_sha}^{commit}"',
+            self.auto_release,
+        )
+
+    def test_squash_guard_reads_embedded_source_skip_trailers(self) -> None:
+        self.assertIn("COMMIT_MESSAGES squash bodies", self.auto_release)
+        self.assertIn(
+            "^[[:space:]]*release:[[:space:]]+skip",
+            self.auto_release,
+        )
+        self.assertIn(
+            "^[[:space:]]*version-bump:[[:space:]]+skip",
+            self.auto_release,
+        )
+        self.assertIn("bump_body=$(git log -1 --format=%B", self.auto_release)
+        self.assertIn(
+            'printf \'%s\\n\' "$bump_body" | grep -iqE',
+            self.auto_release,
+        )
+        self.assertIn(
+            "Unresolved Revert-Of trailer; treating this as an ordinary change",
+            self.auto_release,
+        )
+
+    def test_stranded_detector_classifies_the_whole_push_range(self) -> None:
+        self.assertIn("tracker_opt_out=0", self.auto_release)
+        self.assertIn("BEFORE_SHA: ${{ github.event.before }}", self.auto_release)
+        self.assertIn("FIRST_PUSH_SHA", self.auto_release)
+        self.assertIn("git fetch --no-tags origin", self.auto_release)
+        self.assertIn("classify-unreleased-range", self.auto_release)
+        self.assertIn('sdk_covered="$SDK_SHOULD_TAG"', self.auto_release)
+        self.assertIn("sdk_skip_bump=$sdk_skip_bump", self.auto_release)
+        self.assertIn("SDK_SKIP_BUMP: ${{ steps.versions.outputs.sdk_skip_bump }}", self.auto_release)
+        self.assertIn('"${SDK_SKIP_BUMP:--}" "${PLUGIN_SKIP_BUMP:--}"', self.auto_release)
+        self.assertIn("refs/pull/${pr_number}/head:${source_ref}", self.auto_release)
+        self.assertIn('"$source_base" "$source_head"', self.auto_release)
+        self.assertIn("uncovered_surfaces", self.auto_release)
+        self.assertIn("Live release signal", self.auto_release)
+
+    def test_reaper_neutralizes_sha_tracker_version_miss(self) -> None:
+        self.assertIn("| head -1 || true)", self.watchdog_reaper)
+        self.assertIn('if [ -z "$ver" ]; then', self.watchdog_reaper)
+        self.assertIn("Skipping SHA-keyed tracker", self.watchdog_reaper)
+
+
 class ReleaseCliLatestPointer(unittest.TestCase):
     """Manual release-cli backfills must not move GitHub's latest pointer."""
 
@@ -658,6 +765,31 @@ class SignAndReleaseContentsWriteTest(unittest.TestCase):
             "sign-and-release run then silently fails and macOS-signed "
             "artifacts never land on the release.",
         )
+
+
+class SignAndReleaseMacosRoutingTest(unittest.TestCase):
+    """Signing must share release-cli's dedicated macOS runner priority."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+
+    def test_dedicated_release_runner_precedes_hosted_fallback(self) -> None:
+        release_pos = self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
+        namespace_pos = self.text.index("PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON")
+        fallback_pos = self.text.index('runs_on_json=["macos-15"]')
+        self.assertNotIn("PULP_LOCAL_MACOS_RUNS_ON_JSON", self.text)
+        self.assertLess(release_pos, namespace_pos)
+        self.assertLess(namespace_pos, fallback_pos)
+
+    def test_signing_keychain_is_unique_and_always_cleaned_up(self) -> None:
+        self.assertIn("pulp-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", self.text)
+        self.assertIn("PREVIOUS_DEFAULT_KEYCHAIN", self.text)
+        self.assertIn("s/^[[:space:]]*//", self.text)
+        self.assertIn("s/[[:space:]]*$//", self.text)
+        self.assertIn("name: Clean up signing keychain", self.text)
+        self.assertIn("if: always() && env.SIGNING_KEYCHAIN != ''", self.text)
+        self.assertIn('security delete-keychain "$SIGNING_KEYCHAIN"', self.text)
 
 
 if __name__ == "__main__":

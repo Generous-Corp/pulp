@@ -51,6 +51,7 @@ from test_version_bump_fixfeat import VersionBumpFixFeatTests  # noqa: E402,F401
 from test_version_bump_force_fixfeat import (  # noqa: E402,F401
     VersionBumpForceFixFeatTests,
 )
+from test_pr_release_tag_report import PrReleaseTagReportTests  # noqa: E402,F401
 from test_compose_release_notes import ComposeReleaseNotesTests  # noqa: E402,F401
 from test_apply_intent_bump import ApplyIntentBumpTests  # noqa: E402,F401
 from test_skill_sync import SkillSyncTests  # noqa: E402,F401

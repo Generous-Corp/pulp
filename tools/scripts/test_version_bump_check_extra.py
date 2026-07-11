@@ -910,11 +910,15 @@ class AssessmentReportApplyTests(unittest.TestCase):
         ):
             self.assertTrue(vbc._range_has_bump_commit("base", "head"))
 
-        passed, msg = vbc.check_fix_feat_requires_bump("", "base", "head")
+        with mock.patch.object(vbc, "_range_fix_feat_subjects", return_value=[]):
+            passed, msg = vbc.check_fix_feat_requires_bump("", "base", "head")
         self.assertTrue(passed)
         self.assertIn("PR title not provided", msg)
 
-        passed, msg = vbc.check_fix_feat_requires_bump("docs: update", "base", "head")
+        with mock.patch.object(vbc, "_range_fix_feat_subjects", return_value=[]):
+            passed, msg = vbc.check_fix_feat_requires_bump(
+                "docs: update", "base", "head"
+            )
         self.assertTrue(passed)
         self.assertIn("no bump required", msg)
 
