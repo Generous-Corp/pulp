@@ -153,6 +153,18 @@ jobs:
               --base "${{ steps.base.outputs.ref }}" \
               --mode=report --enforce
 
+      - name: Config-doc drift check
+        # Authoritative gate (Layer 3) for the config→doc sync pattern.
+        # Mirrors the skill-sync / compat-sync stages. A mapped config surface
+        # (Shipyard config, the shipyard pin/installer, the build/release/gate
+        # workflows — see tools/scripts/config_doc_map.json) that changes
+        # without its guide doc is a hard fail, bypassable only with a
+        # `Config-Doc: skip reason="..."` trailer on a commit in the range.
+        run: |
+          python3 tools/scripts/config_doc_check.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --mode=report
+
       - name: Compat aggregate check
         # Keeps the repo-root aggregate byte-identical to the split
         # compat/ part files. No trailer bypass: regenerate the stale side.
@@ -236,6 +248,7 @@ jobs:
           python3 tools/scripts/test_downstream_validation_manifest.py
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
+          python3 tools/scripts/test_config_doc_check.py
           python3 tools/scripts/test_compat_aggregate.py
           python3 tools/scripts/test_screenshot_sync_check.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
