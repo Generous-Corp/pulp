@@ -23,6 +23,10 @@ The `pulp ship` command handles the full distribution pipeline: code signing, Ap
 
 For the end-to-end release pipeline that turns a merged PR into a published GitHub Release (auto-release.yml → sign-and-release.yml → release-cli.yml, the 11 published assets, and the failure-mode triage by which asset is missing), see [`docs/guides/release-pipeline.md`](../../../docs/guides/release-pipeline.md). Cross-reference comments at the top of `release-cli.yml` and `sign-and-release.yml` point back to that doc — keep them in sync when either workflow changes ownership of appcast generation, draft creation, or the matrix-tarball upload.
 
+`release-cli.yml` also carries the **Tier-3 Intel gate** (`universal-arch-gate`, owned by the `intel-canary` skill): before the `release` job publishes, it builds the PulpGain example universal (`arm64;x86_64`), asserts `lipo -archs` + `codesign --verify` on every shipped bundle and embedded dylib via `tools/scripts/check_bundle_architectures.py --strict` (a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is killed at load — always re-sign after lipo), and runs `auval` both natively and under `arch -x86_64`. It is in `release`'s `needs:`, so it BLOCKS the release on any universal/lipo/signature/auval failure. See `docs/guides/intel-support.md`.
+
+Separately, `release-cli.yml` now publishes an **installable** Intel slice: a native thin `darwin-x64` row in the build+smoke matrices on `macos-15-intel` that ships `pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz` next to the arm64 tarballs (`tools/install/install.sh` auto-selects by `uname -m`). This is DISTINCT from the Tier-3 `universal-arch-gate`, which only *validates* a universal build and ships nothing. Two gotchas: `macos-15-intel` deliberately **bypasses** `resolve-macos-runner` (it's a fixed hosted label, not a self-hosted/Namespace choice — the `runs-on` ternary only routes `matrix.os == 'macos-15'` through the resolver); and the macOS configure pins `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` so a native macOS-15 runner doesn't stamp the floor at 15.0 and lock out the macOS 13/14 Intel Macs the slice serves. The CLI tarball's existing ad-hoc re-sign in `package_cli.py` (after `install_name_tool` rpath rewrites) already covers x86_64 — no new signing flow.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before running `pulp ship ...`, source the shared skew-check helper so
@@ -204,6 +208,14 @@ AU / VST3 / CLAP as desired — do NOT drop back to a flat
 Set `InstallComponent::title` for the choice label, or leave it empty to derive
 from the install location ("Components" → "Audio Unit (AU)", etc.). Verified by
 `test_codesign.cpp` ("component-selectable with a choice per format").
+
+**CLI default (macOS).** `pulp ship package` DEFAULTS to this single
+component-selectable `.pkg` — it collects every built bundle (Standalone →
+`/Applications`, AU/VST3/CLAP → their system plug-in folders) into one
+`create_combined_pkg` call so the user is never forced to install every format.
+`--separate` restores the legacy behavior (one `.pkg` per format); `--dmg`
+produces disk images instead. The routing lives in the `pulp ship package`
+branch of `tools/cli/cmd_ship.cpp`.
 
 ### macOS one-command pipeline: `pulp ship release`
 
@@ -568,6 +580,46 @@ store_pass = "@env:ANDROID_STORE_PASS"
 ```
 
 ## Common Issues
+
+### `hdiutil: create failed - Resource busy` — a process is vetoing unmounts
+
+`hdiutil create -srcfolder` builds a DMG by attaching a temporary volume, copying
+into it, and unmounting it. Any DiskArbitration client may veto that unmount, and
+hdiutil then reports the whole operation as `Resource busy` and exits non-zero. The
+message names neither the volume nor the vetoing process, and it looks exactly like
+a transient collision — **it is not.** The veto persists until the offending client
+is restarted, so retrying, waiting, or detaching stale images will not clear it.
+
+Find the dissenter by unmounting any image and reading the error:
+
+```bash
+diskutil unmount /Volumes/SomeImage
+# Dissenter parent PPID 1 (/sbin/launchd)
+hdiutil detach /Volumes/SomeImage
+# Simulators are still shutting down. Please try again in a few moments.
+```
+
+**Trust the PID, not the message.** `diskutil unmount` names the dissenting process
+by PID; the sentence printed beside it can come from an entirely different subsystem.
+A wedged Mac Studio on 2026-07-10 reported `PID 1801` while printing CoreSimulator's
+"Simulators are still shutting down" with **no booted simulators** — PID 1801 was
+Console.app. Killing it cleared the veto instantly; `sudo killall -9 simdiskimaged`
+had done nothing. Identify the PID, then quit that process:
+
+```bash
+diskutil unmount /Volumes/AnyMountedVolume   # → "... failed to unmount: '...' (PID NNNN)"
+ps -p NNNN -o pid,user,comm=                 # what is it, really?
+kill NNNN                                    # user-owned: no sudo needed
+```
+
+Two consequences worth knowing. Every failed `create` leaks its temporary
+attachment, so failures compound and `hdiutil info` fills with orphaned images —
+that is a symptom, not the cause. And a self-hosted CI runner on a wedged host will
+fail `create_dmg produces a file from valid source` and `pulp ship release --dmg`
+on every PR while GitHub-hosted runners stay green, because they get a fresh VM.
+
+`create_dmg` prints hdiutil's own output and this remedy on failure. It used to
+redirect hdiutil to `/dev/null` and return a bare `false`.
 
 ### "No signing identity specified"
 
@@ -1017,6 +1069,13 @@ appears once the macOS sign/notarize leg is green too; a red sign-and-release le
 leaves the release a draft. See the `ci` skill's coordinator note for the full
 mechanism and debugging steps.
 
+Both macOS legs prefer `PULP_RELEASE_MACOS_RUNS_ON_JSON`. The signing leg then
+uses optional Namespace or GitHub-hosted `macos-15`; it deliberately does not
+fall back to the shared local PR pool because it imports a Developer ID private
+key. Do not route signing directly to the hosted pool while an isolated release
+runner is configured; that split can leave a complete 10-asset draft waiting
+hours for `appcast.xml`.
+
 `release-cli.yml` also owns the Release body: it prepends grouped Highlights
 from `tools/scripts/compose_release_notes.py` to GitHub's generated "What's
 Changed" / "Full Changelog" block, then appends the Install section. Do not route
@@ -1073,3 +1132,20 @@ doctor` provisions). If neither `pulp-cpp` nor a notary key is available the ste
 **fails loudly** (never ships a signed-but-unnotarized `.pkg`); pass
 `--no-notarize` to opt out deliberately. Always `stapler validate` +
 `spctl --assess --type install` the finished `.pkg` regardless of path.
+
+## Release page: ONE workflow owns the GitHub Release
+
+`release-cli.yml` is the **sole creator** of the GitHub Release for a `v*` tag:
+it sets the title (the **bare tag**, e.g. `v0.645.0` — no "Pulp CLI" prefix),
+the body (humanized highlights from `tools/scripts/compose_release_notes.py
+--footer`, which appends the `**Full changelog:** CHANGELOG.md § X` +
+`**Previous release:** vA.B.C` footer), and uploads the CLI/SDK binaries.
+`sign-and-release.yml` must **only** `gh release upload` `appcast.xml` onto that
+release — it must NOT create/name/draft it. Both fire on the same `v*` tag, so if
+sign-and-release creates/renames/drafts a release it RACES release-cli and
+last-writer-wins produces inconsistent titles (`Pulp CLI vX` vs `vX`),
+draft/published flips, stray `release-untagged-*` entries, and GitHub's
+`Full Changelog: A...B` compare footer instead of the CHANGELOG-§ one. Release
+notes link a PR (`#N`) for every entry via `compose_release_notes.py`'s
+`pr_for_commit` GitHub commit→PR lookup; only genuine direct-to-main commits show
+a short SHA. See `planning/2026-07-10-release-page-hygiene.md`.

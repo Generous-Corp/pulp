@@ -341,7 +341,7 @@
   // emit(blob, sampleRate, libm) -> { bytes, imports, stats }
   //   blob:       Uint8Array (LKB0)
   //   sampleRate: number (the AudioContext rate; f32-converted like lk_init)
-  //   libm:       { tanhf, sinf, cosf, expf, tanf, powf, fmodf } — the resident
+  //   libm:       { tanhf, ladder_tanhf, sinf, cosf, expf, tanf, powf, fmodf } — the resident
   //               kernel's f2_* exports (bit-source for all transcendentals).
   // The emitted module imports the per-sample subset it needs from env.*;
   // instantiate with F2.imports(libm). Exports: memory, process(dst,n), dst.
@@ -358,13 +358,14 @@
     // Per-sample imports actually needed by this graph.
     const need = new Set();
     for (const c of cfgs) {
-      if (c.type === NT.LADDER) need.add("tanhf");
+      // LadderFilterT<float> saturates with FastMath::tanh (Padé), not libm.
+      if (c.type === NT.LADDER) need.add("ladder_tanhf");
       if (c.type === NT.OSC && c.wave === 0) need.add("sinf");
       if (c.type === NT.OSC && (c.wave === 2 || c.wave === 3)) need.add("fmodf");
       if (c.type === NT.SHAPER && c.curve === 2) need.add("tanhf");
       if (c.type === NT.SHAPER && c.curve === 4) need.add("sinf");
     }
-    const importNames = ["tanhf", "sinf", "fmodf"].filter((n) => need.has(n));
+    const importNames = ["tanhf", "ladder_tanhf", "sinf", "fmodf"].filter((n) => need.has(n));
     const fidx = {}; importNames.forEach((n, i) => (fidx[n] = i));
     const PROCESS_IDX = importNames.length;
 
@@ -532,7 +533,7 @@
             // st[s] += g * (tanh(prev) - tanh(st[s]))
             C.ld(st[s]).f(c.g);
             if (s === 0) C.ld(t0); else C.ld(st[s - 1]);
-            C.call(fidx.tanhf).ld(st[s]).call(fidx.tanhf).op(OP.F32SUB)
+            C.call(fidx.ladder_tanhf).ld(st[s]).call(fidx.ladder_tanhf).op(OP.F32SUB)
               .op(OP.F32MUL).op(OP.F32ADD).st(st[s]);
           }
           C.ld(st[3]).st(out);
@@ -729,12 +730,14 @@
 
   // Build the instantiate-imports object from the kernel's f2_* bridge exports.
   function imports(libm) {
-    return { env: { tanhf: libm.tanhf, sinf: libm.sinf, fmodf: libm.fmodf } };
+    return { env: { tanhf: libm.tanhf, ladder_tanhf: libm.ladder_tanhf,
+                    sinf: libm.sinf, fmodf: libm.fmodf } };
   }
   // Pluck the full libm bridge off a kernel instance's exports.
   function libmOf(ex) {
     return {
-      tanhf: ex.f2_tanhf, sinf: ex.f2_sinf, cosf: ex.f2_cosf, expf: ex.f2_expf,
+      tanhf: ex.f2_tanhf, ladder_tanhf: ex.f2_ladder_tanhf,
+      sinf: ex.f2_sinf, cosf: ex.f2_cosf, expf: ex.f2_expf,
       tanf: ex.f2_tanf, powf: ex.f2_powf, fmodf: ex.f2_fmodf,
     };
   }

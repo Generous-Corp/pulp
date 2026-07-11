@@ -679,6 +679,13 @@ Skills in `.agents/skills/` are living documents. When you discover a gotcha, fi
    - `core/view/src/webview*`, `core/view/include/*/webview*` → `webview-ui`
    - Design import paths → `import-design`
 5. **No skill exists**: If you've accumulated 3+ gotchas for a domain with no skill, create one.
+6. **Adding, renaming, or removing a skill** — every skill needs a real `name` + `description` in its SKILL.md frontmatter (the `description` is what makes it activate and what the public catalog shows), and the public catalog must be regenerated:
+
+   ```bash
+   python3 tools/scripts/skills_doc_check.py --write   # regenerate docs/reference/skills.md
+   ```
+
+   This is **enforced**: the `skills-doc-sync` ctest (in the required macOS gate) and `tools/check-docs.sh` both fail if `docs/reference/skills.md` is stale or a skill has a missing/too-short description. `docs/reference/skills.md` is generated — never hand-edit it. (Also append the skill's row to the in-context table below and register its paths in `tools/scripts/skill_path_map.json`.)
 
 This rule applies to all agents (Claude Code, Codex) and humans. Skills are checked into the repo alongside the code they document.
 
@@ -708,13 +715,21 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
 **Exact fix/feat release marker:** `.github/workflows/version-skill-check.yml`
-adds `--require-bump-for-fix-feat` on PRs. If the PR title starts with
-`fix:` / `fix(scope):` / `feat:` / `feat(scope):`, the diff range must
-contain a bump-marker commit whose subject starts with exactly
+adds `--require-bump-for-fix-feat` on PRs. If the PR title or any live
+commit-derived signal starts with `fix:` / `fix(scope):` / `feat:` /
+`feat(scope):`, the diff range must contain a bump-marker commit whose subject
+starts with exactly
 `chore: bump versions` (canonical) or `chore(versions): bump` (legacy),
-unless the tip commit has a top-level `Version-Bump: skip reason="..."`
+unless the range has a top-level `Version-Bump: skip reason="..."`
 trailer. Near-misses such as `chore: bump SDK to vX.Y.Z` do not count.
+Explicit reverts cancel their target signals; reverting a revert restores them.
 When manually repairing a release bump, use the exact canonical subject.
+For PRs targeting `main`, the required check also writes an **Expected release
+tags** run summary for the PR queue. This prediction uses the fetched tag state
+and the same auto-release skip/revert guard, modeling GitHub's sole-commit
+subject versus multi-commit PR-title squash policy separately from the synthetic
+merge tree; `auto-release.yml` creates the
+actual signed tags only after merge.
 
 **Bumps are diff-driven, not title-driven.** `--require-bump-for-fix-feat`
 is an *additional* gate layered on `fix:`/`feat:` titles — it is NOT what
@@ -1188,6 +1203,8 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
 | `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
+| `installable-tools` | Acceptance bar for anything Pulp can install (`pulp tool` / `pulp add`): validate install AND uninstall from OUTSIDE a checkout before the README ships; uninstall-safety contract |
+| `intel-canary` | macOS Intel (x86_64) portability: PULP_INTEL_CANARY lint + allowlist, Tier 0-3 CI (build.yml canary, intel-portability, nightly-intel, release universal gate) |
 | `ios` | iOS platform: AUv3 app extensions, Simulator builds, UIKit host, CoreAudio, touch + Pencil input |
 | `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp kit manifests |
@@ -1206,6 +1223,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
 | `trace-analysis` | "Why is this slow?" investigation harness over a Perfetto `.pftrace`: chain-of-evidence loop, wall-vs-CPU-time, follow-the-blocker, exhaustive verification, Pulp domain hints (dsp/frame/js/gpu/cross-platform) |
 | `trace-sql` | SQL discipline for Pulp traces via `trace_processor`: idempotent `CREATE OR REPLACE PERFETTO` views, `GLOB`/`dur=-1`/`EXTRACT_ARG`, stable-key joins, plus the Pulp trace-stdlib views |
+| `update-demos` | Rebuild / re-pin / republish the downstream demo + example repos against a new or latest SDK via `pulp minos {sweep,update,publish-runbook}` |
 | `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
 | `video-proof` | Desktop validation videos: record raw proof, render Remotion context, publish/serve report, prepare review issue body |
 | `view-bridge` | Editor lifecycle and multi-view attach — `Processor::create_view()`, open/notify/resize/close protocol |

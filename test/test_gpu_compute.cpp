@@ -1,7 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/render/gpu_compute.hpp>
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/signal/convolver.hpp>
 #include <pulp/signal/fft.hpp>
+
+#include <random>
 
 #include <algorithm>
 #include <chrono>
@@ -305,6 +308,121 @@ TEST_CASE("GpuCompute FFT timed reports true GPU compute time", "[render][gpu][c
     }
 }
 
+TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t BLOCK = 256, N = 2 * BLOCK;  // fft size 512
+    constexpr uint32_t IR_LEN = 900;                 // -> 4 partitions
+    const uint32_t P = (IR_LEN + BLOCK - 1) / BLOCK;
+
+    std::mt19937 rng(0xC0FFEEu);
+    std::uniform_real_distribution<float> d(-1.0f, 1.0f);
+    std::vector<float> ir(IR_LEN);
+    for (auto& v : ir) v = d(rng);
+
+    // Build IR partition spectra with the GPU's OWN forward FFT so the spectral
+    // product uses the same convention as the input transform. Each partition:
+    // the IR block in the first half of an n-point window, zero-padded, FFT'd.
+    std::vector<float> ir_specs(static_cast<size_t>(N) * 2u * P, 0.0f);
+    for (uint32_t p = 0; p < P; ++p) {
+        std::vector<float> padded(static_cast<size_t>(N) * 2u, 0.0f);
+        const uint32_t off = p * BLOCK;
+        const uint32_t count = std::min<uint32_t>(BLOCK, IR_LEN - off);
+        for (uint32_t i = 0; i < count; ++i) padded[2u * i] = ir[off + i];
+        REQUIRE(compute->fft_forward(padded.data(),
+                                     ir_specs.data() + static_cast<size_t>(p) * N * 2u, N));
+    }
+    REQUIRE(compute->prepare_multi_fdl(N, ir_specs.data(), /*num_ir=*/1, P));
+
+    // CPU reference: the shipping partitioned convolver, same IR + block.
+    pulp::signal::PartitionedConvolver cpu;
+    cpu.load_ir(ir.data(), ir.size(), BLOCK);
+
+    std::vector<float> pan_l{1.0f}, pan_r{1.0f};
+    std::mt19937 irng(0xBEEFu);
+    double max_dev = 0.0;
+    for (int blk = 0; blk < 12; ++blk) {
+        std::vector<float> in(BLOCK), cpu_out(BLOCK), gpu_out(2u * BLOCK);
+        for (auto& v : in) v = d(irng);
+        cpu.process(in.data(), cpu_out.data(), BLOCK);
+        REQUIRE(compute->multi_fdl_convolve(in.data(), pan_l.data(), pan_r.data(),
+                                            gpu_out.data(), N, 1));
+        // pan_l = 1 -> gpu_out L channel is the mono convolution. Skip the first
+        // couple of blocks while both delay lines fill.
+        if (blk >= 2)
+            for (uint32_t i = 0; i < BLOCK; ++i)
+                max_dev = std::max(max_dev,
+                                   static_cast<double>(std::abs(gpu_out[i] - cpu_out[i])));
+    }
+    INFO("max |FDL - CPU PartitionedConvolver| = " << max_dev);
+    REQUIRE(max_dev < 1e-4);  // observed ~1.3e-5 (GPU-vs-CPU FFT rounding)
+}
+
+TEST_CASE("GpuCompute partitioned FDL matches N panned CPU convolvers (multi-IR)",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t BLOCK = 256, N = 2 * BLOCK, NUM_IR = 3, IR_LEN = 700;
+    const uint32_t P = (IR_LEN + BLOCK - 1) / BLOCK;
+
+    std::mt19937 rng(0x515151u);
+    std::uniform_real_distribution<float> d(-1.0f, 1.0f);
+    std::vector<std::vector<float>> irs(NUM_IR, std::vector<float>(IR_LEN));
+    for (auto& ir : irs) for (auto& v : ir) v = d(rng);
+
+    // Per-room per-partition IR spectra: layout (r*P + p).
+    std::vector<float> ir_specs(static_cast<size_t>(N) * 2u * NUM_IR * P, 0.0f);
+    for (uint32_t r = 0; r < NUM_IR; ++r)
+        for (uint32_t p = 0; p < P; ++p) {
+            std::vector<float> padded(static_cast<size_t>(N) * 2u, 0.0f);
+            const uint32_t off = p * BLOCK, count = std::min<uint32_t>(BLOCK, IR_LEN - off);
+            for (uint32_t i = 0; i < count; ++i) padded[2u * i] = irs[r][off + i];
+            REQUIRE(compute->fft_forward(
+                padded.data(),
+                ir_specs.data() + (static_cast<size_t>(r) * P + p) * N * 2u, N));
+        }
+    REQUIRE(compute->prepare_multi_fdl(N, ir_specs.data(), NUM_IR, P));
+
+    // Distinct constant-power pans per room.
+    std::vector<float> pan_l(NUM_IR), pan_r(NUM_IR);
+    for (uint32_t r = 0; r < NUM_IR; ++r) {
+        const float t = static_cast<float>(r) / static_cast<float>(NUM_IR - 1);
+        pan_l[r] = std::cos(t * 1.5707963f);
+        pan_r[r] = std::sin(t * 1.5707963f);
+    }
+
+    std::vector<pulp::signal::PartitionedConvolver> cpu(NUM_IR);
+    for (uint32_t r = 0; r < NUM_IR; ++r) cpu[r].load_ir(irs[r].data(), irs[r].size(), BLOCK);
+
+    std::mt19937 irng(0x2323u);
+    double max_dev = 0.0;
+    for (int blk = 0; blk < 12; ++blk) {
+        std::vector<float> in(BLOCK), gpu_out(2u * BLOCK);
+        for (auto& v : in) v = d(irng);
+        // CPU: sum each room's mono convolution with its pans into L/R.
+        std::vector<float> refL(BLOCK, 0.0f), refR(BLOCK, 0.0f), tmp(BLOCK);
+        for (uint32_t r = 0; r < NUM_IR; ++r) {
+            cpu[r].process(in.data(), tmp.data(), BLOCK);
+            for (uint32_t i = 0; i < BLOCK; ++i) {
+                refL[i] += pan_l[r] * tmp[i];
+                refR[i] += pan_r[r] * tmp[i];
+            }
+        }
+        REQUIRE(compute->multi_fdl_convolve(in.data(), pan_l.data(), pan_r.data(),
+                                            gpu_out.data(), N, NUM_IR));
+        if (blk >= 2)
+            for (uint32_t i = 0; i < BLOCK; ++i) {
+                max_dev = std::max(max_dev, static_cast<double>(std::abs(gpu_out[i] - refL[i])));
+                max_dev = std::max(max_dev, static_cast<double>(std::abs(gpu_out[BLOCK + i] - refR[i])));
+            }
+    }
+    INFO("max |FDL multi-IR - N panned CPU convolvers| = " << max_dev);
+    REQUIRE(max_dev < 1e-4);
+}
+
 TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
     if (!compute || !compute->initialize_standalone()) return;
@@ -584,6 +702,91 @@ TEST_CASE("GpuCompute additive synth produces the requested partials",
     REQUIRE_FALSE(compute->additive_synth(partials.data(), out.data(), 0, N, SR, 0.0f));
 }
 
+// Guards the block-parallel additive_synth reshape (one workgroup per sample, WG
+// lanes tree-reducing the partials sum): numeric parity with a scalar CPU
+// reference across partial counts spanning below / at / above the 256-lane
+// workgroup, a sample count that is NOT a multiple of the workgroup, both routing
+// paths (cooperative vs serial), the >65535-sample grid-stride path, and
+// run-to-run determinism (the tree reduction is fixed-order and atomics-free).
+TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup sizes",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr float SR = 48000.0f;
+    constexpr double TWO_PI = 6.28318530717958647692;
+    auto cpu_add = [&](const std::vector<float>& parts, uint32_t P, uint32_t s,
+                       float t0) {
+        const double t = (static_cast<double>(t0) + s) / SR;
+        double acc = 0.0;  // scalar reference, serial order
+        for (uint32_t i = 0; i < P; ++i) {
+            const double f = parts[i * 3], a = parts[i * 3 + 1], ph = parts[i * 3 + 2];
+            acc += a * std::sin(TWO_PI * f * t + ph);
+        }
+        return static_cast<float>(acc);
+    };
+    auto make_partials = [](uint32_t P) {
+        std::vector<float> m(static_cast<std::size_t>(P) * 3);
+        for (uint32_t i = 0; i < P; ++i) {
+            m[i * 3 + 0] = 55.0f + 11.0f * static_cast<float>(i);   // freq
+            m[i * 3 + 1] = 1.0f / (1.0f + static_cast<float>(i));   // amp
+            m[i * 3 + 2] = 0.1f * static_cast<float>(i);            // phase
+        }
+        return m;
+    };
+
+    // Cooperative-routed: non-multiple-of-256 block; partial counts spanning WG.
+    const uint32_t S = 333;
+    for (uint32_t P : {1u, 2u, 200u, 256u, 300u, 1000u}) {
+        const auto parts = make_partials(P);
+        std::vector<float> out(S, 0.0f), out2(S, 0.0f);
+        REQUIRE(compute->additive_synth(parts.data(), out.data(), P, S, SR, 0.0f));
+        REQUIRE(compute->additive_synth(parts.data(), out2.data(), P, S, SR, 0.0f));
+        for (uint32_t s = 0; s < S; ++s) {
+            const float ref = cpu_add(parts, P, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+            REQUIRE(out[s] == out2[s]);  // deterministic run-to-run
+        }
+    }
+
+    // Serial-routed: a block large enough to fill the device on the serial kernel
+    // (ceil(S/256) >= 32) routes to the unchanged one-thread-per-sample path.
+    {
+        const uint32_t S2 = 16384, P = 300;  // ceil(16384/256)=64 >= 32 -> serial
+        const auto parts = make_partials(P);
+        std::vector<float> out(S2, 0.0f), out2(S2, 0.0f);
+        REQUIRE(compute->additive_synth(parts.data(), out.data(), P, S2, SR, 0.0f));
+        REQUIRE(compute->additive_synth(parts.data(), out2.data(), P, S2, SR, 0.0f));
+        for (uint32_t s = 0; s < S2; ++s) {
+            const float ref = cpu_add(parts, P, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+            REQUIRE(out[s] == out2[s]);
+        }
+    }
+
+    // Grid-stride path (cooperative): a block whose serial dispatch would exceed
+    // the 65535 workgroup-per-dimension cap routes to the cooperative kernel,
+    // which caps its dispatch and grid-strides — so each workgroup wraps to
+    // several samples. Only reachable at the maximum supported block, so keep the
+    // per-sample work tiny (P=1) and spot-check indices across the wrap boundary.
+    {
+        const uint32_t Sbig = 1u << 24;  // 16,777,216 -> ceil/256 = 65536 > 65535
+        const uint32_t P = 1;
+        const auto parts = make_partials(P);
+        std::vector<float> out(Sbig, 0.0f);
+        REQUIRE(compute->additive_synth(parts.data(), out.data(), P, Sbig, SR, 0.0f));
+        // Check indices at LOW t only: at very large sample indices t is huge and
+        // f32 sin's argument-reduction error swamps the double-precision reference
+        // (an f32-large-angle artifact shared with the serial kernel, not a
+        // grid-stride bug). Workgroup 0 owns samples {0, 65535, 131070} (dispatch
+        // caps at 65535, so stride == 65535), so these still exercise the wrap.
+        for (uint32_t s : {0u, 1u, 65535u, 65536u, 131070u, 131071u}) {
+            const float ref = cpu_add(parts, P, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+        }
+    }
+}
+
 TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
@@ -800,6 +1003,100 @@ float wavenet_ref_1x1_2arrays(float x,
     const float headacc1 = head0 + std::tanh(z1);        // SEED + array 1 activation
     return head_scale * (Whr1 * headacc1);
 }
+
+// General scalar reference for a SINGLE WaveNet array (arbitrary channels C,
+// kernel K, layer count L, per-layer dilations, gated/ungated, head_size H,
+// head_bias) computed the way the block-parallel GPU shader computes it: as a
+// block convolution over the B-sample block with zero history before t=0. It
+// walks the flat weight blob with prepare_wavenet's exact offsets (rechannel →
+// per-layer [convW, convB, mixW, l1W, l1B] → head rechannel), reproduces the
+// dilated conv + input-mixin, the gated/ungated activation, the cross-layer head
+// accumulate, and the residual 1x1, then the head rechannel and head_scale. The
+// scale pass reads channel 0 of each sample's head vector, so out[t] =
+// head_scale * headout[t][0]. Accumulates in double to serve as the golden value
+// the float32 GPU result is checked against. This is the coverage the audit of
+// #5878 found missing: every prior WaveNet test runs C<=4, so nothing exercised
+// the 33<=C<=64 regime where a lane owns multiple channels via the shader's
+// `oc += WG` stride loop (Z = 2C > WG = 64 lanes when gated).
+std::vector<double> wavenet_ref_single_array(
+    const std::vector<float>& w, uint32_t C, uint32_t K, uint32_t L,
+    const std::vector<uint32_t>& dils, uint32_t H, bool gated, bool head_bias,
+    float head_scale, const std::vector<float>& in) {
+    const uint32_t B = static_cast<uint32_t>(in.size());
+    const uint32_t Z = gated ? 2u * C : C;
+    auto W = [&](std::size_t i) { return static_cast<double>(w[i]); };
+
+    // Walk the blob to resolve offsets, exactly as prepare_wavenet does.
+    std::size_t off = 0;
+    const std::size_t rc_w = off; off += static_cast<std::size_t>(C) * 1u;  // rechannel (input_size==1)
+    struct Ly { std::size_t conv_w, conv_b, mix_w, l1_w, l1_b; uint32_t dil; };
+    std::vector<Ly> layers;
+    uint32_t max_dil = 1;
+    for (uint32_t l = 0; l < L; ++l) max_dil = dils[l] > max_dil ? dils[l] : max_dil;
+    for (uint32_t l = 0; l < L; ++l) {
+        Ly ly{};
+        ly.conv_w = off; off += static_cast<std::size_t>(Z) * C * K;
+        ly.conv_b = off; off += Z;
+        ly.mix_w = off; off += Z;                          // condition_size == 1
+        ly.l1_w = off; off += static_cast<std::size_t>(C) * C;
+        ly.l1_b = off; off += C;
+        ly.dil = dils[l];
+        layers.push_back(ly);
+    }
+    const std::size_t hr_w = off; off += static_cast<std::size_t>(H) * C;
+    const std::size_t hr_b = off; // valid only when head_bias
+
+    const uint32_t PAD = max_dil * (K - 1u);
+    const std::size_t cols = static_cast<std::size_t>(PAD) + B;
+
+    // act[0]: rechannel of the mono input. History columns [0,PAD) stay zero.
+    std::vector<std::vector<double>> cur(cols, std::vector<double>(C, 0.0));
+    for (uint32_t t = 0; t < B; ++t)
+        for (uint32_t oc = 0; oc < C; ++oc)
+            cur[PAD + t][oc] = W(rc_w + oc) * static_cast<double>(in[t]);
+
+    std::vector<std::vector<double>> hacc(B, std::vector<double>(C, 0.0));
+    for (const auto& ly : layers) {
+        std::vector<std::vector<double>> nxt(cols, std::vector<double>(C, 0.0));
+        for (uint32_t t = 0; t < B; ++t) {
+            const std::size_t acol = PAD + t;
+            std::vector<double> z(Z, 0.0);
+            for (uint32_t oc = 0; oc < Z; ++oc) {
+                double acc = W(ly.conv_b + oc);
+                for (uint32_t k = 0; k < K; ++k) {
+                    const uint32_t back = ly.dil * (K - 1u - k);   // pad >= max back
+                    const std::size_t col = acol - back;
+                    const std::size_t wbase = ly.conv_w + static_cast<std::size_t>(oc) * C * K + k;
+                    for (uint32_t ic = 0; ic < C; ++ic)
+                        acc += W(wbase + static_cast<std::size_t>(ic) * K) * cur[col][ic];
+                }
+                acc += W(ly.mix_w + oc) * static_cast<double>(in[t]);  // input_mixin
+                z[oc] = acc;
+            }
+            std::vector<double> a(C, 0.0);
+            for (uint32_t c = 0; c < C; ++c)
+                a[c] = gated ? std::tanh(z[c]) * (1.0 / (1.0 + std::exp(-z[C + c])))
+                             : std::tanh(z[c]);
+            for (uint32_t c = 0; c < C; ++c) hacc[t][c] += a[c];  // head accumulate
+            for (uint32_t oc = 0; oc < C; ++oc) {                 // residual 1x1
+                double r = W(ly.l1_b + oc);
+                for (uint32_t ic = 0; ic < C; ++ic)
+                    r += W(ly.l1_w + static_cast<std::size_t>(oc) * C + ic) * a[ic];
+                nxt[acol][oc] = cur[acol][oc] + r;
+            }
+        }
+        cur = std::move(nxt);
+    }
+
+    std::vector<double> out(B, 0.0);
+    for (uint32_t t = 0; t < B; ++t) {
+        double acc = head_bias ? W(hr_b + 0) : 0.0;   // head rechannel, channel 0 only
+        for (uint32_t ic = 0; ic < C; ++ic)
+            acc += W(hr_w + 0 * C + ic) * hacc[t][ic];
+        out[t] = static_cast<double>(head_scale) * acc;
+    }
+    return out;
+}
 }  // namespace
 
 TEST_CASE("GpuCompute wavenet_forward matches a scalar reference",
@@ -962,6 +1259,101 @@ TEST_CASE("GpuCompute wavenet_forward keeps two instances independent on one dev
         REQUIRE(std::abs(out0[i] - e0) < 1e-5f);
         REQUIRE(std::abs(out1[i] - e1) < 1e-5f);
     }
+}
+
+namespace {
+// Deterministic small weights that keep the gated activations well away from the
+// saturation tails (so the golden double reference and the float32 GPU result
+// stay comparable to a tight tolerance) while still filling the whole blob.
+std::vector<float> wavenet_weight_blob(uint32_t need) {
+    std::vector<float> w(need);
+    for (uint32_t i = 0; i < need; ++i)
+        w[i] = 0.03f * std::sin(0.29f * i + 0.5f) - 0.012f * std::cos(0.017f * i);
+    return w;
+}
+// prepare_wavenet's exact weight count for one gated/ungated single array with
+// head_size H and no head bias.
+uint32_t wavenet_single_array_len(uint32_t C, uint32_t K, uint32_t L, uint32_t H,
+                                  bool gated) {
+    const uint32_t Z = gated ? 2u * C : C;
+    uint32_t need = C;  // rechannel (input_size == 1)
+    need += L * (Z * C * K + Z + Z + C * C + C);
+    need += H * C;      // head rechannel (no head bias)
+    need += 1;          // trailing head_scale
+    return need;
+}
+}  // namespace
+
+TEST_CASE("GpuCompute wavenet_forward matches a scalar reference at 33<=C<=64 "
+          "(multi-channel-per-lane)", "[render][gpu][compute]") {
+    // The audit of #5878 confirmed the block-parallel layer shader is provably
+    // correct for 33<=C<=64 — each of the WG=64 lanes then owns MULTIPLE output
+    // channels through the `oc += WG` stride loop (gated => Z = 2C up to 128 > 64)
+    // — but NO prior test drove that regime (every existing WaveNet test and every
+    // real .nam model runs C<=32/C<=4). This closes the gap: a gated, multi-layer,
+    // dilated array with C=48 (Z=96) checked bit-close against the scalar golden.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    const uint32_t C = 48, K = 3, L = 2, H = 1;
+    const bool gated = true;
+    std::vector<uint32_t> dilations = {1, 2};
+    const uint32_t need = wavenet_single_array_len(C, K, L, H, gated);
+    std::vector<float> weights = wavenet_weight_blob(need);
+    const float head_scale = 0.7f;
+
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = C;
+    spec.kernel = K; spec.head_size = H; spec.gated = 1; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = L;
+
+    const uint32_t B = 24;
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+
+    std::vector<float> in(B), out(B, 0.0f);
+    for (uint32_t i = 0; i < B; ++i) in[i] = 0.35f * std::sin(0.21f * i) - 0.08f;
+    REQUIRE(compute->wavenet_forward(in.data(), out.data(), B));
+
+    const std::vector<double> expect = wavenet_ref_single_array(
+        weights, C, K, L, dilations, H, gated, /*head_bias=*/false, head_scale, in);
+    for (uint32_t i = 0; i < B; ++i) {
+        REQUIRE(std::isfinite(out[i]));
+        REQUIRE(std::abs(out[i] - expect[i]) <= 1e-3 + 1e-3 * std::abs(expect[i]));
+    }
+}
+
+TEST_CASE("GpuCompute wavenet_forward matches a scalar reference with a "
+          "single-sample block (B=1)", "[render][gpu][compute]") {
+    // The audit also flagged B=1 as an untested dispatch regime: the layer pass
+    // dispatches exactly B workgroups, so B=1 is a SINGLE workgroup (all history
+    // taps read the zero-initialized pre-block columns). Combined with C=64 (the
+    // channel cap, gated => Z=128 fully populating the shared zbuf), this pins both
+    // the smallest block and the widest channel dimension the shader supports.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    const uint32_t C = 64, K = 3, L = 2, H = 1;
+    const bool gated = true;
+    std::vector<uint32_t> dilations = {1, 2};
+    const uint32_t need = wavenet_single_array_len(C, K, L, H, gated);
+    std::vector<float> weights = wavenet_weight_blob(need);
+    const float head_scale = 0.8f;
+
+    GpuCompute::WavenetLayerArraySpec spec;
+    spec.input_size = 1; spec.condition_size = 1; spec.channels = C;
+    spec.kernel = K; spec.head_size = H; spec.gated = 1; spec.head_bias = 0;
+    spec.dilations = dilations.data(); spec.num_layers = L;
+
+    const uint32_t B = 1;
+    REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+
+    std::vector<float> in(B, 0.27f), out(B, 0.0f);
+    REQUIRE(compute->wavenet_forward(in.data(), out.data(), B));
+
+    const std::vector<double> expect = wavenet_ref_single_array(
+        weights, C, K, L, dilations, H, gated, /*head_bias=*/false, head_scale, in);
+    REQUIRE(std::isfinite(out[0]));
+    REQUIRE(std::abs(out[0] - expect[0]) <= 1e-3 + 1e-3 * std::abs(expect[0]));
 }
 
 TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",

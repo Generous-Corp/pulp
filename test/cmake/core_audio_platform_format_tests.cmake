@@ -82,6 +82,13 @@ pulp_add_test_suite(pulp-test-state
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-external-binding LIBRARIES pulp::state)
 
+# Cross-version parameter-ordering guard (host-facing ID + index stability).
+pulp_add_test_suite(pulp-test-param-ordering LIBRARIES pulp::state)
+
+# Gesture thread-safety: run_gesture_on_main marshalling + off-main misuse
+# detection. Needs pulp::events for the MainThreadDispatcher test backend.
+pulp_add_test_suite(pulp-test-gesture-threading LIBRARIES pulp::state pulp::events)
+
 # Structured non-param state channel (sequencer/mod-matrix transport)
 pulp_add_test_suite(pulp-test-sequencer-state-channel LIBRARIES pulp::state)
 
@@ -155,6 +162,23 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-host-validation PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-host-validation)
 
+    # A Processor may reach its StateStore from its destructor, and from a worker
+    # thread that destructor is about to join. Pin that every host destroys the
+    # store after the Processor, not before.
+    add_executable(pulp-test-store-lifetime test_store_lifetime.cpp)
+    target_link_libraries(pulp-test-store-lifetime PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-store-lifetime PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-store-lifetime)
+
+    # An in-place host can hand the adapter an output buffer still carrying the
+    # constant_mask of the input it aliases. Pin that the adapter clears it, so a
+    # varying (CV-rate) output is never read back as one held sample. Link-only
+    # against pulp::format, keeping the diff-cover TU attribution single.
+    add_executable(pulp-test-clap-constant-mask test_clap_constant_mask.cpp)
+    target_link_libraries(pulp-test-clap-constant-mask PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-constant-mask PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-constant-mask)
+
     # Empirical proof the CLAP adapter respects clamp_latency_to_nonneg
     # end-to-end (negative latency → 0 when the
     # quirk is enforced, raw-wrapped when PULP_HOST_QUIRKS=off). Drives the
@@ -178,6 +202,21 @@ if(PULP_HAS_VST3)
         PULP_VST3_GUI=1
     )
     catch_discover_tests(pulp-test-vst3-plugin-state)
+
+    # VST3 parameter display-string round-trip (getParamStringByValue /
+    # getParamValueByString -> ParamInfo::to_string / from_string). Compiles
+    # vst3_plug_view.cpp for the GUI symbols createView() references, mirroring
+    # the plugin-state target above.
+    add_executable(pulp-test-vst3-param-display
+        test_vst3_param_display.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
+    )
+    target_link_libraries(pulp-test-vst3-param-display PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-param-display PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1
+    )
+    catch_discover_tests(pulp-test-vst3-param-display)
 endif()
 
 if(APPLE AND PULP_HAS_AUSDK)
@@ -236,6 +275,22 @@ if(PULP_HAS_LV2)
     )
     target_link_libraries(pulp-test-lv2-adapter PRIVATE pulp::format lv2-headers Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-lv2-adapter)
+
+    # LV2 run() RT-safety guard (MF-2): asserts the render path neither
+    # allocates nor takes a blocking lock, and reports latency. Links the RT
+    # interposition trap TU + sets PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
+    # (UNIX-only) so an allocation / blocking lock in run() ABORTS the test.
+    # Mirrors pulp-test-standalone-rt / the CLAP/AU-v2 RT-trap targets.
+    add_executable(pulp-test-lv2-rt test_lv2_rt.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/lv2_adapter.cpp
+    )
+    target_sources(pulp-test-lv2-rt PRIVATE
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+    target_link_libraries(pulp-test-lv2-rt PRIVATE
+        pulp::format lv2-headers Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-test-lv2-rt PRIVATE
+        $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+    catch_discover_tests(pulp-test-lv2-rt)
 
     add_executable(pulp-test-lv2-host-discovery test_lv2_host_discovery.cpp)
     target_include_directories(pulp-test-lv2-host-discovery PRIVATE

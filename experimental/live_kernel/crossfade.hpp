@@ -5,17 +5,54 @@
 // The kernel holds TWO preallocated Plan slots. On a structural edit the new
 // graph blob is decoded + built into the inactive slot (zero-alloc; the delay
 // pool is pre-prepared), then swap() arms an equal-power crossfade that renders
-// BOTH plans in parallel and blends old->new per-sample along cos/sin — the same
-// shape as native LiveSwapCurve::EqualPower (signal_graph.hpp:56). Param-only
-// edits route to set_param on the active plan with zero interruption and no
-// rebuild.
+// BOTH plans in parallel and blends old->new per-sample — the SAME law as the
+// native live plugin swap (LiveSwapCurve::EqualPower, signal_graph.hpp), i.e. the
+// shared signal::crossfade_gains equal-power split over a signal::crossfade_
+// smoothstep progress ramp. Param-only edits route to set_param on the active
+// plan with zero interruption and no rebuild.
 
 #include "codec.hpp"
 #include "executor.hpp"
 
+#include <pulp/signal/crossfade.hpp>
+
 #include <cmath>
 
 namespace pulp::live_kernel {
+
+// Equal-power old->new crossfade of one audio block, matching the native
+// live-swap law exactly.
+//
+// Per sample: t = (fade_pos + i) / fade_len; the shared smoothstep ramp shapes t
+// to a click-free progress u (zero slope at both ends), and the shared
+// equal-power gain split gives (go, gn) = (cos(u*pi/2), sin(u*pi/2)). This is the
+// IDENTICAL computation performed by signal::TransitionMixer (float, EqualPower)
+// on the native live-swap path, so the kernel's structural swap and the native
+// plugin swap fade by the same curve — proven by test_live_kernel_crossfade_null.
+//
+// NOTE — intended behavior change (SF-2): the previous kernel fade used a LINEAR
+// theta (theta = t * pi/2, no smoothstep) while its comment claimed to match the
+// native EqualPower law. That was a real divergence: mid-fade the linear-theta
+// curve differs from the native smoothstep-shaped curve, so the kernel would
+// fail a bit-exact null test against native. Applying the shared smoothstep here
+// fixes it. Samples at or past the fade end map through u = smoothstep(1) = 1 to
+// the native fade-end gains (cos(pi/2), sin(pi/2)). The old per-block cos/sin
+// angle recurrence assumed a CONSTANT dtheta and is no longer valid once the
+// smoothstep makes theta non-linear in i, so the fade evaluates the law directly.
+inline void equal_power_fade_block(float* dst, const float* ob, const float* nb,
+                                    int n, int fade_pos, int fade_len) noexcept {
+    for (int i = 0; i < n; ++i) {
+        // Division (not reciprocal-multiply) to match signal::TransitionMixer's
+        // `t = float(pos) / float(len)` bit-for-bit.
+        const float t = static_cast<float>(fade_pos + i) /
+                        static_cast<float>(fade_len);
+        const float u = pulp::signal::crossfade_smoothstep(t);
+        float go, gn;
+        pulp::signal::crossfade_gains(u, pulp::signal::CrossfadeGainLaw::EqualPower,
+                                      go, gn);
+        dst[i] = ob[i] * go + nb[i] * gn;
+    }
+}
 
 class Kernel {
 public:
@@ -98,14 +135,7 @@ public:
         Plan& newp = plan_[active_ ^ 1];
         const float* ob = render_block(oldp, n, meter_);
         const float* nb = render_block(newp, n, meter_);
-        const double inv = 1.0 / (double)fade_len_;
-        for (int i = 0; i < n; ++i) {
-            double t = (double)(fade_pos_ + i) * inv;
-            if (t > 1.0) t = 1.0;
-            const float go = (float)std::cos(t * kHalfPi);
-            const float gn = (float)std::sin(t * kHalfPi);
-            dst[i] = ob[i] * go + nb[i] * gn;
-        }
+        equal_power_fade_block(dst, ob, nb, n, fade_pos_, fade_len_);
         fade_pos_ += n;
         if (fade_pos_ >= fade_len_) { active_ ^= 1; fading_ = false; }
     }
@@ -113,7 +143,6 @@ public:
     double sample_rate() const { return sr_; }
 
 private:
-    static constexpr double kHalfPi = 1.57079632679489661923;
     Plan   plan_[2];
     PlanDesc desc_;
     double sr_ = 48000.0;

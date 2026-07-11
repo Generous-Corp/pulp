@@ -1,7 +1,11 @@
 #pragma once
 
+#include <pulp/signal/denormal.hpp>
+#include <pulp/signal/fast_math.hpp>
+
 #include <cmath>
 #include <algorithm>
+#include <type_traits>
 
 namespace pulp::signal {
 
@@ -26,10 +30,16 @@ public:
             resonance_ * SampleType{4.0f} * (stage_[3] - input * SampleType{0.5f});
         SampleType x = input - feedback;
 
-        // 4 cascaded one-pole filters with tanh saturation
+        // 4 cascaded one-pole filters with tanh saturation. Two saturations per
+        // stage — eight per sample — make this loop transcendental-bound, so the
+        // float specialization uses the Padé approximation rather than libm.
         for (int i = 0; i < 4; ++i) {
             SampleType prev = i > 0 ? stage_[i - 1] : x;
-            stage_[i] += g_ * (std::tanh(prev) - std::tanh(stage_[i]));
+            // Snap each ladder stage: at high resonance the stages self-
+            // oscillate and their tails otherwise decay into denormals with
+            // no FTZ guard. No-op above 1e-15.
+            stage_[i] = snap_to_zero(
+                stage_[i] + g_ * (saturate(prev) - saturate(stage_[i])));
         }
 
         return stage_[3];
@@ -45,6 +55,20 @@ public:
     }
 
 private:
+    /// Saturating non-linearity. The `float` path goes through
+    /// `signal::ladder_tanh`, which is exact `std::tanh` by default and switches
+    /// to the float-only Padé `FastMath::tanh` only when
+    /// `PULP_SIGNAL_FAST_LADDER_TANH=1` (see fast_math.hpp for the fidelity
+    /// rationale — the Padé form's +/-4 hard clamp alters the ladder's overdrive
+    /// character, so exact saturation is the default). `LadderFilterT<double>`
+    /// always uses libm: no double Padé exists and it is not on a hot path.
+    static SampleType saturate(SampleType x) {
+        if constexpr (std::is_same_v<SampleType, float>)
+            return ladder_tanh(x);
+        else
+            return std::tanh(x);
+    }
+
     SampleType sample_rate_ = SampleType{44100.0f};
     SampleType cutoff_ = SampleType{1000.0f};
     SampleType resonance_ = SampleType{0.0f};

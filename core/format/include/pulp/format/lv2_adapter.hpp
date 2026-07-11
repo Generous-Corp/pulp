@@ -10,6 +10,7 @@
 // - TTL manifest files for discovery
 
 #include <pulp/format/processor.hpp>
+#include <pulp/midi/buffer.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <lv2/core/lv2.h>
@@ -23,8 +24,12 @@ static constexpr int kMaxChannels = 8;
 
 // LV2 plugin instance — wraps a Pulp Processor
 struct PulpLv2Instance {
-    std::unique_ptr<Processor> processor;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
+    std::unique_ptr<Processor> processor;
     // Param-events sidecar, set on the Processor each run() so the contract is
     // uniform across formats. LV2 control-port values are applied through
     // `store` as before; this queue carries no events yet (atom-based
@@ -32,6 +37,15 @@ struct PulpLv2Instance {
     // a non-null queue and pairs with the RT-safety guard around process().
     state::ParameterEventQueue param_events;
     ProcessorFactory factory;
+
+    // Pre-reserved MIDI scratch, owned by the instance so run() never
+    // heap-allocates on the audio thread. Sized once in instantiate() with
+    // set_realtime_capacity_limit(true) — mirrors the CLAP/VST3 adapters
+    // (clap_adapter.cpp reserve() + set_realtime_capacity_limit(true)).
+    // run() clear()s and reuses these every block instead of constructing
+    // fresh stack-local buffers whose first add() would allocate.
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
 
     // Audio working state
     double sample_rate = 48000.0;
@@ -71,6 +85,14 @@ struct PulpLv2Instance {
     // lv2_atom_sequence_clear + append_event helpers.
     bool produces_midi = false;
     void* midi_out_atom = nullptr;
+
+    // Latency-reporting output control port. Emitted unconditionally by
+    // generate_plugin_ttl() as the last port (designation lv2:latency,
+    // portProperty lv2:reportsLatency); connect_port() wires the host's
+    // single-float buffer here and run() writes the processor's current
+    // latency_samples() into it each block, so a latent Pulp processor is
+    // PDC-compensated under LV2 like it is under every other format.
+    float* latency_port = nullptr;
 };
 
 /// Resolve LV2_URID_Map from a features array.

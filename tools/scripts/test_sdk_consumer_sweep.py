@@ -165,6 +165,72 @@ class Report(unittest.TestCase):
         self.assertIn("README-only", txt)
 
 
+class VersionCompare(unittest.TestCase):
+    def test_shorter_form_equals_padded_form(self):
+        # A measured "13.3.0" and a declared "13.3" are the same floor.
+        self.assertTrue(MOD._ver_eq("13.3", "13.3.0"))
+        self.assertTrue(MOD._ver_eq("2.34", "2.34.0"))
+
+    def test_genuine_difference_is_not_equal(self):
+        self.assertFalse(MOD._ver_eq("13.3", "13.4"))
+        self.assertFalse(MOD._ver_eq("13.3", "26.0"))
+
+    def test_none_handling(self):
+        self.assertTrue(MOD._ver_eq(None, None))
+        self.assertFalse(MOD._ver_eq("13.3", None))
+
+    def test_unparseable_falls_back_to_string_compare(self):
+        self.assertTrue(MOD._ver_eq("weird", "weird"))
+        self.assertFalse(MOD._ver_eq("weird", "13.3"))
+
+    def test_report_uses_numeric_compare_not_string(self):
+        # floor "13.3.0" vs SDK "13.3" must read as match, not DRIFT.
+        results = [{"name": "r", "clone": True, "configure": True, "build": True,
+                    "floor": "13.3.0", "artifacts": [], "notes": []}]
+        txt = MOD.format_report(results, [], sdk="13.3")
+        self.assertIn("match", txt)
+        self.assertNotIn("DRIFT", txt)
+
+
+class CloneReuse(unittest.TestCase):
+    """A reused --workdir checkout is identity-verified and refreshed, not trusted
+    blindly (a stale or foreign tree would otherwise be measured as authoritative)."""
+
+    def _existing(self) -> pathlib.Path:
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        (d / "pulp-gpu-nam").mkdir()
+        return d / "pulp-gpu-nam"
+
+    def test_rejects_a_foreign_checkout(self):
+        from unittest import mock
+        dest = self._existing()
+        # origin points at a DIFFERENT repo → refuse to measure it.
+        with mock.patch.object(MOD, "_run",
+                               return_value=(0, "git@github.com:owner/some-other-repo.git")):
+            ok, msg = MOD.clone("owner/pulp-gpu-nam", dest, pathlib.Path("/dev/null"))
+        self.assertFalse(ok)
+        self.assertIn("not owner/pulp-gpu-nam", msg)
+
+    def test_refreshes_a_matching_checkout(self):
+        from unittest import mock
+        dest = self._existing()
+        calls = []
+
+        def fake_run(cmd, log=None, **kw):
+            calls.append(cmd)
+            if cmd[-1] == "origin" and "get-url" in cmd:
+                return 0, "git@github.com:owner/pulp-gpu-nam.git"
+            return 0, ""
+
+        with mock.patch.object(MOD, "_run", side_effect=fake_run):
+            ok, msg = MOD.clone("owner/pulp-gpu-nam", dest, pathlib.Path("/dev/null"))
+        self.assertTrue(ok)
+        # It fetched and hard-reset to the fetched tip.
+        self.assertTrue(any("fetch" in c for c in calls))
+        self.assertTrue(any(c[:4] == ["git", "-C", str(dest), "reset"] for c in calls))
+
+
 class BoundedJobs(unittest.TestCase):
     def test_explicit_wins(self):
         self.assertEqual(MOD.bounded_jobs(4), 4)

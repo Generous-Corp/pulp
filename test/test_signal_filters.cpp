@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/signal.hpp>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -192,6 +193,134 @@ TEST_CASE("LadderFilter lowpass behavior", "[signal][ladder]") {
     }
     float rms = std::sqrt(sum_sq / 4210.0f);
     REQUIRE(rms < 0.05f); // 24dB/oct should heavily attenuate
+}
+
+// The float ladder's saturator is gated by PULP_SIGNAL_FAST_LADDER_TANH
+// (fast_math.hpp): exact std::tanh by DEFAULT, opt-in Padé FastMath::tanh. The
+// references below reproduce both formulations of the process loop so the tests
+// can (a) prove the default is bit-exact std::tanh and (b) pin how far the Padé
+// path would move the filter — regardless of which way the gate is compiled.
+namespace {
+template <typename Sat>
+float ladder_reference(const std::vector<float>& in, float sr, float fc, float res, Sat sat) {
+    float stage[4] = {};
+    const float g = 1.0f - std::exp(-2.0f * 3.14159265f * fc / sr);
+    float last = 0.0f;
+    for (float input : in) {
+        const float feedback = res * 4.0f * (stage[3] - input * 0.5f);
+        const float x = input - feedback;
+        for (int i = 0; i < 4; ++i) {
+            const float prev = i > 0 ? stage[i - 1] : x;
+            stage[i] += g * (sat(prev) - sat(stage[i]));
+        }
+        last = stage[3];
+    }
+    return last;
+}
+float ladder_reference_std_tanh(const std::vector<float>& in, float sr, float fc, float res) {
+    return ladder_reference(in, sr, fc, res, [](float v) { return std::tanh(v); });
+}
+[[maybe_unused]] float ladder_reference_fast_tanh(
+    const std::vector<float>& in, float sr, float fc, float res) {
+    return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh(v); });
+}
+}  // namespace
+
+// Regression guard on the Padé approximation itself. This is what makes the
+// fast path safe to keep as an opt-in: a future edit to FastMath::tanh that
+// widened its error would break this before it could reach anyone's ears.
+TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
+          "[signal][ladder][fast_math]") {
+    // Central region the ladder lives in at normal levels — essentially float
+    // epsilon (~-130 dBFS).
+    float max_err_2 = 0.0f, max_err_4 = 0.0f, max_err_full = 0.0f;
+    for (int i = 0; i <= 200000; ++i) {
+        const float x = -16.0f + 32.0f * static_cast<float>(i) / 200000.0f;
+        const float e = std::abs(FastMath::tanh(x) - static_cast<float>(std::tanh(x)));
+        max_err_full = std::max(max_err_full, e);
+        if (std::abs(x) <= 4.0f) max_err_4 = std::max(max_err_4, e);
+        if (std::abs(x) <= 2.0f) max_err_2 = std::max(max_err_2, e);
+    }
+    REQUIRE(max_err_2 < 1e-6f);     // ~-133 dBFS — inaudible
+    REQUIRE(max_err_4 < 2e-5f);     // ~-94 dBFS  — Padé error inside |x|<4
+    REQUIRE(max_err_full < 7e-4f);  // ~-63 dBFS  — the +/-4 hard-clamp seam (worst case)
+}
+
+// The default float ladder must be EXACT std::tanh, so a driven signal tracks
+// the libm reference to float round-off. If someone flips the default back to
+// the Padé path, this fails — the fidelity guarantee is pinned, not implicit.
+TEST_CASE("LadderFilter default saturator is exact std::tanh",
+          "[signal][ladder]") {
+    constexpr float kSr = 48000.0f, kFc = 1200.0f, kRes = 0.7f;
+    LadderFilter ladder;
+    ladder.set_sample_rate(kSr);
+    ladder.set_frequency(kFc);
+    ladder.set_resonance(kRes);
+
+    // Hard drive (amp 3) pushes stage args past 4 — where the two saturators
+    // diverge most — so this is a strict test of "the default really is libm".
+    std::vector<float> drive;
+    drive.reserve(2048);
+    for (int i = 0; i < 2048; ++i)
+        drive.push_back(3.0f * std::sin(2.0f * 3.14159265f * 220.0f * static_cast<float>(i) / kSr));
+
+    float max_abs_dev = 0.0f;
+    std::vector<float> prefix;
+    prefix.reserve(drive.size());
+    for (float s : drive) {
+        prefix.push_back(s);
+        const float got = ladder.process(s);
+        const float exact = ladder_reference_std_tanh(prefix, kSr, kFc, kRes);
+        max_abs_dev = std::max(max_abs_dev, std::abs(got - exact));
+        REQUIRE(std::isfinite(got));
+    }
+#if PULP_SIGNAL_FAST_LADDER_TANH
+    // Opt-in fast build: track the Padé reference, and pin how far it strays
+    // from the exact filter (the character delta the gate protects against).
+    float max_fast_dev = 0.0f;
+    prefix.clear();
+    ladder.reset();
+    for (float s : drive) {
+        prefix.push_back(s);
+        const float got = ladder.process(s);
+        max_fast_dev = std::max(max_fast_dev,
+                                std::abs(got - ladder_reference_fast_tanh(prefix, kSr, kFc, kRes)));
+    }
+    REQUIRE(max_fast_dev < 1e-3f);        // tracks the Padé reference
+    REQUIRE(max_abs_dev  > 1e-5f);        // and is provably NOT the exact filter
+#else
+    // Default build: bit-exact to libm (snap_to_zero is a no-op at these levels).
+    REQUIRE(max_abs_dev < 1e-5f);
+#endif
+}
+
+TEST_CASE("LadderFilter double instantiation still uses libm tanh",
+          "[signal][ladder]") {
+    // FastMath::tanh is float-only; the double path must remain exact enough
+    // that a strict tanh-based reference matches to double tolerance.
+    LadderFilter64 ladder;
+    ladder.set_sample_rate(48000.0);
+    ladder.set_frequency(1000.0);
+    ladder.set_resonance(0.5);
+
+    double stage[4] = {};
+    // The header builds g from SampleType{3.14159265f} — a *float* literal even
+    // for the double instantiation. Mirror that exactly or the tolerance below
+    // is measuring pi, not tanh.
+    const double kPi = static_cast<double>(3.14159265f);
+    const double g = 1.0 - std::exp(-2.0 * kPi * 1000.0 / 48000.0);
+    for (int n = 0; n < 256; ++n) {
+        const double input = 0.5 * std::sin(0.05 * n);
+        const double got = ladder.process(input);
+
+        const double feedback = 0.5 * 4.0 * (stage[3] - input * 0.5);
+        const double x = input - feedback;
+        for (int i = 0; i < 4; ++i) {
+            const double prev = i > 0 ? stage[i - 1] : x;
+            stage[i] += g * (std::tanh(prev) - std::tanh(stage[i]));
+        }
+        REQUIRE_THAT(got, WithinAbs(stage[3], 1e-12));
+    }
 }
 
 TEST_CASE("LadderFilter resets buffer state and clamps resonance inputs",

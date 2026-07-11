@@ -1,0 +1,67 @@
+# intel_canary_lint.py allowlist
+#
+# Each non-comment line is `<repo-relative-path> :: <substring-of-the-line>`.
+# A finding is exempt when its file matches the path AND the substring appears
+# in the finding's source line. Substrings (not line numbers) keep entries
+# stable as files shift and force every exemption to name the exact construct.
+#
+# Only list occurrences that are GENUINELY arch-aware — i.e. the token is part
+# of correct arch-SELECTION logic (a conditional that also handles x86_64, or a
+# HOST-arch probe used for cache-dir naming, or a deliberately arm64-only Apple
+# toolchain file). A NEW hardcoded arm64-only asset must be fixed at the source,
+# not added here. See docs/guides/intel-support.md.
+
+# ── Class 3: aarch64/darwin-arm64/mac-arm64 inside correct arch selection ─────
+# wgpu-native prebuilt arch is chosen conditionally (arm64 slice OR x86_64 slice)
+# and keyed off CMAKE_OSX_ARCHITECTURES for the TARGET on Apple.
+tools/cmake/PulpDependencies.cmake :: STREQUAL "aarch64"
+tools/cmake/PulpDependencies.cmake :: set(ARCH "aarch64")
+tools/cmake/PulpDependencies.cmake :: forcing WebGPU prebuilt architecture to aarch64
+# HOST-arch probe used only to name the per-slice Skia cache dir, not to pick the
+# TARGET slice (that comes from CMAKE_OSX_ARCHITECTURES).
+tools/cmake/PulpDependencies.cmake :: CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64"
+# arm64 Skia platform slug is one branch of an arch-selection if/elseif that also
+# handles x86_64 + universal.
+tools/cmake/PulpDependencies.cmake :: set(_pulp_skia_plat "darwin-arm64")
+
+# FindV8: v8-builder publishes thin mac-arm64 + mac-x86_64 slices; the key is
+# chosen conditionally and a universal target hard-errors above.
+tools/cmake/FindV8.cmake :: mac-arm64 and mac-x86_64 slices
+tools/cmake/FindV8.cmake :: MATCHES "arm64|aarch64"
+tools/cmake/FindV8.cmake :: set(_v8_key "mac-arm64")
+tools/cmake/FindV8.cmake :: MATCHES "ARM64|aarch64"
+tools/cmake/FindV8.cmake :: MATCHES "aarch64|arm64"
+
+# PulpWgpuUniversal fabricates the fat dylib by iterating BOTH slices.
+tools/cmake/PulpWgpuUniversal.cmake :: foreach(_slice aarch64 x86_64)
+tools/cmake/PulpWgpuUniversal.cmake :: _slice STREQUAL "aarch64"
+
+# PulpFetchContent maps the selected arch (already TARGET-aware, see class 4
+# exemption below) to wgpu-native's URL arch token.
+tools/cmake/PulpFetchContent.cmake :: set(url_arch "aarch64")
+tools/cmake/PulpFetchContent.cmake :: elseif(arch STREQUAL "aarch64")
+
+# FindSkia HOST-arch probes name the cache dir / default host slice only.
+tools/cmake/FindSkia.cmake :: CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64|aarch64"
+tools/cmake/FindSkia.cmake :: CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64"
+
+# PulpMinOs takes the MAX min-OS floor across requested arches; this is a HOST
+# probe for the unset-CMAKE_OSX_ARCHITECTURES fallback.
+tools/cmake/PulpMinOs.cmake :: _host_machine MATCHES "arm64|aarch64"
+
+# Test fixture: a synthetic wgpu cache path exercising the relocatable check.
+tools/cmake/scripts/test_check_bundle_relocatable.py :: wgpu-macos-aarch64
+
+# fetch scripts map every supported platform slug (arm64 AND x64 AND universal).
+tools/scripts/fetch_skia_for_release.py :: "darwin-arm64": "mac-arm64"
+tools/scripts/fetch_skia_for_release.py :: darwin-arm64, darwin-x64, darwin-universal
+tools/scripts/fetch_v8_for_release.py :: "darwin-arm64": "mac-arm64"
+tools/scripts/fetch_v8_for_release.py :: darwin-arm64, darwin-x64, linux-x64
+
+# ── Class 5: deliberately arm64-only Apple toolchains ─────────────────────────
+# iOS DEVICE is arm64-only by construction (the simulator entry is universal).
+tools/cmake/ios.toolchain.cmake :: CACHE STRING "Device architecture"
+# Named arm64 osxcross cross-compile toolchain — arm64 is its whole purpose.
+tools/cmake/toolchains/macos-arm64-osxcross.cmake :: set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "macOS architectures" FORCE)
+# Help text in a FATAL_ERROR message showing how to build a single arch.
+tools/cmake/FindSkia.cmake :: Build a single arch: -DCMAKE_OSX_ARCHITECTURES=arm64

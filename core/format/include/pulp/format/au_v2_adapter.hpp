@@ -13,6 +13,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 namespace pulp::format::au {
@@ -230,6 +232,50 @@ inline UInt32 build_channel_info(const PluginDescriptor& desc,
     return count;
 }
 
+/// Fill `ProcessBusBufferInfo` for an AU v2 EFFECT's input buses: the main input
+/// (index 0, role Main) plus — when the descriptor declares a second input bus —
+/// a Sidechain bus (index 1, role Sidechain).
+///
+/// AUEffectBase is a single-input/single-output kernel model (`AUBase(ci, 1, 1)`,
+/// and `AUEffectBase::Render` pulls ONLY input element 0), so a Pulp AU effect
+/// cannot receive live sidechain audio through the stock render path. The
+/// sidechain view is therefore emitted INACTIVE: `Processor::sidechain_input()`
+/// returns `nullptr` gracefully (a disconnected bus delivering null without
+/// reordering the bus->buffer mapping) rather than exposing uninitialised memory
+/// or a bus the host would expect to feed. Live AU-effect sidechain delivery is a
+/// documented AU v2 limitation (the instrument/aumu path carries real multi-bus).
+///
+/// Pure / allocation-free and unit-testable without an `AudioComponentInstance`.
+/// Names view into `desc`, which must outlive the filled infos. The adapter sets
+/// each view's `.active` from the live host channel count before process().
+inline std::size_t build_input_bus_infos(const PluginDescriptor& desc,
+                                         ProcessBusBufferInfo* out,
+                                         std::size_t cap) noexcept {
+    if (cap == 0) return 0;
+    std::size_t n = 0;
+    out[n].name = desc.input_buses.empty()
+                      ? std::string_view{"Audio In"}
+                      : std::string_view{desc.input_buses[0].name};
+    out[n].index = 0;
+    out[n].direction = BusDirection::Input;
+    out[n].role = BusRole::Main;
+    out[n].declared_channels = desc.default_input_channels();
+    out[n].optional = desc.default_input_channels() == 0;
+    out[n].active = true;  // adapter overwrites from live channel count
+    ++n;
+    if (desc.input_buses.size() > 1 && n < cap) {
+        out[n].name = desc.input_buses[1].name;
+        out[n].index = 1;
+        out[n].direction = BusDirection::Input;
+        out[n].role = BusRole::Sidechain;
+        out[n].declared_channels = desc.input_buses[1].default_channels;
+        out[n].optional = true;
+        out[n].active = false;  // AUEffectBase does not pull a 2nd input element
+        ++n;
+    }
+    return n;
+}
+
 /// RT-safe builder for the `MIDIPacketList` an AU v2 plugin hands the host via
 /// `kAudioUnitProperty_MIDIOutputCallback`. Backed by a fixed-size byte buffer
 /// so building the list never allocates on the audio thread — the same
@@ -286,12 +332,10 @@ struct MidiOutputPacketBuilder {
         std::uint32_t order = 0;
 
         const auto clamp_offset = [&](std::int32_t off) -> std::int32_t {
-            if (off < 0) return 0;
-            if (frame_count > 0 &&
-                off > static_cast<std::int32_t>(frame_count) - 1) {
-                return static_cast<std::int32_t>(frame_count) - 1;
-            }
-            return off;
+            // Shared cross-format offset contract (see detail/midi_out_offset.hpp
+            // and test_midi_out_offset_parity.cpp): an in-block offset N is
+            // preserved; a stray out-of-block offset is clamped into the block.
+            return detail::au_output_offset(off, frame_count);
         };
 
         std::uint32_t ev_index = 0;
@@ -456,8 +500,17 @@ private:
     /// advertise a MIDI output the host would try to wire up.
     bool plugin_produces_midi() const noexcept;
 
-    std::unique_ptr<Processor> processor_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
+
+    // Immutable plugin metadata, cached once in the constructor so the render
+    // path can view its bus-name strings without copying the descriptor per
+    // block (which would allocate std::string members on the audio thread).
+    PluginDescriptor descriptor_{};
 
     // Main-thread listener that pushes editor parameter edits to the host
     // (AudioUnitSetParameter), kept alive for the adapter's lifetime so host

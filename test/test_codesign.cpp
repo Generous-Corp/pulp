@@ -20,6 +20,9 @@ SigningInfo parse_codesign_details(const std::string& output);
 std::optional<std::string> parse_notarytool_submit_id(const std::string& output);
 NotarizationStatus parse_notarytool_status(const std::string& output);
 std::vector<std::string> parse_signing_identities(const std::string& output);
+std::string disk_image_failure_hint(const std::string& output);
+bool create_dmg_image(const std::string& source_path, const std::string& output_path,
+                      const std::string& volume_name, std::string& error);
 }
 #endif
 
@@ -159,6 +162,46 @@ TEST_CASE("create_dmg produces a file from valid source", "[ship][codesign]") {
     fs::remove_all(root);
 #endif
 }
+
+#ifdef __APPLE__
+TEST_CASE("a busy hdiutil failure names the unmount dissenter; other failures do not",
+          "[ship][codesign]") {
+    using detail::disk_image_failure_hint;
+
+    // hdiutil collapses "someone vetoed the unmount of my temporary volume" into
+    // this one line, so the hint is the only place a user learns what to do.
+    const auto busy = disk_image_failure_hint("hdiutil: create failed - Resource busy");
+    CHECK_FALSE(busy.empty());
+    CHECK(busy.find("diskutil unmount") != std::string::npos);  // how to find the dissenter
+    CHECK(busy.find("PID") != std::string::npos);                // what to trust when you do
+    CHECK_FALSE(disk_image_failure_hint("hdiutil: attach failed - Device busy").empty());
+
+    // A failure the hint cannot explain must not carry it: pointing at the
+    // simulator when the source folder is missing is worse than saying nothing.
+    CHECK(disk_image_failure_hint("hdiutil: create failed - No such file or directory").empty());
+    CHECK(disk_image_failure_hint("hdiutil: create failed - No space left on device").empty());
+    CHECK(disk_image_failure_hint("").empty());
+}
+
+TEST_CASE("a failed dmg build hands back what hdiutil said", "[ship][codesign]") {
+    // hdiutil's output used to be redirected to /dev/null, so every DMG failure
+    // reached the user as a bare `false`. Whatever hdiutil prints, the caller gets.
+    ScopedTempDir temp("pulp-dmg-missing-src");
+    std::string error;
+    CHECK_FALSE(detail::create_dmg_image((temp.path / "not-here").string(),
+                                         (temp.path / "out.dmg").string(),
+                                         "PulpTest", error));
+    CHECK_FALSE(error.empty());
+    CHECK(error.find("hdiutil") != std::string::npos);
+}
+
+TEST_CASE("create_dmg fails when the source is missing", "[ship][codesign]") {
+    ScopedTempDir temp("pulp-dmg-missing-src");
+    CHECK_FALSE(create_dmg((temp.path / "not-here").string(),
+                           (temp.path / "out.dmg").string(), "PulpTest"));
+    CHECK_FALSE(fs::exists(temp.path / "out.dmg"));
+}
+#endif
 
 TEST_CASE("codesign reports unsigned regular files without identity metadata",
           "[ship][codesign]") {

@@ -101,7 +101,15 @@ struct. It owns:
   converts f32 outputs back to `data64`. If the plugin opts in, every active
   routed bus for the block must be f64 before the adapter calls
   `Processor::process_f64(ProcessBuffers64&, ...)`; mixed f32/f64 blocks stay
-  on the compatibility path.
+  on the compatibility path. Every audio port advertises
+  `CLAP_AUDIO_PORT_SUPPORTS_64BITS` (in `audio_ports_get`), and native-f64
+  descriptors additionally advertise `CLAP_AUDIO_PORT_PREFERS_64BITS` — a
+  spec-compliant host only sends `data64` to ports carrying the SUPPORTS
+  flag, so dropping it silently kills the whole f64 path. The boundary
+  f64→f32 demotion and output-scratch pre-zero are deferred until after the
+  native-f64 decision inside `clap_process` (native blocks read the host's
+  double buffers directly and skip the conversion); keep any new bus wiring
+  consistent with that ordering.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
 - `bridge` + `editor_host` + `editor_visible` — gated on
@@ -231,7 +239,13 @@ debug log. See the `mpe` skill for tracker details.
 **Outbound MIDI**: the processor's `midi_out` emits short messages as
 `CLAP_EVENT_MIDI` and sysex entries as
 `CLAP_EVENT_MIDI_SYSEX`, both via `out_events->try_push`.
-`sample_offset` carries through to `header.time`. The sysex
+`sample_offset` carries through to `header.time` via the shared cross-format
+helper `detail::clap_output_offset(sample_offset)` (clamps a negative offset up
+to 0, since `header.time` is unsigned) — the same "offset N in → offset N out"
+contract AU v2 and VST3 share, defined once in
+`core/format/include/pulp/format/detail/midi_out_offset.hpp` and pinned by
+`test/test_midi_out_offset_parity.cpp`. Do NOT re-open-code the offset clamp.
+The sysex
 `clap_event_midi_sysex_t.buffer` field is non-owning — the backing
 vector is alive for the duration of `clap_process()`, which is all
 CLAP's push contract requires (the host copies before returning).
@@ -479,6 +493,28 @@ every secondary output channel every block — do not skip this even for
 "only bus 0 used" plugins; some hosts reuse memory across plugin
 slots.
 
+### `constant_mask` on an output bus is inherited, not given to you clean
+
+`clap_audio_buffer_t::constant_mask` is the *plugin's* promise about the
+block it just wrote: bit N set means "every frame of channel N equals
+sample 0", and a host may act on it by reading one sample instead of the
+block. The host never clears it, and CLAP explicitly permits in-place
+buffers — so an output bus can arrive still carrying the mask an upstream
+plugin set on the input it aliases. An adapter that never writes the mask
+inherits that lie, and a plugin whose output varies gets read back as one
+held sample.
+
+`clap_process` therefore clears `constant_mask` on **every** output bus
+(not just the routed ones) after the Processor call and after the bypass
+short-circuit. Zero means "no channel is known constant", which is always
+true and always safe. Never set a bit speculatively: a set bit obliges you
+to have actually filled the channel with that constant.
+
+The symptom is loudest on CV-rate outputs — where the variation *is* the
+signal, so the whole plug-in reads as a frozen DC level — and can be
+invisible on audio, because hosts are free to ignore the mask entirely.
+Never touch the *input* bus's mask; that one belongs to the host.
+
 ### ARA companion factory is returned **only after Processor exists**
 
 `clap_get_extension` may be called before `clap_init` populates
@@ -724,3 +760,65 @@ first; a per-param skip-set stops them double-reporting a param that pushed
 explicit `push_output_param_event()` events. CLAP param values are **plain
 domain** (`double`), unlike VST3 which normalizes. `test_clap_midi_events.cpp`
 asserts the `param@0, midi@8, param@16` interleave stays non-decreasing in time.
+
+## The StateStore must outlive the Processor
+
+`Processor::state()` dereferences a pointer the host installs. A Processor may
+follow it for its whole lifetime — from `process()`, from its destructor, and from
+any worker thread that destructor is about to `join()`. So the host has to keep the
+store alive until the Processor is gone.
+
+In practice that is one rule about member order: **declare the `state::StateStore`
+before the `std::unique_ptr<Processor>`.** Members are destroyed in reverse
+declaration order, so the store then dies last. Every host in `core/format` had it
+backwards until 2026-07; the effect is nothing at all for a Processor with no
+threads, and a use-after-free on plug-in close for one with a background thread that
+reads `state().get_value()` while the destructor walks to its `join()`.
+
+It crashes only on close, only sometimes, and the DAW gets the blame. The regression
+test is `test/test_store_lifetime.cpp`; it observes the store's destruction through a
+sentinel owned by a parameter's `to_string` closure rather than reading freed memory
+and hoping the result looks wrong.
+
+A Processor should not *rely* on this either: a worker thread that reads the store on
+every tick is one host away from the same crash. Publish what the thread needs to
+atomics from `process()` instead.
+
+## Param text entry + gesture threading (PARAMS region)
+
+- `params_text_to_value` must try `ParamInfo::from_string` BEFORE the generic
+  numeric parse. from_string is the inverse of the `to_string` used by
+  `value_to_text`, so a custom rendering ("quality=0.75", an enum label)
+  round-trips; a bare strtod would reject it. CLAP values are plain (min..max),
+  the same domain from_string returns — no normalization step. Guard the result
+  with `std::isfinite` and fall through to the locale-independent strtod path on
+  a non-finite parse. Keep the locale-independent fallback (`parse_double_c_locale`)
+  for plain-numeric params. Test: `test/test_clap_entry.cpp`
+  ("text_to_value routes through ParamInfo::from_string").
+- CLAP delivers `CLAP_EVENT_PARAM_GESTURE_BEGIN/END` on the process/flush path
+  and calls `store.begin_gesture/end_gesture` directly. Those StateStore entry
+  points are main-thread-only (they forward to host undo grouping). A background
+  writer must use `StateStore::run_gesture_on_main()` — see the state notes in
+  `binding.hpp`.
+## Editor resize contract (aspect-lock vs free reflow)
+
+`gui_can_resize` returns resizable **iff `view_size().min_width>0 && min_height>0`** —
+a plugin on the base-class default (`ViewSize{w,h,0,0,0,0}`) is fixed-size. Do NOT
+naively "honor `aspect_ratio==0`" everywhere: that default returns `aspect_ratio==0`,
+so a naive read flips *every* hand-authored plugin to free-reflow. The three cases the
+GUI region dispatches (`gui_create`, `gui_get_resize_hints`, `gui_adjust_size`):
+
+- **min==0 (not resizable):** keep the design-viewport pin at preferred (letterbox
+  backstop for off-size panes). `gui_can_resize` already returns false.
+- **resizable + `aspect_ratio>0`:** viewport + aspect lock; `preserve_aspect_ratio=true`;
+  `gui_adjust_size` snaps to the design aspect (design-import plugins live here).
+- **resizable + `aspect_ratio==0`:** free drag — **no** `set_design_viewport`, **no**
+  `set_fixed_aspect_ratio`; `preserve_aspect_ratio=false`; `gui_adjust_size` clamps each
+  axis to `[min,max]` independently with **no aspect snap**; the root reflows via Yoga at
+  the host size.
+
+The rule is `free = (min>0 && aspect_ratio==0)`. VST3's `PulpPlugView` mirrors it exactly
+(`canResize`/`checkSizeConstraint`). Tests: the `[resize]` cases in
+`test/test_clap_entry.cpp` build a `PulpClapPlugin` whose `bridge` is constructed
+directly from a controlled `view_size()` (the `ViewBridge` ctor copies `view_size()` into
+`size_hints_`, so no `gui_create`/attach is needed to exercise the negotiation math).

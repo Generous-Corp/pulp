@@ -4,6 +4,7 @@
 /// Fast math approximations for real-time audio DSP.
 /// All functions are branchless and SIMD-friendly (no conditionals in hot path).
 
+#include <algorithm>  // std::max / std::min, used by clamp()
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -139,5 +140,37 @@ struct FastMath {
         return x - (x * x * x) / 6.75f;
     }
 };
+
+/// Fidelity gate for the Moog ladder's saturating non-linearity (PR #5880).
+///
+/// `FastMath::tanh` is a Padé approximation of `std::tanh`: ~1.2-1.4x faster on
+/// the real-time path, but NOT bit-exact. Its error is negligible (~-130 dBFS)
+/// for the input range the ladder sees at normal levels (|arg| < ~3, i.e. input
+/// up to ~+6 dBFS even at self-oscillation), but the approximation HARD-CLAMPS
+/// to +/-1 beyond |x| = 4, where real tanh is still climbing. When the ladder is
+/// driven hard (3-4x / +10 dBFS overdrive at high resonance — a signature Moog
+/// "drive" setting) the stage argument crosses 4 and the clamp seam produces a
+/// genuine, phase-stable deviation that peaks at ~-63 dBFS pointwise and ~-69
+/// dBFS in the filtered output. That sits inside the plausibly-audible band and
+/// alters the ladder's overdrive character, so the exact saturator is the
+/// DEFAULT. Define `PULP_SIGNAL_FAST_LADDER_TANH=1` to opt into the fast Padé
+/// path where the ~1.4x throughput win matters more than bit-exact drive.
+///
+/// This is the single source of truth for the saturator: `LadderFilterT<float>`
+/// (the interpreter) and the live-kernel `f2_ladder_tanhf` export (the F2 WASM
+/// emitter) both route through it, so the per-node bit-exact null test stays
+/// green under either setting.
+#ifndef PULP_SIGNAL_FAST_LADDER_TANH
+#define PULP_SIGNAL_FAST_LADDER_TANH 0  // default: exact std::tanh (fidelity)
+#endif
+
+/// The ladder's `float` saturator, gated by `PULP_SIGNAL_FAST_LADDER_TANH`.
+inline float ladder_tanh(float x) {
+#if PULP_SIGNAL_FAST_LADDER_TANH
+    return FastMath::tanh(x);
+#else
+    return std::tanh(x);
+#endif
+}
 
 } // namespace pulp::signal

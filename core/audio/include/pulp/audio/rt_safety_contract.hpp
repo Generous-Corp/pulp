@@ -476,8 +476,9 @@ sampler_looper_rt_safety_contracts() noexcept {
 // Core realtime-runtime callback-boundary contracts. Companion to the
 // sampler/looper table above, extending the codified RT-safety registry beyond
 // the sampler to the lock-free primitives, the per-block automation queue, the
-// host graph walk, the load-telemetry counter, the denormal-mode guard, and
-// the Processor DSP entry point. These labels are DESCRIPTIVE — the actual
+// host graph walk, RealtimeResourceSlot's read side, the load-telemetry counter,
+// the denormal-mode guard, and the Processor DSP entry point. These labels are
+// DESCRIPTIVE — the actual
 // enforcement is the no-alloc/no-lock abort-trap in
 // test/native_components/rt_intercept_test_support.cpp plus the per-primitive
 // no-alloc tests; the same well-formedness invariants the sampler table is
@@ -506,8 +507,9 @@ inline constexpr std::array kCoreRuntimeRtSafetyContracts{
         false,
         false,
         "single writer thread",
-        "Byte-wise volatile copy bracketed by an odd/even seq increment; cost "
-        "scales with sizeof(T), so keep T small for audio-thread writers."),
+        "Relaxed atomic word/tail-byte payload copy bracketed by an odd/even "
+        "seq increment; cost scales with sizeof(T), so keep T small for "
+        "audio-thread writers."),
     detail::make_rt_safety_contract(
         "TripleBuffer",
         "read_write",
@@ -532,6 +534,19 @@ inline constexpr std::array kCoreRuntimeRtSafetyContracts{
         "one producer thread and one consumer thread",
         "Wraps choc SingleReaderSingleWriterFIFO; fixed capacity, overflow is "
         "counted and the push fails rather than allocating."),
+    detail::make_rt_safety_contract(
+        "RealtimeResourceSlot",
+        "get",
+        RtSafetyClass::AudioCallbackSafe,
+        true,
+        false,
+        false,
+        false,
+        false,
+        "one non-RT publisher/reclaimer; any number of audio readers",
+        "Acquire-loads a raw prepared-resource pointer. The pointer is not "
+        "reader-pinned; the non-RT owner reclaims retired resources only after "
+        "a block-boundary grace point."),
     detail::make_rt_safety_contract(
         "ParameterEventQueue",
         "push_sort_clear",

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/signal/denormal.hpp>
+
 #include <cmath>
 
 namespace pulp::signal {
@@ -23,8 +25,10 @@ public:
         SampleType v3 = input - ic2_;
         SampleType v1 = a1_ * ic1_ + a2_ * v3;
         SampleType v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
-        ic1_ = SampleType{2.0f} * v1 - ic1_;
-        ic2_ = SampleType{2.0f} * v2 - ic2_;
+        // Snap the two integrator states to keep denormals out of the TPT
+        // feedback path where no FTZ guard applies. No-op above 1e-15.
+        ic1_ = snap_to_zero(SampleType{2.0f} * v1 - ic1_);
+        ic2_ = snap_to_zero(SampleType{2.0f} * v2 - ic2_);
 
         switch (mode_) {
             case Mode::lowpass:  return v2;

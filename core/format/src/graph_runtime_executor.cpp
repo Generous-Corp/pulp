@@ -27,14 +27,6 @@ bool command_requires_node(graph::GraphCommandType type) noexcept {
     return true;
 }
 
-bool contains_node(const graph::GraphRuntimePlan& plan,
-                   graph::NodeId node_id) noexcept {
-    return std::any_of(plan.nodes.begin(), plan.nodes.end(),
-                       [node_id](const graph::GraphRuntimeNodePlan& node) {
-                           return node.id == node_id;
-                       });
-}
-
 graph::GraphEvent command_event(const graph::GraphTimedCommand& command,
                                 graph::GraphEventType type) noexcept {
     graph::GraphEvent event;
@@ -311,20 +303,24 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
     // audio-rate path.
     const std::uint32_t dense_count = automation.dense_param_count(node_index);
     // Per-node DENSE transient gather slices (disjoint per node => parallel-safe).
-    // Re-zero this node's flags/bounds at entry — the storage persists.
+    // Touch tracking keeps the RT path from clearing/emitting every predeclared
+    // dense lane when this block reaches only a subset.
     const std::span<std::uint8_t> dense_replace = automation.dense_replace(node_index);
     const std::span<std::uint8_t> dense_add = automation.dense_add(node_index);
     const std::span<float> dense_lo = automation.dense_lo(node_index);
     const std::span<float> dense_hi = automation.dense_hi(node_index);
-    for (std::uint32_t i = 0; i < dense_count; ++i) {
-        dense_replace[i] = 0;
-        dense_add[i] = 0;
-        dense_lo[i] = 0.0f;
-        dense_hi[i] = 0.0f;
-    }
-    for (std::uint32_t i = 0; i < dense_count; ++i) {
-        std::fill_n(automation.dense_buffer(node_index, i), frames, 0.0f);
-    }
+    const std::span<std::uint32_t> dense_touched = automation.dense_touched(node_index);
+    std::uint32_t dense_touched_count = 0;
+    auto touch_dense = [&](std::uint32_t pi) noexcept -> float* {
+        float* dst = automation.dense_buffer(node_index, pi);
+        if (!dense_replace[pi] && !dense_add[pi]) {
+            dense_lo[pi] = 0.0f;
+            dense_hi[pi] = 0.0f;
+            std::fill_n(dst, frames, 0.0f);
+            dense_touched[dense_touched_count++] = pi;
+        }
+        return dst;
+    };
     for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
@@ -339,9 +335,9 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
         const float* src = pool.slot_data(src_slots.output_base + conn.source_port);
         if (src == nullptr) continue;
         const auto& a = conn.automation;
+        float* dst = touch_dense(pi);
         dense_lo[pi] = a.bounds_lo;
         dense_hi[pi] = a.bounds_hi;
-        float* dst = automation.dense_buffer(node_index, pi);
         const auto ring = pool.delay_ring(conn_index);
         if (ring.data == nullptr || ring.delay == 0) {
             for (std::uint32_t f = 0; f < frames; ++f) {
@@ -368,7 +364,8 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
             *ring.write_pos = wp;
         }
     }
-    for (std::uint32_t i = 0; i < dense_count; ++i) {
+    for (std::uint32_t touched = 0; touched < dense_touched_count; ++touched) {
+        const std::uint32_t i = dense_touched[touched];
         if (!dense_replace[i] && !dense_add[i]) continue;
         const std::uint32_t pid = automation.dense_param_id(node_index, i);
         const float* vals = automation.dense_buffer(node_index, i);
@@ -379,6 +376,10 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
             if (dense_add[i]) v = std::clamp(v, lo, hi);
             if (!queue->push({pid, static_cast<std::int32_t>(f), v, 0})) break;
         }
+        dense_replace[i] = 0;
+        dense_add[i] = 0;
+        dense_lo[i] = 0.0f;
+        dense_hi[i] = 0.0f;
     }
     queue->sort();
 }
@@ -657,6 +658,7 @@ bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
         dense_hi_.assign(total_dense, 0.0f);
         dense_replace_.assign(total_dense, 0);
         dense_add_.assign(total_dense, 0);
+        dense_touched_.assign(total_dense, 0);
     } catch (...) {
         clear();
         return false;
@@ -679,6 +681,7 @@ void GraphRuntimeAutomationScratch::clear() noexcept {
     dense_hi_.clear();
     dense_replace_.clear();
     dense_add_.clear();
+    dense_touched_.clear();
     sparse_accum_storage_.clear();
     node_sparse_first_.clear();
     node_sparse_count_.clear();
@@ -758,6 +761,11 @@ bool GraphRuntimeSnapshot::reset(
     }
 
     try {
+        std::vector<graph::NodeId> node_ids;
+        node_ids.reserve(plan.nodes.size());
+        for (const auto& node : plan.nodes) node_ids.push_back(node.id);
+        std::sort(node_ids.begin(), node_ids.end());
+
         // The buffer assignment is a pure function of the plan, so it is built
         // here off the audio thread alongside plan validation. parallel_safe
         // disables slot reuse so concurrent same-level nodes never alias a
@@ -771,6 +779,7 @@ bool GraphRuntimeSnapshot::reset(
         }
         plan_ = std::move(plan);
         bindings_.assign(bindings.begin(), bindings.end());
+        node_ids_sorted_ = std::move(node_ids);
         assignment_ = std::move(assignment);
         parallel_safe_ = parallel_safe;
     } catch (...) {
@@ -783,12 +792,14 @@ bool GraphRuntimeSnapshot::reset(
 void GraphRuntimeSnapshot::clear() noexcept {
     plan_.clear();
     bindings_.clear();
+    node_ids_sorted_.clear();
     assignment_ = {};
     parallel_safe_ = false;
 }
 
 bool GraphRuntimeSnapshot::valid() const noexcept {
     if (bindings_.size() != plan_.nodes.size()) return false;
+    if (node_ids_sorted_.size() != plan_.nodes.size()) return false;
     if (plan_.processing_order_indices.size() != plan_.nodes.size()) return false;
     if (assignment_.nodes.size() != plan_.nodes.size()) return false;
     for (std::uint32_t i = 0; i < plan_.nodes.size(); ++i) {
@@ -800,9 +811,13 @@ bool GraphRuntimeSnapshot::valid() const noexcept {
     return true;
 }
 
+bool GraphRuntimeSnapshot::contains_node(graph::NodeId node_id) const noexcept {
+    return std::binary_search(node_ids_sorted_.begin(), node_ids_sorted_.end(), node_id);
+}
+
 bool GraphRuntimeExecutor::drain_commands(
     ProcessBlock& block,
-    const graph::GraphRuntimePlan& plan,
+    const GraphRuntimeSnapshot& snapshot,
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
     GraphRuntimeCommandHandler command_handler,
@@ -812,11 +827,12 @@ bool GraphRuntimeExecutor::drain_commands(
 
     result.commands_drained = static_cast<std::uint32_t>(commands.size());
     commands_drained_.fetch_add(result.commands_drained, std::memory_order_relaxed);
+    const auto& plan = snapshot.plan();
 
     for (const auto& command : commands) {
         auto status = GraphRuntimeCommandStatus::Accepted;
         if (command_requires_node(command.command.type) &&
-            !contains_node(plan, command.command.node_id)) {
+            !snapshot.contains_node(command.command.node_id)) {
             status = GraphRuntimeCommandStatus::Rejected;
         } else if (command_handler.apply && command.block_offset != 0) {
             status = GraphRuntimeCommandStatus::Rejected;
@@ -862,7 +878,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
     const auto bindings = snapshot.bindings();
 
     GraphRuntimeExecutorResult result;
-    if (!drain_commands(block, plan, commands, command_results, command_handler,
+    if (!drain_commands(block, snapshot, commands, command_results, command_handler,
                         event_sink, result)) {
         return fail_command_scratch_too_small();
     }
@@ -943,7 +959,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     }
 
     GraphRuntimeExecutorResult result;
-    if (!drain_commands(block, plan, commands, command_results, command_handler,
+    if (!drain_commands(block, snapshot, commands, command_results, command_handler,
                         event_sink, result)) {
         return fail_command_scratch_too_small();
     }
@@ -1097,7 +1113,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
     }
 
     GraphRuntimeExecutorResult result;
-    if (!drain_commands(block, plan, commands, command_results, command_handler,
+    if (!drain_commands(block, snapshot, commands, command_results, command_handler,
                         event_sink, result)) {
         return fail_command_scratch_too_small();
     }

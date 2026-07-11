@@ -50,6 +50,8 @@ pulp_add_test_suite(pulp-test-graph-runtime-levelization LIBRARIES pulp::graph)
 pulp_add_test_suite(pulp-test-graph-runtime-worker-pool
     SOURCES test_graph_runtime_worker_pool.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::format)
+target_compile_definitions(pulp-test-graph-runtime-worker-pool
+    PRIVATE PULP_GRAPH_RUNTIME_WORKER_POOL_TEST_HOOKS=1)
 # Executor routing path moves audio between nodes (chain/diamond/feedback/
 # multi-output parity vs SignalGraph) and is allocation-free on the RT thread.
 pulp_add_test_suite(pulp-test-graph-executor-routing
@@ -247,6 +249,10 @@ pulp_add_test_suite(pulp-test-time-pitch-processor LIBRARIES pulp::audio)
 
 # Loop reader and renderer primitives, including interpolation, fades, and crossfades.
 pulp_add_test_suite(pulp-test-loop-rendering LIBRARIES pulp::audio)
+# PF-2 null test: wrap-crossfade output is bit-exact after hoisting the
+# equal-power gains to one per-frame CrossfadePlan.
+pulp_add_test_suite(pulp-test-loop-renderer-crossfade-null
+    SOURCES test_loop_renderer_crossfade_null.cpp LIBRARIES pulp::audio)
 
 # End-to-end synthetic generated looper harness over core primitives only.
 pulp_add_test_suite(pulp-test-sampler-looper-integration LIBRARIES pulp::audio)

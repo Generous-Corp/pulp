@@ -115,8 +115,28 @@ export function parseMidiOutRecords(bytes, len) {
 // invalidates old ArrayBuffer references.
 export function makeBridge(exports) {
   const mem = () => exports.memory;
-  const u8 = () => new Uint8Array(mem().buffer);
-  const f32 = () => new Float32Array(mem().buffer);
+  // Cache the heap views instead of rebuilding a Uint8Array/Float32Array on
+  // every call. These are hit on the audio render thread — f32() on the planar
+  // copy in and copy out (see makeWamAudioPorts) and u8() on every MIDI drain —
+  // so a fresh view per call was steady per-block GC pressure. Rebuild only when
+  // the heap buffer changes: ALLOW_MEMORY_GROWTH swaps the ArrayBuffer (identity
+  // changes) and a shared/growable buffer extends in place (byteLength changes),
+  // so covering both never reads a grown heap through a stale, too-short view.
+  let viewBuffer = null;
+  let viewByteLength = -1;
+  let u8View = null;
+  let f32View = null;
+  const refreshViews = () => {
+    const buf = mem().buffer;
+    if (buf !== viewBuffer || buf.byteLength !== viewByteLength) {
+      viewBuffer = buf;
+      viewByteLength = buf.byteLength;
+      u8View = new Uint8Array(buf);
+      f32View = new Float32Array(buf);
+    }
+  };
+  const u8 = () => { refreshViews(); return u8View; };
+  const f32 = () => { refreshViews(); return f32View; };
   const writeCStr = (s) => {
     const bytes = utf8Encode(s + "\0");
     const p = exports.malloc(bytes.length);
@@ -137,6 +157,10 @@ export function makeBridge(exports) {
     // --no-entry build: run static constructors (constructs the global bridge).
     callCtors() { if (exports.__wasm_call_ctors) exports.__wasm_call_ctors(); },
     init(sampleRate, blockSize) { return exports.wam_init(sampleRate, blockSize) !== 0; },
+    // PLANAR channel-pointer ABI (matches WCLAP / native CLAP). `inPtr`/`outPtr`
+    // are wasm pointer ARRAYS — one channel-buffer pointer per channel — laid out
+    // by makeWamAudioPorts. wam_process reads/writes those channel buffers
+    // directly; there is no interleave round-trip.
     process(inPtr, outPtr, channels, frames) { exports.wam_process(inPtr, outPtr, channels, frames); },
     setParam(id, value) { const p = writeCStr(id); exports.wam_set_param(p, value); exports.free(p); },
     getParam(id) { const p = writeCStr(id); const v = exports.wam_get_param(p); exports.free(p); return v; },
@@ -212,4 +236,66 @@ export function makeBridge(exports) {
     if (typeof exports[exportName] !== "function") delete bridge[method];
   }
   return bridge;
+}
+
+// Planar audio ports for the wam_process ABI — the single place the JS<->wasm
+// audio marshalling lives, so the worklet and the Node runners cannot lay the
+// buffers out differently.
+//
+// Web Audio hands JS planar per-channel Float32Arrays; the Pulp Processor is
+// planar; WCLAP and native CLAP pass planar channel-pointer ARRAYS. So the WAM
+// ABI is planar too: wam_process(inPtr, outPtr, channels, frames), where each
+// *Ptr is a wasm array of `maxChannels` pointers, one per channel buffer. This
+// owns those buffers + the two pointer arrays for the life of the module, so a
+// caller copies WHOLE channels in/out (a straight typed-array copy — no
+// per-sample interleave transpose) instead of re-implementing the layout.
+//
+// Emscripten's malloc never relocates a live allocation, so the channel
+// addresses written into the pointer arrays here stay valid even if the heap
+// grows later; only the cached typed-array views (bridge.f32()) are refreshed.
+export function makeWamAudioPorts(bridge, maxChannels, maxFrames) {
+  const inBufs = [], outBufs = [];
+  for (let c = 0; c < maxChannels; c++) {
+    inBufs.push(bridge.malloc(maxFrames * 4));
+    outBufs.push(bridge.malloc(maxFrames * 4));
+  }
+  const inPtr = bridge.malloc(maxChannels * 4);
+  const outPtr = bridge.malloc(maxChannels * 4);
+  {
+    // One-time, off the audio thread: stamp the channel pointers into the two
+    // pointer arrays. A throwaway DataView is fine here (not a hot path).
+    const dv = new DataView(bridge.exports.memory.buffer);
+    for (let c = 0; c < maxChannels; c++) {
+      dv.setUint32(inPtr + c * 4, inBufs[c], true);
+      dv.setUint32(outPtr + c * 4, outBufs[c], true);
+    }
+  }
+  return {
+    inPtr, outPtr, maxChannels, maxFrames,
+    // Copy each source channel (a Float32Array) into its wasm channel buffer.
+    // A straight per-channel copy — no interleave. A missing source channel is
+    // zero-filled so a stale block never leaks through.
+    writeInput(channels, frames) {
+      const h = bridge.f32();
+      for (let c = 0; c < maxChannels; c++) {
+        const base = inBufs[c] >> 2;
+        const src = channels && channels[c];
+        if (src) h.set(src.subarray(0, frames), base);
+        else h.fill(0, base, base + frames);
+      }
+    },
+    // Copy the wasm output channels back into the caller's per-channel
+    // Float32Arrays (min of what the caller has and what we own).
+    readInto(channels, frames) {
+      const h = bridge.f32();
+      const n = Math.min(channels.length, maxChannels);
+      for (let c = 0; c < n; c++) {
+        const base = outBufs[c] >> 2;
+        channels[c].set(h.subarray(base, base + frames));
+      }
+    },
+    // Random-access sample helpers (used by the deterministic Node runners).
+    setInputSample(c, f, v) { bridge.f32()[(inBufs[c] >> 2) + f] = v; },
+    outputSample(c, f) { return bridge.f32()[(outBufs[c] >> 2) + f]; },
+  };
 }

@@ -48,3 +48,31 @@ Notes:
 - The registry of what to sweep is `planning/sdk-consumers/consumers.yaml` (private submodule); per-repo build knobs are in `tools/scripts/sdk_consumer_sweep_recipes.yaml`. README/PKG-only release mirrors are skipped automatically.
 - `pulp minos sweep` needs PyYAML: `python3 -m pip install pyyaml`.
 - The sweep clones and builds many repositories, so it's a CLI-only command (not exposed over MCP). The `pulp minos measure` op is available over MCP as `pulp_minos`.
+
+## Batch-update consumers to a new SDK
+
+When a new SDK ships, bump every downstream consumer's pinned SDK version in one pass. **Dry-run by default** — it prints the per-repo pin changes and writes nothing:
+
+```bash
+pulp minos update --to 0.640.0
+```
+
+Add `--open-prs` to actually clone each repo, apply the edit on a branch, commit, push, and open a PR:
+
+```bash
+pulp minos update --to 0.640.0                       # dry-run plan
+pulp minos update --to 0.640.0 --only pulp-gpu-nam   # scope to one repo
+pulp minos update --to 0.640.0 --open-prs            # open the PRs
+```
+
+It rewrites the common pin forms (`pulp.toml` `sdk_version`, `find_package(Pulp X.Y.Z)`, FetchContent `GIT_TAG`) and leaves a floating `sdk_version = "latest"` alone.
+
+## Republish runbook
+
+Print the exact rebuild + package + publish steps for the packaged demos (prints only — never builds, signs, or touches a release):
+
+```bash
+pulp minos publish-runbook --to 0.640.0
+```
+
+Full auto-publish is intentionally not automated: each packaged demo signs with its own identity and cuts its own release, and publishing mutates public releases — so the runbook is the reviewable hand-off to that per-repo step.

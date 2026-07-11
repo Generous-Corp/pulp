@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/runtime/slot.hpp>
 #include <pulp/signal/fft.hpp>
 
 #include <algorithm>
@@ -170,14 +170,6 @@ public:
     ConvolverIrSwapperT(const ConvolverIrSwapperT&) = delete;
     ConvolverIrSwapperT& operator=(const ConvolverIrSwapperT&) = delete;
 
-    ~ConvolverIrSwapperT() {
-        // Reclaim anything still parked so we don't leak memory at
-        // teardown. Safe because both producer and consumer threads
-        // must have stopped by destruction.
-        delete pending_.exchange(nullptr, std::memory_order_acquire);
-        while (auto* p = pop_retired_raw()) delete p;
-    }
-
     /// Build a fresh IR state off the audio thread and publish it for
     /// the audio thread to pick up. Returns `true` on success.
     ///
@@ -196,24 +188,14 @@ public:
 
     /// Publish a pre-built state. Same semantics as the raw overload.
     bool stage_ir(std::unique_ptr<ConvolverIrStateT<SampleType>> next) {
-        if (!next)
-            return false;
-        // Release ordering so the state's contents (FFTs, buffers)
-        // happen-before any acquire-load on the audio thread.
-        auto* raw = next.release();
-        auto* prev = pending_.exchange(raw, std::memory_order_acq_rel);
-        // If the audio thread hasn't consumed the previous staging,
-        // reclaim it here on the (non-RT) staging thread.
-        delete prev;
-        return true;
+        return handoff_.publish(std::move(next));
     }
 
     /// Audio-thread-callable: atomically claim the most recently staged
     /// IR, if any. Returns nullptr if nothing is pending. NEVER blocks,
     /// NEVER allocates, NEVER frees.
     std::unique_ptr<ConvolverIrStateT<SampleType>> try_consume() {
-        auto* raw = pending_.exchange(nullptr, std::memory_order_acquire);
-        return std::unique_ptr<ConvolverIrStateT<SampleType>>(raw);
+        return handoff_.try_consume();
     }
 
     /// Audio-thread-callable: park the IR that the audio thread is
@@ -228,83 +210,52 @@ public:
     ///
     /// RT contract: never allocates, never blocks, never frees.
     [[nodiscard]] bool retire(std::unique_ptr<ConvolverIrStateT<SampleType>>& displaced) {
-        if (!displaced) return true; // nothing to park
-        auto* raw = displaced.get();
-        if (!retired_queue_.try_push(raw)) return false;
-        (void)displaced.release(); // ownership transferred to queue
-        return true;
+        return handoff_.retire(displaced);
     }
 
     /// True if there's room in the retire ring for one more displaced
     /// IR. Audio thread checks this before consuming pending so a
     /// swap never strands a displaced IR without an off-thread free
     /// path.
-    bool has_retire_capacity() const {
-        return retired_queue_.size_approx() < kRetireRingCapacity;
-    }
+    bool has_retire_capacity() const { return handoff_.has_retire_capacity(); }
 
     /// Room to park at least @p n IRs — for a caller that must retire more than
     /// one in a single audio-thread step (e.g. a completed crossfade fade-out
     /// PLUS the just-displaced IR). Reserve before committing so no retire ever
     /// fails inline and strands an IR on the audio thread.
-    bool has_retire_capacity(std::size_t n) const {
-        return retired_queue_.size_approx() + n <= kRetireRingCapacity;
-    }
+    bool has_retire_capacity(std::size_t n) const { return handoff_.has_retire_capacity(n); }
 
     /// UI / worker thread: reclaim ALL retired IRs the audio thread
     /// has parked. Returns the count freed; the actual deallocation
-    /// runs through `unique_ptr` destructors in this scope (off-RT).
-    /// Test callers can use the single-pop overload below if they
-    /// want to inspect each freed state.
-    std::size_t drain_old() {
-        std::size_t freed = 0;
-        while (auto* raw = pop_retired_raw()) {
-            std::unique_ptr<ConvolverIrStateT<SampleType>> state(raw);
-            ++freed;
-        }
-        return freed;
-    }
+    /// runs off the audio thread.
+    std::size_t drain_old() { return handoff_.drain_retired(); }
 
     /// UI / worker thread: pop ONE retired IR for test inspection.
     /// Returns nullptr if none queued.
     std::unique_ptr<ConvolverIrStateT<SampleType>> drain_old_one() {
-        auto* raw = pop_retired_raw();
-        return std::unique_ptr<ConvolverIrStateT<SampleType>>(raw);
+        return handoff_.drain_retired_one();
     }
 
     /// True if a freshly-staged IR is awaiting consumption.
-    bool has_pending() const {
-        return pending_.load(std::memory_order_acquire) != nullptr;
-    }
+    bool has_pending() const { return handoff_.has_pending(); }
 
     /// True if any retired IR is awaiting drain.
-    bool has_retired() const {
-        return retired_queue_.size_approx() > 0;
-    }
+    bool has_retired() const { return handoff_.has_retired(); }
 
     /// Compile-time capacity of the retired-IR ring. Sized so a few
     /// back-to-back swaps survive a single missed drain tick — past
     /// this point, swaps refuse until a drain runs.
-    static constexpr std::size_t retire_capacity() {
-        return kRetireRingCapacity;
-    }
+    static constexpr std::size_t retire_capacity() { return kRetireRingCapacity; }
 
 private:
     static constexpr std::size_t kRetireRingCapacity = 8;
 
-    // Producer → consumer: latest IR awaiting pickup.
-    std::atomic<ConvolverIrStateT<SampleType>*> pending_{nullptr};
-    // Consumer → producer: ring of displaced IRs awaiting off-thread
-    // deletion. Replaces the single-slot atomic the original impl used
-    // so rapid IR automation can queue multiple displaced states
-    // without forcing audio-thread frees when one drain tick is missed.
-    pulp::runtime::SpscQueue<ConvolverIrStateT<SampleType>*,
-                             kRetireRingCapacity> retired_queue_;
-
-    ConvolverIrStateT<SampleType>* pop_retired_raw() {
-        auto popped = retired_queue_.try_pop();
-        return popped ? *popped : nullptr;
-    }
+    // The publish/consume/retire machinery is `runtime::Handoff` — the shared
+    // real-time ownership-transfer primitive. It owns the pending slot, the
+    // retire ring, and teardown reclamation, so this class only adds the
+    // IR-specific `stage_ir` build step and the `drain_old` naming its callers
+    // already use.
+    pulp::runtime::Handoff<ConvolverIrStateT<SampleType>, kRetireRingCapacity> handoff_;
 };
 
 using ConvolverIrSwapper = ConvolverIrSwapperT<float>;

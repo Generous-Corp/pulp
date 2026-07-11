@@ -4,6 +4,11 @@
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
+# runtime::Slot<T> / runtime::Handoff<T> — the two real-time publication modes.
+# Includes N-thread hammer tests that assert reclamation never runs on the
+# reader/consumer thread.
+pulp_add_test_suite(pulp-test-runtime-slot LIBRARIES pulp::runtime)
+
 # Tracing subsystem guard (Perfetto, dev-only). Asserts a default build has
 # tracing OFF. When PULP_TRACING=OFF, also nm-scan the binary to prove no
 # Perfetto symbols leaked (best-effort; mirrors the AssertNoJsSymbols guard).
@@ -162,6 +167,19 @@ pulp_add_test_suite(pulp-test-fft-backends LIBRARIES pulp::signal-fft-backend)
 pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
+# SF-2 crossfade unification: live_kernel structural-swap fade now matches the
+# native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
+# documented behavior change (the fade previously used a linear theta).
+pulp_add_test_suite(pulp-test-live-kernel-crossfade-null
+    SOURCES test_live_kernel_crossfade_null.cpp
+    LIBRARIES pulp::signal
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/experimental)
+# SF-2 crossfade unification: the ONE fixture covering every SIGNAL-side fade —
+# shared-law invariants + TransitionMixer / live_kernel / LoopRenderer parity.
+pulp_add_test_suite(pulp-test-crossfade
+    SOURCES test_crossfade.cpp
+    LIBRARIES pulp::signal pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/experimental)
 # DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
 add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
 target_link_libraries(pulp-test-dsl-processor PRIVATE
@@ -190,6 +208,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
 
+# Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
+# (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —
+# in the no-GPU coverage build too.
+pulp_add_test_suite(pulp-test-flow-pans
+    SOURCES test_flow_pans.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
 # GPU convolver node: golden test vs direct convolution when GPU/render is
 # available, plus CPU-fallback coverage in GPU-off builds.
 pulp_add_test_suite(pulp-test-gpu-convolver
@@ -210,9 +235,10 @@ if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-gpu-spectral-morph
         SOURCES test_gpu_spectral_morph.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
-    # Hyper-Freeze: multi-layer frozen stack, weighted morph, and spectral smear.
-    pulp_add_test_suite(pulp-test-gpu-hyper-freeze
-        SOURCES test_gpu_hyper_freeze.cpp
+    # Spectral stack: multi-layer frozen stack, weighted morph, and spectral
+    # smear — the batched engine that superseded the retired GpuHyperFreeze.
+    pulp_add_test_suite(pulp-test-gpu-spectral-stack
+        SOURCES test_gpu_spectral_stack.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
 endif()
 

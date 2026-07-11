@@ -42,6 +42,15 @@ bool wait_for_progress(const std::atomic<std::uint64_t>& counter) {
     return counter.load(std::memory_order_relaxed) > 0;
 }
 
+bool wait_for_worker_idle_sleep(GraphRuntimeWorkerPool& pool) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (pool.worker_idle_sleep_count() == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    return pool.worker_idle_sleep_count() > 0;
+}
+
 } // namespace
 
 TEST_CASE("WorkerPool runs every task in a batch exactly once",
@@ -156,6 +165,36 @@ TEST_CASE("WorkerPool stop is idempotent",
     pool.stop();
     pool.stop();  // second stop is a no-op, not a crash
     CHECK_FALSE(pool.running());
+}
+
+TEST_CASE("WorkerPool cold-idles workers without blocking later batches",
+          "[format][worker-pool][rt-safety]") {
+    GraphRuntimeWorkerPool pool;
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(pool.start(4));
+    REQUIRE(wait_for_worker_idle_sleep(pool));
+
+    SquareCtx ctx;
+    ctx.out.assign(128, 0xFFFFFFFFu);
+    pool.run(128, square_task, &ctx);
+    REQUIRE(ctx.runs.load() == 128);
+    for (std::uint32_t i = 0; i < 128; ++i) REQUIRE(ctx.out[i] == i * i);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool clears a gate-collision reheat only when no worker parked",
+          "[format][worker-pool][rt-safety]") {
+    GraphRuntimeWorkerPool pool;
+
+    pool.seed_reheat_state_for_test(/*worker_count=*/4, /*active_worker_threads=*/3,
+                                    /*reheat_requested=*/true);
+    pool.clear_transient_reheat_if_no_worker_cold_for_test();
+    CHECK_FALSE(pool.reheat_requested_for_test());
+
+    pool.seed_reheat_state_for_test(/*worker_count=*/4, /*active_worker_threads=*/2,
+                                    /*reheat_requested=*/true);
+    pool.clear_transient_reheat_if_no_worker_cold_for_test();
+    CHECK(pool.reheat_requested_for_test());
 }
 
 TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-free",

@@ -134,7 +134,12 @@ the adapter-boundary conversion path: copy host double buffers to f32 scratch,
 run the existing f32 Processor callback, and copy active outputs back to double.
 Only call `Processor::process_f64(ProcessBuffers64&, ...)` for plugins that
 explicitly opt in; native f64 processors are responsible for doing real double
-DSP, not relying on the compatibility conversion.
+DSP, not relying on the compatibility conversion. On the boundary path the
+output scratch is pre-zeroed for only `num_samples` frames (the writeback
+copies exactly that many), and the aux f32→f64 writeback is bounded by the
+routed view's channel count — not the host bus channel count — so a bus
+demoted by a null mid-bus channel pointer keeps its block-start pre-zero
+instead of reading back stale scratch.
 
 ### Parameters
 
@@ -333,7 +338,14 @@ Load-bearing constraints:
   sort stays allocation-free on the audio thread.
 
 MIDI output mirrors the inverse: note_on / note_off in
-`midi_out_` are written back into `data.outputEvents`.
+`midi_out_` are written back into `data.outputEvents`, with each event's
+`Event.sampleOffset` set from the shared cross-format helper
+`detail::vst3_output_offset(me.sample_offset)` (identity for VST3 — the host
+clamps the signed offset). That helper lives in
+`core/format/include/pulp/format/detail/midi_out_offset.hpp` and is the single
+source of truth for the "offset N in → offset N out" contract shared with AU v2
+and CLAP; do NOT re-open-code the offset mapping here. Parity is pinned by
+`test/test_midi_out_offset_parity.cpp`.
 
 **Real-time-safe MIDI buffers (no per-block allocation).** `midi_in_` /
 `midi_out_` are reused `MidiBuffer` *members*, not block-local: `setupProcessing()`
@@ -860,3 +872,47 @@ writing `0.5` into a buffer passes whether or not the flag is set; the defect
 only exists at the adapter boundary. `test_vst3_plugin_state.cpp`'s `[silence]`
 case drives `PulpVst3Processor::process()` with `outputs[0].silenceFlags = 0x3`
 and asserts it comes back `0`.
+
+## The StateStore must outlive the Processor
+
+`Processor::state()` dereferences a pointer the host installs. A Processor may
+follow it for its whole lifetime — from `process()`, from its destructor, and from
+any worker thread that destructor is about to `join()`. So the host has to keep the
+store alive until the Processor is gone.
+
+In practice that is one rule about member order: **declare the `state::StateStore`
+before the `std::unique_ptr<Processor>`.** Members are destroyed in reverse
+declaration order, so the store then dies last. Every host in `core/format` had it
+backwards until 2026-07; the effect is nothing at all for a Processor with no
+threads, and a use-after-free on plug-in close for one with a background thread that
+reads `state().get_value()` while the destructor walks to its `join()`.
+
+It crashes only on close, only sometimes, and the DAW gets the blame. The regression
+test is `test/test_store_lifetime.cpp`; it observes the store's destruction through a
+sentinel owned by a parameter's `to_string` closure rather than reading freed memory
+and hoping the result looks wrong.
+
+A Processor should not *rely* on this either: a worker thread that reads the store on
+every tick is one host away from the same crash. Publish what the thread needs to
+atomics from `process()` instead.
+
+## Parameter display strings — override the EditController methods, convert domains
+
+Hosts show and accept per-parameter text through the `IEditController` pair
+`getParamStringByValue` / `getParamValueByString`. `SingleComponentEffect`
+provides stock numeric formatting, so if the adapter does NOT override these,
+a plugin's `ParamInfo::to_string` / `from_string` are silently ignored and the
+host shows the base class's generic number instead. `PulpVst3Processor`
+overrides both (`vst3_adapter.cpp`):
+
+- These methods work in the **normalized [0,1]** domain, but `to_string` /
+  `from_string` work in **plain (min..max)** units. Denormalize on the way in
+  (`info->range.denormalize(valueNormalized)` before `to_string`) and normalize
+  on the way out (`info->range.normalize(plain)`). Skipping this shows the
+  normalized 0..1 number, not the real value.
+- Decline to the base class (`return SingleComponentEffect::...`) when the
+  parameter has no converter, so existing plugins and the hidden MIDI-controller
+  params (which have no `ParamInfo`) keep the stock path.
+- `from_string` is author code: guard with `std::isfinite` and fall through to
+  the base parser on a non-finite result rather than writing a garbage
+  normalized value. Test: `test/test_vst3_param_display.cpp`.

@@ -32,7 +32,7 @@ use crate::color;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
 use crate::tool_registry::{
-    self, current_platform_key, load, locate_tool, uninstall_tool, ToolRegistry,
+    self, current_platform_key, locate_tool, uninstall_tool, ToolRegistry,
 };
 use crate::tool_version::{self, ActiveVersion};
 
@@ -241,25 +241,32 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
     }
 
     let cwd = std::env::current_dir().map_err(|e| CliError::io("<cwd>", e))?;
-    let Some(reg_path) = tool_registry::find_tool_registry_path(&cwd) else {
-        return Err(CliError::Other(
-            "Tool registry not found at tools/packages/tool-registry.json".to_owned(),
-        ));
-    };
-    let reg = load(&reg_path)?;
+    // Repo checkout wins (a Pulp dev's edits show without a rebuild); installed
+    // users fall back to the registry compiled into the binary, so `pulp tool`
+    // works from any directory, not only inside a Pulp source tree.
+    let (reg, _reg_path) = tool_registry::resolve_registry(&cwd)?;
 
+    // Resolve friendly aliases (e.g. "perfetto" → "trace-processor") once, at
+    // the dispatch boundary, so every verb — including install's trace-processor
+    // short-circuit and uninstall's managed-dir lookup — sees the canonical id.
     match sub {
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
-        Sub::Info { id, json } => info(&reg, id, *json, out),
+        Sub::Info { id, json } => info(&reg, &reg.canonical_id(id), *json, out),
         Sub::Install { id, all, force: _, version } => {
-            install(&reg, id.as_deref(), *all, version.as_deref(), out)
+            let canon = id.as_ref().map(|i| reg.canonical_id(i));
+            install(&reg, canon.as_deref(), *all, version.as_deref(), out)
         }
-        Sub::Update { id, version } => update(&reg, id, version.as_deref(), out),
-        Sub::Uninstall(id) => uninstall(id, out),
-        Sub::Path(id) => path(&reg, id, out),
-        Sub::Run { id, args } => run_tool(&reg, id, args, spawner, out),
-        Sub::Doctor { id, run } => doctor(&reg, id.as_deref(), *run, spawner, out),
+        Sub::Update { id, version } => {
+            update(&reg, &reg.canonical_id(id), version.as_deref(), out)
+        }
+        Sub::Uninstall(id) => uninstall(&reg.canonical_id(id), out),
+        Sub::Path(id) => path(&reg, &reg.canonical_id(id), out),
+        Sub::Run { id, args } => run_tool(&reg, &reg.canonical_id(id), args, spawner, out),
+        Sub::Doctor { id, run } => {
+            let canon = id.as_ref().map(|i| reg.canonical_id(i));
+            doctor(&reg, canon.as_deref(), *run, spawner, out)
+        }
     }
 }
 
@@ -682,24 +689,32 @@ fn delegate_install(id_for_env: Option<&str>, argv: &[String], out: &mut impl Wr
 }
 
 fn uninstall(id: &str, out: &mut impl Write) -> Result<i32> {
-    if uninstall_tool(id)? {
-        writeln!(
-            out,
-            "{green}✓{reset} Uninstalled {id}",
-            green = color::green(),
-            reset = color::reset()
-        )
-        .map_err(io)?;
-        Ok(0)
-    } else {
-        writeln!(
-            out,
-            "{red}✗{reset} {id} is not installed (pulp-managed)",
-            red = color::red(),
-            reset = color::reset()
-        )
-        .map_err(io)?;
-        Ok(1)
+    // uninstall_tool validates the id and confines the delete to the managed
+    // tree; it returns the exact directory removed so we can name it — deleting
+    // silently is the wrong default.
+    match uninstall_tool(id)? {
+        Some(removed) => {
+            writeln!(
+                out,
+                "{green}✓{reset} Uninstalled {id} {dim}(removed {}){reset}",
+                removed.display(),
+                green = color::green(),
+                reset = color::reset(),
+                dim = color::dim(),
+            )
+            .map_err(io)?;
+            Ok(0)
+        }
+        None => {
+            writeln!(
+                out,
+                "{red}✗{reset} {id} is not installed (pulp-managed); nothing removed",
+                red = color::red(),
+                reset = color::reset()
+            )
+            .map_err(io)?;
+            Ok(1)
+        }
     }
 }
 
@@ -766,13 +781,14 @@ fn run_tool<S: Spawner>(
 #[cfg(test)]
 #[allow(dead_code)]
 pub(crate) fn registry_at(p: &std::path::Path) -> Result<ToolRegistry> {
-    load(p)
+    tool_registry::load(p)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::EnvVarGuard;
+    use crate::tool_registry::load;
     use std::fs;
     use std::path::Path;
 

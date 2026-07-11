@@ -323,6 +323,17 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   put the behavioral assertion in a platform-gated unit test (here:
   `test_linux_packaging.cpp`) rather than a cross-platform shellout, since the
   required macOS lane can't exercise the Linux-only branch.
+- `pulp ship package` (macOS) DEFAULTS to a single component-selectable `.pkg`:
+  it collects every built format into one `create_combined_pkg` call so the
+  installer shows a **Customize** pane (one pre-checked, toggleable choice per
+  format) — users are never forced to install every format. `--separate` is the
+  legacy per-format-`.pkg` path; `--dmg` makes disk images. Discovery scans the
+  whole `build/{VST3,CLAP,AU,Standalone}` tree, so a multi-example build bundles
+  EVERY plugin's formats (dozens of choices) unless you pass `--product <name>`
+  to scope to one product's bundles (also names the installer). Verify a real
+  installer by unpacking its `Distribution` (`xar -xf … Distribution`) and
+  checking for `<options customize="allow">` + one `<line choice>` per format —
+  a flat `Bom/Payload/PackageInfo` archive is a bare `pkgbuild` with NO Customize.
 - A subcommand that must work BEFORE a build exists (e.g. `pulp ship doctor`,
   which makes signing non-interactive) has to be dispatched *above*
   `cmd_ship`'s `build/CMakeCache.txt` guard — that early-return fires first and
@@ -595,6 +606,20 @@ owns its dependency list (mirror `requirements.txt`). Per the parity rule
 above, both new fields are also declared in `experimental/pulp-rs/src/tool_registry.rs`
 (serde `#[serde(default)]`, ignored on the delegated install path) so `pulp
 tool info`/`list` round-trip them. First user: `audio-quality-lab`.
+
+### Remove/uninstall commands name what they deleted
+
+Every extend-surface removal (`pulp tool uninstall`, `pulp kit remove`, `pulp
+content remove`, `pulp add --remove`) closes on an OK line that **names what it
+removed**, not just the id — this is the shared extend-surface lifecycle
+contract (see `docs/reference/extending-pulp.md`). `tool uninstall` prints
+`(removed <path>)` from the returned `PathBuf`; `content remove` mirrors it with
+the deleted content-pack path; `kit remove` deletes a *set* of lock-recorded
+files, so it names the count instead (`(removed N files)`). When you add or
+change a removal command, keep the OK line honest — echo the concrete path (or
+count, for multi-file removals) the command actually deleted, and assert it in
+the command's test via `capture_stdout_for` so "it names what it removed" is
+proven, not assumed.
 
 ### Package suggestion and analyzer metadata commands
 
@@ -1503,6 +1528,13 @@ shape as `pulp coverage`. Two subcommands, two scripts:
   every downstream consumer against one installed SDK and compares each floor to
   the SDK floor. All args pass through (`--sdk-prefix`, `--only`, `--dry-run`,
   `--json`).
+- `pulp minos update [args...]` / `pulp minos publish-runbook [args...]` →
+  `tools/scripts/sdk_consumer_update.py` (the subcommand name is prepended, then
+  args pass through). `update` bumps every consumer's SDK pin (dry-run default;
+  `--open-prs` to open PRs); `publish-runbook` prints the republish steps
+  (prints only — never builds/signs/publishes). Pin-detect/rewrite + runbook are
+  pure and unit-tested in `test_sdk_consumer_update.py`; the clone/PR side
+  effects are gated and integration-light.
 
 Surfaces that must stay in lockstep (the scripts are the single
 implementation; everything else delegates):
@@ -2329,3 +2361,31 @@ WITHOUT opening a real audio device — `prepare_render_state()` then
 `test/test_standalone_rt.cpp`, which asserts the path is allocation/lock-free
 under the RT trap build). Keep the extraction behavior-preserving — the full
 standalone suite (start/apply-config/transport) is the regression gate.
+
+## A CTest case that shells out to a CLI command must not require `planning/`
+
+The `planning` submodule is private and optional — a public clone, a fresh
+worktree, and every CI runner can be missing it. So a `add_test(... COMMAND
+pulp-cli <cmd>)` whose command reads something under `planning/` will fail on
+those checkouts, and if it lands it turns the required macOS gate red for every
+open PR until it is fixed.
+
+`pulp minos sweep` and `pulp minos publish-runbook` read
+`planning/sdk-consumers/consumers.yaml`. Their CTest cases pair the usual
+`PASS_REGULAR_EXPRESSION` with a skip keyed on the script's own message:
+
+```cmake
+set_tests_properties(cli-minos-sweep-dryrun PROPERTIES
+    PASS_REGULAR_EXPRESSION "Planned sweep:"
+    SKIP_REGULAR_EXPRESSION "consumers registry not found")
+```
+
+CTest checks the skip regex before the pass regex and before the exit code, so a
+missing registry reports `Skipped` with the reason visible, while a checkout that
+*has* the registry still asserts the real output. Never spell the degradation as
+a second `PASS_REGULAR_EXPRESSION` — that greens a genuinely broken tool.
+
+The skip is only as strong as the agreement between the script's wording and the
+CMake property. `tools/scripts/test_minos_registry_absent.py` asserts both ends:
+the scripts really print the phrase, and the CMakeLists really keys its skip on
+it. Extend that test when you add another registry-reading CLI test.

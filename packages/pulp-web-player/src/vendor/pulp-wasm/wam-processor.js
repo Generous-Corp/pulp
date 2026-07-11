@@ -20,7 +20,7 @@
 // served next to this file as ./wam-dsp.js (an ES-module factory).
 
 import createDspModule from "./wam-dsp.js";
-import { makeBridge, parseMidiOutRecords, processorNameForUrl } from "./wam-runtime.mjs";
+import { makeBridge, makeWamAudioPorts, parseMidiOutRecords, processorNameForUrl } from "./wam-runtime.mjs";
 
 const MAX_FRAMES = 128;   // Web Audio render quantum is fixed at 128.
 const MAX_CHANNELS = 2;   // Stereo lane (see plan: wider bus support is later).
@@ -72,9 +72,9 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       const wam = makeBridge(moduleExports(M));
       wam.callCtors();
       wam.init(sampleRate, MAX_FRAMES); // sampleRate is an AudioWorklet global
-      // Lifetime-persistent interleaved scratch buffers (not per-block).
-      this._inPtr = wam.malloc(MAX_CHANNELS * MAX_FRAMES * 4);
-      this._outPtr = wam.malloc(MAX_CHANNELS * MAX_FRAMES * 4);
+      // Lifetime-persistent PLANAR audio ports (per-channel buffers + the two
+      // wam_process pointer arrays), allocated once. No interleave scratch.
+      this._ports = makeWamAudioPorts(wam, MAX_CHANNELS, MAX_FRAMES);
       // MIDI-out drain target, allocated once (never per block).
       this._midiOutPtr = wam.malloc(MIDI_OUT_CAP);
       // Bulk parameter snapshot target + the last epoch we reported. These
@@ -98,6 +98,11 @@ class PulpWamProcessor extends AudioWorkletProcessor {
         this._paramPtr = 0;
         this._lastParamEpoch = 0;
       }
+      // Reused output array for the param-echo postMessage: filled by index from
+      // the wasm heap each epoch change instead of allocating a fresh Array via
+      // Array.from on the audio thread. postMessage structured-clones it
+      // synchronously, so reusing the same array across blocks is safe.
+      this._paramValuesOut = new Array(this._paramCount);
       this._wam = wam;
       for (const m of this._pendingMsgs) this._handle(m);
       this._pendingMsgs.length = 0;
@@ -148,19 +153,11 @@ class PulpWamProcessor extends AudioWorkletProcessor {
     const frames = Math.min(output[0].length, MAX_FRAMES);
     const ch = Math.min(output.length, MAX_CHANNELS);
 
-    // Interleave inputs into the wasm heap (the bridge expects interleaved and
-    // de-interleaves internally). ONE process() call per block — not
-    // channel-by-channel, which would corrupt channel-coupled DSP.
-    const heap = this._wam.f32();
-    const ib = this._inPtr >> 2;
-    for (let f = 0; f < frames; f++) {
-      for (let c = 0; c < ch; c++) {
-        const chan = input && input[c];
-        heap[ib + f * ch + c] = chan ? chan[f] : 0;
-      }
-    }
-
-    this._wam.process(this._inPtr, this._outPtr, ch, frames);
+    // Copy the planar input channels into the wasm channel buffers (straight
+    // per-channel copy — Web Audio is already planar, so there is no interleave).
+    // ONE process() call per block against the planar pointer arrays.
+    this._ports.writeInput(input, frames);
+    this._wam.process(this._ports.inPtr, this._ports.outPtr, ch, frames);
 
     // Drain whatever MIDI the plugin emitted this block. Only crosses to the
     // main thread when there is something to report, so a plugin that emits no
@@ -195,19 +192,19 @@ class PulpWamProcessor extends AudioWorkletProcessor {
       if (epoch !== this._lastParamEpoch) {
         this._lastParamEpoch = epoch;
         this._wam.readParamValues(this._paramPtr, this._paramCount);
-        const values = this._wam.f32().subarray(this._paramPtr >> 2,
-                                                (this._paramPtr >> 2) + this._paramCount);
-        this.port.postMessage({ type: "paramValues", epoch, values: Array.from(values) });
+        // Copy heap → reused array by index (no per-block Array.from allocation).
+        const heap = this._wam.f32();
+        const base = this._paramPtr >> 2;
+        const values = this._paramValuesOut;
+        for (let i = 0; i < this._paramCount; i++) values[i] = heap[base + i];
+        this.port.postMessage({ type: "paramValues", epoch, values });
       }
     }
 
-    const out = this._wam.f32(); // refetch in case the heap grew
-    const ob = this._outPtr >> 2;
-    for (let f = 0; f < frames; f++) {
-      for (let c = 0; c < ch; c++) {
-        output[c][f] = out[ob + f * ch + c];
-      }
-    }
+    // Copy the planar wasm output channels back into the Web Audio output
+    // (straight per-channel copy; readInto refetches the heap view in case it
+    // grew). No de-interleave.
+    this._ports.readInto(output, frames);
     return true;
   }
 

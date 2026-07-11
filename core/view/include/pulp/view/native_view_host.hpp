@@ -101,9 +101,18 @@ public:
     bool is_native_attached() const { return attached_; }
 
     // ── Introspection (headless tests) ──────────────────────────────────────
-    /// The native child's absolute frame in root/host coordinates as last
-    /// computed from Yoga layout (top-left origin).
+    /// The native child's absolute frame in ROOT (design-space) coordinates as
+    /// last computed from Yoga layout (top-left origin). This is the pure
+    /// layout frame, BEFORE any active design-viewport transform — the space
+    /// every other Pulp widget lays out in.
     Rect computed_child_frame() const { return last_frame_; }
+    /// The native child's absolute frame in HOST (window) coordinates — the
+    /// design-space frame after the active host's design-viewport transform
+    /// (`x' = x*sx+tx`, `w' = w*sx`, …). Equal to `computed_child_frame()`
+    /// when no viewport is active. This is what is actually pushed to the host
+    /// as the OS view's frame, so it is the value a mixed Pulp+native tree
+    /// stays pixel-aligned against. Exposed for headless tests.
+    Rect computed_child_frame_host() const { return last_frame_host_; }
     /// The last visible sub-rectangle in root/host coordinates after intersecting
     /// with clipping ancestors. Equal to `computed_child_frame()` when nothing
     /// clips it; empty when fully scrolled out.
@@ -127,8 +136,21 @@ private:
     enum class HostKind { none, plugin, window };
 
     /// Compute the child's absolute frame and its visible (clip-intersected)
-    /// rect from the current parent chain. Pure geometry; no host calls.
+    /// rect from the current parent chain. Pure geometry (ROOT/design space);
+    /// no host calls, no viewport transform.
     void compute_geometry(Rect& frame, Rect& visible, bool& clipped) const;
+
+    /// Query the active host's design-viewport transform (design->host). Uses
+    /// the host we are attached through when attached, else the active host.
+    /// Returns false (identity) when no viewport is set / no host is present.
+    bool active_viewport_transform(float& sx, float& sy, float& tx,
+                                   float& ty) const;
+
+    /// Apply a design->host viewport transform to a rect in place:
+    /// `x' = x*sx+tx, y' = y*sy+ty, w' = w*sx, h' = h*sy`.
+    static void apply_viewport(Rect& r, float sx, float sy, float tx, float ty) {
+        r = {r.x * sx + tx, r.y * sy + ty, r.width * sx, r.height * sy};
+    }
 
     /// Attach to the active host if not yet attached and a handle is present.
     bool try_attach();
@@ -148,14 +170,17 @@ private:
     PluginViewHost* attached_plugin_ = nullptr;
     WindowHost* attached_window_ = nullptr;
 
-    // Last computed geometry (introspection getters; kept current every layout
-    // pump regardless of platform / attach state).
+    // Last computed geometry in ROOT/design space (introspection getters; kept
+    // current every layout pump regardless of platform / attach state).
     Rect last_frame_{};
     Rect last_visible_{};
     bool last_clipped_ = false;
+    // Last computed frame in HOST space (design frame after the active
+    // viewport transform). Equal to last_frame_ when no viewport is active.
+    Rect last_frame_host_{};
 
-    // Last geometry actually pushed to the host, to skip redundant per-frame
-    // host calls.
+    // Last geometry actually pushed to the host (HOST space), to skip
+    // redundant per-frame host calls.
     Rect pushed_frame_{};
     Rect pushed_visible_{};
     bool pushed_clipped_ = false;

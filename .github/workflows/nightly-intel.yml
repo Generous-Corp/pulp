@@ -1,0 +1,390 @@
+name: Nightly Intel
+
+# Tier 2 of the Intel support tiering (docs/guides/intel-support.md).
+#
+# Two independent jobs run every night; a watchdog opens/updates one
+# de-duplicated tracking issue that auto-closes on green (pattern from
+# auto-release-watchdog.yml / nightly-full-build.yml):
+#
+#   Job A — NATIVE Intel on `macos-15-intel` (real Intel CPU + toolchain, no
+#           Rosetta): full Release build + ctest + auval. This runner has known
+#           flake reports (C++ linker-image errors, 100% CPU pegging), so a
+#           red run is classified: an *infra* signature (linker-image bug /
+#           timeout / CPU-peg) is labelled `runner-infra` and does NOT page;
+#           a product failure does. timeout-minutes: 120 keeps a pegged runner
+#           from burning six hours.
+#
+#   Job B — INDEPENDENT cross-check on the STABLE `macos-15` (Apple Silicon):
+#           universal (arm64;x86_64) build, `lipo -archs` + `codesign --verify`
+#           on every shipped bundle/dylib, and `arch -x86_64 auval`. Job B keeps
+#           the x86_64 signal alive whenever Job A's flaky runner is down.
+#
+# Runner priority is honored: zero Intel work ever routes to the self-hosted
+# Mac Studios that host the required `macos` gate; no Namespace, ever. Both
+# jobs run on free-for-public-repos GitHub-hosted macOS runners.
+
+on:
+  schedule:
+    # 07:41 UTC — off-peak (overnight in the Americas). Odd minute avoids the
+    # top-of-hour scheduler stampede; distinct from nightly-full-build's 09:13.
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nightly-intel
+  cancel-in-progress: false
+
+jobs:
+  # ── Job A: native Intel (flake-tolerant) ─────────────────────────────────
+  native-intel:
+    name: Native Intel build + test (macos-15-intel)
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+      infra: ${{ steps.report.outputs.infra }}
+    env:
+      BUILD_DIR: build-intel-native
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Install ccache + ninja
+        run: |
+          brew install ccache ninja || {
+            brew update
+            brew install ccache ninja
+          }
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Fetch prebuilt Skia (macOS x86_64)
+        shell: bash
+        run: python3 tools/scripts/fetch_skia_for_release.py darwin-x64
+
+      - name: Intel canary lint (whole tree)
+        shell: bash
+        run: python3 tools/scripts/intel_canary_lint.py --mode=tree
+
+      - name: Configure (native x86_64, full tree)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Host is native Intel here, so an unset CMAKE_OSX_ARCHITECTURES
+          # builds native x86_64 — no cross-compile, no Rosetta.
+          cmake -S . -B "${BUILD_DIR}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build everything (keep-going)
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          if cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-intel-native.log; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run test suite (informational)
+        id: test
+        shell: bash
+        run: |
+          set -o pipefail
+          if ctest --test-dir "${BUILD_DIR}" --output-on-failure --timeout 120 \
+               2>&1 | tee ctest-intel-native.log; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+          # ctest is informational on the nightly: this GitHub-hosted VM lacks a
+          # representative GPU and registered AU components, so GPU/golden/auval
+          # tests fail here even when the x86_64 code is fine. The run's verdict
+          # gates on BUILD (the #2462-style "does it even compile natively on
+          # Intel" concern).
+
+      - name: Compute result + classify infra vs product
+        id: report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          build='${{ steps.build.outputs.status }}'
+          if [ "$build" = "pass" ]; then
+            result="success"
+          else
+            result="failure"
+          fi
+          # Infra signature: the macos-15-intel image's known failure modes are
+          # C++ linker-image errors and CPU-peg/timeout. A build failure whose
+          # log matches these is runner-infra, not a Pulp product regression.
+          infra="false"
+          if [ "$result" = "failure" ] && [ -f build-intel-native.log ]; then
+            if grep -qE 'ld: |clang: error:.*linker command failed|Killed: 9|Segmentation fault: 11|could not open.*for reading|malformed object' build-intel-native.log; then
+              infra="true"
+            fi
+          fi
+          echo "result=${result}" >> "$GITHUB_OUTPUT"
+          echo "infra=${infra}"   >> "$GITHUB_OUTPUT"
+          echo "native-intel: build=${build} result=${result} infra=${infra}"
+
+      - name: Upload native-Intel logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-intel-native-logs
+          path: |
+            build-intel-native.log
+            ctest-intel-native.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ── Job B: universal cross-check on the stable runner ────────────────────
+  universal-crosscheck:
+    name: Universal + lipo + dual-arch auval (macos-15)
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    runs-on: macos-15
+    timeout-minutes: 120
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    env:
+      BUILD_DIR: build-universal
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Install ccache + ninja
+        run: |
+          brew install ccache ninja || {
+            brew update
+            brew install ccache ninja
+          }
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Fetch prebuilt Skia (macOS universal)
+        shell: bash
+        run: python3 tools/scripts/fetch_skia_for_release.py darwin-universal
+
+      - name: Configure (universal arm64;x86_64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build PulpGain (all formats, keep-going)
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          if cmake --build "${BUILD_DIR}" \
+               --target PulpGain_VST3 PulpGain_AU PulpGain_CLAP \
+               -- -k 0 2>&1 | tee build-universal.log; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assert bundle architectures + signature (lipo -archs, codesign)
+        id: lipo
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc=0
+          for bundle in \
+              "${BUILD_DIR}/AU/PulpGain.component" \
+              "${BUILD_DIR}/VST3/PulpGain.vst3" \
+              "${BUILD_DIR}/CLAP/PulpGain.clap"; do
+            if [ -e "$bundle" ]; then
+              echo "== $bundle =="
+              python3 tools/scripts/check_bundle_architectures.py \
+                "$bundle" --archs arm64,x86_64 --strict \
+                --label "$(basename "$bundle")" || rc=1
+            else
+              echo "::warning::expected universal bundle missing: $bundle"
+              rc=1
+            fi
+          done
+          if [ "$rc" -eq 0 ]; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dual-arch auval (informational)
+        id: auval
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          # auval on a GitHub-hosted VM is unreliable (no persistent AU
+          # registration); run it best-effort so the run captures the signal
+          # without gating on the VM's AU quirks. The BLOCKING dual-arch auval
+          # lives in the Tier-3 release gate on a capable runner.
+          comp="${BUILD_DIR}/AU/PulpGain.component"
+          dest="$HOME/Library/Audio/Plug-Ins/Components/PulpGain.nightly.component"
+          rm -rf "$dest"
+          cp -R "$comp" "$dest" 2>/dev/null || { echo "no component to auval"; exit 0; }
+          killall -KILL AudioComponentRegistrar 2>/dev/null || true
+          sleep 1
+          echo "--- native (arm64) auval ---"
+          auval -v aufx PGan Pulp 2>&1 | tail -5 || true
+          echo "--- arch -x86_64 auval ---"
+          arch -x86_64 auval -v aufx PGan Pulp 2>&1 | tail -5 || true
+          rm -rf "$dest"
+
+      - name: Compute result
+        id: report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          build='${{ steps.build.outputs.status }}'
+          lipo='${{ steps.lipo.outputs.status }}'
+          if [ "$build" = "pass" ] && [ "$lipo" = "pass" ]; then
+            result="success"
+          else
+            result="failure"
+          fi
+          echo "result=${result}" >> "$GITHUB_OUTPUT"
+          echo "universal-crosscheck: build=${build} lipo=${lipo} -> ${result}"
+
+      - name: Upload universal logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-intel-universal-logs
+          path: build-universal.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ── Watchdog: one de-duplicated tracking issue, auto-closes on green ──────
+  watchdog:
+    name: Intel nightly watchdog
+    needs: [native-intel, universal-crosscheck]
+    if: always() && (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TRACKING_TITLE: 'Nightly Intel build is broken'
+      A_RESULT: ${{ needs.native-intel.result }}
+      A_VERDICT: ${{ needs.native-intel.outputs.result }}
+      A_INFRA: ${{ needs.native-intel.outputs.infra }}
+      B_RESULT: ${{ needs.universal-crosscheck.result }}
+      B_VERDICT: ${{ needs.universal-crosscheck.outputs.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      RUN_SHA: ${{ github.sha }}
+
+    steps:
+      - name: Classify + maintain tracking issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          # Native-Intel verdict: a job that did not COMPLETE (timeout/cancel →
+          # A_RESULT != success with an empty A_VERDICT) is treated as infra,
+          # since the macos-15-intel runner's known failure mode is exactly a
+          # pegged/hung run. An explicit product failure is A_VERDICT=failure
+          # with A_INFRA=false.
+          a_infra="false"
+          if [ "$A_INFRA" = "true" ]; then
+            a_infra="true"
+          elif [ "$A_RESULT" != "success" ] && [ -z "$A_VERDICT" ]; then
+            a_infra="true"
+          fi
+          a_product_fail="false"
+          if [ "$A_VERDICT" = "failure" ] && [ "$a_infra" != "true" ]; then
+            a_product_fail="true"
+          fi
+          b_ok="false"
+          if [ "$B_VERDICT" = "success" ]; then
+            b_ok="true"
+          fi
+
+          # Product-health verdict for the run: the stable cross-check (B) must
+          # be green, and native Intel (A) must be green OR infra-only. A red
+          # that is purely runner-infra keeps the product verdict green so the
+          # flaky runner never opens a product-failure tracker.
+          if [ "$b_ok" = "true" ] && [ "$a_product_fail" != "true" ]; then
+            product_ok="true"
+          else
+            product_ok="false"
+          fi
+
+          # Look up the tracker in BOTH states; only close an OPEN one on green.
+          search_json=$(gh api --method GET "/search/issues" \
+              -f q="repo:${repo} is:issue in:title ${title}")
+          existing_json=$(printf '%s' "$search_json" | TRACKING_TITLE="$title" python3 -c 'import json, os, sys; title = os.environ["TRACKING_TITLE"]; data = json.load(sys.stdin); match = next((i for i in data.get("items", []) if i.get("title") == title), None); print(json.dumps({"number": match.get("number", ""), "state": str(match.get("state", "")).upper()}) if match else "{}")')
+          existing=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          echo "A_RESULT=$A_RESULT A_VERDICT=$A_VERDICT a_infra=$a_infra a_product_fail=$a_product_fail B_VERDICT=$B_VERDICT product_ok=$product_ok"
+
+          if [ "$product_ok" = "true" ]; then
+            note=""
+            if [ "$a_infra" = "true" ]; then
+              note=" (native Intel runner flaked with a runner-infra signature; the stable universal cross-check is green, so the product is healthy)"
+            fi
+            if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+              gh issue comment "$existing" --repo "$repo" \
+                --body "Nightly Intel returned to green on ${RUN_URL} (sha ${RUN_SHA})${note}. Closing."
+              gh issue close "$existing" --repo "$repo" --reason completed
+            else
+              echo "Nightly Intel product verdict green and no open tracker — nothing to do.${note}"
+            fi
+            exit 0
+          fi
+
+          {
+            echo "_Auto-generated by \`.github/workflows/nightly-intel.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')._"
+            echo
+            echo "The nightly Intel lane failed its product-health verdict."
+            echo
+            echo "| Job | Runner | Verdict |"
+            echo "|-----|--------|---------|"
+            echo "| Native Intel | \`macos-15-intel\` | ${A_VERDICT:-did-not-complete} (job=${A_RESULT}${A_INFRA:+, infra=${A_INFRA}}) |"
+            echo "| Universal cross-check | \`macos-15\` | ${B_VERDICT:-did-not-complete} (job=${B_RESULT}) |"
+            echo
+            if [ "$a_product_fail" = "true" ]; then
+              echo "**Native Intel PRODUCT failure** — the x86_64 build/test broke on a real Intel CPU. This is a genuine portability regression; inspect \`nightly-intel-native-logs\`."
+            elif [ "$a_infra" = "true" ] && [ "$b_ok" != "true" ]; then
+              echo "**Universal cross-check failed** while native Intel hit a runner-infra signature. The x86_64/universal packaging (lipo/codesign) or build regressed — inspect \`nightly-intel-universal-logs\`. The native-Intel red is runner-infra (do not page on it)."
+            elif [ "$a_infra" = "true" ]; then
+              echo "**Native Intel runner-infra signature** (linker-image / CPU-peg / timeout) — NOT a product failure. Do not page. Tracked because a run of infra-only reds delays Tier-1 promotion (see docs/guides/intel-support.md)."
+            else
+              echo "**Universal cross-check failed** — inspect \`nightly-intel-universal-logs\` (lipo -archs / codesign --verify / build)."
+            fi
+            echo
+            echo "**Run:** ${RUN_URL}"
+            echo "**Tip SHA:** \`${RUN_SHA}\`"
+            echo
+            echo "_De-duplicated (one issue, edited in place); closes automatically on the next green product verdict._"
+          } > body.md
+
+          if [ -z "${existing:-}" ]; then
+            gh issue create --repo "$repo" --title "$title" --body-file body.md \
+              --label bug,ci,intel-nightly 2>&1 || \
+              gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+            gh issue edit "$existing" --repo "$repo" --body-file body.md
+            gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi

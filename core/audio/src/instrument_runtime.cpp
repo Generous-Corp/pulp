@@ -42,6 +42,11 @@ InstrumentTriggerResult InstrumentRuntime::trigger(
     result.valid = true;
     result.zone = zone;
     result.sample = sample;
+    result.host_sample_rate = request.host_sample_rate;
+    result.pitch_playback_rate =
+        (zone.pitch_ratio > 0.0 && std::isfinite(zone.pitch_ratio))
+            ? zone.pitch_ratio
+            : 0.0;
     result.playback_rate = playback_rate_for_sample(sample,
                                                     zone.pitch_ratio,
                                                     request.host_sample_rate);

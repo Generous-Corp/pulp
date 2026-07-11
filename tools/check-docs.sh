@@ -247,6 +247,14 @@ if [ -f "$ROOT/tools/scripts/widgets_doc_check.py" ]; then
         error "web-plugin docs reference paths/helpers that do not exist"
     fi
 fi
+
+# ── Skills catalog sync (docs/reference/skills.md ⇔ every SKILL.md) ────────────
+if [ -f "$ROOT/tools/scripts/skills_doc_check.py" ]; then
+    echo "Checking skills catalog (docs/reference/skills.md) is in sync..."
+    if ! python3 "$ROOT/tools/scripts/skills_doc_check.py" --check; then
+        error "docs/reference/skills.md is out of sync — run: python3 tools/scripts/skills_doc_check.py --write"
+    fi
+fi
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [ $ERRORS -gt 0 ]; then

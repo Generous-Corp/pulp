@@ -62,10 +62,18 @@ struct WamDescriptorData {
     int latency_samples = 0;
     int tail_samples = 0;
 
+    // Non-empty only for a rack: the per-stage display names, emitted as a
+    // "stages" array. A single plugin leaves this empty, so to_json() produces
+    // the exact single-plugin object it always has. This is what lets the rack
+    // descriptor reuse the ONE emitter below instead of hand-rolling a second.
+    std::vector<std::string> stages;
+
     // Build from a Pulp PluginDescriptor
     static WamDescriptorData from_processor(const PluginDescriptor& desc);
 
-    // Serialize to JSON string for JS consumption
+    // Serialize to JSON string for JS consumption. The single source of truth
+    // for the WAMv2 descriptor JSON — both the single-plugin bridge and the rack
+    // (which fills `stages`) emit through here so the two can never drift.
     std::string to_json() const;
 };
 
@@ -137,8 +145,11 @@ public:
     // stage as its audio input — zero copy, same wasm memory.
     audio::BufferView<const float> output_as_input(int num_frames) const;
 
-    // Copy this stage's planar output into an interleaved Web Audio buffer.
-    void interleave_into(float* output, int host_channels, int num_frames) const;
+    // Copy this stage's planar output into the host's planar output channel
+    // buffers (one pointer per channel — the same layout wam_process receives).
+    // A straight per-channel copy: the rack is planar end-to-end, no interleave.
+    void copy_output_into(float* const* outputs, int host_channels,
+                          int num_frames) const;
 
     // The MIDI this stage produced during the last run() — handed by reference
     // to the next stage as its midi_in, or serialized for the host by the rack.
@@ -181,8 +192,12 @@ private:
     static constexpr std::size_t kSysexCapacity = 16;
     static constexpr std::size_t kSysexPayloadCapacity = 512;
 
-    std::unique_ptr<Processor> processor_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
 
     std::atomic<uint32_t> param_epoch_{0};
     state::ListenerToken param_listener_;
@@ -233,9 +248,16 @@ public:
     void set_transport(bool is_playing, double bpm, double position_beats,
                        double position_samples, int tsig_num, int tsig_den) noexcept;
 
-    // Called each AudioWorkletProcessor.process() frame
-    // input/output are interleaved float arrays (Web Audio layout)
-    void process(const float* input, float* output,
+    // Called each AudioWorkletProcessor.process() frame.
+    //
+    // PLANAR channel-pointer arrays — the SAME shape WCLAP and native CLAP use
+    // (clap_process_t audio buffers). `inputs`/`outputs` each point at an array
+    // of `num_channels` channel pointers, one contiguous float buffer per
+    // channel. Web Audio is already planar and the Pulp Processor is planar, so
+    // the processor renders straight from `inputs` into `outputs` with no
+    // interleave round-trip (the four transposes the interleaved single-pointer
+    // ABI used to do all cancelled, so removing them is behaviour-preserving).
+    void process(const float* const* inputs, float* const* outputs,
                  int num_channels, int num_frames);
 
     // Parameter access (WAMv2 uses string IDs)
@@ -298,11 +320,19 @@ public:
 
     // Descriptor
     WamDescriptorData descriptor() const;
+    // The descriptor as a JSON string. Thin wrapper over descriptor().to_json()
+    // so the single-plugin and rack entry points call the SAME method name and
+    // the shared wam_* export layer needs no per-bridge special-casing.
+    std::string descriptor_json() const { return descriptor().to_json(); }
 
 private:
     ProcessorFactory factory_;
-    std::unique_ptr<Processor> processor_;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
+    std::unique_ptr<Processor> processor_;
 
     // Bumped by an audio-thread listener on every parameter change. Atomic
     // because the counter is written on the audio thread and read from a
@@ -310,11 +340,9 @@ private:
     std::atomic<uint32_t> param_epoch_{0};
     state::ListenerToken param_listener_;
 
-    // De-interleave buffers (Web Audio uses interleaved, Pulp uses planar)
-    std::vector<float> input_planar_;
-    std::vector<float> output_planar_;
-    std::vector<float*> input_ptrs_;
-    std::vector<float*> output_ptrs_;
+    // No planar scratch: the processor renders directly from the host's planar
+    // input channel pointers into the host's planar output channel pointers
+    // (see process()), so there is nothing to de-interleave into.
 
     // Bounds for the adapter-owned MIDI buffers. They are reserved once in
     // initialize() and run with set_realtime_capacity_limit(true), so add()
@@ -342,17 +370,11 @@ private:
     // exactly one block sees ctx.reset_requested = true. One bool: RT-safe.
     bool reset_pending_ = false;
 
-    // Host-supplied transport, copied into ProcessContext every block. Plain
-    // POD so set_transport() is an allocation-free field write. Fields the web
+    // Host-supplied transport, copied into ProcessContext every block. The same
+    // WamTransport POD the rack uses (was a byte-identical private twin) so
+    // set_transport() writes it through the one shared helper. Fields the web
     // host cannot supply are left at ProcessContext's own defaults.
-    struct TransportSnapshot {
-        bool is_playing = false;
-        double tempo_bpm = 120.0;
-        double position_beats = 0.0;
-        int64_t position_samples = 0;
-        int time_sig_numerator = 4;
-        int time_sig_denominator = 4;
-    } transport_;
+    WamTransport transport_;
 };
 
 // ── WamChainBridge ──────────────────────────────────────────────────────
@@ -404,7 +426,10 @@ public:
                        double position_samples, int tsig_num, int tsig_den) noexcept;
 
     // Run the whole rack for one block. See the class comment for the wiring.
-    void process(const float* input, float* output,
+    // PLANAR channel-pointer arrays, same shape as WamProcessorBridge::process
+    // and native CLAP: stage 0 renders straight from `inputs`, the last stage's
+    // planar output is copied into `outputs` — no interleave round-trip.
+    void process(const float* const* inputs, float* const* outputs,
                  int num_channels, int num_frames);
 
     // Every stage's parameters, stage-qualified. Each entry carries a "stage"
@@ -445,9 +470,8 @@ private:
     // pointers alias its own storage) never moves after initialize().
     std::vector<std::unique_ptr<WamStage>> stages_;
 
-    // Host-facing de-interleave scratch feeding STAGE 0's audio input.
-    std::vector<float> input_planar_;
-    std::vector<float*> input_ptrs_;
+    // No host-facing input scratch: stage 0 renders directly from the host's
+    // planar input channel pointers (see process()).
 
     // Inbound host MIDI → stage 0. Reserved once, RT-capacity-limited.
     midi::MidiBuffer pending_midi_;

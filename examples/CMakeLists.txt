@@ -25,7 +25,9 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
-add_subdirectory(bitches-brew)
+# Bitches Brew (Silent Way-inspired control-voltage plug-in suite) lives in its
+# own repo and consumes Pulp as an SDK:
+# https://github.com/danielraffel/pulp-bitches-brew
 add_subdirectory(super-convolver)
 add_subdirectory(spectral-lab)
 # GPU NAM (Neural Amp Modeler player) lives in its own repo and consumes Pulp as
@@ -70,6 +72,10 @@ add_subdirectory(PulpSynth)
 
 # MPE demo: MPE-aware sine synth validating the per-note expression path
 add_subdirectory(mpe-synth)
+
+# Multi-out demo: 8-voice instrument, one stereo output bus per voice
+# (1 main + 7 aux). Exercises the AU v2 aumu multi-output-element path.
+add_subdirectory(pulp-multi-out)
 
 # PulpSampler: sample-buffer sampler with MIDI + ADSR
 add_subdirectory(PulpSampler)

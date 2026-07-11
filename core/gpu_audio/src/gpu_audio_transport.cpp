@@ -182,6 +182,13 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
         }
     }
 
+    // Keep the CPU fallback's convolution history current: feed it THIS block
+    // (hit or miss) and let it stage a latency-aligned substitute, so if the read
+    // below misses, the substitute is a correct continuation of the stream rather
+    // than a stale block with gaps in its overlap-add tail. Cheap (one partitioned
+    // block); only for CpuFallback nodes.
+    if (miss_policy_ == MissPolicy::CpuFallback) node_->prime_fallback(input, n);
+
     // Read the latency-delayed output produced earlier by the worker.
     if (output_ring_.read(output, n)) return;
 
@@ -232,6 +239,10 @@ void GpuAudioTransport::process_offline(const audio::BufferView<const float>& in
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
     pump();  // drains all ready input → node → output ring (blocking GPU readback)
+
+    // Keep the fallback fed on the offline timeline too, so a backstop miss below
+    // substitutes a correctly-continued, latency-aligned block.
+    if (miss_policy_ == MissPolicy::CpuFallback) node_->prime_fallback(input, n);
 
     if (output_ring_.read(output, n)) return;
 

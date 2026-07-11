@@ -146,6 +146,10 @@ and [`pulp-import-iplug`](https://github.com/danielraffel/pulp-import-iplug)
 
 ## See also
 
+* [Foreign-framework coexistence](foreign-framework-coexistence.md) — the
+  *forward* direction: a foreign framework (JUCE, a host's own UI) hosting a
+  Pulp view in-process. Covers the `PluginViewHost`-vs-`WindowHost` rule and
+  the run-loop / timer risks of a shared process.
 * [Coming from JUCE](coming-from-juce.md) — migrating the DSP itself to a Pulp
   `Processor` (the other direction: rewrite, don't embed).
 * [Importing designs](importing-designs.md) — the design-import pipeline the

@@ -4,8 +4,10 @@
 #include "clap_remote_controls.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
@@ -290,18 +292,17 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // docs/guides/dsp-threading.md "Numeric mode".
     pulp::signal::ScopedFlushDenormals flush_denormals;
 
-    // Max-frames contract guard (defensive; well-behaved hosts never exceed the
+    // Max-block contract guard (defensive; well-behaved hosts never exceed the
     // advertised max). The Processor and all its scratch buffers were sized in
     // clap_activate() to self->max_buffer_size. A render larger than that would
-    // overrun them and corrupt DSP state. CLAP has no clean per-block reject, so
-    // clamp the processed region to the prepared max and zero the un-processable
-    // tail [max, original) on every main output channel below so it reads back
-    // as clean silence rather than garbage.
+    // overrun them and corrupt DSP state. Per the shared max-block contract
+    // (max_block_contract.hpp) — matching VST3/AU-v3/AAX — clamp the processed
+    // region to the prepared max and zero the un-processable tail
+    // [max, original) on every main output channel below so it reads back as
+    // clean silence rather than garbage.
     const auto original_num_samples = num_samples;
-    if (self->max_buffer_size > 0 &&
-        num_samples > static_cast<uint32_t>(self->max_buffer_size)) {
-        num_samples = static_cast<uint32_t>(self->max_buffer_size);
-    }
+    num_samples = static_cast<uint32_t>(clamp_block_to_prepared_max(
+        static_cast<int>(num_samples), self->max_buffer_size));
 
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
@@ -370,10 +371,13 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         in_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
         for (int ch = 0; ch < in_channels; ++ch) {
             if (main_input_f64) {
+                // Wire the f32 view at the scratch buffer now; the actual
+                // f64→f32 demotion is deferred until after the native-f64
+                // decision below so the native dispatch path never pays for a
+                // conversion it immediately discards.
                 const double* src = bus.data64[ch];
                 self->input64_ptrs[ch] = src;
                 auto* dst = self->f64_input_scratch[static_cast<std::size_t>(ch)].data();
-                copy_f64_to_f32(src, dst, num_samples);
                 self->input_ptrs[ch] = src ? dst : nullptr;
             } else {
                 self->input64_ptrs[ch] = nullptr;
@@ -391,10 +395,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             sc_channels = (std::min)(static_cast<int>(sc_bus.channel_count), kMaxChannels);
             for (int ch = 0; ch < sc_channels; ++ch) {
                 if (sidechain_f64) {
+                    // Demotion deferred (see the main-input loop above).
                     const double* src = sc_bus.data64[ch];
                     self->sidechain64_ptrs[ch] = src;
                     auto* dst = self->f64_sidechain_scratch[static_cast<std::size_t>(ch)].data();
-                    copy_f64_to_f32(src, dst, num_samples);
                     self->sidechain_ptrs[ch] = src ? dst : nullptr;
                 } else {
                     self->sidechain64_ptrs[ch] = nullptr;
@@ -417,10 +421,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         out_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
         for (int ch = 0; ch < out_channels; ++ch) {
             if (main_output_f64) {
+                // Scratch pre-zeroing is deferred with the input demotion: it
+                // only matters on the boundary path, where the f32 process()
+                // may leave channels it never writes.
                 self->output64_ptrs[ch] =
                     bus.data64 && bus.data64[ch] ? bus.data64[ch] : nullptr;
                 auto& scratch = self->f64_output_scratch[static_cast<std::size_t>(ch)];
-                std::fill(scratch.begin(), scratch.end(), 0.0f);
                 self->output_ptrs[ch] = bus.data64 && bus.data64[ch]
                     ? scratch.data()
                     : nullptr;
@@ -520,11 +526,11 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         if (active) {
             for (int ch = 0; ch < aux_channels; ++ch) {
                 if (bus_f64) {
+                    // Scratch pre-zeroing deferred (see the main output bus).
                     self->aux_output64_ptrs[b - 1][ch] =
                         bus.data64 && bus.data64[ch] ? bus.data64[ch] : nullptr;
                     auto& scratch =
                         self->f64_aux_output_scratch[b - 1][static_cast<std::size_t>(ch)];
-                    std::fill(scratch.begin(), scratch.end(), 0.0f);
                     ptrs[ch] = bus.data64[ch] ? scratch.data() : nullptr;
                 } else {
                     self->aux_output64_ptrs[b - 1][ch] = nullptr;
@@ -624,6 +630,54 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     };
     const bool native_f64 =
         self->native_f64_enabled && has_host_f64 && all_active_routed_buses_are_f64;
+
+    // Boundary marshaling, deferred from the wiring loops above so it only
+    // runs when the block will actually be processed through the f32 surface:
+    // demote f64 host inputs into the f32 scratch the views already point at,
+    // and pre-zero the f32 output scratch (only the frames this block renders;
+    // the writeback below copies exactly num_samples) so output channels the
+    // processor never writes emit silence. The native-f64 dispatch reads the
+    // host's double buffers directly and skips all of this.
+    if (has_host_f64 && !native_f64) {
+        if (main_input_f64) {
+            for (int ch = 0; ch < in_channels; ++ch) {
+                copy_f64_to_f32(
+                    self->input64_ptrs[ch],
+                    self->f64_input_scratch[static_cast<std::size_t>(ch)].data(),
+                    num_samples);
+            }
+        }
+        if (sidechain_f64) {
+            for (int ch = 0; ch < sc_channels; ++ch) {
+                copy_f64_to_f32(
+                    self->sidechain64_ptrs[ch],
+                    self->f64_sidechain_scratch[static_cast<std::size_t>(ch)].data(),
+                    num_samples);
+            }
+        }
+        if (main_output_f64) {
+            for (int ch = 0; ch < out_channels; ++ch) {
+                if (self->output64_ptrs[ch]) {
+                    std::fill_n(
+                        self->f64_output_scratch[static_cast<std::size_t>(ch)].begin(),
+                        num_samples, 0.0f);
+                }
+            }
+        }
+        for (uint32_t b = 1; b < routed_output_buses; ++b) {
+            // Only the routed view's channels need zeroed scratch: the
+            // boundary writeback below is bounded to the same view, and every
+            // host aux channel outside it already holds the direct pre-zero
+            // applied to bus.data64 above.
+            if (!aux_output_f64[b - 1] || !output_buses[b].active()) continue;
+            const auto aux_channels = output_buses[b].buffer.num_channels();
+            for (std::size_t ch = 0; ch < aux_channels; ++ch) {
+                std::fill_n(
+                    self->f64_aux_output_scratch[b - 1][ch].begin(),
+                    num_samples, 0.0f);
+            }
+        }
+    }
 
     // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
     // capacity survives warmup and the steady-state process path stays RT-safe.
@@ -1076,14 +1130,35 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             if (native_f64 || !aux_output_f64[b - 1]) continue;
             auto& bus = process->audio_outputs[b];
             if (!bus.data64) continue;
-            int aux_channels =
-                (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
+            // Bounded by the routed view, not the host channel count: only
+            // these channels have scratch wired (and zeroed) this block. Host
+            // channels outside the view — including a whole bus demoted by a
+            // null mid-bus channel pointer — keep the direct data64 pre-zero
+            // from block start, and a demoted bus's stale scratch pointers are
+            // never dereferenced.
+            const auto aux_channels =
+                static_cast<int>(output_buses[b].buffer.num_channels());
             for (int ch = 0; ch < aux_channels; ++ch) {
                 copy_f32_to_f64(self->aux_output_ptrs[b - 1][ch],
                                 bus.data64[ch],
                                 num_samples);
             }
         }
+    }
+
+    // constant_mask is the plugin's promise about the block it just wrote: a set
+    // bit says "every frame of this channel holds the value in sample 0". CLAP
+    // permits in-place buffers, so an output buffer can arrive carrying the mask
+    // an upstream plugin (or the host) set on the input it aliases. Nothing above
+    // writes the mask, so leaving it alone would let a stale bit make a host read
+    // one sample of a channel that in fact varies — silent, and worst on CV-rate
+    // outputs, where the whole signal is the variation. Clearing it is always
+    // sound: 0 means "no channel is known constant", which is the truth for every
+    // block a Processor writes, and it costs one store per bus. Every output bus
+    // is fully written above — bus 0 by the Processor (or the bypass copy), the
+    // rest pre-zeroed — so no bus is exempt.
+    for (uint32_t b = 0; b < process->audio_outputs_count; ++b) {
+        process->audio_outputs[b].constant_mask = 0;
     }
 
     // Return trigger / momentary params (panic, reset, tap) to their default
@@ -1167,7 +1242,13 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         const std::size_t p_end = self->output_param_events.size();
         const std::size_t s_end = shorts.size();
         const std::size_t x_end = sysexes.size();
-        auto sample_at = [](int32_t off) -> int32_t { return off < 0 ? 0 : off; };
+        // Shared cross-format outbound-offset contract: offset N in -> N out;
+        // a negative offset clamps to the block start (see
+        // detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp). Kept as
+        // int32 here so the ascending-offset merge comparisons below stay signed.
+        auto sample_at = [](int32_t off) -> int32_t {
+            return static_cast<int32_t>(detail::clap_output_offset(off));
+        };
         auto param_at = [&](std::size_t i) -> int32_t {
             int32_t off = self->output_param_events.begin()[i].sample_offset;
             if (off < 0) return 0;

@@ -140,6 +140,30 @@ function(pulp_register_wgpu_native_precompiled_source version)
     endif()
 
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
+    # On Apple, CMAKE_SYSTEM_PROCESSOR reports the HOST arch. Select the wgpu
+    # slice from the TARGET arch (CMAKE_OSX_ARCHITECTURES) instead, so a cross
+    # or Intel-thin build caches/fetches the matching slice rather than the
+    # host's. A universal (arm64;x86_64) or unset value keeps the host arch as
+    # the single-slice placeholder — the fat dylib is fabricated separately by
+    # PulpWgpuUniversal.cmake, which overrides IMPORTED_LOCATION. This mirrors
+    # the ARCH override PulpDependencies.cmake applies before fetching wgpu.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES)
+        set(_wgpu_has_arm64 FALSE)
+        set(_wgpu_has_x86_64 FALSE)
+        if(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+            set(_wgpu_has_arm64 TRUE)
+        endif()
+        if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+            set(_wgpu_has_x86_64 TRUE)
+        endif()
+        if(_wgpu_has_arm64 AND _wgpu_has_x86_64)
+            # universal — keep the host arch placeholder (see comment above)
+        elseif(_wgpu_has_x86_64)
+            set(arch "x86_64")
+        elseif(_wgpu_has_arm64)
+            set(arch "arm64")
+        endif()
+    endif()
     if(arch STREQUAL "amd64")
         set(url_arch "x86_64")
     elseif(arch STREQUAL "x86_64")

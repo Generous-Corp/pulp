@@ -765,6 +765,54 @@ delay, lookahead, or oscillator state on host seeks.
 
 ---
 
+## Audio precision (f32 / f64)
+
+Pulp processes audio in 32-bit float by default, and supports 64-bit float
+end-to-end as an opt-in. The contract:
+
+- `Processor::process(...)` is the f32 surface every plugin implements.
+- `Processor::process_f64(...)` (both the simple `BufferView<double>` form and
+  the richer `ProcessBuffers64` form) is additive. The default implementation
+  is an allocation-free fallback that converts f64→f32 at the boundary, runs
+  your f32 `process()`, and converts back — so every Pulp plugin works in a
+  64-bit host with no extra code.
+- To process natively in double precision, set
+  `caps.supports_f64_audio = true` in the descriptor's capabilities and
+  override `process_f64`. The `core/signal` DSP classes are sample-type
+  templated (`Gain64`, `Biquad64`, …) and the SIMD kernels have f64 variants,
+  so a genuinely double-precision chain is available throughout.
+  `examples/pulp-gain` is the reference native-f64 plugin.
+
+Which surfaces can actually carry 64-bit audio is fixed by each host API:
+
+| Surface | Host can deliver f64? | Behavior |
+|---|---|---|
+| VST3 | Yes (`kSample64`) | Accepted unconditionally (`canProcessSampleSize`). Native dispatch when `supports_f64_audio`, otherwise boundary conversion. |
+| CLAP / WebCLAP | Yes (`data64`) | All ports advertise `CLAP_AUDIO_PORT_SUPPORTS_64BITS`; native-f64 plugins also advertise `PREFERS_64BITS`. Native dispatch requires every active routed bus to be 64-bit; mixed 32/64 blocks demote to the f32 boundary path. |
+| AU v2 / AU v3 | No — the AU render ABI is `Float32` | f32 only, by format. |
+| AAX | No — AAX audio buffers are 32-bit float | f32 only, by format. |
+| LV2 | No — `lv2:AudioPort` is `float` | f32 only, by format. |
+| Standalone | No — the device layer runs 32-bit float streams | f32 only. |
+| WAM (web) | No — Web Audio is f32 | f32 only. |
+| HeadlessHost / ValidationHarness / Python / Node bindings | Yes (API) | `process_f64` passes straight through; non-native plugins hit the single boundary conversion in the core fallback. |
+
+Additional precision notes:
+
+- **Parameters** are 32-bit floats (normalized at the store); host automation
+  values arriving as doubles narrow at the store boundary. Transport and
+  timing fields on `ProcessContext` are doubles.
+- **GPU audio, SignalGraph, PluginSlot, and the experimental live-kernel are
+  f32 surfaces by policy.** A native-f64 processor that routes through them is
+  narrowed to f32 at that node boundary.
+- **Latency-compensated bypass** runs its dry-delay line in f32 even under a
+  64-bit host, so bypassed passthrough with nonzero reported latency carries an
+  f32-precision floor; non-delayed bypass is a bit-exact copy.
+- Denormal flushing (`ScopedFlushDenormals`) wraps the audio callback on both
+  the f32 and f64 paths — FTZ/DAZ on x86 and FPCR.FZ on arm64 apply to both
+  sample widths.
+
+---
+
 ## Choosing Which Formats to Build
 
 Each format is a separate CMake target. A typical `CMakeLists.txt` creates one target per format, all sharing the same processor source:
