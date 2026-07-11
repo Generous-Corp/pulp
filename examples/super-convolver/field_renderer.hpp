@@ -55,53 +55,56 @@ inline void field_glow(canvas::Canvas& c, float x, float y, float radius,
 }
 }  // namespace detail
 
-// Draw one frame of the field into [x,y,w,h]. `flow` 0..1 = motion; `density` =
-// emitter count; `energy` 0..1 = overall audio level (brightens + swells).
-// Does NOT paint a background — caller fills the ground first.
+// Draw one frame of the field into [x,y,w,h] as many thin, dotted TRACER streaks
+// that flow along a coherent field — Schlieren / dye-in-water / long-exposure,
+// near-monochrome silver with rare cool/warm accents (not fat glowing dots).
+// `flow` 0..1 sets streak length (motion); `density` scales tracer count;
+// `energy` 0..1 brightens. Additive. Caller fills the ground first.
 inline void draw_acoustic_field(canvas::Canvas& c, float x, float y, float w, float h,
                                 double t_seconds, float flow, int density, float energy) {
-    static const FieldRGB PAL[5] = {{220, 230, 240}, {239, 226, 201}, {175, 206, 220},
-                                    {231, 199, 154}, {206, 214, 226}};
     const float cx = x + w * 0.5f, cy = y + h * 0.5f;
-    const float fx = w * 0.46f, fy = h * 0.46f;
-    const float dpr = 1.0f;  // caller works in device px already
-    const float e0 = 0.55f + 0.45f * energy;  // global brightness from audio
+    const float fx = w * 0.54f, fy = h * 0.54f;  // fill most of the frame
+    const float bright = 0.55f + 0.45f * energy;
 
     c.set_blend_mode(canvas::Canvas::BlendMode::lighter);
-    // Atmospheric haze from the Source at center.
-    detail::field_glow(c, cx, cy, std::fmax(fx, fy) * 1.15f, FieldRGB{50, 64, 82}, 20);
+    // Faint atmospheric vignette (not a hot central glow).
+    detail::field_glow(c, cx, cy, std::fmax(fx, fy) * 1.25f, FieldRGB{34, 42, 56}, 16);
 
-    const int n = density < 1 ? 1 : density;
-    for (int k = 0; k < n; ++k) {
-        const float a = field_hash(k * 7 + 1) * 6.2831853f;
-        const float rr = std::sqrt(field_hash(k * 13 + 2));
-        float sx = std::cos(a) * rr * 1.02f, sy = std::sin(a) * rr * 0.95f;
-        const FieldRGB col = PAL[k % 5];
-        const float z = 0.3f + 0.7f * field_hash(k * 5 + 3);
-        const float energy_k = e0 * (0.55f + 0.45f *
-            std::fabs(std::sin(6.2831853f * field_hash(k * 17 + 4) * 3.1f +
-                               k + static_cast<float>(t_seconds) * 0.6f)));
+    const int d = density < 1 ? 1 : density;
+    const int tracers = 220 + d * 10;                // dense; grows with density
+    const int steps = 30;
+    const float slen = 0.006f + 0.032f * flow;       // streak length grows with Flow
 
-        // Tracer streak: integrate the flow a few steps, dropping fading dots.
-        for (int s = 0; s < 10; ++s) {
+    for (int k = 0; k < tracers; ++k) {
+        // Seed across the whole frame (slightly beyond so streaks enter/leave).
+        float sx = field_hash(k * 3 + 1) * 2.3f - 1.15f;
+        float sy = field_hash(k * 7 + 2) * 2.1f - 1.05f;
+        // Palette: mostly silver; rare low-saturation cool/warm accents.
+        const float acc = field_hash(k * 13 + 5);
+        const FieldRGB col = acc < 0.06f ? FieldRGB{196, 214, 230}
+                           : acc < 0.11f ? FieldRGB{228, 210, 182}
+                                         : FieldRGB{234, 240, 248};
+        const float gain = bright * (0.85f + 0.7f * field_hash(k * 23 + 8));
+
+        // Integrate a dotted streak through the flow; faint tail → bright head.
+        for (int s = 0; s < steps; ++s) {
             float vx, vy; field_flow_at(sx, sy, t_seconds, vx, vy);
-            sx += vx * 0.03f * flow; sy += vy * 0.03f * flow;
-            const float tt = 1.0f - s / 10.0f;
-            const int aA = static_cast<int>(30 * tt * energy_k);
-            const float rad = (0.8f + 1.6f * z) * tt * dpr;
+            sx += vx * slen; sy += vy * slen;
+            const float frac = static_cast<float>(s) / steps;   // 0 tail → 1 head
+            const int a = static_cast<int>((14.0f + 105.0f * frac) * gain);
+            const float rad = 0.5f + 1.05f * frac;
             c.set_fill_color(canvas::Color::rgba8(col.r, col.g, col.b,
-                                                  static_cast<std::uint8_t>(aA)));
+                                                  static_cast<std::uint8_t>(a > 255 ? 255 : a)));
             c.fill_circle(cx + sx * fx, cy + sy * fy, rad);
         }
+        // Bright head — a hot point that makes the streak read.
         const float hx = cx + sx * fx, hy = cy + sy * fy;
-        const float halo = (5.0f + 8.0f * z) * (0.72f + 0.5f * energy_k) * dpr;
-        detail::field_glow(c, hx, hy, halo * 2.8f, col, static_cast<int>(40 + 65 * energy_k));
         c.set_fill_color(canvas::Color::rgba8(col.r, col.g, col.b,
-                                              static_cast<std::uint8_t>(80 + 80 * energy_k)));
-        c.fill_circle(hx, hy, halo * 0.5f);
+                                              static_cast<std::uint8_t>(std::min(255.0f, 120.0f * gain))));
+        c.fill_circle(hx, hy, 1.6f);
         c.set_fill_color(canvas::Color::rgba8(255, 255, 255,
-                                              static_cast<std::uint8_t>(60 + 85 * energy_k)));
-        c.fill_circle(hx, hy, halo * 0.2f);
+                                              static_cast<std::uint8_t>(std::min(255.0f, 150.0f * gain))));
+        c.fill_circle(hx, hy, 0.9f);
     }
     c.set_blend_mode(canvas::Canvas::BlendMode::normal);
 }
