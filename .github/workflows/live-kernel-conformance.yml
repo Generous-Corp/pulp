@@ -32,6 +32,10 @@ on:
       - "examples/web-demos/live-kernel-spike/**"
       - "core/signal/include/pulp/signal/**"
       - ".github/workflows/live-kernel-conformance.yml"
+  # Run the required `Build + per-node null test + RT-safety gates` check on
+  # queued merge groups so a merge queue on `main` can land PRs. `merge_group`
+  # does not honour the `paths` filter above, so this fires on every group.
+  merge_group:
   workflow_dispatch:
 
 concurrency:

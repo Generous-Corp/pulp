@@ -282,6 +282,16 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   in-worklet), and transferring an `ArrayBuffer` OUT of an AudioWorklet is
   unreliable (the receiver gets a detached buffer) — clone small payloads (state,
   sysex) instead, and never transfer a caller-owned buffer (it detaches theirs).
+- **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
+  in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
+  `tools/scripts/screenshot_sync_check.py` then diffs the manifest's `[trigger].paths`
+  and fails when a triggered target's committed PNG/OG image wasn't refreshed.
+  Wired identically to skill-sync: PostToolUse hint in
+  `hooks/scripts/cli-plugin-sync.sh`, pre-push report in `.githooks/pre-push`, and
+  authoritative CI step in `version-skill-check.yml`. Bypass a single commit with a
+  `Screenshot-Sync: skip target=<id|all> reason="..."` trailer. Pulp core itself is
+  NOT opted in (no manifest), so the gate no-ops here; it exists for downstream
+  plugin repos (GPU NAM, example plugins, Bendr) and the WCLAP/WAM OG images.
 - **Android native `.cxx` caches must be dependency-aware.** The Android workflow
   builds through Gradle's external native build, and `android/app/.cxx` can hold
   FetchContent checkouts under `_deps`. Do not cache `.cxx` under a Gradle-only
@@ -3632,3 +3642,20 @@ full design in `docs/guides/intel-support.md`). CI-relevant facts:
 Hard rule: **no Intel work ever routes to the self-hosted Studios** (they host
 the required `macos` gate) and **Namespace is never used**. All Intel lanes run
 on free-for-public-repo GitHub-hosted macOS runners.
+
+## Release page: ONE workflow owns the GitHub Release
+
+`release-cli.yml` is the **sole creator** of the GitHub Release for a `v*` tag:
+it sets the title (the **bare tag**, e.g. `v0.645.0` — no "Pulp CLI" prefix),
+the body (humanized highlights from `tools/scripts/compose_release_notes.py
+--footer`, which appends the `**Full changelog:** CHANGELOG.md § X` +
+`**Previous release:** vA.B.C` footer), and uploads the CLI/SDK binaries.
+`sign-and-release.yml` must **only** `gh release upload` `appcast.xml` onto that
+release — it must NOT create/name/draft it. Both fire on the same `v*` tag, so if
+sign-and-release creates/renames/drafts a release it RACES release-cli and
+last-writer-wins produces inconsistent titles (`Pulp CLI vX` vs `vX`),
+draft/published flips, stray `release-untagged-*` entries, and GitHub's
+`Full Changelog: A...B` compare footer instead of the CHANGELOG-§ one. Release
+notes link a PR (`#N`) for every entry via `compose_release_notes.py`'s
+`pr_for_commit` GitHub commit→PR lookup; only genuine direct-to-main commits show
+a short SHA. See `planning/2026-07-10-release-page-hygiene.md`.

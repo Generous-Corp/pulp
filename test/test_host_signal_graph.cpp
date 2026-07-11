@@ -678,9 +678,17 @@ public:
         while (!release_thread_started_.load(std::memory_order_acquire)) {
             std::this_thread::yield();
         }
-        for (int i = 0; i < 100000
-             && !release_called_.load(std::memory_order_acquire);
-             ++i) {
+        // Give the release thread a bounded window to demonstrate whether it
+        // (incorrectly) calls release() while process() is still in flight.
+        // Bound the window by wall-clock, not a fixed yield count: on a
+        // saturated CI host 100000 yields can each context-switch and the loop
+        // can outlast the ctest timeout, aborting the test spuriously. ~50ms is
+        // ample for the release thread to run graph.release() and expose an
+        // ordering bug if one exists (release_called_ breaks the loop early).
+        const auto window_end =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+        while (std::chrono::steady_clock::now() < window_end
+               && !release_called_.load(std::memory_order_acquire)) {
             std::this_thread::yield();
         }
         const size_t channels = std::min(out.num_channels(), in.num_channels());
