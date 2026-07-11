@@ -155,6 +155,18 @@ public:
                                 const float* pan_r, float* out_lr, uint32_t n,
                                 uint32_t num_ir) = 0;
 
+    /// Same as multi_convolve, but also reports the true GPU-busy time of the
+    /// fused pass sequence (forward FFT → broadcast multiply → batched inverse
+    /// FFT → pan-combine) in microseconds via `gpu_compute_us`, measured with a
+    /// compute-pass timestamp query — excluding the input upload and the
+    /// blocking readback. Sets `*gpu_compute_us = -1` when timing is
+    /// unavailable (capabilities().timestamp_query == false). Diagnostic /
+    /// roofline path: comparing this against the call's wall time separates a
+    /// GPU-busy (bandwidth/compute-bound) kernel from an upload/readback-bound
+    /// one. Mirrors fft_forward_timed.
+    virtual bool multi_convolve_timed(const float* in_complex, const float* pan_l,
+                                      const float* pan_r, float* out_lr, uint32_t n,
+                                      uint32_t num_ir, double* gpu_compute_us) = 0;
     // ── Partitioned-FDL multi-convolution (roofline #1) ──────────────────────
     //
     // The same one-input → many-IRs → stereo result, but with the IR split into

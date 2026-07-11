@@ -308,6 +308,43 @@ TEST_CASE("GpuCompute FFT timed reports true GPU compute time", "[render][gpu][c
     }
 }
 
+TEST_CASE("GpuCompute multi_convolve_timed matches multi_convolve and reports GPU time",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr uint32_t N = 2048, NUM_IR = 4;
+    std::vector<float> ir_specs(static_cast<size_t>(2) * N * NUM_IR);
+    for (size_t i = 0; i < ir_specs.size(); ++i)
+        ir_specs[i] = 0.01f * std::sin(0.003f * static_cast<float>(i));
+    REQUIRE(compute->prepare_multi_convolution(N, ir_specs.data(), NUM_IR));
+
+    std::vector<float> in(2 * N, 0.0f);
+    for (uint32_t i = 0; i < N; ++i) in[2 * i] = std::sin(0.02f * i);
+    std::vector<float> pan_l(NUM_IR, 0.6f), pan_r(NUM_IR, 0.4f);
+    std::vector<float> ref(2 * N, 0.0f), timed(2 * N, 0.0f);
+
+    // Timed path must produce the SAME stereo output as the untimed path — the
+    // timestamp bracket must not perturb the result.
+    REQUIRE(compute->multi_convolve(in.data(), pan_l.data(), pan_r.data(),
+                                    ref.data(), N, NUM_IR));
+    double gpu_us = -123.0;
+    REQUIRE(compute->multi_convolve_timed(in.data(), pan_l.data(), pan_r.data(),
+                                          timed.data(), N, NUM_IR, &gpu_us));
+    for (uint32_t i = 0; i < 2 * N; ++i) REQUIRE(std::abs(timed[i] - ref[i]) < 1e-4f);
+
+    if (compute->capabilities().timestamp_query) {
+        // A resolved GPU-busy delta, in µs. Under contention the two timestamps
+        // can coalesce to 0; accept that rather than flake, but reject a
+        // negative non-sentinel or an absurd magnitude. Output-equality above is
+        // the deterministic signal; this only sanity-checks the timing.
+        REQUIRE(gpu_us >= 0.0);
+        REQUIRE(gpu_us < 100000.0);
+    } else {
+        REQUIRE(gpu_us == -1.0);  // timing unavailable -> sentinel
+    }
+}
+
 TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
