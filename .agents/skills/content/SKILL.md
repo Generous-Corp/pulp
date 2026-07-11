@@ -32,7 +32,7 @@ Trust rules:
 - update uses an explicit local path, not registry resolution, and rolls back a replaced version on failure;
 - install/update/remove/reveal require safe single-component plugin/package/version ids;
 - rescan is metadata-only and records `plugin_id` plus `manifest_sha256`;
-- removal deletes only the installed pack root; user edits stay in the plugin's normal user preset path.
+- removal deletes only the installed pack root; user edits stay in the plugin's normal user preset path. The OK line names the deleted pack path — `Removed content pack <id> for <plugin> (removed <path>)` — for parity with `tool uninstall`.
 
 Built plugins should embed `pulp.plugin-runtime.json` via `pulp_add_plugin(... CONTENT_CAPABILITIES ... CONTENT_KINDS ...)`. Agents and in-app installers should preview with that manifest before approval, then install with `approved=true`. Validate built bundles with `ValidationHarness::validate_plugin_runtime_manifest(...)`.
 

@@ -3522,6 +3522,7 @@ int cmd_remove(const std::vector<std::string>& args) {
         return 1;
     }
 
+    const std::size_t removed_count = it->owned_paths.size();
     std::string remove_error;
     for (const auto& rel : it->owned_paths) {
         if (!remove_owned_path(project_root, rel, remove_error)) {
@@ -3555,7 +3556,8 @@ int cmd_remove(const std::vector<std::string>& args) {
         }
     }
 
-    print_ok_local("Removed kit " + kit_id);
+    print_ok_local("Removed kit " + kit_id + " (removed " + std::to_string(removed_count)
+                   + (removed_count == 1 ? " file)" : " files)"));
     return 0;
 }
 

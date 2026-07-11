@@ -167,8 +167,16 @@ TEST_CASE("pulp content installs, lists, reveals, and removes data-only packs",
                          "--version", "0.1.0", "--root", data.path.string()}) == 0);
 
     write_file(data.path / "Content" / plugin / "UserPresets" / "mine.json", "{}\n");
-    REQUIRE(cmd_content({"remove", pack_id, "--plugin", plugin,
-                         "--version", "0.1.0", "--root", data.path.string(), "--yes"}) == 0);
+    int remove_rc = 0;
+    const auto remove_out = capture_stdout_for([&] {
+        return cmd_content({"remove", pack_id, "--plugin", plugin,
+                            "--version", "0.1.0", "--root", data.path.string(), "--yes"});
+    }, remove_rc);
+    REQUIRE(remove_rc == 0);
+    // The OK line names the path it deleted (parity with `tool uninstall`).
+    REQUIRE(remove_out.find("Removed content pack " + pack_id) != std::string::npos);
+    REQUIRE(remove_out.find("(removed ") != std::string::npos);
+    REQUIRE(remove_out.find(installed.string()) != std::string::npos);
     REQUIRE_FALSE(fs::exists(installed));
     REQUIRE(fs::exists(data.path / "Content" / plugin / "UserPresets" / "mine.json"));
 }

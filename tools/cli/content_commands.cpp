@@ -1093,7 +1093,8 @@ int cmd_remove(const std::vector<std::string>& args) {
         return 1;
     }
     write_index(data_root);
-    std::cout << "OK: Removed content pack " << id << " for " << plugin << "\n";
+    std::cout << "OK: Removed content pack " << id << " for " << plugin
+              << " (removed " << target.string() << ")\n";
     return 0;
 }
 
