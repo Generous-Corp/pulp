@@ -394,6 +394,32 @@ def collect_entries(
     return entries
 
 
+def changelog_anchor(tag: str) -> str:
+    """CHANGELOG.md heading anchor for a tag: ``v0.645.0`` → ``v06450``."""
+    parsed = parse_semver(tag)
+    if not parsed:
+        return tag.lstrip("v").replace(".", "")
+    return "v" + "".join(str(n) for n in parsed)
+
+
+def footer(tag: str, repo_url: str) -> str:
+    """The release-page footer owner prefers: a CHANGELOG.md § link plus a
+    Previous-release link — NOT GitHub's auto "Full Changelog: A...B" compare.
+    """
+    base = repo_url.rstrip("/")
+    version = tag.lstrip("v")
+    lines = [
+        "---",
+        "",
+        f"**Full changelog:** [CHANGELOG.md § {version}]"
+        f"({base}/blob/main/CHANGELOG.md#{changelog_anchor(tag)})",
+    ]
+    prev = previous_tag(tag)
+    if prev:
+        lines.append(f"**Previous release:** [{prev}]({base}/releases/tag/{prev})")
+    return "\n".join(lines)
+
+
 def entry_link(entry: ReleaseEntry, repo_url: str) -> str:
     if entry.pr_number:
         return f"[#{entry.pr_number}]({repo_url.rstrip('/')}/pull/{entry.pr_number})"
@@ -519,6 +545,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Best-effort detection of a PR label named 'breaking'.",
     )
     parser.add_argument(
+        "--footer",
+        action="store_true",
+        help="Append the CHANGELOG.md-section + previous-release footer.",
+    )
+    parser.add_argument(
         "--tier",
         choices=["auto", "patch", "minor", "major"],
         default="auto",
@@ -544,7 +575,10 @@ def main(argv: list[str]) -> int:
         tier = args.tier
         if tier == "auto":
             tier = bump_level(args.tag, previous_tag(args.tag))
-        print(render(entries, repo_url=args.repo_url, tier=tier))
+        body = render(entries, repo_url=args.repo_url, tier=tier)
+        if args.footer:
+            body = body + "\n\n" + footer(args.tag, args.repo_url)
+        print(body)
     except Exception as exc:
         print(f"compose_release_notes.py: {exc}", file=sys.stderr)
         return 1

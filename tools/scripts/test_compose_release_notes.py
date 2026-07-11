@@ -208,6 +208,24 @@ class ComposeReleaseNotesTests(unittest.TestCase):
         # No repo slug (offline / no lookup) -> None, no API call.
         self.assertIsNone(crn.pr_for_commit("abc123", None))
 
+    def test_footer_links_changelog_section_and_previous_release(self) -> None:
+        # The owner-preferred footer: a CHANGELOG.md § link + a Previous-release
+        # link, NOT GitHub's "Full Changelog: A...B" compare link.
+        self.assertEqual(crn.changelog_anchor("v0.645.0"), "v06450")
+        self.assertEqual(crn.changelog_anchor("v1.2.3"), "v123")
+        with mock.patch.object(crn, "previous_tag", return_value="v0.644.0"):
+            foot = crn.footer("v0.645.0", "https://github.com/example/repo")
+        self.assertIn(
+            "[CHANGELOG.md § 0.645.0]"
+            "(https://github.com/example/repo/blob/main/CHANGELOG.md#v06450)",
+            foot,
+        )
+        self.assertIn(
+            "[v0.644.0](https://github.com/example/repo/releases/tag/v0.644.0)",
+            foot,
+        )
+        self.assertNotIn("compare", foot)
+
     def compose_tier(self, tag: str, tier: str) -> str:
         result = subprocess.run(
             [
