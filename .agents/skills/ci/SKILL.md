@@ -282,6 +282,16 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   in-worklet), and transferring an `ArrayBuffer` OUT of an AudioWorklet is
   unreliable (the receiver gets a detached buffer) — clone small payloads (state,
   sysex) instead, and never transfer a caller-owned buffer (it detaches theirs).
+- **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
+  in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
+  `tools/scripts/screenshot_sync_check.py` then diffs the manifest's `[trigger].paths`
+  and fails when a triggered target's committed PNG/OG image wasn't refreshed.
+  Wired identically to skill-sync: PostToolUse hint in
+  `hooks/scripts/cli-plugin-sync.sh`, pre-push report in `.githooks/pre-push`, and
+  authoritative CI step in `version-skill-check.yml`. Bypass a single commit with a
+  `Screenshot-Sync: skip target=<id|all> reason="..."` trailer. Pulp core itself is
+  NOT opted in (no manifest), so the gate no-ops here; it exists for downstream
+  plugin repos (GPU NAM, example plugins, Bendr) and the WCLAP/WAM OG images.
 - **Android native `.cxx` caches must be dependency-aware.** The Android workflow
   builds through Gradle's external native build, and `android/app/.cxx` can hold
   FetchContent checkouts under `_deps`. Do not cache `.cxx` under a Gradle-only
@@ -646,6 +656,23 @@ fails and the whole release never publishes (the `release` job `needs` the full
 `build-cli` matrix). Steady-state fix is to bake rustup into the golden (tartci
 `manifests/pulp.macos.toml`); the workflow fallback stays as the portability
 belt for any un-baked runner.
+
+### `release-cli.yml` has a native Intel (`darwin-x64`) leg
+
+`release-cli.yml`'s macOS matrix ships TWO slices: `darwin-arm64` (routed through
+`resolve-macos-runner`) and `darwin-x64` on GitHub-hosted `macos-15-intel`. The
+Intel leg deliberately **does not** go through the resolver — the `runs-on`
+ternary only routes `matrix.os == 'macos-15'`, so `macos-15-intel` runs on that
+fixed hosted label (no self-hosted/Namespace/VM routing, and Rust is
+preinstalled so the toolchain-bootstrap above is a no-op there). It's a native
+build (no cross-compile, no Rosetta) with a `CMAKE_OSX_DEPLOYMENT_TARGET=13.0`
+floor and an arch-asserting smoke. `macos-15-intel` is the pinned stable hosted
+x86_64 macOS image (supported ~through Aug 2027; `macos-13` retired Dec 2025;
+`macos-26-intel` also exists but is newer/less-baked) — when it EOLs, the
+successor is cross-compiling on the arm64 pool
+(`planning/2026-07-10-intel-mac-cli-support.md`). Do NOT route this leg to the
+self-hosted studios (the `no Intel on the studios` discipline in
+`docs/guides/intel-support.md`).
 
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
@@ -3612,3 +3639,40 @@ falls back to a bounded local `-j` when tartci is absent (build VM / plain
 checkout) or the lease is denied (it never fails the build and never piles onto
 a saturated host). Keep new POSIX build strings routed through it; don't add a
 bare `cmake --build … --parallel` back to the `local`/ssh-linux lanes.
+
+## macOS Intel (x86_64) CI tiering
+
+Intel portability is verified in four tiers (owned by the `intel-canary` skill;
+full design in `docs/guides/intel-support.md`). CI-relevant facts:
+
+- **Tier 0** is a step in `build.yml`'s ARM macOS job, gated on the
+  `PULP_INTEL_CANARY` repo variable (set `1` on `danielraffel/pulp`; forks
+  default off and skip it). It runs the lint + a GPU-off x86_64 compile.
+- **Tier 1** is `intel-portability.yml` — a path-triggered **advisory** x86_64
+  lane on the STABLE `macos-15` (arm+Rosetta). Do NOT add it to required checks.
+- **Tier 2** is `nightly-intel.yml` — job A on the flaky native `macos-15-intel`
+  (quarantined here, `timeout-minutes: 120`, infra-vs-product watchdog), job B a
+  universal cross-check on `macos-15`. Opens/auto-closes one dedup watchdog
+  issue.
+- **Tier 3** is the **blocking** `universal-arch-gate` job in `release-cli.yml`.
+
+Hard rule: **no Intel work ever routes to the self-hosted Studios** (they host
+the required `macos` gate) and **Namespace is never used**. All Intel lanes run
+on free-for-public-repo GitHub-hosted macOS runners.
+
+## Release page: ONE workflow owns the GitHub Release
+
+`release-cli.yml` is the **sole creator** of the GitHub Release for a `v*` tag:
+it sets the title (the **bare tag**, e.g. `v0.645.0` — no "Pulp CLI" prefix),
+the body (humanized highlights from `tools/scripts/compose_release_notes.py
+--footer`, which appends the `**Full changelog:** CHANGELOG.md § X` +
+`**Previous release:** vA.B.C` footer), and uploads the CLI/SDK binaries.
+`sign-and-release.yml` must **only** `gh release upload` `appcast.xml` onto that
+release — it must NOT create/name/draft it. Both fire on the same `v*` tag, so if
+sign-and-release creates/renames/drafts a release it RACES release-cli and
+last-writer-wins produces inconsistent titles (`Pulp CLI vX` vs `vX`),
+draft/published flips, stray `release-untagged-*` entries, and GitHub's
+`Full Changelog: A...B` compare footer instead of the CHANGELOG-§ one. Release
+notes link a PR (`#N`) for every entry via `compose_release_notes.py`'s
+`pr_for_commit` GitHub commit→PR lookup; only genuine direct-to-main commits show
+a short SHA. See `planning/2026-07-10-release-page-hygiene.md`.

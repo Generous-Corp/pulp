@@ -607,6 +607,20 @@ above, both new fields are also declared in `experimental/pulp-rs/src/tool_regis
 (serde `#[serde(default)]`, ignored on the delegated install path) so `pulp
 tool info`/`list` round-trip them. First user: `audio-quality-lab`.
 
+### Remove/uninstall commands name what they deleted
+
+Every extend-surface removal (`pulp tool uninstall`, `pulp kit remove`, `pulp
+content remove`, `pulp add --remove`) closes on an OK line that **names what it
+removed**, not just the id — this is the shared extend-surface lifecycle
+contract (see `docs/reference/extending-pulp.md`). `tool uninstall` prints
+`(removed <path>)` from the returned `PathBuf`; `content remove` mirrors it with
+the deleted content-pack path; `kit remove` deletes a *set* of lock-recorded
+files, so it names the count instead (`(removed N files)`). When you add or
+change a removal command, keep the OK line honest — echo the concrete path (or
+count, for multi-file removals) the command actually deleted, and assert it in
+the command's test via `capture_stdout_for` so "it names what it removed" is
+proven, not assumed.
+
 ### Package suggestion and analyzer metadata commands
 
 Package search/suggestion code (`tools/cli/package_commands_search.cpp`) is a

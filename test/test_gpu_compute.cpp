@@ -702,6 +702,91 @@ TEST_CASE("GpuCompute additive synth produces the requested partials",
     REQUIRE_FALSE(compute->additive_synth(partials.data(), out.data(), 0, N, SR, 0.0f));
 }
 
+// Guards the block-parallel additive_synth reshape (one workgroup per sample, WG
+// lanes tree-reducing the partials sum): numeric parity with a scalar CPU
+// reference across partial counts spanning below / at / above the 256-lane
+// workgroup, a sample count that is NOT a multiple of the workgroup, both routing
+// paths (cooperative vs serial), the >65535-sample grid-stride path, and
+// run-to-run determinism (the tree reduction is fixed-order and atomics-free).
+TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup sizes",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
+    constexpr float SR = 48000.0f;
+    constexpr double TWO_PI = 6.28318530717958647692;
+    auto cpu_add = [&](const std::vector<float>& parts, uint32_t P, uint32_t s,
+                       float t0) {
+        const double t = (static_cast<double>(t0) + s) / SR;
+        double acc = 0.0;  // scalar reference, serial order
+        for (uint32_t i = 0; i < P; ++i) {
+            const double f = parts[i * 3], a = parts[i * 3 + 1], ph = parts[i * 3 + 2];
+            acc += a * std::sin(TWO_PI * f * t + ph);
+        }
+        return static_cast<float>(acc);
+    };
+    auto make_partials = [](uint32_t P) {
+        std::vector<float> m(static_cast<std::size_t>(P) * 3);
+        for (uint32_t i = 0; i < P; ++i) {
+            m[i * 3 + 0] = 55.0f + 11.0f * static_cast<float>(i);   // freq
+            m[i * 3 + 1] = 1.0f / (1.0f + static_cast<float>(i));   // amp
+            m[i * 3 + 2] = 0.1f * static_cast<float>(i);            // phase
+        }
+        return m;
+    };
+
+    // Cooperative-routed: non-multiple-of-256 block; partial counts spanning WG.
+    const uint32_t S = 333;
+    for (uint32_t P : {1u, 2u, 200u, 256u, 300u, 1000u}) {
+        const auto parts = make_partials(P);
+        std::vector<float> out(S, 0.0f), out2(S, 0.0f);
+        REQUIRE(compute->additive_synth(parts.data(), out.data(), P, S, SR, 0.0f));
+        REQUIRE(compute->additive_synth(parts.data(), out2.data(), P, S, SR, 0.0f));
+        for (uint32_t s = 0; s < S; ++s) {
+            const float ref = cpu_add(parts, P, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+            REQUIRE(out[s] == out2[s]);  // deterministic run-to-run
+        }
+    }
+
+    // Serial-routed: a block large enough to fill the device on the serial kernel
+    // (ceil(S/256) >= 32) routes to the unchanged one-thread-per-sample path.
+    {
+        const uint32_t S2 = 16384, P = 300;  // ceil(16384/256)=64 >= 32 -> serial
+        const auto parts = make_partials(P);
+        std::vector<float> out(S2, 0.0f), out2(S2, 0.0f);
+        REQUIRE(compute->additive_synth(parts.data(), out.data(), P, S2, SR, 0.0f));
+        REQUIRE(compute->additive_synth(parts.data(), out2.data(), P, S2, SR, 0.0f));
+        for (uint32_t s = 0; s < S2; ++s) {
+            const float ref = cpu_add(parts, P, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+            REQUIRE(out[s] == out2[s]);
+        }
+    }
+
+    // Grid-stride path (cooperative): a block whose serial dispatch would exceed
+    // the 65535 workgroup-per-dimension cap routes to the cooperative kernel,
+    // which caps its dispatch and grid-strides — so each workgroup wraps to
+    // several samples. Only reachable at the maximum supported block, so keep the
+    // per-sample work tiny (P=1) and spot-check indices across the wrap boundary.
+    {
+        const uint32_t Sbig = 1u << 24;  // 16,777,216 -> ceil/256 = 65536 > 65535
+        const uint32_t P = 1;
+        const auto parts = make_partials(P);
+        std::vector<float> out(Sbig, 0.0f);
+        REQUIRE(compute->additive_synth(parts.data(), out.data(), P, Sbig, SR, 0.0f));
+        // Check indices at LOW t only: at very large sample indices t is huge and
+        // f32 sin's argument-reduction error swamps the double-precision reference
+        // (an f32-large-angle artifact shared with the serial kernel, not a
+        // grid-stride bug). Workgroup 0 owns samples {0, 65535, 131070} (dispatch
+        // caps at 65535, so stride == 65535), so these still exercise the wrap.
+        for (uint32_t s : {0u, 1u, 65535u, 65536u, 131070u, 131071u}) {
+            const float ref = cpu_add(parts, P, s, 0.0f);
+            REQUIRE(std::abs(out[s] - ref) < 1e-3f * (1.0f + std::abs(ref)));
+        }
+    }
+}
+
 TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();

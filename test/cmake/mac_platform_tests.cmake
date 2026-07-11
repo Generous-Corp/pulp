@@ -60,3 +60,21 @@ if(APPLE AND NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-mac-perform-key-equivalent)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Foreign-framework coexistence (PAM WS-6 / G8): a raw non-Pulp NSWindow
+    # stands in for a JUCE editor sharing the process. Pins that the CPU
+    # window host's idle pump keeps firing under a modal / event-tracking
+    # run-loop mode (the NSRunLoopCommonModes fix in window_host_mac.mm) and
+    # that Pulp's own-thread timer, audio-render thread, and UI hit-testing
+    # stay correct across the foreign window's open/resize/focus/close.
+    add_executable(pulp-test-foreign-framework-coexistence
+        test_foreign_framework_coexistence.mm
+    )
+    target_link_libraries(pulp-test-foreign-framework-coexistence PRIVATE
+        pulp::view
+        pulp::events
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    catch_discover_tests(pulp-test-foreign-framework-coexistence)
+endif()

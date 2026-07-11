@@ -2,6 +2,7 @@
 #include <pulp/state/parameter.hpp>
 
 #include <cmath>
+#include <vector>
 
 using namespace pulp::state;
 
@@ -196,4 +197,129 @@ TEST_CASE("ParamRange skew honors step quantization on denormalize",
         const float snapped = std::round(v / 10.0f) * 10.0f;
         REQUIRE(std::abs(v - snapped) < 1e-3f);
     }
+}
+
+// ---------------------------------------------------------------------------
+// JUCE NormalisableRange reference cross-check (WS-4 / G5 "prove the skew").
+//
+// Verifies Pulp's NormalisableRange<T> maps values with the same skew
+// convention a JUCE-based port expects, so migrated automation lanes keep the
+// identical curve. A reference computation of that skew math (skew via pow,
+// symmetric mirror about the middle, exp/log formulation for the inverse) runs
+// alongside Pulp's and is asserted equal across skew in [0.05, 20]. Uses double
+// so the only residual difference is exp/log-vs-pow rounding (a handful of ULP),
+// not the float32 precision wall the shaped tests above already document.
+// ---------------------------------------------------------------------------
+
+namespace juce_ref {
+
+// Independent transcription of JUCE's NormalisableRange<double> default
+// (no-custom-lambda) mapping. Kept structurally parallel to the JUCE source so
+// a reviewer can diff it against upstream.
+double convert_to_0to1(double start, double end, double skew, bool symmetric,
+                       double v) {
+    double proportion = (v - start) / (end - start);
+    proportion = std::clamp(proportion, 0.0, 1.0);
+    if (skew == 1.0) return proportion;
+    if (!symmetric) return std::pow(proportion, skew);
+    const double dfm = 2.0 * proportion - 1.0;
+    return (1.0 + std::pow(std::abs(dfm), skew) * (dfm < 0.0 ? -1.0 : 1.0)) / 2.0;
+}
+
+double convert_from_0to1(double start, double end, double skew, bool symmetric,
+                         double proportion) {
+    proportion = std::clamp(proportion, 0.0, 1.0);
+    if (!symmetric) {
+        if (skew != 1.0 && proportion > 0.0)
+            proportion = std::exp(std::log(proportion) / skew);
+        return start + (end - start) * proportion;
+    }
+    double dfm = 2.0 * proportion - 1.0;
+    if (skew != 1.0 && dfm != 0.0)
+        dfm = std::exp(std::log(std::abs(dfm)) / skew) * (dfm < 0.0 ? -1.0 : 1.0);
+    return start + (end - start) / 2.0 * (1.0 + dfm);
+}
+
+}  // namespace juce_ref
+
+TEST_CASE("NormalisableRange matches JUCE reference values across skew [0.05,20]",
+          "[state][normalisable][juce-ref]") {
+    struct Case { double lo, hi; bool symmetric; };
+    const std::vector<Case> ranges = {
+        {0.0, 100.0, false},       // gain-style
+        {20.0, 20000.0, false},    // frequency-style
+        {-1.0, 1.0, true},         // bipolar pan/detune (symmetric)
+        {-24.0, 24.0, true},       // bipolar transpose (symmetric)
+    };
+    const std::vector<double> skews = {0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0};
+
+    for (const auto& rc : ranges) {
+        for (double skew : skews) {
+            NormalisableRange<double> r{rc.lo, rc.hi, /*step*/ 0.0, skew, rc.symmetric};
+            const double span = rc.hi - rc.lo;
+            for (int i = 0; i <= 100; ++i) {
+                const double n = static_cast<double>(i) / 100.0;
+
+                // denormalize == JUCE convertFrom0to1.
+                const double plain = r.denormalize(n);
+                const double ref_plain =
+                    juce_ref::convert_from_0to1(rc.lo, rc.hi, skew, rc.symmetric, n);
+                REQUIRE(std::abs(plain - ref_plain) <= 1e-9 * span + 1e-12);
+
+                // normalize == JUCE convertTo0to1 (sample the real domain).
+                const double v = rc.lo + n * span;
+                const double norm = r.normalize(v);
+                const double ref_norm =
+                    juce_ref::convert_to_0to1(rc.lo, rc.hi, skew, rc.symmetric, v);
+                REQUIRE(std::abs(norm - ref_norm) <= 1e-9 + 1e-12);
+            }
+        }
+    }
+}
+
+TEST_CASE("NormalisableRange plain->norm->plain round-trips tightly in double",
+          "[state][normalisable][juce-ref]") {
+    // Double precision removes the float32 wall, so the inverse round-trip is
+    // tight across the WELL-CONDITIONED domain. Non-symmetric skew is stable to
+    // the extreme (0.05..20); the symmetric branch composes pow(·,1/skew) then
+    // pow(·,skew) about the midpoint and becomes ill-conditioned there for very
+    // large skew (skew=20 maps a wide band to near the center, so the inverse
+    // loses ~1e-4 absolute). That pathological corner — not a real bipolar
+    // parameter — is still proven FORWARD-exact against JUCE at 1e-9 by the
+    // reference-match test above; here we bound symmetric skew to a realistic
+    // range so the round-trip assertion stays tight and meaningful.
+    const double span = 32.0;
+    const double tol = 1e-7 * span + 1e-12;  // ~7 orders tighter than float32
+    const auto round_trip_ok = [&](double skew, bool symmetric) {
+        NormalisableRange<double> r{-8.0, 24.0, /*step*/ 0.0, skew, symmetric};
+        for (int i = 0; i <= 200; ++i) {
+            const double v = -8.0 + (span * i) / 200.0;
+            const double rt = r.denormalize(r.normalize(v));
+            REQUIRE(std::abs(rt - v) <= tol);
+        }
+    };
+    for (double skew : {0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 10.0, 20.0})
+        round_trip_ok(skew, /*symmetric*/ false);
+    for (double skew : {0.2, 0.5, 1.0, 2.0, 5.0})
+        round_trip_ok(skew, /*symmetric*/ true);
+}
+
+TEST_CASE("NormalisableRange step snapping matches JUCE snap-to-legal-value",
+          "[state][normalisable][juce-ref]") {
+    // JUCE snaps to the nearest legal interval on the way out of 0..1; Pulp's
+    // denormalize and snap() do the same. Prove it on a skewed, stepped range.
+    NormalisableRange<double> r{0.0, 120.0, /*interval*/ 12.0, /*skew*/ 0.3, false};
+    for (int i = 0; i <= 100; ++i) {
+        const double v = r.denormalize(static_cast<double>(i) / 100.0);
+        // Every emitted value sits exactly on a 12-unit grid line.
+        const double grid = std::round(v / 12.0) * 12.0;
+        REQUIRE(std::abs(v - grid) < 1e-9);
+        REQUIRE(v >= 0.0);
+        REQUIRE(v <= 120.0);
+    }
+    // snap() is the standalone rounding primitive.
+    REQUIRE(r.snap(17.0) == 12.0);
+    REQUIRE(r.snap(19.0) == 24.0);
+    REQUIRE(r.snap(-5.0) == 0.0);
+    REQUIRE(r.snap(999.0) == 120.0);
 }

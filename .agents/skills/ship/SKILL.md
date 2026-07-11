@@ -23,6 +23,10 @@ The `pulp ship` command handles the full distribution pipeline: code signing, Ap
 
 For the end-to-end release pipeline that turns a merged PR into a published GitHub Release (auto-release.yml → sign-and-release.yml → release-cli.yml, the 11 published assets, and the failure-mode triage by which asset is missing), see [`docs/guides/release-pipeline.md`](../../../docs/guides/release-pipeline.md). Cross-reference comments at the top of `release-cli.yml` and `sign-and-release.yml` point back to that doc — keep them in sync when either workflow changes ownership of appcast generation, draft creation, or the matrix-tarball upload.
 
+`release-cli.yml` also carries the **Tier-3 Intel gate** (`universal-arch-gate`, owned by the `intel-canary` skill): before the `release` job publishes, it builds the PulpGain example universal (`arm64;x86_64`), asserts `lipo -archs` + `codesign --verify` on every shipped bundle and embedded dylib via `tools/scripts/check_bundle_architectures.py --strict` (a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is killed at load — always re-sign after lipo), and runs `auval` both natively and under `arch -x86_64`. It is in `release`'s `needs:`, so it BLOCKS the release on any universal/lipo/signature/auval failure. See `docs/guides/intel-support.md`.
+
+Separately, `release-cli.yml` now publishes an **installable** Intel slice: a native thin `darwin-x64` row in the build+smoke matrices on `macos-15-intel` that ships `pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz` next to the arm64 tarballs (`tools/install/install.sh` auto-selects by `uname -m`). This is DISTINCT from the Tier-3 `universal-arch-gate`, which only *validates* a universal build and ships nothing. Two gotchas: `macos-15-intel` deliberately **bypasses** `resolve-macos-runner` (it's a fixed hosted label, not a self-hosted/Namespace choice — the `runs-on` ternary only routes `matrix.os == 'macos-15'` through the resolver); and the macOS configure pins `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` so a native macOS-15 runner doesn't stamp the floor at 15.0 and lock out the macOS 13/14 Intel Macs the slice serves. The CLI tarball's existing ad-hoc re-sign in `package_cli.py` (after `install_name_tool` rpath rewrites) already covers x86_64 — no new signing flow.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before running `pulp ship ...`, source the shared skew-check helper so
@@ -1121,3 +1125,20 @@ doctor` provisions). If neither `pulp-cpp` nor a notary key is available the ste
 **fails loudly** (never ships a signed-but-unnotarized `.pkg`); pass
 `--no-notarize` to opt out deliberately. Always `stapler validate` +
 `spctl --assess --type install` the finished `.pkg` regardless of path.
+
+## Release page: ONE workflow owns the GitHub Release
+
+`release-cli.yml` is the **sole creator** of the GitHub Release for a `v*` tag:
+it sets the title (the **bare tag**, e.g. `v0.645.0` — no "Pulp CLI" prefix),
+the body (humanized highlights from `tools/scripts/compose_release_notes.py
+--footer`, which appends the `**Full changelog:** CHANGELOG.md § X` +
+`**Previous release:** vA.B.C` footer), and uploads the CLI/SDK binaries.
+`sign-and-release.yml` must **only** `gh release upload` `appcast.xml` onto that
+release — it must NOT create/name/draft it. Both fire on the same `v*` tag, so if
+sign-and-release creates/renames/drafts a release it RACES release-cli and
+last-writer-wins produces inconsistent titles (`Pulp CLI vX` vs `vX`),
+draft/published flips, stray `release-untagged-*` entries, and GitHub's
+`Full Changelog: A...B` compare footer instead of the CHANGELOG-§ one. Release
+notes link a PR (`#N`) for every entry via `compose_release_notes.py`'s
+`pr_for_commit` GitHub commit→PR lookup; only genuine direct-to-main commits show
+a short SHA. See `planning/2026-07-10-release-page-hygiene.md`.

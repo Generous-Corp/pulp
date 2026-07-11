@@ -28,7 +28,7 @@ Trust rules:
 - metadata commands never run package CMake, JavaScript, scripts, dynamic libraries, remote search, or content installers;
 - `.pulpkit` archives must include `files.sha256.json`, and every payload file must be listed and hash-matched before the manifest is trusted;
 - apply requires explicit approval and writes only owned project files;
-- remove uses `.pulp/kits.lock.json` ownership records and is constrained to `pulp-kits/<kit-id>/...` plus known generated lock/CMake files;
+- remove uses `.pulp/kits.lock.json` ownership records and is constrained to `pulp-kits/<kit-id>/...` plus known generated lock/CMake files; because a kit removal spans a set of files, the OK line names the count it deleted — `Removed kit <id> (removed N files)` — rather than a single path, for parity with `tool uninstall`;
 - packing and publish dry-run never execute package code.
 
 ## Commands
@@ -94,3 +94,17 @@ Use MCP tools when available:
 - `pulp_kit_pack`
 - `pulp_kit_publish_check`
 - `pulp_kit_init`
+
+## Related extend surfaces
+
+`packages`, `kits`, `content`, and `installable-tools` are Pulp's four ways to
+extend a project or machine, and they share one lifecycle contract: **add is
+validated, remove is confirmed + confined to the surface's own area + names what
+it deleted, and both add and remove ship tests.** Pick the right surface and read
+the shared contract in
+[extending-pulp.md](../../../docs/reference/extending-pulp.md).
+
+- [`packages`](../packages/SKILL.md) — third-party audio DSP libraries → a project
+- [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
+- [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
+- [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar

@@ -180,6 +180,57 @@ additive `install_name_tool -add_rpath @loader_path` over
 `BUILD_WITH_INSTALL_RPATH` (which drops ALL auto build rpaths) — see the note in
 `PulpBundleRelocatable.cmake`.
 
+## macOS x86_64 + universal builds (G3)
+
+Pulp builds macOS **arm64, x86_64, or universal (`arm64;x86_64`)**. Select with
+`-DCMAKE_OSX_ARCHITECTURES` — the whole toolchain keys off the **TARGET** arch,
+never the host `CMAKE_SYSTEM_PROCESSOR` (which reports the build machine and is
+wrong for a cross/Intel build on Apple Silicon).
+
+- **Three Skia slices, per-slice caches.** skia-builder publishes `mac-arm64`,
+  `mac-x86_64`, and `mac-universal` (all three pinned in
+  `tools/deps/manifest.json` → Skia `release_assets`; the old
+  `PulpDependencies.cmake` comment "the only published mac asset" was false).
+  Each slice's `libskia.a` flattens to the SAME path
+  (`build/mac-gpu/lib/Release/libskia.a`), so the autofetch uses **per-slice
+  cache dirs** `~/.cache/pulp/skia-build{,-x64,-universal}` — one shared dir
+  would silently reuse a wrong-arch archive after an arch switch. `fetch_skia_for_release.py`
+  matrix keys: `darwin-arm64` / `darwin-x64` / `darwin-universal`.
+- **FindSkia fails LOUD on an arch mismatch.** If `SKIA_DIR` points at the wrong
+  slice, `FindSkia.cmake` FATALs at configure time (`lipo -archs` vs
+  `CMAKE_OSX_ARCHITECTURES`) with "architecture mismatch … missing: <arch>" —
+  one actionable error instead of a wall of ld64 "building for macOS-x86_64 but
+  linking arm64" warnings + hundreds of undefined symbols.
+- **wgpu-native has NO universal dylib.** For a universal build, Pulp fetches
+  BOTH pinned mac wgpu zips, `lipo -create`s them, and — **REQUIRED** —
+  `codesign -f -s -` re-signs the fat dylib (`PulpWgpuUniversal.cmake`, wired
+  from `PulpDependencies.cmake`). The re-sign is not optional: a raw `lipo`
+  output fails `codesign --verify` ("code object is not signed at all") because
+  the per-slice adhoc linker signatures don't merge, and an unsigned arm64
+  dylib is **killed at load**. `LC_ID_DYLIB` is already `@rpath/…` and the dylib
+  has no `LC_RPATH`, so the `@loader_path` relocatable contract above still holds.
+- **No universal libv8.** `PULP_JS_ENGINE=v8` + a universal target is a hard
+  `FindV8.cmake` FATAL (v8-builder ships only thin mac slices). Use quickjs/jsc
+  for universal, or lipo two thin V8 builds yourself.
+- **Ship the arch gate on distributable bundles.** Alongside
+  `pulp_validate_bundle_relocatable`, add
+  `pulp_validate_bundle_architectures(<target> [ARCHS "arm64;x86_64"])`
+  (`PulpBundleRelocatable.cmake`). POST_BUILD it asserts `lipo -archs` == the
+  requested set AND `codesign --verify` on the main binary AND **every embedded
+  dylib** (`libwgpu_native.dylib`, `libv8.dylib`) — catching a thin embedded
+  dylib in an otherwise-universal bundle (crashes on the missing arch) and an
+  unsigned fat dylib. Standalone validator:
+  `tools/scripts/check_bundle_architectures.py <bundle> --archs arm64,x86_64 --strict`.
+- **Min-OS floor is the MAX across requested arches** (`PulpMinOs.cmake`, no
+  longer hardcoded to `macos-arm64`). Both arm64 and x86_64 slices stamp
+  Skia/Dawn minos 13.0; the real floor is libc++ 13.3 (`std::to_chars(float)`),
+  arch-independent — so arm64, x86_64, and universal all pin **13.3**
+  (`tools/deps/min_os.json` `macos-arm64` + `macos-x64`, MEASURED with
+  `measure_min_os.py --measure`, never hardcoded).
+- **Ships `experimental`.** GitHub VMs have no representative Intel GPU and
+  Rosetta caps SIMD at SSE4.2/AVX2, so Metal-on-Intel-GPU and AVX3 dispatch are
+  unverified until a real Intel smoke — the support-matrix `experimental` note.
+
 ## Embedding Pulp as a submodule (standalone plugin repos)
 
 When Pulp is consumed via `add_subdirectory(pulp)` from another repo (a

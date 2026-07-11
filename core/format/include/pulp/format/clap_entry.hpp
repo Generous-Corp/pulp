@@ -24,6 +24,7 @@
 #include <clap/clap.h>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 #include <string>
@@ -197,8 +198,30 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
     return true;
 }
 
-inline bool params_text_to_value(const clap_plugin_t*, clap_id, const char* text, double* value) {
+inline bool params_text_to_value(const clap_plugin_t* plugin, clap_id param_id,
+                                 const char* text, double* value) {
     if (!text) return false;
+
+    // Prefer the author-supplied from_string parser: it is the inverse of the
+    // to_string used by params_value_to_text, so a fully custom rendering
+    // ("quality=0.75", "12 o'clock", an enum label) round-trips even though a
+    // bare numeric parse would reject it. CLAP values are plain (min..max),
+    // the same domain from_string returns, so no normalization step is needed.
+    if (plugin) {
+        auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+        auto* info = self->store.info(static_cast<state::ParamID>(param_id));
+        if (info && info->from_string) {
+            const float parsed = info->from_string(text);
+            // Reject a non-finite parse rather than writing garbage; fall
+            // through to the generic numeric parse so a partly-numeric string
+            // still has a chance (author from_string is best-effort).
+            if (std::isfinite(parsed)) {
+                *value = parsed;
+                return true;
+            }
+        }
+    }
+
     // Locale-independent parse via a C-locale strtod. std::from_chars' float
     // overload is =deleted on some toolchains (see locale_independent_float.hpp),
     // so we cannot use it for the value. strtod skips leading whitespace and
@@ -370,13 +393,20 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
                     "via ScriptedUiSession (CLAP)");
             }
         }
-        // Design viewport: pin root at the editor's preferred size so that
-        // host-driven resizes scale content proportionally instead of
-        // re-laying out. Paired with the can_resize/get_resize_hints/
-        // adjust_size path below so DAWs (Reaper, Bitwig, Live, …) enforce
-        // the aspect during user drag — the host applies a letterbox-bar
-        // backstop only while the DAW briefly diverges from the aspect.
-        if (hints.preferred_width > 0 && hints.preferred_height > 0) {
+        // Resize contract (ViewSize), mirroring the VST3 adapter:
+        //   - not resizable (min==0): pin the viewport at preferred so an
+        //     off-size pane letterbox-scales the content (today's behavior).
+        //   - resizable + aspect_ratio>0: pin viewport + lock aspect; the
+        //     adjust_size / get_resize_hints path enforces the aspect on drag.
+        //   - resizable + aspect_ratio==0: honor "free drag within [min,max]" —
+        //     NO viewport, NO aspect lock; the root reflows via Yoga at the host
+        //     size and adjust_size only clamps min/max.
+        // `resizable` follows gui_can_resize's convention (min>0 on both axes).
+        const bool resizable =
+            hints.min_width > 0 && hints.min_height > 0;
+        const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
+        if (hints.preferred_width > 0 && hints.preferred_height > 0 &&
+            !free_resize) {
             p->editor_host->set_design_viewport(
                 static_cast<float>(hints.preferred_width),
                 static_cast<float>(hints.preferred_height));
@@ -451,7 +481,12 @@ inline bool gui_get_resize_hints(const clap_plugin_t* plugin,
     }
     hints->can_resize_horizontally = true;
     hints->can_resize_vertically = true;
-    hints->preserve_aspect_ratio = true;
+    // preserve_aspect_ratio tracks the resize contract: a resizable editor with
+    // aspect_ratio==0 drags freely (no lock); otherwise the aspect is held.
+    const bool resizable =
+        size_hints.min_width > 0 && size_hints.min_height > 0;
+    const bool free_resize = resizable && size_hints.aspect_ratio <= 0.0;
+    hints->preserve_aspect_ratio = !free_resize;
     hints->aspect_ratio_width = size_hints.preferred_width;
     hints->aspect_ratio_height = size_hints.preferred_height;
     return true;
@@ -465,6 +500,23 @@ inline bool gui_adjust_size(const clap_plugin_t* plugin,
     const auto& size_hints = p->bridge->size_hints();
     if (size_hints.preferred_width == 0 || size_hints.preferred_height == 0) {
         return false;
+    }
+    // Free-resize contract: resizable (min>0) with aspect_ratio==0 means "any
+    // ratio; drag freely within [min,max]". Clamp each axis independently — NO
+    // aspect snap — matching gui_get_resize_hints.preserve_aspect_ratio=false.
+    const bool resizable =
+        size_hints.min_width > 0 && size_hints.min_height > 0;
+    const bool free_resize = resizable && size_hints.aspect_ratio <= 0.0;
+    if (free_resize) {
+        if (size_hints.min_width > 0 && *width < size_hints.min_width)
+            *width = size_hints.min_width;
+        if (size_hints.min_height > 0 && *height < size_hints.min_height)
+            *height = size_hints.min_height;
+        if (size_hints.max_width > 0 && *width > size_hints.max_width)
+            *width = size_hints.max_width;
+        if (size_hints.max_height > 0 && *height > size_hints.max_height)
+            *height = size_hints.max_height;
+        return true;
     }
     // Snap to the design aspect ratio — pick the largest box with the
     // design aspect that fits within the requested rectangle. Same shape

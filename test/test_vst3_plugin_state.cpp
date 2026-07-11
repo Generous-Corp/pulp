@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
@@ -4466,4 +4467,115 @@ TEST_CASE("VST3 clears output silenceFlags after an active render",
 
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+// ── G1: VST3 resize-contract honoring (WS-1b) ────────────────────────────────
+// ViewSize::aspect_ratio==0 means "free drag within [min,max]". A plugin is
+// resizable iff it declares non-zero min bounds (CLAP's shipped convention).
+// PulpPlugView::canResize / checkSizeConstraint must honor that: fixed when
+// min==0, aspect-snapped when aspect_ratio>0, free min/max clamp when
+// resizable+aspect_ratio==0. The bridge_'s size_hints_ are read straight from
+// the processor's view_size() in the PulpPlugView constructor, so no attach /
+// open is needed to exercise the negotiation.
+namespace {
+
+using pulp::format::ViewSize;
+
+class Vst3ResizeProcessor final : public pulp::format::Processor {
+public:
+    explicit Vst3ResizeProcessor(ViewSize vs) : vs_(vs) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vst3ResizeProcessor";
+        d.input_buses = {{"In", 2, false}};
+        d.output_buses = {{"Out", 2, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    ViewSize view_size() const override { return vs_; }
+private:
+    ViewSize vs_;
+};
+
+Steinberg::ViewRect make_rect(int32_t w, int32_t h) {
+    return Steinberg::ViewRect(0, 0, w, h);
+}
+
+}  // namespace
+
+TEST_CASE("VST3 canResize is false when the plugin is not resizable (min==0)",
+          "[vst3][gui][resize][issue-pam-g1]") {
+    // Default hand-authored plugin: preferred size, no min bounds.
+    Vst3ResizeProcessor proc(ViewSize{400, 300, 0, 0, 0, 0, 0.0});
+    pulp::state::StateStore store;
+    pulp::format::vst3::PulpPlugView view(proc, store);
+    REQUIRE(view.canResize() == Steinberg::kResultFalse);
+}
+
+TEST_CASE("VST3 canResize is true when the plugin declares min bounds",
+          "[vst3][gui][resize][issue-pam-g1]") {
+    Vst3ResizeProcessor proc(
+        ViewSize{400, 300, 200, 150, 800, 600, 400.0 / 300.0});
+    pulp::state::StateStore store;
+    pulp::format::vst3::PulpPlugView view(proc, store);
+    REQUIRE(view.canResize() == Steinberg::kResultTrue);
+}
+
+TEST_CASE("VST3 checkSizeConstraint free-resize clamps min/max without aspect snap",
+          "[vst3][gui][resize][issue-pam-g1]") {
+    // Resizable (min>0) + aspect_ratio==0 → free drag: each axis clamped to
+    // [min,max], NO aspect snap.
+    Vst3ResizeProcessor proc(ViewSize{400, 300, 200, 150, 800, 600, 0.0});
+    pulp::state::StateStore store;
+    pulp::format::vst3::PulpPlugView view(proc, store);
+
+    // Off-aspect request inside bounds is returned verbatim. An aspect lock
+    // would have snapped (800,300) → (400,300); free resize does not.
+    auto r = make_rect(800, 300);
+    REQUIRE(view.checkSizeConstraint(&r) == Steinberg::kResultTrue);
+    REQUIRE(r.getWidth() == 800);
+    REQUIRE(r.getHeight() == 300);
+
+    // Below-min on both axes clamps up to the min box (still no aspect snap).
+    auto r2 = make_rect(100, 100);
+    REQUIRE(view.checkSizeConstraint(&r2) == Steinberg::kResultTrue);
+    REQUIRE(r2.getWidth() == 200);
+    REQUIRE(r2.getHeight() == 150);
+
+    // Above-max on both axes clamps down to the max box.
+    auto r3 = make_rect(2000, 2000);
+    REQUIRE(view.checkSizeConstraint(&r3) == Steinberg::kResultTrue);
+    REQUIRE(r3.getWidth() == 800);
+    REQUIRE(r3.getHeight() == 600);
+}
+
+TEST_CASE("VST3 checkSizeConstraint aspect-locked behavior is unchanged (regression pin)",
+          "[vst3][gui][resize][issue-pam-g1]") {
+    // Resizable + aspect_ratio>0 → today's aspect snap. Byte-identical to the
+    // pre-G1 behavior: (800,300) snaps to the 4:3 design box (400,300).
+    Vst3ResizeProcessor locked(
+        ViewSize{400, 300, 200, 150, 800, 600, 400.0 / 300.0});
+    pulp::state::StateStore store;
+    pulp::format::vst3::PulpPlugView view(locked, store);
+
+    auto r = make_rect(800, 300);
+    REQUIRE(view.checkSizeConstraint(&r) == Steinberg::kResultTrue);
+    REQUIRE(r.getWidth() == 400);
+    REQUIRE(r.getHeight() == 300);
+
+    // Not-resizable (min==0) also keeps the aspect snap (the letterbox pin
+    // backstop), independent of the aspect_ratio field — proving the
+    // free-resize path is entered ONLY for resizable+aspect==0.
+    Vst3ResizeProcessor fixed(ViewSize{400, 300, 0, 0, 0, 0, 0.0});
+    pulp::format::vst3::PulpPlugView fixed_view(fixed, store);
+    auto rf = make_rect(800, 300);
+    REQUIRE(fixed_view.checkSizeConstraint(&rf) == Steinberg::kResultTrue);
+    REQUIRE(rf.getWidth() == 400);
+    REQUIRE(rf.getHeight() == 300);
 }

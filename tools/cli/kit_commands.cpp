@@ -3532,7 +3532,7 @@ int cmd_remove(const std::vector<std::string>& args) {
         if (!parent.empty()) prune_empty_parent_dirs(project_root, parent);
     }
 
-    entries.erase(it);
+    const std::size_t removed_count = it->owned_paths.size(); entries.erase(it);
     if (!entries.empty()) {
         if (!write_text(lock_path, kit_lock_json(entries))) {
             print_fail_local("Failed to update " + lock_path.string());
@@ -3555,7 +3555,7 @@ int cmd_remove(const std::vector<std::string>& args) {
         }
     }
 
-    print_ok_local("Removed kit " + kit_id);
+    print_ok_local("Removed kit " + kit_id + " (removed " + std::to_string(removed_count) + (removed_count == 1 ? " file)" : " files)"));
     return 0;
 }
 

@@ -5,7 +5,9 @@
 #include <optional>
 #include <vector>
 #include <pulp/events/event_loop.hpp>
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <cassert>
 #include <pulp/state/store.hpp>
 #include <pulp/state/state_migration.hpp>
 #include <pulp/runtime/assert.hpp>
@@ -448,12 +450,51 @@ const ParamInfo* StateStore::info(ParamID id) const {
     return &params_[it->second];
 }
 
+namespace {
+
+// Detect (and, in debug, assert) a gesture entry point being driven off the
+// host main thread. Gesture callbacks forward to host beginEdit/endEdit-style
+// undo grouping, which is main-thread-only. When no backend is registered
+// (every headless test) this is inert, so tests that legitimately drive
+// gestures inline never trip it. Zero cost in release beyond one atomic load
+// via has_backend().
+bool gesture_off_main_thread() {
+    return events::MainThreadDispatcher::has_backend() &&
+           !events::MainThreadDispatcher::is_main_thread();
+}
+
+} // namespace
+
 void StateStore::begin_gesture(ParamID id) {
+    if (gesture_off_main_thread()) {
+        gesture_thread_violations_.fetch_add(1, std::memory_order_relaxed);
+        assert(false && "StateStore::begin_gesture called off the host main "
+                        "thread; use run_gesture_on_main()");
+    }
     if (on_begin_gesture_) on_begin_gesture_(id);
 }
 
 void StateStore::end_gesture(ParamID id) {
+    if (gesture_off_main_thread()) {
+        gesture_thread_violations_.fetch_add(1, std::memory_order_relaxed);
+        assert(false && "StateStore::end_gesture called off the host main "
+                        "thread; use run_gesture_on_main()");
+    }
     if (on_end_gesture_) on_end_gesture_(id);
+}
+
+void StateStore::run_gesture_on_main(std::function<void()> gesture) {
+    if (!gesture) return;
+    // Marshal only when a real host backend is registered AND we are off its
+    // thread. Otherwise run inline: either we are already on the main thread,
+    // or this is a headless context with no backend to post to. call_async
+    // swallows exceptions so they cannot escape into a native event queue.
+    if (events::MainThreadDispatcher::has_backend() &&
+        !events::MainThreadDispatcher::is_main_thread()) {
+        events::MainThreadDispatcher::call_async(std::move(gesture));
+    } else {
+        gesture();
+    }
 }
 
 void StateStore::set_main_loop(pulp::events::EventLoop* loop) {
