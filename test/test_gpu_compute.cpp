@@ -309,7 +309,6 @@ TEST_CASE("GpuCompute FFT timed reports true GPU compute time", "[render][gpu][c
 }
 
 TEST_CASE("GpuCompute multi_convolve_timed matches multi_convolve and reports GPU time",
-TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
     if (!compute || !compute->initialize_standalone()) return;
@@ -344,6 +343,13 @@ TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
     } else {
         REQUIRE(gpu_us == -1.0);  // timing unavailable -> sentinel
     }
+}
+
+TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) return;
+
     constexpr uint32_t BLOCK = 256, N = 2 * BLOCK;  // fft size 512
     constexpr uint32_t IR_LEN = 900;                 // -> 4 partitions
     const uint32_t P = (IR_LEN + BLOCK - 1) / BLOCK;
