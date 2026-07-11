@@ -452,63 +452,90 @@ private:
     }
 
     // ── controls (vertical sliders + bypass toggle) ──
+    // Center text within a cell width by estimating glyph advance (~0.52em for
+    // Inter) — the canvas has no measure API here, so this keeps labels visually
+    // centered without one.
+    void centered_text(cv::Canvas& canvas, const std::string& txt, float cx,
+                       float baseline, float px) {
+        const float w = static_cast<float>(txt.size()) * px * 0.52f;
+        canvas.fill_text(txt, cx - w * 0.5f, baseline);
+    }
+
     void paint_controls(cv::Canvas& canvas) {
         const float s = scale();
-        canvas.set_fill_color(pal_.surface);
-        canvas.fill_rounded_rect(controls_.x, controls_.y, controls_.width,
-                                 controls_.height, 8 * s);
+        const auto& c = controls_;
+        // Glass dock floating over the field: translucent panel + hairline edge.
+        canvas.set_fill_color(cv::Color::rgba8(11, 14, 21, 214));
+        canvas.fill_rounded_rect(c.x, c.y, c.width, c.height, 13 * s);
+        canvas.set_stroke_color(cv::Color::rgba8(236, 240, 248, 28));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(c.x, c.y, c.width, c.height, 13 * s);
 
         for (int i = 0; i < 5; ++i) {
             const Slider& sl = sliders_[static_cast<size_t>(i)];
             const auto& t = sl.track;
-            // Label (top of cell), centered.
-            canvas.set_fill_color(pal_.text_dim);
-            canvas.set_font("Inter", 12.0f * s);
-            canvas.fill_text(sl.label, sl.cell.x + (sl.cell.width - 36 * s) * 0.5f,
-                             sl.cell.y + 16 * s);
+            const bool is_flow = (sl.id == kFlow);
+            const bool active = (active_slider_ == i);
+            const cv::Color tint = is_flow ? pal_.bypass_on : pal_.accent;  // Flow = amber hero
+            const float cxm = sl.cell.x + sl.cell.width * 0.5f;
+
+            // Label (uppercase, tracked feel via smaller size).
+            canvas.set_fill_color(is_flow ? tint : pal_.text_dim);
+            canvas.set_font("Inter", 10.0f * s);
+            centered_text(canvas, sl.label, cxm, sl.cell.y + 15 * s, 10.0f * s);
 
             const float frac = value_frac(i);
             const float handle_y = t.bottom() - frac * t.height;
+            const float tw = std::max(3.0f * s, t.width * 0.34f);  // thin track
+            const float tx = t.x + (t.width - tw) * 0.5f;
             // Track + fill below the handle.
-            canvas.set_fill_color(pal_.slider_track);
-            canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.width * 0.5f);
-            canvas.set_fill_color(pal_.slider_fill);
-            canvas.fill_rounded_rect(t.x, handle_y, t.width, t.bottom() - handle_y,
-                                     t.width * 0.5f);
-            // Handle.
-            const bool active = (active_slider_ == i);
-            canvas.set_fill_color(active ? pal_.accent_warm : pal_.accent);
-            canvas.fill_circle(t.x + t.width * 0.5f, handle_y, t.width * 0.9f);
+            canvas.set_fill_color(cv::Color::rgba8(236, 240, 248, 30));
+            canvas.fill_rounded_rect(tx, t.y, tw, t.height, tw * 0.5f);
+            canvas.set_fill_color(tint.with_alpha(0.65f));
+            canvas.fill_rounded_rect(tx, handle_y, tw, t.bottom() - handle_y, tw * 0.5f);
+            // Handle: a glowing ring (additive halo + dark core + tinted rim).
+            const float hx = t.x + t.width * 0.5f;
+            canvas.set_blend_mode(cv::Canvas::BlendMode::lighter);
+            canvas.set_fill_color(tint.with_alpha(active ? 0.5f : 0.28f));
+            canvas.fill_circle(hx, handle_y, (active ? 12.0f : 9.0f) * s);
+            canvas.set_blend_mode(cv::Canvas::BlendMode::normal);
+            canvas.set_fill_color(cv::Color::rgba8(12, 15, 22));
+            canvas.fill_circle(hx, handle_y, 6.0f * s);
+            canvas.set_stroke_color(tint);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_circle(hx, handle_y, 6.0f * s);
 
-            // Value readout (bottom of cell), centered.
+            // Value readout.
             char buf[40];
             std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
                           static_cast<double>(slider_value(i)),
                           sl.unit[0] ? " " : "", sl.unit);
-            canvas.set_fill_color(pal_.text);
-            canvas.set_font("Inter", 13.0f * s);
-            canvas.fill_text(buf, sl.cell.x + (sl.cell.width - 44 * s) * 0.5f,
-                             sl.cell.bottom() - 8 * s);
+            canvas.set_fill_color(is_flow ? tint : pal_.text);
+            canvas.set_font("Inter", 12.5f * s);
+            centered_text(canvas, buf, cxm, sl.cell.bottom() - 8 * s, 12.5f * s);
         }
 
-        // Engine toggle (CPU / GPU). Lit (accent) when GPU is requested; the
-        // subtitle reports whether the GPU is actually carrying the audio.
+        // Engine chip (CPU / GPU) — pill, lit when GPU requested.
         const bool gpu_req = store_.get_value(kEngine) >= 0.5f;
-        canvas.set_fill_color(gpu_req ? pal_.accent : pal_.elevated);
-        canvas.fill_rounded_rect(engine_.x, engine_.y, engine_.width, engine_.height, 8 * s);
-        canvas.set_fill_color(gpu_req ? pal_.bg : pal_.text);
-        canvas.set_font("Inter", 14.0f * s);
-        canvas.fill_text(gpu_req ? "● GPU" : "CPU",
-                         engine_.x + 16 * s, engine_.y + engine_.height * 0.62f);
-
-        // Bypass toggle.
+        paint_chip(canvas, engine_, gpu_req, gpu_req ? "GPU" : "CPU", pal_.accent);
+        // Bypass chip.
         const bool bypassed = store_.get_value(kBypass) >= 0.5f;
-        canvas.set_fill_color(bypassed ? pal_.bypass_on : pal_.elevated);
-        canvas.fill_rounded_rect(bypass_.x, bypass_.y, bypass_.width, bypass_.height, 8 * s);
-        canvas.set_fill_color(bypassed ? pal_.bg : pal_.text);
-        canvas.set_font("Inter", 14.0f * s);
-        canvas.fill_text(bypassed ? "● BYPASSED" : "BYPASS",
-                         bypass_.x + 16 * s, bypass_.y + bypass_.height * 0.62f);
+        paint_chip(canvas, bypass_, bypassed, bypassed ? "BYPASSED" : "BYPASS", pal_.bypass_on);
+    }
+
+    void paint_chip(cv::Canvas& canvas, const vw::Rect& r, bool on,
+                    const std::string& label, cv::Color accent) {
+        const float s = scale();
+        canvas.set_fill_color(on ? accent : cv::Color::rgba8(236, 240, 248, 22));
+        canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, r.height * 0.5f);
+        if (!on) {
+            canvas.set_stroke_color(cv::Color::rgba8(236, 240, 248, 40));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(r.x, r.y, r.width, r.height, r.height * 0.5f);
+        }
+        canvas.set_fill_color(on ? pal_.bg : pal_.text);
+        canvas.set_font("Inter", 13.0f * s);
+        centered_text(canvas, label, r.x + r.width * 0.5f, r.y + r.height * 0.62f, 13.0f * s);
     }
 
     // ── interaction ──
