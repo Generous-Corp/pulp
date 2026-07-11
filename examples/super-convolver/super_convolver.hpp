@@ -1081,9 +1081,27 @@ private:
                 gpu_base_dirty_ = true;
             }
 
+            // Debounce Rooms: rebuilding the GPU stack retires the live stack and
+            // builds a fresh one, so the audio drops to the CPU/single-IR path for
+            // the gap. Dragging the Rooms slider changes the value every poll, which
+            // would rebuild dozens of times and glitch the sound in and out. Hold
+            // the currently-built count until Rooms has been STABLE for a moment,
+            // then rebuild once. Engine toggles and IR/Size changes are NOT
+            // debounced (they route through the other branches immediately).
+            if (want_rooms != rooms_last_seen_) {
+                rooms_last_seen_ = want_rooms;
+                rooms_stable_polls_ = 0;
+            } else if (rooms_stable_polls_ < kRoomsSettlePolls) {
+                ++rooms_stable_polls_;
+            }
+            const bool rooms_settled = rooms_stable_polls_ >= kRoomsSettlePolls;
+            const int effective_rooms =
+                rooms_settled ? want_rooms
+                              : (gpu_built_rooms_ > 0 ? gpu_built_rooms_ : want_rooms);
+
             // GPU stack management (only meaningful when a device exists).
             if (device_available_)
-                service_gpu_stack(want_engine, want_rooms);
+                service_gpu_stack(want_engine, effective_rooms);
 
             // Push the live Flow depth into the multi-room node (worker owns the
             // stack, so this deref is safe here). The node applies it on its next
@@ -1189,6 +1207,13 @@ private:
     std::atomic<int> requested_rooms_{1};
     std::atomic<float> requested_flow_{0.0f};        // 0..1 moving-field depth
     int gpu_built_rooms_ = 0;          // worker-thread-local (current_stack_ config)
+    // Rooms debounce (worker-thread-local): hold the built count until the Rooms
+    // request has been stable for kRoomsSettlePolls worker polls (~120 ms at the
+    // 5 ms poll), so dragging the slider rebuilds the GPU stack once on release
+    // instead of glitching the audio in and out on every intermediate value.
+    static constexpr int kRoomsSettlePolls = 24;
+    int rooms_last_seen_ = -1;
+    int rooms_stable_polls_ = 0;
 
     // IR source. The path is opaque, persisted state (set on the UI/main thread,
     // read on the worker / prepare); ir_path_gen_ is the lock-free trigger the
