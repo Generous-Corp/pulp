@@ -2389,3 +2389,19 @@ The skip is only as strong as the agreement between the script's wording and the
 CMake property. `tools/scripts/test_minos_registry_absent.py` asserts both ends:
 the scripts really print the phrase, and the CMakeLists really keys its skip on
 it. Extend that test when you add another registry-reading CLI test.
+
+## An MCP tool's exit code is a real signal — do not throw it away
+
+`mcp_shell::exec()` returns only stdout, and it surfaces a failure *only when the
+command printed nothing*. The MCP render path also appends `2>&1`, folding stderr
+into stdout. Together those mean a command that **fails while printing a
+well-formed report** — a validation gate, a latency proof, anything that can
+legitimately DISPROVE something — reaches the agent as a success.
+
+When a command's exit status carries meaning, use **`exec_with_status()`** and map
+a nonzero status onto an MCP error. Reading only the artifact is not enough: the
+artifact's *existence* is not the result. `handle_audio_render` does this for
+`latency: true` — a disproven latency comes back as an error carrying the evidence,
+never as a payload the caller has to remember to inspect.
+
+Plain `exec()` is still correct for commands whose output *is* the whole result.
