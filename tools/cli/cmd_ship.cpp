@@ -451,6 +451,11 @@ int cmd_ship(const std::vector<std::string>& args) {
         // each (legacy), `--dmg` wraps each bundle as a disk image. `--pkg` is the
         // explicit form of the default.
         bool want_pkg = false, want_dmg = false, want_separate = false;
+        // Scope discovery to one product's bundles. A build tree holds every
+        // example's AU/VST3/CLAP; without this the installer bundles them all (one
+        // choice per bundle, dozens of entries). `--product SuperConvolver` keeps
+        // only bundles whose name matches, and names the installer after it.
+        std::string product_filter;
 
         // Read version from CMakeLists.txt project(VERSION), falling back to SDK version
         auto cmake_ver = read_project_cmake_version(root);
@@ -479,6 +484,8 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (!take_ship_value(args, i, sub, args[i], binary_path)) return 2;
             } else if (args[i] == "--icon") {
                 if (!take_ship_value(args, i, sub, args[i], icon_path)) return 2;
+            } else if (args[i] == "--product") {
+                if (!take_ship_value(args, i, sub, args[i], product_filter)) return 2;
             }
             else if (args[i] == "--apk-only") apk_only = true;
             else if (args[i] == "--aab-only") aab_only = true;
@@ -718,6 +725,7 @@ int cmd_ship(const std::vector<std::string>& args) {
             for (auto& entry : fs::directory_iterator(standalone_dir)) {
                 if (entry.path().extension().string() != ".app") continue;
                 auto name = entry.path().stem().string();
+                if (!product_filter.empty() && name != product_filter) continue;
                 product_name = name;
                 if (want_dmg) {
                     auto dmg_path = artifacts / (name + "-" + version + ".dmg");
@@ -743,6 +751,7 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (ext != ".vst3" && ext != ".clap" && ext != ".component") continue;
 
                 auto name = entry.path().stem().string();
+                if (!product_filter.empty() && name != product_filter) continue;
 
 #ifdef __APPLE__
                 // Plugin bundle → .dmg ONLY when the user explicitly
