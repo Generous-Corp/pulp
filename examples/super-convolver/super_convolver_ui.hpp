@@ -98,6 +98,9 @@ public:
     /// headless capture / tests; a click anywhere dismisses it at runtime.
     void open_info() { show_info_ = true; }
 
+    /// Show a transient message (for headless capture / tests).
+    void test_toast(const std::string& m) { show_toast(m); }
+
     void paint(cv::Canvas& canvas) override {
         if (layout_dirty_) layout();
         const float W = local_bounds().width, H = local_bounds().height;
@@ -210,7 +213,11 @@ public:
             canvas.fill_circle(r.x + 18 * s, r.y + r.height * 0.5f, 7 * s);
             canvas.set_fill_color(tk_text());
             canvas.set_font("Inter", 12.0f * s);
-            canvas.fill_text(name, r.x + 34 * s, r.y + r.height * 0.46f);
+            // A long loaded-IR name (e.g. "DELUXE REVERB OXFORD BIG 48") would
+            // overflow the chip — truncate to the available width with an ellipsis.
+            const float name_max = r.width - 34 * s - 12 * s;
+            canvas.fill_text(fit_text(canvas, name, name_max),
+                             r.x + 34 * s, r.y + r.height * 0.46f);
             canvas.set_fill_color(cv::Color::rgba8(71, 76, 85));  // faint
             canvas.set_font("Inter", 8.5f * s);
             tracked_text(canvas, "Source", r.x + 34 * s, r.y + r.height * 0.82f, 8.5f * s, 0.2f);
@@ -218,9 +225,32 @@ public:
 
         paint_controls(canvas);
 
+        if (field_time_ < toast_until_ && !toast_msg_.empty()) draw_toast(canvas);
         if (show_info_) draw_info_overlay(canvas);
 
         request_repaint();  // self-driven loop for the live field
+    }
+
+    // Show a brief centered message (e.g. a refused engine switch). field_time_ is
+    // the repaint clock, so it fades on its own without a timer.
+    void show_toast(std::string msg) { toast_msg_ = std::move(msg); toast_until_ = field_time_ + 2.6; }
+
+    void draw_toast(cv::Canvas& canvas) {
+        const float s = scale();
+        const float W = local_bounds().width;
+        const float remaining = static_cast<float>(toast_until_ - field_time_);
+        const float a = std::clamp(remaining / 0.4f, 0.0f, 1.0f);  // fade out the last 0.4s
+        canvas.set_font("Inter", 11.5f * s);
+        const float tw = canvas.measure_text(toast_msg_);
+        const float padx = 16 * s, h = 30 * s;
+        const float bw = tw + 2 * padx, bx = (W - bw) * 0.5f, by = 96 * s;
+        canvas.set_fill_color(cv::Color::rgba8(9, 11, 15).with_alpha(0.94f * a));
+        canvas.fill_rounded_rect(bx, by, bw, h, h * 0.5f);
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 40).with_alpha(a));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(bx, by, bw, h, h * 0.5f);
+        canvas.set_fill_color(cv::Color::rgba8(237, 239, 243).with_alpha(a));
+        canvas.fill_text(toast_msg_, bx + padx, by + h * 0.64f);
     }
 
     // Info card — a compact "what is this" overlay toggled by the header "i"
@@ -559,6 +589,17 @@ private:
         canvas.fill_text(txt, cx - w * 0.5f, baseline);
     }
 
+    // Truncate `txt` with a trailing ellipsis so it fits `max_w` at the canvas's
+    // current font (uses the real shaper via measure_text). Returns the input
+    // unchanged when it already fits.
+    static std::string fit_text(cv::Canvas& canvas, const std::string& txt, float max_w) {
+        if (max_w <= 0.0f || canvas.measure_text(txt) <= max_w) return txt;
+        std::string s = txt;
+        while (!s.empty() && canvas.measure_text(s + "\xE2\x80\xA6") > max_w) s.pop_back();
+        while (!s.empty() && s.back() == ' ') s.pop_back();
+        return s + "\xE2\x80\xA6";  // UTF-8 ellipsis
+    }
+
     // Design tokens from the concept (near-monochrome, Leica scientific).
     static cv::Color tk_text()  { return cv::Color::rgba8(237, 239, 243); }  // values
     static cv::Color tk_label() { return cv::Color::rgba8(120, 126, 136); }  // DENSITY/FLOW
@@ -683,7 +724,17 @@ private:
             if (in_rect(p, tabs_[static_cast<size_t>(i)])) { viz_mode_ = i; return; }
         }
         if (in_rect(p, engine_)) {   // top-right chip toggles CPU/GPU
-            toggle_param(kEngine);
+            const bool gpu = store_.get_value(kEngine) >= 0.5f;
+            const int rooms = static_cast<int>(std::lround(store_.get_value(kRooms)));
+            // CPU can't sustain more than kCpuRoomCap rooms. GPU->CPU while Rooms
+            // is above that would silently ignore the extra rooms, so refuse and
+            // say why; CPU->GPU is always fine. (Dragging Rooms past the cap on
+            // CPU auto-switches to GPU — see apply_slider.)
+            if (gpu && rooms > static_cast<int>(kCpuRoomCap)) {
+                show_toast("CPU handles up to 20 rooms — lower Rooms to switch to CPU");
+            } else {
+                toggle_param(kEngine);
+            }
             return;
         }
         for (int i = 0; i < 5; ++i) {
@@ -770,6 +821,8 @@ private:
     vw::Rect tabs_[3]{};        // mode-tab hit rects
     vw::Rect info_{};           // header "i" glyph hit rect (set during paint)
     bool show_info_ = false;    // info card overlay visible
+    std::string toast_msg_;     // transient centered message (e.g. refused toggle)
+    double toast_until_ = 0.0;  // field_time_ value after which the toast is gone
 
     // Rooms count the CPU engine is expected to sustain in real time; above it
     // the editor auto-switches to GPU (matches the "N / 20" CPU cap badge).

@@ -91,9 +91,12 @@ int main(int argc, char** argv) {
                          "falling back to CPU raster.\n");
     }
 
+    if (const char* src = std::getenv("SC_SOURCE")) proc.set_ir_path(src);
     auto v = proc.create_view();
-    if (std::getenv("SC_INFO"))
-        if (auto* ui = dynamic_cast<examples::SuperConvolverUi*>(v.get())) ui->open_info();
+    if (auto* ui = dynamic_cast<examples::SuperConvolverUi*>(v.get())) {
+        if (std::getenv("SC_INFO")) ui->open_info();
+        if (const char* t = std::getenv("SC_TOAST")) ui->test_toast(t);
+    }
     const bool ok = view::render_to_file(*v, 820, 560, out, 2.0f, backend);
     std::printf("SuperConvolver editor screenshot [%s]: %s -> %s\n",
                 backend == ScreenshotBackend::gpu ? "gpu" : "raster",
