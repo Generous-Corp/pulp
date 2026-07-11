@@ -200,6 +200,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
 
+# Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
+# (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —
+# in the no-GPU coverage build too.
+pulp_add_test_suite(pulp-test-flow-pans
+    SOURCES test_flow_pans.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
 # GPU convolver node: golden test vs direct convolution when GPU/render is
 # available, plus CPU-fallback coverage in GPU-off builds.
 pulp_add_test_suite(pulp-test-gpu-convolver
