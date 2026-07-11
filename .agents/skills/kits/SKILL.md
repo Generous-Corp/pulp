@@ -28,7 +28,7 @@ Trust rules:
 - metadata commands never run package CMake, JavaScript, scripts, dynamic libraries, remote search, or content installers;
 - `.pulpkit` archives must include `files.sha256.json`, and every payload file must be listed and hash-matched before the manifest is trusted;
 - apply requires explicit approval and writes only owned project files;
-- remove uses `.pulp/kits.lock.json` ownership records and is constrained to `pulp-kits/<kit-id>/...` plus known generated lock/CMake files;
+- remove uses `.pulp/kits.lock.json` ownership records and is constrained to `pulp-kits/<kit-id>/...` plus known generated lock/CMake files; because a kit removal spans a set of files, the OK line names the count it deleted — `Removed kit <id> (removed N files)` — rather than a single path, for parity with `tool uninstall`;
 - packing and publish dry-run never execute package code.
 
 ## Commands
