@@ -6,7 +6,10 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/format/host_quirks.hpp>
+#include <pulp/format/max_block_contract.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <AAX_CEffectParameters.h>
 #include <AAX_CParameter.h>
@@ -68,6 +71,31 @@ constexpr AAX_CFieldIndex kMidiInputField = AAX_FIELD_INDEX(AlgorithmContext, mi
 constexpr AAX_CFieldIndex kMidiOutputField = AAX_FIELD_INDEX(AlgorithmContext, midi_output_node);
 
 static_assert(kAudioInputField == AAX_FIELD_INDEX(AlgorithmContext, audio_input));
+
+// Defensive prepared max-block ceiling. AAX (unlike CLAP/VST3) never hands the
+// algorithm a max-block size up front — it only reveals the block size on the
+// render thread. We prepare the Processor to at least this many frames on the
+// first block so ordinary host buffer sizes (Pro Tools tops out well under
+// this) never re-prepare on the audio thread, and a pathological over-ceiling
+// block clamps + zero-fills per the shared max-block contract instead.
+constexpr int kAaxPreparedMaxBlock = 8192;
+
+// Worst-case per-block MIDI capacities the render-thread MIDI buffers are
+// reserved to (mirrors CLAP/VST3/AU). A MIDI-effect / generator / arpeggiator
+// with supports_midi_output writes into midi_out from inside process(); the
+// buffers are reserved off the render thread and capacity-limited so those
+// add()/add_sysex() calls never allocate under the ScopedNoAlloc guard. Kept
+// in sync with test_aax_rt_safety.cpp.
+constexpr std::size_t kAaxMaxMidiEventsPerBlock = 2048;
+constexpr std::size_t kAaxMaxSysexPerBlock = 64;
+constexpr std::size_t kAaxMaxSysexPayloadBytes = 512;
+
+// AAX has no host-type/version detection here, so it reports latency through
+// the shared quirk helper with the always-on defaults (clamp-negative-to-zero),
+// exactly like CLAP/VST3/AU rather than calling SetSignalLatency raw.
+inline int aax_reported_latency(int raw) {
+    return reported_latency_samples(raw, HostQuirks{});
+}
 
 std::string truncate_copy(std::string value, std::size_t max_size) {
     if (value.size() <= max_size) {
@@ -342,6 +370,19 @@ struct InstanceState {
             descriptor = processor->descriptor();
             store.reset_all_to_defaults();
         }
+
+        // Pre-size + capacity-limit the render-thread MIDI buffers here, off the
+        // render thread (instance construction), exactly like CLAP/VST3/AU. A
+        // supports_midi_output plugin appends to midi_out from inside process(),
+        // which runs under the ScopedNoAlloc guard below — without this reserve
+        // the first add() would push_back on a zero-capacity vector and allocate
+        // on the AAX render thread (the very hazard this adapter closes).
+        midi_in.reserve(kAaxMaxMidiEventsPerBlock, kAaxMaxSysexPerBlock,
+                        kAaxMaxSysexPayloadBytes);
+        midi_out.reserve(kAaxMaxMidiEventsPerBlock, kAaxMaxSysexPerBlock,
+                         kAaxMaxSysexPayloadBytes);
+        midi_in.set_realtime_capacity_limit(true);
+        midi_out.set_realtime_capacity_limit(true);
     }
 
     ~InstanceState() {
@@ -351,7 +392,7 @@ struct InstanceState {
     }
 
     bool ensure_prepared(double sample_rate,
-                         int max_buffer_size,
+                         int block_size,
                          int input_channels,
                          int output_channels)
     {
@@ -359,11 +400,24 @@ struct InstanceState {
             return false;
         }
 
+        // Re-prepare only on a stable-configuration change (sample rate /
+        // channel count) OR to GROW the scratch for a block larger than any we
+        // have prepared for. The first prepare sizes scratch to a generous
+        // ceiling (kAaxPreparedMaxBlock) that covers every real-time host buffer
+        // size, so the real-time Insert path — where re-preparing would be an
+        // allocation on the audio thread (the bug this fix removes) — never
+        // re-prepares after the first block: shorter blocks reuse the scratch.
+        //
+        // The only path that can exceed the ceiling is offline AudioSuite
+        // rendering (this plugin ships AAX_ePlugInRole_InsertOrAudioSuite),
+        // which is NOT the real-time audio thread and where a one-time grow is
+        // acceptable — and correct, versus silently clamping the tail of a large
+        // offline block to silence.
         if (prepared
             && prepared_sample_rate == sample_rate
-            && prepared_max_buffer == max_buffer_size
             && prepared_input_channels == input_channels
-            && prepared_output_channels == output_channels)
+            && prepared_output_channels == output_channels
+            && block_size <= prepared_max_buffer)
         {
             return true;
         }
@@ -372,17 +426,31 @@ struct InstanceState {
             processor->release();
         }
 
+        // Grow-only ceiling: never shrink below a size we've already prepared
+        // for, and always cover at least kAaxPreparedMaxBlock so real-time host
+        // buffer sizes never re-prepare on the audio thread.
+        const int prepared_block = std::max({block_size,
+                                             prepared_max_buffer,
+                                             kAaxPreparedMaxBlock});
+
         processor->prepare({
             .sample_rate = sample_rate,
-            .max_buffer_size = max_buffer_size,
+            .max_buffer_size = prepared_block,
             .input_channels = input_channels,
             .output_channels = output_channels,
         });
         prepared = true;
         prepared_sample_rate = sample_rate;
-        prepared_max_buffer = max_buffer_size;
+        prepared_max_buffer = prepared_block;
         prepared_input_channels = input_channels;
         prepared_output_channels = output_channels;
+
+        // Pre-reserve the render-thread pointer scratch so the per-block
+        // clear()/push_back() below never allocates (they stay within this
+        // reserved capacity), keeping the process() region no-alloc.
+        input_ptrs.reserve(static_cast<std::size_t>(std::max(0, input_channels)));
+        output_ptrs.reserve(static_cast<std::size_t>(std::max(0, output_channels)));
+        sidechain_ptrs.reserve(1);
         return true;
     }
 
@@ -478,7 +546,7 @@ public:
         }
 
         if (auto* controller = Controller()) {
-            controller->SetSignalLatency(definition_.latency_samples);
+            controller->SetSignalLatency(aax_reported_latency(definition_.latency_samples));
         }
 
         return GenerateCoefficients();
@@ -512,7 +580,7 @@ public:
             }
         }
 
-        controller->SetSignalLatency(definition_.latency_samples);
+        controller->SetSignalLatency(aax_reported_latency(definition_.latency_samples));
         return controller->PostPacket(
             kParameterPacketField,
             packet.data(),
@@ -598,6 +666,15 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
                               component.main_input_channels,
                               component.main_output_channels);
 
+        // Defensive backstop only: ensure_prepared() above grew the scratch to
+        // cover this block, so prepared_max_buffer >= sample_count and this
+        // clamp is normally a no-op. It fires (clamp + zero-fill the tail below)
+        // only if a prepare() could not grow (e.g. allocation failure), keeping
+        // the processed region inside the scratch that actually exists rather
+        // than overrunning it. Shares the clamp helper with CLAP/VST3.
+        const int process_count =
+            clamp_block_to_prepared_max(sample_count, state.prepared_max_buffer);
+
         state.input_ptrs.clear();
         if (component.main_input_channels > 0 && context->audio_input) {
             state.input_ptrs.reserve(static_cast<std::size_t>(component.main_input_channels));
@@ -618,14 +695,14 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
         if (!state.input_ptrs.empty()) {
             audio_in = audio::BufferView<const float>(state.input_ptrs.data(),
                                                       state.input_ptrs.size(),
-                                                      static_cast<std::size_t>(sample_count));
+                                                      static_cast<std::size_t>(process_count));
         }
 
         audio::BufferView<float> audio_out;
         if (!state.output_ptrs.empty()) {
             audio_out = audio::BufferView<float>(state.output_ptrs.data(),
                                                  state.output_ptrs.size(),
-                                                 static_cast<std::size_t>(sample_count));
+                                                 static_cast<std::size_t>(process_count));
         }
 
         std::optional<audio::BufferView<const float>> sidechain_view;
@@ -638,7 +715,7 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
             state.sidechain_ptrs.push_back(context->audio_input[*context->sidechain_start_index]);
             sidechain_view.emplace(state.sidechain_ptrs.data(),
                                    state.sidechain_ptrs.size(),
-                                   static_cast<std::size_t>(sample_count));
+                                   static_cast<std::size_t>(process_count));
             state.processor->set_sidechain(&*sidechain_view);
         } else {
             state.processor->set_sidechain(nullptr);
@@ -654,7 +731,7 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
 
         ProcessContext process_context{
             .sample_rate = sample_rate,
-            .num_samples = sample_count,
+            .num_samples = process_count,
             .process_mode = ProcessMode::Realtime,
             .render_speed_hint = RenderSpeedHint::Realtime,
         };
@@ -670,16 +747,35 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
                                component.main_output_channels,
                                context->audio_input,
                                component.main_input_channels,
-                               sample_count);
+                               process_count);
                 } else {
-                    clear_audio(context->audio_output, component.main_output_channels, sample_count);
+                    clear_audio(context->audio_output, component.main_output_channels, process_count);
                 }
             }
             if (definition.supports_midi_output) {
                 copy_midi(state.midi_in, state.midi_out);
             }
         } else {
+            // Adapter-owned DSP region: MIDI buffers are pre-reserved +
+            // capacity-limited, the pointer scratch is pre-reserved, and the
+            // Processor honours the no-alloc contract — so this must not
+            // allocate. The tripwire (test builds / sanitizers) traps any stray
+            // allocation. Matches CLAP/VST3/AU.
+            pulp::runtime::ScopedNoAlloc no_alloc_guard;
             state.processor->process(audio_out, audio_in, state.midi_in, state.midi_out, process_context);
+        }
+
+        // Zero the un-processable tail on every main output channel when the
+        // block was clamped, so the host reads clean silence past the prepared
+        // max rather than uninitialised memory.
+        if (sample_count > process_count && component.main_output_channels > 0
+            && context->audio_output) {
+            for (int ch = 0; ch < component.main_output_channels; ++ch) {
+                if (context->audio_output[ch]) {
+                    std::fill_n(context->audio_output[ch] + process_count,
+                                sample_count - process_count, 0.0f);
+                }
+            }
         }
 
         if (definition.supports_midi_output) {
@@ -785,7 +881,8 @@ AAX_Result add_component_process(AAX_IComponentDescriptor* component,
                           static_cast<AAX_CPropertyValue>(stem_to_aax(layout.output_stem)));
         result != AAX_SUCCESS) return result;
     if (auto result = add(AAX_eProperty_LatencyContribution,
-                          static_cast<AAX_CPropertyValue>(definition.latency_samples));
+                          static_cast<AAX_CPropertyValue>(
+                              aax_reported_latency(definition.latency_samples)));
         result != AAX_SUCCESS) return result;
     if (auto result = add(AAX_eProperty_CanBypass, 1); result != AAX_SUCCESS) return result;
     if (auto result = add(AAX_eProperty_Constraint_MultiMonoSupport, 0); result != AAX_SUCCESS) return result;

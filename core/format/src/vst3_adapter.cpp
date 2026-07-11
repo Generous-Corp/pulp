@@ -10,6 +10,7 @@
 #include <pulp/format/detail/vst3_frame_rate.hpp>
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/quirk_apply.hpp>
@@ -1114,14 +1115,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // Max-block contract guard (defensive; well-behaved hosts never exceed the
     // advertised max). The Processor and all its scratch buffers were sized in
     // setupProcessing() to max_block_size_ (setup.maxSamplesPerBlock). A render
-    // larger than that would overrun them and corrupt DSP state. VST3 has no
-    // clean per-block reject, so clamp the processed region to the prepared max
-    // and zero the un-processable tail [max_block_size_, original) on every main
-    // output channel so it reads back as clean silence rather than garbage.
+    // larger than that would overrun them and corrupt DSP state. Per the shared
+    // max-block contract (max_block_contract.hpp) — matching CLAP/AU-v3/AAX —
+    // clamp the processed region to the prepared max and zero the un-processable
+    // tail [max_block_size_, original) on every main output channel so it reads
+    // back as clean silence rather than garbage.
     const int32 original_num_samples = num_samples;
-    if (max_block_size_ > 0 && num_samples > max_block_size_) {
-        num_samples = max_block_size_;
-    }
+    num_samples = clamp_block_to_prepared_max(num_samples, max_block_size_);
 
     // Bus 0 routes to main input/output; bus 1 routes to
     // Processor::set_sidechain(). Additional input buses beyond index 1

@@ -14,12 +14,12 @@ needs a version bump (patch/minor/major). Three modes:
 Additional flag:
 
     --require-bump-for-fix-feat
-        When set, asserts that PRs whose title carries a Conventional
-        Commits `fix:` or `feat:` prefix (parsed from $GITHUB_PR_TITLE
-        or --pr-title) include either an accepted bump-marker commit
-        subject prefix (`chore: bump versions` canonical, or legacy
+        When set, asserts that PRs whose title OR live commit-derived
+        signals carry a Conventional Commits `fix:` or `feat:` prefix
+        include either an accepted bump-marker commit subject prefix
+        (`chore: bump versions` canonical, or legacy
         `chore(versions): bump`) in the diff range OR a
-        `Version-Bump: skip reason="..."` trailer on the tip commit.
+        `Version-Bump: skip reason="..."` trailer in that range.
         Near-misses like `chore: bump SDK to vX.Y.Z` deliberately do
         not count. This is the structural fix for the 2026-04-30
         incident where PR #1008 (a `fix(view):` user-facing fix) merged
@@ -67,6 +67,7 @@ the stable CLI and import entrypoint. External importers
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess  # noqa: F401  (re-exported for external importers)
@@ -129,7 +130,7 @@ from version_bump_render import (
 )
 
 
-# ── PR-title fix/feat-needs-bump check ─────────────────────────────────
+# ── PR/commit fix/feat-needs-bump check ────────────────────────────────
 
 
 # Conventional Commits prefix for user-facing changes that must ship
@@ -149,17 +150,44 @@ def _is_fix_or_feat_title(title: str) -> bool:
     return bool(_FIX_FEAT_TITLE_RE.match(title.strip()))
 
 
+def _release_subjects(subject: str, body: str) -> list[str]:
+    """Release-bearing subjects represented by a landed commit.
+
+    GitHub's multi-commit ``COMMIT_MESSAGES`` squash format keeps source
+    subjects as ``* <subject>`` lines, then appends a ``---------`` co-author
+    footer. Those source commits are no longer reachable from ``main``, so the
+    post-merge backstop must recover their fix/feat signals from that stable
+    message shape. A conventional landed subject remains the sole signal.
+    """
+    cleaned = subject.strip()
+    signals = [cleaned] if _is_fix_or_feat_title(cleaned) else []
+    separator = re.search(r"(?m)^---------\s*$", body)
+    if separator is not None:
+        source_messages = body[:separator.start()]
+    elif re.search(r"\(#[0-9]+\)\s*$", cleaned):
+        # A multi-commit squash without co-authors has no footer separator;
+        # GitHub still appends the PR number to the landed title.
+        source_messages = body
+    else:
+        source_messages = ""
+    signals.extend(
+        match.group(1).strip()
+        for match in re.finditer(
+            r"(?m)^\*[ \t]+((?:fix|feat)(?:\([^\r\n)]*\))?!?:[ \t]+[^\r\n]+)",
+            source_messages,
+        )
+    )
+    return list(dict.fromkeys(signals))
+
+
 def _fix_feat_min_level(title: str) -> str | None:
     """Minimum bump level a `fix:` / `feat:` title demands, or None.
 
     `feat:` (a new user-facing capability) is a semver-minor; `fix:`
     (and the `fix!:` / `feat!:` breaking variants, which we still treat
-    as their base type here — the title alone doesn't carry the target
-    surface) is a semver-patch. This mirrors `classify_conventional`'s
-    subject mapping but reads the PR *title* rather than a commit subject,
-    so the force-bump in `--mode=apply` agrees with the conv-commit
-    ceiling the per-surface pipeline would have applied had the diff been
-    meaningful.
+    as their base type here — the signal alone doesn't carry the target
+    surface) is a semver-patch. This mirrors `classify_conventional`'s subject
+    mapping for either a PR title or commit-derived signal.
     """
     s = title.strip()
     m = _FIX_FEAT_TITLE_RE.match(s)
@@ -168,34 +196,24 @@ def _fix_feat_min_level(title: str) -> str | None:
     return "minor" if m.group(1) == "feat" else "patch"
 
 
-def force_fix_feat_bump(
-    pr_title: str,
+def force_fix_feat_verdicts(
+    release_signal: str,
+    min_levels_by_surface: dict[str, str],
     verdicts: list,
-    changed: list[str],
-    base: str,
-    repo: Path,
-) -> tuple[list[str], str]:
+    recorded_levels: bool = False,
+) -> tuple[list, str]:
     """Reconcile `--mode=apply` with `--require-bump-for-fix-feat`.
 
-    Called only in apply mode after the normal `apply_bumps` pass when the
-    PR title is a `fix:` / `feat:` and that first pass edited nothing. A
-    branch cut from a recent merge inherits a version EQUAL to its
-    merge-base; for such a branch the per-surface heuristic finds no delta
-    → `final_level == "none"` → `apply_bumps` writes nothing. But CI's
-    `--require-bump-for-fix-feat` still hard-fails the `fix:` / `feat:` PR
-    for lacking a `chore: bump versions` commit. The two halves disagree
-    and a human has to hand-bump (issue #4679).
-
-    Resolution: when the title is `fix:` / `feat:` AND the diff touched a
-    versioned surface's `trigger_paths`, FORCE the title's minimum level
-    (patch for `fix:`, minor for `feat:`) onto every touched surface and
-    write the version files — the same files `apply_bumps` would have
-    written. The caller still appends the `chore: bump versions` commit,
-    so the report then passes with no manual step.
+    Called before `apply_bumps` when the PR title or a live commit signal is
+    `fix:` / `feat:` and the range has no effective global opt-out. Each
+    signaled surface is raised to that surface's minimum (patch for `fix:`,
+    minor for `feat:`), including surfaces hidden by scoped skips while a
+    different surface has a normal verdict. Explicit numeric overrides remain
+    authoritative during normal PR apply. Detector-recorded recovery levels
+    are already boundary-filtered and are therefore applied exactly.
 
     Returns `(edited, message)`:
-      - `edited` is the list of version-file paths rewritten (possibly
-        empty when every touched surface is already bumped).
+      - the verdict list to pass through the single apply operation.
       - `message` is an advisory line for non-edit outcomes: when NO
         versioned surface was touched at all, it is an actionable
         reclassify-or-skip message (the caller surfaces it and the
@@ -203,16 +221,12 @@ def force_fix_feat_bump(
         this never silently no-ops). Empty string when surfaces were
         forced.
     """
-    min_level = _fix_feat_min_level(pr_title)
-    if min_level is None:  # pragma: no cover - guarded by caller
-        return [], ""
-
-    touched_verdicts = []
-    for v in verdicts:
-        if any(_matches_any(p, v.surface.trigger_paths) for p in changed):
-            touched_verdicts.append(v)
-
-    if not touched_verdicts:
+    signaled_names = {
+        verdict.surface.name
+        for verdict in verdicts
+        if verdict.surface.name in min_levels_by_surface
+    }
+    if not signaled_names:
         # No versioned surface touched — a `fix:` / `feat:` title on a
         # diff that only changes build/CI/docs/test paths (the P5
         # `build:`-class case). We refuse to silently no-op: emit an
@@ -220,7 +234,7 @@ def force_fix_feat_bump(
         # so the author either reclassifies the title or records a skip.
         return [], (
             "fix/feat-needs-bump: PR title "
-            f"{pr_title!r} is a user-facing `fix:` / `feat:` change but "
+            f"{release_signal!r} is a user-facing `fix:` / `feat:` change but "
             "the diff touches NO versioned surface's trigger paths, so "
             "there is nothing to bump. This usually means the title is "
             "mislabeled (a `build:` / `ci:` / `docs:` / `test:` /\n"
@@ -236,22 +250,98 @@ def force_fix_feat_bump(
             '      Version-Bump: skip reason="<why this doesn\'t need a release>"\n'
         )
 
-    # Force the title's minimum level onto every touched surface, then
-    # re-run apply_bumps. `apply_bumps` already short-circuits surfaces
-    # whose version files are all at the target (idempotent re-apply) and
-    # computes the new version from the BASE version, so forcing here is
-    # safe even on a partially-bumped branch.
+    # Raise each signaled surface before the single apply operation. This
+    # preserves a stronger normal verdict while ensuring a patch write cannot
+    # make a later feature-level force look already satisfied. Numeric trailer
+    # levels are an explicit author verdict and remain authoritative.
     forced = []
-    for v in touched_verdicts:
+    for v in verdicts:
+        min_level = min_levels_by_surface.get(v.surface.name)
+        explicit_level = (
+            v.trailer_override in LEVELS
+            and v.trailer_override != "none"
+        )
+        final_level = v.final_level
+        if min_level and recorded_levels:
+            final_level = min_level
+        elif min_level and not explicit_level:
+            final_level = max_level(final_level, min_level)
         forced.append(Verdict(
             surface=v.surface,
             heuristic=v.heuristic,
             trailer_override=v.trailer_override,
             current_version=v.current_version,
-            final_level=min_level,
+            final_level=final_level,
         ))
-    edited = apply_bumps(forced, base, repo)
-    return edited, ""
+    return forced, ""
+
+
+def _signal_files(sha: str) -> list[str]:
+    """Files introduced by a release-signal commit.
+
+    A merge commit's ordinary ``git show --name-only`` result is not a stable
+    description of what the merge introduced. Compare its first-parent tree to
+    the merge tree so a later, unrelated commit in the pushed range cannot be
+    attributed to the merge subject.
+    """
+    parent_line = subprocess.run(
+        ["git", "rev-list", "--parents", "-n", "1", sha],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    if len(parent_line) <= 2:
+        return git_commit_files(sha)
+    result = subprocess.run(
+        ["git", "diff", "--name-only", f"{parent_line[1]}..{sha}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _signal_is_embedded(sha: str, signal_subject: str) -> bool:
+    landed_subject = subprocess.run(
+        ["git", "show", "-s", "--format=%s", sha],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return signal_subject.strip() != landed_subject
+
+
+def _fix_feat_levels_by_surface(
+    base: str,
+    head: str,
+    cfg: Config,
+    changed: list[str],
+    pr_title: str,
+) -> dict[str, str]:
+    """Return the strongest live fix/feat level owed by each surface."""
+    levels: dict[str, str] = {}
+
+    def add_signal(signal: str, files: list[str]) -> None:
+        level = _fix_feat_min_level(signal)
+        if level is None:
+            return
+        for surface in cfg.surfaces:
+            if any(_matches_any(path, surface.trigger_paths) for path in files):
+                levels[surface.name] = max_level(
+                    levels.get(surface.name, "none"),
+                    level,
+                )
+
+    for sha, subject in _range_fix_feat_signals(base, head):
+        # Embedded COMMIT_MESSAGES subjects share the landed squash SHA but not
+        # its aggregate file set. Recovery receives detector-recorded levels;
+        # normal PR apply sees the original commits and never needs this unsafe
+        # aggregate fallback.
+        files = [] if _signal_is_embedded(sha, subject) else _signal_files(sha)
+        add_signal(subject, files)
+    if _is_fix_or_feat_title(pr_title):
+        add_signal(pr_title, changed)
+    return levels
 
 
 def _range_has_bump_commit(base: str, head: str) -> bool:
@@ -266,6 +356,213 @@ def _range_has_bump_commit(base: str, head: str) -> bool:
         if any(s.startswith(prefix) for prefix in BUMP_COMMIT_SUBJECT_PREFIXES):
             return True
     return False
+
+
+def _range_fix_feat_signals(base: str, head: str) -> list[tuple[str, str]]:
+    """Return live `(sha, subject)` signals contributed by ``base..head``.
+
+    GitHub's ``COMMIT_OR_PR_TITLE`` squash policy uses the sole commit's
+    subject for a one-commit PR, but the required pre-merge gate receives the
+    separately editable PR title. Looking at only that title lets a plain-
+    language title hide the exact Conventional Commit subject that will land
+    on ``main``. Scanning the range also covers rebase and merge-commit flows
+    without reproducing one repository's current squash settings here.
+
+    Explicit reverts cancel the signal introduced by their target commit. For
+    merge targets, that signal is measured against the mainline parent recorded
+    by standard `git revert` metadata (with the first parent as the fallback for
+    a trailer-only revert). Reverting the revert restores the same signal, even
+    when the original `fix:` / `feat:` commit predates ``base``. This follows
+    commit relationships instead of path names, which remain reliable across
+    later renames and unrelated edits to the same file.
+    """
+    records: dict[str, tuple[str, str, list[str]]] = {}
+    trailers_by_sha: dict[str, dict[str, list[str]]] = {}
+    release_subjects_by_sha: dict[str, list[str]] = {}
+    target_by_sha: dict[str, tuple[bool, str | None]] = {}
+    commit_delta_cache: dict[str, dict[str, int]] = {}
+    range_delta_cache: dict[tuple[str, str], dict[str, int]] = {}
+    resolving: set[str] = set()
+
+    def resolve_commit(ref: str) -> str | None:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def commit_record(ref: str) -> tuple[str, str, list[str]] | None:
+        sha = resolve_commit(ref)
+        if sha is None:
+            return None
+        if sha not in records:
+            result = subprocess.run(
+                ["git", "show", "-s", "--format=%P%x00%s%x00%B", sha],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            parents, subject, body = result.stdout.split("\x00", 2)
+            records[sha] = (subject, body, parents.split())
+        return records[sha]
+
+    def revert_target(sha: str) -> tuple[bool, str | None]:
+        if sha in target_by_sha:
+            return target_by_sha[sha]
+
+        record = commit_record(sha)
+        if record is None:  # pragma: no cover - sha came from git log/show
+            return False, None
+        subject, body, _parents = record
+        trailers = trailers_by_sha.setdefault(sha, git_commit_trailers(sha))
+        body_match = re.search(
+            r"(?im)^This reverts commit ([0-9a-f]{7,64})(?:[.,]|\s|$)",
+            body,
+        )
+        declared_revert = (
+            is_revert_commit(subject, trailers) or body_match is not None
+        )
+        if not declared_revert:
+            target_by_sha[sha] = (False, None)
+            return target_by_sha[sha]
+
+        candidates = trailers.get("revert-of", [])
+        if body_match:
+            candidates = [*candidates, body_match.group(1)]
+
+        target = None
+        for candidate in candidates:
+            match = re.search(r"\b[0-9a-fA-F]{7,64}\b", candidate)
+            if match:
+                target = resolve_commit(match.group(0))
+            if target is not None:
+                break
+        # Invalid or stale revert metadata must not hide a real release signal.
+        # A conventional Revert subject remains non-release-bearing, but a
+        # `fix:` / `feat:` subject only gains revert semantics after its target
+        # resolves in the fetched history.
+        is_revert = target is not None or not _is_fix_or_feat_title(subject)
+        target_by_sha[sha] = (is_revert, target)
+        return target_by_sha[sha]
+
+    def release_subjects(sha: str) -> list[str]:
+        if sha not in release_subjects_by_sha:
+            record = commit_record(sha)
+            if record is None:
+                release_subjects_by_sha[sha] = []
+            else:
+                release_subjects_by_sha[sha] = _release_subjects(
+                    record[0],
+                    record[1],
+                )
+        return release_subjects_by_sha[sha]
+
+    def add_delta(
+        destination: dict[str, int],
+        source: dict[str, int],
+        multiplier: int = 1,
+    ) -> None:
+        for candidate_sha, value in source.items():
+            total = destination.get(candidate_sha, 0) + multiplier * value
+            if total:
+                destination[candidate_sha] = total
+            else:
+                destination.pop(candidate_sha, None)
+
+    def range_delta(range_base: str, range_head: str) -> dict[str, int]:
+        key = (range_base, range_head)
+        if key in range_delta_cache:
+            return dict(range_delta_cache[key])
+
+        delta: dict[str, int] = {}
+        for sha, subject, body in git_log_subjects_and_bodies(
+            range_base,
+            range_head,
+        ):
+            record = commit_record(sha)
+            if record is not None:
+                records[sha] = (subject, body, record[2])
+            is_revert, _target = revert_target(sha)
+            if is_revert:
+                add_delta(delta, commit_delta(sha))
+            elif release_subjects(sha):
+                add_delta(delta, {sha: 1})
+
+        range_delta_cache[key] = dict(delta)
+        return delta
+
+    def reverted_delta(revert_sha: str, target_sha: str) -> dict[str, int]:
+        target_record = commit_record(target_sha)
+        if target_record is None:
+            return {}
+        _subject, _body, target_parents = target_record
+        if len(target_parents) <= 1:
+            return commit_delta(target_sha)
+
+        revert_record = commit_record(revert_sha)
+        revert_body = revert_record[1] if revert_record is not None else ""
+        mainline_match = re.search(
+            r"(?im)reversing\s+changes made to ([0-9a-f]{7,64})",
+            revert_body,
+        )
+        mainline = None
+        if mainline_match:
+            resolved = resolve_commit(mainline_match.group(1))
+            if resolved in target_parents:
+                mainline = resolved
+        if mainline is None:
+            mainline = target_parents[0]
+        return range_delta(mainline, target_sha)
+
+    def commit_delta(sha: str) -> dict[str, int]:
+        if sha in commit_delta_cache:
+            return dict(commit_delta_cache[sha])
+        if sha in resolving:
+            return {}
+
+        resolving.add(sha)
+        try:
+            record = commit_record(sha)
+            if record is None:
+                delta: dict[str, int] = {}
+            else:
+                subject, _body, parents = record
+                is_revert, target = revert_target(sha)
+                if is_revert:
+                    delta = {}
+                    if target is not None:
+                        add_delta(delta, reverted_delta(sha, target), -1)
+                elif len(parents) > 1:
+                    delta = range_delta(parents[0], sha)
+                elif release_subjects(sha):
+                    delta = {sha: 1}
+                else:
+                    delta = {}
+            commit_delta_cache[sha] = dict(delta)
+            return delta
+        finally:
+            resolving.remove(sha)
+
+    commits = git_log_subjects_and_bodies(base, head)
+    if not commits:
+        return []
+    live = range_delta(base, head)
+    signals: list[tuple[str, str]] = []
+    for sha, value in live.items():
+        if value <= 0:
+            continue
+        record = commit_record(sha)
+        if record is None:  # pragma: no cover - live keys resolve from git
+            continue
+        is_revert, _target = revert_target(sha)
+        if not is_revert:
+            signals.extend((sha, signal) for signal in release_subjects(sha))
+    return signals
+
+
+def _range_fix_feat_subjects(base: str, head: str) -> list[str]:
+    return [subject for _sha, subject in _range_fix_feat_signals(base, head)]
 
 
 def _range_has_version_bump_skip_trailer(base: str, head: str) -> bool:
@@ -297,6 +594,102 @@ def _range_has_version_bump_skip_trailer(base: str, head: str) -> bool:
     return False
 
 
+def _range_unreleased_fix_feat_subjects(
+    base: str,
+    head: str,
+    cfg: Config,
+    covered_surfaces: dict[str, bool],
+    coverage_boundaries: dict[str, str] | None = None,
+    source_range: tuple[str, str] | None = None,
+) -> tuple[list[tuple[str, list[str]]], dict[str, str]]:
+    """Return live signals and surfaces not covered by a tag or skip boundary."""
+    if _range_has_version_bump_skip_trailer(base, head):
+        return [], {}
+    if source_range and _range_has_version_bump_skip_trailer(*source_range):
+        return [], {}
+
+    boundaries = coverage_boundaries or {}
+    by_signal: dict[tuple[str, str], list[str]] = {}
+    levels: dict[str, str] = {}
+    for surface in cfg.surfaces:
+        if covered_surfaces.get(surface.name, False):
+            continue
+        signal_base = base
+        boundary = boundaries.get(surface.name)
+        if boundary:
+            # A sticky skip only narrows this push when its bump lies inside
+            # base..head. If it predates base, restarting at the old bump would
+            # rediscover already-tracked fixes on every unrelated later push.
+            boundary_in_range = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", base, boundary],
+                capture_output=True,
+                text=True,
+            )
+            boundary_reaches_head = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", boundary, head],
+                capture_output=True,
+                text=True,
+            )
+            if (
+                boundary_in_range.returncode == 0
+                and boundary_reaches_head.returncode == 0
+            ):
+                signal_base = boundary
+        analysis_base = signal_base
+        analysis_head = head
+        if source_range and signal_base == base:
+            analysis_base, analysis_head = source_range
+        trailers = git_range_trailers(analysis_base, analysis_head)
+        explicit_level = surface_trailer_override(
+            trailers,
+            cfg.trailer_version_bump,
+            surface.name,
+        )
+        boundary_changed = filter_generated(
+            git_diff_names(analysis_base, analysis_head),
+            cfg.generated_globs,
+        )
+        boundary_heuristic = heuristic_for_surface(
+            surface,
+            boundary_changed,
+            analysis_base,
+            analysis_head,
+        )
+        for sha, subject in _range_fix_feat_signals(analysis_base, analysis_head):
+            files = _signal_files(sha)
+            if not source_range and _signal_is_embedded(sha, subject):
+                touched_surfaces = [
+                    candidate.name
+                    for candidate in cfg.surfaces
+                    if any(
+                        _matches_any(path, candidate.trigger_paths)
+                        for path in files
+                    )
+                ]
+                if touched_surfaces != [surface.name]:
+                    continue
+            if not any(
+                _matches_any(path, surface.trigger_paths)
+                for path in files
+            ):
+                continue
+            by_signal.setdefault((sha, subject), []).append(surface.name)
+            signal_level = _fix_feat_min_level(subject) or "none"
+            if explicit_level in ("patch", "minor", "major"):
+                levels[surface.name] = explicit_level
+            else:
+                levels[surface.name] = max_level(
+                    levels.get(surface.name, "none"),
+                    signal_level,
+                    boundary_heuristic,
+                )
+    signals = [
+        (subject, surfaces)
+        for (_sha, subject), surfaces in by_signal.items()
+    ]
+    return signals, levels
+
+
 def check_fix_feat_requires_bump(
     pr_title: str,
     base: str,
@@ -304,43 +697,52 @@ def check_fix_feat_requires_bump(
 ) -> tuple[bool, str]:
     """Returns (passed, message). `passed=True` means either:
 
-    - the PR title is not a `fix:` / `feat:` (no requirement), OR
-    - the title matches and the diff range contains a bump commit, OR
-    - the title matches and the tip commit carries a top-level
+    - neither the PR title nor a live commit-derived signal is a
+      `fix:` / `feat:` (no requirement), OR
+    - a release signal exists and the diff range contains a bump commit, OR
+    - a release signal exists and the range carries a top-level
       `Version-Bump: skip reason="..."` trailer.
 
     Otherwise returns (False, error-with-suggestions).
     """
-    if not pr_title or not pr_title.strip():
-        # Defensive: no title supplied means the workflow couldn't
-        # resolve $GITHUB_PR_TITLE. Don't false-fail the gate — the
-        # per-surface verdict is still authoritative.
-        return True, (
-            "fix/feat-needs-bump: PR title not provided; skipping check "
-            "(this is normal on push events and workflow_dispatch)."
-        )
+    title_matches = _is_fix_or_feat_title(pr_title) if pr_title else False
+    commit_subjects = [] if title_matches else _range_fix_feat_subjects(base, head)
 
-    if not _is_fix_or_feat_title(pr_title):
+    if title_matches:
+        release_signal = f"PR title {pr_title!r}"
+    elif commit_subjects:
+        release_signal = f"commit subject {commit_subjects[0]!r}"
+    elif not pr_title or not pr_title.strip():
+        # Defensive: no title supplied and no classifiable subject means the
+        # workflow has no release signal. The per-surface verdict remains
+        # authoritative on push events and workflow_dispatch.
         return True, (
-            f"fix/feat-needs-bump: PR title {pr_title!r} is not a "
-            "`fix:` or `feat:` user-facing change — no bump required."
+            "fix/feat-needs-bump: PR title not provided and no `fix:` / "
+            "`feat:` commit subject found; skipping check (this is normal on "
+            "push events and workflow_dispatch)."
+        )
+    else:
+        return True, (
+            f"fix/feat-needs-bump: PR title {pr_title!r} is not a `fix:` or "
+            "`feat:` user-facing change, and no commit subject is one — no "
+            "bump required."
         )
 
     if _range_has_bump_commit(base, head):
         return True, (
-            f"fix/feat-needs-bump: PR title {pr_title!r} matches; "
+            f"fix/feat-needs-bump: {release_signal} matches; "
             "found `chore: bump versions` commit in the diff range — OK."
         )
 
     if _range_has_version_bump_skip_trailer(base, head):
         return True, (
-            f"fix/feat-needs-bump: PR title {pr_title!r} matches; "
+            f"fix/feat-needs-bump: {release_signal} matches; "
             'no bump commit found, but a `Version-Bump: skip reason="..."` '
             "trailer is present in the range — bypass honored."
         )
 
     return False, (
-        f"fix/feat-needs-bump: PR title {pr_title!r} is a user-facing "
+        f"fix/feat-needs-bump: {release_signal} is a user-facing "
         "`fix:` / `feat:` change but the diff range contains NO commit "
         "with subject `chore: bump versions` (canonical; legacy "
         "`chore(versions): bump` is also accepted) AND no top-level "
@@ -357,7 +759,7 @@ def check_fix_feat_requires_bump(
         "can apply the bump and append a `chore: bump versions` commit.\n"
         "  • If the fix/feat is genuinely not user-facing (rare — "
         "consider re-titling to `chore:` / `docs:` / `refactor:` "
-        "instead), add a top-level trailer to the tip commit:\n"
+        "instead), add a top-level trailer to a commit in the range:\n"
         '      Version-Bump: skip reason="<why this fix doesn\'t need a release>"\n'
         "  • Branch protection on `main` SHOULD make this an enforced "
         "required check; see docs/guides/release-watchdog.md."
@@ -376,6 +778,51 @@ def main(argv: list[str]) -> int:
     # lock-step drift risk).
     if len(argv) >= 2 and argv[0] == "classify-subject":
         return 0 if _is_fix_or_feat_title(argv[1]) else 1
+    if len(argv) >= 3 and argv[0] == "classify-range":
+        if _range_has_version_bump_skip_trailer(argv[1], argv[2]):
+            return 1
+        signals = _range_fix_feat_subjects(argv[1], argv[2])
+        if not signals:
+            return 1
+        print(signals[0])
+        return 0
+    if len(argv) >= 5 and argv[0] == "classify-unreleased-range":
+        if argv[3] not in ("0", "1") or argv[4] not in ("0", "1"):
+            return 2
+        root = repo_root()
+        config_path = Path(argv[5]) if len(argv) >= 6 else (
+            root / "tools" / "scripts" / "versioning.json"
+        )
+        sdk_boundary = argv[6] if len(argv) >= 7 and argv[6] != "-" else ""
+        plugin_boundary = argv[7] if len(argv) >= 8 and argv[7] != "-" else ""
+        source_base = argv[8] if len(argv) >= 9 and argv[8] != "-" else ""
+        source_head = argv[9] if len(argv) >= 10 and argv[9] != "-" else ""
+        cfg = load_config(config_path)
+        signals, levels = _range_unreleased_fix_feat_subjects(
+            argv[1],
+            argv[2],
+            cfg,
+            {"sdk": argv[3] == "1", "plugin": argv[4] == "1"},
+            {"sdk": sdk_boundary, "plugin": plugin_boundary},
+            (source_base, source_head) if source_base and source_head else None,
+        )
+        if not signals:
+            return 1
+        subject = signals[0][0]
+        signaled_surfaces = {
+            surface for _subject, surfaces in signals for surface in surfaces
+        }
+        surfaces = [
+            surface.name
+            for surface in cfg.surfaces
+            if surface.name in signaled_surfaces
+        ]
+        print(json.dumps({
+            "subject": subject,
+            "surfaces": surfaces,
+            "levels": levels,
+        }))
+        return 0
 
     parser = argparse.ArgumentParser(description="Version-bump gate")
     parser.add_argument("--base", default="origin/main")
@@ -384,11 +831,47 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--mode", choices=("report", "hint", "apply"), default="report")
     parser.add_argument("--repo-root", default=None)
     parser.add_argument(
+        "--apply-version-base",
+        default=None,
+        help=(
+            "In apply mode, compute new versions from this ref while retaining "
+            "--base/--head for changed-path and release-signal analysis. "
+            "Defaults to --base."
+        ),
+    )
+    parser.add_argument(
+        "--recover-stranded-release",
+        action="store_true",
+        help=(
+            "In apply mode, force every touched surface to at least the live "
+            "fix/feat signal's minimum level even when the historical range "
+            "already contains a bump-marker subject."
+        ),
+    )
+    parser.add_argument(
+        "--recover-surfaces",
+        default="",
+        help=(
+            "Comma-separated surface names to edit during stranded-release "
+            "recovery. Requires --recover-stranded-release."
+        ),
+    )
+    parser.add_argument(
+        "--recover-levels",
+        default="",
+        help=(
+            "Comma-separated <surface>=<patch|minor|major> levels recorded by "
+            "the stranded-release detector. Valid only with "
+            "--recover-stranded-release."
+        ),
+    )
+    parser.add_argument(
         "--require-bump-for-fix-feat",
         action="store_true",
         help=(
-            "Additively require that PRs titled `fix:`/`feat:` (read "
-            "from $GITHUB_PR_TITLE or --pr-title) include either a "
+            "Additively require that a `fix:`/`feat:` PR title (read "
+            "from $GITHUB_PR_TITLE or --pr-title) or commit subject "
+            "include either a "
             '`chore: bump versions` commit or a `Version-Bump: skip '
             'reason="..."` trailer. Hard-fails when violated. Wired '
             "into version-skill-check.yml on PR triggers."
@@ -399,8 +882,8 @@ def main(argv: list[str]) -> int:
         default=None,
         help=(
             "Override the PR title used by --require-bump-for-fix-feat. "
-            "Defaults to $GITHUB_PR_TITLE. Empty / unset means the "
-            "check is skipped (normal for push and workflow_dispatch)."
+            "Defaults to $GITHUB_PR_TITLE. An empty / unset title still "
+            "allows commit-subject classification."
         ),
     )
     parser.add_argument(
@@ -421,6 +904,12 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.recover_stranded_release and args.mode != "apply":
+        sys.stderr.write(
+            "version_bump_check: --recover-stranded-release requires --mode=apply\n"
+        )
+        return 2
+
     root = Path(args.repo_root) if args.repo_root else repo_root()
     cfg_path = Path(args.config) if args.config else root / "tools" / "scripts" / "versioning.json"
     if not cfg_path.exists():
@@ -428,6 +917,53 @@ def main(argv: list[str]) -> int:
         return 2
 
     cfg = load_config(cfg_path)
+    recover_surfaces = {
+        name.strip() for name in args.recover_surfaces.split(",") if name.strip()
+    }
+    recover_levels: dict[str, str] = {}
+    for item in (part.strip() for part in args.recover_levels.split(",")):
+        if not item:
+            continue
+        if "=" not in item:
+            sys.stderr.write(
+                "version_bump_check: --recover-levels entries must be "
+                "<surface>=<patch|minor|major>\n"
+            )
+            return 2
+        name, level = (part.strip() for part in item.split("=", 1))
+        if level not in ("patch", "minor", "major"):
+            sys.stderr.write(
+                f"version_bump_check: invalid recovery level for {name}: {level}\n"
+            )
+            return 2
+        recover_levels[name] = level
+    if recover_surfaces and not args.recover_stranded_release:
+        sys.stderr.write(
+            "version_bump_check: --recover-surfaces requires "
+            "--recover-stranded-release\n"
+        )
+        return 2
+    if recover_levels and not args.recover_stranded_release:
+        sys.stderr.write(
+            "version_bump_check: --recover-levels requires "
+            "--recover-stranded-release\n"
+        )
+        return 2
+    known_surfaces = {surface.name for surface in cfg.surfaces}
+    unknown_surfaces = (recover_surfaces | set(recover_levels)) - known_surfaces
+    if unknown_surfaces:
+        sys.stderr.write(
+            "version_bump_check: unknown recovery surface(s): "
+            + ", ".join(sorted(unknown_surfaces))
+            + "\n"
+        )
+        return 2
+    if recover_levels and recover_surfaces != set(recover_levels):
+        sys.stderr.write(
+            "version_bump_check: --recover-levels must name exactly the "
+            "--recover-surfaces set\n"
+        )
+        return 2
 
     changed = git_diff_names(args.base, args.head)
     changed = filter_generated(changed, cfg.generated_globs)
@@ -435,44 +971,76 @@ def main(argv: list[str]) -> int:
     verdicts = assess_surfaces(cfg, changed, args.base, args.head, root)
 
     if args.mode == "apply":
-        edited = apply_bumps(verdicts, args.base, root)
+        apply_base = args.apply_version_base or args.base
+        apply_verdicts = [
+            verdict
+            for verdict in verdicts
+            if not recover_surfaces or verdict.surface.name in recover_surfaces
+        ]
 
         # Reconcile apply with `--require-bump-for-fix-feat` (issue #4679).
         # A branch cut from a recent merge inherits a version EQUAL to its
         # merge-base; the per-surface heuristic then finds no delta →
         # `apply_bumps` writes nothing → CI's fix/feat gate hard-fails the
         # `fix:` / `feat:` PR for lacking a `chore: bump versions` commit.
-        # When the title IS `fix:` / `feat:` and the first pass edited
-        # nothing AND the range carries no bump commit / skip trailer
-        # already, FORCE the title's minimum bump on every touched surface
-        # so the gate passes without a manual hand-bump.
+        # When the title or a live commit subject IS `fix:` / `feat:`, raise
+        # every touched surface to that signal's minimum. Run this even when
+        # normal apply edited a different surface, so one valid bump cannot
+        # mask a scoped skip on the surface carrying the fix.
         forced_no_surface_msg = ""
-        forced_this_run = False
+        forced_signal = ""
         pr_title = (
             args.pr_title if args.pr_title is not None
             else os.environ.get("GITHUB_PR_TITLE", "")
         )
-        # Only force when the fix/feat gate would otherwise FAIL — i.e.
-        # the title is `fix:` / `feat:` and the range carries neither a
-        # bump commit nor a `Version-Bump: skip` trailer.
-        # `check_fix_feat_requires_bump` is the single source of truth for
-        # that verdict (it also short-circuits non-fix/feat titles and the
-        # no-title case), so reusing it keeps `main()` and the CI gate in
-        # lock-step and avoids re-deriving the conditions here.
+        force_signals = _range_fix_feat_subjects(args.base, args.head)
+        if _is_fix_or_feat_title(pr_title):
+            force_signals.append(pr_title)
+        force_levels = recover_levels or _fix_feat_levels_by_surface(
+            args.base,
+            args.head,
+            cfg,
+            changed,
+            "" if args.recover_stranded_release else pr_title,
+        )
+        if force_signals:
+            forced_signal = max(
+                force_signals,
+                key=lambda signal: LEVELS.index(
+                    _fix_feat_min_level(signal) or "none"
+                ),
+            )
+
+        # Normal apply honors an existing marker/global skip. Recovery ignores
+        # a historical marker because the tracker proves no usable version
+        # movement resulted, but it still honors an explicit global skip.
         ff_would_pass, _ff_pre_msg = check_fix_feat_requires_bump(
             pr_title, args.base, args.head,
         )
-        if not edited and pr_title and not ff_would_pass:
-            forced, forced_no_surface_msg = force_fix_feat_bump(
-                pr_title, verdicts, changed, args.base, root,
+        global_skip = _range_has_version_bump_skip_trailer(args.base, args.head)
+        should_force = forced_signal and (
+            not ff_would_pass
+            or (args.recover_stranded_release and not global_skip)
+        )
+        if should_force:
+            apply_verdicts, forced_no_surface_msg = force_fix_feat_verdicts(
+                forced_signal,
+                force_levels,
+                apply_verdicts,
+                recorded_levels=bool(recover_levels),
             )
-            edited = forced
-            forced_this_run = bool(forced)
+        edited = apply_bumps(apply_verdicts, apply_base, root)
 
         # Re-assess after editing: re-read current versions and re-check.
         verdicts_after = assess_surfaces(cfg, changed, args.base, args.head, root)
+        if recover_surfaces:
+            verdicts_after = [
+                verdict
+                for verdict in verdicts_after
+                if verdict.surface.name in recover_surfaces
+            ]
         text, code = render_report(
-            verdicts_after, mode="report", base=args.base, repo=root,
+            verdicts_after, mode="report", base=apply_base, repo=root,
             accept_intent_trailers=args.accept_intent_trailers,
         )
         if edited:
@@ -491,6 +1059,12 @@ def main(argv: list[str]) -> int:
             sys.stderr.write(forced_no_surface_msg + "\n")
             if code == 0:
                 code = 1
+        if args.recover_stranded_release and not edited:
+            sys.stderr.write(
+                "fix/feat-needs-bump: recovery produced no version edit; "
+                "refusing to report success.\n"
+            )
+            return 1
         # `--require-bump-for-fix-feat` is meaningful in apply mode too:
         # if `pulp pr` ran apply and STILL couldn't produce a bump (no
         # surface touched, or the author opted out without a trailer),
@@ -498,16 +1072,14 @@ def main(argv: list[str]) -> int:
         # common branch==base case now passes here instead of failing at
         # the CI gate.
         if args.require_bump_for_fix_feat:
-            if forced_this_run:
-                # We just wrote the version files this run; the caller
-                # (shipyard pr) appends the `chore: bump versions` commit
-                # AFTER apply, so the bump commit isn't in the range yet.
-                # Don't hard-fail on the marker we are in the middle of
-                # creating — the downstream CI report (which runs after
-                # the commit lands) is the authoritative gate.
+            if edited:
+                # We just wrote version files this run; the caller appends the
+                # `chore: bump versions` commit AFTER apply, so that marker is
+                # not in the immutable input range yet. Do not fail on the
+                # marker we are in the middle of creating.
                 print(
-                    "fix/feat-needs-bump: forced the minimum bump for "
-                    f"{pr_title!r}; the caller will append the "
+                    "fix/feat-needs-bump: applied a pending bump for "
+                    f"{(forced_signal or pr_title)!r}; the caller will append the "
                     "`chore: bump versions` commit — OK."
                 )
             else:

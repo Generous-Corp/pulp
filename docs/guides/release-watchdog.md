@@ -214,9 +214,12 @@ catch it at PR time, before the merge ever happens. That lives in
 `.github/workflows/version-skill-check.yml` via the
 `--require-bump-for-fix-feat` flag on `tools/scripts/version_bump_check.py`.
 
-**What it does:** On PR triggers, parses `${{ github.event.pull_request.title }}`.
-If it matches the Conventional Commits prefix `^(fix|feat)(\([^)]*\))?!?:\s`,
-asserts that EITHER:
+**What it does:** On PR triggers, parses both
+`${{ github.event.pull_request.title }}` and the live commit-derived signals
+contributed by the PR range. Explicit reverts cancel their target signals;
+reverting a revert restores its target signal. If either carries the
+Conventional Commits prefix
+`^(fix|feat)(\([^)]*\))?!?:\s`, it asserts that EITHER:
 
 1. A commit in the PR's diff range has subject `chore: bump versions`
    (the canonical subject `pulp pr` writes when a bump was applied), OR
@@ -239,40 +242,50 @@ merge). The `release-cadence-check.yml` looks for bumps without tags,
 not the inverse. The fix landed on main but consumers couldn't reach it
 until the catch-up bump PR (#1011) merged.
 
-### Recommended branch protection
+### Required branch protection
 
-The `version-skill-check` GitHub workflow runs the new check on every
-PR, but `gh pr merge` and admin-merge paths can bypass non-required
-checks. To make the check load-bearing, add it to branch protection on
+The `version-skill-check` GitHub workflow runs this check on every PR. The
+canonical repository makes it load-bearing through branch protection on
 `main`:
 
 > **Required check:** `Versioning & Skill-Sync / Enforce version & skill sync`
 >
-> Configure via github.com/&lt;owner&gt;/pulp/settings/branches → branch
-> protection rule for `main` → "Require status checks to pass before
-> merging" → add `Enforce version & skill sync`.
->
-> Alternatively via the API:
-> ```bash
-> gh api -X PUT repos/danielraffel/pulp/branches/main/protection \
->     --input <(gh api repos/danielraffel/pulp/branches/main/protection \
->                  | python3 -c 'import json,sys; d=json.load(sys.stdin); \
->                                d["required_status_checks"]["contexts"].append("Enforce version & skill sync"); \
->                                print(json.dumps(d))')
-> ```
+The checked-in intent lives in `.github/rulesets/main-protection.json`; keep the
+live ruleset aligned with it. Normal merges then refuse any PR whose title or
+commit subjects signal `fix:` / `feat:` without either the bump commit or the
+skip trailer, regardless of squash / rebase / merge-commit mode. Administrators
+can still bypass branch protection when the live ruleset permits it, so the
+post-merge detector remains load-bearing.
 
-This is **documented but not enforced** — the user will choose when to
-flip the protection on. With it enabled, `gh pr merge` will refuse to
-merge any `fix:` / `feat:` PR without either the bump commit or the
-skip trailer, regardless of admin / squash / rebase merge mode.
+The same required check writes an **Expected release tags** run summary for the
+PR queue. It predicts SDK and plugin tags from the PR head, fetched tag state,
+the repository's one-commit-subject/multi-commit-PR-title squash policy, and
+sticky `Release: skip` metadata. Tag creation
+remains a post-merge action in `auto-release.yml`; the queue report is
+prediction, not a pre-created tag.
 
 ### Layer 3 backstop in `auto-release.yml`
 
 If the PR-time gate is bypassed somehow (force-push race, admin merge,
 unknown-unknown), `auto-release.yml` has a final backstop step
 (`Stranded fix/feat detector`) that runs after the tag-or-not decision.
-When `SDK_SHOULD_TAG=0` AND `PLUGIN_SHOULD_TAG=0` AND the merge
-commit's subject matches the same `fix:`/`feat:` regex, it:
+It applies the same live-signal classifier to the whole pushed range and maps
+each signal back to its release surface. That catches plain merge tips,
+multi-commit rebases, re-reverts that restore an older `fix:` / `feat:` signal,
+and mixed pushes where (for example) a plugin tag does not cover an unbumped
+SDK fix. Explicit `Release: skip` and range-wide top-level
+`Version-Bump: skip` opt-outs remain silent; a sticky per-surface
+`Release: skip` counts as intentional coverage only for that surface when its
+bump belongs to the pushed range. The bump commit is the coverage boundary:
+signals at or before it are covered, while a later fix remains uncovered.
+Recovery also retains independent fix/feat levels per surface and respects an
+explicit numeric `Version-Bump: <surface>=<level>` verdict.
+The tracker records those exact levels and passes them back through
+`--recover-levels`, so covered feature work cannot inflate a later fix recovery.
+For multi-commit squashes, the auto-release guard also recognizes exact embedded
+source skip-trailer lines before GitHub's co-author footer; that footer prevents
+ordinary `interpret-trailers` parsing from seeing the nested source trailers.
+For an unbumped live signal, it:
 
 1. Emits a `::warning::` annotation visible in the workflow run UI.
 2. Opens a tracking issue titled `release: stuck — fix/feat merged
@@ -280,7 +293,16 @@ commit's subject matches the same `fix:`/`feat:` regex, it:
    step-by-step recovery instructions.
 
 The tracker is keyed on the tip SHA so multiple stranded merges produce
-distinct issues — each needs its own catch-up bump PR.
+distinct issues — each needs its own catch-up bump PR. Unlike version-keyed
+release watchdogs, a SHA-keyed tracker cannot be auto-closed from its title
+alone because the affected surface is not encoded there. Close it only after
+verifying that surface's later tag or published release contains the stranded
+commit. Its generated recovery command starts from fetched `origin/main`,
+preserves the historical analysis range, and passes the explicitly uncovered
+surface list. Current `main` is the version-arithmetic base, while
+`--recover-stranded-release` ignores a historical marker-only
+`chore: bump versions`; later version movement, a stale marker, or an already
+released sibling surface cannot produce a successful no-op or duplicate tag.
 
 ## Manual override
 

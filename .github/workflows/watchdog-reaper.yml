@@ -58,8 +58,15 @@ jobs:
 
           while IFS=$'\t' read -r num title; do
             [ -z "${num:-}" ] && continue
-            ver="$(printf '%s' "$title" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-            [ -z "$ver" ] && continue
+            # SHA-keyed release-stuck trackers deliberately have no semantic
+            # version in their title. `grep` returns 1 for that valid case;
+            # neutralize it so `set -euo pipefail` does not abort the entire
+            # daily sweep before the remaining version trackers are reaped.
+            ver="$(printf '%s' "$title" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+            if [ -z "$ver" ]; then
+              echo "Skipping SHA-keyed tracker #$num; close it after verifying the affected surface shipped."
+              continue
+            fi
 
             reason=""
             if gh release view "$ver" --repo "$REPO" >/dev/null 2>&1; then
