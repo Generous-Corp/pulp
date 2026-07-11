@@ -42,7 +42,7 @@ if(TARGET pulp::render)
     target_sources(pulp-gpu-audio PRIVATE
         src/gpu_convolver.cpp src/gpu_multi_convolver.cpp src/gpu_stft.cpp
         src/gpu_spectral_freeze.cpp src/gpu_spectral_morph.cpp
-        src/gpu_hyper_freeze.cpp src/spectral_stack.cpp)
+        src/spectral_stack.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::render pulp::signal)
 else()
     target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp)

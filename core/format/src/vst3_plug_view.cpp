@@ -82,15 +82,21 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         return result;
     }
 
-    // Design viewport: pin root at the editor's preferred size so DAW
-    // resizes scale content proportionally. Paired with canResize/
-    // checkSizeConstraint below so VST3 hosts (Reaper, Bitwig, Live, …)
-    // enforce the aspect during user drag. Set AFTER attach succeeds so
-    // a failed attach doesn't install the pointTransform block on a
-    // host that's about to be destroyed (the dtor clears it, but
-    // keeping the lifecycle ordering clean is cheaper than relying on
-    // teardown).
-    if (hints.preferred_width > 0 && hints.preferred_height > 0) {
+    // Resize contract (ViewSize):
+    //   - not resizable (min==0): pin the design viewport at preferred so an
+    //     off-size DAW pane letterbox-scales the content (today's behavior).
+    //   - resizable + aspect_ratio>0: pin viewport + lock aspect (design-import
+    //     path). checkSizeConstraint snaps to the design aspect.
+    //   - resizable + aspect_ratio==0: honor "free drag within [min,max]" —
+    //     NO design viewport, NO aspect lock; the root reflows via Yoga at the
+    //     host size and checkSizeConstraint only clamps min/max.
+    // `resizable` follows CLAP's shipped convention (min_width>0 && min_height>0).
+    //
+    // Set AFTER attach succeeds so a failed attach doesn't install the
+    // pointTransform block on a host that's about to be destroyed.
+    const bool resizable = hints.min_width > 0 && hints.min_height > 0;
+    const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
+    if (hints.preferred_width > 0 && hints.preferred_height > 0 && !free_resize) {
         editor_host_->set_design_viewport(
             static_cast<float>(hints.preferred_width),
             static_cast<float>(hints.preferred_height));
@@ -130,10 +136,15 @@ tresult PLUGIN_API PulpPlugView::getSize(ViewRect* size) {
 }
 
 tresult PLUGIN_API PulpPlugView::canResize() {
-    // Proportional + aspect-locked editor resize, enforced by the host via
-    // checkSizeConstraint() during user drag. The PluginViewHost's design
-    // viewport handles content fitting.
-    return kResultTrue;
+    // Resizable iff the plugin declares non-zero min bounds — the same
+    // convention CLAP's gui_can_resize uses (clap_entry.hpp). A plugin that
+    // uses the base-class default (min==0) is fixed-size: report kResultFalse
+    // so the host doesn't offer a resize grip. When resizable, checkSizeConstraint()
+    // enforces the per-mode constraint (aspect snap when locked, min/max clamp
+    // when free).
+    const auto& hints = bridge_.size_hints();
+    const bool resizable = hints.min_width > 0 && hints.min_height > 0;
+    return resizable ? kResultTrue : kResultFalse;
 }
 
 tresult PLUGIN_API PulpPlugView::checkSizeConstraint(ViewRect* rect) {
@@ -145,6 +156,26 @@ tresult PLUGIN_API PulpPlugView::checkSizeConstraint(ViewRect* rect) {
     int32 w = rect->getWidth();
     int32 h = rect->getHeight();
     if (w <= 0 || h <= 0) return kResultFalse;
+
+    auto clamp = [](int32 v, uint32_t lo, uint32_t hi) {
+        if (lo > 0 && v < static_cast<int32>(lo)) v = static_cast<int32>(lo);
+        if (hi > 0 && v > static_cast<int32>(hi)) v = static_cast<int32>(hi);
+        return v;
+    };
+
+    // Free-resize contract: resizable (min>0) with aspect_ratio==0 means "any
+    // ratio; drag freely within [min,max]". Clamp each axis independently — NO
+    // aspect snap — so the host lets the user pick any box in bounds and the
+    // root reflows via Yoga at that size.
+    const bool resizable = hints.min_width > 0 && hints.min_height > 0;
+    const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
+    if (free_resize) {
+        w = clamp(w, hints.min_width, hints.max_width);
+        h = clamp(h, hints.min_height, hints.max_height);
+        rect->right = rect->left + w;
+        rect->bottom = rect->top + h;
+        return kResultTrue;
+    }
 
     // Snap to the design aspect ratio — pick the largest box at the
     // design aspect that fits within the requested rectangle. Same
@@ -166,12 +197,8 @@ tresult PLUGIN_API PulpPlugView::checkSizeConstraint(ViewRect* rect) {
     // rects (design 2:1, request (500,1000) snaps to (500,250); a
     // min_height=400 clamp gives (500,400) — no longer 2:1). After any
     // clamp, re-snap by EXPANDING the other dimension to restore the
-    // design aspect. Matches the CLAP gui_adjust_size shape.
-    auto clamp = [](int32 v, uint32_t lo, uint32_t hi) {
-        if (lo > 0 && v < static_cast<int32>(lo)) v = static_cast<int32>(lo);
-        if (hi > 0 && v > static_cast<int32>(hi)) v = static_cast<int32>(hi);
-        return v;
-    };
+    // design aspect. Matches the CLAP gui_adjust_size shape. (`clamp` is
+    // defined above, shared with the free-resize path.)
     auto resnap = [&]() {
         const double aspect_now = static_cast<double>(w) / static_cast<double>(h);
         if (aspect_now > design_aspect) {

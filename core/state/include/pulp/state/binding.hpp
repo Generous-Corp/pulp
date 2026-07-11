@@ -29,8 +29,17 @@ namespace pulp::state {
 /// gain_binding.poll();
 /// @endcode
 ///
-/// @note Thread safety: reads and writes go through StateStore's atomics.
-///       Change callbacks fire on the thread that calls set() or poll().
+/// @note Thread safety: `get`/`set`/`get_normalized`/`set_normalized` go
+///       through StateStore's atomics and are safe to call from any thread;
+///       change callbacks fire on the thread that calls set() or poll().
+///       The GESTURE entry points (`begin_gesture`/`end_gesture`) and the
+///       EditHistory they drive are **main-thread only** — they forward to the
+///       host's undo-grouping calls (VST3 beginEdit / AU parameter-change
+///       gesture / CLAP gesture events) and mutate this Binding's non-atomic
+///       gesture state. A background writer (e.g. a MIDI-learn engine on a
+///       timer thread) must NOT call them directly; use
+///       @c set_from_background(), which marshals a full begin→set→end
+///       gesture onto the host main thread.
 class Binding {
 public:
     Binding() = default;
@@ -101,6 +110,26 @@ public:
                     info() ? info()->name : "param change");
             }
         }
+    }
+
+    /// Perform a complete parameter gesture (begin → set → end) from ANY
+    /// thread — the thread-safe entry point for background writers such as a
+    /// MIDI-learn engine driving a mapped parameter from a timer thread.
+    ///
+    /// The gesture is marshalled onto the host main thread via
+    /// @c StateStore::run_gesture_on_main so the host's begin/endEdit undo
+    /// grouping is issued in order on the correct thread. Only the store and
+    /// the target value are captured (never @c this), so this is safe even if
+    /// the Binding is destroyed before the marshalled task runs. It does NOT
+    /// push to this Binding's EditHistory: an off-thread automation-style write
+    /// is not a user undo step, matching how host automation never creates one.
+    void set_from_background(float value) {
+        if (!store_) return;
+        store_->run_gesture_on_main([s = store_, pid = param_id_, value] {
+            s->begin_gesture(pid);
+            s->set_value(pid, value);
+            s->end_gesture(pid);
+        });
     }
 
     /// Attach an EditHistory for undo support. Optional — null by default.

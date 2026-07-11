@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -47,16 +48,24 @@ REPO = Path(__file__).resolve().parents[2]
 DEFAULT_CONSUMERS = REPO / "planning" / "sdk-consumers" / "consumers.yaml"
 
 # How consumers pin the Pulp SDK. Each rule is (label, filename, regex) where the
-# regex has two capture groups: (1) everything up to and including the version
-# prefix, (2) the semver itself. Only concrete X.Y.Z pins are rewritten — a
+# regex's first group is everything up to and including the version prefix and its
+# second group is the semver itself. Only concrete X.Y.Z pins are rewritten — a
 # floating `sdk_version = "latest"` is left alone (the semver group won't match).
+#
+# Every rule MUST be scoped to the Pulp SDK specifically. The FetchContent rule is
+# the trap: a bare `GIT_TAG vX.Y.Z` also matches every OTHER FetchContent_Declare
+# in the file (Catch2, fmt, json, …), so it is anchored to a declare block that
+# names `pulp` — `FetchContent_Declare( … pulp … GIT_TAG v<ver>)`. `[^)]*?` keeps
+# the match inside one declare's parentheses (a git URL contains no `)`), so an
+# unrelated dependency's tag is never touched.
 SDK_PIN_RULES = [
     ("pulp.toml sdk_version", "pulp.toml",
      re.compile(r'(?m)^(\s*sdk_version\s*=\s*")(\d+\.\d+\.\d+)(")')),
     ("find_package(Pulp)", "CMakeLists.txt",
      re.compile(r'(find_package\s*\(\s*Pulp\s+)(\d+\.\d+\.\d+)')),
     ("FetchContent GIT_TAG", "CMakeLists.txt",
-     re.compile(r'(GIT_TAG\s+v?)(\d+\.\d+\.\d+)')),
+     re.compile(r'(?is)(FetchContent_Declare\s*\([^)]*?\bpulp\b[^)]*?'
+                r'GIT_TAG\s+v?)(\d+\.\d+\.\d+)')),
 ]
 
 SEMVER_RE = re.compile(r'^\d+\.\d+\.\d+$')
@@ -174,11 +183,15 @@ def open_update_pr(entry: dict, checkout: Path, new_version: str,
     the clone/push (agent git is SSH-routed) and gh for the PR."""
     repo = entry.get("repo", "")
     branch = f"chore/sdk-{new_version}"
+    # `-B` (reset if it exists) and `--force-with-lease` keep a re-run idempotent:
+    # a fresh clone re-creates the same branch and re-pushes it rather than dying on
+    # a non-fast-forward left behind by an earlier run that pushed but failed to open
+    # the PR. `--force-with-lease` still refuses to clobber an unexpected remote tip.
     steps = [
-        (["git", "checkout", "-b", branch], "branch"),
+        (["git", "checkout", "-B", branch], "branch"),
         (["git", "add", *changed_files], "stage"),
         (["git", "commit", "-m", f"chore: bump Pulp SDK to {new_version}"], "commit"),
-        (["git", "push", "-u", "origin", branch], "push"),
+        (["git", "push", "--force-with-lease", "-u", "origin", branch], "push"),
         (["gh", "pr", "create", "--repo", repo, "--head", branch,
           "--title", f"chore: bump Pulp SDK to {new_version}",
           "--body", f"Update the pinned Pulp SDK to {new_version}.\n\n"
@@ -194,7 +207,19 @@ def open_update_pr(entry: dict, checkout: Path, new_version: str,
 
 def clone(repo: str, dest: Path) -> tuple[bool, str]:
     if dest.exists():
-        return True, "reused existing checkout"
+        # A pre-existing checkout in --workdir. Verify it is actually THIS repo
+        # and refresh it to the remote tip before we rewrite pins / open a PR from
+        # it — never bump a stale or foreign tree and push it as an SDK update.
+        rc, out = _run(["git", "remote", "get-url", "origin"], cwd=dest)
+        url = out.strip().splitlines()[-1].strip() if rc == 0 and out.strip() else ""
+        slug = repo.split("/", 1)[-1].removesuffix(".git")
+        if rc != 0 or slug not in url:
+            return False, f"existing checkout is not {repo} (origin={url or 'unknown'})"
+        rc, _ = _run(["git", "fetch", "--depth", "1", "origin", "HEAD"], cwd=dest)
+        if rc != 0:
+            return False, "reused checkout: fetch failed (stale; refusing to update it)"
+        _run(["git", "reset", "--hard", "FETCH_HEAD"], cwd=dest)
+        return True, "reused + refreshed existing checkout"
     rc, out = _run(["git", "clone", "--depth", "1",
                     f"git@github.com:{repo}.git", str(dest)])
     return rc == 0, (out.strip().splitlines()[-1] if out.strip() else "clone failed")
@@ -252,6 +277,10 @@ def cmd_update(args, consumers: dict) -> int:
         print("No buildable consumers matched.", file=sys.stderr)
         return 2
 
+    # A dry run still has to clone each consumer to read its real pins, but it must
+    # not litter /tmp with those clones the way a `--keep`-less run would. Clean up
+    # only the temp dir we minted ourselves; an explicit --workdir is the user's.
+    created_temp = args.workdir is None
     workdir = args.workdir or Path(
         __import__("tempfile").mkdtemp(prefix="pulp-sdk-update-"))
     workdir.mkdir(parents=True, exist_ok=True)
@@ -259,30 +288,34 @@ def cmd_update(args, consumers: dict) -> int:
     print(f"{'DRY-RUN — ' if not args.open_prs else ''}update {len(targets)} "
           f"consumer(s) to SDK {args.to}\n")
     any_change = False
-    for entry in targets:
-        name = short_name(entry.get("repo", ""))
-        checkout = workdir / name
-        ok, msg = clone(entry.get("repo", ""), checkout)
-        if not ok:
-            print(f"  {name:32} clone✗  {msg}")
-            continue
-        plan = plan_repo_update(checkout, args.to)
-        changed_here = [(f, d) for f, d in plan.items() if d["changes"]]
-        if not plan:
-            print(f"  {name:32} —       no SDK pin found "
-                  "(installed-SDK / floating / no pin)")
-            continue
-        if not changed_here:
-            print(f"  {name:32} ok      already at {args.to}")
-            continue
-        any_change = True
-        for fname, d in changed_here:
-            for label, old, new in d["changes"]:
-                print(f"  {name:32} {fname:15} {label}: {old} → {new}")
-        if args.open_prs:
-            files = apply_repo_update(checkout, args.to)
-            pr_ok, pr_msg = open_update_pr(entry, checkout, args.to, files)
-            print(f"  {name:32} {'PR ✓' if pr_ok else 'PR ✗'}  {pr_msg}")
+    try:
+        for entry in targets:
+            name = short_name(entry.get("repo", ""))
+            checkout = workdir / name
+            ok, msg = clone(entry.get("repo", ""), checkout)
+            if not ok:
+                print(f"  {name:32} clone✗  {msg}")
+                continue
+            plan = plan_repo_update(checkout, args.to)
+            changed_here = [(f, d) for f, d in plan.items() if d["changes"]]
+            if not plan:
+                print(f"  {name:32} —       no SDK pin found "
+                      "(installed-SDK / floating / no pin)")
+                continue
+            if not changed_here:
+                print(f"  {name:32} ok      already at {args.to}")
+                continue
+            any_change = True
+            for fname, d in changed_here:
+                for label, old, new in d["changes"]:
+                    print(f"  {name:32} {fname:15} {label}: {old} → {new}")
+            if args.open_prs:
+                files = apply_repo_update(checkout, args.to)
+                pr_ok, pr_msg = open_update_pr(entry, checkout, args.to, files)
+                print(f"  {name:32} {'PR ✓' if pr_ok else 'PR ✗'}  {pr_msg}")
+    finally:
+        if created_temp:
+            shutil.rmtree(workdir, ignore_errors=True)
 
     if not args.open_prs and any_change:
         print(f"\nDry-run only. Re-run with --open-prs to open the update PRs.")

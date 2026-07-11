@@ -54,6 +54,19 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME measure-min-os-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_measure_min_os.py")
 
+    # Bundle-architecture gate (G3): the pure arch/signature decision core plus
+    # a real thin/fat Mach-O fixture pass (the fixture layer skips when the
+    # Apple toolchain is absent). Guards macOS universal builds against a thin
+    # embedded dylib or an unsigned raw-lipo fat dylib.
+    add_test(NAME check-bundle-architectures-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_bundle_architectures.py")
+
+    # FindSkia macOS arch assertion (G3): a real cmake-configure negative test
+    # proving the lipo -archs guard FATALs on a wrong-arch Skia archive and
+    # passes on a matching one (skips off-macOS / without clang+ar+lipo).
+    add_test(NAME findskia-arch-assert-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_findskia_arch_assert.py")
+
     # SDK-consumer sweep: the WHAT-builds / WHICH-binaries-measured / HOW-reported
     # decision logic of the turnkey runner that rebuilds every downstream consumer
     # against one installed SDK and checks the min-OS floor propagated.
@@ -71,6 +84,15 @@ if(Python3_Interpreter_FOUND)
     # is announced, or those cases fail on every checkout that lacks planning.
     add_test(NAME minos-registry-absent-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_minos_registry_absent.py")
+
+    # Skills catalog: docs/reference/skills.md is generated from every skill's
+    # SKILL.md frontmatter. This runs in the required gate so adding or renaming a
+    # skill without regenerating the catalog (or leaving one with no real
+    # description) fails CI with the exact `--write` fix — the catalog can't drift.
+    add_test(NAME skills-doc-sync COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/skills_doc_check.py" --check)
+    add_test(NAME skills-doc-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_skills_doc_check.py")
 
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).

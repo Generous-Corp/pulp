@@ -53,3 +53,64 @@ function(pulp_validate_bundle_relocatable target)
             VERBATIM)
     endif()
 endfunction()
+
+# Assert a shipped macOS bundle carries the expected architecture on its main
+# binary AND every embedded dylib, and that each is validly signed. This is the
+# G3 universal-build gate: it catches a thin embedded libwgpu_native.dylib /
+# libv8.dylib in an otherwise-universal bundle (the app would crash at load on
+# the missing arch), and an unsigned raw-lipo fat dylib (whose arm64 slice is
+# killed at load). POST_BUILD, mirroring pulp_validate_bundle_relocatable.
+#
+#   pulp_validate_bundle_architectures(<target> [ARCHS "arm64;x86_64"])
+#
+# ARCHS defaults to CMAKE_OSX_ARCHITECTURES (the arches the target was built
+# for), or the host arch when that is unset.
+function(pulp_validate_bundle_architectures target)
+    if(NOT (APPLE AND TARGET ${target}))
+        return()
+    endif()
+    cmake_parse_arguments(PVBA "" "" "ARCHS" ${ARGN})
+
+    set(_archs "${PVBA_ARCHS}")
+    if(NOT _archs)
+        set(_archs "${CMAKE_OSX_ARCHITECTURES}")
+    endif()
+    if(NOT _archs)
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE _archs
+                        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    # The script accepts a comma/semicolon/space list; hand it a comma list.
+    string(REPLACE ";" "," _archs_csv "${_archs}")
+
+    # Resolve the checker in both the in-tree layout (tools/cmake/ →
+    # ../scripts/) and the installed SDK layout (lib/cmake/Pulp/ →
+    # scripts/, shipped by PulpInstallRules.cmake).
+    set(_script "")
+    foreach(_cand
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../scripts/check_bundle_architectures.py"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/check_bundle_architectures.py")
+        if(EXISTS "${_cand}")
+            set(_script "${_cand}")
+            break()
+        endif()
+    endforeach()
+    if(NOT _script)
+        message(FATAL_ERROR
+            "pulp_validate_bundle_architectures: could not find "
+            "check_bundle_architectures.py next to PulpBundleRelocatable.cmake "
+            "(looked in ../scripts and scripts). The arch gate would be a "
+            "silent no-op.")
+    endif()
+
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    set(_py "${Python3_EXECUTABLE}")
+    if(NOT _py)
+        set(_py python3)
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${_py}" "${_script}"
+            "$<TARGET_FILE_DIR:${target}>/../.."
+            --archs "${_archs_csv}" --strict --label "${target}"
+        COMMENT "Verifying ${target} bundle architectures (${_archs_csv}) + signatures"
+        VERBATIM)
+endfunction()

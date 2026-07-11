@@ -34,26 +34,41 @@ SKIA = REPO / "external" / "skia-build" / "build"
 V8 = REPO / "external" / "v8-build"
 
 
+def _parse_otool_minos(out: str) -> str | None:
+    """Max deployment-target minimum across all slices/objects in `otool -l` output.
+
+    Reads both the modern `LC_BUILD_VERSION … minos X.Y` and the legacy
+    `LC_VERSION_MIN_MACOSX … version X.Y` load commands — an older Mach-O built
+    with only the legacy command would otherwise silently report no floor."""
+    vals = []
+    lines = out.splitlines()
+    for i, ln in enumerate(lines):
+        if "LC_BUILD_VERSION" in ln:
+            field = r"\bminos\s+([0-9.]+)"
+        elif ("LC_VERSION_MIN_MACOSX" in ln or "LC_VERSION_MIN_IPHONEOS" in ln
+              or "LC_VERSION_MIN_TVOS" in ln or "LC_VERSION_MIN_WATCHOS" in ln):
+            field = r"\bversion\s+([0-9.]+)"
+        else:
+            continue
+        for j in range(i, min(i + 6, len(lines))):
+            m = re.search(field, lines[j])
+            if m:
+                vals.append(tuple(int(x) for x in m.group(1).split(".")))
+                break
+    if not vals:
+        return None
+    top = max(vals)
+    return ".".join(str(x) for x in top) if len(top) > 1 else f"{top[0]}.0"
+
+
 def _otool_minos(lib: Path) -> str | None:
-    """Max LC_BUILD_VERSION minos across all slices/objects in a Mach-O archive."""
+    """Max deployment-target minimum across all slices/objects in a Mach-O archive."""
     try:
         out = subprocess.run(["otool", "-l", str(lib)], capture_output=True,
                              text=True, check=True).stdout
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
-    vals = []
-    lines = out.splitlines()
-    for i, ln in enumerate(lines):
-        if "LC_BUILD_VERSION" in ln:
-            for j in range(i, min(i + 6, len(lines))):
-                m = re.search(r"\bminos\s+([0-9.]+)", lines[j])
-                if m:
-                    vals.append(tuple(int(x) for x in m.group(1).split(".")))
-                    break
-    if not vals:
-        return None
-    top = max(vals)
-    return ".".join(str(x) for x in top) if len(top) > 1 else f"{top[0]}.0"
+    return _parse_otool_minos(out)
 
 
 def _glibc_floor(lib: Path) -> str | None:
@@ -96,15 +111,36 @@ def _win_os_version(pe: Path) -> str | None:
     return None
 
 
+# Mach-O CPU types (low 24 bits, capability flags masked off): x86, ARM, PPC.
+# Used to tell a real fat Mach-O from a Java `.class`, which shares the 0xCAFEBABE
+# magic: a fat header's first fat_arch.cputype is one of these; a class file's
+# bytes there are its constant-pool count and never match.
+_MACHO_CPUTYPES = {7, 12, 18}
+
+
+def _is_fat_macho(header: bytes, big_endian: bool) -> bool:
+    """True if a 0xCAFEBABE/0xBEBAFECA header is really a fat Mach-O (not a Java
+    .class). Validates nfat_arch is sane and the first arch's cputype is a known
+    Mach-O CPU type."""
+    if len(header) < 12:
+        return False
+    order = "big" if big_endian else "little"
+    nfat = int.from_bytes(header[4:8], order)
+    cputype = int.from_bytes(header[8:12], order)
+    return 1 <= nfat <= 64 and (cputype & 0x00FFFFFF) in _MACHO_CPUTYPES
+
+
 def _artifact_kind(path: Path) -> str | None:
     """Detect a binary's format from its magic bytes: 'macho' | 'elf' | 'pe' | 'ar'.
 
-    'ar' is a Unix static archive (`.a`), whose members may be Mach-O or ELF;
-    both otool and objdump read the archive directly, so measure_artifact tries
-    both on it."""
+    'ar' is a Unix static archive (`.a`). otool reads a Mach-O archive's member
+    slices directly; the ELF/glibc reader is only best-effort on an archive,
+    because a static `.a` has no dynamic symbol table (objdump -T finds no GLIBC_
+    symbols), so an ELF archive usually measures as no floor rather than a real
+    one. measure_artifact tries the Mach-O reader first, then the glibc reader."""
     try:
         with open(path, "rb") as fh:
-            magic = fh.read(8)
+            magic = fh.read(16)
     except OSError:
         return None
     if magic[:8] == b"!<arch>\n":
@@ -113,10 +149,15 @@ def _artifact_kind(path: Path) -> str | None:
         return "pe"
     if magic[:4] == b"\x7fELF":
         return "elf"
-    # Mach-O thin (0xFEEDFACE/CF, either endianness) or FAT (0xCAFEBABE/0xBEBAFECA).
+    # Mach-O thin (0xFEEDFACE/CF, either endianness) — unambiguous.
     if magic[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
-                     b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe",
-                     b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"):
+                     b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"):
+        return "macho"
+    # Fat Mach-O (0xCAFEBABE big-endian / 0xBEBAFECA byte-swapped) shares its
+    # magic with a Java `.class`; only accept it if the fat header validates.
+    if magic[:4] == b"\xca\xfe\xba\xbe" and _is_fat_macho(magic, big_endian=True):
+        return "macho"
+    if magic[:4] == b"\xbe\xba\xfe\xca" and _is_fat_macho(magic, big_endian=False):
         return "macho"
     return None
 
@@ -171,9 +212,13 @@ def measure() -> dict[str, dict[str, str]]:
         mac["v8"] = v
     if mac:
         result["macos-arm64"] = mac
-    # Linux (if a .so happens to be present in this checkout)
-    lskia = _find(SKIA / "linux-gpu", "libskia.a") or _find(SKIA, "libskia.so")
+    # Linux (if a shared object happens to be present in this checkout). glibc
+    # floor is a dynamic-symbol property, so only a .so is measurable — a static
+    # libskia.a has no dynamic symbol table and yields nothing.
     lin = {}
+    lskia = _find(SKIA / "linux-gpu", "libskia.so") or _find(SKIA, "libskia.so")
+    if lskia and (v := _glibc_floor(lskia)):
+        lin["skia"] = v
     lv8 = _find(V8, "libv8.so")
     if lv8 and (v := _glibc_floor(lv8)):
         lin["v8"] = v

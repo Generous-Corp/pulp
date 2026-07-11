@@ -14,6 +14,8 @@
 
 #include "crossfade.hpp"
 
+#include <pulp/signal/fast_math.hpp>  // FastMath::tanh — the ladder's saturator
+
 #include <cmath>
 #include <cstdlib>
 #include <cstddef>
@@ -93,6 +95,12 @@ LK_EXPORT double lk_alloc_count()  { return (double)g_alloc_count; }
 // operation routes to the same compiled code; every rational f32 op is IEEE-754
 // exact by definition. Pure float→float, no memory access, alloc-free.
 LK_EXPORT float f2_tanhf(float x)          { return std::tanh(x); }
+// The ladder's saturator is NOT libm tanh: LadderFilterT<float> uses
+// signal::FastMath::tanh (Padé) on the real-time path. The emitter must route
+// the ladder — and only the ladder — through this export, or the emitted module
+// diverges from the interpreter by ~1 ulp and the bit-exact null test fails.
+// The waveshaper's tanh_clip curve still wants real libm tanh above.
+LK_EXPORT float f2_ladder_tanhf(float x)   { return pulp::signal::FastMath::tanh(x); }
 LK_EXPORT float f2_sinf(float x)           { return std::sin(x); }
 LK_EXPORT float f2_cosf(float x)           { return std::cos(x); }
 LK_EXPORT float f2_expf(float x)           { return std::exp(x); }

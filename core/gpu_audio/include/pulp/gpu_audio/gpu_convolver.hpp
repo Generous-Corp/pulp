@@ -15,12 +15,17 @@ namespace pulp::gpu_audio {
 /// with a fixed impulse response, computed on the GPU via render::GpuCompute on
 /// the transport's non-RT worker. CPU fallback uses signal::Convolver.
 ///
-/// Correctness-first: each block runs three GpuCompute calls (FFT,
-/// complex-multiply, inverse FFT) each with its own blocking readback, so it is
-/// validated by golden test but is NOT yet real-time fast — the Phase-2 finding
-/// (readback dominates) means the real-time win needs a GPU-resident pipeline
-/// (no per-call readback), tracked as 3b-2. Until then run it offline / via
-/// pump(), or rely on the CPU fallback for live use.
+/// Each block issues ONE `GpuCompute::convolve_batch` — forward FFT, complex
+/// multiply by the resident IR spectrum, and inverse FFT for every channel,
+/// fused into a single submit with a single readback. The per-call GPU
+/// round-trip (~0.5 ms of map latency) is therefore paid once per block rather
+/// than once per channel.
+///
+/// It still blocks on that readback, which is why `process_block` runs on the
+/// transport's non-RT worker and never on the audio thread. Live use at small
+/// block sizes should still prefer the CPU fallback: a partitioned CPU
+/// convolution costs microseconds, and no amount of batching beats a map
+/// round-trip for a single stereo pair.
 class GpuConvolver : public GpuAudioNode {
 public:
     GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,

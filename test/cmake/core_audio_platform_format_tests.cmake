@@ -82,6 +82,13 @@ pulp_add_test_suite(pulp-test-state
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-external-binding LIBRARIES pulp::state)
 
+# Cross-version parameter-ordering guard (host-facing ID + index stability).
+pulp_add_test_suite(pulp-test-param-ordering LIBRARIES pulp::state)
+
+# Gesture thread-safety: run_gesture_on_main marshalling + off-main misuse
+# detection. Needs pulp::events for the MainThreadDispatcher test backend.
+pulp_add_test_suite(pulp-test-gesture-threading LIBRARIES pulp::state pulp::events)
+
 # Structured non-param state channel (sequencer/mod-matrix transport)
 pulp_add_test_suite(pulp-test-sequencer-state-channel LIBRARIES pulp::state)
 
@@ -195,6 +202,21 @@ if(PULP_HAS_VST3)
         PULP_VST3_GUI=1
     )
     catch_discover_tests(pulp-test-vst3-plugin-state)
+
+    # VST3 parameter display-string round-trip (getParamStringByValue /
+    # getParamValueByString -> ParamInfo::to_string / from_string). Compiles
+    # vst3_plug_view.cpp for the GUI symbols createView() references, mirroring
+    # the plugin-state target above.
+    add_executable(pulp-test-vst3-param-display
+        test_vst3_param_display.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
+    )
+    target_link_libraries(pulp-test-vst3-param-display PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-param-display PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1
+    )
+    catch_discover_tests(pulp-test-vst3-param-display)
 endif()
 
 if(APPLE AND PULP_HAS_AUSDK)
