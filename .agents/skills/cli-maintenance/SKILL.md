@@ -323,6 +323,17 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   put the behavioral assertion in a platform-gated unit test (here:
   `test_linux_packaging.cpp`) rather than a cross-platform shellout, since the
   required macOS lane can't exercise the Linux-only branch.
+- `pulp ship package` (macOS) DEFAULTS to a single component-selectable `.pkg`:
+  it collects every built format into one `create_combined_pkg` call so the
+  installer shows a **Customize** pane (one pre-checked, toggleable choice per
+  format) — users are never forced to install every format. `--separate` is the
+  legacy per-format-`.pkg` path; `--dmg` makes disk images. Discovery scans the
+  whole `build/{VST3,CLAP,AU,Standalone}` tree, so a multi-example build bundles
+  EVERY plugin's formats (dozens of choices) unless you pass `--product <name>`
+  to scope to one product's bundles (also names the installer). Verify a real
+  installer by unpacking its `Distribution` (`xar -xf … Distribution`) and
+  checking for `<options customize="allow">` + one `<line choice>` per format —
+  a flat `Bom/Payload/PackageInfo` archive is a bare `pkgbuild` with NO Customize.
 - A subcommand that must work BEFORE a build exists (e.g. `pulp ship doctor`,
   which makes signing non-interactive) has to be dispatched *above*
   `cmd_ship`'s `build/CMakeCache.txt` guard — that early-return fires first and
@@ -595,6 +606,20 @@ owns its dependency list (mirror `requirements.txt`). Per the parity rule
 above, both new fields are also declared in `experimental/pulp-rs/src/tool_registry.rs`
 (serde `#[serde(default)]`, ignored on the delegated install path) so `pulp
 tool info`/`list` round-trip them. First user: `audio-quality-lab`.
+
+### Remove/uninstall commands name what they deleted
+
+Every extend-surface removal (`pulp tool uninstall`, `pulp kit remove`, `pulp
+content remove`, `pulp add --remove`) closes on an OK line that **names what it
+removed**, not just the id — this is the shared extend-surface lifecycle
+contract (see `docs/reference/extending-pulp.md`). `tool uninstall` prints
+`(removed <path>)` from the returned `PathBuf`; `content remove` mirrors it with
+the deleted content-pack path; `kit remove` deletes a *set* of lock-recorded
+files, so it names the count instead (`(removed N files)`). When you add or
+change a removal command, keep the OK line honest — echo the concrete path (or
+count, for multi-file removals) the command actually deleted, and assert it in
+the command's test via `capture_stdout_for` so "it names what it removed" is
+proven, not assumed.
 
 ### Package suggestion and analyzer metadata commands
 

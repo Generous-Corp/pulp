@@ -107,6 +107,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/format/src/plugin_state_io.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/wasm/headless_defaults.cpp
     ${_PULP_WCLAP_ROOT}/core/events/src/plugin_main_thread_stub.cpp
+    ${_PULP_WCLAP_ROOT}/core/events/src/wasm/main_thread_dispatcher_wasm.cpp
     ${_PULP_WCLAP_ROOT}/core/events/src/event_loop.cpp
     ${_PULP_WCLAP_ROOT}/core/state/src/store.cpp
     ${_PULP_WCLAP_ROOT}/core/state/src/state_migration.cpp

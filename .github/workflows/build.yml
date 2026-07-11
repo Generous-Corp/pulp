@@ -3,6 +3,12 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
+  # Run the required macos/linux/windows alias gates on queued merge groups so
+  # a GitHub merge queue on `main` can land PRs. The `merge_group` event does
+  # not support `paths` filters, so it fires on every group; the classify job
+  # still diffs the merged tree against origin/main and skip-safe groups
+  # short-circuit as before.
+  merge_group:
   workflow_dispatch:
     inputs:
       runner_provider:
@@ -895,7 +901,11 @@ jobs:
         run: |
           set -euo pipefail
           label_exclude="validation"
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # merge_group runs the same reduced set as a PR: a queued group is
+          # exactly the PR content that already passed here, and the required
+          # macos gate rides the serialized self-hosted runner — running the
+          # heavier `slow` set only on push/nightly keeps the queue landable.
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
             label_exclude="validation|slow"
           fi
           exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items'
@@ -1007,6 +1017,7 @@ jobs:
           set "PULP_CTEST_LABEL_EXCLUDE=validation"
           if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
           if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
+          if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
       # Plugin bundle uploads only run on push/schedule events — pull_request

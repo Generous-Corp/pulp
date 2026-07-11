@@ -29,6 +29,14 @@ live in `docs/guides/intel-support.md` — read it first.
   (Tier 1 advisory PR lane), `nightly-intel.yml` (Tier 2), and the
   `universal-arch-gate` job in `release-cli.yml` (Tier 3, blocking).
 
+Note: the Tier-3 `universal-arch-gate` only *validates* a universal build — it
+publishes nothing. The **installable** Intel artifact is a separate concern: a
+native thin `darwin-x64` build+smoke leg in `release-cli.yml` (on
+`macos-15-intel`) that ships `pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz`.
+Don't conflate "Intel is validated" (the gate) with "Intel is shippable" (the
+leg); both live in `release-cli.yml`. See `docs/guides/intel-support.md` →
+"Shipped Intel artifacts".
+
 ## The five lint classes (and why they are scoped the way they are)
 
 1. Raw NEON intrinsics / `arm_neon.h` outside an `__aarch64__`/`__ARM_NEON`

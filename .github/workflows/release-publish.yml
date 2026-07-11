@@ -88,6 +88,23 @@ jobs:
             mkdir -p release-assets
             gh release download "${TAG}" --repo "${REPO}" --dir release-assets --clobber
 
+            # Intel (darwin-x64) CLI+SDK is an ADVISORY release leg
+            # (release-cli.yml, continue-on-error): present when the
+            # macos-15-intel build succeeded, absent otherwise. Because the
+            # publish check runs --exact-required, the pair must be listed
+            # as required WHEN PRESENT (or --exact-required rejects them as
+            # "unexpected" and the release stays a draft — the success-path
+            # bug), yet must NOT be required unconditionally (that would
+            # negate the advisory design and block every release whenever
+            # the Intel runner is down). build-cli uploads both Intel
+            # archives from one job, so they arrive atomically (both/neither).
+            if [ -f release-assets/pulp-darwin-x64.tar.gz ]; then
+              required_assets+=(pulp-darwin-x64.tar.gz pulp-sdk-darwin-x64.tar.gz)
+              echo "Intel (darwin-x64) assets present — requiring them in the manifest."
+            else
+              echo "Intel (darwin-x64) assets absent (advisory leg did not publish) — release proceeds without them."
+            fi
+
             checksum_args=()
             for asset in "${required_assets[@]}"; do
               checksum_args+=(--required-name "${asset}")
