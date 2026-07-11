@@ -8,6 +8,7 @@
 #include <cassert>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -158,15 +159,51 @@ public:
         }
     }
 
-    /// Process a block of audio. num_samples must equal block_size.
+    /// Process a block of audio.
+    ///
+    /// **Precondition: `num_samples == block_size()` whenever an IR is loaded.**
+    /// Overlap-save folds each block into a partition history sized to
+    /// `block_size()`; a block of any other length cannot be folded into that
+    /// history coherently.
+    ///
+    /// The three states are distinct, and only one of them passes audio through:
+    ///
+    /// - **No IR loaded (or an empty IR).** The convolver is a wire: input is
+    ///   copied to output. This is the correct neutral behavior.
+    /// - **IR loaded, `num_samples == block_size()`.** Normal convolution.
+    /// - **IR loaded, wrong `num_samples`.** A precondition violation. It fails
+    ///   *closed*: the block is emitted as silence, `block_size_violations()`
+    ///   increments, and the history is marked torn so the next correctly-sized
+    ///   block resets rather than continuing from a partially-advanced state.
+    ///
+    ///   It deliberately does NOT pass through. A pass-through here is audibly
+    ///   indistinguishable from a working convolution with a near-unity IR, so
+    ///   it turns a caller's block size bug into audio that merely sounds wrong
+    ///   — the hardest kind of bug to find. Silence plus a counter is a bug you
+    ///   can see, and `block_size_violations() == 0` is an invariant a test can
+    ///   assert.
+    ///
+    /// RT-safe in every branch: the violation path bumps a counter and fills a
+    /// buffer. It does not log, allocate, throw, or abort on the audio thread —
+    /// a convolver must never take down its host over a caller bug.
     void process(const SampleType* input,
                  SampleType* output,
                  std::size_t num_samples) {
-        if (!state_ || state_->ir_spectra.empty()
-            || static_cast<int>(num_samples) != state_->block_size) {
+        // No IR to convolve with: pass through.
+        if (!state_ || state_->ir_spectra.empty()) {
             std::copy_n(input, num_samples, output);
             return;
         }
+        // Loaded, but the caller's block size does not match the IR partitioning.
+        if (static_cast<int>(num_samples) != state_->block_size) {
+            std::fill_n(output, num_samples, SampleType{0.0f});
+            ++block_size_violations_;
+            history_torn_ = true;
+            return;
+        }
+        // Recover from a previous violation before folding a valid block in.
+        if (history_torn_) reset();
+
         render_state(*state_, partition_index_, input, output, num_samples);
 
         // Crossfade the retiring IR (item 2.1b): render it in parallel from its
@@ -193,14 +230,17 @@ public:
         }
     }
 
+    /// Drop all overlap-save history — live and (if a crossfade is in flight)
+    /// fading — so the next block starts from silence rather than continuing a
+    /// previous stream. Also clears the torn-history flag and the block-size
+    /// violation count.
     void reset() {
-        if (!state_) return;
-        for (auto& spec : state_->input_spectra)
-            std::fill(spec.begin(), spec.end(),
-                      std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
-        std::fill(state_->input_buffer.begin(), state_->input_buffer.end(),
-                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
+        clear_history(state_.get());
         partition_index_ = 0;
+        clear_history(fading_.get());
+        fading_partition_index_ = 0;
+        history_torn_ = false;
+        block_size_violations_ = 0;
     }
 
     /// Returns the algorithmic latency in samples.
@@ -208,6 +248,26 @@ public:
     /// immediately (partition 0 is applied in the same callback), so
     /// latency is 0.
     std::size_t latency() const { return 0; }
+
+    /// The block size `process()` requires, in samples — the value handed to
+    /// `load_ir()` rounded up to the next power of two (the radix-2 FFT needs
+    /// it). Zero when no IR is loaded.
+    ///
+    /// Size the caller's blocks from THIS, not from the value passed to
+    /// `load_ir()`: `load_ir(ir, len, 100)` yields a 128-sample convolver, and
+    /// feeding it 100-sample blocks is a precondition violation.
+    std::size_t block_size() const {
+        return state_ ? static_cast<std::size_t>(state_->block_size) : 0;
+    }
+
+    /// How many times `process()` was called on a loaded convolver with
+    /// `num_samples != block_size()`. Every one of those blocks was emitted as
+    /// silence (see `process()`).
+    ///
+    /// This is a caller bug, not a runtime condition: a nonzero count means the
+    /// audio host's block size and the size handed to `load_ir()` disagree.
+    /// Assert it is zero in tests. Cleared by `reset()`.
+    std::uint64_t block_size_violations() const { return block_size_violations_; }
 
     std::size_t num_partitions() const {
         return state_ ? state_->num_partitions : 0;
@@ -279,8 +339,22 @@ private:
         partition_index = (partition_index + 1) % s.num_partitions;
     }
 
+    // Zero one state's overlap-save history. Null-tolerant so reset() can call
+    // it for both the live and the fading IR without branching per member.
+    static void clear_history(ConvolverIrStateT<SampleType>* s) {
+        if (!s) return;
+        constexpr std::complex<SampleType> kZero{SampleType{0.0f}, SampleType{0.0f}};
+        for (auto& spec : s->input_spectra)
+            std::fill(spec.begin(), spec.end(), kZero);
+        std::fill(s->input_buffer.begin(), s->input_buffer.end(), kZero);
+    }
+
     std::unique_ptr<ConvolverIrStateT<SampleType>> state_;
     std::size_t partition_index_ = 0;
+    // Set when process() is handed a block whose size does not match the loaded
+    // IR partitioning. The next valid block resets before folding itself in.
+    bool history_torn_ = false;
+    std::uint64_t block_size_violations_ = 0;
 
     // ── Crossfade state (item 2.1b; opt-in via set_crossfade) ─────────────────
     std::unique_ptr<ConvolverIrStateT<SampleType>> fading_; // IR fading out (parallel render)

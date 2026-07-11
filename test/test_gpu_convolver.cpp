@@ -82,6 +82,27 @@ TEST_CASE("GpuConvolver rejects empty IR", "[gpu_audio][convolver][gpu]") {
     REQUIRE_FALSE(node.prepare());
 }
 
+// The CPU fallback is a signal::PartitionedConvolver loaded at the node's block
+// size, and load_ir() rounds a non-power-of-two block UP to the next power of two.
+// The fallback would then be partitioned for a size the transport never delivers,
+// so every fallback block would be a block-size violation (silence). Refuse to
+// prepare instead of running a convolver whose fallback can only fail closed.
+TEST_CASE("GpuConvolver rejects a non-power-of-two block size",
+          "[gpu_audio][convolver]") {
+    const std::vector<float> ir(128, 0.1f);
+    for (uint32_t block : {3u, 100u, 192u, 500u}) {
+        GpuConvolver node(1, block, 48000, ir);
+        INFO("block = " << block);
+        REQUIRE_FALSE(node.prepare());
+    }
+    // Powers of two still prepare.
+    for (uint32_t block : {1u, 64u, 512u}) {
+        GpuConvolver node(1, block, 48000, ir);
+        INFO("block = " << block);
+        REQUIRE(node.prepare());
+    }
+}
+
 // The no-GPU worker path is a zero-latency partitioned convolution: process_block
 // (which drives worker_fallback_ when there is no device) must reproduce direct
 // linear convolution of the stream, block-aligned (no one-block streaming lag).

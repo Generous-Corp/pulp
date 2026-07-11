@@ -45,6 +45,7 @@
 #include <cassert>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace pulp::signal {
@@ -128,10 +129,22 @@ public:
         loaded_ = true;
     }
 
-    /// Process one audio block. `num_samples` must equal block_size().
+    /// Process one audio block.
     ///
-    /// RT-safe: no allocation, no blocking. Pure compute on the
-    /// frequency-domain accumulators of both stages.
+    /// **Precondition: `num_samples == block_size()` whenever an IR is loaded.**
+    /// The head/tail stages advance interlocked cursors sized to `block_size()`;
+    /// a block of any other length desynchronizes them.
+    ///
+    /// Fails closed on violation, exactly as `PartitionedConvolver` does: an
+    /// unloaded convolver passes through (it is a wire), but a *loaded* one
+    /// handed the wrong block size emits silence, bumps
+    /// `block_size_violations()`, and marks its history torn so the next
+    /// correctly-sized block resets both stages. It never passes through,
+    /// because a pass-through is audibly indistinguishable from a working
+    /// convolution and would hide the caller's block size bug.
+    ///
+    /// RT-safe: no allocation, no blocking, no logging, no abort. Pure compute
+    /// on the frequency-domain accumulators of both stages.
     ///
     /// Tail-stage timing:
     ///   Accumulate K small blocks of input into `tail_input_buf_`,
@@ -144,11 +157,20 @@ public:
     void process(const SampleType* input,
                  SampleType* output,
                  std::size_t num_samples) {
-        if (!loaded_ || num_samples != block_size_) {
-            // Pass-through fallback (matches PartitionedConvolver).
+        // No IR to convolve with: pass through.
+        if (!loaded_) {
             std::copy_n(input, num_samples, output);
             return;
         }
+        // Loaded, but the caller's block size does not match the partitioning.
+        if (num_samples != block_size_) {
+            std::fill_n(output, num_samples, SampleType{0.0f});
+            ++block_size_violations_;
+            history_torn_ = true;
+            return;
+        }
+        // Recover from a previous violation before folding a valid block in.
+        if (history_torn_) reset();
 
         // ── head stage: live ──
         head_.process(input, output, num_samples);
@@ -185,6 +207,8 @@ public:
         std::fill(tail_output_buf_.begin(), tail_output_buf_.end(), SampleType{0.0f});
         tail_fill_ = 0;
         tail_stream_pos_ = tail_block_;
+        history_torn_ = false;
+        block_size_violations_ = 0;
     }
 
     /// Algorithmic latency in samples. Always 0 — head stage produces
@@ -192,6 +216,14 @@ public:
     std::size_t latency() const { return 0; }
 
     std::size_t block_size() const { return block_size_; }
+
+    /// How many times `process()` was called on a loaded convolver with
+    /// `num_samples != block_size()`. Every one of those blocks was emitted as
+    /// silence. A nonzero count is a caller bug — the host's block size and the
+    /// size handed to `load_ir()` disagree. Assert it is zero in tests. Cleared
+    /// by `reset()`.
+    std::uint64_t block_size_violations() const { return block_size_violations_; }
+
     std::size_t head_samples() const { return head_samples_; }
     std::size_t tail_block() const { return tail_block_; }
     std::size_t tail_multiplier() const { return tail_multiplier_; }
@@ -234,6 +266,11 @@ private:
     std::size_t tail_fill_ = 0;
     std::size_t tail_stream_pos_ = 0;  // tail_block_ ⇒ nothing to stream
     bool loaded_ = false;
+    // Set when process() is handed a block whose size does not match the loaded
+    // IR partitioning. The next valid block resets both stages before folding
+    // itself in.
+    bool history_torn_ = false;
+    std::uint64_t block_size_violations_ = 0;
 };
 
 using NonUniformPartitionedConvolver = NonUniformPartitionedConvolverT<float>;
