@@ -117,7 +117,7 @@ public:
             viz_mode_);
         canvas.set_blend_mode(cv::Canvas::BlendMode::normal);  // ensure chrome is not additive
 
-        // Wordmark — tracked caps, bone (#BCC2CC); info glyph after it.
+        // Wordmark — tracked caps in bone #BCC2CC; info glyph after it.
         canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));
         canvas.set_font("Inter", 11.0f * s);
         const float mk_end = tracked_text(canvas, "SuperConvolver", 24 * s, 30 * s, 11.0f * s, 0.22f);
@@ -548,8 +548,8 @@ private:
             const auto& t = sl.track;
             const bool active = (active_slider_ == i);
 
-            // Label (uppercase, tracked, dim #787E88) at the track's left; value
-            // (bold, #EDEFF3) right-aligned at the track's right — concept tokens.
+            // Label at the track's left — uppercase, tracked, dim #787E88; value
+            // right-aligned at the track's right — bold #EDEFF3. Concept tokens.
             canvas.set_fill_color(tk_label());
             canvas.set_font("Inter", 9.5f * s);
             tracked_text(canvas, sl.label, t.x, t.y - 12 * s, 9.5f * s, 0.26f);
@@ -569,7 +569,7 @@ private:
             canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.height * 0.5f);
             canvas.set_fill_color(cv::Color::rgba8(236, 239, 243, 158));
             canvas.fill_rounded_rect(t.x, t.y, std::max(0.0f, hx - t.x), t.height, t.height * 0.5f);
-            // Thumb: 14px #EDEFF3 dot with a 2px dark (#050607) border.
+            // Thumb: 14px #EDEFF3 dot with a 2px dark border in #050607.
             const float hr = (active ? 8.0f : 7.0f) * s;
             canvas.set_fill_color(cv::Color::rgba8(5, 6, 7));
             canvas.fill_circle(hx, hy, hr);
