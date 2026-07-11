@@ -237,6 +237,75 @@ void bench_multi() {
 
 }  // namespace
 
+// Roofline probe for the multi-IR path (roofline audit finding #1). Drives
+// GpuCompute::multi_convolve_timed directly (like gpu_hammer) so `n` (FFT size)
+// is controlled independently, and reports GPU-busy time alongside wall time.
+//
+// Two questions:
+//   1. Is the kernel GPU-busy (compute/bandwidth-bound) or overhead-bound?
+//      -> compare gpu_busy_us against wall_us. If gpu_busy ≈ wall, the cost is
+//         real GPU work, not dispatch/readback overhead.
+//   2. Does the cost scale with the FULL FFT size n rather than useful IR taps?
+//      -> the non-partitioned kernel uses n = next_pow2(block + IR_len), so cost
+//         should track n·log2(n)·num_ir. A partitioned FDL would instead track
+//         (IR_len/block) small block-size FFTs — the removable waste.
+void bench_multi_roofline() {
+    auto gpu = pulp::render::GpuCompute::create();
+    const bool have_gpu = gpu && gpu->initialize_standalone();
+    std::printf("\n=== multi-IR roofline: GPU-busy vs wall, cost vs FFT size ===\n");
+    if (!have_gpu || !gpu->capabilities().timestamp_query) {
+        std::printf("(timestamp queries unavailable — skipping GPU-busy measurement)\n");
+        return;
+    }
+    constexpr uint32_t kBlock = 512, kNumIr = 32;
+    std::printf("block=%u num_ir=%u | a partitioned FDL would cost ~(IR_len/block)"
+                " block-size FFTs instead of one length-n FFT.\n\n", kBlock, kNumIr);
+    std::printf("%-8s %-8s %12s %12s %9s %16s\n",
+                "IR(s)", "n", "wall_us", "gpu_busy", "busy/wall", "us/(n·log·Nir)");
+
+    for (double ir_sec : {0.1, 0.25, 0.5, 1.0, 2.0}) {
+        const uint32_t ir_len = static_cast<uint32_t>(ir_sec * 48000.0);
+        uint32_t n = 1; while (n < kBlock + ir_len) n <<= 1;
+
+        // Content-agnostic IR spectra (timing depends on n and num_ir, not values).
+        std::vector<float> ir_specs(static_cast<size_t>(2) * n * kNumIr);
+        for (size_t i = 0; i < ir_specs.size(); ++i)
+            ir_specs[i] = 0.01f * std::sin(0.001f * static_cast<float>(i));
+        if (!gpu->prepare_multi_convolution(n, ir_specs.data(), kNumIr)) {
+            std::printf("%-8.2f %-8u  prepare failed (over storage-buffer limit)\n", ir_sec, n);
+            continue;
+        }
+        std::vector<float> in(2u * n, 0.0f), out(2u * n, 0.0f);
+        for (uint32_t i = 0; i < n; ++i) in[2u * i] = 0.1f * std::sin(0.01f * i);
+        std::vector<float> pl(kNumIr, 0.7f), pr(kNumIr, 0.7f);
+
+        double busy = -1.0;
+        for (int w = 0; w < 8; ++w)
+            gpu->multi_convolve_timed(in.data(), pl.data(), pr.data(), out.data(), n, kNumIr, &busy);
+        std::vector<double> wall, gbusy;
+        for (int r = 0; r < 40; ++r) {
+            const auto t0 = std::chrono::steady_clock::now();
+            gpu->multi_convolve_timed(in.data(), pl.data(), pr.data(), out.data(), n, kNumIr, &busy);
+            wall.push_back(std::chrono::duration<double, std::micro>(
+                std::chrono::steady_clock::now() - t0).count());
+            if (busy >= 0.0) gbusy.push_back(busy);
+        }
+        const double w_med = median_us(wall);
+        const double b_med = gbusy.empty() ? -1.0 : median_us(gbusy);
+        const double nlogn_nir = double(n) * std::log2(double(n)) * kNumIr;
+        std::printf("%-8.2f %-8u %12.1f %12.1f %8.0f%% %16.4f\n",
+                    ir_sec, n, w_med, b_med,
+                    b_med > 0 ? 100.0 * b_med / w_med : 0.0,
+                    b_med > 0 ? b_med / nlogn_nir * 1e3 : 0.0);
+    }
+    std::printf("\nReading: busy/wall RISING toward ~1.0 as n grows means the cost is\n");
+    std::printf("real GPU work, not dispatch/readback overhead — so a fix must cut the\n");
+    std::printf("WORK, not the overhead. gpu_busy grows with n (the full FFT size, set\n");
+    std::printf("by IR length), which is the removable waste: a partitioned FDL keeps\n");
+    std::printf("n at the block size and does IR_len/block small-FFT MAC rows instead.\n");
+    std::printf("(us/(n·log·Nir) falling, not flat, shows the kernel gains occupancy at\n");
+    std::printf("large n — the same under-parallelization the audit found at small n.)\n");
+    std::printf("See planning/2026-07-09-roofline-audit-audio-pipeline.md #1.\n");
 // ── 3. The finding-#1 payoff: CPU vs non-partitioned GPU vs partitioned FDL ──
 // Fixed 1 s IR, sweeping the room count — the demo-decisive comparison. The
 // SuperConvolver v1.2 KILL verdict said the CPU beats the GPU; it was measured
@@ -486,6 +555,7 @@ int main() {
     }
     bench_single();
     bench_multi();
+    bench_multi_roofline();
     bench_fdl();
     bench_timevarying();
     return 0;
