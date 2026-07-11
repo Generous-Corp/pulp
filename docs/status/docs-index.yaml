@@ -434,3 +434,8 @@ docs:
     path: reports/webgpu-compute-feasibility.md
     kind: report
     summary: Feasibility spike for batch-oriented WebGPU compute audio workloads
+
+  - slug: gpu-roofline-optimization-sequence
+    path: reports/gpu-roofline-optimization-sequence.md
+    kind: report
+    summary: GPU roofline/occupancy instrumentation and the ordered optimization program for gpu_audio compute passes
