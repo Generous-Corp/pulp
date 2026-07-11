@@ -560,6 +560,9 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   — the existing watchdogs only auto-close inside a recent window, so historical
   per-version trackers orphaned (334 had accumulated). It only matches the exact
   auto-generated tracker titles and only closes objectively-resolved ones.
+  SHA-keyed `release: stuck` trackers carry no version in their title; the reaper
+  skips them without failing the sweep. Close those only after verifying the
+  affected SDK/plugin surface shipped the stranded commit.
 - Keep watchdog/issue-maintenance workflows on REST `gh api` calls. Avoid
   `gh issue list` / `gh pr *` helpers in those paths because they can use the
   shared GraphQL quota; a watchdog must not fail while reporting that the
@@ -2924,10 +2927,47 @@ extraction cannot quietly regrow.
 
 **Auto-release:** `.github/workflows/auto-release.yml` fires on push to `main`. It diffs the two version-bearing files (`CMakeLists.txt` project version, `.claude-plugin/plugin.json` version) against the previous push range and creates the corresponding `v<x.y.z>` or `plugin-v<x.y.z>` tag. The existing tag-triggered release workflows (`release-cli.yml`, `sign-and-release.yml`) then build and publish. `Release: skip reason="..."` on the merging commit suppresses the tag.
 
-**fix/feat-needs-bump (issue #1009):** the version-skill-check workflow ALSO runs `version_bump_check.py --require-bump-for-fix-feat` on `pull_request` events. If the PR title matches `^(fix|feat)(\([^)]*\))?!?:\s` (Conventional Commits user-facing prefix), the diff range MUST contain either a commit subject `chore: bump versions` OR a top-level `Version-Bump: skip reason="..."` trailer (with non-empty reason — bare `skip` is rejected). This is the structural fix for the 2026-04-30 incident (PR #1008) where a `fix(view):` merged via `gh pr merge` after a force-push race with `shipyard pr` and stranded the change on main. Auto-release.yml has a matching backstop step (`Stranded fix/feat detector`) that emits a `::warning::` annotation and opens a `release-stuck`-labelled tracking issue when the merge slips through to push. Branch protection on `main` requiring the `Enforce version & skill sync` check would close the loop entirely — see `docs/guides/release-watchdog.md` for the recommended setup. Bypass the check on a one-off basis with `Version-Bump: skip reason="..."` on any commit in the range; this is intentionally a different trailer from `Release: skip` so a "don't tag this release" decision doesn't silently imply "this fix doesn't need a bump."
+**fix/feat-needs-bump (issue #1009):** the version-skill-check workflow ALSO
+runs `version_bump_check.py --require-bump-for-fix-feat` on `pull_request`
+events. If the PR title or any live commit-derived signal matches
+`^(fix|feat)(\([^)]*\))?!?:\s` (Conventional Commits user-facing prefix), the
+diff range MUST contain either a commit subject `chore: bump versions` OR a
+top-level `Version-Bump: skip reason="..."` trailer (with non-empty reason —
+bare `skip` is rejected). Explicit reverts cancel their target signals;
+reverting a revert restores them.
+Checking commit subjects matters under GitHub's
+`COMMIT_OR_PR_TITLE` squash policy: a one-commit PR can have a plain-language
+PR title while its conventional commit subject becomes the landed squash
+subject. Auto-release.yml has a matching backstop step (`Stranded fix/feat
+detector`) that emits a `::warning::` annotation and opens a
+`release-stuck`-labelled tracking issue when the merge slips through. The
+canonical `main` ruleset requires `Enforce version & skill sync`; if a tracker
+still fires, compare the PR title with the subject GitHub actually landed
+before blaming branch protection. Bypass the check on a one-off basis with
+`Version-Bump: skip reason="..."` on any commit in the range; this is
+intentionally a different trailer from `Release: skip` so a "don't tag this
+release" decision doesn't silently imply "this fix doesn't need a bump."
+For PRs targeting `main`, the check's **Expected release tags** run summary
+reports the SDK/plugin tags the PR queue should produce after merge, using the
+PR head, fetched tags, and GitHub's one-commit-subject/multi-commit-PR-title
+squash policy plus sticky `Release: skip` state. Treat it as a prediction:
+`auto-release.yml` creates the
+actual signed tags after merge. The
+post-merge stranded detector classifies the whole pushed range, maps signals to
+SDK/plugin surfaces, and checks each surface independently. A created tag or a
+sticky `Release: skip` covers only its own surface and only signals at or before
+that skipped bump; a later fix remains uncovered. Recovery preserves each
+surface's own fix/feat bump level and any explicit numeric `Version-Bump`
+override. Its recovery command starts from fetched `origin/main`, analyzes the
+recorded historical range, and computes the next version from current `main`
+via `--apply-version-base HEAD` plus
+`--recover-stranded-release`; recorded `--recover-levels` preserve the
+boundary-filtered level, while `--recover-surfaces` prevents an already covered
+sibling surface from being bumped again.
 
-**Exact bump-marker format:** for `fix:` / `feat:` PR titles, the accepted
-commit subject prefixes are exactly `chore: bump versions` (canonical) and
+**Exact bump-marker format:** for `fix:` / `feat:` PR titles or commit
+subjects, the accepted bump-marker prefixes are exactly
+`chore: bump versions` (canonical) and
 `chore(versions): bump` (legacy). A manually authored subject such as
 `chore: bump SDK to v0.78.4` does not satisfy the gate, even if the
 version files and changelog are correctly edited. Let `shipyard pr` create
@@ -3335,9 +3375,9 @@ drift; humans run `shipyard update` to apply.
 ### Composition with `Version-Bump` gate
 
 `shipyard rescue` does not interact with the `Enforce version & skill
-sync` check. If a PR title starts with `fix:` / `feat:` and the branch
-lacks either a `chore: bump versions` commit OR a
-`Version-Bump: skip reason="..."` trailer on the tip commit, the
+sync` check. If a PR title or live commit-derived signal starts with `fix:` /
+`feat:` and the branch lacks either a `chore: bump versions` commit OR a
+`Version-Bump: skip reason="..."` trailer in the range, the
 version-skill-sync check fails independently. The trailer block must
 be CONTIGUOUS (no blank line between `Version-Bump:` and any other
 trailer like `Co-Authored-By:`) or git's `interpret-trailers` won't
@@ -3596,6 +3636,12 @@ fallback to `macos-15` and keep selecting the newest installed Xcode 16.x
 (`release-cli.yml` and the Build/Test gate already use macOS 15). If the
 GitHub-hosted macOS image changes again, verify the fallback runner still has
 C++20 parity with the PR lane before changing release routing.
+
+The fallback is last, not first. `sign-and-release.yml` must prefer the isolated
+`PULP_RELEASE_MACOS_RUNS_ON_JSON`, then optional Namespace, and only then hosted
+`macos-15`. It must not import the Developer ID private key on the shared local
+PR pool. A split route can finish all CLI/SDK assets while the signing leg
+remains queued with no runner, leaving the release draft unpublished.
 
 ## Release health escalation (`release-health.yml`)
 

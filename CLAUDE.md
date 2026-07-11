@@ -739,13 +739,21 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
 **Exact fix/feat release marker:** `.github/workflows/version-skill-check.yml`
-adds `--require-bump-for-fix-feat` on PRs. If the PR title starts with
-`fix:` / `fix(scope):` / `feat:` / `feat(scope):`, the diff range must
-contain a bump-marker commit whose subject starts with exactly
+adds `--require-bump-for-fix-feat` on PRs. If the PR title or any live
+commit-derived signal starts with `fix:` / `fix(scope):` / `feat:` /
+`feat(scope):`, the diff range must contain a bump-marker commit whose subject
+starts with exactly
 `chore: bump versions` (canonical) or `chore(versions): bump` (legacy),
-unless the tip commit has a top-level `Version-Bump: skip reason="..."`
+unless the range has a top-level `Version-Bump: skip reason="..."`
 trailer. Near-misses such as `chore: bump SDK to vX.Y.Z` do not count.
+Explicit reverts cancel their target signals; reverting a revert restores them.
 When manually repairing a release bump, use the exact canonical subject.
+For PRs targeting `main`, the required check also writes an **Expected release
+tags** run summary for the PR queue. This prediction uses the fetched tag state
+and the same auto-release skip/revert guard, modeling GitHub's sole-commit
+subject versus multi-commit PR-title squash policy separately from the synthetic
+merge tree; `auto-release.yml` creates the
+actual signed tags only after merge.
 
 **Bumps are diff-driven, not title-driven.** `--require-bump-for-fix-feat`
 is an *additional* gate layered on `fix:`/`feat:` titles — it is NOT what

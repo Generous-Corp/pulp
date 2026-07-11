@@ -190,6 +190,15 @@ pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 pulp_add_test_suite(pulp-test-plugin-state-io LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics LIBRARIES pulp::format)
 
+# Shared max-block-overrun contract (clamp+zero) used by every format adapter
+pulp_add_test_suite(pulp-test-max-block-contract LIBRARIES pulp::format)
+
+# AAX render-path RT-safety: MIDI-out buffers reserved off-thread so a
+# supports_midi_output plugin never allocates inside the ScopedNoAlloc guard.
+pulp_add_test_suite(pulp-test-aax-rt-safety
+    SOURCES test_aax_rt_safety.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
+
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
 
