@@ -608,6 +608,164 @@ TEST_CASE("SkiaCanvas fill-rule punches an even-odd hole in compound paths",
 #endif
 }
 
+// ── SkiaCanvas::stroke_path / fill_path raster proofs ────────────────────────
+//
+// These render the real SkiaCanvas through the same SkpFrameCapture →
+// serialize → replay-onto-a-black-raster-surface path the fill-rule test above
+// uses, then sample rendered pixels. They exist to pin the point-array
+// polyline / polygon overrides: without them SkiaCanvas inherited the
+// base-class fallbacks — stroke_path degraded to N independent butt-capped
+// stroke_line calls (no joins between segments) and fill_path was a silent
+// no-op (a filled polygon never appeared).
+#ifdef PULP_HAS_SKIA
+namespace {
+// Render `draw` into a WxH capture, serialize, and sample one pixel colour.
+template <typename DrawFn>
+SkColor4f render_and_sample(int w, int h, DrawFn draw, int x, int y) {
+    pulp::render::SkpFrameCapture capture(w, h);
+    REQUIRE(capture.available());
+    auto* canvas = capture.canvas();
+    REQUIRE(canvas != nullptr);
+    draw(*canvas);
+    std::string blob;
+    REQUIRE(capture.finish_to_memory(blob).ok);
+    sk_sp<SkPicture> pic = SkPicture::MakeFromData(blob.data(), blob.size());
+    REQUIRE(pic != nullptr);
+    const SkImageInfo info = SkImageInfo::MakeN32Premul(w, h);
+    return SkColor4f::FromColor(replay_pixel_at(pic, info, x, y));
+}
+}  // namespace
+#endif
+
+TEST_CASE("SkiaCanvas fill_path fills a closed polygon", "[render][skia]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 48, H = 48;
+    // A large triangle: apex top-centre, base along the bottom. Its centroid
+    // is comfortably interior; the top corners of the frame are exterior.
+    const pulp::canvas::Canvas::Point2D tri[] = {
+        {24.0f, 6.0f}, {42.0f, 42.0f}, {6.0f, 42.0f}};
+
+    auto draw = [&](pulp::canvas::Canvas& c) {
+        c.set_fill_color(pulp::canvas::Color{0.0f, 1.0f, 0.0f, 1.0f});  // green
+        c.fill_path(tri, 3);
+    };
+
+    // A pixel strictly inside the triangle is the green fill. This is the
+    // assertion that fails against the old silent no-op fill_path — with the
+    // fallback nothing is drawn and (30,30) stays black background.
+    const SkColor4f inside = render_and_sample(W, H, draw, 24, 30);
+    REQUIRE(inside.fG > 0.5f);
+    REQUIRE(inside.fR < 0.25f);
+    REQUIRE(inside.fB < 0.25f);
+
+    // A pixel outside the triangle (top-left corner) stays background.
+    const SkColor4f outside = render_and_sample(W, H, draw, 3, 3);
+    REQUIRE(outside.fG < 0.25f);
+#else
+    SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
+#endif
+}
+
+TEST_CASE("SkiaCanvas stroke_path strokes a polyline without filling it",
+          "[render][skia]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 48, H = 48;
+    // Open right-angle path: horizontal leg then vertical leg.
+    const pulp::canvas::Canvas::Point2D poly[] = {
+        {8.0f, 24.0f}, {40.0f, 24.0f}, {40.0f, 8.0f}};
+
+    auto draw = [&](pulp::canvas::Canvas& c) {
+        c.set_stroke_color(pulp::canvas::Color{1.0f, 0.0f, 0.0f, 1.0f});  // red
+        c.set_line_width(4.0f);
+        c.stroke_path(poly, 3);
+    };
+
+    // A pixel on the horizontal leg is stroked red.
+    const SkColor4f on_path = render_and_sample(W, H, draw, 20, 24);
+    REQUIRE(on_path.fR > 0.5f);
+
+    // The interior of the (open) elbow is NOT filled — stroke_path strokes, it
+    // does not fill. Sample well inside the bend, away from both legs.
+    const SkColor4f interior = render_and_sample(W, H, draw, 20, 12);
+    REQUIRE(interior.fR < 0.25f);
+    REQUIRE(interior.fG < 0.25f);
+    REQUIRE(interior.fB < 0.25f);
+#else
+    SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
+#endif
+}
+
+TEST_CASE("SkiaCanvas stroke_path joins segments into one continuous path",
+          "[render][skia]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 48, H = 48;
+    // A right-angle corner stroked thick with a ROUND join and BUTT caps.
+    // As one SkPath, the round join fills a disk of radius line_width/2 at the
+    // outer (south-east) corner of the vertex. As N independent butt-capped
+    // stroke_line calls (the base-class fallback), the two segments meet flush
+    // and leave that outer corner empty — the beading/gap this override fixes.
+    const pulp::canvas::Canvas::Point2D corner[] = {
+        {10.0f, 30.0f}, {30.0f, 30.0f}, {30.0f, 10.0f}};
+
+    auto draw = [&](pulp::canvas::Canvas& c) {
+        c.set_stroke_color(pulp::canvas::Color{1.0f, 0.0f, 0.0f, 1.0f});  // red
+        c.set_line_width(8.0f);
+        c.set_line_cap(pulp::canvas::LineCap::butt);
+        c.set_line_join(pulp::canvas::LineJoin::round);
+        c.stroke_path(corner, 3);
+    };
+
+    // (32,32) is ~2.83px from the vertex (30,30) — inside the round-join disk
+    // (radius 4) but outside the butt-capped union of the two legs. Filled red
+    // only when the polyline is stroked as one joined path. This assertion
+    // fails against the base-class fallback.
+    const SkColor4f join_corner = render_and_sample(W, H, draw, 32, 32);
+    REQUIRE(join_corner.fR > 0.5f);
+
+    // Sanity: a point on the horizontal leg is stroked under either code path.
+    const SkColor4f on_leg = render_and_sample(W, H, draw, 20, 30);
+    REQUIRE(on_leg.fR > 0.5f);
+#else
+    SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
+#endif
+}
+
+TEST_CASE("SkiaCanvas stroke_path / fill_path degenerate input is safe",
+          "[render][skia]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 16, H = 16;
+    const pulp::canvas::Canvas::Point2D one[] = {{8.0f, 8.0f}};
+
+    // count 0, count 1, and a null pointer must draw nothing and must not
+    // crash — matching CgCanvas. Every sampled pixel stays black background.
+    auto expect_blank = [&](auto&& draw) {
+        const SkColor4f px = render_and_sample(W, H, draw, 8, 8);
+        REQUIRE(px.fR < 0.05f);
+        REQUIRE(px.fG < 0.05f);
+        REQUIRE(px.fB < 0.05f);
+    };
+
+    expect_blank([&](pulp::canvas::Canvas& c) {
+        c.set_stroke_color(pulp::canvas::Color{1.0f, 1.0f, 1.0f, 1.0f});
+        c.set_line_width(4.0f);
+        c.stroke_path(one, 0);
+        c.stroke_path(one, 1);
+        c.stroke_path(nullptr, 0);
+        c.stroke_path(nullptr, 5);
+    });
+    expect_blank([&](pulp::canvas::Canvas& c) {
+        c.set_fill_color(pulp::canvas::Color{1.0f, 1.0f, 1.0f, 1.0f});
+        c.fill_path(one, 0);
+        c.fill_path(one, 1);
+        c.fill_path(one, 2);      // < 3 points: no enclosed area
+        c.fill_path(nullptr, 0);
+        c.fill_path(nullptr, 5);
+    });
+#else
+    SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
+#endif
+}
+
 TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
           "[render][skia][skp]") {
     // SkPicture::serialize()'s image proc must not silently drop GPU-texture-

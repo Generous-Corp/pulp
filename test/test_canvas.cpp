@@ -54,6 +54,29 @@ TEST_CASE("RecordingCanvas captures commands", "[canvas]") {
     REQUIRE(canvas.count(DrawCommand::Type::restore) == 1);
 }
 
+// The base-class stroke_path fallback is what every backend that has not
+// overridden it actually runs. It walks the point array, so a null array with a
+// plausible count dereferences null — a crash, not a no-draw.
+TEST_CASE("Canvas::stroke_path fallback survives degenerate input",
+          "[canvas][safety]") {
+    RecordingCanvas rc;
+    const Canvas::Point2D pts[3] = {{0, 0}, {10, 10}, {20, 0}};
+
+    rc.stroke_path(nullptr, 5);
+    REQUIRE(rc.count(DrawCommand::Type::stroke_line) == 0);
+
+    rc.stroke_path(pts, 0);
+    rc.stroke_path(pts, 1);
+    REQUIRE(rc.count(DrawCommand::Type::stroke_line) == 0);
+
+    // A real polyline still strokes one segment per gap.
+    rc.stroke_path(pts, 3);
+    REQUIRE(rc.count(DrawCommand::Type::stroke_line) == 2);
+
+    // fill_path's fallback draws nothing, and must not read the array either.
+    rc.fill_path(nullptr, 4);
+}
+
 TEST_CASE("RecordingCanvas shapes", "[canvas]") {
     RecordingCanvas canvas;
 

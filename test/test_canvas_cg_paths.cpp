@@ -393,6 +393,42 @@ TEST_CASE("CoreGraphicsCanvas::fill_rect honors active linear gradient",
 // Same test for fill_path. Build a triangle path and verify at least two pixels
 // inside the rendered triangle differ in color, proving the gradient was
 // actually painted (not a single solid colour).
+// A null point array with a plausible count must draw nothing, not walk it. The
+// count guard alone does not stop that: the caller's count is what it is.
+TEST_CASE("CoreGraphicsCanvas path calls survive degenerate input",
+          "[canvas][cg][safety]") {
+    constexpr int W = 16;
+    constexpr int H = 16;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.set_fill_color(Color::rgba(1.0f, 1.0f, 1.0f, 1.0f));
+        canvas.set_stroke_color(Color::rgba(1.0f, 1.0f, 1.0f, 1.0f));
+
+        Canvas::Point2D pts[3] = {{1, 1}, {8, 8}, {14, 1}};
+        canvas.stroke_path(nullptr, 5);
+        canvas.fill_path(nullptr, 5);
+        canvas.stroke_path(pts, 0);
+        canvas.stroke_path(pts, 1);
+        canvas.fill_path(pts, 2);
+    }
+    CGContextRelease(ctx);
+
+    // Nothing was drawn: the bitmap is still the cleared background.
+    for (uint8_t px : pixels) REQUIRE(px == 0u);
+}
+
 TEST_CASE("CoreGraphicsCanvas::fill_path honors active linear gradient",
           "[canvas][cg][gradient][issue-1359]") {
     constexpr int W = 64;
