@@ -63,7 +63,14 @@ macos_architectures:
       Intel-native DAW-in-the-loop hosting. Tier 4 (a dedicated Intel Mac /
       tartci Intel host) is CUT: macos-15-intel already covers the native Intel
       CPU + toolchain, leaving only those two GPU/DAW gaps. Highway runtime SIMD
-      dispatch is arch-portable; there is no raw NEON in core/.
+      dispatch is arch-portable; there is no raw NEON in core/. The release
+      pipeline publishes native thin x86_64 CLI + SDK artifacts
+      (pulp-darwin-x64.tar.gz, pulp-sdk-darwin-x64.tar.gz), built and smoked
+      natively on macos-15-intel; tools/install/install.sh auto-selects them on
+      an Intel host, so Intel users get a one-line install rather than a source
+      build. That leg is advisory (continue-on-error): a flaky macos-15-intel run
+      does not block the arm64/linux/windows release, so most but not every
+      release carries the Intel slice (installer falls back to source when absent).
   universal:
     status: experimental
     notes: >

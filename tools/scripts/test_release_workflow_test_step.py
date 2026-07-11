@@ -466,6 +466,28 @@ class ReleasePublishChecksumGate(unittest.TestCase):
         self.assertIn("gh release download \"${TAG}\"", self.text)
         self.assertIn("--dir release-assets", self.text)
 
+    def test_publish_coordinator_requires_intel_assets_only_when_present(self) -> None:
+        # The advisory darwin-x64 (Intel) CLI+SDK pair must NOT be in the static
+        # required_assets list (that would negate continue-on-error and block
+        # every release when the macos-15-intel runner is down), but MUST be
+        # appended to the required set WHEN PRESENT — otherwise --exact-required
+        # rejects them as "unexpected" and a successful-Intel release stays a
+        # draft (the success-path bug this guards).
+        for intel_asset in ("pulp-darwin-x64.tar.gz", "pulp-sdk-darwin-x64.tar.gz"):
+            self.assertNotIn(intel_asset, self.REQUIRED_RELEASE_ASSETS)
+        # Present in the workflow, gated behind a presence check on the CLI tarball.
+        self.assertIn("release-assets/pulp-darwin-x64.tar.gz", self.text)
+        self.assertIn(
+            "required_assets+=(pulp-darwin-x64.tar.gz pulp-sdk-darwin-x64.tar.gz)",
+            self.text,
+        )
+        # The presence check must precede where checksum_args is built from
+        # required_assets, so the append actually takes effect.
+        self.assertLess(
+            self.text.index("required_assets+=(pulp-darwin-x64.tar.gz"),
+            self.text.index("checksum_args=()"),
+        )
+
 
 class ReleaseArtifactAttestations(unittest.TestCase):
     """Release workflows should emit build provenance attestations."""

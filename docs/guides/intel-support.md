@@ -24,6 +24,25 @@ Intel/AMD GPU.
 | 2 | **Nightly** native Intel (job A) + universal cross-check (job B) | `nightly-intel.yml`: job A on `macos-15-intel`, job B on `macos-15` | cron, off-peak | no (opens a watchdog issue) |
 | 3 | **Release gate**: universal build + `lipo -archs` + `codesign --verify` + dual-arch `auval` | `release-cli.yml` `universal-arch-gate` | on tag / release dispatch | **yes** (blocks publish) |
 
+### Shipped Intel artifacts (distinct from the Tier-3 gate)
+
+Tier 3 *validates* a universal build; it does not publish an installable Intel
+binary. The **installable** Intel path is a separate leg in the same
+`release-cli.yml`: a native thin **`darwin-x64`** matrix row (build + smoke) on
+`macos-15-intel` that publishes `pulp-darwin-x64.tar.gz` and
+`pulp-sdk-darwin-x64.tar.gz` alongside the arm64 tarballs. Built natively
+(`CMAKE_SYSTEM_PROCESSOR=x86_64`, no cross-compile, no Rosetta), floored at
+`CMAKE_OSX_DEPLOYMENT_TARGET=13.0`, and smoke-verified natively with an explicit
+`file` arch assertion on the binaries and the bundled `libwgpu_native.dylib`.
+`tools/install/install.sh` auto-selects the slice from `uname -m`, so Intel
+users get a one-line install. `macos-15-intel` is the pinned stable hosted
+x86_64 image (`macos-26-intel` also exists but is newer/less-baked). When it
+reaches end-of-life (~Aug 2027), the successor is cross-compiling x86_64 on the
+arm64 pool — the
+`if(WIN32)`-gated wgpu arch-forcing in `PulpDependencies.cmake` would need an
+Apple `CMAKE_OSX_ARCHITECTURES` branch, plus arch-isolated Skia extraction
+(`planning/2026-07-10-intel-mac-cli-support.md`, Option A).
+
 Runner discipline is absolute: **no Intel work ever routes to the self-hosted
 Mac Studios** that host the required `macos` gate, and **Namespace is never
 used** (cost). `danielraffel/pulp` is a public repo, so GitHub-hosted macOS
