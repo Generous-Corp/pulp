@@ -54,10 +54,19 @@ public:
                                audio::BufferView<float>& output,
                                uint32_t n) = 0;
 
+    /// RT-safe. Called by the transport on EVERY block (not just misses) for a
+    /// CpuFallback node, BEFORE the output-ring read, so the node's CPU fallback
+    /// can be kept continuously fed and its convolution history is always current
+    /// the moment a miss makes it take over. A node whose fallback needs no live
+    /// priming (the default) does nothing. MUST NOT allocate, lock, or block.
+    virtual void prime_fallback(const audio::BufferView<const float>& /*input*/,
+                                uint32_t /*n*/) noexcept {}
+
     /// RT-safe fallback. MUST NOT allocate, lock, or block — it runs on the
     /// audio thread for the CpuFallback miss policy (hence noexcept). Default
     /// copies input to output (dry) so a node without a real fallback still
-    /// degrades safely.
+    /// degrades safely. When paired with prime_fallback(), this emits the
+    /// latency-aligned block the continuously-fed fallback has already computed.
     virtual void process_cpu_fallback(const audio::BufferView<const float>& input,
                                       audio::BufferView<float>& output,
                                       uint32_t n) noexcept {

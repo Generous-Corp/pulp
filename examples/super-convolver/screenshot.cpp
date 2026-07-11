@@ -12,6 +12,7 @@
 //                       notice if the build has no GPU capture backend.
 
 #include "super_convolver.hpp"  // pulls in BufferView + MidiBuffer via processor.hpp
+#include "super_convolver_ui.hpp"  // SuperConvolverUi (for the SC_INFO capture hook)
 #include <pulp/view/screenshot.hpp>
 
 #include <cmath>
@@ -90,7 +91,12 @@ int main(int argc, char** argv) {
                          "falling back to CPU raster.\n");
     }
 
+    if (const char* src = std::getenv("SC_SOURCE")) proc.set_ir_path(src);
     auto v = proc.create_view();
+    if (auto* ui = dynamic_cast<examples::SuperConvolverUi*>(v.get())) {
+        if (std::getenv("SC_INFO")) ui->open_info();
+        if (const char* t = std::getenv("SC_TOAST")) ui->test_toast(t);
+    }
     const bool ok = view::render_to_file(*v, 820, 560, out, 2.0f, backend);
     std::printf("SuperConvolver editor screenshot [%s]: %s -> %s\n",
                 backend == ScreenshotBackend::gpu ? "gpu" : "raster",
