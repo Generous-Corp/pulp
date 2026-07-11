@@ -143,9 +143,13 @@ TEST_CASE("WamProcessorBridge handles uninitialized and null-factory states",
     REQUIRE(empty_desc.vendor.empty());
     REQUIRE(uninitialized.get_parameter_info().empty());
 
+    // Planar: 2 channels x 2 frames. An uninitialized bridge is a no-op, so
+    // output stays untouched (layout-agnostic).
     float input[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float output[4] = {9.0f, 9.0f, 9.0f, 9.0f};
-    uninitialized.process(input, output, 2, 2);
+    const float* inCh[2]  = {input, input + 2};
+    float*       outCh[2] = {output, output + 2};
+    uninitialized.process(inCh, outCh, 2, 2);
     REQUIRE(output[0] == 9.0f);
     REQUIRE(output[3] == 9.0f);
 
@@ -185,17 +189,20 @@ TEST_CASE("WamProcessorBridge audio processing", "[format][wam]") {
     WamProcessorBridge bridge(create_test_wam);
     bridge.initialize(48000.0, 128);
 
-    // Interleaved stereo: [L0,R0,L1,R1,...] — 4 frames
-    float input[8] = {1.0f, 1.0f, 0.5f, 0.5f, -1.0f, -1.0f, 0.0f, 0.0f};
+    // Planar stereo: ch0 (L) = [0,4), ch1 (R) = [4,8). 4 frames.
+    // L = R = {1.0, 0.5, -1.0, 0.0}.
+    float input[8] = {1.0f, 0.5f, -1.0f, 0.0f,   1.0f, 0.5f, -1.0f, 0.0f};
     float output[8] = {};
+    const float* inCh[2]  = {input, input + 4};
+    float*       outCh[2] = {output, output + 4};
 
-    bridge.process(input, output, 2, 4);
+    bridge.process(inCh, outCh, 2, 4);
 
-    // Processor applies 0.5x gain
-    REQUIRE(output[0] == Catch::Approx(0.5f));  // L0
-    REQUIRE(output[1] == Catch::Approx(0.5f));  // R0
-    REQUIRE(output[2] == Catch::Approx(0.25f)); // L1
-    REQUIRE(output[4] == Catch::Approx(-0.5f)); // L2
+    // Processor applies 0.5x gain. Planar output: L=[0,4), R=[4,8).
+    REQUIRE(output[0] == Catch::Approx(0.5f));   // L0 = 1.0*0.5
+    REQUIRE(output[4] == Catch::Approx(0.5f));   // R0 = 1.0*0.5
+    REQUIRE(output[1] == Catch::Approx(0.25f));  // L1 = 0.5*0.5
+    REQUIRE(output[2] == Catch::Approx(-0.5f));  // L2 = -1.0*0.5
 }
 
 TEST_CASE("WamProcessorBridge clamps processing to prepared channel count",
@@ -203,22 +210,26 @@ TEST_CASE("WamProcessorBridge clamps processing to prepared channel count",
     WamProcessorBridge bridge(create_test_wam);
     bridge.initialize(48000.0, 128);
 
+    // Planar 3-channel, 4 frames: ch0=[0,4), ch1=[4,8), ch2=[8,12).
+    // ch2 is clamped away (bridge prepared for 2 channels).
     float input[12] = {
-        1.0f, 2.0f, 99.0f,
-        0.5f, 0.25f, 88.0f,
-        -1.0f, -2.0f, 77.0f,
-        0.0f, 0.0f, 66.0f,
+        1.0f,  0.5f,  -1.0f, 0.0f,    // ch0
+        2.0f,  0.25f, -2.0f, 0.0f,    // ch1
+        99.0f, 88.0f, 77.0f, 66.0f,   // ch2 (dropped)
     };
     float output[12] = {};
+    const float* inCh[3]  = {input, input + 4, input + 8};
+    float*       outCh[3] = {output, output + 4, output + 8};
 
-    bridge.process(input, output, 3, 4);
+    bridge.process(inCh, outCh, 3, 4);
 
-    REQUIRE(output[0] == Catch::Approx(0.5f));
-    REQUIRE(output[1] == Catch::Approx(1.0f));
-    REQUIRE(output[2] == Catch::Approx(0.0f));
-    REQUIRE(output[3] == Catch::Approx(0.25f));
-    REQUIRE(output[4] == Catch::Approx(0.125f));
-    REQUIRE(output[5] == Catch::Approx(0.0f));
+    // 0.5x gain on the two prepared channels; ch2 left untouched (clamped).
+    REQUIRE(output[0] == Catch::Approx(0.5f));    // ch0[0] = 1.0*0.5
+    REQUIRE(output[4] == Catch::Approx(1.0f));    // ch1[0] = 2.0*0.5
+    REQUIRE(output[8] == Catch::Approx(0.0f));    // ch2[0] clamped
+    REQUIRE(output[1] == Catch::Approx(0.25f));   // ch0[1] = 0.5*0.5
+    REQUIRE(output[5] == Catch::Approx(0.125f));  // ch1[1] = 0.25*0.5
+    REQUIRE(output[9] == Catch::Approx(0.0f));    // ch2[1] clamped
 }
 
 TEST_CASE("WamProcessorBridge MIDI scheduling", "[format][wam]") {
@@ -230,7 +241,9 @@ TEST_CASE("WamProcessorBridge MIDI scheduling", "[format][wam]") {
 
     float input[4] = {};
     float output[4] = {};
-    bridge.process(input, output, 2, 2);
+    const float* inCh[2]  = {input, input + 2};
+    float*       outCh[2] = {output, output + 2};
+    bridge.process(inCh, outCh, 2, 2);
 }
 
 TEST_CASE("WamProcessorBridge ignores unsupported MIDI statuses",
@@ -243,7 +256,9 @@ TEST_CASE("WamProcessorBridge ignores unsupported MIDI statuses",
 
     float input[4] = {};
     float output[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    bridge.process(input, output, 2, 2);
+    const float* inCh[2]  = {input, input + 2};
+    float*       outCh[2] = {output, output + 2};
+    bridge.process(inCh, outCh, 2, 2);
 
     REQUIRE(output[0] == Catch::Approx(0.0f));
     REQUIRE(output[3] == Catch::Approx(0.0f));
