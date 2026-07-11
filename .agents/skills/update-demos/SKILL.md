@@ -132,6 +132,10 @@ pulp minos publish-runbook --to 0.640.0
 - **Measuring one binary's floor** (no registry needed) is the primitive under
   all of this: `pulp minos measure <path/to/binary>` — also exposed over MCP as
   `pulp_minos`. See `docs/guides/minimum-os-support.md`.
+- **`--workdir` reuse is verified, not trusted.** When sweep/update reuse an
+  existing checkout in `--workdir`, they confirm its `origin` really is that
+  consumer and fast-forward it to the remote tip first — a stale or wrong tree of
+  the same name is refused, not measured or bumped as if it were current.
 
 ## Related
 

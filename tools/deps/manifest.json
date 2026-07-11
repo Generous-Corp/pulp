@@ -978,6 +978,10 @@
           "mac-universal": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-minos13/skia-build-mac-universal-gpu-release.zip",
             "sha256": "284964fda380a2cc5ff4f885ae557ef04dab5987ebd94fc01354b95878ad85cf"
+          },
+          "mac-x86_64": {
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-minos13/skia-build-mac-x86_64-gpu-release.zip",
+            "sha256": "f1734e9f41c0d01700d446282550725a7b6b42ebc906ba295f1f563112831f17"
           }
         },
         "rebuild_triggers": [

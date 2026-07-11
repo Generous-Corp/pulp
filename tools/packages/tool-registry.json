@@ -19,7 +19,8 @@
     "trace-processor": {
       "display_name": "Perfetto trace_processor",
       "category": "binary",
-      "description": "Perfetto trace_processor_shell — the offline SQL query engine behind `pulp trace query --trace`. Downloaded and SHA-256-verified by `pulp trace fetch` (also reachable as `pulp tool install trace-processor`).",
+      "description": "Perfetto trace_processor_shell — the offline SQL query engine behind `pulp trace query --trace`. Downloaded and SHA-256-verified by `pulp trace fetch` (also reachable as `pulp tool install trace-processor` or `pulp tool install perfetto`).",
+      "aliases": ["perfetto"],
       "upstream_url": "https://github.com/google/perfetto",
       "license": "Apache-2.0",
       "install_method": "binary_download",

@@ -1,0 +1,105 @@
+name: Intel portability (advisory)
+
+# Tier 1 of the Intel support tiering (docs/guides/intel-support.md).
+#
+# A path-triggered, ADVISORY x86_64 build + test lane that fires only when a PR
+# touches arch-sensitive code. It is deliberately NOT in the required checks:
+# a red here informs, it does not block merge. Promotion to required is
+# governed by the criteria in docs/guides/intel-support.md (14 consecutive
+# green Tier-2 nightlies, zero runner-infra-only reds in the last 7).
+#
+# Runner choice is deliberate: the STABLE GitHub-hosted `macos-15` (Apple
+# Silicon + Rosetta), free for public repos, NOT the flaky `macos-15-intel`
+# runner. A thin -DCMAKE_OSX_ARCHITECTURES=x86_64 build produces x86_64 test
+# binaries that macOS runs transparently under Rosetta — no `arch` wrapper. The
+# native-Intel runner (with its known C++ linker-error / CPU-pegging flake) is
+# quarantined to the Tier-2 nightly, where a red run costs nobody a merge.
+#
+# GPU is OFF here (the proven sanitizer-matrix config): it makes the thin build
+# fast and deterministic and keeps the signal to "the x86_64 non-GPU code
+# compiles and its tests pass under Rosetta". x86_64 GPU / Skia / wgpu runtime
+# coverage is the Tier-2 nightly's native-Intel job.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    # Only run when the touched code can plausibly differ across arch. Mirrors
+    # the sanitizers.yml paths-filter style, scoped to the arch-sensitive set.
+    paths:
+      - 'core/runtime/**'
+      - 'core/signal/**'
+      - 'core/platform/**'
+      - 'tools/cmake/**'
+      - 'tools/deps/manifest.json'
+      - 'tools/deps/min_os.json'
+      - 'tools/scripts/fetch_*'
+      - 'ship/**'
+      - '.github/workflows/intel-portability.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: intel-portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  x86_64-build-test:
+    name: x86_64 build + test (Rosetta, advisory)
+    # Fork PRs run on the same free GitHub-hosted runner; only skip scheduled
+    # noise on forks (this workflow has no schedule, so the guard is a no-op
+    # today and kept for parity with the nightly).
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      BUILD_DIR: build-intel-x86_64
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Install ccache + ninja
+        run: |
+          brew install ccache ninja || {
+            brew update
+            brew install ccache ninja
+          }
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Intel canary lint (whole tree)
+        shell: bash
+        run: python3 tools/scripts/intel_canary_lint.py --mode=tree
+
+      - name: Configure (x86_64 thin, GPU off)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Build
+        shell: bash
+        run: cmake --build "${BUILD_DIR}" -j"$(sysctl -n hw.ncpu)"
+
+      - name: Test (x86_64 binaries under Rosetta)
+        shell: bash
+        # Full native ctest — the thin x86_64 test binaries run transparently
+        # under Rosetta on the arm64 runner. GPU/visual/font/AU tests are
+        # excluded because this GitHub-hosted VM lacks a representative GPU and
+        # registered AU components (same environment gap the nightly documents),
+        # not because of anything x86_64-specific. --repeat until-pass:2 self-
+        # heals a single timing flake.
+        run: |
+          set -euo pipefail
+          exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items'
+          ctest --test-dir "${BUILD_DIR}" --output-on-failure \
+            --repeat until-pass:2 \
+            -C Release -LE "validation|slow" \
+            -j"$(sysctl -n hw.ncpu)" --timeout 120 \
+            --exclude-regex "$exclude"

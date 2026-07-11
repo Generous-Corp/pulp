@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 43 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 46 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -33,6 +33,8 @@ for its complete, authoritative guidance.
 | `faust` | Create FAUST DSP plugins in Pulp using offline codegen, pre-generated C++ headers, and the FaustProcessor template wrapper. |
 | `hosting` | Load, run, and test VST3 / AU / CLAP / LV2 plugins from Pulp code. |
 | `import-design` | Import designs from Figma, Stitch, v0, Pencil, React Native, or Claude Design into Pulp web-compat JS with automated visual validation. |
+| `installable-tools` | The acceptance bar for anything Pulp can install (a `pulp tool` registry entry, `pulp add` package, or any downloadable). |
+| `intel-canary` | Maintain Pulp's macOS Intel (x86_64) portability lint and CI tiering — the PULP_INTEL_CANARY configure gate, intel_canary_lint.py + its allowlist, and the Tier 0-3 workflows (build.yml canary step, intel-portability.yml, nightly-intel.yml, release-cli.yml universal gate). |
 | `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
 | `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
@@ -43,6 +45,7 @@ for its complete, authoritative guidance.
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
 | `screenshot` | Capture faithful PNGs of Pulp view trees / imported UIs headlessly. |
+| `screenshot-sync` | Keep a plugin/demo repo's screenshots in sync with its UX. |
 | `sdf-text` | Work with Pulp's SDF / MSDF / PSDF glyph atlases — building, sampling via SkSL, and the shared text-layout helpers. |
 | `ship` | Sign, notarize, package, and distribute Pulp plugins and apps across macOS, Windows, and Android |
 | `skia-gpu-build` | Enable a Skia + Dawn GPU build of Pulp (MacGpuWindowHost, Skia Graphite). |

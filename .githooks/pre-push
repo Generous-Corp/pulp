@@ -157,6 +157,19 @@ case $? in
     *) echo "[pre-push] version_bump_check: internal error" >&2 ;;
 esac
 
+# Screenshot-sync. No-op unless this repo carries .pulp/screenshots.toml
+# (plugin repos opt in; pulp core does not). Enforcing-by-default like the
+# skill-sync gate above; PULP_DISABLE_PREPUSH_GATES=1 demotes it.
+SSCS="$ROOT/tools/scripts/screenshot_sync_check.py"
+if [ -f "$SSCS" ]; then
+    "$PYTHON" "$SSCS" --base "$BASE" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] screenshot_sync_check: internal error" >&2 ;;
+    esac
+fi
+
 # Compat-sync.
 if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce

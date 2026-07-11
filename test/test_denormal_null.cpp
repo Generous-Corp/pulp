@@ -14,6 +14,7 @@
 #include "denormal_null_reference.hpp"
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <vector>
 
@@ -70,9 +71,22 @@ TEST_CASE("MF-3: guarded feedback filters flush to a subnormal-free tail",
     REQUIRE_FALSE(snap_on.ladder);
     REQUIRE_FALSE(snap_on.reverb);
 
-    // The test has teeth: without the guard, these tails go subnormal.
+    // The test has teeth: without the guard, these tails go subnormal — but
+    // ONLY where the CPU can actually represent a subnormal. If this process
+    // is in a hardware flush-to-zero mode (an FTZ/DAZ default, a fast-math
+    // CRT that sets FPCR/MXCSR at startup, or an inherited FP mode on the CI
+    // host), every decaying tail is flushed straight to zero and the reference
+    // physically cannot produce a subnormal. That is an environment property,
+    // not a broken guard, so the teeth check is skipped rather than failed —
+    // the snap-ON "no subnormal tail" assertions above stay HARD regardless.
+    // Anywhere denormals ARE representable, the reference MUST hit one, or the
+    // null test is vacuous.
     const bool reference_saw_subnormals =
         snap_off.dc_blocker || snap_off.ballistics || snap_off.svf ||
         snap_off.ladder || snap_off.reverb;
+    if (!reference_saw_subnormals && pulp::signal::denormals_are_flushed()) {
+        SKIP("reference tail cannot exhibit subnormals: the CPU is flushing "
+             "denormals to zero for this process (hardware/OS FTZ)");
+    }
     REQUIRE(reference_saw_subnormals);
 }
