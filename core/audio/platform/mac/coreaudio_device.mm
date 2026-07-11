@@ -125,6 +125,22 @@ void CoreAudioDevice::query_callback_workgroup() {
 
 bool CoreAudioDevice::open(const DeviceConfig& config) {
     config_ = config;
+    // AUHAL bus 0 is output, bus 1 is input. An input-only open (input channels
+    // requested, output channels zero) must disable output IO and drive the unit
+    // from an input callback — a zero-channel output stream format is rejected by
+    // AUHAL, and the render callback on bus 0 never fires when output is disabled.
+    const bool want_output = config_.output_channels > 0;
+    const bool want_input  = config_.input_channels  > 0;
+    output_enabled_        = want_output;
+    const bool input_only  = want_input && !want_output;
+
+    // A unit with neither input nor output has no IO to drive — reject it rather
+    // than build a unit that opens but never delivers a callback.
+    if (!want_input && !want_output) {
+        runtime::log_error("CoreAudio: open requires at least one input or output channel");
+        return false;
+    }
+
     // No explicit device requested AND output-only => use the system DefaultOutput
     // unit, which AUTO-FOLLOWS the system default device (and sample-rate-converts).
     // This is what makes switching to AirPods / headphones mid-session keep playing.
@@ -133,9 +149,12 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     follow_default_ =
         (device_id_ == kAudioObjectUnknown) && config_.input_channels == 0;
     if (device_id_ == kAudioObjectUnknown) {
-        device_id_ = CoreAudioSystem::get_default_device(false);
+        // An input-only open with no pinned device resolves the default INPUT
+        // device; every other configuration resolves the default output.
+        device_id_ = CoreAudioSystem::get_default_device(input_only);
         if (device_id_ == kAudioObjectUnknown) {
-            runtime::log_error("CoreAudio: no default output device is available");
+            runtime::log_error("CoreAudio: no default {} device is available",
+                input_only ? "input" : "output");
             return false;
         }
     }
@@ -230,13 +249,21 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
 
     // Enable input on bus 1 if input channels are requested
     input_enabled_ = false;
-    if (config_.input_channels > 0) {
+    if (want_input) {
         UInt32 enable_input = 1;
         status = AudioUnitSetProperty(audio_unit_,
             kAudioOutputUnitProperty_EnableIO,
             kAudioUnitScope_Input, 1,
             &enable_input, sizeof(enable_input));
         if (status != noErr) {
+            if (input_only) {
+                // Output is also disabled, so a failed input-enable would leave a
+                // unit with no IO at all — fatal for an input-only open.
+                runtime::log_error("CoreAudio: could not enable input for input-only open ({})",
+                    static_cast<int>(status));
+                close();
+                return false;
+            }
             runtime::log_warn("CoreAudio: could not enable input ({})", static_cast<int>(status));
             // Continue without input — effects will receive silence
         } else {
@@ -244,7 +271,25 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         }
     }
 
-    // Set output stream format (bus 0, input scope = what we provide to the device)
+    // Disable output on bus 0 when no output channels are requested. AUHAL rejects
+    // a zero-channel output stream format (kAudioUnitErr_FormatNotSupported,
+    // -10868), so an input-only unit must turn output IO off rather than set a
+    // degenerate format. EnableIO must be set before AudioUnitInitialize.
+    if (!want_output) {
+        UInt32 disable_output = 0;
+        status = AudioUnitSetProperty(audio_unit_,
+            kAudioOutputUnitProperty_EnableIO,
+            kAudioUnitScope_Output, 0,
+            &disable_output, sizeof(disable_output));
+        if (status != noErr) {
+            runtime::log_error("CoreAudio: could not disable output IO ({})", static_cast<int>(status));
+            close();
+            return false;
+        }
+    }
+
+    // The non-interleaved 32-bit float PCM format shared by both buses; the
+    // per-bus channel count is stamped in below.
     AudioStreamBasicDescription stream_desc{};
     stream_desc.mSampleRate = config_.sample_rate;
     stream_desc.mFormatID = kAudioFormatLinearPCM;
@@ -255,14 +300,19 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     stream_desc.mBytesPerFrame = sizeof(float);
     stream_desc.mBytesPerPacket = sizeof(float);
 
-    status = AudioUnitSetProperty(audio_unit_,
-        kAudioUnitProperty_StreamFormat,
-        kAudioUnitScope_Input, 0,
-        &stream_desc, sizeof(stream_desc));
-    if (status != noErr) {
-        runtime::log_error("CoreAudio: could not set output stream format ({})", static_cast<int>(status));
-        close();
-        return false;
+    // Set output stream format (bus 0, input scope = what we provide to the device).
+    // Skipped entirely when output IO is disabled — AUHAL has no bus-0 output
+    // stream to configure in that case.
+    if (want_output) {
+        status = AudioUnitSetProperty(audio_unit_,
+            kAudioUnitProperty_StreamFormat,
+            kAudioUnitScope_Input, 0,
+            &stream_desc, sizeof(stream_desc));
+        if (status != noErr) {
+            runtime::log_error("CoreAudio: could not set output stream format ({})", static_cast<int>(status));
+            close();
+            return false;
+        }
     }
 
     // Set input stream format (bus 1, output scope = what we receive from the device)
@@ -275,6 +325,14 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
             kAudioUnitScope_Output, 1,
             &input_desc, sizeof(input_desc));
         if (status != noErr) {
+            if (input_only) {
+                // No output to fall back on — an input-only unit that cannot set
+                // its capture format has nothing left to deliver.
+                runtime::log_error("CoreAudio: could not set input stream format for input-only open ({})",
+                    static_cast<int>(status));
+                close();
+                return false;
+            }
             runtime::log_warn("CoreAudio: could not set input stream format ({})", static_cast<int>(status));
             input_enabled_ = false;
         }
@@ -313,17 +371,32 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         }
     }
 
-    // Set render callback
+    // Install the callback that drives the unit. With output enabled the device
+    // pulls from a render callback on bus 0 (which fills output and, if input is
+    // enabled, pulls bus 1 via AudioUnitRender). With output disabled bus 0 never
+    // fires, so an input-only unit is driven by an input callback that fires when
+    // captured frames are ready; that callback pulls bus 1 the same way and hands
+    // the caller an empty output view.
     AURenderCallbackStruct callback_struct{};
     callback_struct.inputProc = render_callback;
     callback_struct.inputProcRefCon = this;
 
+    const AudioUnitPropertyID callback_property = want_output
+        ? static_cast<AudioUnitPropertyID>(kAudioUnitProperty_SetRenderCallback)
+        : static_cast<AudioUnitPropertyID>(kAudioOutputUnitProperty_SetInputCallback);
+    // The render callback lives on bus 0's input scope; the input callback is a
+    // global unit property.
+    const AudioUnitScope callback_scope = want_output
+        ? kAudioUnitScope_Input
+        : kAudioUnitScope_Global;
+
     status = AudioUnitSetProperty(audio_unit_,
-        kAudioUnitProperty_SetRenderCallback,
-        kAudioUnitScope_Input, 0,
+        callback_property,
+        callback_scope, 0,
         &callback_struct, sizeof(callback_struct));
     if (status != noErr) {
-        runtime::log_error("CoreAudio: could not set render callback ({})", static_cast<int>(status));
+        runtime::log_error("CoreAudio: could not set {} callback ({})",
+            want_output ? "render" : "input", static_cast<int>(status));
         close();
         return false;
     }
@@ -381,9 +454,10 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     }
 
     is_open_ = true;
-    runtime::log_info("CoreAudio: opened device '{}' at {} Hz, buffer {}, input {}ch{}",
+    runtime::log_info("CoreAudio: opened device '{}' at {} Hz, buffer {}, input {}ch, output {}ch{}",
         info().name, config_.sample_rate, config_.buffer_size,
         input_enabled_ ? config_.input_channels : 0,
+        output_enabled_ ? config_.output_channels : 0,
         follow_default_ ? " (follows system default)" : "");
     return true;
 }
@@ -466,6 +540,7 @@ void CoreAudioDevice::close() {
     input_buffer_storage_.clear();
     input_ptrs_.clear();
     input_enabled_ = false;
+    output_enabled_ = true;
     is_open_ = false;
 }
 
@@ -531,18 +606,32 @@ OSStatus CoreAudioDevice::render_callback(
         }
     }
 
+    // An input-only unit is driven by an input callback: ioData is null (there is
+    // no output buffer to fill), and the callback receives an empty output view.
+    // A render-callback (output-enabled) unit always supplies ioData.
+    const bool has_output = (ioData != nullptr);
+
     if (!self->callback_) {
-        // Silence
-        for (UInt32 i = 0; i < ioData->mNumberBuffers; ++i) {
-            std::memset(ioData->mBuffers[i].mData, 0, ioData->mBuffers[i].mDataByteSize);
+        // Silence the output buffer when there is one; an input-only callback has
+        // nothing to zero.
+        if (has_output) {
+            for (UInt32 i = 0; i < ioData->mNumberBuffers; ++i) {
+                std::memset(ioData->mBuffers[i].mData, 0, ioData->mBuffers[i].mDataByteSize);
+            }
         }
         return noErr;
     }
 
-    // Build output buffer view from CoreAudio's buffer list
-    self->output_ptrs_.resize(ioData->mNumberBuffers);
-    for (UInt32 i = 0; i < ioData->mNumberBuffers; ++i) {
-        self->output_ptrs_[i] = static_cast<float*>(ioData->mBuffers[i].mData);
+    // Build output buffer view from CoreAudio's buffer list. Left empty (zero
+    // channels) for an input-only unit.
+    BufferView<float> output_view;
+    if (has_output) {
+        self->output_ptrs_.resize(ioData->mNumberBuffers);
+        for (UInt32 i = 0; i < ioData->mNumberBuffers; ++i) {
+            self->output_ptrs_[i] = static_cast<float*>(ioData->mBuffers[i].mData);
+        }
+        output_view = BufferView<float>(self->output_ptrs_.data(),
+            self->output_ptrs_.size(), inNumberFrames);
     }
 
     // Capture input from bus 1 if enabled
@@ -554,8 +643,12 @@ OSStatus CoreAudioDevice::render_callback(
             self->input_buffer_list_->mBuffers[c].mDataByteSize = inNumberFrames * sizeof(float);
         }
 
+        // Pull input with its own action-flags slot so flags written by the
+        // bus-1 input render never leak back into the bus-0 output render on the
+        // duplex path.
+        AudioUnitRenderActionFlags input_flags = 0;
         OSStatus input_status = AudioUnitRender(
-            self->audio_unit_, ioActionFlags, inTimeStamp,
+            self->audio_unit_, &input_flags, inTimeStamp,
             1,  // Bus 1 = input
             inNumberFrames,
             self->input_buffer_list_);
@@ -567,9 +660,6 @@ OSStatus CoreAudioDevice::render_callback(
         }
         // On error, input_view remains empty (silence) — don't crash
     }
-
-    BufferView<float> output_view(self->output_ptrs_.data(),
-        self->output_ptrs_.size(), inNumberFrames);
 
     CallbackContext ctx;
     ctx.sample_rate = self->config_.sample_rate;

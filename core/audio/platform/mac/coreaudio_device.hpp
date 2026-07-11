@@ -89,6 +89,9 @@ private:
     bool is_open_ = false;
     bool is_running_ = false;
     bool input_enabled_ = false;
+    // False for an input-only unit (output IO disabled, bus 0 render callback
+    // never fires); the render callback then hands the caller an empty output.
+    bool output_enabled_ = true;
     uint64_t sample_position_ = 0;
 
 #if defined(__APPLE__)
