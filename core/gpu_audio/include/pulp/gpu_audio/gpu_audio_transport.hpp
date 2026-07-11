@@ -119,7 +119,8 @@ private:
     uint32_t block_size_ = 0;
     uint32_t latency_blocks_ = 0;
     uint32_t ring_blocks_ = 0;
-    MissPolicy miss_policy_ = MissPolicy::PassthroughDry;
+    // Fails closed until prepare() copies the node's declared policy in.
+    MissPolicy miss_policy_ = MissPolicy::Silence;
     bool prepared_ = false;
 
     audio::PlanarAudioRingBuffer input_ring_;

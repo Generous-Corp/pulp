@@ -1,8 +1,9 @@
 # GPU audio runtime (developer guide)
 
 > Status: experimental, default-OFF. Requires a Skia/Dawn GPU build
-> (`-DPULP_ENABLE_GPU=ON`); every path has a CPU fallback so plugins keep
-> working on unsupported devices.
+> (`-DPULP_ENABLE_GPU=ON`). Most paths carry a CPU fallback so plugins keep
+> working on unsupported devices; the ones that cannot fall back say so and fail
+> to silence rather than to wrong audio.
 
 This is **not** "run your audio on the GPU." It's a runtime that lets a plugin
 selectively accelerate *computationally expensive* DSP on the GPU **while
@@ -20,7 +21,7 @@ later (reported to the host as plugin delay compensation). To make that pay off,
 batch lots of work together, keep intermediates GPU-resident, do **one** readback
 instead of many, and add predictable latency instead of blocking. Small/
 low-latency DSP stays on the CPU; the GPU does the coarse, heavy, batched,
-latency-tolerant work — and a CPU fallback always covers it.
+latency-tolerant work — with a CPU fallback wherever one is tractable.
 
 ## Honest tradeoffs (read this first)
 
@@ -43,22 +44,34 @@ to know before reaching for it:
    list below). We'd rather tell you that than sell you a GPU mode that
    regresses your plugin.
 
-3. **Compatibility is opt-out-safe: there is always a CPU fallback.** A common
-   disappointment with GPU audio is a plugin that won't even run on a given card.
-   Pulp's contract avoids that: **no path hard-requires a GPU.**
-   If the GPU is absent, unsupported, or fails to initialize, the node logs it
-   and runs its `signal::*` CPU reference — the plugin still loads and produces
-   correct audio, just unaccelerated. On a *miss* mid-stream (the worker didn't
-   finish in time) the transport's `CpuFallback` policy fills the block on the
-   CPU, seamlessly — no dropout. `capabilities().backend` tells you at runtime
+3. **Compatibility is opt-out-safe, and where it is not, it fails closed.** A
+   common disappointment with GPU audio is a plugin that won't even run on a
+   given card. Most Pulp paths avoid that with a `signal::*` CPU fallback.
+
+   Not all of them can. `GpuMultiConvolver` (many IRs batched into one GPU
+   submit) and Spectral Lab's cloud node have no tractable RT-safe CPU
+   equivalent, so they declare `supports_cpu_fallback = false` and emit silence
+   on a miss. That is deliberate: a bounded, obvious dropout beats plausible
+   wrong audio. Check the processor's descriptor rather than assuming a
+   fallback exists.
+
+   For a node that DOES declare one: if the GPU is absent, unsupported, or fails
+   to initialize, the node logs it and runs its `signal::*` CPU reference — the
+   plugin still loads and produces correct audio, just unaccelerated. On a *miss*
+   mid-stream (the worker didn't finish in time) the `CpuFallback` policy fills
+   the block on the CPU seamlessly — but only if that fallback is kept
+   continuously primed and latency-aligned (see `prime_fallback()` below); an
+   unprimed one substitutes a stale block with a torn history.
+   `capabilities().backend` tells you at runtime
    which backend you actually got ("Metal"/"D3D12"/"Vulkan"), and audio paths are
    only **validated on Apple Silicon / Metal** today (see the matrix below) —
    everything else is experimental-but-falls-back. We won't claim a card works
    until we've tested it.
 
 Bottom line: GPU audio here is a **latency-tolerant accelerator for heavy,
-batched, parallel DSP, with a guaranteed CPU fallback** — not a magic
-across-the-board speed-up, and never a hard GPU dependency.
+batched, parallel DSP** — not a magic across-the-board speed-up, and never a hard
+GPU dependency. Where a CPU fallback is tractable a node carries one; where it is
+not, the node says so and fails to silence rather than to wrong audio.
 
 ## What belongs on the GPU (and what doesn't)
 
@@ -107,8 +120,10 @@ at short IRs the CPU path is selected because it's faster there.
 ## Which GPUs / platforms
 
 GPU compute runs through the WebGPU layer (Dawn / wgpu-native), so it follows
-WebGPU's backends. Every path has a CPU fallback, so a plugin still works with no
-compatible GPU — it just runs the `signal::*` reference path.
+WebGPU's backends. Where a node declares a CPU fallback, a plugin still works
+with no compatible GPU — it just runs the `signal::*` reference path. Where it
+declares none (`supports_cpu_fallback = false`), a missed or unavailable GPU
+block comes out silent, never as wrong audio.
 
 | Platform | Backend | GPUs |
 |---|---|---|
@@ -154,8 +169,11 @@ worker (Layer 2) or offline.
 the transport with the node and `Config{ ring_blocks, run_worker_thread }`; the
 audio callback calls `process()` — it writes the input ring and reads the
 latency-delayed output, never blocking. On a miss the node's `MissPolicy`
-(silence / dry passthrough / CPU fallback) fills the block. Report
-`latency_samples()` to the host.
+fills the block — `Silence` by default (a bounded, obvious dropout), or
+`CpuFallback` if you have a fallback you keep primed and latency-aligned. **Report
+`latency_samples()` to the host**: the transport delays your output by
+`latency_blocks * block_size`, and a host that is not told leaves your track
+shifted late against every other track in the session.
 
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
@@ -201,8 +219,23 @@ public:
         d.output_channels = channels_;
         d.block_size = block_;
         d.sample_rate = sr_;
-        d.latency_blocks = 1;                              // fixed PDC the host gets
-        d.miss_policy = gpu_audio::MissPolicy::CpuFallback; // seamless if the worker is late
+        d.latency_blocks = 1;   // fixed PDC — you MUST report this (see below)
+
+        // Miss policy. Both fields default to failing CLOSED (Silence, no
+        // fallback): a missed block comes out silent. That is the right default —
+        // a dropout is obvious and bounded.
+        //
+        // Opt into CpuFallback only if you actually have a correct fallback. It
+        // is not enough to implement process_cpu_fallback(): a stateful fallback
+        // (a convolver, a filter) must ALSO be fed every block via prime_fallback()
+        // so its history is current and latency-aligned the moment it takes over.
+        // An unprimed fallback substitutes a stale block with a torn history.
+        //
+        // Do NOT use MissPolicy::PassthroughDry. The transport's output is delayed
+        // by latency_blocks, so substituting the dry sample for the CURRENT time
+        // jumps the stream forward by the whole latency for one block and back
+        // again — a timeline break, not an honest dropout.
+        d.miss_policy = gpu_audio::MissPolicy::CpuFallback;
         d.supports_cpu_fallback = true;
         return d;
     }
@@ -221,10 +254,19 @@ public:
         // ... call gpu_->fft_forward / convolve / matmul, write `out` ...
     }
 
+    // RT-safe: called on EVERY block (hit or miss), before the output-ring read,
+    // so a stateful fallback stays continuously fed and its substitute is a
+    // correct, latency-aligned continuation of the stream rather than a stale
+    // block with gaps in its history. Required whenever your fallback has state.
+    void prime_fallback(const audio::BufferView<const float>& in,
+                        uint32_t n) noexcept override {
+        // ... advance your signal::* CPU path by one block and stage its output ...
+    }
+
     // RT-safe: runs on the audio thread for a missed block. No alloc/lock/block.
     void process_cpu_fallback(const audio::BufferView<const float>& in,
                               audio::BufferView<float>& out, uint32_t n) noexcept override {
-        // ... your signal::* CPU path; the default is a dry passthrough ...
+        // ... emit the substitute prime_fallback() already computed for this slot ...
     }
 private:
     uint32_t channels_, block_, sr_;
@@ -236,17 +278,34 @@ class MyPlugin : public format::Processor {
     MyGpuNode node_{2, 256, 48000};
     gpu_audio::GpuAudioTransport transport_;
 
-    void prepare(const format::PrepareContext&) {
+    void prepare(const format::PrepareContext&) override {
         node_.prepare();
         transport_.prepare(&node_, {/*ring_blocks*/ 8, /*run_worker_thread*/ true});
-        // Report transport_.latency_samples() to the host for plugin-delay comp.
     }
+
+    // REPORT THE LATENCY. The transport delays your output by
+    // latency_blocks * block_size, and the host cannot know that unless you say
+    // so — it will leave your track shifted late against every other track in
+    // the session, and nothing will error. This override is not optional.
+    int latency_samples() const override { return transport_.latency_samples(); }
+
     void process(audio::BufferView<float>& out,
-                 const audio::BufferView<const float>& in, /*...*/) {
-        transport_.process(in, out, out.num_frames());  // writes input, reads delayed output — never blocks
+                 const audio::BufferView<const float>& in, /*...*/) override {
+        transport_.process(in, out, out.num_samples());  // writes input, reads delayed output — never blocks
     }
 };
 ```
+
+Prove that `latency_samples()` is honest rather than trusting it — the number is
+hand-maintained and drifts the moment the block size or `latency_blocks` changes:
+
+```bash
+pulp audio render --plugin MyPlugin.clap --out /tmp/o.wav --duration-ms 500 \
+    --input-signal noise --param <your-bypass-id>=1 --latency-report /tmp/lat.json
+```
+
+It exits nonzero if the reported latency does not match the delay actually in the
+audio. See [the CLI reference](../reference/cli.md#proving-reported-latency---latency-report).
 
 That is the entire contract: the audio thread only ever calls `transport_.process()`
 (lock-free), the GPU work happens on the worker a fixed number of blocks behind,
