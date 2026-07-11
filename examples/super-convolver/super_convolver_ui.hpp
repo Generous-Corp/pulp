@@ -260,11 +260,12 @@ private:
         for (int i = 0; i < 5; ++i) {
             Slider& sl = sliders_[static_cast<size_t>(i)];
             sl.cell = {controls_.x + i * cw, controls_.y, cw, controls_.height};
-            const float tw = std::min(16 * s, cw * 0.22f);
-            const float tx = sl.cell.x + (cw - tw) * 0.5f;
-            const float ty = sl.cell.y + label_h + pad;
-            const float th = sl.cell.height - label_h - value_h - 2 * pad;
-            sl.track = {tx, ty, tw, std::max(20.0f, th)};
+            (void)label_h; (void)value_h; (void)pad;
+            // Horizontal track: full cell width (minus padding), thin, vertically
+            // centered — the whole row of controls sits on one horizon.
+            const float hpad = 14 * s, th = 4 * s;
+            sl.track = {sl.cell.x + hpad, sl.cell.y + sl.cell.height * 0.54f,
+                        cw - 2 * hpad, th};
         }
         // Toggle column (the fifth): Engine on top, Bypass below.
         const float bw = std::min(cw - 20 * s, 120 * s);
@@ -479,40 +480,38 @@ private:
             const cv::Color tint = is_flow ? pal_.bypass_on : pal_.accent;  // Flow = amber hero
             const float cxm = sl.cell.x + sl.cell.width * 0.5f;
 
-            // Label (uppercase, tracked feel via smaller size).
+            // Label (above the track).
             canvas.set_fill_color(is_flow ? tint : pal_.text_dim);
             canvas.set_font("Inter", 10.0f * s);
-            centered_text(canvas, sl.label, cxm, sl.cell.y + 15 * s, 10.0f * s);
+            centered_text(canvas, sl.label, cxm, t.y - 11 * s, 10.0f * s);
 
             const float frac = value_frac(i);
-            const float handle_y = t.bottom() - frac * t.height;
-            const float tw = std::max(3.0f * s, t.width * 0.34f);  // thin track
-            const float tx = t.x + (t.width - tw) * 0.5f;
-            // Track + fill below the handle.
+            const float hx = t.x + frac * t.width;       // horizontal handle
+            const float hy = t.y + t.height * 0.5f;
+            // Track + fill to the LEFT of the handle.
             canvas.set_fill_color(cv::Color::rgba8(236, 240, 248, 30));
-            canvas.fill_rounded_rect(tx, t.y, tw, t.height, tw * 0.5f);
+            canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.height * 0.5f);
             canvas.set_fill_color(tint.with_alpha(0.65f));
-            canvas.fill_rounded_rect(tx, handle_y, tw, t.bottom() - handle_y, tw * 0.5f);
+            canvas.fill_rounded_rect(t.x, t.y, std::max(0.0f, hx - t.x), t.height, t.height * 0.5f);
             // Handle: a glowing ring (additive halo + dark core + tinted rim).
-            const float hx = t.x + t.width * 0.5f;
             canvas.set_blend_mode(cv::Canvas::BlendMode::lighter);
             canvas.set_fill_color(tint.with_alpha(active ? 0.5f : 0.28f));
-            canvas.fill_circle(hx, handle_y, (active ? 12.0f : 9.0f) * s);
+            canvas.fill_circle(hx, hy, (active ? 12.0f : 9.0f) * s);
             canvas.set_blend_mode(cv::Canvas::BlendMode::normal);
             canvas.set_fill_color(cv::Color::rgba8(12, 15, 22));
-            canvas.fill_circle(hx, handle_y, 6.0f * s);
+            canvas.fill_circle(hx, hy, 6.0f * s);
             canvas.set_stroke_color(tint);
             canvas.set_line_width(2.0f);
-            canvas.stroke_circle(hx, handle_y, 6.0f * s);
+            canvas.stroke_circle(hx, hy, 6.0f * s);
 
-            // Value readout.
+            // Value readout (below the track).
             char buf[40];
             std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
                           static_cast<double>(slider_value(i)),
                           sl.unit[0] ? " " : "", sl.unit);
             canvas.set_fill_color(is_flow ? tint : pal_.text);
-            canvas.set_font("Inter", 12.5f * s);
-            centered_text(canvas, buf, cxm, sl.cell.bottom() - 8 * s, 12.5f * s);
+            canvas.set_font("Inter", 12.0f * s);
+            centered_text(canvas, buf, cxm, t.y + 22 * s, 12.0f * s);
         }
 
         // Engine chip (CPU / GPU) — pill, lit when GPU requested.
@@ -579,7 +578,7 @@ private:
     void apply_slider(vw::Point p) {
         const Slider& sl = sliders_[static_cast<size_t>(active_slider_)];
         const auto& t = sl.track;
-        const float frac = std::clamp((t.bottom() - p.y) / t.height, 0.0f, 1.0f);
+        const float frac = std::clamp((p.x - t.x) / t.width, 0.0f, 1.0f);
         float v = sl.lo + frac * (sl.hi - sl.lo);
         if (sl.snap_int) v = std::round(v);   // Rooms is a whole-step control
         edit_.set(sl.id, v);
