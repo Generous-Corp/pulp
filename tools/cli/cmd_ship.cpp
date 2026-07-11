@@ -443,12 +443,14 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
-        // Item 7.5: per-artifact packaging on macOS. When the user
-        // passes neither flag we use the historical default — `.pkg`
-        // for every plugin bundle, which is right for AU/VST3/CLAP
-        // under `~/Library/Audio/Plug-Ins/`. `--dmg` flips standalone
-        // apps to disk images. `--pkg` is explicit form of the default.
-        bool want_pkg = false, want_dmg = false;
+        // macOS packaging. DEFAULT: one component-selectable installer — a single
+        // signed `.pkg` whose "Customize" pane lets the user install only the
+        // formats they want (AU/VST3/CLAP/Standalone, all pre-checked). This is
+        // how pro audio installers behave; users should never be forced to
+        // install every format. Overrides: `--separate` emits a per-format `.pkg`
+        // each (legacy), `--dmg` wraps each bundle as a disk image. `--pkg` is the
+        // explicit form of the default.
+        bool want_pkg = false, want_dmg = false, want_separate = false;
 
         // Read version from CMakeLists.txt project(VERSION), falling back to SDK version
         auto cmake_ver = read_project_cmake_version(root);
@@ -483,6 +485,7 @@ int cmd_ship(const std::vector<std::string>& args) {
             else if (args[i] == "--per-user") per_user = true;
             else if (args[i] == "--pkg") want_pkg = true;
             else if (args[i] == "--dmg") want_dmg = true;
+            else if (args[i] == "--separate") want_separate = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
             else return unknown_ship_arg(sub, args[i]);
         }
@@ -703,20 +706,27 @@ int cmd_ship(const std::vector<std::string>& args) {
                                          "signing.apple", "installer_identity");
 
 #ifdef __APPLE__
-        // Standalone `.app` bundles → `.dmg` by default (or when --dmg).
+        // Components collected for the DEFAULT single, component-selectable
+        // installer (a "Customize" pane lets the user pick formats).
+        std::vector<pulp::ship::InstallComponent> combined;
+        std::string product_name;
+
+        // Standalone `.app`: a choice in the combined installer (→ /Applications),
+        // or its own `.dmg` when --dmg.
         auto standalone_dir = build_dir / "Standalone";
         if (fs::exists(standalone_dir)) {
             for (auto& entry : fs::directory_iterator(standalone_dir)) {
                 if (entry.path().extension().string() != ".app") continue;
                 auto name = entry.path().stem().string();
-                auto dmg_name = name + "-" + version + ".dmg";
-                auto dmg_path = artifacts / dmg_name;
-                std::cout << "Packaging " << name << " (Standalone .app → .dmg)...\n";
-                if (pulp::ship::create_dmg(entry.path().string(),
-                                           dmg_path.string(), name)) {
-                    ++dmg_count;
+                product_name = name;
+                if (want_dmg) {
+                    auto dmg_path = artifacts / (name + "-" + version + ".dmg");
+                    std::cout << "Packaging " << name << " (Standalone .app → .dmg)...\n";
+                    if (pulp::ship::create_dmg(entry.path().string(), dmg_path.string(), name))
+                        ++dmg_count;
+                    else std::cerr << "  FAILED to create .dmg for " << name << "\n";
                 } else {
-                    std::cerr << "  FAILED to create .dmg for " << name << "\n";
+                    combined.push_back({entry.path().string(), "/Applications", "Standalone App"});
                 }
             }
         }
@@ -753,15 +763,21 @@ int cmd_ship(const std::vector<std::string>& args) {
                 }
 #endif
 
-                auto pkg_name = name + "-" + dir_name + "-" + version + ".pkg";
-                auto pkg_path = artifacts / pkg_name;
-
+                product_name = name;
                 std::string install_loc = "/Library/Audio/Plug-Ins/";
-                if (ext == ".vst3") install_loc += "VST3/";
-                else if (ext == ".clap") install_loc += "CLAP/";
-                else install_loc = pulp::runtime::get_env("HOME").value_or("~")
-                                 + "/Library/Audio/Plug-Ins/Components/";
+                std::string title = dir_name;
+                if (ext == ".vst3") { install_loc += "VST3"; title = "VST3"; }
+                else if (ext == ".clap") { install_loc += "CLAP"; title = "CLAP"; }
+                else { install_loc += "Components"; title = "Audio Unit (AU)"; }
 
+                if (!want_separate) {
+                    // DEFAULT: collect as one toggleable choice in the combined,
+                    // component-selectable installer built after this loop.
+                    combined.push_back({entry.path().string(), install_loc, title});
+                    continue;
+                }
+                // --separate (legacy): one signed `.pkg` per format.
+                auto pkg_path = artifacts / (name + "-" + dir_name + "-" + version + ".pkg");
                 std::cout << "Packaging " << name << " (" << dir_name << " → .pkg"
                           << (installer_identity.empty() ? "" : ", signed") << ")...\n";
                 std::string cmd = "pkgbuild --component \"" + entry.path().string() + "\""
@@ -774,6 +790,19 @@ int cmd_ship(const std::vector<std::string>& args) {
                 if (run(cmd) == 0) ++pkg_count;
                 else std::cerr << "  FAILED\n";
             }
+        }
+
+        // DEFAULT: one component-selectable installer (Customize pane) with every
+        // built format as a pre-checked, user-toggleable choice.
+        if (!combined.empty() && !product_name.empty()) {
+            auto pkg_path = artifacts / (product_name + "-" + version + ".pkg");
+            std::cout << "Packaging " << product_name << " (component-selectable installer, "
+                      << combined.size() << " formats"
+                      << (installer_identity.empty() ? "" : ", signed") << ")...\n";
+            if (pulp::ship::create_combined_pkg(combined, pkg_path.string(),
+                    "com.pulp." + product_name, version, installer_identity))
+                ++pkg_count;
+            else std::cerr << "  FAILED to create combined installer\n";
         }
         std::cout << "Created " << pkg_count << " .pkg and " << dmg_count
                   << " .dmg artifacts in " << artifacts.string() << "\n";

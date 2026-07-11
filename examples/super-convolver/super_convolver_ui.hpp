@@ -523,12 +523,19 @@ private:
         for (char ch : t) {
             const char one[2] = {ch, 0};
             canvas.fill_text(one, x, baseline);
-            // Rough per-glyph advance (uppercase Inter) so tracking reads even.
-            float w = 0.60f;
-            if (ch == 'I' || ch == 'J') w = 0.34f;
-            else if (ch == 'M' || ch == 'W') w = 0.86f;
-            else if (ch == 'L' || ch == 'C' || ch == 'S' || ch == 'E' || ch == 'F') w = 0.55f;
-            else if (ch == ' ') w = 0.40f;
+            // Per-glyph advance (uppercase Inter, em) so tracking reads even.
+            float w;
+            switch (ch) {
+                case 'I': case 'J': w = 0.30f; break;
+                case 'L': w = 0.52f; break;
+                case 'S': case 'E': case 'F': case 'P': case 'T': case 'Z': w = 0.60f; break;
+                case 'R': case 'B': case 'K': case 'V': case 'A': case 'X': case 'Y': w = 0.66f; break;
+                case 'C': case 'D': case 'H': case 'N': case 'U': case 'O':
+                case 'Q': case 'G': w = 0.73f; break;
+                case 'M': case 'W': w = 0.88f; break;
+                case ' ': w = 0.40f; break;
+                default:  w = 0.64f; break;
+            }
             x += px * w + gap;
         }
         return x;  // end x
@@ -538,12 +545,16 @@ private:
         const float s = scale();
         const auto& c = controls_;
         // No cell — the sliders sit directly on the field (concept style). A soft
-        // dark fade at the bottom keeps labels legible over bright tracers.
-        for (int g = 0; g < 7; ++g) {
-            const float gy = c.y - 24 * s + (c.height + 24 * s) * (g / 7.0f);
-            const float gh = (c.height + 24 * s) / 7.0f + 1.0f;
-            canvas.set_fill_color(cv::Color::rgba8(5, 6, 9, static_cast<std::uint8_t>(14 + g * 22)));
-            canvas.fill_rect(c.x, gy, c.width, gh);
+        // linear fade at the bottom keeps labels legible over bright modes without
+        // the banding a stepped fill would show (esp. in Field mode).
+        {
+            const float top = c.y - 26 * s, bot = c.bottom();
+            const cv::Color gcols[2] = {cv::Color::rgba8(5, 6, 9, 0),
+                                        cv::Color::rgba8(4, 5, 8, 224)};
+            const float gpos[2] = {0.0f, 1.0f};
+            canvas.set_fill_gradient_linear(c.x, top, c.x, bot, gcols, gpos, 2);
+            canvas.fill_rect(c.x, top, c.width, bot - top);
+            canvas.set_fill_color(cv::Color::rgba8(0, 0, 0, 0));  // clears the gradient
         }
 
         for (int i = 0; i < 5; ++i) {
@@ -681,7 +692,7 @@ private:
         {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
         {kSize,  "Size",   0.05f, 4.0f,  2, "s"},
         {kGain,  "Gain",  -24.0f, 24.0f, 1, "dB"},
-        {kRooms, "Rooms",  1.0f, 256.0f, 0, "", true},
+        {kRooms, "Rooms",  1.0f, 128.0f, 0, "", true},
         {kFlow,  "Flow",   0.0f, 100.0f, 0, "%"},
     }};
     std::array<float, kSpectrumBins> spec_display_{};

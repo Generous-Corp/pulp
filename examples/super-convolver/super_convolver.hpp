@@ -190,7 +190,7 @@ public:
         // CPU (which would need Rooms× independent convolvers). Rooms=1 keeps the
         // single-IR GPU path. No effect when Engine=CPU.
         store.add_parameter({.id = kRooms, .name = "Rooms", .unit = "",
-                             .range = {1.0f, 256.0f, 16.0f, 1.0f}});
+                             .range = {1.0f, 128.0f, 16.0f, 1.0f}});
         // Flow: 0 = static rooms (an ordinary reverb); >0 makes each room's pan
         // drift on its own rate per block — the batch becomes a MOVING field, the
         // irreducible time-varying case where the GPU wins. GPU multi-room only;
