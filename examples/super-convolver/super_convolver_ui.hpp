@@ -20,6 +20,7 @@
 // the audio thread's per-block parameter echo.
 
 #include "super_convolver.hpp"
+#include "field_renderer.hpp"
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
@@ -98,8 +99,22 @@ public:
         const float W = local_bounds().width, H = local_bounds().height;
         const float s = scale();
 
-        canvas.set_fill_color(pal_.bg);
+        // Deep ground for the field to glow against.
+        canvas.set_fill_color(cv::Color::rgba8(7, 9, 14));
         canvas.fill_rect(0, 0, W, H);
+
+        // The living acoustic field — the plugin's hero, drawn as the backdrop.
+        // Header, status, and controls float on top. Emitter count = Rooms
+        // (capped for a smooth 60fps), motion = Flow, brightness = live energy.
+        read_spectrum();
+        field_time_ += 1.0 / 60.0;
+        const float field_flow = std::clamp(
+            static_cast<float>(store_.get_value(kFlow)) * 0.01f, 0.0f, 1.0f);
+        const int field_density = std::min(96,
+            std::max(1, static_cast<int>(std::lround(store_.get_value(kRooms)))));
+        pulp::superconvolver::draw_acoustic_field(
+            canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy());
+        canvas.set_blend_mode(cv::Canvas::BlendMode::normal);  // ensure chrome is not additive
 
         canvas.set_fill_color(pal_.text);
         canvas.set_font("Inter", 21.0f * s);
@@ -138,12 +153,9 @@ public:
                          20 * s, 50 * s);
 
         paint_load_ir(canvas);
-        read_spectrum();
-        paint_ir(canvas);
-        paint_spectrum(canvas);
         paint_controls(canvas);
 
-        request_repaint();  // self-driven loop for the live panels
+        request_repaint();  // self-driven loop for the live field
     }
 
     void on_mouse_event(const vw::MouseEvent& e) override {
@@ -263,6 +275,12 @@ private:
         const int idx = std::clamp(static_cast<int>(frac * (kSpectrumBins - 1)),
                                    0, kSpectrumBins - 1);
         return spec_display_[static_cast<size_t>(idx)];
+    }
+    // Overall live level (a few bands averaged) → the field's brightness/swell.
+    float overall_energy() const {
+        float e = 0.0f; int n = 0;
+        for (float f = 0.08f; f < 0.95f; f += 0.13f) { e += spectrum_energy_at(f); ++n; }
+        return n ? std::clamp(e / static_cast<float>(n), 0.0f, 1.0f) : 0.0f;
     }
 
     // ── Load-IR button + current source name (header) ──
@@ -565,6 +583,7 @@ private:
     int active_slider_ = -1;
     bool pointer_down_ = false;
     bool layout_dirty_ = true;
+    double field_time_ = 0.0;   // advances per repaint → the field's animation clock
 };
 
 } // namespace pulp::examples
