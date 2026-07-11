@@ -11,6 +11,10 @@ name: Versioning & Skill-Sync
 on:
   pull_request:
     branches: [main, develop]
+  # Run the required `Enforce version & skill sync` gate on queued merge groups
+  # so a merge queue on `main` can land PRs. On merge_group the diff base
+  # resolves to origin/main (see the "Resolve diff base" step).
+  merge_group:
   workflow_dispatch:
     inputs:
       runner_provider:
