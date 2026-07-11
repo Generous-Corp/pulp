@@ -45,14 +45,32 @@ bool GpuMultiConvolver::prepare() {
     carry_l_.assign(fft_size_, 0.0f);
     carry_r_.assign(fft_size_, 0.0f);
 
-    // Constant-power pan: spread the rooms evenly across the stereo field, scaled
-    // by 1/sqrt(num_ir) so summing decorrelated rooms keeps a sane level.
+    // Constant-power pan, normalized so the DECORRELATED room aggregate is
+    // unity-RMS PER CHANNEL — i.e. a unity-RMS mono drive comes out unity-RMS on
+    // each output channel, level-matching the single-IR path (and so the CPU
+    // per-channel engine) on a mono/correlated drive. The rooms are phase-
+    // decorrelated, so each output channel's power is the incoherent sum
+    //   E[out_L^2] = (sum_k cos^2 theta_k) * pan_norm^2 * E[drive^2].
+    // The azimuths spread evenly on [0, pi/2], so by the symmetry
+    // theta_{N-1-k} = pi/2 - theta_k we have sum cos^2 = sum sin^2 = N/2 exactly.
+    // Setting pan_norm = sqrt(2/N) therefore makes (sum cos^2) * pan_norm^2 = 1,
+    // i.e. unity per-channel aggregate. The earlier 1/sqrt(N) left the aggregate
+    // at sqrt(1/2) (~-3 dB), which is exactly the "GPU is quieter than CPU" jump
+    // the user heard when toggling Engine with the default 16-room field. This is
+    // +3 dB vs 1/sqrt(N); constant power (pan_l^2 + pan_r^2 == pan_norm^2) still
+    // holds every instant, so Flow's moving field never pumps. Peak headroom is
+    // preserved by the IRs' 0 dB peak-response normalization (see
+    // normalize_peak_response): a full-scale tone still cannot clip because no
+    // single room exceeds unity and the decorrelated rooms do not sum coherently.
+    // A decorrelated stereo drive is still ~3 dB lower than the CPU per-channel
+    // engine — that is the standard behavior of a mono reverb send (0.5*(L+R)
+    // folds decorrelated content by 3 dB), not a bug the pan gain should mask.
     pan_l_.assign(num_ir_, 0.0f);
     pan_r_.assign(num_ir_, 0.0f);
     base_theta_.assign(num_ir_, 0.0f);
     pan_l_live_.assign(num_ir_, 0.0f);
     pan_r_live_.assign(num_ir_, 0.0f);
-    pan_norm_ = 1.0f / std::sqrt(static_cast<float>(num_ir_));
+    pan_norm_ = std::sqrt(2.0f / static_cast<float>(num_ir_));
     block_counter_ = 0;
     for (uint32_t k = 0; k < num_ir_; ++k) {
         const float theta = flow_base_azimuth(k, num_ir_);  // 0..pi/2, even spread

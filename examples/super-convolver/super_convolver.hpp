@@ -167,6 +167,36 @@ inline std::vector<float> make_reverb_ir(std::size_t length, std::uint32_t seed 
     return ir;
 }
 
+/// Window a loaded IR down to `target_len` samples with a short raised-cosine
+/// fade-out over the last `fade_len` samples. This is what makes the Size knob
+/// audibly do something with a LOADED file IR: shortening Size truncates the
+/// loaded space's tail (shorter reverb) with a smooth fade so the cut never
+/// clicks. A truncation with NO fade would leave a hard step at the cut sample
+/// — an audible click on every tail — so the fade is not cosmetic. We do NOT
+/// time-stretch (that would shift pitch); this is a pure length window.
+///
+/// If the IR is already ≤ target_len it is returned UNCHANGED — a real recorded
+/// space is never zero-pad-extended into silence, so a Size longer than the file
+/// is a no-op (the file is its own natural length). After a real cut the result
+/// is re-normalized to 0 dB peak response so a shortened IR keeps the exact same
+/// clip headroom as every other Size (see normalize_peak_response). Off-thread
+/// only (one FFT in the normalize); never call from the audio thread.
+inline std::vector<float> window_ir_to_length(const std::vector<float>& ir,
+                                              std::size_t target_len,
+                                              std::size_t fade_len) {
+    if (target_len == 0 || ir.size() <= target_len) return ir;
+    std::vector<float> out(ir.begin(), ir.begin() + static_cast<std::ptrdiff_t>(target_len));
+    const std::size_t fade = fade_len < target_len ? fade_len : target_len;
+    // Raised cosine from 1 (start of the fade) down to 0 (last sample).
+    for (std::size_t i = 0; i < fade; ++i) {
+        const float x = static_cast<float>(i) / static_cast<float>(fade);
+        const float w = 0.5f * (1.0f + std::cos(3.14159265f * x));
+        out[target_len - fade + i] *= w;
+    }
+    normalize_peak_response(out, 1.0f);
+    return out;
+}
+
 class SuperConvolverProcessor : public format::Processor {
 public:
     // Fixed convolver block. Independent of the host's block size; the
@@ -362,6 +392,11 @@ public:
             while (swapper_[ch].try_consume()) { /* freed here, off the audio thread */ }
         }
         wet_.assign(kInternalBlock, 0.0f);
+
+        // Drop any decoded-file cache from a previous prepare — it was resampled
+        // to the OLD session rate, so a re-prepare must re-decode at ctx.sample_rate.
+        worker_file_raw_.clear();
+        worker_file_raw_gen_ = 0;
 
         rebuild_ir_inline(current_size());   // first IR loaded synchronously (CPU)
 
@@ -933,39 +968,66 @@ private:
     }
 
     // True when the base IR must be rebuilt: the loaded-file generation changed,
-    // or (synthetic fallback only) the Size knob moved. Worker-thread only.
+    // or the Size knob moved. Size governs the synthetic IR's length AND (via
+    // window_ir_to_length) truncates a loaded file's tail, so a Size change must
+    // rebuild in BOTH cases — the earlier `!worker_has_file_` guard is exactly
+    // why the Size knob felt dead once a file IR was loaded. Worker-thread only.
     bool base_needs_rebuild(std::uint32_t want_gen, float want_size) const {
         if (want_gen != worker_base_gen_) return true;
-        if (!worker_has_file_ && want_size > 0.0f && want_size != worker_base_size_)
-            return true;
+        if (want_size > 0.0f && want_size != worker_base_size_) return true;
         return false;
     }
 
     // Produce the base IR for the current source. With a readable IR path set the
-    // base is the loaded file (summed to mono, resampled to the session SR,
-    // unit-energy normalized); otherwise it is the synthetic reverb at `seconds`.
-    // Sets worker_has_file_. Worker / prepare thread only (file IO + alloc).
+    // base is the loaded file (summed to mono, resampled to the session SR),
+    // WINDOWED by the Size knob to `seconds` with a short fade tail so Size stays
+    // live for loaded files too (see window_ir_to_length); otherwise it is the
+    // synthetic reverb at `seconds`. The full decoded file is cached in
+    // worker_file_raw_ keyed by ir_path_gen_, so a Size change only re-windows
+    // (cheap) — the expensive decode/resample runs once per file, not per Size
+    // step. Sets worker_has_file_. Worker / prepare thread only (file IO + alloc).
     std::vector<float> build_base_ir(float seconds) {
         const std::string path = ir_path();
         if (!path.empty()) {
-            // Any exception during decode/resample (e.g. bad_alloc on a huge or
-            // corrupt file) must never escape onto the worker or prepare thread —
-            // fall back to the synthetic IR rather than drop audio or crash.
-            std::optional<std::vector<float>> loaded;
-            try {
-                loaded = load_ir_file(path);
-            } catch (...) {
-                loaded = std::nullopt;
+            const std::uint32_t gen = ir_path_gen_.load(std::memory_order_acquire);
+            if (worker_file_raw_.empty() || worker_file_raw_gen_ != gen) {
+                // Any exception during decode/resample (e.g. bad_alloc on a huge
+                // or corrupt file) must never escape onto the worker or prepare
+                // thread — fall back to the synthetic IR rather than crash.
+                std::optional<std::vector<float>> loaded;
+                try {
+                    loaded = load_ir_file(path);
+                } catch (...) {
+                    loaded = std::nullopt;
+                }
+                if (loaded && !loaded->empty()) {
+                    worker_file_raw_ = std::move(*loaded);
+                    worker_file_raw_gen_ = gen;
+                } else {
+                    worker_file_raw_.clear();
+                    runtime::log_warn(
+                        "SuperConvolver: IR file '{}' is unreadable, too large, or "
+                        "empty; falling back to the built-in synthetic IR.", path);
+                }
             }
-            if (loaded && !loaded->empty()) {
+            if (!worker_file_raw_.empty()) {
                 worker_has_file_ = true;
-                return std::move(*loaded);
+                // Size truncates the loaded space's tail (bounded by kMaxIrSeconds,
+                // which the loader already enforces on decode). A ~30 ms fade tail
+                // (capped to the target) smooths the cut. If the file is shorter
+                // than Size the window is a no-op (never zero-pad-extended).
+                std::size_t target = ir_length_for(seconds);
+                const std::size_t cap =
+                    static_cast<std::size_t>(kMaxIrSeconds * sample_rate_);
+                if (target > cap) target = cap;
+                const std::size_t fade =
+                    static_cast<std::size_t>(0.030 * sample_rate_);
+                return window_ir_to_length(worker_file_raw_, target, fade);
             }
-            runtime::log_warn(
-                "SuperConvolver: IR file '{}' is unreadable, too large, or empty; "
-                "falling back to the built-in synthetic IR.", path);
         }
         worker_has_file_ = false;
+        worker_file_raw_.clear();
+        worker_file_raw_gen_ = 0;
         return make_reverb_ir(ir_length_for(seconds));
     }
 
@@ -1230,6 +1292,11 @@ private:
     float worker_base_size_ = -1.0f;
     bool worker_has_file_ = false;
     bool gpu_base_dirty_ = false;
+    // Full decoded loaded file (mono, session SR), cached so a Size change only
+    // re-windows instead of re-decoding. Keyed by the ir_path generation that
+    // produced it; a new file (generation moves) forces a fresh decode.
+    std::vector<float> worker_file_raw_;
+    std::uint32_t worker_file_raw_gen_ = 0;
 
     // UI display snapshot (UI + worker thread only; never audio thread).
     mutable std::mutex ir_display_mutex_;
