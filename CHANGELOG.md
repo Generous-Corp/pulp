@@ -8,6 +8,23 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06500"></a>
+## [0.650.0] - 2026-07-11
+
+- fix/skia canvas stroke fill path ([#5814](https://github.com/danielraffel/pulp/pull/5814))
+- feature/config doc gate ([#5953](https://github.com/danielraffel/pulp/pull/5953))
+- feature/p0 governance declare ([#5952](https://github.com/danielraffel/pulp/pull/5952))
+- refactor(signal): SF-2 unify SIGNAL-side crossfades + fix live_kernel law ([#5913](https://github.com/danielraffel/pulp/pull/5913))
+- web(wam): make WAM planar end-to-end and dedup the entry ABI (SF-3) ([#5958](https://github.com/danielraffel/pulp/pull/5958))
+- fix(signal): gate ladder fast-tanh behind a flag, default to exact std::tanh ([#5928](https://github.com/danielraffel/pulp/pull/5928))
+- format: remove adapter render-thread hard edges (MF-8 + PF-3) ([#5911](https://github.com/danielraffel/pulp/pull/5911))
+- fix/release gate merge subject 5939 ([#5971](https://github.com/danielraffel/pulp/pull/5971))
+- feature/intel vm tooling ([#5994](https://github.com/danielraffel/pulp/pull/5994))
+- perf(gpu-audio): O(n) sliding-window spectral smear on the CPU engine ([#5927](https://github.com/danielraffel/pulp/pull/5927))
+- fix(gpu-audio): correct GpuConvolver CPU fallback (MF-4) ([#5930](https://github.com/danielraffel/pulp/pull/5930))
+- core/format f64: advertise CLAP 64-bit ports, hoist boundary conversion off the native path ([#5895](https://github.com/danielraffel/pulp/pull/5895))
+- test(gpu): cover WaveNet 33<=C<=64 multi-channel-per-lane + B=1; fix roofline serialMAC column ([#5967](https://github.com/danielraffel/pulp/pull/5967))
+
 <a id="v06490"></a>
 ## [0.649.0] - 2026-07-11
 
@@ -6241,6 +6258,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.650.0]: https://github.com/danielraffel/pulp/releases/tag/v0.650.0
 [0.649.0]: https://github.com/danielraffel/pulp/releases/tag/v0.649.0
 [0.647.0]: https://github.com/danielraffel/pulp/releases/tag/v0.647.0
 [0.645.0]: https://github.com/danielraffel/pulp/releases/tag/v0.645.0
