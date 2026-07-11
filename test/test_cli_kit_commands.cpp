@@ -2325,8 +2325,16 @@ TEST_CASE("pulp kit remove deletes only lock-recorded owned files",
                      "--project", project.path.string()}) == 2);
     REQUIRE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
 
-    REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit",
-                     "--project", project.path.string(), "--yes"}) == 0);
+    int remove_rc = 0;
+    const auto remove_out = capture_stdout_for([&] {
+        return cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit",
+                        "--project", project.path.string(), "--yes"});
+    }, remove_rc);
+    REQUIRE(remove_rc == 0);
+    // The OK line names what was removed (parity with `tool uninstall`).
+    REQUIRE(remove_out.find("Removed kit dev.pulp.fixtures.basic-ui-kit") != std::string::npos);
+    REQUIRE(remove_out.find("(removed ") != std::string::npos);
+    REQUIRE(remove_out.find("file") != std::string::npos);
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
     REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
