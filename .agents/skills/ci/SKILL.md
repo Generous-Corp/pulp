@@ -282,6 +282,16 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   in-worklet), and transferring an `ArrayBuffer` OUT of an AudioWorklet is
   unreliable (the receiver gets a detached buffer) — clone small payloads (state,
   sysex) instead, and never transfer a caller-owned buffer (it detaches theirs).
+- **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
+  in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
+  `tools/scripts/screenshot_sync_check.py` then diffs the manifest's `[trigger].paths`
+  and fails when a triggered target's committed PNG/OG image wasn't refreshed.
+  Wired identically to skill-sync: PostToolUse hint in
+  `hooks/scripts/cli-plugin-sync.sh`, pre-push report in `.githooks/pre-push`, and
+  authoritative CI step in `version-skill-check.yml`. Bypass a single commit with a
+  `Screenshot-Sync: skip target=<id|all> reason="..."` trailer. Pulp core itself is
+  NOT opted in (no manifest), so the gate no-ops here; it exists for downstream
+  plugin repos (GPU NAM, example plugins, Bendr) and the WCLAP/WAM OG images.
 - **Android native `.cxx` caches must be dependency-aware.** The Android workflow
   builds through Gradle's external native build, and `android/app/.cxx` can hold
   FetchContent checkouts under `_deps`. Do not cache `.cxx` under a Gradle-only
