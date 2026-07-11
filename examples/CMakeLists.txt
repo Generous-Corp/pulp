@@ -25,7 +25,9 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
-add_subdirectory(bitches-brew)
+# Bitches Brew (Silent Way-inspired control-voltage plug-in suite) lives in its
+# own repo and consumes Pulp as an SDK:
+# https://github.com/danielraffel/pulp-bitches-brew
 add_subdirectory(super-convolver)
 add_subdirectory(spectral-lab)
 # GPU NAM (Neural Amp Modeler player) lives in its own repo and consumes Pulp as
