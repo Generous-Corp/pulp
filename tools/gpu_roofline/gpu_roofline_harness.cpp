@@ -169,10 +169,18 @@ int main() {
             // B=64 — see the git history of this file / gpu_compute.cpp.)
             const uint32_t WG = 64u;
             const uint32_t wg = B;
-            const uint64_t busy = static_cast<uint64_t>(B) * std::min(Z, WG);
+            const uint32_t active_ch = std::min(Z, WG);  // channels worked in parallel
+            const uint64_t busy = static_cast<uint64_t>(B) * active_ch;
+            // serialMAC = the reduction ONE lane walks alone. Post-fix the conv is
+            // channel-parallel: active_ch lanes cooperate across the channel
+            // dimension, so a lane only walks its own channel(s)' K*C reduction, not
+            // the whole per-sample total. Dividing per_sample by the active channel
+            // count reports the real per-lane depth (pre-fix, one lane walked all
+            // per_sample MACs; the column overstated depth by this factor).
+            const double serial_mac = per_sample / static_cast<double>(active_ch);
             rows.push_back({std::string("wavenet ") + cfg.name, "B=" + std::to_string(B),
                             macs, ms, gmacs,
-                            occupancy_of(busy, wg, WG), wg, per_sample, 0});
+                            occupancy_of(busy, wg, WG), wg, serial_mac, 0});
         }
     }
 
