@@ -473,6 +473,19 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `release-dry-run.yml`, `sign-and-release.yml`, `release-cli-local.sh`, and
   checkout-backed SDK configure paths aligned when touching release CMake
   flags.
+- **`sign-and-release.yml` waits on `release-cli.yml` to create the release —
+  the wait must cover release-cli's FULL runtime.** Since the release split
+  (release-cli is the sole creator of the GitHub release; sign-and-release only
+  attaches `appcast.xml` on top), sign-and-release polls `gh release view "$TAG"`
+  until the release exists. release-cli creates it only after its whole chain
+  (`build-cli → smoke-cli → universal-arch-gate`), which includes a self-hosted
+  darwin-arm64 leg that can queue behind a busy runner — routinely far longer
+  than 10 minutes. A too-short poll loses that race on every tag and leaves the
+  published release without its Sparkle feed (the watchdog flags it as a broken
+  release). Keep the wait window generous (currently `150 * 20s = 50 min`); if
+  release-cli grows a slower leg, widen it rather than letting the appcast attach
+  silently time out. The SDK/CLI binaries are unaffected either way — they are
+  release-cli's output; only the appcast rides on sign-and-release.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push
