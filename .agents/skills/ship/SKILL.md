@@ -1069,6 +1069,13 @@ appears once the macOS sign/notarize leg is green too; a red sign-and-release le
 leaves the release a draft. See the `ci` skill's coordinator note for the full
 mechanism and debugging steps.
 
+Both macOS legs prefer `PULP_RELEASE_MACOS_RUNS_ON_JSON`. The signing leg then
+uses optional Namespace or GitHub-hosted `macos-15`; it deliberately does not
+fall back to the shared local PR pool because it imports a Developer ID private
+key. Do not route signing directly to the hosted pool while an isolated release
+runner is configured; that split can leave a complete 10-asset draft waiting
+hours for `appcast.xml`.
+
 `release-cli.yml` also owns the Release body: it prepends grouped Highlights
 from `tools/scripts/compose_release_notes.py` to GitHub's generated "What's
 Changed" / "Full Changelog" block, then appends the Install section. Do not route

@@ -11,6 +11,7 @@ name: Versioning & Skill-Sync
 on:
   pull_request:
     branches: [main, develop]
+    types: [opened, synchronize, reopened, edited]
   # Run the required `Enforce version & skill sync` gate on queued merge groups
   # so a merge queue on `main` can land PRs. On merge_group the diff base
   # resolves to origin/main (see the "Resolve diff base" step).
@@ -96,16 +97,20 @@ jobs:
               --mode=report
 
       - name: Version-bump check
-        # On pull_request events, ALSO require that fix:/feat: PR titles
-        # carry either a `chore: bump versions` commit or a top-level
-        # `Version-Bump: skip reason="..."` trailer. Structural fix for
+        # On pull_request events, ALSO require that fix:/feat: PR titles or
+        # live commit-derived signals carry either a `chore: bump versions`
+        # commit or a top-level `Version-Bump: skip reason="..."` trailer.
+        # Explicit reverts cancel their target signals; re-reverts restore them.
+        # Structural fix for
         # the 2026-04-30 incident (PR #1008 → issue #1009): a
         # user-facing fix merged without a bump and consumers were
-        # stranded on main because auto-release.yml had nothing to tag.
+        # stranded on main because auto-release.yml had nothing to tag. Commit
+        # subjects matter because GitHub may use a sole commit's subject as the
+        # squash title even when the editable PR title is plain language.
         #
         # The flag is additive — the per-surface verdict pipeline runs
-        # exactly as before. Skipped on workflow_dispatch (no PR title
-        # to inspect), so this only fires on real PR triggers.
+        # exactly as before. Skipped on workflow_dispatch, so this only fires
+        # on real PR triggers with a defined base/head range.
         env:
           GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
@@ -118,6 +123,24 @@ jobs:
               --config tools/scripts/versioning.json \
               --mode=report \
               $extra
+
+      - name: Report expected release tags
+        if: >-
+          always() &&
+          steps.base.outcome == 'success' &&
+          github.event_name == 'pull_request' &&
+          github.base_ref == 'main'
+        shell: bash
+        env:
+          GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/pr_release_tag_report.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --head HEAD \
+              --guard-head "${{ github.event.pull_request.head.sha || 'HEAD' }}" \
+              --pr-title "$GITHUB_PR_TITLE" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Compat-sync check (issue #1029)
         # Authoritative gate (Layer 3) for the compat-matrix sync
