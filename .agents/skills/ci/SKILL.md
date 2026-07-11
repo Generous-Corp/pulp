@@ -752,6 +752,31 @@ designed to fail under ON, so the lane excludes exactly that case (Catch2
 fully pass under ON. `runs-on` is a hard-coded `ubuntu-latest` — never route it
 to a self-hosted label or add it to branch protection.
 
+## Governance is declared, and mirrors LIVE state — not aspiration
+
+`.shipyard/config.toml` declares Pulp's branch-protection posture so
+`shipyard governance {diff,apply}` can reconcile it, and it is checked in
+alongside `.github/rulesets/main-protection.json`. Two hard rules:
+
+- **The declared required checks must match the LIVE GitHub ruleset, not what
+  we wish we enforced.** Live `main` requires exactly two contexts: `macos` and
+  `Enforce version & skill sync`. Both the `[governance]
+  required_status_checks` list in `.shipyard/config.toml` AND the
+  `required_status_checks` array in `main-protection.json` are pinned to that
+  two-context set. `[branch_protection."main"] require_strict_status = true`
+  mirrors the ruleset's `strict_required_status_checks_policy`. Before editing
+  either, run `shipyard governance diff` — a clean run prints
+  `OK main: no changes`; any other output means the checked-in intent has
+  drifted from live and you must reconcile (don't just re-declare).
+- **Never promote `linux`/`windows` into the required set.** They validate as
+  advisory GitHub-hosted lanes and deliberately do NOT gate merge. Making an
+  advisory lane blocking craters throughput — a saturated or flaky advisory
+  lane would wedge every merge — without adding signal. This is why the ruleset
+  was trimmed from four contexts to two: so nobody can "fix drift" by pushing a
+  config that flips the advisory lanes blocking. `test_ruleset_drift_config.py`
+  asserts the two-context required set; keep it and the two config surfaces in
+  lockstep.
+
 ## PR Review Thread Hygiene
 
 Before opening a follow-up PR or declaring a phase complete, sweep review

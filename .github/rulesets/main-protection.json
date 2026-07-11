@@ -12,16 +12,23 @@
     "",
     "Required-check contract (fast lane, blocks merge):",
     "  - macos   : macOS build+test leg of .github/workflows/build.yml",
-    "  - linux   : Linux (x64) build+test leg of .github/workflows/build.yml",
-    "  - windows : Windows (x64) build+test leg of .github/workflows/build.yml",
     "  - Enforce version & skill sync : .github/workflows/version-skill-check.yml",
     "",
-    "The three platform names are intended as *stable aliases* that survive",
-    "runner-provider swaps (github-hosted <-> namespace). The concrete job",
-    "names in build.yml today resolve to e.g. `macOS (ARM64) [namespace]`,",
-    "which is not a stable contract. Landing the alias layer is part of #462;",
-    "until then, the drift workflow should be run with an alias map that maps",
-    "alias -> current context so the diff stays meaningful.",
+    "ONLY these two contexts are required. This matches the LIVE branch",
+    "protection posture: the macOS leg is the single required build gate, and",
+    "Linux/Windows validate as advisory GitHub-hosted lanes that do NOT block",
+    "merge. Do NOT promote `linux` or `windows` into required_status_checks",
+    "without an explicit policy change — making the advisory lanes blocking",
+    "craters throughput (a saturated/flaky advisory lane would wedge every",
+    "merge) without adding real signal. Keep this in sync with the",
+    "[governance] table in .shipyard/config.toml.",
+    "",
+    "The macOS name is intended as a *stable alias* that survives runner-",
+    "provider swaps (github-hosted <-> namespace). The concrete job names in",
+    "build.yml today resolve to e.g. `macOS (ARM64) [namespace]`, which is not",
+    "a stable contract. Landing the alias layer is part of #462; until then,",
+    "the drift workflow should be run with an alias map that maps alias ->",
+    "current context so the diff stays meaningful.",
     "",
     "Advisory (slow lane, does NOT block merge) — tracked here for visibility",
     "and drift enforcement only. Do NOT move these into `required_status_checks`",
@@ -70,14 +77,6 @@
         "required_status_checks": [
           {
             "context": "macos",
-            "integration_id": null
-          },
-          {
-            "context": "linux",
-            "integration_id": null
-          },
-          {
-            "context": "windows",
             "integration_id": null
           },
           {
