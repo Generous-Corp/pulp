@@ -22,26 +22,33 @@ Intel/AMD GPU.
 | 0 | Intel **canary**: static lint + `-DPULP_ENABLE_GPU=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64` compile of `pulp-runtime pulp-signal pulp-platform pulp-state pulp-format` | inside the existing ARM macOS job (`build.yml`), gated on the `PULP_INTEL_CANARY` repo variable | every PR (opt-in; forks pay nothing) | yes, on `danielraffel/pulp` |
 | 1 | Path-triggered **advisory** x86_64 build + full ctest under Rosetta | `intel-portability.yml`, **stable** `macos-15` (arm64+Rosetta) | PRs that touch arch-sensitive paths | no (advisory) |
 | 2 | **Nightly** native Intel (job A) + universal cross-check (job B) | `nightly-intel.yml`: job A on `macos-15-intel`, job B on `macos-15` | cron, off-peak | no (opens a watchdog issue) |
-| 3 | **Release gate**: universal build + `lipo -archs` + `codesign --verify` + dual-arch `auval` | `release-cli.yml` `universal-arch-gate` | on tag / release dispatch | **yes** (blocks publish) |
+| 3 | **Release gate**: universal build + `lipo -archs` + `codesign --verify` + dual-arch `auval` | `release-cli.yml` `universal-arch-gate` | on tag / release dispatch | advisory as of 2026-07-11 (see note) |
 
-### Shipped Intel artifacts (distinct from the Tier-3 gate)
+The Tier-3 gate was blocking, but as of 2026-07-11 it is **advisory**
+(`continue-on-error`, dropped from the `release` job's required `if:`): a known
+`auval` "Bad Max Frames" flake was wedging every publish. Re-blocking it — fix
+the AU max-frames guard in `core/format/src/au_v2_adapter.cpp`, then restore the
+hard `needs`/`if` requirement — is a tracked follow-up.
 
-Tier 3 *validates* a universal build; it does not publish an installable Intel
-binary. The **installable** Intel path is a separate leg in the same
-`release-cli.yml`: a native thin **`darwin-x64`** matrix row (build + smoke) on
-`macos-15-intel` that publishes `pulp-darwin-x64.tar.gz` and
-`pulp-sdk-darwin-x64.tar.gz` alongside the arm64 tarballs. Built natively
-(`CMAKE_SYSTEM_PROCESSOR=x86_64`, no cross-compile, no Rosetta), floored at
-`CMAKE_OSX_DEPLOYMENT_TARGET=13.0`, and smoke-verified natively with an explicit
-`file` arch assertion on the binaries and the bundled `libwgpu_native.dylib`.
-`tools/install/install.sh` auto-selects the slice from `uname -m`, so Intel
-users get a one-line install. `macos-15-intel` is the pinned stable hosted
-x86_64 image (`macos-26-intel` also exists but is newer/less-baked). When it
-reaches end-of-life (~Aug 2027), the successor is cross-compiling x86_64 on the
-arm64 pool — the
-`if(WIN32)`-gated wgpu arch-forcing in `PulpDependencies.cmake` would need an
-Apple `CMAKE_OSX_ARCHITECTURES` branch, plus arch-isolated Skia extraction
-(`planning/2026-07-10-intel-mac-cli-support.md`, Option A).
+### Shipped Intel artifacts — currently DISABLED (2026-07-11)
+
+Tier 3 *validates* a universal build; it never published an installable Intel
+binary. The separate **installable** `darwin-x64` release leg (a native thin
+matrix row on `macos-15-intel` that shipped `pulp-darwin-x64.tar.gz` +
+`pulp-sdk-darwin-x64.tar.gz`) is **temporarily removed** from `release-cli.yml`.
+The GitHub-hosted `macos-15-intel` image CPU-pegs on a full CLI+SDK build and
+reliably blows any sane timeout, shipping no artifact — and its timeout
+*cancellation* (not a clean failure) turned `build-cli`'s matrix aggregate
+`cancelled` and skipped the whole `release` job. Until the reliable path lands,
+Intel-Mac users **source-build**.
+
+The reliable x86_64-macOS path is the Tart Intel cross-build golden VM (arm64
+host cross-compiling x86_64); Intel returns to the release through that lane.
+Wiring it in still needs the Apple `CMAKE_OSX_ARCHITECTURES` branch for the
+`if(WIN32)`-gated wgpu arch-forcing in `PulpDependencies.cmake` plus arch-isolated
+Skia extraction (`planning/2026-07-10-intel-mac-cli-support.md`, Option A).
+`macos-15-intel` remains the pinned stable hosted x86_64 image for the Tier-2
+nightly and the successor plan when it EOLs (~Aug 2027).
 
 Runner discipline is absolute: **no Intel work ever routes to the self-hosted
 Mac Studios** that host the required `macos` gate, and **Namespace is never

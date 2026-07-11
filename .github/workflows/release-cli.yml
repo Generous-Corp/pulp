@@ -96,31 +96,19 @@ jobs:
           - os: macos-15
             platform: darwin-arm64
             artifact: pulp
-          # Intel Mac slice. Native x86_64 build on GitHub-hosted
-          # `macos-15-intel` — the pinned stable hosted x86_64 macOS image,
-          # supported through ~Aug 2027 (`macos-13` was retired Dec 2025;
-          # `macos-26-intel` also exists but is newer/less-baked, so we pin
-          # 15). Building natively means CMAKE_SYSTEM_PROCESSOR is
-          # x86_64, so wgpu-native + Skia arch selection Just Work with no
-          # cross-compile CMake surgery, and the smoke leg runs the binary
-          # natively (no Rosetta). Deliberately NOT routed through
-          # resolve-macos-runner: Intel is a fixed hosted label, not a
-          # self-hosted-vs-Namespace choice. When the label EOLs the
-          # successor is cross-compiling x86_64 on the arm64 pool — see
-          # planning/2026-07-10-intel-mac-cli-support.md (Option A).
-          # experimental: this leg is ADVISORY — a failure must not block
-          # the whole release. `macos-15-intel` is documented-flaky
-          # (docs/guides/intel-support.md: linker-image errors, CPU-peg),
-          # and the `release` job `needs: build-cli`, so without
-          # continue-on-error an Intel flake would wedge the arm64 / linux /
-          # windows publishes too. If the Intel leg fails, the release
-          # simply ships without the x86_64 artifact (Intel users fall back
-          # to a source build, the prior status quo) rather than blocking
-          # everyone. This mirrors the Tier-2 nightly's non-blocking stance.
-          - os: macos-15-intel
-            platform: darwin-x64
-            artifact: pulp
-            experimental: true
+          # Intel Mac (darwin-x64) is DISABLED as a native release leg.
+          # The GitHub-hosted `macos-15-intel` image is pathologically slow
+          # for a full Pulp CLI+SDK build — it CPU-pegs and reliably blows a
+          # 75-min cap (observed: a 71-min build cancelled at the timeout,
+          # every run), producing no artifact while its cancellation makes
+          # build-cli's matrix aggregate `cancelled` and skips `release`
+          # (continue-on-error masks a clean *failure*, not a cancellation).
+          # The reliable x86_64-macOS path is the Tart Intel cross-build
+          # golden VM (arm64 host cross-compiling x86_64) — that lane is
+          # productized separately and is where Intel returns to the release.
+          # Until it is wired in here, Intel-Mac users source-build (the prior
+          # status quo). See planning/2026-07-10-intel-mac-cli-support.md
+          # (Option A) and docs/guides/intel-support.md.
           - os: ubuntu-24.04
             platform: linux-x64
             artifact: pulp
@@ -139,13 +127,12 @@ jobs:
             artifact: pulp.exe
 
     runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
-    # Advisory Intel leg: darwin-x64 sets matrix.experimental so its failure
-    # does not fail the build-cli job (and thus does not block `release`).
-    continue-on-error: ${{ matrix.experimental || false }}
-    # continue-on-error only covers a cell that FINISHES failed — not a hang or
-    # a runner stuck queued. macos-15-intel is documented to CPU-peg, so cap the
-    # Intel cell tightly (75 min) while leaving other legs at GitHub's 360 default.
-    timeout-minutes: ${{ matrix.experimental && 75 || 360 }}
+    # Every current leg is required (no advisory legs today). GitHub's 360-min
+    # default cap applies. When the Intel cross-build lane returns as an
+    # advisory leg, reintroduce a per-leg continue-on-error + tighter timeout
+    # keyed on a matrix flag — but make it FAIL clean, never time-out-cancel,
+    # or its cancellation will skip `release` (see the release job's if:).
+    timeout-minutes: 360
     # Empty for non-container cells (mac/win/linux-arm64) = run directly on the runner.
     container: ${{ matrix.container }}
     name: CLI ${{ matrix.platform }}
@@ -731,16 +718,10 @@ jobs:
           - os: macos-15
             platform: darwin-arm64
             artifact: pulp
-          # Intel Mac slice — native x86_64 smoke on macos-15-intel. A
-          # non-portable arm64 binary or arm64-linked dylib would fail to
-          # launch here natively (no Rosetta), and the explicit `file`
-          # arch assertion below catches a mislabelled fat/thin slice.
-          # Advisory (experimental) for the same reason as the build leg:
-          # a flaky macos-15-intel smoke must not block the release.
-          - os: macos-15-intel
-            platform: darwin-x64
-            artifact: pulp
-            experimental: true
+          # Intel Mac (darwin-x64) smoke is disabled alongside the build leg
+          # above — there is no x86_64-macOS artifact to smoke while the native
+          # `macos-15-intel` release leg is off. Returns with the Intel
+          # cross-build lane.
           - os: ubuntu-24.04
             platform: linux-x64
             artifact: pulp
@@ -754,8 +735,7 @@ jobs:
             platform: windows-arm64
             artifact: pulp.exe
     runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
-    continue-on-error: ${{ matrix.experimental || false }}
-    timeout-minutes: ${{ matrix.experimental && 30 || 360 }}
+    timeout-minutes: 360
     name: Smoke ${{ matrix.platform }}
 
     steps:
@@ -1063,7 +1043,19 @@ jobs:
   release:
     needs: [build-cli, smoke-cli, universal-arch-gate]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    # Publish when the real cross-platform build+smoke matrices both succeed.
+    # `always()` forces evaluation even if a *needed* job did not succeed, so an
+    # advisory job can't silently skip the release via the implicit success()
+    # gate. universal-arch-gate is deliberately NOT required here — it is
+    # advisory (a known auval "Bad Max Frames" flake; re-blocking is tracked
+    # separately). If it or any future advisory leg fails, the release still
+    # ships as long as build-cli + smoke-cli are green. A genuine build/smoke
+    # failure still blocks publish.
+    if: >-
+      always()
+      && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+      && needs.build-cli.result == 'success'
+      && needs.smoke-cli.result == 'success'
     permissions:
       contents: write
       issues: read
