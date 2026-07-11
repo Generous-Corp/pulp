@@ -17,6 +17,13 @@
 ///   - `EqualPower` — constant POWER (old² + new² == 1), cos/sin. Avoids the
 ///     mid-fade level dip when old/new are decorrelated (a big DSP change).
 ///     Mirrors `DryWetMixer`'s EqualPower law.
+///
+/// The smoothstep shaping and the two gain laws live in the shared
+/// `crossfade.hpp` — the one place the SIGNAL side computes old→new gains — so a
+/// `TransitionMixer` fade, a `LoopRenderer` wrap, and the live-kernel swap all
+/// blend by the identical math.
+
+#include "crossfade.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -54,21 +61,17 @@ public:
     void gains_at(std::size_t fade_pos,
                   SampleType& old_gain,
                   SampleType& new_gain) const {
-        SampleType t = (length_ == 0)
+        const SampleType t = (length_ == 0)
             ? SampleType{1.0f}
             : static_cast<SampleType>(fade_pos) / static_cast<SampleType>(length_);
-        if (t > SampleType{1.0f}) t = SampleType{1.0f};
-        const SampleType ramp =
-            t * t * (SampleType{3.0f} - SampleType{2.0f} * t);
-        if (curve_ == TransitionCurve::EqualPower) {
-            constexpr SampleType kHalfPi = SampleType{1.57079632679489661923f};
-            const SampleType theta = ramp * kHalfPi;
-            old_gain = std::cos(theta);                 // old²+new² == 1
-            new_gain = std::sin(theta);
-        } else {
-            old_gain = SampleType{1.0f} - ramp;         // old+new == 1
-            new_gain = ramp;
-        }
+        // Smoothstep-shaped progress (click-free ends), then the shared old→new
+        // gain law: EqualPower → constant power (cos/sin), Smoothstep → equal gain.
+        const SampleType u = crossfade_smoothstep(t);
+        crossfade_gains(u,
+                        curve_ == TransitionCurve::EqualPower
+                            ? CrossfadeGainLaw::EqualPower
+                            : CrossfadeGainLaw::EqualGain,
+                        old_gain, new_gain);
     }
 
 private:

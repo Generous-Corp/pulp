@@ -1,5 +1,7 @@
 #include <pulp/audio/loop_renderer.hpp>
 
+#include <pulp/signal/crossfade.hpp>
+
 #include <algorithm>
 #include <cmath>
 
@@ -7,21 +9,27 @@ namespace pulp::audio {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
-
 struct BlendGains {
     double dry;
     double wet;
 };
 
-// Old->new blend gains for a crossfade position `t`. Computes the equal-power
-// cos/sin (or the linear pair) ONCE so callers can reuse the gains across every
-// channel of a frame. Bit-identical to the previous inline `blend()` math.
+// Old->new blend gains for a loop-wrap crossfade position `t`, via the shared
+// SIGNAL crossfade law so the wrap fades by the same math as the live-swap and
+// convolver crossfades. The loop wrap uses the RAW ramp (no smoothstep shaping),
+// so `t` is only clamped before the gain split. Computed ONCE per frame so the
+// equal-power cos/sin is reused across every channel. Bit-identical to the
+// previous inline `t*0.5*π` cos/sin (`t·0.5` is exact, so the shared
+// full-precision π/2 rounds the product identically).
 BlendGains blend_gains(double t, LoopCrossfadeCurve curve) noexcept {
-    t = std::clamp(t, 0.0, 1.0);
-    if (curve == LoopCrossfadeCurve::EqualPower)
-        return {std::cos(t * 0.5 * kPi), std::sin(t * 0.5 * kPi)};
-    return {1.0 - t, t};
+    const double u = std::clamp(t, 0.0, 1.0);
+    BlendGains g{};
+    signal::crossfade_gains(u,
+                            curve == LoopCrossfadeCurve::EqualPower
+                                ? signal::CrossfadeGainLaw::EqualPower
+                                : signal::CrossfadeGainLaw::EqualGain,
+                            g.dry, g.wet);
+    return g;
 }
 
 }  // namespace
