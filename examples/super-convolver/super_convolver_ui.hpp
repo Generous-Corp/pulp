@@ -214,7 +214,7 @@ private:
     }
     float scale() const { return std::max(0.5f, local_bounds().height / 560.0f); }
 
-    std::array<Slider, 4>& sliders() { return sliders_; }
+    std::array<Slider, 5>& sliders() { return sliders_; }
 
     void layout() {
         const float W = local_bounds().width, H = local_bounds().height;
@@ -237,9 +237,9 @@ private:
 
         // Five equal columns: four sliders (Mix/Size/Gain/Rooms) + a toggle
         // column holding the Engine (CPU/GPU) toggle stacked over Bypass.
-        const float cw = controls_.width / 5.0f;
+        const float cw = controls_.width / 6.0f;
         const float label_h = 20 * s, value_h = 22 * s, pad = 10 * s;
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             Slider& sl = sliders_[static_cast<size_t>(i)];
             sl.cell = {controls_.x + i * cw, controls_.y, cw, controls_.height};
             const float tw = std::min(16 * s, cw * 0.22f);
@@ -251,7 +251,7 @@ private:
         // Toggle column (the fifth): Engine on top, Bypass below.
         const float bw = std::min(cw - 20 * s, 120 * s);
         const float bh = std::min(controls_.height * 0.34f, 48 * s);
-        const float bx = controls_.x + 4 * cw + (cw - bw) * 0.5f;
+        const float bx = controls_.x + 5 * cw + (cw - bw) * 0.5f;
         const float gap = 12 * s;
         const float stack_h = 2 * bh + gap;
         const float y0 = controls_.y + (controls_.height - stack_h) * 0.5f;
@@ -440,7 +440,7 @@ private:
         canvas.fill_rounded_rect(controls_.x, controls_.y, controls_.width,
                                  controls_.height, 8 * s);
 
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             const Slider& sl = sliders_[static_cast<size_t>(i)];
             const auto& t = sl.track;
             // Label (top of cell), centered.
@@ -511,7 +511,7 @@ private:
             toggle_param(kEngine);
             return;
         }
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             if (in_rect(p, sliders_[static_cast<size_t>(i)].cell)) {
                 active_slider_ = i;
                 edit_.begin(sliders_[static_cast<size_t>(i)].id);
@@ -573,11 +573,12 @@ private:
     ScPalette pal_ = make_ink_signal_palette();   // resolved from the Ink & Signal preset
 
     vw::Rect ir_{}, spectrum_rect_{}, controls_{}, bypass_{}, engine_{}, load_ir_btn_{};
-    std::array<Slider, 4> sliders_{{
+    std::array<Slider, 5> sliders_{{
         {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
         {kSize,  "Size",   0.05f, 4.0f,  2, "s"},
         {kGain,  "Gain",  -24.0f, 24.0f, 1, "dB"},
         {kRooms, "Rooms",  1.0f, 256.0f, 0, "", true},
+        {kFlow,  "Flow",   0.0f, 100.0f, 0, "%"},
     }};
     std::array<float, kSpectrumBins> spec_display_{};
     int active_slider_ = -1;
