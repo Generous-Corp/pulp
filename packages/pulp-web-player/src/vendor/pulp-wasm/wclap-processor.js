@@ -57,6 +57,10 @@ const CLAP_EXT_PARAMS = "clap.params";
 const CLAP_EXT_STATE = "clap.state";
 const CLAP_EXT_AUDIO_PORTS = "clap.audio-ports";
 const CLAP_EXT_NOTE_PORTS = "clap.note-ports";
+const CLAP_EXT_LOG = "clap.log";
+const CLAP_EXT_THREAD_CHECK = "clap.thread-check";
+const CLAP_EXT_LATENCY = "clap.latency";
+const CLAP_EXT_TAIL = "clap.tail";
 const CLAP_CORE_EVENT_SPACE_ID = 0;
 const CLAP_EVENT_NOTE_ON = 0;
 const CLAP_EVENT_NOTE_OFF = 1;
@@ -82,11 +86,21 @@ const HOST = { size: 48, name: 16, vendor: 20, url: 24, version: 28, get_extensi
 const STATE_EXT = { save: 0, load: 4 };
 const OSTREAM = { size: 8, ctx: 0, write: 4 };
 const ISTREAM = { size: 8, ctx: 0, read: 4 };
+const PLUGIN_LATENCY = { get: 0 };
+const PLUGIN_TAIL = { get: 0 };
+const HOST_LOG = { size: 4, log: 0 };
+const HOST_THREAD_CHECK = { size: 8, is_main_thread: 0, is_audio_thread: 4 };
+const HOST_LATENCY = { size: 4, changed: 0 };
+const HOST_TAIL = { size: 4, changed: 0 };
+const HOST_STATE = { size: 4, mark_dirty: 0 };
+const HOST_PARAMS = { size: 12, rescan: 0, clear: 4, request_flush: 8 };
 const TRAMPOLINES = {
   "ii->i": "AGFzbQEAAAABBwFgAn9/AX8CBwEBaAFmAAADAgEABwYBAmZuAAEKCgEIACAAIAEQAAs=",
   "i->i": "AGFzbQEAAAABBgFgAX8BfwIHAQFoAWYAAAMCAQAHBgECZm4AAQoIAQYAIAAQAAs=",
   "i->": "AGFzbQEAAAABBQFgAX8AAgcBAWgBZgAAAwIBAAcGAQJmbgABCggBBgAgABAACw==",
   "iiI->I": "AGFzbQEAAAABCAFgA39/fgF+AgcBAWgBZgAAAwIBAAcGAQJmbgABCgwBCgAgACABIAIQAAs=",
+  "ii->": "AGFzbQEAAAABBgFgAn9/AAIHAQFoAWYAAAMCAQAHBgECZm4AAQoKAQgAIAAgARAACw==",
+  "iii->": "AGFzbQEAAAABBwFgA39/fwACBwEBaAFmAAADAgEABwYBAmZuAAEKDAEKACAAIAEgAhAACw==",
 };
 /* ────────────────────────── end inlined ABI block ──────────────────────────── */
 
@@ -129,10 +143,18 @@ function makeWasiImports(getMemory, onText) {
 
 /* ─────────────────── worklet-resident host + real-time plugin ─────────────── */
 class WorkletWclapHost {
-  constructor(onLog) {
+  constructor(onLog, hooks = {}) {
     this.onLog = onLog;
+    this.hooks = hooks;            // { onLatencyChanged, onTailChanged, onStateDirty, onParamsRescan, onRequestRestart }
     this.memory = new WebAssembly.Memory({ initial: 512, maximum: 16384, shared: true });
     this.instance = null; this.ex = null;
+    this.currentPlugin = null;     // set by createPlugin; host callbacks reach the plugin through it
+    // clap.thread-check state: true only while the plugin's process() is on the
+    // stack. The deferred main-thread callback (request_callback → on_main_thread)
+    // runs with this false, so the plugin's is_main_thread() assertions hold.
+    this._inAudioThread = false;
+    this._mainThreadCallbackPending = false;
+    this._hostExtById = null;      // id → vtable ptr, built once in _buildHost
   }
   instantiateSync(bytes) {
     // Posting a WebAssembly.Module INTO an AudioWorklet is silently dropped in
@@ -198,12 +220,91 @@ class WorkletWclapHost {
     this.setU32(h + HOST.vendor, this.cstr("Pulp"));
     this.setU32(h + HOST.url, this.cstr("https://github.com/danielraffel/pulp"));
     this.setU32(h + HOST.version, this.cstr("0.0.1"));
-    this.setU32(h + HOST.get_extension, this._addFn("ii->i", () => 0)); // host offers none
-    const noop = this._addFn("i->", () => {});
-    this.setU32(h + HOST.request_restart, noop);
-    this.setU32(h + HOST.request_process, noop);
-    this.setU32(h + HOST.request_callback, noop);
+
+    // Host-provided extensions (parity with the native ClapSlot host services a
+    // Pulp CLAP plugin actually queries). Every vtable is built ONCE here — never
+    // during on_main_thread / process — so get_extension is an allocation-free id
+    // lookup and no host callback grows the wasm table on the audio thread.
+    this._hostExtById = {
+      [CLAP_EXT_LOG]: this._buildHostLog(),
+      [CLAP_EXT_THREAD_CHECK]: this._buildHostThreadCheck(),
+      [CLAP_EXT_LATENCY]: this._buildHostLatency(),
+      [CLAP_EXT_TAIL]: this._buildHostTail(),
+      [CLAP_EXT_STATE]: this._buildHostState(),
+      [CLAP_EXT_PARAMS]: this._buildHostParams(),
+    };
+    this.setU32(h + HOST.get_extension, this._addFn("ii->i",
+      (_host, idPtr) => this._hostExtById[this.readCstr(idPtr, 64)] || 0));
+
+    // request_restart: a Pulp plugin asks for one when latency changes while
+    // active (latency may only change across (de)activate). The shared player
+    // treats a running demo as fixed-latency, so we surface it to the app (which
+    // can rebuild) rather than tear the graph down mid-render.
+    this.setU32(h + HOST.request_restart, this._addFn("i->",
+      () => this.hooks.onRequestRestart && this.hooks.onRequestRestart()));
+    // request_process: the worklet renders every quantum unconditionally, so a
+    // request to be scheduled for processing is already satisfied — no-op.
+    this.setU32(h + HOST.request_process, this._addFn("i->", () => {}));
+    // request_callback: defer plugin.on_main_thread() until the current
+    // process() unwinds (see processQuantum). Called on the audio thread; only
+    // flips a flag, allocates nothing.
+    this.setU32(h + HOST.request_callback, this._addFn("i->",
+      () => { this._mainThreadCallbackPending = true; }));
     return h;
+  }
+
+  // ── host-extension vtables (each allocated + wired once) ───────────────────
+  _buildHostLog() {
+    const p = this.ex.malloc(HOST_LOG.size);
+    this.setU32(p + HOST_LOG.log, this._addFn("iii->", (_host, severity, msgPtr) => {
+      // Route plugin diagnostics through the same channel as wasm stdio; map
+      // CLAP severity (>=ERROR) onto fd 2 so the app can flag it.
+      if (this.onLog) this.onLog(severity >= 3 ? 2 : 1, "[clap] " + this.readCstr(msgPtr, 1024));
+    }));
+    return p;
+  }
+  _buildHostThreadCheck() {
+    const p = this.ex.malloc(HOST_THREAD_CHECK.size);
+    this.setU32(p + HOST_THREAD_CHECK.is_main_thread, this._addFn("i->i", () => (this._inAudioThread ? 0 : 1)));
+    this.setU32(p + HOST_THREAD_CHECK.is_audio_thread, this._addFn("i->i", () => (this._inAudioThread ? 1 : 0)));
+    return p;
+  }
+  _buildHostLatency() {
+    const p = this.ex.malloc(HOST_LATENCY.size);
+    this.setU32(p + HOST_LATENCY.changed, this._addFn("i->", () => {
+      const s = this.currentPlugin ? this.currentPlugin.currentLatency() : 0;
+      this.hooks.onLatencyChanged && this.hooks.onLatencyChanged(s);
+    }));
+    return p;
+  }
+  _buildHostTail() {
+    const p = this.ex.malloc(HOST_TAIL.size);
+    this.setU32(p + HOST_TAIL.changed, this._addFn("i->", () => {
+      const s = this.currentPlugin ? this.currentPlugin.currentTail() : 0;
+      this.hooks.onTailChanged && this.hooks.onTailChanged(s);
+    }));
+    return p;
+  }
+  _buildHostState() {
+    const p = this.ex.malloc(HOST_STATE.size);
+    this.setU32(p + HOST_STATE.mark_dirty, this._addFn("i->", () => {
+      this.hooks.onStateDirty && this.hooks.onStateDirty();
+    }));
+    return p;
+  }
+  _buildHostParams() {
+    const p = this.ex.malloc(HOST_PARAMS.size);
+    this.setU32(p + HOST_PARAMS.rescan, this._addFn("ii->", (_host, flags) => {
+      this.hooks.onParamsRescan && this.hooks.onParamsRescan(flags);
+    }));
+    // clear(host, param_id, flags): drop host-side references to a param. The
+    // web host holds none beyond the id list the app owns, so nothing to clear.
+    this.setU32(p + HOST_PARAMS.clear, this._addFn("iii->", () => {}));
+    // request_flush(host): the plugin wants its output param events delivered
+    // even when idle. The worklet processes every quantum and already captures
+    // out_events each block, so the flush is inherently satisfied — no-op.
+    this.setU32(p + HOST_PARAMS.request_flush, this._addFn("i->", () => {}));
+    return p;
   }
   createPlugin(index = 0) {
     const entry = this.ex.clap_entry.value;
@@ -217,7 +318,9 @@ class WorkletWclapHost {
     const name = this.readCstr(this.u32(desc + DESC.name));
     const ptr = this.call(this.u32(factory + FACTORY.create), factory, this._buildHost(), this.cstr(id));
     if (!ptr) throw new Error("create_plugin returned null");
-    return new RealtimeWclapPlugin(this, ptr, { id, name });
+    const plugin = new RealtimeWclapPlugin(this, ptr, { id, name });
+    this.currentPlugin = plugin;   // host latency/tail callbacks read the live plugin
+    return plugin;
   }
 }
 
@@ -300,6 +403,29 @@ class RealtimeWclapPlugin {
     return out;
   }
 
+  // Run the plugin's on_main_thread handler. A Pulp CLAP plugin drains its
+  // pending latency/tail-change flags here and calls the host's
+  // clap_host_latency/tail.changed(), which the host forwards to the app. This
+  // is invoked by processQuantum AFTER process() unwinds (see request_callback),
+  // so it is never reentrant with process().
+  onMainThread() { this.host.call(this._fn(PLUGIN.on_main_thread), this.ptr); }
+
+  // Current plugin-reported latency / tail in samples (clap.latency / clap.tail
+  // plugin extensions). Extension pointers are resolved + cached once; a plugin
+  // that does not expose the extension reports 0. `>>> 0` keeps the uint32 ABI.
+  currentLatency() {
+    const h = this.host;
+    if (this._latencyExt === undefined) this._latencyExt = this._ext(CLAP_EXT_LATENCY) || 0;
+    if (!this._latencyExt) return 0;
+    return h.call(h.u32(this._latencyExt + PLUGIN_LATENCY.get), this.ptr) >>> 0;
+  }
+  currentTail() {
+    const h = this.host;
+    if (this._tailExt === undefined) this._tailExt = this._ext(CLAP_EXT_TAIL) || 0;
+    if (!this._tailExt) return 0;
+    return h.call(h.u32(this._tailExt + PLUGIN_TAIL.get), this.ptr) >>> 0;
+  }
+
   // Allocate every wasm structure ONCE. After this, processQuantum() is
   // allocation-free and audio-thread-safe.
   prepare(channels, maxFrames) {
@@ -363,6 +489,12 @@ class RealtimeWclapPlugin {
       this._sysexPool.push(h.ex.malloc(SYSEX_EVENT.size));
       this._sysexBufs.push(h.ex.malloc(512)); // per-slot payload scratch
     }
+
+    // Resolve the clap.latency / clap.tail plugin-extension pointers now (they
+    // malloc a cstr for the id) so currentLatency()/currentTail() — which the
+    // host's changed() callbacks invoke on the audio thread — never allocate.
+    this.currentLatency();
+    this.currentTail();
 
     if (!h.call(this._fn(PLUGIN.start_processing), this.ptr)) throw new Error("start_processing failed");
     this._started = true;
@@ -430,13 +562,27 @@ class RealtimeWclapPlugin {
     h.setU32(this._proc + PROCESS.frames, frames);
     this._outParamEvents.length = 0; this._outMidi.length = 0;
 
+    // Mark the audio thread across the plugin's process() so clap.thread-check
+    // answers is_audio_thread() correctly for any RT assertions inside it.
+    h._inAudioThread = true;
     const status = h.call(this._fn(PLUGIN.process), this.ptr, this._proc);
+    h._inAudioThread = false;
     cur.length = 0;
     if (status < 0) throw new Error("process() status " + status);
 
     for (let c = 0; c < this.channels; c++) {
       const out = new Float32Array(h.memory.buffer, this._outCh[c], frames);
       outputChannels[c].set(out.subarray(0, frames));
+    }
+
+    // If the plugin called host->request_callback() during process() (e.g. it
+    // flagged a latency/tail change), run on_main_thread() now that process()
+    // has unwound — outside the plugin's process() call and with thread-check
+    // reporting main-thread. The plugin's handler drives host latency/tail
+    // .changed(), which the host forwards to the app via the hooks.
+    if (h._mainThreadCallbackPending) {
+      h._mainThreadCallbackPending = false;
+      this.onMainThread();
     }
     return { params: this._outParamEvents, midi: this._outMidi };
   }
@@ -511,7 +657,24 @@ class WclapProcessor extends AudioWorkletProcessor {
   _onMessage(msg) {
     if (msg.type === "load") {
       try {
-        this.host = new WorkletWclapHost((fd, t) => this.port.postMessage({ type: "log", fd, text: t.replace(/\n$/, "") }));
+        this.host = new WorkletWclapHost(
+          (fd, t) => this.port.postMessage({ type: "log", fd, text: t.replace(/\n$/, "") }),
+          {
+            // clap_host_latency.changed → re-read plugin latency, tell the app so
+            // its PDC is correct (mirrors WAM's descriptor.latencySamples).
+            onLatencyChanged: (s) => { this._latencySamples = s; this.port.postMessage({ type: "latencyChanged", latencySamples: s }); },
+            onTailChanged: (s) => this.port.postMessage({ type: "tailChanged", tailSamples: s }),
+            // clap_host_state.mark_dirty → the plugin's persisted state went
+            // stale; let the app re-snapshot if it tracks a saved blob.
+            onStateDirty: () => this.port.postMessage({ type: "stateDirty" }),
+            // clap_host_params.rescan → re-read the plugin's current values and
+            // push them so widgets re-sync (the value path, like a state load).
+            onParamsRescan: () => {
+              const changes = this.plugin ? this.plugin.readParamValues() : [];
+              if (changes.length) this.port.postMessage({ type: "paramsChanged", changes });
+            },
+            onRequestRestart: () => this.port.postMessage({ type: "restartRequested" }),
+          });
         this.host.instantiateSync(msg.bytes || msg.module);
         this.plugin = this.host.createPlugin(msg.pluginIndex || 0);
         this.plugin.init();
@@ -519,9 +682,11 @@ class WclapProcessor extends AudioWorkletProcessor {
         const flags = this.plugin.descriptorFlags();
         this.paramList = this.plugin.params();
         this.plugin.prepare(2, 128);
+        this._latencySamples = this.plugin.currentLatency();
         this.ready = true;
         this.port.postMessage({ type: "ready",
-          descriptor: { ...this.plugin.descriptor, ...flags, hasState: this.plugin.hasState() },
+          descriptor: { ...this.plugin.descriptor, ...flags, hasState: this.plugin.hasState(),
+                        latencySamples: this._latencySamples },
           params: this.paramList, sampleRate });
       } catch (err) {
         this.port.postMessage({ type: "error", message: String(err && err.stack || err) });

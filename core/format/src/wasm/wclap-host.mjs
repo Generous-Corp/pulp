@@ -20,8 +20,24 @@ import { createWclapMemory, makeWasiImports } from "./wclap-wasi.mjs";
 
 const CLAP_PLUGIN_FACTORY_ID = "clap.plugin-factory";
 const CLAP_EXT_PARAMS = "clap.params";
+const CLAP_EXT_STATE = "clap.state";
+const CLAP_EXT_LOG = "clap.log";
+const CLAP_EXT_THREAD_CHECK = "clap.thread-check";
+const CLAP_EXT_LATENCY = "clap.latency";
+const CLAP_EXT_TAIL = "clap.tail";
 const CLAP_EVENT_PARAM_VALUE = 5;
 const CLAP_CORE_EVENT_SPACE_ID = 0;
+
+// Host-extension vtable offsets + plugin latency/tail get() — see wclap-abi.mjs
+// (the single source of truth) for the canonical definitions these mirror.
+const HOST_LOG = { size: 4, log: 0 };
+const HOST_THREAD_CHECK = { size: 8, is_main_thread: 0, is_audio_thread: 4 };
+const HOST_LATENCY = { size: 4, changed: 0 };
+const HOST_TAIL = { size: 4, changed: 0 };
+const HOST_STATE = { size: 4, mark_dirty: 0 };
+const HOST_PARAMS = { size: 12, rescan: 0, clear: 4, request_flush: 8 };
+const PLUGIN_LATENCY = { get: 0 };
+const PLUGIN_TAIL = { get: 0 };
 
 // clap_param_info_t (wasm32): id@0, flags@4, cookie@8, name[256]@12,
 // module[1024]@268, min@1296, max@1304, default@1312.  Size 1320.
@@ -42,18 +58,26 @@ const TRAMPOLINES = {
   "ii->i": "AGFzbQEAAAABBwFgAn9/AX8CBwEBaAFmAAADAgEABwYBAmZuAAEKCgEIACAAIAEQAAs=",
   "i->i": "AGFzbQEAAAABBgFgAX8BfwIHAQFoAWYAAAMCAQAHBgECZm4AAQoIAQYAIAAQAAs=",
   "i->": "AGFzbQEAAAABBQFgAX8AAgcBAWgBZgAAAwIBAAcGAQJmbgABCggBBgAgABAACw==",
+  "ii->": "AGFzbQEAAAABBgFgAn9/AAIHAQFoAWYAAAMCAQAHBgECZm4AAQoKAQgAIAAgARAACw==",
+  "iii->": "AGFzbQEAAAABBwFgA39/fwACBwEBaAFmAAADAgEABwYBAmZuAAEKDAEKACAAIAEgAhAACw==",
 };
 
 export class WebClapHost {
   constructor({ name = "Pulp WebCLAP Host", vendor = "Pulp",
                 url = "https://github.com/danielraffel/pulp", version = "0.0.1",
-                onLog = null } = {}) {
+                onLog = null, hooks = {} } = {}) {
     this.meta = { name, vendor, url, version };
     this.onLog = onLog;            // (fd, text) => void
+    this.hooks = hooks;            // { onLatencyChanged, onTailChanged, onStateDirty, onParamsRescan, onRequestRestart }
     this.memory = createWclapMemory();
     this.instance = null;
     this.ex = null;
-    this.getExtensionLog = [];
+    this.getExtensionLog = [];     // ids the plugin queried (diagnostic)
+    this.currentPlugin = null;     // set by createPlugin; host callbacks reach the plugin through it
+    // clap.thread-check: true only while the plugin's process() is on the stack.
+    this._inAudioThread = false;
+    this._mainThreadCallbackPending = false;
+    this._hostExtById = null;      // id → vtable ptr, built once in _buildHost
   }
 
   // ── instantiation ─────────────────────────────────────────────────────────
@@ -122,7 +146,7 @@ export class WebClapHost {
   // browser and in Node alike. The trampoline is instantiated per callback so
   // each table slot wraps its own JS closure.
   _addFn(sig, fn) {
-    const key = `${sig.parameters.length === 2 ? "ii" : "i"}->${sig.results.length ? "i" : ""}`;
+    const key = `${"i".repeat(sig.parameters.length)}->${sig.results.length ? "i" : ""}`;
     const mod = WebClapHost._trampolineModule(key);
     const inst = new WebAssembly.Instance(mod, { h: { f: fn } });
     const tbl = this.instance.exports.__indirect_function_table;
@@ -147,7 +171,17 @@ export class WebClapHost {
   }
 
   // ── build clap_host_t (48 bytes) ──────────────────────────────────────────
+  // Mirrors the worklet host's host-vtable (wclap-processor.js): the same set of
+  // host-provided extensions a Pulp CLAP plugin queries, wired to the same JS
+  // effects. Every extension vtable is built ONCE here so get_extension is a pure
+  // id lookup and no host callback allocates a table slot after setup.
   _buildHost() {
+    const P1 = { parameters: ["i32"], results: [] };
+    const P1R = { parameters: ["i32"], results: ["i32"] };
+    const P2 = { parameters: ["i32", "i32"], results: [] };
+    const P2R = { parameters: ["i32", "i32"], results: ["i32"] };
+    const P3 = { parameters: ["i32", "i32", "i32"], results: [] };
+
     const h = this.ex.malloc(48);
     this.setU32(h + 0, 1); this.setU32(h + 4, 2); this.setU32(h + 8, 2); // clap_version 1.2.2
     this.setU32(h + 12, 0);                                              // host_data
@@ -155,10 +189,54 @@ export class WebClapHost {
     this.setU32(h + 20, this.cstr(this.meta.vendor));
     this.setU32(h + 24, this.cstr(this.meta.url));
     this.setU32(h + 28, this.cstr(this.meta.version));
-    this.setU32(h + 32, this._addFn({ parameters: ["i32", "i32"], results: ["i32"] },
-      (_host, extId) => { this.getExtensionLog.push(this.readCstr(extId)); return 0; }));
-    const noop = this._addFn({ parameters: ["i32"], results: [] }, () => {});
-    this.setU32(h + 36, noop); this.setU32(h + 40, noop); this.setU32(h + 44, noop);
+
+    // clap.log
+    const logExt = this.ex.malloc(HOST_LOG.size);
+    this.setU32(logExt + HOST_LOG.log, this._addFn(P3, (_host, severity, msgPtr) => {
+      if (this.onLog) this.onLog(severity >= 3 ? 2 : 1, "[clap] " + this.readCstr(msgPtr, 1024));
+    }));
+    // clap.thread-check
+    const tcExt = this.ex.malloc(HOST_THREAD_CHECK.size);
+    this.setU32(tcExt + HOST_THREAD_CHECK.is_main_thread, this._addFn(P1R, () => (this._inAudioThread ? 0 : 1)));
+    this.setU32(tcExt + HOST_THREAD_CHECK.is_audio_thread, this._addFn(P1R, () => (this._inAudioThread ? 1 : 0)));
+    // clap.latency
+    const latExt = this.ex.malloc(HOST_LATENCY.size);
+    this.setU32(latExt + HOST_LATENCY.changed, this._addFn(P1, () => {
+      const s = this.currentPlugin ? this.currentPlugin.currentLatency() : 0;
+      this.hooks.onLatencyChanged && this.hooks.onLatencyChanged(s);
+    }));
+    // clap.tail
+    const tailExt = this.ex.malloc(HOST_TAIL.size);
+    this.setU32(tailExt + HOST_TAIL.changed, this._addFn(P1, () => {
+      const s = this.currentPlugin ? this.currentPlugin.currentTail() : 0;
+      this.hooks.onTailChanged && this.hooks.onTailChanged(s);
+    }));
+    // clap.state
+    const stateExt = this.ex.malloc(HOST_STATE.size);
+    this.setU32(stateExt + HOST_STATE.mark_dirty, this._addFn(P1, () => {
+      this.hooks.onStateDirty && this.hooks.onStateDirty();
+    }));
+    // clap.params
+    const paramsExt = this.ex.malloc(HOST_PARAMS.size);
+    this.setU32(paramsExt + HOST_PARAMS.rescan, this._addFn(P2, (_host, flags) => {
+      this.hooks.onParamsRescan && this.hooks.onParamsRescan(flags);
+    }));
+    this.setU32(paramsExt + HOST_PARAMS.clear, this._addFn(P3, () => {}));
+    this.setU32(paramsExt + HOST_PARAMS.request_flush, this._addFn(P1, () => {}));
+
+    this._hostExtById = {
+      [CLAP_EXT_LOG]: logExt, [CLAP_EXT_THREAD_CHECK]: tcExt,
+      [CLAP_EXT_LATENCY]: latExt, [CLAP_EXT_TAIL]: tailExt,
+      [CLAP_EXT_STATE]: stateExt, [CLAP_EXT_PARAMS]: paramsExt,
+    };
+    this.setU32(h + 32, this._addFn(P2R, (_host, extId) => {
+      const id = this.readCstr(extId);
+      this.getExtensionLog.push(id);
+      return this._hostExtById[id] || 0;
+    }));
+    this.setU32(h + 36, this._addFn(P1, () => this.hooks.onRequestRestart && this.hooks.onRequestRestart())); // request_restart
+    this.setU32(h + 40, this._addFn(P1, () => {}));                                                            // request_process
+    this.setU32(h + 44, this._addFn(P1, () => { this._mainThreadCallbackPending = true; }));                   // request_callback
     return h;
   }
 
@@ -176,7 +254,9 @@ export class WebClapHost {
     const hostPtr = this._buildHost();
     const ptr = this.call(this.u32(factory + 8), factory, hostPtr, this.cstr(id));
     if (!ptr) throw new Error(`create_plugin(${id}) returned null`);
-    return new WebClapPlugin(this, ptr, { id, name, count });
+    const plugin = new WebClapPlugin(this, ptr, { id, name, count });
+    this.currentPlugin = plugin;   // host latency/tail callbacks read the live plugin
+    return plugin;
   }
 }
 
@@ -202,6 +282,29 @@ export class WebClapPlugin {
     return this;
   }
   destroy() { this.host.call(this._fn(12), this.ptr); }
+
+  // Query a plugin extension by id (get_extension @40). Returns the extension
+  // pointer, or 0 if the plugin does not expose it.
+  _ext(id) { return this.host.call(this._fn(40), this.ptr, this.host.cstr(id)); }
+
+  // Run the plugin's on_main_thread handler (@44). A Pulp plugin drains its
+  // pending latency/tail-change flags here and calls the host latency/tail
+  // .changed() callbacks. Invoked by process() after process() unwinds.
+  onMainThread() { this.host.call(this._fn(44), this.ptr); }
+
+  // Current plugin-reported latency / tail in samples (clap.latency/clap.tail).
+  currentLatency() {
+    const h = this.host;
+    if (this._latencyExt === undefined) this._latencyExt = this._ext(CLAP_EXT_LATENCY) || 0;
+    if (!this._latencyExt) return 0;
+    return h.call(h.u32(this._latencyExt + PLUGIN_LATENCY.get), this.ptr) >>> 0;
+  }
+  currentTail() {
+    const h = this.host;
+    if (this._tailExt === undefined) this._tailExt = this._ext(CLAP_EXT_TAIL) || 0;
+    if (!this._tailExt) return 0;
+    return h.call(h.u32(this._tailExt + PLUGIN_TAIL.get), this.ptr) >>> 0;
+  }
 
   // Query the clap.params extension; returns [{id, name, min, max, default}].
   params() {
@@ -310,9 +413,19 @@ export class WebClapPlugin {
       h.setU32(proc + 32, this._inEvents); h.setU32(proc + 36, this._outEvents);
 
       if (!h.call(this._fn(24), this.ptr)) throw new Error("start_processing() failed");
+      h._inAudioThread = true;
       const status = h.call(this._fn(36), this.ptr, proc);
+      h._inAudioThread = false;
       h.call(this._fn(28), this.ptr); // stop_processing
       if (status < 0) throw new Error(`process() returned error status ${status}`);
+
+      // If the plugin requested a host callback during process() (e.g. a latency
+      // change), run on_main_thread() now that process() has unwound — the host
+      // latency/tail .changed() it triggers is then delivered outside process().
+      if (h._mainThreadCallbackPending) {
+        h._mainThreadCallbackPending = false;
+        this.onMainThread();
+      }
 
       return outCh.map((p) => Float32Array.from(new Float32Array(h.memory.buffer, p, frames)));
     } finally {

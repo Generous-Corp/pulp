@@ -51,6 +51,14 @@ ok(/CLAP_EXT_STATE/.test(worklet) && /getState\(\)/.test(worklet) && /setState\(
    "worklet implements clap.state save/load");
 ok(/CLAP_EVENT_MIDI\b/.test(worklet) && /CLAP_EVENT_MIDI_SYSEX/.test(worklet),
    "worklet builds CLAP midi + midi_sysex IN events");
+// Host-provided extensions (MF-7): the worklet host answers get_extension for
+// the services a Pulp CLAP plugin queries, not just returns 0.
+ok(/_hostExtById/.test(worklet) && /_buildHostLatency/.test(worklet),
+   "worklet builds host-provided extension vtables (get_extension is not a stub)");
+for (const id of ["CLAP_EXT_LOG", "CLAP_EXT_THREAD_CHECK", "CLAP_EXT_LATENCY", "CLAP_EXT_TAIL"])
+  ok(new RegExp(`\\[${id}\\]`).test(worklet), `worklet wires the ${id} host extension`);
+ok(/request_callback/.test(worklet) && /_mainThreadCallbackPending/.test(worklet) && /onMainThread\(\)/.test(worklet),
+   "worklet defers request_callback → plugin.on_main_thread() (latency/tail propagation)");
 
 // ——— 3. ABI parity: every single-line `export const` in wclap-abi.mjs appears
 //        verbatim (sans `export `) in the worklet's inlined block.
@@ -64,7 +72,25 @@ for (const [, name, rhs] of singleLine) {
 const b64s = (src) => [...src.matchAll(/"([A-Za-z0-9+/=]{20,})"/g)].map((m) => m[1]);
 const abiTramps = Object.values(ABI.TRAMPOLINES).sort();
 const wkTramps = b64s(worklet).filter((s) => abiTramps.includes(s)).sort();
-ok(abiTramps.every((t) => wkTramps.includes(t)), "worklet inlines all four host trampolines (incl. iiI->I)");
+ok(abiTramps.every((t) => wkTramps.includes(t)),
+   `worklet inlines all ${abiTramps.length} host trampolines (incl. iiI->I, ii->, iii->)`);
+
+// ——— The void-returning host-extension trampolines compile + forward exactly.
+for (const [key, params] of [["ii->", 2], ["iii->", 3]]) {
+  const b64 = ABI.TRAMPOLINES[key];
+  ok(!!b64, `wclap-abi.mjs defines the ${key} trampoline`);
+  try {
+    let seen = null;
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(Buffer.from(b64, "base64")),
+      { h: { f: (...a) => { seen = a; } } });
+    const args = Array.from({ length: params }, (_, i) => i + 1);
+    const r = inst.exports.fn(...args);
+    ok(seen && seen.length === params && seen.every((v, i) => v === i + 1) && r === undefined,
+       `${key} trampoline forwards ${params}×i32 → void`);
+  } catch (e) {
+    ok(false, `${key} trampoline compiles + runs: ` + (e && e.message));
+  }
+}
 
 // ——— 4. The clap.state stream trampoline compiles and round-trips an i64.
 const streamB64 = ABI.TRAMPOLINES["iiI->I"];
