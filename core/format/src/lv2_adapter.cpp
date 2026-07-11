@@ -155,6 +155,23 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
         port_index++;
     }
 
+    // Latency-reporting output control port (always last). The host reads the
+    // value run() writes here each block for plugin delay compensation, so a
+    // latent processor is PDC-compensated under LV2 like every other format.
+    // Emitted unconditionally; connect_port() reserves this fixed final index.
+    ttl << " ,\n";
+    ttl << "    [\n";
+    ttl << "        a lv2:OutputPort , lv2:ControlPort ;\n";
+    ttl << "        lv2:index " << port_index << " ;\n";
+    ttl << "        lv2:symbol \"latency\" ;\n";
+    ttl << "        lv2:name \"Latency\" ;\n";
+    ttl << "        lv2:minimum 0 ;\n";
+    ttl << "        lv2:maximum 192000 ;\n";
+    ttl << "        lv2:portProperty lv2:reportsLatency , lv2:integer ;\n";
+    ttl << "        lv2:designation lv2:latency\n";
+    ttl << "    ]";
+    port_index++;
+
     ttl << " .\n";
 
     return ttl.str();

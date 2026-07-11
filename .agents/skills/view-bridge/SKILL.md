@@ -266,6 +266,45 @@ Remote views attach through `ViewBridge::attach_remote_channel(channel, label)`
 as `ViewRole::Remote` secondaries. The bridge does not own URL parsing or socket
 creation; callers connect a `MessageChannel` first and hand it to the bridge.
 
+## Parameter type-in round-trips through `ParamInfo` (shared with the editor)
+
+The same `StateStore` every attached view polls (see *Secondary views*) is
+also the source of truth for the host's parameter **display strings** and its
+**generic type-in field**. As of G5 all four format adapters route the
+host-facing text↔value conversion through the *same* `ParamInfo::to_string` /
+`from_string` your editor draws from:
+
+| Format | Host callback that now honors `ParamInfo` |
+|---|---|
+| VST3 | `getParamStringByValue` / `getParamValueByString` |
+| AU v2 | `kAudioUnitProperty_ParameterStringFromValue` / `...ValueFromString` (+ `kAudioUnitParameterFlag_ValuesHaveStrings` when a `to_string` exists) |
+| CLAP | `params_value_to_text` / `params_text_to_value` |
+
+The CLAP `params_text_to_value` change is the one that lands on the shared
+`clap_entry.hpp` (hence this skill is dual-mapped with `clap`): it now tries
+`ParamInfo::from_string` **before** the generic locale-independent `strtod`, so
+a fully custom rendering ("quality=0.75", an enum label, "12 o'clock")
+round-trips instead of being rejected by a bare numeric parse. CLAP values are
+plain (`min..max`) — the exact domain `from_string` returns — so no
+normalization step is needed; VST3 converts to/from the host's normalized
+domain around the same call.
+
+**Editor consequence.** A parameter's on-screen value string (drawn by your
+view) and the host's generic type-in field now agree, because both derive from
+the same `ParamInfo` converters on the shared store. Two rules for editor
+authors:
+
+- **Don't add a parallel text parser in the editor.** Type-in a user enters in
+  your own field should call the SAME `ParamInfo::from_string` (or bind through
+  the store) so your field and the host's stay consistent.
+- **Decline by returning a non-finite value.** A `from_string` that yields
+  NaN/±inf is rejected: CLAP falls through to the numeric parse, VST3/AU decline
+  to the base class. So a parameter with no meaningful string form should return
+  NaN rather than a garbage value.
+
+Tests: `test/test_clap_entry.cpp`, `test/test_vst3_param_display.cpp`,
+`test/test_au_v2_param_display.mm`.
+
 ## Trackpad / Scroll-Wheel Zoom Event Path
 
 **Searchable keywords**: trackpad zoom, scroll-wheel zoom, mouse wheel, "1.00x zoom" stuck, deltaY missing, deltaY=0, wheel event not firing, FilterBank zoom, Spectr zoom, onWheel, addEventListener('wheel'), registerWheel never called, wheel bubble, ancestor not receiving wheel, canvas-child captures wheel, wheel handler short-circuits.
@@ -1305,3 +1344,36 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## Native children under a design viewport, and the resize contract
+
+Two coupled seams a native-editor (WebView) plugin depends on:
+
+**1. Native-child geometry honors the viewport transform.** When a host paints under a
+design viewport it scales+letterboxes Pulp widgets, but `NativeViewHost::compute_geometry`
+produces frames in ROOT/design space. If those raw coords are pushed to the OS view, a
+tree mixing Pulp widgets and a native child drifts by scale+letterbox on any off-size DAW
+pane. The fix is a **forward** transform companion to `window_to_root_point`'s inverse:
+`bool design_viewport_transform(float& sx,float& sy,float& tx,float& ty)` on both
+`PluginViewHost` and `WindowHost` (default false = identity; overridden by the mac CPU/GPU
+plugin hosts and the GPU window host — the CPU window host has no viewport, so false is
+correct). **Do the transform in the WIDGET (`native_view_host.cpp`), never in the host
+`attach_native_child_view`/`set_native_child_view_bounds` primitives** — other callers
+(`hosted_editor_attachment.hpp`, `examples/webview-{palette,monaco}`, `test_web_view.cpp`)
+already pass HOST-space coords and would double-transform. Introspection getters stay in
+design space; `computed_child_frame_host()` exposes the transformed frame for tests. The
+pushed-geometry cache stores HOST-space, so a host resize (which changes the scale)
+invalidates it and re-pushes even when the design-space layout is unchanged. WKWebView
+caveat: scaling the frame **reflows** web content (CSS px track the frame), it does not
+zoom — a `pageZoom = s` parity hook is deferred, not wired.
+
+**2. The resize contract.** `ViewSize::aspect_ratio==0` means "free drag within [min,max]".
+VST3 (`vst3_plug_view.cpp`) + CLAP (`clap_entry.hpp`) must honor it, but the migration
+hazard is that the default `view_size()` returns `{w,h,0,0,0,0}` → `aspect_ratio==0`, so a
+naive read flips every hand-authored plugin to free-reflow. Rule: `resizable = min>0 on
+both axes` (CLAP's shipped convention); `free = resizable && aspect_ratio==0`. min==0 keeps
+today's viewport pin (and VST3 `canResize()` now returns false there, aligning with CLAP);
+resizable+aspect>0 is unchanged (viewport+lock+snap); free ⇒ no viewport/lock, clamp
+min/max only, no aspect snap. Tests live in `test/test_vst3_plugin_state.cpp` and
+`test/test_clap_entry.cpp` (`[resize]`), plus fake-host viewport-transform cases in
+`test/test_native_view_host.cpp` (`[viewport]`).

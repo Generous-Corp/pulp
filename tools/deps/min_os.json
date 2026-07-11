@@ -47,6 +47,39 @@
         }
       }
     },
+    "macos-x64": {
+      "unit": "macos_version",
+      "floor": "13.3",
+      "binding": "skia,dawn,libcxx",
+      "note": "Intel (x86_64) macOS target. Floor is arch-independent and set by Apple's libc++, not Skia/Dawn: std::to_chars(float) — reached via std::format in core/runtime/log.hpp — is marked unavailable before macOS 13.3 in the Xcode SDK's libc++, exactly as on macos-arm64. The x86_64 Skia + Dawn prebuilt slices (danielraffel/skia-builder chrome/m151-minos13, skia-build-mac-x86_64-gpu-release.zip) both stamp minos 13.0 (measured via measure_min_os.py --measure over the unpacked libskia.a / libdawn_combined.a on 2026-07-10), below the 13.3 toolchain floor. A universal (arm64;x86_64) build's floor is max(macos-arm64, macos-x64) = 13.3.",
+      "deps": {
+        "skia": {
+          "measured": "13.0",
+          "expected": "13.0",
+          "always_linked": true,
+          "source": "skia-builder chrome/m151-minos13 mac-x86_64 slice; measure_min_os.py --measure over build/mac-gpu/lib/Release/x86_64/libskia.a"
+        },
+        "dawn": {
+          "measured": "13.0",
+          "expected": "13.0",
+          "always_linked": true,
+          "source": "skia-builder chrome/m151-minos13 mac-x86_64 slice; measure_min_os.py --measure over build/mac-gpu/lib/Release/x86_64/libdawn_combined.a (bundled in the Skia toolchain)"
+        },
+        "libcxx": {
+          "measured": "13.3",
+          "expected": "13.3",
+          "always_linked": true,
+          "toolchain_declared": true,
+          "source": "Apple libc++ std::to_chars(float) availability (arch-independent), reached via std::format in core/runtime/log.hpp"
+        },
+        "v8": {
+          "measured": "11.0",
+          "expected": "11.0",
+          "always_linked": false,
+          "source": "v8-builder build-v8.py mac_deployment_target (single mac target across arm64/x86_64 slices)"
+        }
+      }
+    },
     "ios-arm64": {
       "unit": "ios_version",
       "floor": "16.0",

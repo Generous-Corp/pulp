@@ -192,6 +192,45 @@ class VersionCompare(unittest.TestCase):
         self.assertNotIn("DRIFT", txt)
 
 
+class CloneReuse(unittest.TestCase):
+    """A reused --workdir checkout is identity-verified and refreshed, not trusted
+    blindly (a stale or foreign tree would otherwise be measured as authoritative)."""
+
+    def _existing(self) -> pathlib.Path:
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        (d / "pulp-gpu-nam").mkdir()
+        return d / "pulp-gpu-nam"
+
+    def test_rejects_a_foreign_checkout(self):
+        from unittest import mock
+        dest = self._existing()
+        # origin points at a DIFFERENT repo → refuse to measure it.
+        with mock.patch.object(MOD, "_run",
+                               return_value=(0, "git@github.com:owner/some-other-repo.git")):
+            ok, msg = MOD.clone("owner/pulp-gpu-nam", dest, pathlib.Path("/dev/null"))
+        self.assertFalse(ok)
+        self.assertIn("not owner/pulp-gpu-nam", msg)
+
+    def test_refreshes_a_matching_checkout(self):
+        from unittest import mock
+        dest = self._existing()
+        calls = []
+
+        def fake_run(cmd, log=None, **kw):
+            calls.append(cmd)
+            if cmd[-1] == "origin" and "get-url" in cmd:
+                return 0, "git@github.com:owner/pulp-gpu-nam.git"
+            return 0, ""
+
+        with mock.patch.object(MOD, "_run", side_effect=fake_run):
+            ok, msg = MOD.clone("owner/pulp-gpu-nam", dest, pathlib.Path("/dev/null"))
+        self.assertTrue(ok)
+        # It fetched and hard-reset to the fetched tip.
+        self.assertTrue(any("fetch" in c for c in calls))
+        self.assertTrue(any(c[:4] == ["git", "-C", str(dest), "reset"] for c in calls))
+
+
 class BoundedJobs(unittest.TestCase):
     def test_explicit_wins(self):
         self.assertEqual(MOD.bounded_jobs(4), 4)

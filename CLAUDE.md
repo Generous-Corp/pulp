@@ -715,13 +715,21 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
 **Exact fix/feat release marker:** `.github/workflows/version-skill-check.yml`
-adds `--require-bump-for-fix-feat` on PRs. If the PR title starts with
-`fix:` / `fix(scope):` / `feat:` / `feat(scope):`, the diff range must
-contain a bump-marker commit whose subject starts with exactly
+adds `--require-bump-for-fix-feat` on PRs. If the PR title or any live
+commit-derived signal starts with `fix:` / `fix(scope):` / `feat:` /
+`feat(scope):`, the diff range must contain a bump-marker commit whose subject
+starts with exactly
 `chore: bump versions` (canonical) or `chore(versions): bump` (legacy),
-unless the tip commit has a top-level `Version-Bump: skip reason="..."`
+unless the range has a top-level `Version-Bump: skip reason="..."`
 trailer. Near-misses such as `chore: bump SDK to vX.Y.Z` do not count.
+Explicit reverts cancel their target signals; reverting a revert restores them.
 When manually repairing a release bump, use the exact canonical subject.
+For PRs targeting `main`, the required check also writes an **Expected release
+tags** run summary for the PR queue. This prediction uses the fetched tag state
+and the same auto-release skip/revert guard, modeling GitHub's sole-commit
+subject versus multi-commit PR-title squash policy separately from the synthetic
+merge tree; `auto-release.yml` creates the
+actual signed tags only after merge.
 
 **Bumps are diff-driven, not title-driven.** `--require-bump-for-fix-feat`
 is an *additional* gate layered on `fix:`/`feat:` titles — it is NOT what
@@ -1195,6 +1203,8 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
 | `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
+| `installable-tools` | Acceptance bar for anything Pulp can install (`pulp tool` / `pulp add`): validate install AND uninstall from OUTSIDE a checkout before the README ships; uninstall-safety contract |
+| `intel-canary` | macOS Intel (x86_64) portability: PULP_INTEL_CANARY lint + allowlist, Tier 0-3 CI (build.yml canary, intel-portability, nightly-intel, release universal gate) |
 | `ios` | iOS platform: AUv3 app extensions, Simulator builds, UIKit host, CoreAudio, touch + Pencil input |
 | `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp kit manifests |

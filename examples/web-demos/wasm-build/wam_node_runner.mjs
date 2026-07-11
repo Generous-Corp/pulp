@@ -18,7 +18,7 @@
 //   "1" = Input Gain (dB),  "2" = Output Gain (dB),  "3" = Bypass (boolean)
 
 import { readFileSync } from "node:fs";
-import { makeWasmImports, makeBridge } from "../../../core/format/src/wasm/wam-runtime.mjs";
+import { makeWasmImports, makeBridge, makeWamAudioPorts } from "../../../core/format/src/wasm/wam-runtime.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -39,18 +39,21 @@ const getParam = (id) => wam.getParam(id);
 const SR = 48000, FR = 128, CH = 2, N = CH * FR;
 if (!wam.init(SR, FR)) throw new Error("wam_init returned 0");
 
-const inPtr = ex.malloc(N * 4), outPtr = ex.malloc(N * 4);
+// Planar audio ports (per-channel wasm buffers + the wam_process pointer arrays),
+// the same marshalling the worklet uses. The readOutput() helper reconstructs an
+// interleaved [L0,R0,L1,R1,...] array purely for the assertions below — the ABI
+// itself is planar.
+const ports = makeWamAudioPorts(wam, CH, FR);
 const fillInput = (fn) => {
-  const h = wam.f32();
-  for (let f = 0; f < FR; f++) for (let c = 0; c < CH; c++) h[(inPtr >> 2) + f * CH + c] = fn(f, c);
+  for (let f = 0; f < FR; f++) for (let c = 0; c < CH; c++) ports.setInputSample(c, f, fn(f, c));
 };
 const readOutput = () => {
-  const h = wam.f32(), o = new Array(N);
-  for (let i = 0; i < N; i++) o[i] = h[(outPtr >> 2) + i];
+  const o = new Array(N);
+  for (let f = 0; f < FR; f++) for (let c = 0; c < CH; c++) o[f * CH + c] = ports.outputSample(c, f);
   return o;
 };
 const rms = (a) => Math.sqrt(a.reduce((s, x) => s + x * x, 0) / a.length);
-const proc = () => { wam.process(inPtr, outPtr, CH, FR); return readOutput(); };
+const proc = () => { wam.process(ports.inPtr, ports.outPtr, CH, FR); return readOutput(); };
 
 const failures = [];
 const check = (name, cond, detail = "") => {

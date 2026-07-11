@@ -351,6 +351,22 @@ HWY_AFTER_NAMESPACE();
 
 namespace pulp::runtime {
 
+// Cross-arch (macOS x86_64 + arm64 universal) portability invariant.
+//
+// Pulp's SIMD is Google Highway runtime dispatch ONLY — there are no raw
+// NEON/SSE intrinsics in core/, so this translation unit recompiles cleanly
+// for whichever slice (arm64 or x86_64) a thin or universal build is
+// compiling, and the right kernel is chosen at run time by HWY_DYNAMIC_DISPATCH.
+// This static_assert is the "ship an assertion, not a fix" guard for that
+// invariant (G3): if Highway ever sees an architecture with no compiled
+// target at all, fail at compile time here rather than silently degrading to
+// a broken/empty dispatch table. Every supported target — including the x86
+// SSE/AVX slices and the arm64 NEON slice — leaves HWY_TARGETS non-zero.
+static_assert(HWY_TARGETS != 0,
+    "Highway compiled no SIMD target for this architecture. Pulp requires at "
+    "least a baseline target for its runtime-dispatched SIMD; an empty target "
+    "set means the build arch is unsupported by the pinned Highway.");
+
 HWY_EXPORT(FloatLanes);
 HWY_EXPORT(DoubleLanes);
 HWY_EXPORT(AddF32);

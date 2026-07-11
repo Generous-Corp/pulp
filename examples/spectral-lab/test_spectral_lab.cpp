@@ -47,6 +47,40 @@ double rms(const float* x, uint32_t n) {
 
 }  // namespace
 
+TEST_CASE("circular_box_blur matches direct summation within float tolerance",
+          "[spectral]") {
+    // The O(n) running-sum blur must reproduce the O(n*radius) direct circular
+    // box blur it replaced. This is what the GPU (which keeps the direct loop)
+    // and the CPU (now running-sum) agree on; pin it directly, tighter than the
+    // xcorr>0.99 parity gate.
+    auto direct = [](const std::vector<float>& m, int r, float inv, int n) {
+        std::vector<float> out(n);
+        for (int k = 0; k < n; ++k) {
+            float s = 0.0f;
+            for (int d = -r; d <= r; ++d) { int j = (k + d) % n; if (j < 0) j += n; s += m[j]; }
+            out[k] = s * inv;
+        }
+        return out;
+    };
+
+    for (uint32_t n : {512u, 2048u, 4096u}) {
+        std::vector<float> m(n);
+        std::uint32_t seed = 0x1234u + n;
+        for (uint32_t k = 0; k < n; ++k) m[k] = std::abs(std::sin(0.013f * k) + 0.3f * std::cos(0.07f * k + seed));
+        for (uint32_t radius : {1u, 5u, n / 64u, n / 32u}) {
+            if (radius == 0u) continue;
+            const float inv = 1.0f / static_cast<float>(2u * radius + 1u);
+            std::vector<float> got(n);
+            gpu_audio::detail::circular_box_blur(m, got, radius, inv, n);
+            const auto want = direct(m, static_cast<int>(radius), inv, static_cast<int>(n));
+            double max_dev = 0.0;
+            for (uint32_t k = 0; k < n; ++k) max_dev = std::max(max_dev, double(std::abs(got[k] - want[k])));
+            // Running-sum drift over n add/subtracts on O(1) magnitudes.
+            REQUIRE(max_dev < 1e-4);
+        }
+    }
+}
+
 TEST_CASE("CpuSpectralStack captures and renders a real, finite frame", "[spectral]") {
     constexpr uint32_t N = 1024, HOP = 256, L = 4;
     gpu_audio::CpuSpectralStack cpu;
@@ -90,7 +124,7 @@ TEST_CASE("GpuSpectralStack matches the CPU reference bit-for-bit", "[spectral][
     }
 }
 
-TEST_CASE("GpuSpectralStack wins at high layer counts", "[spectral][gpu]") {
+TEST_CASE("GpuSpectralStack stays within budget at high layer counts", "[spectral][gpu]") {
     if (!gpu_available()) { WARN("no GPU device; skipping"); return; }
     constexpr uint32_t N = 2048, HOP = 512, L = 128;
     gpu_audio::CpuSpectralStack cpu; REQUIRE(cpu.prepare(N, HOP, L));
@@ -116,7 +150,22 @@ TEST_CASE("GpuSpectralStack wins at high layer counts", "[spectral][gpu]") {
     const double gpu_us = std::chrono::duration<double, std::micro>(
         std::chrono::steady_clock::now() - t0).count() / ITERS;
     INFO("128 layers: CPU " << cpu_us << " us, GPU " << gpu_us << " us");
-    REQUIRE(gpu_us < cpu_us);   // GPU is faster at 128 layers
+
+    // This used to assert `gpu_us < cpu_us`. That is no longer true, and the
+    // change is honest signal, not a regression: once the CPU smear became O(n)
+    // (from O(n*radius) — this PR), the CPU spectral stack is fast enough to
+    // match or beat the GPU up to the 128-layer buffer cap, because the GPU
+    // still pays a fixed ~0.5 ms/hop readback the CPU does not. The GPU's
+    // structural win now sits above the testable layer count, and reclaiming a
+    // clear win at <=128 layers needs the GPU-side smear optimization (a
+    // shared-memory tile — the deferred follow-up; the GPU kernel here is still
+    // the O(n*radius*L) brute force). The roofline audit flagged this exact
+    // timing race as unreliable; replace it with a meaningful, non-flaky check:
+    // both engines produce finite output and stay within the per-hop budget.
+    const double budget_us = static_cast<double>(HOP) / 48000.0 * 1e6;  // ~10667 us
+    REQUIRE(cpu_us < budget_us);
+    REQUIRE(gpu_us < budget_us);
+    for (float v : out) REQUIRE(std::isfinite(v));
 }
 
 TEST_CASE("Freeze with jitter does not buzz at the FFT period", "[spectral]") {

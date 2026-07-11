@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.24)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.646.0
+    VERSION 0.649.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -100,6 +100,44 @@ option(PULP_REQUIRE_GPU_FOR_SDK
         Set ON in .github/workflows/release-cli.yml to prevent silently \
         shipping CG-only SDKs."
        OFF)
+# Tier-0 Intel canary. When ON, a sub-second static lint runs at configure
+# time and FAILS the configure on any of five cross-arch (x86_64) portability
+# regressions (raw NEON outside a guard, ARM-gated SIMD with no x86 fallback,
+# hardcoded darwin-arm64/aarch64 asset strings, CMAKE_SYSTEM_PROCESSOR driving
+# an Apple target-arch decision, hardcoded CMAKE_OSX_ARCHITECTURES=arm64).
+# Default OFF so external cloners who never ship Intel pay nothing; pulp opts
+# in via the `PULP_INTEL_CANARY` repo variable in CI (mirrors the
+# PULP_REQUIRE_GPU_FOR_SDK "set ON in CI" convention above). This is a canary,
+# not a substitute for the Tier-2 nightly Intel build — see
+# docs/guides/intel-support.md for the honest catch/miss list.
+option(PULP_INTEL_CANARY
+       "Cross-arch (Intel) portability lint at configure time. Default OFF; \
+        pulp sets it ON via a repo variable. See docs/guides/intel-support.md."
+       OFF)
+if(PULP_INTEL_CANARY)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(NOT Python3_Interpreter_FOUND)
+        find_program(Python3_EXECUTABLE NAMES python3 python)
+    endif()
+    if(NOT Python3_EXECUTABLE)
+        message(FATAL_ERROR
+            "PULP_INTEL_CANARY=ON but no python3 interpreter was found to run "
+            "tools/scripts/intel_canary_lint.py.")
+    endif()
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}"
+                "${PULP_ROOT_DIR}/tools/scripts/intel_canary_lint.py"
+                --mode=tree --root "${PULP_ROOT_DIR}"
+        RESULT_VARIABLE _pulp_intel_canary_rc
+        OUTPUT_VARIABLE _pulp_intel_canary_out
+        ERROR_VARIABLE _pulp_intel_canary_err)
+    if(NOT _pulp_intel_canary_rc EQUAL 0)
+        message(FATAL_ERROR
+            "PULP_INTEL_CANARY: cross-arch portability lint failed:\n"
+            "${_pulp_intel_canary_out}${_pulp_intel_canary_err}")
+    endif()
+    message(STATUS "Pulp: Intel canary lint clean.")
+endif()
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.
 # Opt-in (default OFF): builds that don't use it link nothing extra and the

@@ -69,6 +69,11 @@ docs:
     kind: guide
     summary: Put a Pulp UI in a JUCE plugin — import vs template vs adapter, the binding contract, build recipe
 
+  - slug: foreign-framework-coexistence
+    path: guides/foreign-framework-coexistence.md
+    kind: guide
+    summary: Sharing a process with a second UI framework — the PluginViewHost-vs-WindowHost rule, init order, and the run-loop / timer risks of cooperative mode
+
   - slug: troubleshooting
     path: guides/troubleshooting.md
     kind: guide

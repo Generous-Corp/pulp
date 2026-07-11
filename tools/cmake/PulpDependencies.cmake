@@ -85,6 +85,43 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
             set(_pulp_restore_arch TRUE)
             message(STATUS "Pulp: forcing WebGPU prebuilt architecture to x86_64 for x64 cross-compile on ARM64 host")
         endif()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES)
+        # Same target-vs-host arch hazard as Windows above, but on Apple.
+        # CMAKE_SYSTEM_PROCESSOR is the HOST arch, so wgpu-native's
+        # detect_system_architecture() would download the host slice even for
+        # an Intel-thin (-DCMAKE_OSX_ARCHITECTURES=x86_64) target on an Apple
+        # Silicon box, producing an arch-mismatch link failure. Force ARCH from
+        # the TARGET arch. A universal (arm64;x86_64) build leaves ARCH unset —
+        # the host slice downloads to create the `webgpu` target, then
+        # PulpWgpuUniversal.cmake lipos both pinned slices into a fat dylib and
+        # overrides IMPORTED_LOCATION (wgpu-native ships no universal dylib).
+        set(_pulp_osx_arm64 FALSE)
+        set(_pulp_osx_x86_64 FALSE)
+        if(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+            set(_pulp_osx_arm64 TRUE)
+        endif()
+        if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+            set(_pulp_osx_x86_64 TRUE)
+        endif()
+        if(_pulp_osx_arm64 AND _pulp_osx_x86_64)
+            # universal — leave ARCH unset (see comment above)
+        elseif(_pulp_osx_x86_64)
+            if(DEFINED ARCH)
+                set(_pulp_saved_arch "${ARCH}")
+            endif()
+            set(ARCH "x86_64")
+            set(_pulp_restore_arch TRUE)
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to x86_64 for an Intel/x86_64 mac target")
+        elseif(_pulp_osx_arm64)
+            if(DEFINED ARCH)
+                set(_pulp_saved_arch "${ARCH}")
+            endif()
+            set(ARCH "aarch64")
+            set(_pulp_restore_arch TRUE)
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to aarch64 for an arm64 mac target")
+        endif()
+        unset(_pulp_osx_arm64)
+        unset(_pulp_osx_x86_64)
     endif()
     FetchContent_MakeAvailable(webgpu)
     if(_pulp_restore_arch)
@@ -97,6 +134,14 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     endif()
     unset(_pulp_restore_arch)
     unset(_pulp_webgpu_processor)
+
+    # For a macOS universal (arm64;x86_64) build, wgpu-native has no universal
+    # dylib — the fetch above produced a thin (host-arch) slice. Replace the
+    # `webgpu` target's IMPORTED_LOCATION with a lipo'd + ad-hoc-re-signed fat
+    # dylib. No-op for thin targets and non-Apple platforms.
+    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWgpuUniversal.cmake)
+    pulp_make_wgpu_universal(v24.0.3.1)
+
     set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
     message(STATUS "Pulp: WebGPU (Dawn) enabled")
 
@@ -121,25 +166,69 @@ option(PULP_SKIA_AUTOFETCH "Auto-fetch pinned Skia into a shared cache when miss
 if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         AND NOT DEFINED ENV{SKIA_DIR} AND NOT ANDROID
         AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS"))
+    # Select the Skia slice from the TARGET architecture, not the host arch.
+    # On Apple that is CMAKE_OSX_ARCHITECTURES (unset ⇒ host arch). skia-builder
+    # publishes THREE mac slices — arm64, x86_64, and universal — so the old
+    # hardcoded darwin-arm64 (with its "the only published mac asset" comment)
+    # was both false and wrong for an Intel/universal target.
+    #
+    # Each slice's libskia.a flattens to the SAME on-disk path
+    # (build/mac-gpu/lib/Release/libskia.a), so the caches MUST be per-slice —
+    # one shared cache dir would silently reuse a wrong-arch archive after an
+    # arch switch (the universal zip's internal layout is byte-identical to
+    # arm64's). Suffix the cache dir per slice: skia-build{,-x64,-universal}.
+    set(_pulp_skia_plat "")
+    set(_pulp_skia_cache_suffix "")
+    if(APPLE)
+        set(_pulp_req_archs "${CMAKE_OSX_ARCHITECTURES}")
+        if(_pulp_req_archs STREQUAL "")
+            if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+                set(_pulp_req_archs "arm64")
+            else()
+                set(_pulp_req_archs "x86_64")
+            endif()
+        endif()
+        set(_pulp_has_arm64 FALSE)
+        set(_pulp_has_x86_64 FALSE)
+        if(_pulp_req_archs MATCHES "arm64")
+            set(_pulp_has_arm64 TRUE)
+        endif()
+        if(_pulp_req_archs MATCHES "x86_64")
+            set(_pulp_has_x86_64 TRUE)
+        endif()
+        if(_pulp_has_arm64 AND _pulp_has_x86_64)
+            set(_pulp_skia_plat "darwin-universal")
+            set(_pulp_skia_cache_suffix "-universal")
+        elseif(_pulp_has_x86_64)
+            set(_pulp_skia_plat "darwin-x64")
+            set(_pulp_skia_cache_suffix "-x64")
+        elseif(_pulp_has_arm64)
+            set(_pulp_skia_plat "darwin-arm64")
+        else()
+            message(FATAL_ERROR
+                "Pulp: cannot select a prebuilt Skia slice for "
+                "CMAKE_OSX_ARCHITECTURES='${CMAKE_OSX_ARCHITECTURES}'. "
+                "Supported values are 'arm64', 'x86_64', or 'arm64;x86_64' "
+                "(universal). Pass -DPULP_SKIA_AUTOFETCH=OFF and set SKIA_DIR "
+                "by hand to build against a slice Pulp does not auto-provision.")
+        endif()
+    elseif(UNIX)
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(_pulp_skia_plat "linux-arm64")
+        else()
+            set(_pulp_skia_plat "linux-x64")
+        endif()
+    endif()
+
     file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/*-gpu/lib/Release/libskia.a")
     if(NOT _pulp_local_skia)
         if(DEFINED ENV{PULP_SKIA_CACHE})
             set(_pulp_skia_cache "$ENV{PULP_SKIA_CACHE}")
         else()
-            set(_pulp_skia_cache "$ENV{HOME}/.cache/pulp/skia-build")
+            set(_pulp_skia_cache "$ENV{HOME}/.cache/pulp/skia-build${_pulp_skia_cache_suffix}")
         endif()
         file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
         if(NOT _pulp_cache_skia)
-            set(_pulp_skia_plat "")
-            if(APPLE)
-                set(_pulp_skia_plat "darwin-arm64")  # the only published mac asset
-            elseif(UNIX)
-                if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-                    set(_pulp_skia_plat "linux-arm64")
-                else()
-                    set(_pulp_skia_plat "linux-x64")
-                endif()
-            endif()
             find_program(_pulp_python3 NAMES python3 python)
             if(_pulp_skia_plat AND _pulp_python3)
                 message(STATUS "Skia: auto-provisioning ${_pulp_skia_plat} → ${_pulp_skia_cache} (PULP_SKIA_AUTOFETCH; one-time, shared)")

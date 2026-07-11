@@ -15,6 +15,9 @@
 [project]
 name      = "pulp"
 type      = "cmake"
+# Shipyard governance profile. `solo` matches Pulp's single-maintainer
+# branch-protection posture (0 required approvals, self-merge on green).
+profile   = "solo"
 # The platforms Pulp ships. Not the set Shipyard validates locally — see
 # "Targets" below: `mac` is the only declared target, and Linux/Windows
 # validate as advisory GitHub-hosted lanes.
@@ -219,6 +222,24 @@ repository = "danielraffel/pulp"
 
 [merge]
 require_platforms = ["macos", "linux", "windows"]
+
+# ── Governance (required-check contract) ───────────────────────────────────
+# The GitHub checks that must be green before `main` accepts a merge. This
+# mirrors the LIVE branch-protection ruleset, NOT the full ship platform set:
+# only the macOS build+test leg and the version/skill-sync gate are blocking.
+# Linux and Windows validate as advisory GitHub-hosted lanes (see [project]
+# platforms) and deliberately do NOT gate merge — making them blocking would
+# crater throughput without adding signal. Keep this list aligned with
+# .github/rulesets/main-protection.json.
+[governance]
+required_status_checks = ["macos", "Enforce version & skill sync"]
+
+# Per-branch protection knobs. `require_strict_status = true` means a PR must
+# be up to date with `main` (re-validated on the exact merge-candidate SHA)
+# before it can merge — matching the ruleset's
+# strict_required_status_checks_policy.
+[branch_protection."main"]
+require_strict_status = true
 
 # ── Ship defaults ──────────────────────────────────────────────────────────
 

@@ -8,6 +8,27 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06490"></a>
+## [0.649.0] - 2026-07-11
+
+- fix(super-convolver): DSP level-match + Size windowing + no-clip + glitch fixes, editor polish, and customizable installer default ([#5974](https://github.com/danielraffel/pulp/pull/5974))
+- core/format LV2: RT hygiene — pre-reserve MIDI, FTZ guard, latency port (MF-2) ([#5890](https://github.com/danielraffel/pulp/pull/5890))
+- fix(ci): update build-dir test for merge_group label-exclude condition ([#5982](https://github.com/danielraffel/pulp/pull/5982))
+- feat(release): publish native Intel (darwin-x64) macOS CLI + SDK ([#5968](https://github.com/danielraffel/pulp/pull/5968))
+- fix(gpu_audio): keep muted stack layers' phase advancing (SF-4 regression) ([#5959](https://github.com/danielraffel/pulp/pull/5959))
+- ci: run required checks on merge_group so a merge queue can land PRs ([#5975](https://github.com/danielraffel/pulp/pull/5975))
+
+<a id="v06470"></a>
+## [0.647.0] - 2026-07-10
+
+- fix(release): one workflow owns the release; bare title + CHANGELOG-§ footer ([#5960](https://github.com/danielraffel/pulp/pull/5960))
+- fix(release-notes): resolve direct-commit entries to PR links, not bare SHAs ([#5956](https://github.com/danielraffel/pulp/pull/5956))
+- test(runtime): close consumed==0 harness race in Handoff hammer ([#5949](https://github.com/danielraffel/pulp/pull/5949))
+- ci(intel): pin universal-arch-gate to GitHub-hosted macOS, not the Studios ([#5933](https://github.com/danielraffel/pulp/pull/5933))
+- feat(examples): retain WebView on the processor and attach via NativeViewHost ([#5932](https://github.com/danielraffel/pulp/pull/5932))
+- fix(au): clamp AU v2 instrument output elements + sync view-bridge skill ([#5934](https://github.com/danielraffel/pulp/pull/5934))
+- docs+fix(view): document foreign-framework coexistence; keep CPU idle pump alive in modal run-loop modes ([#5931](https://github.com/danielraffel/pulp/pull/5931))
+
 <a id="v06450"></a>
 ## [0.645.0] - 2026-07-10
 
@@ -6220,6 +6241,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.649.0]: https://github.com/danielraffel/pulp/releases/tag/v0.649.0
+[0.647.0]: https://github.com/danielraffel/pulp/releases/tag/v0.647.0
 [0.645.0]: https://github.com/danielraffel/pulp/releases/tag/v0.645.0
 [0.644.0]: https://github.com/danielraffel/pulp/releases/tag/v0.644.0
 [0.643.0]: https://github.com/danielraffel/pulp/releases/tag/v0.643.0

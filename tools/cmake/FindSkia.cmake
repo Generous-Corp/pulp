@@ -173,6 +173,67 @@ if(NOT EXISTS "${DAWN_LIBRARY}")
     set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
 endif()
 
+# Fail loud at CONFIGURE time if the resolved macOS Skia archive does not
+# contain every requested target architecture. This mirrors the iOS
+# fail-loud block above. skia-builder ships THREE mac slices (arm64 /
+# x86_64 / universal) that all flatten libskia.a to the same on-disk path,
+# so a SKIA_DIR pointed at the wrong slice — or a stale per-slice cache —
+# would otherwise surface only as a wall of ld64 "building for macOS-x86_64
+# but linking arm64" warnings followed by hundreds of undefined symbols.
+# One actionable config error is far better than that spew.
+if(APPLE AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS") AND EXISTS "${SKIA_LIBRARY}")
+    set(_skia_req_archs "${CMAKE_OSX_ARCHITECTURES}")
+    if(_skia_req_archs STREQUAL "")
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(_skia_req_archs "arm64")
+        else()
+            set(_skia_req_archs "x86_64")
+        endif()
+    endif()
+    find_program(_skia_lipo NAMES lipo)
+    if(_skia_lipo)
+        execute_process(
+            COMMAND "${_skia_lipo}" -archs "${SKIA_LIBRARY}"
+            OUTPUT_VARIABLE _skia_have_archs
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _skia_lipo_rc
+            ERROR_QUIET)
+        if(_skia_lipo_rc EQUAL 0)
+            set(_skia_missing_archs "")
+            foreach(_skia_want IN LISTS _skia_req_archs)
+                string(STRIP "${_skia_want}" _skia_want)
+                if(_skia_want STREQUAL "")
+                    continue()
+                endif()
+                # lipo prints space-separated archs (e.g. "x86_64 arm64").
+                # Pad both sides so a whole-token match cannot false-hit.
+                string(FIND " ${_skia_have_archs} " " ${_skia_want} " _skia_hit)
+                if(_skia_hit EQUAL -1)
+                    list(APPEND _skia_missing_archs "${_skia_want}")
+                endif()
+            endforeach()
+            if(_skia_missing_archs)
+                message(FATAL_ERROR
+                    "Skia (macOS): the resolved archive\n"
+                    "    ${SKIA_LIBRARY}\n"
+                    "  has architectures '${_skia_have_archs}' but this build "
+                    "targets '${_skia_req_archs}' (missing: ${_skia_missing_archs}).\n"
+                    "  skia-builder publishes three mac slices — arm64, x86_64, "
+                    "and universal. Fix one of:\n"
+                    "    - Let Pulp auto-provision the matching slice: unset "
+                    "SKIA_DIR and keep PULP_SKIA_AUTOFETCH=ON (the default).\n"
+                    "    - Point SKIA_DIR at a slice whose libskia.a contains "
+                    "'${_skia_req_archs}' (the universal slice satisfies any "
+                    "single-arch or universal mac target)."
+                )
+            endif()
+        endif()
+    endif()
+    unset(_skia_req_archs)
+    unset(_skia_have_archs)
+    unset(_skia_missing_archs)
+endif()
+
 if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     set(SKIA_FOUND TRUE)
     # Include dirs: Skia headers, modules, and Dawn headers
