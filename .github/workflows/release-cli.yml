@@ -969,37 +969,27 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           NOTES=$(python3 tools/scripts/compose_release_notes.py "$TAG" \
             --github-repo "$GITHUB_REPOSITORY" \
-            --detect-github-labels)
+            --detect-github-labels \
+            --footer)
           echo "notes<<HIGHLIGHTS_EOF" >> "$GITHUB_OUTPUT"
           echo "$NOTES" >> "$GITHUB_OUTPUT"
           echo "HIGHLIGHTS_EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Generate GitHub release notes
-        id: github_notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          NOTES=$(gh api \
-            --method POST \
-            "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-            -f tag_name="$TAG" \
-            --jq .body)
-          echo "notes<<GITHUB_NOTES_EOF" >> "$GITHUB_OUTPUT"
-          echo "$NOTES" >> "$GITHUB_OUTPUT"
-          echo "GITHUB_NOTES_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Pulp CLI ${{ steps.version.outputs.tag }}
+          # Bare tag name (owner: drop the "Pulp CLI" prefix — one product, one
+          # consistent title). This workflow is the SOLE creator of the release;
+          # sign-and-release.yml only uploads appcast.xml to it (pulp release
+          # hygiene 2026-07-10), so name/body/draft don't get overwritten.
+          name: ${{ steps.version.outputs.tag }}
+          # Body = the humanized, grouped highlights (compose_release_notes.py,
+          # now including the CHANGELOG.md-§ + Previous-release footer via
+          # --footer). The GitHub auto "Full Changelog: A...B compare" notes were
+          # dropped — the composer footer is the owner-preferred format.
           body: |
             ${{ steps.highlights.outputs.notes }}
-
-            ---
-
-            ${{ steps.github_notes.outputs.notes }}
 
             ---
 
