@@ -16,7 +16,7 @@ The chrome/m151 release ships all platform slices, including `linux-arm64`.
 The bundled build reports Dawn SHA1
 `7807dcbdca245e462617c04d544706394db245ba` (`include/dawn/dawn_version.h`).
 
-The **macOS** slices (`mac-arm64`, `mac-universal`) are pinned to the
+The **macOS** slices (`mac-arm64`, `mac-x86_64`, `mac-universal`) are pinned to the
 `chrome/m151-minos13` re-cut, which stamps `LC_BUILD_VERSION minos 13.0`
 (macOS 13 Ventura) on both Skia and Dawn. The original `chrome/m151` macOS
 zips accidentally leaked the CI runner's macOS 15 SDK as the deployment
@@ -104,6 +104,7 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-linux-x64-gpu-release.zip` | `518b74ee7f0b245c209349023e58a2891a83a7ab776504d7d8a23d1e76fbf4de` |
 | `skia-build-mac-arm64-gpu-release.zip` | `648250f9ee625f0c6c73c521b5a2de7cf46812b06aa2300e4bec8b2bb6d4081b` |
 | `skia-build-mac-universal-gpu-release.zip` | `284964fda380a2cc5ff4f885ae557ef04dab5987ebd94fc01354b95878ad85cf` |
+| `skia-build-mac-x86_64-gpu-release.zip` | `f1734e9f41c0d01700d446282550725a7b6b42ebc906ba295f1f563112831f17` |
 
 ## Libraries Per Platform
 
