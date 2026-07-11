@@ -306,6 +306,8 @@ void bench_multi_roofline() {
     std::printf("(us/(n·log·Nir) falling, not flat, shows the kernel gains occupancy at\n");
     std::printf("large n — the same under-parallelization the audit found at small n.)\n");
     std::printf("See planning/2026-07-09-roofline-audit-audio-pipeline.md #1.\n");
+}
+
 // ── 3. The finding-#1 payoff: CPU vs non-partitioned GPU vs partitioned FDL ──
 // Fixed 1 s IR, sweeping the room count — the demo-decisive comparison. The
 // SuperConvolver v1.2 KILL verdict said the CPU beats the GPU; it was measured
