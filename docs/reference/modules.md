@@ -1128,25 +1128,28 @@ bounce running faster than real time, or a cold pipeline), a configurable **miss
 policy** falls back to CPU or silence rather than glitching.
 
 **Link:** `pulp::gpu-audio` · **Include prefix:** `<pulp/gpu_audio/...>` ·
-**Depends on:** `render`, `signal`, `audio`
+**Depends on:** `audio`, `runtime`, `signal` (always) · `render` (GPU builds only)
 
 | Node / primitive | What It Does |
 |------------------|-------------|
 | `GpuAudioTransport` | Fixed-latency RT↔non-RT bridge: lock-free rings + polling worker over `GpuCompute` |
 | `GpuConvolver` | GPU-resident fused / batched partitioned convolution (long IRs, many instances) |
+| `GpuMultiConvolver` | Batched multi-IR / multi-room convolution — one GPU submit per block across N IRs |
 | `GpuStft` | GPU STFT / ISTFT primitive — the spectral toolkit's analysis/synthesis stage |
 | `GpuSpectralFreeze` / `GpuSpectralMorph` / `GpuSpectralStack` | Capture-and-render spectral engines (single freeze, A/B morph, N-layer stack/cloud) |
 
 The node boundary is **not** real-time-safe at the device level by design — the
 GPU round-trip is amortized across a block of fixed latency, not paid per sample.
-The subsystem is gated on `pulp::render`; a build without the GPU stack doesn't
-compile or link it.
+Only the GPU node *implementations* are gated on `pulp::render`; the
+`GpuAudioTransport` bridge and the public node classes still compile and link in
+a build without the GPU stack, report `gpu_available() == false`, and route the
+`signal::*` CPU fallback.
 
 **Example plugins built on it** (in-tree, `examples/`):
 
 | Example | Uses | Docs |
 |---------|------|------|
-| [SuperConvolver](../examples/super-convolver.md) | `GpuConvolver` — convolution reverb with live IR swap; GPU carries very long IRs / many rooms | [super-convolver](../examples/super-convolver.md) |
+| [SuperConvolver](../examples/super-convolver.md) | `GpuConvolver` (single IR) / `GpuMultiConvolver` (many rooms) — convolution reverb with live IR swap; GPU carries very long IRs / many rooms | [super-convolver](../examples/super-convolver.md) |
 | [Spectral Lab](../examples/spectral-lab.md) | GPU spectral stack — N-layer freeze / morph "cloud" | [spectral-lab](../examples/spectral-lab.md) |
 | [GPU NAM](../examples/gpu-nam.md) | `render::GpuCompute::wavenet_forward` neural-inference primitive (own repo) | [gpu-nam](../examples/gpu-nam.md) |
 

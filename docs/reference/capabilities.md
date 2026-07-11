@@ -337,8 +337,10 @@ Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
 ## GPU Audio
 
 Offload heavy DSP to the GPU from a real-time `process()` block via a
-fixed-latency, lock-free bridge. Gated on the GPU render stack (`pulp::render`);
-a non-GPU build does not compile the subsystem.
+fixed-latency, lock-free bridge. The GPU node implementations are gated on the
+GPU render stack (`pulp::render`); the `GpuAudioTransport` bridge and the public
+node classes still compile in a non-GPU build and report `gpu_available() ==
+false`, falling back to the `signal::*` CPU path.
 
 | Capability | Status | Module | Docs |
 |---|---|---|---|

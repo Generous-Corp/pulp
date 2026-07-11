@@ -51,11 +51,11 @@ What is **not** covered by `Canvas::draw_with_sksl` and friends:
   a rect, not arbitrary triangle lists).
 - **Compute / mesh / tessellation / geometry shaders.** Use the Dawn
   compute path via the `GpuCompute` interface
-  (`core/render/include/pulp/render/gpu_compute.hpp`) — the published
-  surface is `compute_magnitude`, `complex_multiply`, `batch_magnitude`,
-  and the `benchmark_*` helpers. PBR materials and Three.js bridging
-  already ride this path. Direct WGSL authoring lives behind the same
-  interface; see existing call sites for the pattern.
+  (`core/render/include/pulp/render/gpu_compute.hpp`) — it exposes
+  spectral, batch-convolution, FFT, matmul, and neural-inference
+  primitives (see `gpu_compute.hpp` for the full surface). PBR materials
+  and Three.js bridging already ride this path. Direct WGSL authoring
+  lives behind the same interface; see existing call sites for the pattern.
 - **Raw vertex / index buffer authoring.** Out of scope through SkSL.
   Drop down to Dawn (`core/render/include/pulp/render/gpu_surface.hpp`)
   if you need it.
@@ -217,9 +217,11 @@ const info = getGPUInfo();                 // { backendType: 'Metal' | 'D3D12' |
 clearWidgetShader('my-knob');
 ```
 
-All four functions are registered in `core/view/src/widget_bridge.cpp`
-and route to the same `RuntimeEffectCache`, so a shader compiled from
-JS is shared with C++ paint code that uses the same source.
+All five functions are registered under `core/view/src/widget_bridge/`
+(`compileShader`, `setWidgetShader`, `applyShader`, and `clearWidgetShader`
+in `shader_api.cpp`; `getGPUInfo` in `gpu_api.cpp`) and route to the same
+`RuntimeEffectCache`, so a shader compiled from JS is shared with C++ paint
+code that uses the same source.
 
 ## Performance notes
 

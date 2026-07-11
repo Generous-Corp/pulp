@@ -749,8 +749,9 @@ private:
 
     // GPU engine: same fixed re-blocking, but each B-block is processed as ONE
     // stereo block through the GPU transport (RT-safe by contract — the GPU FFT
-    // runs on the transport's non-RT worker; on a worker miss the node's
-    // PassthroughDry policy fills the block). Both channels advance in lockstep
+    // runs on the transport's non-RT worker; on a worker miss the node's miss
+    // policy fills the block — CpuFallback for the single-IR GpuConvolver,
+    // Silence for the many-rooms GpuMultiConvolver). Both channels advance in lockstep
     // (the same n is appended every call), so in_len_[0] gates the drain.
     void fill_wet_gpu(gpu_audio::GpuAudioTransport* tp,
                       const audio::BufferView<const float>& input, std::size_t n,
