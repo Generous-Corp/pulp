@@ -24,9 +24,24 @@ concurrency:
 
 jobs:
   dry-run:
-    name: Release dry-run (darwin-arm64, no publish)
+    name: Release dry-run (${{ matrix.platform }}, no publish)
     if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: darwin-arm64
+          # Native Intel dry-run: builds + packages + RUNS the x86_64 CLI on
+          # macos-15-intel (no cross-compile, no Rosetta), the empirical proof
+          # for release-cli.yml's darwin-x64 leg. Advisory (experimental) so a
+          # flaky macos-15-intel run doesn't fail the weekly dry-run.
+          - os: macos-15-intel
+            platform: darwin-x64
+            experimental: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental || false }}
+    timeout-minutes: ${{ matrix.experimental && 75 || 360 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -35,10 +50,10 @@ jobs:
         shell: bash
 
       - name: Fetch Skia binaries
-        run: python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+        run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
         shell: bash
 
-      - name: Configure (mirrors release-cli.yml darwin-arm64)
+      - name: Configure (mirrors release-cli.yml)
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -59,9 +74,33 @@ jobs:
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
             --build-dir build \
-            --platform darwin-arm64 \
-            --out pulp-darwin-arm64.tar.gz
-          test -s pulp-darwin-arm64.tar.gz || { echo "::error::package_cli produced no tarball"; exit 1; }
+            --platform ${{ matrix.platform }} \
+            --out pulp-${{ matrix.platform }}.tar.gz
+          test -s pulp-${{ matrix.platform }}.tar.gz || { echo "::error::package_cli produced no tarball"; exit 1; }
+        shell: bash
+
+      - name: Verify arch + run the packaged CLI natively
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform }}" in
+            darwin-arm64) EXPECT_ARCH="arm64" ;;
+            darwin-x64)   EXPECT_ARCH="x86_64" ;;
+          esac
+          # Extract the packaged tarball and assert the shipped binary is the
+          # exact (thin) arch this platform claims, then RUN it — on the native
+          # runner this proves the artifact actually executes on real silicon.
+          rm -rf dryrun-extract && mkdir -p dryrun-extract
+          tar -xzf pulp-${{ matrix.platform }}.tar.gz -C dryrun-extract
+          BIN="$(find dryrun-extract -name pulp -type f | head -1)"
+          test -x "$BIN" || { echo "::error::packaged pulp binary missing"; exit 1; }
+          ARCHS="$(lipo -archs "$BIN" 2>/dev/null || true)"
+          if [ "$ARCHS" != "$EXPECT_ARCH" ]; then
+            echo "::error::packaged pulp arch is '$ARCHS', expected exactly '$EXPECT_ARCH' — $(file "$BIN")"
+            exit 1
+          fi
+          echo "OK: packaged pulp is thin $EXPECT_ARCH — running it:"
+          "$BIN" help >/dev/null
+          echo "OK: '$BIN help' ran on native ${{ matrix.platform }}."
         shell: bash
 
       - name: Generate + validate appcast (synthetic version, no publish)
@@ -77,8 +116,8 @@ jobs:
       - name: Upload dry-run artifacts (throwaway — NOT a release)
         uses: actions/upload-artifact@v6
         with:
-          name: release-dry-run-darwin-arm64
+          name: release-dry-run-${{ matrix.platform }}
           path: |
-            pulp-darwin-arm64.tar.gz
+            pulp-${{ matrix.platform }}.tar.gz
             appcast.xml
           retention-days: 7
