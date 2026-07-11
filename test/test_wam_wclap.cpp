@@ -143,11 +143,15 @@ TEST_CASE("WamProcessorBridge handles uninitialized and null-factory states",
     REQUIRE(empty_desc.vendor.empty());
     REQUIRE(uninitialized.get_parameter_info().empty());
 
-    float input[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    float output[4] = {9.0f, 9.0f, 9.0f, 9.0f};
-    uninitialized.process(input, output, 2, 2);
-    REQUIRE(output[0] == 9.0f);
-    REQUIRE(output[3] == 9.0f);
+    float input_l[2] = {1.0f, 1.0f};
+    float input_r[2] = {1.0f, 1.0f};
+    float output_l[2] = {9.0f, 9.0f};
+    float output_r[2] = {9.0f, 9.0f};
+    const float* inputs[] = {input_l, input_r};
+    float* outputs[] = {output_l, output_r};
+    uninitialized.process(inputs, outputs, 2, 2);
+    REQUIRE(output_l[0] == 9.0f);
+    REQUIRE(output_r[1] == 9.0f);
 
     WamProcessorBridge null_bridge(create_null_wam);
     REQUIRE_FALSE(null_bridge.initialize(48000.0, 64));
@@ -185,17 +189,22 @@ TEST_CASE("WamProcessorBridge audio processing", "[format][wam]") {
     WamProcessorBridge bridge(create_test_wam);
     bridge.initialize(48000.0, 128);
 
-    // Interleaved stereo: [L0,R0,L1,R1,...] — 4 frames
-    float input[8] = {1.0f, 1.0f, 0.5f, 0.5f, -1.0f, -1.0f, 0.0f, 0.0f};
-    float output[8] = {};
+    float input_l[4] = {1.0f, 0.5f, -1.0f, 0.0f};
+    float input_r[4] = {1.0f, 0.25f, -2.0f, 0.0f};
+    float output_l[4] = {};
+    float output_r[4] = {};
+    const float* inputs[] = {input_l, input_r};
+    float* outputs[] = {output_l, output_r};
 
-    bridge.process(input, output, 2, 4);
+    bridge.process(inputs, outputs, 2, 4);
 
     // Processor applies 0.5x gain
-    REQUIRE(output[0] == Catch::Approx(0.5f));  // L0
-    REQUIRE(output[1] == Catch::Approx(0.5f));  // R0
-    REQUIRE(output[2] == Catch::Approx(0.25f)); // L1
-    REQUIRE(output[4] == Catch::Approx(-0.5f)); // L2
+    REQUIRE(output_l[0] == Catch::Approx(0.5f));
+    REQUIRE(output_r[0] == Catch::Approx(0.5f));
+    REQUIRE(output_l[1] == Catch::Approx(0.25f));
+    REQUIRE(output_r[1] == Catch::Approx(0.125f));
+    REQUIRE(output_l[2] == Catch::Approx(-0.5f));
+    REQUIRE(output_r[2] == Catch::Approx(-1.0f));
 }
 
 TEST_CASE("WamProcessorBridge clamps processing to prepared channel count",
@@ -203,22 +212,23 @@ TEST_CASE("WamProcessorBridge clamps processing to prepared channel count",
     WamProcessorBridge bridge(create_test_wam);
     bridge.initialize(48000.0, 128);
 
-    float input[12] = {
-        1.0f, 2.0f, 99.0f,
-        0.5f, 0.25f, 88.0f,
-        -1.0f, -2.0f, 77.0f,
-        0.0f, 0.0f, 66.0f,
-    };
-    float output[12] = {};
+    float input_l[4] = {1.0f, 0.5f, -1.0f, 0.0f};
+    float input_r[4] = {2.0f, 0.25f, -2.0f, 0.0f};
+    float input_extra[4] = {99.0f, 88.0f, 77.0f, 66.0f};
+    float output_l[4] = {};
+    float output_r[4] = {};
+    float output_extra[4] = {7.0f, 7.0f, 7.0f, 7.0f};
+    const float* inputs[] = {input_l, input_r, input_extra};
+    float* outputs[] = {output_l, output_r, output_extra};
 
-    bridge.process(input, output, 3, 4);
+    bridge.process(inputs, outputs, 3, 4);
 
-    REQUIRE(output[0] == Catch::Approx(0.5f));
-    REQUIRE(output[1] == Catch::Approx(1.0f));
-    REQUIRE(output[2] == Catch::Approx(0.0f));
-    REQUIRE(output[3] == Catch::Approx(0.25f));
-    REQUIRE(output[4] == Catch::Approx(0.125f));
-    REQUIRE(output[5] == Catch::Approx(0.0f));
+    REQUIRE(output_l[0] == Catch::Approx(0.5f));
+    REQUIRE(output_r[0] == Catch::Approx(1.0f));
+    REQUIRE(output_extra[0] == Catch::Approx(7.0f));
+    REQUIRE(output_l[1] == Catch::Approx(0.25f));
+    REQUIRE(output_r[1] == Catch::Approx(0.125f));
+    REQUIRE(output_extra[1] == Catch::Approx(7.0f));
 }
 
 TEST_CASE("WamProcessorBridge MIDI scheduling", "[format][wam]") {
@@ -228,9 +238,13 @@ TEST_CASE("WamProcessorBridge MIDI scheduling", "[format][wam]") {
     bridge.schedule_midi(0x90, 60, 127, 0);
     bridge.schedule_midi(0x80, 60, 0, 64);
 
-    float input[4] = {};
-    float output[4] = {};
-    bridge.process(input, output, 2, 2);
+    float input_l[2] = {};
+    float input_r[2] = {};
+    float output_l[2] = {};
+    float output_r[2] = {};
+    const float* inputs[] = {input_l, input_r};
+    float* outputs[] = {output_l, output_r};
+    bridge.process(inputs, outputs, 2, 2);
 }
 
 TEST_CASE("WamProcessorBridge ignores unsupported MIDI statuses",
@@ -241,12 +255,16 @@ TEST_CASE("WamProcessorBridge ignores unsupported MIDI statuses",
     bridge.schedule_midi(0xF0, 1, 2, 0);
     bridge.schedule_midi(0xE0, 0, 64, 1);
 
-    float input[4] = {};
-    float output[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    bridge.process(input, output, 2, 2);
+    float input_l[2] = {};
+    float input_r[2] = {};
+    float output_l[2] = {1.0f, 1.0f};
+    float output_r[2] = {1.0f, 1.0f};
+    const float* inputs[] = {input_l, input_r};
+    float* outputs[] = {output_l, output_r};
+    bridge.process(inputs, outputs, 2, 2);
 
-    REQUIRE(output[0] == Catch::Approx(0.0f));
-    REQUIRE(output[3] == Catch::Approx(0.0f));
+    REQUIRE(output_l[0] == Catch::Approx(0.0f));
+    REQUIRE(output_r[1] == Catch::Approx(0.0f));
 }
 
 TEST_CASE("WamProcessorBridge state round-trip", "[format][wam]") {
