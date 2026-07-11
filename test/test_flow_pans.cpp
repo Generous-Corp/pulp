@@ -21,7 +21,7 @@ namespace {
 constexpr float kHalfPi = 1.5707963f;
 }
 
-TEST_CASE("flow_hash is deterministic and in [0,1)", "[flow]") {
+TEST_CASE("flow_hash is deterministic and in the unit interval", "[flow]") {
     for (std::uint32_t k = 0; k < 64; ++k) {
         const float h = flow_hash(k);
         REQUIRE(h >= 0.0f);
@@ -30,7 +30,7 @@ TEST_CASE("flow_hash is deterministic and in [0,1)", "[flow]") {
     }
 }
 
-TEST_CASE("flow_base_azimuth spreads evenly across [0, pi/2]", "[flow]") {
+TEST_CASE("flow_base_azimuth spreads evenly to half pi", "[flow]") {
     // n == 1 sits dead-center (pi/4).
     REQUIRE(flow_base_azimuth(0, 1) == Approx(kHalfPi * 0.5f));
     // n > 1: first room at 0, last at pi/2, monotone increasing.
@@ -56,7 +56,7 @@ TEST_CASE("flow_pan_room is constant-power at every instant", "[flow]") {
             }
 }
 
-TEST_CASE("depth 0 reproduces the static base layout", "[flow]") {
+TEST_CASE("depth zero reproduces the static base layout", "[flow]") {
     const float norm = 0.7f;
     for (std::uint32_t k = 0; k < 5; ++k) {
         const float base = flow_base_azimuth(k, 5);
@@ -68,7 +68,7 @@ TEST_CASE("depth 0 reproduces the static base layout", "[flow]") {
     }
 }
 
-TEST_CASE("depth > 0 actually moves the pans over time", "[flow]") {
+TEST_CASE("positive depth moves the pans over time", "[flow]") {
     const std::uint32_t n = 8;
     std::vector<float> base(n);
     for (std::uint32_t k = 0; k < n; ++k) base[k] = flow_base_azimuth(k, n);
@@ -98,7 +98,7 @@ TEST_CASE("fill_flow_pans matches per-base fill and stays in range", "[flow]") {
     }
 }
 
-TEST_CASE("GpuMultiConvolver::set_flow clamps without a device", "[flow]") {
+TEST_CASE("GpuMultiConvolver set_flow clamps without a device", "[flow]") {
     // set_flow is a plain atomic store — safe to call with no GPU. Construct a
     // node (no prepare) and exercise the clamp on both ends.
     std::vector<std::vector<float>> irs = {{1.0f, 0.5f, 0.25f}, {0.3f, 0.2f, 0.1f}};
