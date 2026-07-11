@@ -80,9 +80,12 @@ TEST_CASE("WAM bridge clamps oversized blocks instead of overrunning", "[wam][rt
     WamProcessorBridge bridge(pulp::examples::create_pulp_gain);
     REQUIRE(bridge.initialize(48000.0, 128)); // planar buffers sized to 128
 
+    // Planar channel-pointer arrays: 2 channels of 256 frames each.
     std::vector<float> in(2 * 256, 0.25f), out(2 * 256, -99.0f);
-    REQUIRE_NOTHROW(bridge.process(in.data(), out.data(), 2, 256)); // 256 > 128
-    REQUIRE_NOTHROW(bridge.process(in.data(), out.data(), 2, 0));   // <= 0 guard
+    const float* inCh[2]  = { in.data(),  in.data()  + 256 };
+    float*       outCh[2] = { out.data(), out.data() + 256 };
+    REQUIRE_NOTHROW(bridge.process(inCh, outCh, 2, 256)); // 256 > 128
+    REQUIRE_NOTHROW(bridge.process(inCh, outCh, 2, 0));   // <= 0 guard
 
     for (int i = 0; i < 2 * 128; ++i) REQUIRE(std::isfinite(out[i]));
 }
@@ -128,18 +131,21 @@ TEST_CASE("WAM bridge gain parameter and state round-trip", "[wam]") {
     REQUIRE(bridge.initialize(48000.0, 128));
 
     constexpr int CH = 2, FR = 128, N = CH * FR;
+    // Planar layout: channel 0 (L) is [0,FR), channel 1 (R) is [FR,2*FR).
     std::vector<float> in(N), out(N, 0.0f);
-    for (int f = 0; f < FR; ++f) { in[f * CH] = 0.5f; in[f * CH + 1] = -0.5f; }
+    for (int f = 0; f < FR; ++f) { in[f] = 0.5f; in[FR + f] = -0.5f; }
+    const float* inCh[CH]  = { in.data(),  in.data()  + FR };
+    float*       outCh[CH] = { out.data(), out.data() + FR };
 
     // Default 0 dB in/out -> unity passthrough, distinct L/R preserved.
-    bridge.process(in.data(), out.data(), CH, FR);
+    bridge.process(inCh, outCh, CH, FR);
     REQUIRE(rms(out, N) == Catch::Approx(0.5f).margin(0.01f));
-    REQUIRE(out[0] == Catch::Approx(0.5f).margin(0.01f));   // L
-    REQUIRE(out[1] == Catch::Approx(-0.5f).margin(0.01f));  // R
+    REQUIRE(out[0]  == Catch::Approx(0.5f).margin(0.01f));   // L[0]
+    REQUIRE(out[FR] == Catch::Approx(-0.5f).margin(0.01f));  // R[0]
 
     // Output gain +6 dB (~2x). PulpGain ids: "1" input, "2" output, "3" bypass.
     bridge.set_parameter_value("2", 6.0f);
-    bridge.process(in.data(), out.data(), CH, FR);
+    bridge.process(inCh, outCh, CH, FR);
     REQUIRE(rms(out, N) == Catch::Approx(1.0f).margin(0.03f));
 
     // Parameter read-back.
@@ -161,14 +167,16 @@ TEST_CASE("WAM bridge delivers scheduled MIDI to the processor", "[wam]") {
 
     constexpr int CH = 2, FR = 128, N = CH * FR;
     std::vector<float> in(N, 0.0f), out(N, -1.0f);
+    const float* inCh[CH]  = { in.data(),  in.data()  + FR };
+    float*       outCh[CH] = { out.data(), out.data() + FR };
 
     // No MIDI yet -> the probe outputs silence.
-    bridge.process(in.data(), out.data(), CH, FR);
+    bridge.process(inCh, outCh, CH, FR);
     REQUIRE(out[0] == Catch::Approx(0.0f).margin(1e-6f));
 
     // Schedule a note-on; the bridge must route it into the processor's midi_in,
     // which the probe reflects by driving its output high.
     bridge.schedule_midi(0x90, 60, 100, 0);
-    bridge.process(in.data(), out.data(), CH, FR);
+    bridge.process(inCh, outCh, CH, FR);
     REQUIRE(out[0] == Catch::Approx(1.0f).margin(1e-6f));
 }
