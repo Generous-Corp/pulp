@@ -272,6 +272,16 @@ if(UNIX)
     set_tests_properties(install-sh-runs-sdk-install
         PROPERTIES TIMEOUT 10
         LABELS "tooling")
+
+    # install.sh OS/arch → release-platform mapping, including Intel Mac
+    # (darwin-x64). Guards the reverse-Rosetta regression where an x86_64
+    # Mac was mapped to the arm64 tarball. Drives the real installer with
+    # a mocked `uname` and PULP_PRINT_PLATFORM=1 (no network).
+    add_test(NAME install-sh-platform-detect
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_platform_detect.sh)
+    set_tests_properties(install-sh-platform-detect
+        PROPERTIES TIMEOUT 30
+        LABELS "tooling")
 endif()
 
 # Window-only capture invariants: spectr-roundtrip.sh must not

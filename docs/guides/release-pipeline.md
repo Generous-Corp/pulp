@@ -1,7 +1,8 @@
 # Release pipeline
 
 This doc explains end-to-end how a PR merge becomes a published SDK release —
-from the first commit on `main` to 12 downloadable assets on the Releases page.
+from the first commit on `main` to 12 downloadable assets on the Releases page
+(plus 2 optional Intel `darwin-x64` assets when that advisory leg succeeds).
 
 If you're hunting a specific layer:
 
@@ -147,9 +148,11 @@ PR merge to main
 └─────────────────────────────────────────────────────────┘
 ```
 
-## The 12 release assets
+## The release assets (12 base, +2 optional Intel)
 
-A successful release publishes exactly **12 assets** to the GitHub Release page:
+A successful release publishes **12 base assets** to the GitHub Release page,
+plus **2 optional Intel (`darwin-x64`) assets** when the advisory
+`macos-15-intel` leg succeeds (so 12 or 14 total):
 
 | Asset | Purpose |
 |-------|---------|
@@ -164,10 +167,20 @@ A successful release publishes exactly **12 assets** to the GitHub Release page:
 | `pulp-sdk-linux-x64.tar.gz` | " |
 | `pulp-sdk-windows-arm64.tar.gz` | " |
 | `pulp-sdk-windows-x64.tar.gz` | " |
-| `SHA256SUMS` | SHA-256 manifest for the 11 user-facing release assets above |
+| `pulp-darwin-x64.tar.gz` | *(optional)* Intel CLI tarball — present only when the advisory `macos-15-intel` leg succeeded |
+| `pulp-sdk-darwin-x64.tar.gz` | *(optional)* Intel SDK tarball — same advisory leg |
+| `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above (11 base, or 13 with the Intel pair) |
 
-Anything less than 12 published assets means part of the pipeline didn't reach the
-end. Triage by which assets are present:
+The Intel pair is advisory: `release-cli.yml`'s `darwin-x64` build/smoke legs are
+`continue-on-error`, so a flaky `macos-15-intel` run leaves the release without
+the Intel slice rather than blocking it. `release-publish.yml` requires the pair
+in its `--exact-required` manifest **only when present** (it appends them after
+confirming `pulp-darwin-x64.tar.gz` downloaded), so a successful-Intel release is
+not rejected for "unexpected" assets and an Intel-absent release still publishes.
+
+Anything less than the 12 base assets means part of the pipeline didn't reach the
+end (the 2 Intel assets are expected to be absent on some releases). Triage by
+which assets are present:
 
 - **No `appcast.xml` on the release** (or no draft release at all):
   `sign-and-release.yml` didn't reach its "Create GitHub Release" step. The
@@ -183,7 +196,7 @@ end. Triage by which assets are present:
   below). The `release` job uploads whatever
   `actions/download-artifact` finds; failed matrix legs simply don't
   contribute artifacts.
-- **All 11 assets present but the release stays in DRAFT**:
+- **All base assets present but the release stays in DRAFT**:
   `release-publish.yml` either did not reach its publish step after both release
   legs produced their assets, or failed while generating/uploading
   `SHA256SUMS`. Inspect the coordinator run and its upstream workflow
