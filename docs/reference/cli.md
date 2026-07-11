@@ -1553,13 +1553,61 @@ pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --dura
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
 | `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
 | `compare` | Advisory, agent-facing before/after judgment between two WAVs (measure → compare → judge). Delegates to the opt-in [Audio Quality Lab](../guides/audio-quality-lab.md) tool (no DSP links into the CLI); level-matches, runs one `--profile` axis (`tonal-balance` \| `added-hf` \| `noise-roughness` \| `graininess` \| `stereo-width` \| `transient-integrity`), prints a typed evidence envelope + verdict. Exits nonzero **only** when it could not measure (invalid), never for a judgment — distinct from the pass/fail `validate compare` gate. Prints an install hint + exit 1 when the tool is absent |
-| `render` | Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load `--plugin`, drive it from declarative flags, write a WAV, and emit metrics JSON matching `validate summarize --json` |
+| `render` | Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load `--plugin`, drive it from declarative flags, write a WAV, and emit metrics JSON matching `validate summarize --json`. `--latency-report` additionally **proves** the plugin's reported latency against the delay actually in its audio |
 
 Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. Inputs are WAV files or directories of WAV files today; unsupported files are reported as skipped. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
 
 The `validate` subcommands are the offline analysis CLI over captured audio. They analyze decoded WAV files and re-check `assertions.json` manifests (or directories containing one) with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
 
-`render` is the offline counterpart that *does* load a plugin: it takes an explicit `--plugin <bundle>` (the generic CLI has no registered factory, so a bundle is the only render source), drives it through `pulp::host::PluginSlot` block-by-block from declarative flags, writes an int16 WAV, and emits the same `pulp::audio-analysis` metrics JSON as `validate summarize --json` (`--manifest <file>` to a file, `--json` to stdout). Drive it with `--input-signal silence|sine:<hz>[,<dbfs>]` or `--input <file.wav>` (used as-is at `--sample-rate`; no resampling — a rate mismatch shifts pitch), `--param <id>=<value>[@frame]`, and `--midi note:<note>,<vel>,<on>[,<off>]`. **`--param` values are in the PLAIN parameter domain** (the parameter's native `min..max`), **not normalized `[0,1]`** — matching `PluginSlot::set_parameter` / `ParameterEvent::value`; an `@frame` suffix delivers the change **sample-accurately** at that frame. The per-block parameter queue is forwarded straight to `PluginSlot::process`, which every loader applies at the event's sample offset — CLAP (`clap_event_param_value` at `header.time`), VST3 (`IParameterChanges` add-point), AU (`AudioUnitScheduleParameters` buffer offset); LV2 applies it block-rate, which is LV2's control-port contract. (A plugin that itself reads its parameters once per block will still step at block boundaries — that is the plugin's own rate, not the CLI's.) The render uses the `--in-channels`/`--out-channels` bus widths you specify (like `pulp host`); use `--in-channels 0` for instrument/no-input renders, and use at least one input channel for `--input` or sine `--input-signal`. The metrics JSON is computed from the float render — it matches the int16 WAV except below the ~−96 dBFS int16 floor, and at clipping the command warns that the float peak exceeds the hard-clamped file.
+`render` is the offline counterpart that *does* load a plugin: it takes an explicit `--plugin <bundle>` (the generic CLI has no registered factory, so a bundle is the only render source), drives it through `pulp::host::PluginSlot` block-by-block from declarative flags, writes an int16 WAV, and emits the same `pulp::audio-analysis` metrics JSON as `validate summarize --json` (`--manifest <file>` to a file, `--json` to stdout). Drive it with `--input-signal silence|sine:<hz>[,<dbfs>]|noise[:<seed>]|impulse[:<frame>]` or `--input <file.wav>` (used as-is at `--sample-rate`; no resampling — a rate mismatch shifts pitch), `--param <id>=<value>[@frame]`, and `--midi note:<note>,<vel>,<on>[,<off>]`. **`--param` values are in the PLAIN parameter domain** (the parameter's native `min..max`), **not normalized `[0,1]`** — matching `PluginSlot::set_parameter` / `ParameterEvent::value`; an `@frame` suffix delivers the change **sample-accurately** at that frame. The per-block parameter queue is forwarded straight to `PluginSlot::process`, which every loader applies at the event's sample offset — CLAP (`clap_event_param_value` at `header.time`), VST3 (`IParameterChanges` add-point), AU (`AudioUnitScheduleParameters` buffer offset); LV2 applies it block-rate, which is LV2's control-port contract. (A plugin that itself reads its parameters once per block will still step at block boundaries — that is the plugin's own rate, not the CLI's.) The render uses the `--in-channels`/`--out-channels` bus widths you specify (like `pulp host`); use `--in-channels 0` for instrument/no-input renders, and use at least one input channel for `--input` or sine `--input-signal`. The metrics JSON is computed from the float render — it matches the int16 WAV except below the ~−96 dBFS int16 floor, and at clipping the command warns that the float peak exceeds the hard-clamped file.
+
+#### Proving reported latency (`--latency-report`)
+
+A plugin with nonzero latency tells the host a number, and the host slides the
+whole track by it to keep everything in the session aligned. Nothing checks the
+number. When the true delay and the reported delay drift apart — an FFT size
+changes, a filter stage is added, an oversampling ratio is tweaked — the plugin
+silently misaligns against every other track, and no build or test fails.
+
+`--latency-report <file.json>` proves the claim: it measures the delay actually
+present in the rendered output and compares it against the plugin's
+`latency_samples()`.
+
+```bash
+# A bypassed plugin's output should be its input, delayed by exactly the
+# latency it reports. Param 3 is PulpGain's bypass; use your own plugin's.
+pulp audio render --plugin My.clap --out /tmp/o.wav --duration-ms 500 \
+    --input-signal noise --param 3=1 --latency-report /tmp/latency.json
+```
+
+Two policies:
+
+- **`delayed-null`** (the default with `noise`) nulls the output against the
+  input delayed by *D*, sweeping *D*. It checks **every sample**, so a
+  one-sample misreport fails. It requires the plugin to be in a declared
+  pass-through / bypass / fully-dry mode for the render — arrange that with
+  `--param`.
+- **`marker`** (the default with `impulse`) finds the single onset in the output
+  and subtracts its position in the input. Weaker (one onset, not every sample),
+  but it works for plugins that *reshape* the signal — a convolver, a filter —
+  where nulling against the input is meaningless. Declare any delay the plugin
+  adds that is **not** latency (leading silence in a known IR) with
+  `--latency-intrinsic <n>`, so it is not charged to the latency report.
+
+**It never guesses.** A stimulus that cannot pin the delay down comes back
+`inconclusive`, never `match`: silence, a tone whose period is a whole number of
+samples (delays one period apart produce identical audio), an output that is not
+a delayed copy of the input at all, a non-unique marker, or a plugin whose report
+*moved* mid-render. The report itself is kept separate from the measurement and
+from the verdict — a plugin that reports zero because its **format cannot expose
+latency at all** (Pulp's hosted LV2 slot) is `unsupported`, which is not the same
+claim as "reports zero" and is never shown as verified.
+
+**The artifact's existence is not the result.** The command exits **nonzero**
+when the claim is disproven *or* when it was asked for and could not be proven —
+an unprovable claim is a failed claim. Gate on the exit code, not on whether the
+file appeared. The same evidence, with the same verdict, is what
+`pulp_audio_render` returns over MCP with `latency: true`.
 
 `pulp audio scope` is the lower-level sample-window view. Live mode wraps
 `pulp run --audio-scope-json` and may open the audio device; use

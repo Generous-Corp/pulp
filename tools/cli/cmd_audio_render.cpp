@@ -13,6 +13,7 @@
 
 #include <pulp/audio/analysis/audio_artifacts.hpp>
 #include <pulp/audio/analysis/audio_metrics.hpp>
+#include <pulp/audio/analysis/latency_evidence.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -28,6 +29,7 @@
 #include <fstream>
 #include <iostream>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,7 +63,8 @@ void print_render_usage() {
         "Input signal (mutually exclusive; default silence):\n"
         "  --input <file.wav>           Use a WAV as input (used as-is at --sample-rate;\n"
         "                               no resampling — a rate mismatch shifts pitch)\n"
-        "  --input-signal silence|sine:<hz>[,<dbfs>]   (sine dbfs default: -6)\n\n"
+        "  --input-signal silence|sine:<hz>[,<dbfs>]|noise[:<seed>]|impulse[:<frame>]\n"
+        "                               (sine dbfs default: -6; noise seed default: 1)\n\n"
         "Automation (repeatable):\n"
         "  --param <id>=<value>[@frame] Parameter change in the PLAIN domain (native\n"
         "                               min..max, NOT normalized); @frame is sample-accurate\n"
@@ -69,7 +72,24 @@ void print_render_usage() {
         "  --midi note:<note>,<vel>,<on>[,<off>]   Note on at <on>, optional off at <off>\n\n"
         "Output:\n"
         "  --manifest <file.json>       Write the metrics manifest to a file\n"
-        "  --json                       Print the metrics manifest to stdout\n";
+        "  --json                       Print the metrics manifest to stdout\n\n"
+        "Latency proof (does the plugin's reported latency match the audio?):\n"
+        "  --latency-report <file.json> Write a latency-evidence artifact. Exits NONZERO\n"
+        "                               if the report is disproven, or if it was asked for\n"
+        "                               and could not be proven.\n"
+        "  --latency-policy delayed-null|marker\n"
+        "                               delayed-null (default with noise): null the output\n"
+        "                                 against the input delayed by D, sweeping D. Needs\n"
+        "                                 the plugin in a pass-through/bypass/dry mode --\n"
+        "                                 arrange it with --param.\n"
+        "                               marker (default with impulse): find the one onset.\n"
+        "                                 For plugins that reshape the signal.\n"
+        "  --latency-tolerance <n>      Samples of drift allowed (default: 0)\n"
+        "  --latency-intrinsic <n>      Delay the plugin adds that is NOT latency (leading\n"
+        "                               silence in a known IR). --latency-policy marker only.\n\n"
+        "  Example (a bypassed plugin must report its true delay):\n"
+        "    pulp audio render --plugin My.clap --out /tmp/o.wav --duration-ms 500 \\\n"
+        "        --input-signal noise --param 3=1 --latency-report /tmp/latency.json\n";
 }
 
 host::PluginFormat parse_format(std::string_view s, bool& known) {
@@ -126,8 +146,47 @@ audio::Buffer<float> materialize_input(const ParseAudioRenderResult& req, bool& 
             for (std::size_t n = 0; n < frames; ++n)
                 dst[n] = static_cast<float>(amp * std::sin(w * static_cast<double>(n)));
         }
+    } else if (req.input_kind == AudioRenderInputKind::Noise && frames > 0) {
+        // SplitMix64 -> [-0.5, 0.5). Seeded and self-contained, so the same
+        // --input-signal noise:<seed> renders bit-identically on every platform
+        // and a latency artifact is reproducible.
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            std::uint64_t state = req.noise_seed + 0x9E3779B97F4A7C15ull *
+                                                       (static_cast<std::uint64_t>(ch) + 1);
+            auto dst = buf.channel(ch);
+            for (std::size_t n = 0; n < frames; ++n) {
+                state += 0x9E3779B97F4A7C15ull;
+                std::uint64_t z = state;
+                z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+                z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+                z ^= z >> 31;
+                // Top 24 bits -> [0,1), centered.
+                const double u = static_cast<double>(z >> 40) / 16777216.0;
+                dst[n] = static_cast<float>(u - 0.5);
+            }
+        }
+    } else if (req.input_kind == AudioRenderInputKind::Impulse && frames > 0) {
+        const auto pos = static_cast<std::size_t>(req.impulse_frame);
+        if (pos < frames)
+            for (std::size_t ch = 0; ch < channels; ++ch)
+                buf.channel(ch)[pos] = 1.0f;
     }
     return buf;
+}
+
+// Map the host slot's latency query onto the analysis layer's report status.
+// core/host cannot depend on the tool-tier analysis library, so the two enums
+// are deliberately separate and meet here.
+analysis::LatencyReportStatus to_report_status(host::PluginSlot::LatencyQuery query) {
+    switch (query) {
+        case host::PluginSlot::LatencyQuery::Available:
+            return analysis::LatencyReportStatus::available;
+        case host::PluginSlot::LatencyQuery::Unsupported:
+            return analysis::LatencyReportStatus::unsupported;
+        case host::PluginSlot::LatencyQuery::QueryFailed:
+            return analysis::LatencyReportStatus::query_failed;
+    }
+    return analysis::LatencyReportStatus::unsupported;
 }
 
 }  // namespace
@@ -228,6 +287,17 @@ int cmd_audio_render(const std::vector<std::string>& args) {
 
     audio::Buffer<float> output;
     audio_render::StepStats stats;
+
+    // Latency facts, gathered WHILE the slot is alive. A hosted slot exposes no
+    // latency-changed flag, so the only way to notice a moving report is to read
+    // it at every block boundary.
+    const auto latency_query = slot->latency_query();
+    const bool latency_readable =
+        latency_query == host::PluginSlot::LatencyQuery::Available;
+    const int initial_latency = latency_readable ? slot->latency_samples() : 0;
+    int final_latency = initial_latency;
+    bool latency_changed = false;
+
     const auto process = [&](audio::BufferView<float>& out,
                              const audio::BufferView<const float>& in,
                              const midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
@@ -243,6 +313,12 @@ int cmd_audio_render(const std::vector<std::string>& args) {
         // change (once at offset 0, once at its real offset) and smear the
         // automation the queue exists to make precise.
         slot->process(out, in, midi_in, midi_out, pq, n);
+
+        if (latency_readable) {
+            const int now = slot->latency_samples();
+            if (now != final_latency) latency_changed = true;
+            final_latency = now;
+        }
     };
 
     if (!audio_render::render_blocks(spec, input.view(), events, output, stats, process)) {
@@ -319,6 +395,58 @@ int cmd_audio_render(const std::vector<std::string>& args) {
         std::cout << "  frames: " << stats.frames_rendered
                   << "  blocks: " << stats.blocks_rendered << "\n";
         std::cout << analysis::summarize(metrics, freq) << "\n";
+    }
+
+    // ── Latency proof ───────────────────────────────────────────────────────
+    // A separate, versioned artifact. The metrics manifest and --json stdout
+    // above keep their exact shape, so nothing that parses them today breaks.
+    if (!req.latency_report_path.empty()) {
+        analysis::LatencyEvidence evidence;
+
+        // The report is a FACT about the plugin. An unsupported query must not
+        // become a confident zero — that is precisely how an unverifiable plugin
+        // would get certified.
+        std::optional<int> reported;
+        if (latency_readable) reported = initial_latency;
+
+        if (req.latency_policy == AudioRenderLatencyPolicy::Marker) {
+            analysis::MarkerOffsetOptions options;
+            options.input_marker_frame = static_cast<std::int64_t>(req.impulse_frame);
+            options.intrinsic_response_offset = req.latency_intrinsic;
+            options.tolerance_samples = req.latency_tolerance;
+            evidence = analysis::measure_marker_offset(input, output, reported, options);
+        } else {
+            analysis::DelayedNullOptions options;
+            options.tolerance_samples = req.latency_tolerance;
+            evidence = analysis::measure_delayed_passthrough(input, output, reported,
+                                                             options);
+        }
+
+        evidence.report_status = to_report_status(latency_query);
+        evidence.reported_samples = reported;
+        if (latency_readable) evidence.final_reported_samples = final_latency;
+        evidence.observation_mode = analysis::LatencyObservationMode::per_block_poll;
+        evidence.report_observation =
+            !latency_readable  ? analysis::LatencyReportObservation::unobservable
+            : latency_changed  ? analysis::LatencyReportObservation::changed
+                               : analysis::LatencyReportObservation::stable;
+        analysis::apply_report_observation(evidence);
+
+        std::ofstream report(req.latency_report_path, std::ios::binary | std::ios::trunc);
+        if (!report) {
+            std::fprintf(stderr, "pulp audio render: failed to write latency report '%s'\n",
+                         req.latency_report_path.c_str());
+            return 1;
+        }
+        report << analysis::latency_evidence_to_json(evidence) << "\n";
+
+        std::fprintf(stderr, "pulp audio render: %s\n",
+                     analysis::latency_evidence_summary(evidence).c_str());
+
+        // The artifact exists either way. Its EXISTENCE is not the result —
+        // a disproven or unprovable claim must fail, or a caller that only
+        // checks "did the file appear" would read a violation as a pass.
+        if (evidence.gates_failure()) return 1;
     }
 
     return 0;

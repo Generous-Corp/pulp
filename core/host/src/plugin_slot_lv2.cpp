@@ -320,7 +320,12 @@ public:
 #  pragma GCC diagnostic pop
 #endif
 
+    // This slot does not yet read the plugin's lv2:reportsLatency control port,
+    // so it has no latency to report. Zero here is a placeholder, NOT a claim
+    // that the plugin is latency-free — latency_query() says so, and callers
+    // that care must ask.
     int latency_samples() const override { return 0; }
+    LatencyQuery latency_query() const override { return LatencyQuery::Unsupported; }
     int tail_samples() const override { return 0; }
 
     // Typed plugin introspection surfaces the LV2 instance handle and URI so

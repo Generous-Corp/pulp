@@ -207,9 +207,14 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
 
     // Report current processing latency to the host's latency control port
     // (see generate_plugin_ttl's lv2:reportsLatency port) for PDC.
+    //
+    // Clamp to the port's declared domain. The TTL gives this port a minimum of
+    // zero, so a processor that returns a negative latency_samples() would
+    // otherwise write an out-of-range value straight into the host's delay
+    // compensation and shift the track the wrong way.
     if (inst->latency_port) {
-        *inst->latency_port =
-            static_cast<float>(inst->processor->latency_samples());
+        const int reported = inst->processor->latency_samples();
+        *inst->latency_port = static_cast<float>(reported > 0 ? reported : 0);
     }
 
     // Read control port values into the parameter store. LV2 run() is

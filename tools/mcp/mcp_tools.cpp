@@ -1072,18 +1072,45 @@ std::string handle_audio_render(const std::string& params_json) {
     if (out.empty()) out = (temp_dir / "render.wav").string();
     const auto manifest_path = (temp_dir / "metrics.json").string();
 
+    // Latency proof: opt-in. `latency: true` asks the render to prove that the
+    // plugin's reported latency matches the delay actually in its output.
+    const bool want_latency = has("latency") && extract_bool(params_json, "latency", false);
+    const auto latency_path = (temp_dir / "latency.json").string();
+
     std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio render";
     cmd += " --plugin " + shell_quote(plugin);
     cmd += " --out " + shell_quote(out);
     cmd += " --manifest " + shell_quote(manifest_path);
+    if (want_latency) {
+        cmd += " --latency-report " + shell_quote(latency_path);
+        add_str("latency_policy", "--latency-policy");
+        if (has("latency_tolerance")) {
+            const int tol = extract_int(params_json, "latency_tolerance", -1);
+            if (tol < 0) return arg_error("Error: latency_tolerance must be an integer >= 0");
+            cmd += " --latency-tolerance " + std::to_string(tol);
+        }
+        if (has("latency_intrinsic")) {
+            const int intrinsic = extract_int(params_json, "latency_intrinsic", -1);
+            if (intrinsic < 0) return arg_error("Error: latency_intrinsic must be an integer >= 0");
+            cmd += " --latency-intrinsic " + std::to_string(intrinsic);
+        }
+    }
     cmd += flags;
     // Read the manifest from a FILE (like audio scope) so stderr — plugin load /
     // prepare / write failures, objc warnings — can be captured via 2>&1 and
     // surfaced on failure instead of corrupting the JSON or vanishing.
     cmd += " 2>&1";
-    auto output = exec(cmd);
+
+    // Keep the EXIT STATUS. Merging stderr into stdout above means the status is
+    // the only signal left that the render failed, and a latency proof fails by
+    // exiting nonzero while still writing a perfectly well-formed report. Reading
+    // only the artifact would report a DISPROVEN latency to the agent as a
+    // success — the exact conflation this proof exists to prevent.
+    const auto run = exec_with_status(cmd);
+    const auto& output = run.output;
 
     auto manifest_json = read_text_file(manifest_path);
+    auto latency_json = want_latency ? read_text_file(latency_path) : std::string{};
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
 
@@ -1100,6 +1127,22 @@ std::string handle_audio_render(const std::string& params_json) {
         if (!output.empty()) message += "\n" + output;
         return arg_error(message);
     }
+
+    if (want_latency) {
+        if (latency_json.empty()) {
+            std::string message = "Error: pulp audio render did not write a latency report";
+            if (!output.empty()) message += "\n" + output;
+            return arg_error(message);
+        }
+        // A failed proof is an ERROR result, not a payload the caller has to
+        // remember to inspect. The evidence goes with it so the reason is right
+        // there: which delay was measured, which was reported, or why neither.
+        if (run.failed())
+            return arg_error("Error: the plugin's reported latency was not proven.\n" +
+                             latency_json);
+        return json_tool_payload(latency_json);
+    }
+
     return json_tool_payload(normalized_json);
 }
 
