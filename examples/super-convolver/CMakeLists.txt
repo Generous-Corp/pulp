@@ -29,6 +29,12 @@ if(APPLE AND TARGET pulp::gpu-audio AND TARGET pulp::render AND
         pulp::format pulp::audio pulp::signal pulp::gpu-audio pulp::render
         pulp::view pulp::canvas)
     target_include_directories(super-convolver-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # Native render of the acoustic-field concept (Phase B visual target).
+    add_executable(super-convolver-field-shot field_shot.cpp)
+    target_link_libraries(super-convolver-field-shot PRIVATE
+        pulp::render pulp::view pulp::canvas)
+    target_include_directories(super-convolver-field-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
 # Honest CPU-vs-GPU convolution benchmark. macOS + GPU only (it instantiates the
