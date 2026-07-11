@@ -43,7 +43,19 @@ A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh ma
 - `strategy = "bake"` — pre-bake a project image (fast clones for hot repos).
 - `strategy = "configure-on-boot"` — clone the bare base + apply the manifest on boot (flexible/new repos).
 
-Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode tier), `[brew].packages`, `[pip].packages`, `[caches].ccache_max`, `[[mounts]]`. See `.shipyard/vm-image.toml` (Pulp: Xcode+Skia) and `tools/ci/examples/vm-image.rust-repo.toml` (a light Rust profile, no Xcode — proves generalization).
+Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode tier), `[toolchain].rust` + `.rust_targets` + `.rosetta` (Intel cross-build layer — omit → not installed), `[brew].packages`, `[pip].packages`, `[caches].ccache_max`, `[[mounts]]`. See `.shipyard/vm-image.toml` (Pulp: Xcode+Skia), `.shipyard/vm-image.intel.toml` (Intel cross-build layer), and `tools/ci/examples/vm-image.rust-repo.toml` (a light Rust profile, no Xcode — proves generalization).
+
+## Intel (x86_64) cross-build lane — no native Intel hardware needed
+Pulp's `darwin-x64` release leg is native on GitHub's `macos-15-intel` (slow, nightly-gated). For an interactive "does the Intel build still work?" check, an **Apple-Silicon host cross-compiles x86_64 and runs it under Rosetta 2** — no Intel Mac, and nothing installed on the host.
+
+- **Golden:** `pulp-intel-build:latest`, baked from `.shipyard/vm-image.intel.toml`. `base = pulp-build-runner:latest` (inherits Xcode + cmake/ninja + baked arm64 Skia) + the Intel layer (`[toolchain].rust` + `rust_targets=["x86_64-apple-darwin"]` + `rosetta`). Do NOT re-declare Xcode in the Intel manifest — it's inherited (re-declaring triggers a multi-hour Xcode re-provision).
+  ```
+  tools/ci/tart-provision.sh manifest .shipyard/vm-image.intel.toml
+  tools/ci/tart-provision.sh tag pulp-intel-build pulp-intel-build
+  ```
+- **Use it:** `tools/ci/intel-vm-cross-build.sh [--ref <branch|tag|sha>] [--keep] [--full-build]` clones the golden → runs the cross-build recipe on a ref → asserts exact-thin x86_64 (`lipo -archs`) + a Rosetta `pulp help` run → discards the VM.
+- **THE cross-build gotcha (baked into the recipe):** `setup.sh --ci` prefetches the **host-arch (arm64)** Skia and `fetch_skia_for_release.py`'s flatten step **won't clobber** it, so the x86_64 `cmake` fails `FindSkia`. The recipe does `rm -rf external/skia-build/build` BETWEEN setup.sh and the `darwin-x64` fetch. Native Intel runners never hit this (host==target).
+- **Replicate to another Mac host:** either copy the baked `pulp-intel-build` image (tart export/clone over the network) OR run the manifest on that host — it needs `pulp-build-runner:latest` present there first (it's the base). Same 2-VM/host kernel cap applies; route Intel builds off the required-gate runners.
 
 ## Verified base/runtime specifics (cirruslabs + Tart, 2026-06-01)
 - Base image `ghcr.io/cirruslabs/macos-tahoe-base:latest` = macOS 26 "Tahoe" (matches Xcode 26.5 / build 17F42). Default creds `admin`/`admin`.
