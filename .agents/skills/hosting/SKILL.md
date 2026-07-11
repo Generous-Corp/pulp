@@ -908,3 +908,28 @@ null-slot nodes as deterministic input→output pass-through (or
 zero-fill on channel-count mismatch). Don't assume a Plugin node
 always has a live slot — always null-check `plugins[id]` before
 dereferencing.
+
+## `latency_samples()` alone is not a fact — ask `latency_query()`
+
+`PluginSlot::latency_samples()` returns an `int` whether or not the backend can
+actually ask the plugin. On its own it cannot distinguish **"this plugin reports
+zero latency"** from **"this backend has no way to ask"** — and collapsing those
+turns an unanswered question into a confident zero, which anything downstream
+will happily treat as verified.
+
+`PluginSlot::latency_query()` is the fact:
+
+| | |
+|---|---|
+| `Available` | The value is the plugin's own report. Zero means zero. |
+| `Unsupported` | This backend cannot ask. The value is meaningless. |
+| `QueryFailed` | The backend asked and the plugin errored. |
+
+It defaults to `Available` (CLAP, VST3, and AU all read a real value). **The LV2
+slot overrides it to `Unsupported`**: it does not read the plugin's
+`lv2:reportsLatency` control port, so its `latency_samples() == 0` is a
+placeholder, not a claim. Wiring that port is the fix; until then, anything that
+reports or gates on hosted latency must branch on `latency_query()` first.
+
+`pulp audio render --latency-report` does exactly that, which is why an LV2 plugin
+comes back `unsupported` rather than being falsely certified as zero-latency.

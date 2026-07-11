@@ -240,3 +240,17 @@ If you write a headless scene around a Processor that owns a background thread,
 this is what keeps `~Processor` from joining that thread against a freed store. It
 crashes only on teardown, only sometimes, so a scene that "passes" a hundred times
 can still be wrong. `test/test_store_lifetime.cpp` pins the ordering.
+
+## Latency evidence lives in the analysis lib, not the scene
+
+If a headless scene needs to prove a processor's *reported* latency against the
+delay in its output, do not hand-roll the measurement. `pulp::audio-analysis`
+(`latency_evidence.hpp`) has the pure evaluators — delayed-null and marker-offset
+— plus the evidence schema that the test harness, the `pulp` CLI, and MCP all
+serialize. Calling them keeps a scene's verdict identical to what CI and an agent
+would conclude from the same audio.
+
+They refuse rather than guess: silence, an output that is not a delayed copy of
+the input, an integer-sample-periodic stimulus, and a report that moved
+mid-render all come back `inconclusive`. See the `audio-harness` skill for the
+full list and the stimulus each policy needs.

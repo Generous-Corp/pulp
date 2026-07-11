@@ -620,3 +620,41 @@ Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not w
   env-path license fence.
 - **`audio_io.load_wav` mono-downmixes** — fine for tonal balance; a future stereo-image axis must
   NOT use that loader.
+
+## Proving reported latency
+
+`expect_reported_latency(result)` measures the delay actually present in a
+render and compares it against `Processor::latency_samples()`. This is the
+contract for any processor with nonzero latency: the host slides the whole track
+by the number the plugin reports, and nothing else checks it. `RenderScenario`
+collects the report facts on **every** render (`ScenarioResult::latency`), so a
+contract can ask for the proof without re-rendering.
+
+The schema and both evaluators live in `pulp::audio-analysis`
+(`latency_evidence.hpp`) as pure functions over buffers, so the test harness, the
+`pulp` CLI, and MCP all produce the same verdict. Add a policy there, never in
+`test/support`, or the surfaces drift.
+
+**Feed it a broadband, aperiodic stimulus.** `make_white_noise` for the
+delayed-null policy, `make_impulse` for the marker policy.
+
+**The refusals are the feature, not a limitation.** A stimulus that cannot pin
+the delay down returns `not_measurable` / `inconclusive`, and an inconclusive
+result that was *asked for* fails the gate — an unprovable claim is a failed
+claim, never a silent pass. Expect a refusal when:
+
+- the stimulus is silent, or the output is not a delayed copy of the input (the
+  delayed-null policy needs the processor in a declared identity / bypass /
+  fully-dry mode — set that up with `set_param`);
+- the stimulus is **periodic on an integer sample count**. This is the one that
+  bites. Tile-a-cell noise with period 100 against a true delay of 512 makes
+  delays 12, 112, 212… bit-identical; the sweep's argmin walks upward and would
+  confidently return **12**, falsely accusing an honest processor of misreporting
+  by 500 samples. The guard catches competing minima and refuses.
+  Note this is about *integer-sample* periodicity, not tonality — a 440 Hz sine at
+  48 kHz has a 109.09-sample period, so its delay IS recoverable and is proven;
+- the processor's report *moved* mid-render, including moving away and back. The
+  harness watches `consume_latency_changed_flag()` as well as polling the value,
+  because a host notified mid-render has already acted on the intermediate number.
+  (Consuming the flag is safe here: a headless render has no adapter to steal it
+  from.)
