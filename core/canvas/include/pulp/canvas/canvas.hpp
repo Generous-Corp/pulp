@@ -592,15 +592,14 @@ public:
 
     /// Stroke a continuous polyline — much smoother than individual stroke_line calls.
     virtual void stroke_path(const Point2D* points, size_t count) {
-        // Default fallback: individual line segments (subclass should override)
+        // Fallback: separate segments, so no joins. Curve backends should override.
+        if (points == nullptr || count < 2) return;
         for (size_t i = 1; i < count; ++i)
             stroke_line(points[i-1].x, points[i-1].y, points[i].x, points[i].y);
     }
 
-    /// Fill a closed polygon defined by points.
-    virtual void fill_path(const Point2D* points, size_t count) {
-        (void)points; (void)count; // Default: no-op, subclass should override
-    }
+    /// Fill a closed polygon defined by points. The fallback draws nothing.
+    virtual void fill_path(const Point2D*, size_t) {}
 
     /// Draw an image identified by an opaque, platform-specific handle
     /// into the rectangle (x, y, w, h). The handle is the \c native_handle

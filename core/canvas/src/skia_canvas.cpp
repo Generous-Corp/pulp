@@ -722,6 +722,47 @@ void SkiaCanvas::stroke_line(float x0, float y0, float x1, float y1) {
     canvas_->drawLine(x0, y0, x1, y1, paint);
 }
 
+// Stroke a continuous polyline as ONE SkPath so the segments share caps and
+// joins. The base-class fallback routes each segment through stroke_line(),
+// which gives every segment its own butt caps and no joins between them — a
+// dense curve then renders visibly beaded rather than as one antialiased
+// line. Building a single SkPath and stroking it once mirrors the CoreGraphics
+// backend and honors the active line width, cap, join, dash, shadow, and
+// stroke colour / shader. Degenerate input (null, or fewer than two points)
+// draws nothing, matching CgCanvas::stroke_path.
+void SkiaCanvas::stroke_path(const Point2D* points, size_t count) {
+    GUARD_CANVAS;
+    if (!points || count < 2) return;
+    SkPathBuilder builder;
+    builder.moveTo(points[0].x, points[0].y);
+    for (size_t i = 1; i < count; ++i)
+        builder.lineTo(points[i].x, points[i].y);
+    auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_stroke_state(paint);
+    apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
+    apply_filter(paint);
+    canvas_->drawPath(builder.detach(), paint);
+}
+
+// Fill a closed polygon as ONE SkPath. The base-class default is a silent
+// no-op, so a filled polygon simply never appeared on the Skia backend.
+// Building a single closed SkPath and filling it via current_fill_paint()
+// mirrors the CoreGraphics backend and honors the active fill colour /
+// gradient, blend mode, shadow, and filter. Degenerate input (null, or fewer
+// than three points — no enclosed area) draws nothing, matching
+// CgCanvas::fill_path.
+void SkiaCanvas::fill_path(const Point2D* points, size_t count) {
+    GUARD_CANVAS;
+    if (!points || count < 3) return;
+    SkPathBuilder builder;
+    builder.moveTo(points[0].x, points[0].y);
+    for (size_t i = 1; i < count; ++i)
+        builder.lineTo(points[i].x, points[i].y);
+    builder.close();
+    canvas_->drawPath(builder.detach(), current_fill_paint());
+}
+
 void SkiaCanvas::set_line_dash(const float* intervals, int count, float phase) {
     line_dash_.assign(intervals, intervals + (count > 0 ? count : 0));
     line_dash_phase_ = phase;
