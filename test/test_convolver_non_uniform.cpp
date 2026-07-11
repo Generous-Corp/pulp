@@ -220,13 +220,69 @@ TEST_CASE("NonUniformPartitionedConvolver rejects bad input gracefully",
     conv.load_ir(ir.data(), ir.size(), 0);
     REQUIRE_FALSE(conv.is_loaded());
 
-    // Wrong process() block-size: pass-through fallback.
+    // An UNLOADED convolver is a wire: it passes input through.
+    NonUniformPartitionedConvolver unloaded;
+    REQUIRE_FALSE(unloaded.is_loaded());
+    std::vector<float> in(32, 0.3f);
+    std::vector<float> out(32, -1.0f);
+    unloaded.process(in.data(), out.data(), 32);
+    for (auto v : out) REQUIRE(v == 0.3f);
+    REQUIRE(unloaded.block_size_violations() == 0);
+}
+
+TEST_CASE("NonUniformPartitionedConvolver fails closed on a wrong block size",
+          "[signal][convolver][non-uniform]") {
+    std::vector<float> ir(128, 1.0f);
+    NonUniformPartitionedConvolver conv;
     conv.load_ir(ir.data(), ir.size(), 64);
     REQUIRE(conv.is_loaded());
+    REQUIRE(conv.block_size() == 64);
+
+    // A LOADED convolver handed the wrong block size must NOT pass through --
+    // a pass-through is audibly indistinguishable from a working convolution,
+    // so it would hide the caller's bug. It emits silence and counts the
+    // violation instead.
     std::vector<float> in(32, 0.3f);
     std::vector<float> out(32, -1.0f);
     conv.process(in.data(), out.data(), 32);
-    for (auto v : out) REQUIRE(v == 0.3f);  // pass-through copy
+    for (auto v : out) REQUIRE(v == 0.0f);
+    REQUIRE(conv.block_size_violations() == 1);
+
+    // Repeat violations keep counting, and never leak input to output.
+    conv.process(in.data(), out.data(), 32);
+    for (auto v : out) REQUIRE(v == 0.0f);
+    REQUIRE(conv.block_size_violations() == 2);
+}
+
+TEST_CASE("NonUniformPartitionedConvolver recovers from a torn history",
+          "[signal][convolver][non-uniform]") {
+    constexpr std::size_t kBlock = 64;
+    auto ir = make_decaying_ir(512, 0.005f);
+
+    // Reference: a clean convolver fed only valid blocks.
+    NonUniformPartitionedConvolver reference;
+    reference.load_ir(ir.data(), ir.size(), kBlock);
+
+    // Torn: the same convolver, but a wrong-size block is injected first. The
+    // violation must not corrupt the stream -- the next valid block starts from
+    // reset history, so from that point the two agree sample for sample.
+    NonUniformPartitionedConvolver torn;
+    torn.load_ir(ir.data(), ir.size(), kBlock);
+    std::vector<float> bad_in(48, 0.5f), bad_out(48, -1.0f);
+    torn.process(bad_in.data(), bad_out.data(), 48);
+    REQUIRE(torn.block_size_violations() == 1);
+
+    std::vector<float> in(kBlock), ref_out(kBlock), torn_out(kBlock);
+    for (std::size_t block = 0; block < 8; ++block) {
+        for (std::size_t i = 0; i < kBlock; ++i)
+            in[i] = std::sin(0.05f * static_cast<float>(block * kBlock + i));
+        reference.process(in.data(), ref_out.data(), kBlock);
+        torn.process(in.data(), torn_out.data(), kBlock);
+        for (std::size_t i = 0; i < kBlock; ++i)
+            REQUIRE_THAT(torn_out[i], WithinAbs(ref_out[i], 1e-6f));
+    }
+    // reset() cleared the counter as part of the recovery.
+    REQUIRE(torn.block_size_violations() == 0);
 }
 
 TEST_CASE("NonUniformPartitionedConvolver reset clears state",

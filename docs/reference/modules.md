@@ -450,15 +450,30 @@ mixer.mix_wet(output_channels, 2, num_frames);
 
 ### Convolution — load an impulse response
 
+`PartitionedConvolver` is partitioned for one fixed block size, and `process()`
+must be handed exactly that many samples. `load_ir()` rounds its `block_size`
+argument **up to the next power of two** (its FFT is radix-2), so the size you
+must feed is `conv.block_size()` — not necessarily the value you passed in.
+
 ```cpp
 #include <pulp/signal/convolver.hpp>
 
 PartitionedConvolver conv;
-conv.load_ir(impulse_response.data(), ir_length, block_size);
+conv.load_ir(impulse_response.data(), ir_length, block_size);  // may round up
 
-// In your process callback:
-conv.process(input, output, block_size);
+// In your process callback — num_samples MUST equal conv.block_size():
+conv.process(input, output, conv.block_size());
 ```
+
+If your host delivers blocks of any other size (variable blocks, or a size that
+is not a power of two), re-block the audio into `conv.block_size()` chunks
+yourself and report the added delay from `Processor::latency_samples()`.
+
+A loaded convolver handed the wrong block size **fails closed**: it emits
+silence and increments `conv.block_size_violations()`. It deliberately does not
+pass the input through, because a pass-through is audibly indistinguishable from
+a working convolution and would hide the bug. Assert
+`conv.block_size_violations() == 0` in your tests.
 
 ### Available processors
 

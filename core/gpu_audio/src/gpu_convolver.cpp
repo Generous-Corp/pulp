@@ -34,6 +34,14 @@ bool GpuConvolver::prepare() {
     prepared_ = false;
     if (channels_ == 0 || block_ == 0 || ir_.empty()) return false;
 
+    // The CPU fallback is a signal::PartitionedConvolver loaded at `block_`, and
+    // load_ir() rounds a non-power-of-two block UP to the next power of two for
+    // its radix-2 FFT. The fallback would then be partitioned for a block size
+    // the transport never delivers, so every fallback block would be a block-size
+    // violation. Refuse to prepare rather than run a convolver whose fallback can
+    // only ever fail closed.
+    if ((block_ & (block_ - 1u)) != 0u) return false;
+
     // fft_size = next power of two >= block + ir_length (matches signal::Convolver).
     fft_size_ = 1;
     while (fft_size_ < block_ + static_cast<uint32_t>(ir_.size())) fft_size_ <<= 1;

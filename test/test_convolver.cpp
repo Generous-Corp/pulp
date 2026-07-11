@@ -163,7 +163,7 @@ TEST_CASE("Convolver: block size is rounded to a processable power of two",
     REQUIRE_THAT(single_output[0], WithinAbs(single_input[0], 1e-5f));
 }
 
-TEST_CASE("Convolver: empty IR and wrong block size pass input through",
+TEST_CASE("Convolver: an empty IR passes input through",
           "[signal][convolver][issue-645]") {
     float dummy_ir = 0.0f;
     PartitionedConvolver empty_ir;
@@ -171,21 +171,72 @@ TEST_CASE("Convolver: empty IR and wrong block size pass input through",
     REQUIRE_FALSE(empty_ir.is_loaded());
     REQUIRE(empty_ir.num_partitions() == 0);
 
+    // A convolver with nothing to convolve with is a wire, at any block size.
     const float input[] = {0.0f, 1.0f, 2.0f, 3.0f};
     float output[] = {-1.0f, -1.0f, -1.0f, -1.0f};
     empty_ir.process(input, output, 4);
 
     for (size_t i = 0; i < 4; ++i)
         REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-6f));
+    REQUIRE(empty_ir.block_size_violations() == 0);
+}
 
+TEST_CASE("Convolver: a loaded convolver fails closed on a wrong block size",
+          "[signal][convolver][issue-645]") {
     const std::vector<float> identity_ir = {1.0f};
     PartitionedConvolver loaded;
     loaded.load_ir(identity_ir.data(), identity_ir.size(), 8);
     REQUIRE(loaded.is_loaded());
+    REQUIRE(loaded.block_size() == 8);
 
-    std::fill(std::begin(output), std::end(output), -1.0f);
+    // 4 != block_size() == 8. Passing the input through here would be audibly
+    // indistinguishable from this identity IR working correctly -- the caller's
+    // block size bug would produce perfect-sounding audio and never be found.
+    // Fail closed instead: silence, and a violation the caller can assert on.
+    const float input[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    float output[] = {-1.0f, -1.0f, -1.0f, -1.0f};
     loaded.process(input, output, 4);
 
     for (size_t i = 0; i < 4; ++i)
-        REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-6f));
+        REQUIRE(output[i] == 0.0f);
+    REQUIRE(loaded.block_size_violations() == 1);
+}
+
+TEST_CASE("Convolver: a block-size violation does not corrupt the stream after it",
+          "[signal][convolver][issue-645]") {
+    constexpr size_t kBlock = 64;
+    constexpr size_t kIrLen = 256;
+
+    // A decaying IR, so the overlap-save history genuinely carries between
+    // blocks -- a torn history would show up as a mismatch below.
+    std::vector<float> ir(kIrLen);
+    for (size_t i = 0; i < kIrLen; ++i)
+        ir[i] = std::exp(-0.01f * static_cast<float>(i)) * (i % 2 == 0 ? 1.0f : -0.5f);
+
+    PartitionedConvolver reference;
+    reference.load_ir(ir.data(), ir.size(), kBlock);
+
+    PartitionedConvolver torn;
+    torn.load_ir(ir.data(), ir.size(), kBlock);
+
+    // Inject a wrong-size block. It must be silenced AND must leave no residue
+    // in the overlap-save history, so the next valid block resumes from a clean
+    // state -- identical to a convolver that never saw the bad block.
+    std::vector<float> bad_in(48, 0.5f), bad_out(48, -1.0f);
+    torn.process(bad_in.data(), bad_out.data(), 48);
+    for (auto v : bad_out) REQUIRE(v == 0.0f);
+    REQUIRE(torn.block_size_violations() == 1);
+
+    std::vector<float> in(kBlock), ref_out(kBlock), torn_out(kBlock);
+    for (size_t block = 0; block < 8; ++block) {
+        for (size_t i = 0; i < kBlock; ++i)
+            in[i] = std::sin(0.05f * static_cast<float>(block * kBlock + i));
+        reference.process(in.data(), ref_out.data(), kBlock);
+        torn.process(in.data(), torn_out.data(), kBlock);
+        for (size_t i = 0; i < kBlock; ++i) {
+            INFO("block " << block << " sample " << i);
+            REQUIRE_THAT(torn_out[i], WithinAbs(ref_out[i], 1e-6f));
+        }
+    }
+    REQUIRE(torn.block_size_violations() == 0);  // cleared by the recovery reset()
 }
