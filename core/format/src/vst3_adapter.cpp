@@ -1222,7 +1222,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     ? data.outputs[0].channelBuffers64[ch]
                     : nullptr;
                 auto& scratch = f64_output_scratch_[static_cast<std::size_t>(ch)];
-                std::fill(scratch.begin(), scratch.end(), 0.0f);
+                // Zero only the frames this block renders: the boundary
+                // writeback after process() copies exactly num_samples, so the
+                // scratch tail past it is never read.
+                std::fill_n(scratch.begin(), num_samples, 0.0f);
                 output_ptrs_[ch] = data.outputs[0].channelBuffers64 &&
                                    data.outputs[0].channelBuffers64[ch]
                     ? scratch.data()
@@ -1354,7 +1357,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                             : nullptr;
                     auto& scratch =
                         f64_aux_output_scratch_[b - 1][static_cast<std::size_t>(ch)];
-                    std::fill(scratch.begin(), scratch.end(), 0.0f);
+                    // Same bound as the main-output scratch above: the aux
+                    // writeback copies exactly num_samples.
+                    std::fill_n(scratch.begin(), num_samples, 0.0f);
                     ptrs[static_cast<std::size_t>(ch)] =
                         bus.channelBuffers64 && bus.channelBuffers64[ch]
                             ? scratch.data()
@@ -1830,9 +1835,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             auto& bus = data.outputs[b];
             if (!bus.channelBuffers64) continue;
             auto& ptrs = aux_output_ptrs_[b - 1];
+            // Bounded by the routed view, not the host channel count: only the
+            // view's channels have scratch wired (and zeroed) this block. A bus
+            // demoted by a null mid-bus channel pointer has a zero-channel view,
+            // so its stale scratch pointers are never dereferenced and the host
+            // keeps the direct channelBuffers64 pre-zero from block start.
             const int aux_channels =
-                (std::min)(static_cast<int>(bus.numChannels),
-                           static_cast<int>(ptrs.size()));
+                static_cast<int>(output_buses[b].buffer.num_channels());
             for (int ch = 0; ch < aux_channels; ++ch) {
                 copy_f32_to_f64(ptrs[static_cast<std::size_t>(ch)],
                                 bus.channelBuffers64[ch],
