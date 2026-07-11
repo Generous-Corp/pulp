@@ -657,6 +657,23 @@ fails and the whole release never publishes (the `release` job `needs` the full
 `manifests/pulp.macos.toml`); the workflow fallback stays as the portability
 belt for any un-baked runner.
 
+### `release-cli.yml` has a native Intel (`darwin-x64`) leg
+
+`release-cli.yml`'s macOS matrix ships TWO slices: `darwin-arm64` (routed through
+`resolve-macos-runner`) and `darwin-x64` on GitHub-hosted `macos-15-intel`. The
+Intel leg deliberately **does not** go through the resolver — the `runs-on`
+ternary only routes `matrix.os == 'macos-15'`, so `macos-15-intel` runs on that
+fixed hosted label (no self-hosted/Namespace/VM routing, and Rust is
+preinstalled so the toolchain-bootstrap above is a no-op there). It's a native
+build (no cross-compile, no Rosetta) with a `CMAKE_OSX_DEPLOYMENT_TARGET=13.0`
+floor and an arch-asserting smoke. `macos-15-intel` is the pinned stable hosted
+x86_64 macOS image (supported ~through Aug 2027; `macos-13` retired Dec 2025;
+`macos-26-intel` also exists but is newer/less-baked) — when it EOLs, the
+successor is cross-compiling on the arm64 pool
+(`planning/2026-07-10-intel-mac-cli-support.md`). Do NOT route this leg to the
+self-hosted studios (the `no Intel on the studios` discipline in
+`docs/guides/intel-support.md`).
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory
