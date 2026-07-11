@@ -58,8 +58,11 @@ public:
         // Ground.
         c.set_fill_color(Color::rgba8(5, 6, 8));
         c.fill_rect(0, 0, W, H);
+        // Everything luminous composites additively (SkBlendMode::kPlus), so
+        // overlaps bloom to white on their own — real glow, not alpha stacking.
+        c.set_blend_mode(canvas::Canvas::BlendMode::lighter);
         // Atmospheric haze from the Source at center.
-        drawGlow(c, cx, cy, std::fmax(fx, fy) * 1.15f, RGB{60, 74, 92}, 26);
+        drawGlow(c, cx, cy, std::fmax(fx, fy) * 1.15f, RGB{50, 64, 82}, 20);
 
         for (int k = 0; k < density; ++k) {
             const float a = frac_hash(k * 7 + 1) * 6.2831853f;
@@ -80,21 +83,17 @@ public:
                 c.set_fill_color(Color::rgba8(col.r, col.g, col.b, static_cast<uint8_t>(aA)));
                 c.fill_circle(cx + sx * fx, cy + sy * fy, rad);
             }
-            // The emitter head: colored halo, then a near-white hot core so
-            // overlaps read as bloom even without an additive blend mode.
+            // The emitter head: a colored halo + a bright core. Additive blend
+            // makes overlaps bloom to white on their own.
             const float hx = cx + sx * fx, hy = cy + sy * fy;
             const float halo = (5.0f + 8.0f * z) * (0.72f + 0.5f * energy);
-            drawGlow(c, hx, hy, halo * 3.0f, col, static_cast<int>(70 + 90 * energy));
-            drawGlow(c, hx, hy, halo * 1.15f, col, static_cast<int>(150 + 90 * energy));
-            // hot core — tinted toward the emitter colour but near white.
-            const uint8_t cr = static_cast<uint8_t>(220 + 0.14f * col.r);
-            const uint8_t cg = static_cast<uint8_t>(224 + 0.12f * col.g);
-            const uint8_t cb = static_cast<uint8_t>(230 + 0.10f * col.b);
-            c.set_fill_color(Color::rgba8(cr, cg, cb, static_cast<uint8_t>(150 + 100 * energy)));
-            c.fill_circle(hx, hy, halo * 0.42f);
-            c.set_fill_color(Color::rgba8(255, 255, 255, static_cast<uint8_t>(120 + 120 * energy)));
-            c.fill_circle(hx, hy, halo * 0.18f);
+            drawGlow(c, hx, hy, halo * 2.8f, col, static_cast<int>(40 + 65 * energy));
+            c.set_fill_color(Color::rgba8(col.r, col.g, col.b, static_cast<uint8_t>(80 + 80 * energy)));
+            c.fill_circle(hx, hy, halo * 0.5f);
+            c.set_fill_color(Color::rgba8(255, 255, 255, static_cast<uint8_t>(60 + 85 * energy)));
+            c.fill_circle(hx, hy, halo * 0.2f);
         }
+        c.set_blend_mode(canvas::Canvas::BlendMode::normal);
     }
 
 private:
