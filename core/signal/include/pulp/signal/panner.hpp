@@ -37,12 +37,18 @@ enum class PanLaw {
 template <typename SampleType = float>
 class PannerT {
 public:
+    PannerT() { update_gains(); }
+
     void set_pan(SampleType pan) {
         pan_ = std::clamp(pan, SampleType{-1.0f}, SampleType{1.0f});
+        update_gains();
     }
     SampleType pan() const { return pan_; }
 
-    void set_law(PanLaw law) { law_ = law; }
+    void set_law(PanLaw law) {
+        law_ = law;
+        update_gains();
+    }
     PanLaw law() const { return law_; }
 
     struct StereoSample {
@@ -51,22 +57,28 @@ public:
 
     /// Pan a mono signal to stereo.
     StereoSample process(SampleType input) const {
-        SampleType l_gain, r_gain;
-        compute_gains(l_gain, r_gain);
-        return {input * l_gain, input * r_gain};
+        return {input * l_gain_, input * r_gain_};
     }
 
     /// Pan stereo in-place (adjust balance).
     void process(SampleType& left, SampleType& right) const {
-        SampleType l_gain, r_gain;
-        compute_gains(l_gain, r_gain);
-        left *= l_gain;
-        right *= r_gain;
+        left *= l_gain_;
+        right *= r_gain_;
     }
 
-    /// Compute per-channel gains for the current pan + law. Exposed so
-    /// callers can ramp / smooth the gain themselves.
+    /// Per-channel gains for the current pan + law. Exposed so callers can
+    /// ramp / smooth the gain themselves. The gains are a pure function of
+    /// (pan, law), so they are evaluated in the setters and cached; the
+    /// trigonometry never runs per sample.
     void compute_gains(SampleType& l_gain, SampleType& r_gain) const {
+        l_gain = l_gain_;
+        r_gain = r_gain_;
+    }
+
+private:
+    void update_gains() {
+        SampleType& l_gain = l_gain_;
+        SampleType& r_gain = r_gain_;
         constexpr SampleType kHalfPi = SampleType{1.57079632679489661923f};
         const SampleType position =
             (pan_ + SampleType{1.0f}) * SampleType{0.5f}; // [0, 1] : 0 = full L, 1 = full R
@@ -115,9 +127,10 @@ public:
         }
     }
 
-private:
     SampleType pan_ = SampleType{0.0f};
     PanLaw law_ = PanLaw::EqualPower;
+    SampleType l_gain_ = SampleType{0.0f};
+    SampleType r_gain_ = SampleType{0.0f};
 };
 
 using Panner = PannerT<float>;

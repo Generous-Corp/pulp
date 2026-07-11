@@ -27,6 +27,7 @@ MIT-licensed. No royalties. No copyleft.
 ## Reference
 
 - [Modules](reference/modules.md) — 13 subsystems with status, dependencies, and key headers
+- [Skills](reference/skills.md) — the full catalog of AI-agent skills Pulp ships (Claude Code + Codex)
 - [API Reference](api/index.html) — Doxygen-generated class and function documentation
 - [CLI Reference](reference/cli.md) — `pulp` command reference
 - [CMake Reference](reference/cmake.md) — `pulp_add_plugin()` and build system functions

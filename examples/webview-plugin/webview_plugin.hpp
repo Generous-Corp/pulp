@@ -2,13 +2,15 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
-#include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/native_view_host.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/web_view.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace pulp::examples {
 
@@ -131,130 +133,22 @@ constexpr const char* kWebViewLoadingHtml = R"HTML(
 </html>
 )HTML";
 
-class WebViewEditorPane final : public view::View {
-public:
-    WebViewEditorPane() {
-        view::WebViewOptions options;
-        options.transparent_background = true;
-        options.initial_html = kWebViewLoadingHtml;
-        panel_ = view::WebViewPanel::create(options);
-        if (!panel_) {
-            runtime::log_warn(
-                "PulpWebViewPlugin: native WebView backend unavailable; "
-                "editor will use the fallback native background");
-            return;
-        }
-
-        panel_->set_message_handler([](const view::WebViewMessage& message) -> std::string {
-            if (message.type == "editor.ready") {
-                return R"({"message":"native child view attached"})";
-            }
-            return R"({"message":"ok"})";
-        });
-        panel_->set_ready_handler([this] {
-            if (panel_) {
-                panel_->set_html(kWebViewEditorHtml);
-            }
-        });
-
-        // This pane attaches a native WebView child that the OS composites — it
-        // is NOT painted into the Pulp Skia canvas. Mark the subtree so the smart
-        // capture path (view::capture_view / standalone --screenshot) routes to
-        // the in-process WebView snapshot below instead of silently rastering a
-        // blank area where the native overlay sits.
-        set_contains_native_overlay(true);
-    }
-
-    ~WebViewEditorPane() override {
-        detach_if_needed();
-    }
-
-    // Headless snapshot of the OS-composited WebView (WKWebView takeSnapshot on
-    // macOS). capture_view() calls this for the contains_native_overlay() subtree
-    // so the native overlay is captured rather than refused. Empty when the
-    // backend has no in-process snapshot (capture_view then reports an honest
-    // "not capturable" reason instead of a silent blank).
-    std::vector<uint8_t> capture_native_overlay_png(uint32_t /*width*/,
-                                                    uint32_t /*height*/) override {
-        return panel_ ? panel_->snapshot_png() : std::vector<uint8_t>{};
-    }
-
-    void attach_if_needed() {
-        auto* host = plugin_view_host();
-        if (attached_ || !host || !panel_ || !panel_->native_handle()) {
-            return;
-        }
-
-        const auto size = host->get_size();
-        attached_ = host->attach_native_child_view(
-            panel_->native_handle(),
-            0.0f,
-            0.0f,
-            static_cast<float>(size.width),
-            static_cast<float>(size.height));
-        if (attached_) {
-            sync_to_host();
-        } else if (!warned_attach_failure_) {
-            warned_attach_failure_ = true;
-            runtime::log_warn(
-                "PulpWebViewPlugin: PluginViewHost rejected native child "
-                "embedding; this platform host must provide attach/bounds/"
-                "detach support for embedded WebViews");
-        }
-    }
-
-    void sync_to_host() {
-        auto* host = plugin_view_host();
-        if (!attached_ || !host || !panel_ || !panel_->native_handle()) {
-            return;
-        }
-
-        const auto size = host->get_size();
-        host->set_native_child_view_bounds(
-            panel_->native_handle(),
-            0.0f,
-            0.0f,
-            static_cast<float>(size.width),
-            static_cast<float>(size.height));
-    }
-
-    void detach_if_needed() {
-        auto* host = plugin_view_host();
-        if (!attached_ || !host || !panel_ || !panel_->native_handle()) {
-            attached_ = false;
-            return;
-        }
-
-        host->detach_native_child_view(panel_->native_handle());
-        attached_ = false;
-    }
-
-private:
-    std::unique_ptr<view::WebViewPanel> panel_;
-    bool attached_ = false;
-    bool warned_attach_failure_ = false;
-};
-
-class WebViewEditorRoot final : public view::View {
-public:
-    WebViewEditorRoot() {
-        set_theme(view::Theme::dark());
-        auto pane = std::make_unique<WebViewEditorPane>();
-        pane_ = pane.get();
-        add_child(std::move(pane));
-    }
-
-    WebViewEditorPane& pane() { return *pane_; }
-
-    void on_resized() override {
-        if (pane_) {
-            pane_->set_bounds({0, 0, bounds().width, bounds().height});
-        }
-    }
-
-private:
-    WebViewEditorPane* pane_ = nullptr;
-};
+// The editor tree is a single view::NativeViewHost that fills the window via
+// flex and embeds the processor-owned WKWebView (see the processor below). The
+// NativeViewHost widget drives attach / detach / bounds / clip itself from its
+// host back-reference and Yoga layout, so this example works under BOTH a
+// PluginViewHost (VST3 / AUv2 / CLAP editor) AND a WindowHost (standalone): the
+// widget falls back to window_host() when no plugin host is present
+// (core/view/src/native_view_host.cpp — try_attach()). The previous hand-rolled
+// plugin_view_host() attach path silently no-oped in standalone, where the root
+// is hosted by WindowHost (core/format/src/standalone.cpp), so the WebView never
+// appeared. NativeViewHost also routes headless snapshot capture (via the
+// snapshot callback) and honors the active design-viewport transform for free.
+//
+// WKWebView SCALING CAVEAT: scaling the NativeViewHost frame REFLOWS the web
+// content — CSS px track the frame — it does NOT zoom the page. Pixel-parity
+// with a letterbox-scaled Pulp sibling would require WKWebView.pageZoom = scale;
+// that parity hook is deliberately DEFERRED and is not a native-editor blocker.
 
 } // namespace
 
@@ -301,20 +195,71 @@ public:
     }
 
     std::unique_ptr<view::View> create_view() override {
-        return std::make_unique<WebViewEditorRoot>();
+        // Create the WKWebView once and keep it on the processor so its JS heap
+        // and page state survive editor close/reopen (RETENTION RULE above).
+        ensure_panel();
+
+        auto root = std::make_unique<view::View>();
+        root->set_theme(view::Theme::dark());
+
+        auto host = std::make_unique<view::NativeViewHost>();
+        // Fill the window: grow to consume the main axis, stretch on the cross
+        // axis (the root's default align_items). No manual set_bounds — Yoga
+        // sizes the child, and the widget re-drives the native frame each paint.
+        host->flex().flex_grow = 1.0f;
+
+        if (panel_ && panel_->native_handle()) {
+            // The pane BORROWS the native handle; ownership stays on the
+            // processor. The snapshot callback keeps the OS-composited WebView
+            // headlessly capturable (WKWebView takeSnapshot) so the smart-capture
+            // path composites it instead of rastering a blank overlay region.
+            view::WebViewPanel* panel = panel_.get();
+            host->set_native_child(
+                panel->native_handle(),
+                [panel](uint32_t /*width*/, uint32_t /*height*/) {
+                    return panel->snapshot_png();
+                });
+        }
+
+        root->add_child(std::move(host));
+        return root;
     }
 
-    void on_view_opened(view::View& root) override {
-        static_cast<WebViewEditorRoot&>(root).pane().attach_if_needed();
+    // Test-only accessor: proves the WKWebView is processor-owned and reused
+    // across editor close/reopen (pointer identity). Not part of the public SDK.
+    view::WebViewPanel* webview_panel_for_test() const { return panel_.get(); }
+
+private:
+    void ensure_panel() {
+        if (panel_) return;
+
+        view::WebViewOptions options;
+        options.transparent_background = true;
+        options.initial_html = kWebViewLoadingHtml;
+        panel_ = view::WebViewPanel::create(options);
+        if (!panel_) {
+            runtime::log_warn(
+                "PulpWebViewPlugin: native WebView backend unavailable; "
+                "editor will use the fallback native background");
+            return;
+        }
+
+        panel_->set_message_handler(
+            [](const view::WebViewMessage& message) -> std::string {
+                if (message.type == "editor.ready") {
+                    return R"({"message":"native child view attached"})";
+                }
+                return R"({"message":"ok"})";
+            });
+        panel_->set_ready_handler([this] {
+            if (panel_) {
+                panel_->set_html(kWebViewEditorHtml);
+            }
+        });
     }
 
-    void on_view_resized(view::View& root, uint32_t, uint32_t) override {
-        static_cast<WebViewEditorRoot&>(root).pane().sync_to_host();
-    }
-
-    void on_view_closed(view::View& root) override {
-        static_cast<WebViewEditorRoot&>(root).pane().detach_if_needed();
-    }
+    // Owned by the PROCESSOR, not the view tree — survives editor close/reopen.
+    std::unique_ptr<view::WebViewPanel> panel_;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_webview_plugin() {

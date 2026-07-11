@@ -239,7 +239,13 @@ debug log. See the `mpe` skill for tracker details.
 **Outbound MIDI**: the processor's `midi_out` emits short messages as
 `CLAP_EVENT_MIDI` and sysex entries as
 `CLAP_EVENT_MIDI_SYSEX`, both via `out_events->try_push`.
-`sample_offset` carries through to `header.time`. The sysex
+`sample_offset` carries through to `header.time` via the shared cross-format
+helper `detail::clap_output_offset(sample_offset)` (clamps a negative offset up
+to 0, since `header.time` is unsigned) — the same "offset N in → offset N out"
+contract AU v2 and VST3 share, defined once in
+`core/format/include/pulp/format/detail/midi_out_offset.hpp` and pinned by
+`test/test_midi_out_offset_parity.cpp`. Do NOT re-open-code the offset clamp.
+The sysex
 `clap_event_midi_sysex_t.buffer` field is non-owning — the backing
 vector is alive for the duration of `clap_process()`, which is all
 CLAP's push contract requires (the host copies before returning).
@@ -777,3 +783,42 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## Param text entry + gesture threading (PARAMS region)
+
+- `params_text_to_value` must try `ParamInfo::from_string` BEFORE the generic
+  numeric parse. from_string is the inverse of the `to_string` used by
+  `value_to_text`, so a custom rendering ("quality=0.75", an enum label)
+  round-trips; a bare strtod would reject it. CLAP values are plain (min..max),
+  the same domain from_string returns — no normalization step. Guard the result
+  with `std::isfinite` and fall through to the locale-independent strtod path on
+  a non-finite parse. Keep the locale-independent fallback (`parse_double_c_locale`)
+  for plain-numeric params. Test: `test/test_clap_entry.cpp`
+  ("text_to_value routes through ParamInfo::from_string").
+- CLAP delivers `CLAP_EVENT_PARAM_GESTURE_BEGIN/END` on the process/flush path
+  and calls `store.begin_gesture/end_gesture` directly. Those StateStore entry
+  points are main-thread-only (they forward to host undo grouping). A background
+  writer must use `StateStore::run_gesture_on_main()` — see the state notes in
+  `binding.hpp`.
+## Editor resize contract (aspect-lock vs free reflow)
+
+`gui_can_resize` returns resizable **iff `view_size().min_width>0 && min_height>0`** —
+a plugin on the base-class default (`ViewSize{w,h,0,0,0,0}`) is fixed-size. Do NOT
+naively "honor `aspect_ratio==0`" everywhere: that default returns `aspect_ratio==0`,
+so a naive read flips *every* hand-authored plugin to free-reflow. The three cases the
+GUI region dispatches (`gui_create`, `gui_get_resize_hints`, `gui_adjust_size`):
+
+- **min==0 (not resizable):** keep the design-viewport pin at preferred (letterbox
+  backstop for off-size panes). `gui_can_resize` already returns false.
+- **resizable + `aspect_ratio>0`:** viewport + aspect lock; `preserve_aspect_ratio=true`;
+  `gui_adjust_size` snaps to the design aspect (design-import plugins live here).
+- **resizable + `aspect_ratio==0`:** free drag — **no** `set_design_viewport`, **no**
+  `set_fixed_aspect_ratio`; `preserve_aspect_ratio=false`; `gui_adjust_size` clamps each
+  axis to `[min,max]` independently with **no aspect snap**; the root reflows via Yoga at
+  the host size.
+
+The rule is `free = (min>0 && aspect_ratio==0)`. VST3's `PulpPlugView` mirrors it exactly
+(`canResize`/`checkSizeConstraint`). Tests: the `[resize]` cases in
+`test/test_clap_entry.cpp` build a `PulpClapPlugin` whose `bridge` is constructed
+directly from a controlled `view_size()` (the `ViewBridge` ctor copies `view_size()` into
+`size_hints_`, so no `gui_create`/attach is needed to exercise the negotiation math).

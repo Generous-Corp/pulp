@@ -28,6 +28,7 @@ struct Recorded {
     int attach_count = 0;
     int detach_count = 0;
     Rect bounds{};
+    int bounds_count = 0;  // set_native_child_view_bounds calls (re-push proof)
     bool has_clip = false;
     Rect clip{};
     int clip_count = 0;
@@ -60,6 +61,7 @@ public:
                                       float w, float h) override {
         if (!rec_.attached || child != rec_.child) return false;
         rec_.bounds = {x, y, w, h};
+        ++rec_.bounds_count;
         return true;
     }
     bool set_native_child_view_clip(NativeViewHandle child, bool has_clip,
@@ -78,6 +80,20 @@ public:
         }
     }
 
+    // Install a design->host viewport transform (mirrors the mac hosts'
+    // design_viewport_transform). Inactive by default → the base false
+    // (identity) is returned, so pre-existing tests observe raw coords.
+    void set_viewport(float sx, float sy, float tx, float ty) {
+        vp_active_ = true;
+        vp_sx_ = sx; vp_sy_ = sy; vp_tx_ = tx; vp_ty_ = ty;
+    }
+    bool design_viewport_transform(float& sx, float& sy, float& tx,
+                                   float& ty) const override {
+        if (!vp_active_) return false;
+        sx = vp_sx_; sy = vp_sy_; tx = vp_tx_; ty = vp_ty_;
+        return true;
+    }
+
     const Recorded& rec() const { return rec_; }
 
 private:
@@ -85,6 +101,8 @@ private:
     int host_sentinel_ = 0;
     Size size_{};
     Recorded rec_{};
+    bool vp_active_ = false;
+    float vp_sx_ = 1, vp_sy_ = 1, vp_tx_ = 0, vp_ty_ = 0;
 };
 
 // Fake WindowHost twin (void* signatures).
@@ -510,4 +528,153 @@ TEST_CASE("NativeViewHost forwards headless capture to its snapshot callback",
 
     nvh.clear_native_child();
     REQUIRE_FALSE(nvh.contains_native_overlay());
+}
+
+// ── G1: design-viewport transform for native children ────────────────────────
+// Under an active design viewport the host paints Pulp widgets letterbox-scaled;
+// the embedded native child's frame must go through the SAME transform so a
+// mixed Pulp+native tree stays pixel-aligned. Introspection stays design-space;
+// computed_child_frame_host() and the pushed host coords are transformed.
+
+TEST_CASE("NativeViewHost identity when no viewport is active",
+          "[view][native-view-host][viewport]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    RecordingPluginHost host;  // no viewport installed → identity
+    root.set_plugin_view_host(&host);
+
+    auto owned = std::make_unique<NativeViewHost>();
+    auto* nvh = owned.get();
+    nvh->set_bounds({40, 30, 120, 80});
+    nvh->set_native_child(fake_handle());
+    root.add_child(std::move(owned));
+
+    nvh->update_native_layout();
+    REQUIRE(nvh->is_native_attached());
+    // Design-space and host-space frames coincide; pushed coords are raw.
+    REQUIRE(nvh->computed_child_frame() == Rect{40, 30, 120, 80});
+    REQUIRE(nvh->computed_child_frame_host() == Rect{40, 30, 120, 80});
+    REQUIRE(host.rec().bounds == Rect{40, 30, 120, 80});
+}
+
+TEST_CASE("NativeViewHost pushes a pillarboxed frame under an active viewport",
+          "[view][native-view-host][viewport]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    RecordingPluginHost host;
+    // Pillarbox: half scale, horizontal offset, no vertical offset.
+    host.set_viewport(/*sx=*/0.5f, /*sy=*/0.5f, /*tx=*/100.0f, /*ty=*/0.0f);
+    root.set_plugin_view_host(&host);
+
+    auto owned = std::make_unique<NativeViewHost>();
+    auto* nvh = owned.get();
+    nvh->set_bounds({40, 30, 120, 80});
+    nvh->set_native_child(fake_handle());
+    root.add_child(std::move(owned));
+
+    nvh->update_native_layout();
+    REQUIRE(nvh->is_native_attached());
+    // Introspection stays in design space (the pure layout frame).
+    REQUIRE(nvh->computed_child_frame() == Rect{40, 30, 120, 80});
+    // Host space = design frame through x'=x*0.5+100, y'=y*0.5, w'=w*0.5, h'=h*0.5.
+    REQUIRE(nvh->computed_child_frame_host() == Rect{120, 15, 60, 40});
+    // The value pushed to the host (the OS view's real frame) is host-space.
+    REQUIRE(host.rec().bounds == Rect{120, 15, 60, 40});
+    // Attach itself used the transformed frame (single attach, no drift).
+    REQUIRE(host.rec().attach_count == 1);
+}
+
+TEST_CASE("NativeViewHost pushes a letterboxed (top-slack) frame under a viewport",
+          "[view][native-view-host][viewport]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    RecordingPluginHost host;
+    // Letterbox: half scale, vertical offset (bars top+bottom), no horizontal.
+    host.set_viewport(0.5f, 0.5f, 0.0f, 60.0f);
+    root.set_plugin_view_host(&host);
+
+    auto owned = std::make_unique<NativeViewHost>();
+    auto* nvh = owned.get();
+    nvh->set_bounds({20, 40, 100, 60});
+    nvh->set_native_child(fake_handle());
+    root.add_child(std::move(owned));
+
+    nvh->update_native_layout();
+    REQUIRE(nvh->computed_child_frame() == Rect{20, 40, 100, 60});
+    // x'=20*0.5=10, y'=40*0.5+60=80, w'=50, h'=30.
+    REQUIRE(nvh->computed_child_frame_host() == Rect{10, 80, 50, 30});
+    REQUIRE(host.rec().bounds == Rect{10, 80, 50, 30});
+}
+
+TEST_CASE("NativeViewHost scales the clip rect too under a viewport",
+          "[view][native-view-host][viewport]") {
+    // A clipped child: the visible sub-rect (in the child's own box) must scale
+    // by the same factor as the frame, or the mask would be wrong on the scaled
+    // OS view.
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+    RecordingPluginHost host;
+    host.set_viewport(0.5f, 0.5f, 0.0f, 0.0f);  // pure half-scale
+    root.set_plugin_view_host(&host);
+
+    auto clip_owned = std::make_unique<View>();
+    auto* clip = clip_owned.get();
+    clip->set_bounds({0, 0, 100, 100});
+    clip->set_overflow(View::Overflow::hidden);
+    root.add_child(std::move(clip_owned));
+
+    auto nvh_owned = std::make_unique<NativeViewHost>();
+    auto* nvh = nvh_owned.get();
+    nvh->set_bounds({50, 50, 100, 100});  // spills past the 100x100 clip
+    nvh->set_native_child(fake_handle());
+    clip->add_child(std::move(nvh_owned));
+
+    nvh->update_native_layout();
+    REQUIRE(nvh->is_clipped());
+    // Design space: frame (50,50,100,100), visible (50,50,50,50).
+    REQUIRE(nvh->computed_child_frame() == Rect{50, 50, 100, 100});
+    REQUIRE(nvh->computed_visible_rect() == Rect{50, 50, 50, 50});
+    // Host space: frame (25,25,50,50). Clip in the child's own box scales from
+    // design (0,0,50,50) → host (0,0,25,25).
+    REQUIRE(nvh->computed_child_frame_host() == Rect{25, 25, 50, 50});
+    REQUIRE(host.rec().bounds == Rect{25, 25, 50, 50});
+    REQUIRE(host.rec().has_clip);
+    REQUIRE(host.rec().clip == Rect{0, 0, 25, 25});
+}
+
+TEST_CASE("NativeViewHost re-pushes on host resize with unchanged design layout",
+          "[view][native-view-host][viewport]") {
+    // A host resize changes the viewport scale/translate while the design-space
+    // layout is untouched. The pushed-geometry cache stores HOST-space coords,
+    // so the changed transform must invalidate it and re-push — otherwise the
+    // native child would keep its pre-resize frame and drift.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    RecordingPluginHost host;
+    host.set_viewport(1.0f, 1.0f, 0.0f, 0.0f);  // initial: identity-ish
+    root.set_plugin_view_host(&host);
+
+    auto owned = std::make_unique<NativeViewHost>();
+    auto* nvh = owned.get();
+    nvh->set_bounds({40, 30, 120, 80});
+    nvh->set_native_child(fake_handle());
+    root.add_child(std::move(owned));
+
+    nvh->update_native_layout();
+    REQUIRE(host.rec().bounds == Rect{40, 30, 120, 80});
+    const int bounds_after_attach = host.rec().bounds_count;
+
+    // Re-pump with the SAME design layout and SAME viewport → cache hit, no
+    // redundant re-push.
+    nvh->update_native_layout();
+    REQUIRE(host.rec().bounds_count == bounds_after_attach);
+
+    // Now the host "resizes": viewport scale + offset change. Design-space
+    // layout (the widget bounds) is unchanged.
+    host.set_viewport(0.5f, 0.5f, 100.0f, 60.0f);
+    nvh->update_native_layout();
+    // Cache invalidated by the new host-space frame → re-pushed.
+    REQUIRE(host.rec().bounds_count == bounds_after_attach + 1);
+    REQUIRE(nvh->computed_child_frame() == Rect{40, 30, 120, 80});  // design unchanged
+    REQUIRE(host.rec().bounds == Rect{120, 75, 60, 40});  // 40*.5+100, 30*.5+60, 120*.5, 80*.5
 }

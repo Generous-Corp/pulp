@@ -189,6 +189,43 @@ class ComposeReleaseNotesTests(unittest.TestCase):
         with mock.patch.object(crn.subprocess, "run", return_value=completed):
             self.assertTrue(crn.pr_has_breaking_label("12", "example/repo"))
 
+    def test_pr_for_commit_resolves_direct_commit_to_a_pr(self) -> None:
+        # A commit whose subject carried no `(#N)` still links to its merged PR
+        # via GitHub's commit->PR association, so the entry is clickable.
+        crn._PR_FOR_COMMIT_CACHE.clear()
+        found = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="5910\n", stderr=""
+        )
+        with mock.patch.object(crn.subprocess, "run", return_value=found):
+            self.assertEqual(crn.pr_for_commit("deadbeef", "example/repo"), "5910")
+        # A genuine direct-to-main commit (no associated PR) stays None -> SHA.
+        crn._PR_FOR_COMMIT_CACHE.clear()
+        empty = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="\n", stderr=""
+        )
+        with mock.patch.object(crn.subprocess, "run", return_value=empty):
+            self.assertIsNone(crn.pr_for_commit("cafef00d", "example/repo"))
+        # No repo slug (offline / no lookup) -> None, no API call.
+        self.assertIsNone(crn.pr_for_commit("abc123", None))
+
+    def test_footer_links_changelog_section_and_previous_release(self) -> None:
+        # The owner-preferred footer: a CHANGELOG.md § link + a Previous-release
+        # link, NOT GitHub's "Full Changelog: A...B" compare link.
+        self.assertEqual(crn.changelog_anchor("v0.645.0"), "v06450")
+        self.assertEqual(crn.changelog_anchor("v1.2.3"), "v123")
+        with mock.patch.object(crn, "previous_tag", return_value="v0.644.0"):
+            foot = crn.footer("v0.645.0", "https://github.com/example/repo")
+        self.assertIn(
+            "[CHANGELOG.md § 0.645.0]"
+            "(https://github.com/example/repo/blob/main/CHANGELOG.md#v06450)",
+            foot,
+        )
+        self.assertIn(
+            "[v0.644.0](https://github.com/example/repo/releases/tag/v0.644.0)",
+            foot,
+        )
+        self.assertNotIn("compare", foot)
+
     def compose_tier(self, tag: str, tier: str) -> str:
         result = subprocess.run(
             [

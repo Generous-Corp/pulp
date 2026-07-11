@@ -19,8 +19,10 @@
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <limits>
+#include <string>
 
 namespace pulp::format::au {
 
@@ -84,6 +86,10 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
         if (processor_) {
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
+            // Cache the immutable descriptor so the render path can view its bus
+            // names without a per-block copy (which would allocate on the audio
+            // thread).
+            descriptor_ = processor_->descriptor();
 
             // Resolve host accommodations once via the runtime policy.
             const auto host_info = detect_host_info();
@@ -195,6 +201,17 @@ OSStatus PulpAUEffect::GetParameterInfo(AudioUnitScope inScope,
     outParameterInfo.flags = kAudioUnitParameterFlag_IsWritable
                            | kAudioUnitParameterFlag_IsReadable
                            | kAudioUnitParameterFlag_HasCFNameString;
+
+    // Advertise author-supplied value strings so the host queries our display
+    // formatting. For DISCRETE params the host reads the enumerated list via
+    // GetParameterValueStrings; for CONTINUOUS params it round-trips single
+    // values through kAudioUnitProperty_ParameterStringFromValue /
+    // ...ValueFromString (handled in GetProperty). Both are gated on to_string,
+    // so a plugin that declares no converter keeps the host's stock numeric
+    // display unchanged.
+    if (param->to_string) {
+        outParameterInfo.flags |= kAudioUnitParameterFlag_ValuesHaveStrings;
+    }
 
     CFStringRef name = CFStringCreateWithCString(
         kCFAllocatorDefault, param->name.c_str(), kCFStringEncodingUTF8);
@@ -315,6 +332,22 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
         outWritable = true;  // write: host installs the delivery callback
         return noErr;
     }
+    // Per-value string conversion for CONTINUOUS parameters. The host passes
+    // the target ParamID inside the in/out struct (not via inElement), so we
+    // advertise support at global scope and validate the specific parameter in
+    // GetProperty. Read-only from the host's perspective.
+    if (inID == kAudioUnitProperty_ParameterStringFromValue) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(AudioUnitParameterStringFromValue);
+        outWritable = false;
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_ParameterValueFromString) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(AudioUnitParameterValueFromString);
+        outWritable = false;
+        return noErr;
+    }
     return AUMIDIEffectBase::GetPropertyInfo(inID, inScope, inElement, outDataSize, outWritable);
 }
 
@@ -368,6 +401,41 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
             out->midiOutputCallback = nullptr;
             out->userData = nullptr;
         }
+        return noErr;
+    }
+    // Continuous-parameter display: value -> string. The host owns and releases
+    // outString, so create it with a +1 retain. inValue == nullptr means "use
+    // the parameter's current value" per the AU convention.
+    if (inID == kAudioUnitProperty_ParameterStringFromValue) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!outData) return kAudioUnitErr_InvalidProperty;
+        auto* sfv = static_cast<AudioUnitParameterStringFromValue*>(outData);
+        const auto* param = store_.info(static_cast<state::ParamID>(sfv->inParamID));
+        if (!param || !param->to_string) return kAudioUnitErr_InvalidPropertyValue;
+        const float value = sfv->inValue
+            ? static_cast<float>(*sfv->inValue)
+            : store_.get_value(static_cast<state::ParamID>(sfv->inParamID));
+        const std::string text = param->to_string(value);
+        sfv->outString = CFStringCreateWithCString(
+            kCFAllocatorDefault, text.c_str(), kCFStringEncodingUTF8);
+        if (!sfv->outString) return kAudioUnitErr_InvalidPropertyValue;
+        return noErr;
+    }
+    // Continuous-parameter text entry: string -> value.
+    if (inID == kAudioUnitProperty_ParameterValueFromString) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (!outData) return kAudioUnitErr_InvalidProperty;
+        auto* vfs = static_cast<AudioUnitParameterValueFromString*>(outData);
+        const auto* param = store_.info(static_cast<state::ParamID>(vfs->inParamID));
+        if (!param || !param->from_string || !vfs->inString)
+            return kAudioUnitErr_InvalidPropertyValue;
+        char buf[256] = {0};
+        if (!CFStringGetCString(vfs->inString, buf, sizeof(buf),
+                                kCFStringEncodingUTF8))
+            return kAudioUnitErr_InvalidPropertyValue;
+        const float parsed = param->from_string(buf);
+        if (!std::isfinite(parsed)) return kAudioUnitErr_InvalidPropertyValue;
+        vfs->outValue = parsed;
         return noErr;
     }
     return AUMIDIEffectBase::GetProperty(inID, inScope, inElement, outData);
@@ -617,24 +685,33 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // channels, which the AU non-interleaved float model does not do.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
-    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
-        {
-            .info = {
-                .name = "Audio In",
-                .index = 0,
-                .direction = BusDirection::Input,
-                .role = BusRole::Main,
-                .declared_channels = static_cast<int>(in_channels),
-                .optional = in_channels == 0,
-                .active = input_view.num_channels() > 0,
-            },
-            .buffer = input_view,
-        },
-    }};
+
+    // Input bus views: the main input (index 0), plus — when the descriptor
+    // declares a sidechain input bus — an INACTIVE Sidechain view (index 1).
+    // AUEffectBase pulls only the main input element, so the sidechain view stays
+    // inactive/null: Processor::sidechain_input() returns nullptr gracefully
+    // rather than exposing a bus the stock AU-effect render path cannot feed.
+    // For the common single-input effect this is exactly one Main view, so the
+    // bus->buffer mapping and behaviour are unchanged. Bus names come from the
+    // cached descriptor (build_input_bus_infos), which owns the strings.
+    std::array<ProcessBusBufferInfo, 2> in_infos{};
+    const std::size_t n_in =
+        build_input_bus_infos(descriptor_, in_infos.data(), in_infos.size());
+    in_infos[0].declared_channels = static_cast<int>(in_channels);
+    in_infos[0].active = input_view.num_channels() > 0;
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{};
+    input_buses[0] = {.info = in_infos[0], .buffer = input_view};
+    for (std::size_t i = 1; i < n_in; ++i) {
+        input_buses[i] = {.info = in_infos[i],
+                          .buffer = audio::BufferView<const float>{}};
+    }
+
     std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {
-                .name = "Audio Out",
+                .name = descriptor_.output_buses.empty()
+                            ? std::string_view{"Audio Out"}
+                            : std::string_view{descriptor_.output_buses[0].name},
                 .index = 0,
                 .direction = BusDirection::Output,
                 .role = BusRole::Main,
@@ -646,7 +723,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         },
     }};
     ProcessBuffers process_buffers{
-        ProcessBusBufferSet<const float>{std::span(input_buses)},
+        ProcessBusBufferSet<const float>{std::span(input_buses.data(), n_in)},
         ProcessBusBufferSet<float>{std::span(output_buses)},
     };
     {

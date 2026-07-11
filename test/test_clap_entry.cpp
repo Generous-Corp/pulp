@@ -59,6 +59,16 @@ public:
             std::snprintf(buffer, sizeof(buffer), "quality=%.2f", value);
             return std::string(buffer);
         };
+        // Inverse of to_string: parse the number after "quality=". A bare
+        // numeric parser (the fallback) rejects this string outright because it
+        // starts with 'q', so it is a clean discriminator that from_string is
+        // actually invoked by params_text_to_value.
+        quality.from_string = [](const std::string& s) -> float {
+            const auto pos = s.find('=');
+            if (pos == std::string::npos)
+                return std::numeric_limits<float>::quiet_NaN();
+            return static_cast<float>(std::atof(s.c_str() + pos + 1));
+        };
         store.add_parameter(quality);
     }
     void prepare(const pulp::format::PrepareContext&) override {}
@@ -626,6 +636,53 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
+TEST_CASE("CLAP text_to_value routes through ParamInfo::from_string",
+          "[clap][entry][params][from-string]") {
+    // The "Quality" param (id 4) declares a custom to_string/from_string pair
+    // whose rendering ("quality=0.75") a bare numeric parse cannot decode.
+    // params_text_to_value must prefer from_string so a host's text-entry field
+    // round-trips the plugin's own formatting. The generic strtod fallback must
+    // still handle plain-numeric params (and reject junk) unchanged.
+    ScopedHostQuirkPolicy quirk_guard(pulp::format::kQuirkFilterOff);
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    REQUIRE(factory != nullptr);
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    REQUIRE(desc != nullptr);
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* params = static_cast<const clap_plugin_params_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+
+    double value = 0.0;
+    // Custom rendering decoded via from_string — a bare numeric parse would
+    // fail on the leading 'q'.
+    REQUIRE(params->text_to_value(plugin, 4, "quality=0.42", &value));
+    REQUIRE_THAT(value, WithinAbs(0.42, 1e-6));
+
+    // Round-trip: value_to_text then text_to_value returns the original value.
+    char text[64]{};
+    REQUIRE(params->value_to_text(plugin, 4, 0.63, text, sizeof(text)));
+    REQUIRE(std::string(text) == "quality=0.63");
+    value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 4, text, &value));
+    REQUIRE_THAT(value, WithinAbs(0.63, 1e-6));
+
+    // A param WITHOUT from_string (Gain, id 1) still uses the numeric fallback.
+    REQUIRE(params->text_to_value(plugin, 1, "-3.25 dB", &value));
+    REQUIRE_THAT(value, WithinAbs(-3.25, 1e-6));
+    REQUIRE_FALSE(params->text_to_value(plugin, 1, "not a number", &value));
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
 TEST_CASE("CLAP param text conversion is locale-independent (comma-decimal host)",
           "[clap][entry][params][locale]") {
     // Under a comma-decimal global C locale, the previous snprintf("%.2f")
@@ -971,4 +1028,127 @@ TEST_CASE("CLAP params_flush ignores events outside the core namespace [issue-74
 
     plugin->destroy(plugin);
     clap_entry.deinit();
+}
+
+// ── G1: CLAP resize-contract honoring (WS-1b) ────────────────────────────────
+// gui_can_resize already keys off min>0 (the shipped convention). G1 makes
+// gui_get_resize_hints.preserve_aspect_ratio and gui_adjust_size honor
+// ViewSize::aspect_ratio: a resizable editor with aspect_ratio==0 drags freely
+// (no aspect lock / no snap); otherwise the aspect is held. The bridge's
+// size_hints_ are read from the processor's view_size() in the ViewBridge
+// constructor, so we build a PulpClapPlugin with a bridge directly — no editor
+// create() / attach needed to exercise the negotiation math.
+namespace {
+
+using pulp::format::ViewSize;
+
+class ClapResizeProcessor final : public pulp::format::Processor {
+public:
+    explicit ClapResizeProcessor(ViewSize vs) : vs_(vs) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "ClapResizeProcessor";
+        d.input_buses = {{"In", 2}};
+        d.output_buses = {{"Out", 2}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    ViewSize view_size() const override { return vs_; }
+private:
+    ViewSize vs_;
+};
+
+// Build a PulpClapPlugin whose bridge reports `vs` as its size hints.
+void make_clap_plugin_with_size(
+    pulp::format::clap_adapter::PulpClapPlugin& data, ViewSize vs) {
+    data.processor = std::make_unique<ClapResizeProcessor>(vs);
+    data.bridge = std::make_unique<pulp::format::ViewBridge>(*data.processor,
+                                                             data.store);
+    data.plugin.plugin_data = &data;
+}
+
+}  // namespace
+
+TEST_CASE("CLAP gui_can_resize follows the min-bounds convention",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    pulp::format::clap_adapter::PulpClapPlugin fixed;
+    make_clap_plugin_with_size(fixed, ViewSize{400, 300, 0, 0, 0, 0, 0.0});
+    REQUIRE_FALSE(gui_can_resize(&fixed.plugin));
+
+    pulp::format::clap_adapter::PulpClapPlugin resizable;
+    make_clap_plugin_with_size(
+        resizable, ViewSize{400, 300, 200, 150, 800, 600, 0.0});
+    REQUIRE(gui_can_resize(&resizable.plugin));
+}
+
+TEST_CASE("CLAP gui_get_resize_hints preserve_aspect_ratio tracks the contract",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    // Resizable + aspect_ratio>0 → aspect held.
+    pulp::format::clap_adapter::PulpClapPlugin locked;
+    make_clap_plugin_with_size(
+        locked, ViewSize{400, 300, 200, 150, 800, 600, 400.0 / 300.0});
+    clap_gui_resize_hints_t h_locked{};
+    REQUIRE(gui_get_resize_hints(&locked.plugin, &h_locked));
+    REQUIRE(h_locked.preserve_aspect_ratio);
+
+    // Resizable + aspect_ratio==0 → free drag, aspect NOT held.
+    pulp::format::clap_adapter::PulpClapPlugin free;
+    make_clap_plugin_with_size(
+        free, ViewSize{400, 300, 200, 150, 800, 600, 0.0});
+    clap_gui_resize_hints_t h_free{};
+    REQUIRE(gui_get_resize_hints(&free.plugin, &h_free));
+    REQUIRE_FALSE(h_free.preserve_aspect_ratio);
+    REQUIRE(h_free.can_resize_horizontally);
+    REQUIRE(h_free.can_resize_vertically);
+}
+
+TEST_CASE("CLAP gui_adjust_size free-resize clamps min/max without aspect snap",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    pulp::format::clap_adapter::PulpClapPlugin free;
+    make_clap_plugin_with_size(
+        free, ViewSize{400, 300, 200, 150, 800, 600, 0.0});
+
+    // Off-aspect request inside bounds returned verbatim (aspect lock would
+    // have snapped (800,300) → (400,300)).
+    uint32_t w = 800, h = 300;
+    REQUIRE(gui_adjust_size(&free.plugin, &w, &h));
+    REQUIRE(w == 800);
+    REQUIRE(h == 300);
+
+    // Below-min clamps up on each axis independently, no aspect re-snap.
+    w = 100; h = 100;
+    REQUIRE(gui_adjust_size(&free.plugin, &w, &h));
+    REQUIRE(w == 200);
+    REQUIRE(h == 150);
+
+    // Above-max clamps down on each axis.
+    w = 4000; h = 4000;
+    REQUIRE(gui_adjust_size(&free.plugin, &w, &h));
+    REQUIRE(w == 800);
+    REQUIRE(h == 600);
+}
+
+TEST_CASE("CLAP gui_adjust_size aspect-locked behavior is unchanged (regression pin)",
+          "[clap][entry][gui][resize][issue-pam-g1]") {
+    using namespace pulp::format::clap_generic;
+
+    // Resizable + aspect_ratio>0 keeps today's aspect snap: (800,300) → (400,300).
+    pulp::format::clap_adapter::PulpClapPlugin locked;
+    make_clap_plugin_with_size(
+        locked, ViewSize{400, 300, 200, 150, 800, 600, 400.0 / 300.0});
+    uint32_t w = 800, h = 300;
+    REQUIRE(gui_adjust_size(&locked.plugin, &w, &h));
+    REQUIRE(w == 400);
+    REQUIRE(h == 300);
 }

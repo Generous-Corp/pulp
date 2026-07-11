@@ -86,7 +86,7 @@ modules:
       (GpuAudioTransport + GpuAudioNode: lock-free input/output rings, polling
       worker, miss policy) over render::GpuCompute. Nodes: GpuConvolver
       (GPU-resident fused/batched convolution) plus a spectral toolkit
-      (GpuStft and the GpuSpectralFreeze / GpuSpectralMorph / GpuHyperFreeze
+      (GpuStft and the GpuSpectralFreeze / GpuSpectralMorph / GpuSpectralStack
       capture-and-render engines). Not real-time-safe at the device boundary
       (each op is upload → dispatch → blocking readback); the transport is the
       RT seam.

@@ -138,6 +138,20 @@ struct SpectralFreezeControls {
 /// arbitrary-length output stream. Owns no GPU state itself — the SpectralStack
 /// does — so it runs unchanged inline (CPU engine) or on the transport worker
 /// (GPU engine).
+///
+/// NOTE (SF-4): this deliberately does NOT delegate its WOLA to
+/// signal::SpectralFrameEngine. The engine owns both the analysis AND synthesis
+/// FFTs and normalizes the spectral→time synthesis it performs on the CPU. This
+/// framer instead hands the SpectralStack windowed time-domain frames and
+/// receives finished time-domain frames back — because the whole point of
+/// GpuSpectralStack is to run advance + smear + weighted-sum + the inverse FFT
+/// in ONE on-device submit and read back a completed frame. Routing through the
+/// engine would force either a redundant second FFT per hop or move synthesis
+/// off the GPU, defeating that batching. The framer's own COLA normalization is
+/// valid for the COLA window/hop configs it accepts (it rejects non-dividing
+/// hops up front rather than producing wrong output), so the consolidation is
+/// intentionally scoped to the jitter contract and the shared device, not the
+/// framing math.
 class SpectralFreezeFramer {
 public:
     /// `stack` must outlive the framer and already be prepared with a matching
