@@ -95,6 +95,8 @@ PYTHON="${PYTHON:-python3}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
+CDC="$ROOT/tools/scripts/config_doc_check.py"
+CDC_MAP="$ROOT/tools/scripts/config_doc_map.json"
 COMPAT_AGG="$ROOT/tools/scripts/compat_aggregate.py"
 DNL="$ROOT/tools/scripts/docs_noise_lint.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
@@ -177,6 +179,19 @@ if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] compat_sync_check: internal error" >&2 ;;
+    esac
+fi
+
+# Config→doc drift. A mapped config surface (Shipyard config, the shipyard
+# pin/installer, the build/release/gate workflows) that changes without its
+# guide doc silently drifts the operator-facing description. Bypass on any
+# commit in the range with a `Config-Doc: skip reason="..."` trailer.
+if [ -f "$CDC" ] && [ -f "$CDC_MAP" ]; then
+    "$PYTHON" "$CDC" --base "$BASE" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] config_doc_check: internal error" >&2 ;;
     esac
 fi
 

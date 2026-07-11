@@ -247,6 +247,7 @@ All three bypass trailers live on the tip commit, never in the PR body. The audi
 | Version bump   | `Version-Bump: <surface>=<patch|minor|major|skip> reason="..."` |
 | Skill update   | `Skill-Update: skip skill=<name> reason="..."`           |
 | Compat update  | `Compat-Update: skip prefix=<section\|*> reason="..."`    |
+| Config doc     | `Config-Doc: skip reason="..."`                          |
 | Auto-release   | `Release: skip reason="..."`                              |
 
 A bypass is a recorded admission that the author thought about the rule and decided it doesn't apply. Empty-reason bypasses are rejected.
@@ -254,6 +255,28 @@ A bypass is a recorded admission that the author thought about the rule and deci
 The compat-update gate uses the same three-layer pattern as the
 version-bump and skill-update gates; see [compat-sync.md](compat-sync.md)
 for the path map, requirement kinds, and rollout state (#1029 / #1027).
+
+## Config→doc drift gate
+
+Some CI/release **config surfaces** are described by a human-facing guide that
+silently goes stale when the config changes without a matching doc edit.
+`tools/scripts/config_doc_check.py` closes that gap with the same three-layer
+pattern as the gates above: for each entry in
+`tools/scripts/config_doc_map.json`, if any of the entry's config `paths`
+changed in the diff range but none of its `docs` did, the gate fails.
+
+The seeded map covers the Shipyard validation config
+(`.shipyard/config.toml`, `.shipyard.local/config.toml.example`), the Shipyard
+binary pin + installer (`tools/shipyard.toml`, `tools/install-shipyard.sh`),
+the build workflows (`build.yml`, `build-macos.yml` → `local-ci.md`), the
+release-watchdog trio (`auto-release.yml`, `auto-release-watchdog.yml`,
+`release-cadence-check.yml` → `release-watchdog.md`), and the enforcement
+workflows themselves (`version-skill-check.yml`, `coverage.yml` → this guide).
+
+It runs advisory (`--mode=hint`) in the agent PostToolUse hook, enforcing
+(`--mode=report`) in `.githooks/pre-push`, `tools/scripts/gates.sh`, and the
+`version-skill-check.yml` PR gate. Bypass a genuinely doc-irrelevant edit with
+a `Config-Doc: skip reason="..."` trailer on any commit in the range.
 
 ---
 

@@ -10,6 +10,7 @@
 #   - skill-sync (catches missing SKILL.md updates for mapped paths)
 #   - version-bump (catches feat:/fix: PRs without a chore: bump versions commit)
 #   - compat-sync (mapped compat paths require matrix/docs/tests or a skip trailer)
+#   - config-doc (mapped config surfaces require their guide doc or a skip trailer)
 #   - compat-aggregate (compat.json stays byte-identical to compat/ parts)
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
@@ -59,6 +60,8 @@ BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
+CDC="$ROOT/tools/scripts/config_doc_check.py"
+CDC_MAP="$ROOT/tools/scripts/config_doc_map.json"
 COMPAT_AGG="$ROOT/tools/scripts/compat_aggregate.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
@@ -144,6 +147,15 @@ if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     echo "" >&2
     echo "▸ compat-sync check" >&2
     if ! "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce; then
+        fail=1
+    fi
+fi
+
+# ── 3b. config→doc drift ────────────────────────────────────────────────────
+if [ -f "$CDC" ] && [ -f "$CDC_MAP" ]; then
+    echo "" >&2
+    echo "▸ config→doc drift check" >&2
+    if ! "$PYTHON" "$CDC" --base "$BASE" --mode=report; then
         fail=1
     fi
 fi
