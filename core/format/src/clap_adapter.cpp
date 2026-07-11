@@ -4,6 +4,7 @@
 #include "clap_remote_controls.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
@@ -34,22 +35,11 @@ void resize_f64_boundary_scratch(
     for (auto& channel : scratch) channel.assign(frames, 0.0f);
 }
 
-void copy_f64_to_f32(const double* src, float* dst, uint32_t count) {
-    if (!src || !dst) return;
-    for (uint32_t i = 0; i < count; ++i)
-        dst[i] = static_cast<float>(src[i]);
-}
-
-void copy_f32_to_f64(const float* src, double* dst, uint32_t count) {
-    if (!src || !dst) return;
-    for (uint32_t i = 0; i < count; ++i)
-        dst[i] = static_cast<double>(src[i]);
-}
-
-void zero_f64(double* dst, uint32_t count) {
-    if (!dst) return;
-    std::fill_n(dst, count, 0.0);
-}
+// f64 marshalling lives in the shared adapter-boundary core (SF-1); alias the
+// unqualified names this TU already used so the call sites stay untouched.
+using pulp::format::boundary::copy_f32_to_f64;
+using pulp::format::boundary::copy_f64_to_f32;
+using pulp::format::boundary::zero_f64;
 }
 
 static PulpClapPlugin* get_self(const clap_plugin_t* plugin) {
@@ -215,14 +205,8 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     // the host's plugin-delay-compensation. Allocate here, never in
     // clap_process(); a 0 latency leaves the delay lines unused so the bypass
     // pass-through stays a zero-copy memcpy.
-    self->bypass_delay_samples = reported_latency_samples(
-        self->processor->latency_samples(), self->host_quirks);
-    if (self->bypass_delay_samples < 0) self->bypass_delay_samples = 0;
-    if (self->bypass_delay_samples > 0) {
-        for (auto& line : self->bypass_dry_delay) {
-            line.prepare(self->bypass_delay_samples);
-        }
-    }
+    self->bypass.prepare(reported_latency_samples(
+        self->processor->latency_samples(), self->host_quirks));
 
     // Reset the playhead snapshot — the next process() call is the
     // first block of a fresh activation cycle and must NOT diff against
@@ -321,19 +305,15 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
                 const auto ev = load_event<clap_event_param_value_t>(hdr);
-                self->param_events.push({
+                // Shared dual-write (SF-1): enqueue for the sample-accurate DSP
+                // cursor AND publish to Main/Audio listeners via the RT-safe
+                // set_value_rt path (atomic store + non-allocating SPSC push).
+                // The editor calls store.pump_listeners() from its UI tick to
+                // deliver the queued notifications; Audio listeners fire inline.
+                boundary::apply_param_value(
+                    self->param_events, self->store,
                     static_cast<state::ParamID>(ev.param_id),
                     static_cast<int32_t>(hdr->time),
-                    static_cast<float>(ev.value),
-                });
-                // RT-safe write: atomic store + non-allocating SPSC push
-                // for Main listeners. The editor calls store.pump_listeners()
-                // from its UI tick to deliver the queued notifications;
-                // Audio listeners fire inline here. Replaces set_value(),
-                // which dispatches a heap-allocated lambda through the
-                // EventLoop when a Main listener is attached.
-                self->store.set_value_rt(
-                    static_cast<state::ParamID>(ev.param_id),
                     static_cast<float>(ev.value));
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
                 const auto ev = load_event<clap_event_param_mod_t>(hdr);
@@ -891,62 +871,69 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     ctx.num_samples = static_cast<int>(num_samples);
     ctx.process_mode = pulp::format::ProcessMode::Realtime;
     ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
+    // Decode CLAP's host transport into the format-neutral boundary struct;
+    // the shared adapter-boundary core (SF-1) then writes the ProcessContext
+    // transport fields, derives the bar when the host supplies none, and diffs
+    // the change-flags — identically for every format. The CLAP-specific work
+    // is only the flag/fixed-point decode below.
+    boundary::HostTransport transport;
     if (process->transport) {
         const auto* tr = process->transport;
         const uint32_t flags = tr->flags;
 
-        ctx.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
-        ctx.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
+        transport.valid = true;
+        transport.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
+        transport.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
         if (flags & CLAP_TRANSPORT_HAS_TEMPO) {
-            ctx.tempo_bpm = tr->tempo;
+            transport.has_tempo = true;
+            transport.tempo_bpm = tr->tempo;
         }
         if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            ctx.position_beats =
+            transport.has_beats = true;
+            transport.position_beats =
                 static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
         }
         if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
             const double seconds =
                 static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
-            ctx.position_samples = static_cast<int64_t>(
+            transport.has_samples = true;
+            transport.position_samples = static_cast<int64_t>(
                 std::llround(seconds * ctx.sample_rate));
         }
         if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
-            ctx.time_sig_numerator = static_cast<int>(tr->tsig_num);
-            ctx.time_sig_denominator = static_cast<int>(tr->tsig_denom);
+            transport.has_time_sig = true;
+            transport.time_sig_numerator = static_cast<int>(tr->tsig_num);
+            transport.time_sig_denominator = static_cast<int>(tr->tsig_denom);
         }
 
         // Cycle / loop range. CLAP gates this on CLAP_TRANSPORT_IS_LOOP_ACTIVE;
         // loop_start_beats / loop_end_beats are CLAP fixed-point
         // `clap_beattime` so they convert through the same factor as
-        // song_pos_beats.
-        ctx.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
-        if (ctx.is_looping) {
-            ctx.loop_start_beats =
+        // song_pos_beats. The mapper only writes them when is_looping.
+        transport.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
+        if (transport.is_looping) {
+            transport.loop_start_beats =
                 static_cast<double>(tr->loop_start_beats) / CLAP_BEATTIME_FACTOR;
-            ctx.loop_end_beats =
+            transport.loop_end_beats =
                 static_cast<double>(tr->loop_end_beats) / CLAP_BEATTIME_FACTOR;
         }
 
         // Bar index. CLAP exposes `bar_number` directly (bar at song pos 0 has
-        // bar 0), so prefer that over deriving from beats. Hosts that don't
-        // supply a beats timeline leave `bar_number` at 0, which matches the
-        // documented default.
+        // bar 0) whenever it supplies a beats timeline, so prefer that over
+        // deriving from beats; otherwise the mapper derives it.
         if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            ctx.bar = static_cast<int64_t>(tr->bar_number);
-        } else {
-            pulp::format::detail::derive_bar_from_beats(ctx);
+            transport.has_host_bar = true;
+            transport.host_bar = static_cast<int64_t>(tr->bar_number);
         }
 
-        // Host clock / SMPTE frame rate are intentionally left at the
-        // documented "host did not provide" sentinels: CLAP 1.2.2's
-        // `clap_event_transport` carries neither field. `ctx.host_time_ns`
-        // stays 0, `ctx.frame_rate` stays FrameRate::unknown; plugin authors
-        // must check before use.
+        // Host clock / SMPTE frame rate stay at the documented "host did not
+        // provide" sentinels (host_time_ns = 0, frame_rate = unknown): CLAP
+        // 1.2.2's `clap_event_transport` carries neither field.
     }
 
-    // Diff against the previous block to populate the three change flags.
-    // Stateful; updates `self->playhead_prev` in place.
-    pulp::format::detail::compute_playhead_changes(ctx, self->playhead_prev);
+    // Apply the neutral transport and diff against the previous block. Stateful;
+    // updates `self->playhead_prev` in place.
+    boundary::apply_host_transport(ctx, transport, self->playhead_prev);
 
     // Snapshot parameter values to detect plugin-side changes.
     // INVARIANT: every scratch vector sized to all_params().size() here runs on
@@ -1027,8 +1014,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         // reported latency in clap_activate()), so it too processes the full
         // original_num_samples — bypass stays a true 1:1 host passthrough with
         // no clamp tail to zero.
-        const bool delayed = self->bypass_delay_samples > 0 &&
-            out_channels <= static_cast<int>(self->bypass_dry_delay.size());
+        const bool delayed = self->bypass.is_latency_compensated() &&
+            out_channels <= static_cast<int>(self->bypass.channel_capacity());
         for (int ch = 0; ch < out_channels; ++ch) {
             const bool has_input_channel =
                 process->audio_inputs_count > 0 &&
@@ -1051,11 +1038,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 if (out64 == nullptr) continue;
                 if (in64 != nullptr) {
                     if (delayed) {
-                        auto& line = self->bypass_dry_delay[ch];
                         for (uint32_t n = 0; n < original_num_samples; ++n) {
-                            out64[n] = static_cast<double>(line.process(
+                            out64[n] = static_cast<double>(self->bypass.process_sample(
                                 static_cast<float>(in64[n]),
-                                static_cast<float>(self->bypass_delay_samples)));
+                                static_cast<std::size_t>(ch)));
                         }
                     } else {
                         std::memcpy(out64, in64,
@@ -1063,11 +1049,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     }
                 } else if (in32 != nullptr) {
                     if (delayed) {
-                        auto& line = self->bypass_dry_delay[ch];
                         for (uint32_t n = 0; n < original_num_samples; ++n) {
-                            out64[n] = static_cast<double>(line.process(
-                                in32[n],
-                                static_cast<float>(self->bypass_delay_samples)));
+                            out64[n] = static_cast<double>(self->bypass.process_sample(
+                                in32[n], static_cast<std::size_t>(ch)));
                         }
                     } else {
                         copy_f32_to_f64(in32, out64, original_num_samples);
@@ -1090,16 +1074,14 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     // the same amount to stay sample-aligned with the host's
                     // plugin-delay-compensation. The delay line is fed only
                     // while bypassed: a one-time transient in the first
-                    // bypass_delay_samples after engaging bypass is accepted
+                    // latency samples after engaging bypass is accepted
                     // (bypass toggling is a user action, not sample-critical)
                     // in exchange for a zero-cost non-bypassed path. Steady
                     // state emits input[n - latency].
-                    auto& line = self->bypass_dry_delay[ch];
                     for (uint32_t n = 0; n < original_num_samples; ++n) {
                         const float sample = in32 ? in32[n] : static_cast<float>(in64[n]);
-                        out32[n] = line.process(
-                            sample,
-                            static_cast<float>(self->bypass_delay_samples));
+                        out32[n] = self->bypass.process_sample(
+                            sample, static_cast<std::size_t>(ch));
                     }
                 } else if (in32 != nullptr) {
                     std::memcpy(out32, in32,
