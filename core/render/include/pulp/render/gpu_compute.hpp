@@ -155,6 +155,38 @@ public:
                                 const float* pan_r, float* out_lr, uint32_t n,
                                 uint32_t num_ir) = 0;
 
+    // ── Partitioned-FDL multi-convolution (roofline #1) ──────────────────────
+    //
+    // The same one-input → many-IRs → stereo result, but with the IR split into
+    // `num_part` block-size partitions so the FFT stays at the small fixed block
+    // size (n = 2*block) instead of growing to next_pow2(block + IR_len). The
+    // convolution becomes a sum of spectral products over a delay line of recent
+    // input spectra — the algorithm signal::PartitionedConvolver uses on the CPU.
+    // This trades one giant FFT for P small-FFT-equivalent MAC rows, which is the
+    // removable waste multi_convolve_timed measured. Not real-time-safe (blocks
+    // on the readback); the amortizable building block for a real-time GPU
+    // multi-room convolver.
+
+    /// Build the partitioned-FDL plan for `n` = 2*block. `ir_part_specs` holds
+    /// `num_ir * num_part` back-to-back interleaved-complex partition spectra
+    /// (each length 2*n): room r partition p at offset (r*num_part + p)*2n. Each
+    /// partition spectrum is the forward FFT of that IR block zero-padded to n.
+    /// Call once before multi_fdl_convolve(n, num_ir). Returns false on invalid
+    /// args or if the resident IR spectra exceed the storage-buffer limit.
+    virtual bool prepare_multi_fdl(uint32_t n, const float* ir_part_specs,
+                                   uint32_t num_ir, uint32_t num_part) = 0;
+
+    /// Run one block of partitioned-FDL convolution for a prepared (n, num_ir).
+    /// `in_block` is `block` (= n/2) real input samples; `pan_l`/`pan_r` are
+    /// per-room linear gains (length num_ir). `out_block` receives the stereo
+    /// output block: out_block[0..block) = L, out_block[block..2*block) = R
+    /// (length 2*block = n). The plan carries the delay line and the previous
+    /// block across calls. Returns false if prepare_multi_fdl was not called for
+    /// (n, num_ir), args are invalid, or dispatch fails.
+    virtual bool multi_fdl_convolve(const float* in_block, const float* pan_l,
+                                    const float* pan_r, float* out_block,
+                                    uint32_t n, uint32_t num_ir) = 0;
+
     // ── Multi-layer spectral stack (N resident layer-spectra → one frame) ───
     //
     // The spectral analogue of the multi-IR regime: keep `num_layers` frozen

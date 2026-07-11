@@ -135,7 +135,7 @@ features (timestamp-query, f16). All are validated against CPU references.
 |---|---|---|
 | FFT / iFFT | `fft_forward` / `fft_inverse` (+ `fft_forward_timed`) | spectral analysis, fast convolution |
 | Fused convolution | `prepare_convolution` + `convolve` | one-readback FFT convolution with a resident IR |
-| Batched convolution | `prepare_convolution_batch` + `convolve_batch` | many blocks/instances in one submit+readback (≈16× at batch 16) |
+| Batched convolution | `prepare_convolution_batch` + `convolve_batch` | many blocks/instances in one submit+readback (amortizes per-dispatch + readback overhead; measured ~2× at batch 2 / stereo — the multiplier grows with batch size until it becomes bandwidth- or readback-bound) |
 | Magnitude / complex-mul | `compute_magnitude`, `complex_multiply`, `batch_magnitude` | spectral building blocks |
 | Dense matmul | `matmul` | neural layers, matrix DSP (ambisonics, mixing) |
 | Dense layer | `dense_tanh` | neural inference (NAM dense / LSTM gates) |
@@ -159,7 +159,7 @@ latency-delayed output, never blocking. On a miss the node's `MissPolicy`
 
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
-- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; `signal::Convolver` CPU fallback.
+- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::PartitionedConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
 - `GpuStft` — STFT/ISTFT (windowed analyze / synthesize) — the spectral toolkit base.
 - `GpuSpectralFreeze` — capture + sustain a spectral frame (infinite pad).
 - `GpuSpectralMorph` — blend between two captured spectra (t ∈ [0,1]).

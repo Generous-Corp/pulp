@@ -209,6 +209,14 @@ Set `InstallComponent::title` for the choice label, or leave it empty to derive
 from the install location ("Components" → "Audio Unit (AU)", etc.). Verified by
 `test_codesign.cpp` ("component-selectable with a choice per format").
 
+**CLI default (macOS).** `pulp ship package` DEFAULTS to this single
+component-selectable `.pkg` — it collects every built bundle (Standalone →
+`/Applications`, AU/VST3/CLAP → their system plug-in folders) into one
+`create_combined_pkg` call so the user is never forced to install every format.
+`--separate` restores the legacy behavior (one `.pkg` per format); `--dmg`
+produces disk images instead. The routing lives in the `pulp ship package`
+branch of `tools/cli/cmd_ship.cpp`.
+
 ### macOS one-command pipeline: `pulp ship release`
 
 ```bash

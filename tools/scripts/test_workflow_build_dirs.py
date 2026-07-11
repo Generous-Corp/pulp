@@ -45,7 +45,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn(
-            """if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            """if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
             label_exclude="validation|slow"
           fi""",
             text,
