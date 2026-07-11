@@ -19,12 +19,13 @@ class FieldView : public pulp::view::View {
 public:
     double t = 6.0;
     float flow = 0.62f;
+    int vmode = 0;
     void paint(pulp::canvas::Canvas& c) override {
         const auto b = local_bounds();
         c.set_fill_color(pulp::canvas::Color::rgba8(5, 6, 8));
         c.fill_rect(0, 0, b.width, b.height);
         pulp::superconvolver::draw_acoustic_field(
-            c, 0, 0, b.width, b.height, t, flow, /*density=*/72, /*energy=*/0.6f);
+            c, 0, 0, b.width, b.height, t, flow, /*density=*/72, /*energy=*/0.6f, vmode);
     }
 };
 
@@ -35,6 +36,7 @@ int main(int argc, char** argv) {
     FieldView view;
     if (argc > 2) view.t = std::atof(argv[2]);
     if (argc > 3) view.flow = static_cast<float>(std::atof(argv[3]));
+    if (argc > 4) view.vmode = std::atoi(argv[4]);
     view.set_bounds({0, 0, 960, 600});
     const bool ok = pulp::view::render_to_file(view, 960, 600, out, 2.0f,
                                                pulp::view::ScreenshotBackend::skia);

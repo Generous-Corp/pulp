@@ -79,18 +79,18 @@ inline void draw_acoustic_field(canvas::Canvas& c, float x, float y, float w, fl
 
     if (mode == 2) {
         // FIELD — continuous illuminated density fog (no streaks, no cores).
-        const int n = 160 + d * 7;
+        const int n = 220 + d * 9;
         for (int k = 0; k < n; ++k) {
             float sx = field_hash(k * 3 + 1) * 2.3f - 1.15f;
             float sy = field_hash(k * 7 + 2) * 2.1f - 1.05f;
-            for (int s = 0; s < 14; ++s) {
+            for (int s = 0; s < 16; ++s) {
                 float vx, vy; field_flow_at(sx, sy, t_seconds, vx, vy);
                 sx += vx * slen; sy += vy * slen;
             }
-            const float gain = bright * (0.6f + 0.6f * field_hash(k * 23 + 8));
-            const float rad = 24.0f + 26.0f * field_hash(k * 5 + 3);
+            const float gain = bright * (0.7f + 0.6f * field_hash(k * 23 + 8));
+            const float rad = 26.0f + 30.0f * field_hash(k * 5 + 3);
             detail::field_glow(c, cx + sx * fx, cy + sy * fy, rad,
-                               FieldRGB{222, 230, 240}, static_cast<int>(9.0f * gain));
+                               FieldRGB{224, 231, 240}, static_cast<int>(26.0f * gain));
         }
         c.set_blend_mode(canvas::Canvas::BlendMode::normal);
         return;
