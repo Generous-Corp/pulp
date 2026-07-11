@@ -62,12 +62,7 @@ case "$OS" in
     Darwin)
         case "$ARCH" in
             arm64|aarch64) PLATFORM="darwin-arm64" ;;
-            x86_64)
-                echo "Warning: Intel Mac (x86_64) is not officially supported."
-                echo "Pre-built binaries are for Apple Silicon (ARM64) only."
-                echo "You can build from source instead: git clone && ./setup.sh"
-                PLATFORM="darwin-arm64"  # try ARM64 via Rosetta
-                ;;
+            x86_64)        PLATFORM="darwin-x64" ;;
             *)             echo "Error: unsupported architecture: $ARCH"; exit 1 ;;
         esac
         ;;
@@ -84,6 +79,14 @@ case "$OS" in
         exit 1
         ;;
 esac
+
+# Testability / debugging hook: print the resolved platform and exit
+# without touching the network. Exercised by
+# test/test_install_platform_detect.sh with a mocked `uname`.
+if [ "${PULP_PRINT_PLATFORM:-0}" = "1" ]; then
+    echo "$PLATFORM"
+    exit 0
+fi
 
 echo "Installing Pulp CLI for $PLATFORM..."
 
@@ -111,7 +114,23 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 echo "Downloading $DOWNLOAD_URL..."
-curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/pulp.tar.gz"
+if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/pulp.tar.gz"; then
+    echo ""
+    echo "Error: could not download pulp-$PLATFORM for this version."
+    case "$PLATFORM" in
+        darwin-x64)
+            echo "The Intel (x86_64) macOS build is an advisory release artifact"
+            echo "and may be absent from this particular release. Try the latest"
+            echo "release (omit --version), or build from source:"
+            ;;
+        *)
+            echo "Pre-built binaries may not be available for this version."
+            echo "To build from source instead:"
+            ;;
+    esac
+    echo "  git clone https://github.com/$REPO.git && cd pulp && ./setup.sh"
+    exit 1
+fi
 
 # ── Install ──────────────────────────────────────────────────────────────────
 
