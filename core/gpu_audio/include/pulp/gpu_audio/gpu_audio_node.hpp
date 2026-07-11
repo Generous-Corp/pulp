@@ -10,9 +10,31 @@ namespace pulp::gpu_audio {
 /// What the transport does for a block when the GPU result is not ready in
 /// time (the worker fell behind, the device was lost, or the node is priming).
 enum class MissPolicy {
-    Silence,        ///< Output silence for the missed block (+ telemetry).
-    PassthroughDry, ///< Output the dry input for the missed block.
-    CpuFallback,    ///< Run the node's CPU fallback for the missed block.
+    /// Output silence for the missed block (+ telemetry). The safe default: a
+    /// dropout is obvious, bounded, and does not corrupt the timeline.
+    Silence,
+
+    /// Output the dry input for the missed block.
+    ///
+    /// **Timing-discontinuous — do not use in new nodes.** The transport's
+    /// output is delayed by `latency_blocks * block_size`, so at output time `t`
+    /// the correct sample is the wet result for `t - latency`. This policy
+    /// substitutes the dry sample for `t` instead, which jumps the stream
+    /// FORWARD by the whole latency for one block and then jumps back. That is
+    /// audible as a glitch and, worse, it is a timeline break rather than an
+    /// honest dropout.
+    ///
+    /// A correct dry substitute would be the dry input *delayed by the same
+    /// latency*. Nothing here holds that history, so there is no correct dry
+    /// substitute to give. Prefer `Silence`, or `CpuFallback` with a
+    /// continuously-primed, latency-aligned fallback (see `prime_fallback`).
+    PassthroughDry,
+
+    /// Run the node's CPU fallback for the missed block. Requires
+    /// `supports_cpu_fallback` AND a fallback that is kept continuously fed and
+    /// latency-aligned via `prime_fallback()` — otherwise the substitute is a
+    /// stale block with a torn history.
+    CpuFallback,
 };
 
 /// Declared, fixed scheduling properties of a GPU audio node. Set at prepare()
@@ -27,8 +49,14 @@ struct GpuAudioNodeDescriptor {
     /// Fixed latency in host blocks. The transport delays output by this many
     /// blocks so the audio thread never waits on the GPU.
     uint32_t latency_blocks = 1;
-    MissPolicy miss_policy = MissPolicy::PassthroughDry;
-    bool supports_cpu_fallback = true;
+
+    // Both default to FAILING CLOSED. A node that says nothing about its miss
+    // behavior gets a bounded, obvious dropout — not a timeline break, and not a
+    // CPU fallback it never implemented. Passing audio through on a miss has to
+    // be a deliberate, stated choice, because a node author who never thought
+    // about misses is exactly the author who has not made the fallback correct.
+    MissPolicy miss_policy = MissPolicy::Silence;
+    bool supports_cpu_fallback = false;
 };
 
 /// A unit of audio work the transport schedules onto a non-real-time worker.

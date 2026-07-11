@@ -95,8 +95,13 @@ public:
         d.block_size = block_size_;
         d.sample_rate = sample_rate_;
         d.latency_blocks = 1;
-        d.miss_policy = gpu_audio::MissPolicy::PassthroughDry;
-        d.supports_cpu_fallback = true;
+        // Fail closed on a miss. PassthroughDry would substitute the dry sample
+        // for the CURRENT time into a stream that is delayed by latency_blocks,
+        // jumping the timeline forward for one block and back again — a timeline
+        // break, not an honest dropout. This node holds no delayed dry history
+        // to substitute correctly, so a missed block is one silent block.
+        d.miss_policy = gpu_audio::MissPolicy::Silence;
+        d.supports_cpu_fallback = false;
         return d;
     }
 

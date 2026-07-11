@@ -345,3 +345,62 @@ TEST_CASE("GpuAudioTransport silences mismatched / too-small views", "[gpu_audio
     t.process(iv, mov, BS);
     REQUIRE(mono_out.storage[0][0] == 0.0f);
 }
+
+// A node that declares nothing about its miss behavior must not pass audio
+// through on a miss. Passing through is the WORST default here: the transport's
+// output is delayed by latency_blocks, so a dry sample for the CURRENT time jumps
+// the stream forward by the whole latency for one block and back again -- a
+// timeline break rather than an honest dropout. And a node that never thought
+// about misses is exactly the node whose CPU fallback is not correct.
+TEST_CASE("GpuAudioNodeDescriptor defaults fail closed", "[gpu_audio][transport]") {
+    GpuAudioNodeDescriptor d;
+    REQUIRE(d.miss_policy == MissPolicy::Silence);
+    REQUIRE_FALSE(d.supports_cpu_fallback);
+}
+
+TEST_CASE("GpuAudioTransport starves to silence when the node declares no policy",
+          "[gpu_audio][transport]") {
+    constexpr uint32_t CH = 1, BS = 32, L = 2, RING = 8;
+
+    // A node whose descriptor leaves miss_policy and supports_cpu_fallback at
+    // their defaults -- the shape a first-time GPU node author writes.
+    struct DefaultPolicyNode : GpuAudioNode {
+        GpuAudioNodeDescriptor descriptor() const override {
+            GpuAudioNodeDescriptor d;   // defaults, deliberately untouched
+            d.name = "defaults";
+            d.input_channels = CH;
+            d.output_channels = CH;
+            d.block_size = BS;
+            d.sample_rate = 48000;
+            d.latency_blocks = L;
+            return d;
+        }
+        bool prepare() override { return true; }
+        void process_block(const BufferView<const float>&, BufferView<float>& out,
+                           uint32_t n) override {
+            for (uint32_t i = 0; i < n; ++i) out.channel_ptr(0)[i] = 1.0f;
+        }
+    };
+
+    DefaultPolicyNode node;
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+
+    // Never pump the worker, so every read is a miss. The dry input is 0.5 --
+    // any nonzero output here is the dry signal leaking through on a miss.
+    Block in(CH, BS), out(CH, BS);
+    for (int k = 0; k < 4; ++k) {
+        in.fill(0.5f);
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+        for (uint32_t i = 0; i < BS; ++i) {
+            INFO("block " << k << " sample " << i);
+            REQUIRE(out.storage[0][i] == 0.0f);
+        }
+    }
+    // Misses were recorded (the exact count depends on the transport's priming
+    // and resync bookkeeping; what this test pins is that they came out SILENT).
+    REQUIRE(t.stats().miss_blocks >= 1);
+}
