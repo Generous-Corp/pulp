@@ -61,12 +61,19 @@ jobs:
         run: |
           # Inspect the tip commit for Release: skip / Version-Bump: skip
           # / Revert subject.
+          echo "tracker_opt_out=0" >> "$GITHUB_OUTPUT"
           subject=$(git log -1 --format=%s HEAD)
           body=$(git log -1 --format=%B HEAD)
+          trailers=$(printf '%s\n' "$body" | git interpret-trailers --parse)
 
-          if echo "$body" | git interpret-trailers --parse | grep -iq '^release: skip'; then
+          # COMMIT_MESSAGES squash bodies append a separator and GitHub footer
+          # after the source commits. interpret-trailers then sees only the
+          # footer, so also recognize an exact embedded source-trailer line.
+          if printf '%s\n' "$trailers" | grep -iq '^release: skip' || \
+              printf '%s\n' "$body" | grep -iqE '^[[:space:]]*release:[[:space:]]+skip([[:space:]]|$)'; then
               echo "Release: skip trailer present — no tagging."
               echo "skip=1" >> "$GITHUB_OUTPUT"
+              echo "tracker_opt_out=1" >> "$GITHUB_OUTPUT"
               exit 0
           fi
           # Honor `Version-Bump: skip reason="..."` the same way
@@ -100,10 +107,13 @@ jobs:
           # If the two layers disagreed on validity, an author could
           # write `reason=""` that passes here but fails at PR time
           # (or vice-versa) — making the bypass inconsistent.
-          if echo "$body" | git interpret-trailers --parse | \
-              grep -iE '^version-bump:[[:space:]]+skip\b.*reason[[:space:]]*=[[:space:]]*"[^"]+"'; then
+          if printf '%s\n' "$trailers" | \
+              grep -iE '^version-bump:[[:space:]]+skip([[:space:]]|$).*reason[[:space:]]*=[[:space:]]*"[^"]+"' || \
+              printf '%s\n' "$body" | \
+              grep -iE '^[[:space:]]*version-bump:[[:space:]]+skip([[:space:]]|$).*reason[[:space:]]*=[[:space:]]*"[^"]+"'; then
               echo "Version-Bump: skip trailer present — no tagging."
               echo "skip=1" >> "$GITHUB_OUTPUT"
+              echo "tracker_opt_out=1" >> "$GITHUB_OUTPUT"
               exit 0
           fi
           if [[ "$subject" =~ ^[Rr]evert ]]; then
@@ -111,10 +121,21 @@ jobs:
               echo "skip=1" >> "$GITHUB_OUTPUT"
               exit 0
           fi
-          if echo "$body" | git interpret-trailers --parse | grep -iq '^revert-of:'; then
-              echo "Revert-Of trailer — no tagging."
-              echo "skip=1" >> "$GITHUB_OUTPUT"
-              exit 0
+          revert_of="$(
+              printf '%s\n' "$trailers" \
+                  | grep -i '^revert-of:' \
+                  | cut -d: -f2- \
+                  | head -1 || true
+          )"
+          if [ -n "$revert_of" ]; then
+              revert_sha="$(printf '%s' "$revert_of" | grep -oE '[0-9a-fA-F]{7,64}' | head -1 || true)"
+              if [ -n "$revert_sha" ] && \
+                  git rev-parse --verify --quiet --end-of-options "${revert_sha}^{commit}" >/dev/null; then
+                  echo "Resolved Revert-Of trailer — no tagging."
+                  echo "skip=1" >> "$GITHUB_OUTPUT"
+                  exit 0
+              fi
+              echo "::warning::Unresolved Revert-Of trailer; treating this as an ordinary change."
           fi
           echo "skip=0" >> "$GITHUB_OUTPUT"
 
@@ -251,9 +272,11 @@ jobs:
           bump_has_skip() {
               local sha="$1"
               [ -z "$sha" ] && return 1
-              git log -1 --format=%B "$sha" \
-                  | git interpret-trailers --parse \
-                  | grep -iq '^release: skip'
+              local bump_body bump_trailers
+              bump_body=$(git log -1 --format=%B "$sha")
+              bump_trailers=$(printf '%s\n' "$bump_body" | git interpret-trailers --parse)
+              printf '%s\n' "$bump_trailers" | grep -iq '^release: skip' || \
+                  printf '%s\n' "$bump_body" | grep -iqE '^[[:space:]]*release:[[:space:]]+skip([[:space:]]|$)'
           }
           # Wrap extractors to take (ref, file) for find_bump_commit's API.
           extract_sdk_version_at() {
@@ -291,6 +314,10 @@ jobs:
           echo "plugin_should_tag=$plugin_should_tag" >> "$GITHUB_OUTPUT"
           echo "sdk_after=$sdk_after"                 >> "$GITHUB_OUTPUT"
           echo "plugin_after=$plugin_after"           >> "$GITHUB_OUTPUT"
+          sdk_skip_bump=""; [ "$sdk_skip" = 1 ] && sdk_skip_bump="$sdk_bump"
+          plugin_skip_bump=""; [ "$plugin_skip" = 1 ] && plugin_skip_bump="$plugin_bump"
+          echo "sdk_skip_bump=$sdk_skip_bump"       >> "$GITHUB_OUTPUT"
+          echo "plugin_skip_bump=$plugin_skip_bump" >> "$GITHUB_OUTPUT"
 
           echo "sdk decision:    $sdk_decision"
           echo "plugin decision: $plugin_decision"
@@ -567,53 +594,100 @@ jobs:
       #      detected. Visible to anyone reviewing the run.
       #   2. Open a tracking issue (`release-stuck` label, edit-in-place
       #      semantics matching the watchdog pattern in
-      #      auto-release-watchdog.yml). Closed automatically by a
-      #      future fix-up PR's auto-release run.
+      #      auto-release-watchdog.yml). SHA-keyed trackers need the affected
+      #      surface's release verified before they are closed.
       #
-      # Skipped on `Release: skip` trailer / revert merges (the
-      # earlier guard step set `skip=1`). That keeps explicit opt-outs
-      # silent.
+      # Explicit `Release: skip` / top-level `Version-Bump: skip` opt-outs stay
+      # silent. Revert-shaped pushes still reach this step so the shared range
+      # classifier can distinguish cancellation from a release-restoring
+      # re-revert.
       - name: Stranded fix/feat detector
-        if: steps.guard.outputs.skip == '0' && steps.versions.outputs.sdk_should_tag == '0' && steps.versions.outputs.plugin_should_tag == '0'
+        if: >-
+          steps.guard.outputs.tracker_opt_out == '0' &&
+          (steps.guard.outputs.skip == '1' ||
+           steps.versions.outputs.sdk_should_tag == '0' ||
+           steps.versions.outputs.plugin_should_tag == '0')
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          FIRST_PUSH_SHA: ${{ github.event.commits[0].id }}
+          SDK_SHOULD_TAG: ${{ steps.versions.outputs.sdk_should_tag || '0' }}
+          PLUGIN_SHOULD_TAG: ${{ steps.versions.outputs.plugin_should_tag || '0' }}
+          SDK_SKIP_BUMP: ${{ steps.versions.outputs.sdk_skip_bump }}
+          PLUGIN_SKIP_BUMP: ${{ steps.versions.outputs.plugin_skip_bump }}
         run: |
           set -euo pipefail
 
-          # Inspect the merge commit's subject. We use the squash-commit
-          # subject (set by `gh pr merge --squash`) which carries the PR
-          # title verbatim. Conventional Commits prefix detection mirrors
-          # version_bump_check.py exactly so the two layers can never
-          # disagree on what counts as user-facing.
+          # Classify the whole pushed range. This covers merge commits with a
+          # plain tip, multi-commit rebases whose final subject is non-fix, and
+          # re-reverts that restore a release signal from older history.
           subject=$(git log -1 --format=%s "$HEAD_SHA")
           echo "Tip subject: ${subject}"
-
-          # Bail early for non-fix/feat — the no-tag outcome is correct
-          # for those. Classification shells out to
-          # `version_bump_check.py classify-subject` so the regex has a
-          # single source of truth instead of an inline copy that can
-          # silently drift.
-          if ! python3 tools/scripts/version_bump_check.py classify-subject "$subject"; then
-              echo "Tip is not a fix:/feat: — no-tag outcome is expected. Done."
-              exit 0
+          range_base="$BEFORE_SHA"
+          if [ -n "$range_base" ] && \
+              [ "$range_base" != "0000000000000000000000000000000000000000" ] && \
+              ! git cat-file -e "${range_base}^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$range_base" >/dev/null 2>&1 || true
           fi
-
-          # Try to find the PR number — `gh api` resolves merge commit
-          # → PR via the events API. Best-effort: if it fails, we
-          # still emit the warning annotation, just without the link.
+          if [ -z "$range_base" ] || \
+              [ "$range_base" = "0000000000000000000000000000000000000000" ] || \
+              ! git cat-file -e "${range_base}^{commit}" 2>/dev/null; then
+              if [ -n "$FIRST_PUSH_SHA" ] && \
+                  git cat-file -e "${FIRST_PUSH_SHA}^{commit}" 2>/dev/null; then
+                  range_base="${FIRST_PUSH_SHA}^"
+              else
+                  range_base="${HEAD_SHA}^"
+              fi
+          fi
+          # Recover the original PR commits for an ordinary one-squash push.
+          # Embedded COMMIT_MESSAGES subjects all share the landed squash SHA,
+          # whose aggregate file list cannot attribute a signal to one surface.
           pr_number=""
+          source_base="-"
+          source_head="-"
           if pr_json=$(gh api "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" 2>/dev/null); then
               pr_number=$(echo "$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['number'] if d else '')" 2>/dev/null || true)
           fi
+          push_count=$(git rev-list --count "${range_base}..${HEAD_SHA}")
+          if [ "$push_count" = "1" ] && [ -n "$pr_number" ]; then
+              source_ref="refs/remotes/origin/release-source-${pr_number}"
+              if git fetch --no-tags origin \
+                  "refs/pull/${pr_number}/head:${source_ref}" >/dev/null 2>&1; then
+                  source_head="$source_ref"
+                  source_base=$(git merge-base "$range_base" "$source_head" || true)
+                  [ -n "$source_base" ] || source_base="-"
+              fi
+          fi
+          sdk_covered="$SDK_SHOULD_TAG"
+          plugin_covered="$PLUGIN_SHOULD_TAG"
+          if ! release_json=$(
+              python3 tools/scripts/version_bump_check.py \
+                  classify-unreleased-range \
+                  "$range_base" "$HEAD_SHA" \
+                  "$sdk_covered" "$plugin_covered" \
+                  tools/scripts/versioning.json \
+                  "${SDK_SKIP_BUMP:--}" "${PLUGIN_SKIP_BUMP:--}" \
+                  "$source_base" "$source_head"
+          ); then
+              echo "Push range has no live fix:/feat: signal on an untagged surface — outcome is expected. Done."
+              exit 0
+          fi
+          release_signal=$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["subject"])')
+          uncovered_surfaces=$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["surfaces"]))')
+          uncovered_levels=$(printf '%s' "$release_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(",".join("{}={}".format(s,d["levels"][s]) for s in d["surfaces"]))')
+          echo "Live release signal: ${release_signal}"
+          echo "Uncovered surfaces: ${uncovered_surfaces}"
+          echo "Recovery levels: ${uncovered_levels}"
 
           pr_ref="${pr_number:+#${pr_number} }"
           subject_safe="${subject//\"/\\\"}"
+          signal_safe="${release_signal//\"/\\\"}"
 
           # Warning annotation — surfaces in the run UI and any
           # downstream watchdog that scans warnings.
-          echo "::warning::PR ${pr_ref}appears user-facing (subject: ${subject_safe}) but no version bump landed; consumers are stuck. See issue #1009."
+          echo "::warning::PR ${pr_ref}appears user-facing (signal: ${signal_safe}; tip: ${subject_safe}) but no version bump landed; consumers are stuck. See issue #1009."
 
           # Tracking issue with edit-in-place semantics. One issue per
           # tip SHA so multiple stranded merges generate distinct
@@ -649,18 +723,29 @@ jobs:
               echo "this change until a follow-up bump PR lands."
               echo
               echo "**Tip commit:** \`${HEAD_SHA}\`"
+              echo "**Analyzed range:** \`${range_base}..${HEAD_SHA}\`"
               if [ -n "$pr_number" ]; then
                   echo "**PR:** #${pr_number}"
               fi
               echo "**Subject:** \`${subject_safe}\`"
+              echo "**Live release signal:** \`${signal_safe}\`"
+              echo "**Uncovered surfaces:** \`${uncovered_surfaces}\`"
+              echo "**Recovery levels:** \`${uncovered_levels}\`"
               echo
               echo "**Resolution:**"
               echo
               echo "1. Open a chore PR that bumps the affected surface(s):"
               echo "   \`\`\`bash"
-              echo "   git checkout -b chore/bump-after-${HEAD_SHA:0:8}"
-              echo "   python3 tools/scripts/version_bump_check.py --mode=apply"
-              echo "   git commit -am 'chore: bump versions (catch-up after ${HEAD_SHA:0:8})'"
+              echo "   git fetch origin main"
+              echo "   git checkout -b chore/bump-after-${HEAD_SHA:0:8} origin/main"
+              echo '   python3 tools/scripts/version_bump_check.py --mode=apply \'
+              printf '       --base %s --head %s \\\n' "$range_base" "$HEAD_SHA"
+              echo '       --apply-version-base HEAD \'
+              echo '       --recover-stranded-release \'
+              printf '       --recover-surfaces %s \\\n' "$uncovered_surfaces"
+              printf '       --recover-levels %s \\\n' "$uncovered_levels"
+              echo '       --require-bump-for-fix-feat --pr-title ""'
+              echo "   git commit -m 'chore: bump versions (catch-up after ${HEAD_SHA:0:8})'"
               echo "   shipyard pr"
               echo "   \`\`\`"
               echo "2. After the catch-up PR merges, \`auto-release.yml\` will"
@@ -671,9 +756,16 @@ jobs:
               echo "\`.github/workflows/version-skill-check.yml\` (the"
               echo "\`--require-bump-for-fix-feat\` flag on"
               echo "\`tools/scripts/version_bump_check.py\`). If this tracker"
-              echo "fires, branch protection on \`main\` is the recommended"
-              echo "follow-up — see \`docs/guides/release-watchdog.md\`."
+              echo "fires despite that check being required, compare the PR title"
+              echo "with the commit subject GitHub actually landed — see"
+              echo "\`docs/guides/release-watchdog.md\`."
           } > body.md
+
+          gh api -X POST "/repos/${GITHUB_REPOSITORY}/labels" \
+              -f name="release-stuck" \
+              -f color="b60205" \
+              -f description="A user-facing change is waiting for a versioned release" \
+              >/dev/null 2>&1 || true
 
           gh issue create \
               --repo "$GITHUB_REPOSITORY" \

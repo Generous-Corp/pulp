@@ -4,6 +4,7 @@
 #include "clap_remote_controls.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
@@ -291,18 +292,17 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // docs/guides/dsp-threading.md "Numeric mode".
     pulp::signal::ScopedFlushDenormals flush_denormals;
 
-    // Max-frames contract guard (defensive; well-behaved hosts never exceed the
+    // Max-block contract guard (defensive; well-behaved hosts never exceed the
     // advertised max). The Processor and all its scratch buffers were sized in
     // clap_activate() to self->max_buffer_size. A render larger than that would
-    // overrun them and corrupt DSP state. CLAP has no clean per-block reject, so
-    // clamp the processed region to the prepared max and zero the un-processable
-    // tail [max, original) on every main output channel below so it reads back
-    // as clean silence rather than garbage.
+    // overrun them and corrupt DSP state. Per the shared max-block contract
+    // (max_block_contract.hpp) — matching VST3/AU-v3/AAX — clamp the processed
+    // region to the prepared max and zero the un-processable tail
+    // [max, original) on every main output channel below so it reads back as
+    // clean silence rather than garbage.
     const auto original_num_samples = num_samples;
-    if (self->max_buffer_size > 0 &&
-        num_samples > static_cast<uint32_t>(self->max_buffer_size)) {
-        num_samples = static_cast<uint32_t>(self->max_buffer_size);
-    }
+    num_samples = static_cast<uint32_t>(clamp_block_to_prepared_max(
+        static_cast<int>(num_samples), self->max_buffer_size));
 
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();

@@ -109,19 +109,29 @@ There is deliberately no bypass in CI other than the commit trailers. The audit 
 
 On `pull_request` events, the workflow additionally runs
 `version_bump_check.py --require-bump-for-fix-feat`. This asserts that
-PRs whose title carries the Conventional Commits `fix:` or `feat:`
-prefix include either:
+PRs whose title or any live commit-derived signal carries the Conventional
+Commits `fix:` or `feat:` prefix include either (explicit reverts cancel their
+target signals, while reverting a revert restores them):
 
 - a commit with subject `chore: bump versions` in the diff range
   (the canonical subject `pulp pr` writes when the bump was applied), OR
 - a top-level `Version-Bump: skip reason="..."` trailer (with non-empty
   reason) on any commit in the range.
 
-Otherwise the check hard-fails with a message that suggests both fix
-paths. The motivating incident (PR #1008, 2026-04-30) merged a
-user-facing fix without a bump; the existing per-surface verdict
-heuristic classified the diff as patch-suggested (advisory), so nothing
-blocked the merge and `auto-release.yml` had nothing to tag.
+Otherwise the check hard-fails with a message that suggests both fix paths.
+Commit subjects are part of the signal because GitHub's
+`COMMIT_OR_PR_TITLE` squash policy uses the sole commit subject for a one-commit
+PR and the editable PR title for a multi-commit PR. The
+motivating incident (PR #1008, 2026-04-30) merged a user-facing fix without a
+bump; the existing per-surface verdict heuristic classified the diff as
+patch-suggested (advisory), so nothing blocked the merge and
+`auto-release.yml` had nothing to tag.
+
+For PRs targeting `main`, the required check's run summary also reports the SDK
+and plugin tags expected after merge. The prediction uses the PR tree, actual PR
+commit count and PR title for squash guard semantics, currently fetched tags,
+and sticky `Release: skip` state. It is advisory evidence for the PR queue; the
+actual signed tags are still created post-merge by `auto-release.yml`.
 
 For full design + recommended branch protection see
 [docs/guides/release-watchdog.md](release-watchdog.md#fixfeat-needs-bump-pr-time-prevention-issue-1009).

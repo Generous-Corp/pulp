@@ -18,13 +18,13 @@ env:
   BUILD_TYPE: Release
 
 jobs:
-  # Resolve the macOS runner. When PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON
-  # is set (the same repo variable build.yml uses for PR macOS routing
-  # post-2026-05-18 cutover), route the release build through Namespace
-  # cloud runners instead of the GitHub-hosted pool. Falls back to macos-15
-  # when unset: the release build needs a modern Xcode 16.x Apple clang for
-  # C++20 parity with the PR lane, and release-cli.yml + the Build/Test gate
-  # already use macOS 15.
+  # Resolve the macOS runner using the same release-specific priority as
+  # release-cli.yml where signing is safe: dedicated isolated release override,
+  # optional Namespace, then GitHub-hosted macos-15. The shared local PR pool is
+  # deliberately excluded because this job imports a Developer ID private key.
+  # Keeping the two tag-triggered legs on release-specific capacity
+  # prevents a release whose CLI assets finish while signing waits indefinitely
+  # in a saturated hosted queue.
   # Background: 2026-05-18 SDK starvation — GitHub-hosted macos-14 queue
   # backed up for hours and blocked v0.111..v0.134 from publishing
   # (compound with the supersede bug fixed in pulp #2238 and the Skia
@@ -36,9 +36,13 @@ jobs:
     steps:
       - id: resolve
         env:
+          RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
         run: |
-          if [ -n "${NAMESPACE_JSON:-}" ]; then
+          if [ -n "${RELEASE_JSON:-}" ]; then
+            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS sign-and-release via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
+          elif [ -n "${NAMESPACE_JSON:-}" ]; then
             echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
             echo "Routing macOS sign-and-release through Namespace: ${NAMESPACE_JSON}"
           else
@@ -173,13 +177,22 @@ jobs:
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          rm certificate.p12
+          keychain="$RUNNER_TEMP/pulp-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.keychain-db"
+          certificate="$RUNNER_TEMP/pulp-signing-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.p12"
+          previous_default=$(
+            security default-keychain -d user \
+              | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+                    -e 's/^"//' -e 's/"$//'
+          )
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "PREVIOUS_DEFAULT_KEYCHAIN=$previous_default" >> "$GITHUB_ENV"
+          trap 'rm -f "$certificate"' EXIT
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security default-keychain -d user -s "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
 
       - name: Sign plugins
         if: env.SIGNING_IDENTITY != ''
@@ -304,3 +317,11 @@ jobs:
           done
           echo "::error::release $TAG never appeared; release-cli.yml may have failed"
           exit 1
+
+      - name: Clean up signing keychain
+        if: always() && env.SIGNING_KEYCHAIN != ''
+        run: |
+          if [ -n "${PREVIOUS_DEFAULT_KEYCHAIN:-}" ]; then
+            security default-keychain -d user -s "$PREVIOUS_DEFAULT_KEYCHAIN" || true
+          fi
+          security delete-keychain "$SIGNING_KEYCHAIN" || true
