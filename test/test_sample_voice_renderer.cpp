@@ -6,8 +6,15 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <limits>
 #include <span>
+#include <vector>
+
+#include <pulp/signal/interpolator.hpp>
 
 using Catch::Matchers::WithinAbs;
 using pulp::audio::AhdsrEnvelope;
@@ -840,4 +847,248 @@ TEST_CASE("SampleVoiceRenderer explicit loop region hot path does not allocate",
     }
 
     REQUIRE(state.active);
+}
+
+// ---------------------------------------------------------------------------
+// Microbenchmark + null test for the block-kernel restructure (PF-1).
+//
+// Baseline: a faithful copy of the PRE-refactor inner loop — a sample-at-a-time
+// out-of-line read (marked noinline, switch-on-interpolation per sample, per-tap
+// clamp/wrap) exactly as the renderer's fast path used to call. New path:
+// SampleVoiceRenderer::render, whose read is the inlined, mode-specialized block
+// kernel with an interior fast path. The reference reproduces the identical
+// float math, so the two outputs must be BIT-IDENTICAL (the null test); the
+// timing ratio then isolates the block-kernel speedup. Hidden ([.]) so it never
+// runs in the normal suite — invoke with the [benchmark] tag.
+namespace {
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PULP_BENCH_NOINLINE __attribute__((noinline))
+#else
+#define PULP_BENCH_NOINLINE
+#endif
+
+std::uint64_t bench_wrap_index(const LoopRegion& region, long long frame) noexcept {
+    const auto length = static_cast<long long>(region.end_frame - region.start_frame);
+    if (length <= 0) return region.start_frame;
+    auto relative = frame - static_cast<long long>(region.start_frame);
+    relative %= length;
+    if (relative < 0) relative += length;
+    return region.start_frame + static_cast<std::uint64_t>(relative);
+}
+
+float bench_sample_at(const float* source, std::uint64_t source_frames,
+                      const LoopRegion& region, long long frame) noexcept {
+    if (source == nullptr || source_frames == 0) return 0.0f;
+    std::uint64_t index = 0;
+    if (region.playback_mode == LoopPlaybackMode::OneShot) {
+        const auto source_last = static_cast<long long>(source_frames - 1);
+        const auto lo = static_cast<long long>(region.start_frame);
+        const auto hi = std::min(static_cast<long long>(region.end_frame - 1), source_last);
+        index = static_cast<std::uint64_t>(std::clamp(frame, lo, hi));
+    } else {
+        index = bench_wrap_index(region, frame);
+    }
+    return index < source_frames ? source[index] : 0.0f;
+}
+
+// Out-of-line per-sample read: the pre-refactor structure.
+PULP_BENCH_NOINLINE float bench_read_scalar(const float* source,
+                                            std::uint64_t source_frames,
+                                            const LoopRegion& region,
+                                            double position) noexcept {
+    if (source == nullptr) return 0.0f;
+    if (region.playback_mode == LoopPlaybackMode::OneShot &&
+        (position < static_cast<double>(region.start_frame) ||
+         position >= static_cast<double>(region.end_frame))) {
+        return 0.0f;
+    }
+    const auto normalized = LoopReader::normalize_position(region, position);
+    const auto base = static_cast<long long>(std::floor(normalized));
+    const auto frac = static_cast<float>(normalized - static_cast<double>(base));
+    switch (region.interpolation) {
+        case LoopInterpolationMode::None:
+            return bench_sample_at(source, source_frames, region, base);
+        case LoopInterpolationMode::Linear: {
+            const auto y0 = bench_sample_at(source, source_frames, region, base);
+            const auto y1 = bench_sample_at(source, source_frames, region, base + 1);
+            return pulp::signal::Interpolator::linear(frac, y0, y1);
+        }
+        case LoopInterpolationMode::Cubic: {
+            const auto ym1 = bench_sample_at(source, source_frames, region, base - 1);
+            const auto y0 = bench_sample_at(source, source_frames, region, base);
+            const auto y1 = bench_sample_at(source, source_frames, region, base + 1);
+            const auto y2 = bench_sample_at(source, source_frames, region, base + 2);
+            return pulp::signal::Interpolator::hermite(frac, ym1, y0, y1, y2);
+        }
+    }
+    return 0.0f;
+}
+
+// Reference renderer mirroring the pre-refactor fast path (no envelope/fade).
+void bench_reference_render(SampleVoiceRenderState& state,
+                            BufferView<float> destination,
+                            std::uint64_t frames,
+                            std::span<const float*> channel_scratch) noexcept {
+    const auto source_channels =
+        static_cast<std::size_t>(state.sample.view.num_channels);
+    const auto source_frames = state.sample.view.num_frames;
+    const auto& region = state.playback_region;
+    const double source_sr = region.source_sample_rate;
+    const double rate_ratio = source_sr / state.host_sample_rate;
+    double step = state.playback_rate * rate_ratio;
+    if (region.playback_mode == LoopPlaybackMode::Reverse) step = -step;
+
+    for (std::size_t ch = 0; ch < destination.num_channels(); ++ch) {
+        const std::size_t src_ch = ch < source_channels ? ch
+                                   : (source_channels == 1 ? 0 : source_channels);
+        if (src_ch >= source_channels) continue;
+        const float* source = channel_scratch[src_ch];
+        float* out = destination.channel_ptr(ch);
+        double position = state.position_frames;
+        for (std::uint64_t f = 0; f < frames; ++f) {
+            out[f] += bench_read_scalar(source, source_frames, region, position) *
+                      state.gain;
+            position += step;
+            if (region.playback_mode != LoopPlaybackMode::OneShot) {
+                position = LoopReader::normalize_position(region, position);
+            }
+        }
+    }
+    // Advance play head like the real renderer.
+    for (std::uint64_t f = 0; f < frames; ++f) {
+        state.position_frames += step;
+        if (region.playback_mode != LoopPlaybackMode::OneShot) {
+            state.position_frames =
+                LoopReader::normalize_position(region, state.position_frames);
+        }
+    }
+}
+
+template <typename Fn>
+double bench_median_us(Fn&& fn, int iters) {
+    std::vector<double> ts;
+    ts.reserve(static_cast<std::size_t>(iters));
+    for (int i = 0; i < 3; ++i) fn();  // warmup
+    for (int i = 0; i < iters; ++i) {
+        const auto t0 = std::chrono::steady_clock::now();
+        fn();
+        const auto t1 = std::chrono::steady_clock::now();
+        ts.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+    }
+    std::sort(ts.begin(), ts.end());
+    return ts[ts.size() / 2];
+}
+
+}  // namespace
+
+TEST_CASE("SampleVoiceRenderer block kernel matches the scalar path and is faster",
+          "[audio][sampler][voice-render][benchmark][.]") {
+    // Stereo cubic looping sustain — the dominant sampler regime PF-1 targets.
+    constexpr std::size_t kFrames = 512;
+    constexpr std::size_t kVoices = 32;
+    constexpr std::size_t kSourceFrames = 4096;
+
+    std::vector<float> interleaved(kSourceFrames * 2);
+    for (std::size_t i = 0; i < kSourceFrames; ++i) {
+        interleaved[2 * i] = std::sin(0.013f * static_cast<float>(i));
+        interleaved[2 * i + 1] = std::sin(0.017f * static_cast<float>(i) + 0.5f);
+    }
+    PublishedSampleStore store;
+    prepare_stereo_store(store, interleaved);
+    auto sample = resolve_sample(store);
+
+    // Resolve the borrowed source channel pointers once; both paths read them.
+    std::array<const float*, 2> scratch{};
+    REQUIRE(SamplePool::populate_channel_ptrs(sample, scratch.data(), scratch.size()));
+
+    auto make_state = [&](const LoopRegion& region, double phase) {
+        SampleVoiceRenderState s{};
+        s.active = true;
+        s.sample = sample;
+        s.position_frames = phase;
+        s.host_sample_rate = 48000.0;
+        s.playback_rate = 1.0009;  // fractional step -> exercises interpolation
+        s.gain = 0.5f;
+        s.use_playback_region = true;
+        s.playback_region = region;
+        return s;
+    };
+
+    Buffer<float> out_new(2, kFrames);
+    Buffer<float> out_ref(2, kFrames);
+    Buffer<float> acc(2, kFrames);
+
+    struct Scenario {
+        const char* name;
+        LoopPlaybackMode mode;
+        LoopInterpolationMode interp;
+    };
+    const Scenario scenarios[] = {
+        {"OneShot None  ", LoopPlaybackMode::OneShot, LoopInterpolationMode::None},
+        {"OneShot Linear", LoopPlaybackMode::OneShot, LoopInterpolationMode::Linear},
+        {"OneShot Cubic ", LoopPlaybackMode::OneShot, LoopInterpolationMode::Cubic},
+        {"Forward Linear", LoopPlaybackMode::Forward, LoopInterpolationMode::Linear},
+        {"Forward Cubic ", LoopPlaybackMode::Forward, LoopInterpolationMode::Cubic},
+    };
+
+    std::printf("\n[voice-render bench] %zu voices x %zu frames, stereo, "
+                "scalar-per-sample vs inlined block kernel\n", kVoices, kFrames);
+
+    for (const auto& sc : scenarios) {
+        // OneShot must not run off the end of the source within the block, so a
+        // OneShot voice's start phase is bounded well inside the region.
+        const LoopRegion region = playback_region(0, kSourceFrames, sc.mode, sc.interp);
+        auto phase_of = [&](std::size_t v) {
+            return sc.mode == LoopPlaybackMode::OneShot
+                       ? static_cast<double>(v) * 3.0        // stays in-bounds
+                       : static_cast<double>(v) * 37.25;
+        };
+
+        // Null test: bit-identical output for every voice phase.
+        std::size_t mismatches = 0;
+        for (std::size_t v = 0; v < kVoices; ++v) {
+            auto s_new = make_state(region, phase_of(v));
+            auto s_ref = make_state(region, phase_of(v));
+            out_new.view().clear();
+            out_ref.view().clear();
+            SampleVoiceRenderer::render(s_new, out_new.view(), kFrames, scratch,
+                                        SampleVoiceRenderOptions{.accumulate = true});
+            bench_reference_render(s_ref, out_ref.view(), kFrames, scratch);
+            for (std::size_t ch = 0; ch < 2; ++ch)
+                for (std::size_t f = 0; f < kFrames; ++f)
+                    if (out_new.channel(ch)[f] != out_ref.channel(ch)[f]) ++mismatches;
+        }
+        REQUIRE(mismatches == 0);  // block kernel is bit-exact vs the scalar path
+
+        std::vector<SampleVoiceRenderState> sn(kVoices), sr(kVoices);
+        for (std::size_t v = 0; v < kVoices; ++v) {
+            sn[v] = make_state(region, phase_of(v));
+            sr[v] = make_state(region, phase_of(v));
+        }
+
+        const double us_new = bench_median_us([&] {
+            acc.view().clear();
+            for (std::size_t v = 0; v < kVoices; ++v) {
+                sn[v].position_frames = phase_of(v);
+                sn[v].active = true;
+                SampleVoiceRenderer::render(sn[v], acc.view(), kFrames, scratch,
+                                            SampleVoiceRenderOptions{.accumulate = true});
+            }
+        }, 200);
+
+        const double us_ref = bench_median_us([&] {
+            acc.view().clear();
+            for (std::size_t v = 0; v < kVoices; ++v) {
+                sr[v].position_frames = phase_of(v);
+                bench_reference_render(sr[v], acc.view(), kFrames, scratch);
+            }
+        }, 200);
+
+        std::printf("  %s : scalar %7.2f us  kernel %7.2f us  speedup %.2fx\n",
+                    sc.name, us_ref, us_new, us_ref / us_new);
+        REQUIRE(us_new > 0.0);
+        REQUIRE(us_ref > 0.0);
+    }
+    std::printf("\n");
 }
