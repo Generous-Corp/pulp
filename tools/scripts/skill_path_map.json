@@ -315,6 +315,15 @@
         "core/view/include/pulp/view/screenshot.hpp"
       ]
     },
+    "screenshot-sync": {
+      "paths": [
+        ".agents/skills/screenshot-sync/**",
+        "tools/scripts/screenshot_sync_check.py",
+        "tools/scripts/test_screenshot_sync_check.py",
+        "examples/web-demos/wclap-build/cloudflare/assemble-gallery.mjs",
+        "examples/web-demos/wclap-build/cloudflare/gen-og-images.mjs"
+      ]
+    },
     "skia-gpu-build": {
       "paths": [
         "tools/cmake/FindSkia.cmake",

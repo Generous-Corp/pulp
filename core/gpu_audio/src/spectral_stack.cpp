@@ -91,7 +91,16 @@ bool CpuSpectralStack::render(float* frame_out, const float* weights, float smea
     const float adv = static_cast<float>(kTwoPi) * hop_ratio_;
     const uint32_t half = n_ / 2u;
     for (uint32_t L = 0; L < layers_.size(); ++L) {
-        if (weights_[L] == 0.0f) continue;
+        // Advance every ACTIVE layer, not just the audible ones: a layer parked
+        // at weight 0 (muted, e.g. mid-morph) must keep its phase running so it
+        // re-enters phase-coherent when its weight comes back up — otherwise the
+        // frozen phase makes it re-enter 2*pi*k*hop_ratio*N behind and clicks on
+        // un-mute. Gating on the WEIGHT here (the SF-4 regression) diverged from
+        // the GPU advance shader, which advances all layers unconditionally (it
+        // has no weight binding); gating on `active` restores both the retired
+        // GpuHyperFreeze behavior and CPU/GPU parity. Synthesis is still gated by
+        // weight below, so a muted layer costs only the phase step, not an FFT.
+        if (!layers_[L].active) continue;
         auto& ph = layers_[L].phase;
         for (uint32_t k = 0; k < n_; ++k) {
             float p = ph[k] + adv * static_cast<float>(k);

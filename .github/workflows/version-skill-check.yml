@@ -11,6 +11,10 @@ name: Versioning & Skill-Sync
 on:
   pull_request:
     branches: [main, develop]
+  # Run the required `Enforce version & skill sync` gate on queued merge groups
+  # so a merge queue on `main` can land PRs. On merge_group the diff base
+  # resolves to origin/main (see the "Resolve diff base" step).
+  merge_group:
   workflow_dispatch:
     inputs:
       runner_provider:
@@ -63,6 +67,17 @@ jobs:
           python3 tools/scripts/skill_sync_check.py \
               --base "${{ steps.base.outputs.ref }}" \
               --config tools/scripts/versioning.json \
+              --mode=report
+
+      - name: Screenshot-sync check
+        # Authoritative gate for the screenshot-sync pattern: in a repo carrying
+        # .pulp/screenshots.toml, a UX-path change must ship a refreshed
+        # README / og:image / gallery screenshot (or a Screenshot-Sync: skip
+        # trailer). No-op in pulp core (no manifest); the plugin/demo repos that
+        # install these gates are where it enforces.
+        run: |
+          python3 tools/scripts/screenshot_sync_check.py \
+              --base "${{ steps.base.outputs.ref }}" \
               --mode=report
 
       - name: Docs-sync check (#566 Phase 4 / #567)
@@ -199,6 +214,7 @@ jobs:
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
           python3 tools/scripts/test_compat_aggregate.py
+          python3 tools/scripts/test_screenshot_sync_check.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
           python3 tools/scripts/test_intel_canary_lint.py
           python3 tools/scripts/single_backend_guard.py --selftest
