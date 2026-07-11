@@ -281,6 +281,26 @@ public:
     // composes with HiDPI scale without double-counting it.
     virtual Point window_to_root_point(Point pt) const { return pt; }
 
+    // Report the active design-viewport transform that maps ROOT (design-space)
+    // coordinates to HOST (window-space) coordinates:
+    //   x' = x*sx + tx,  y' = y*sy + ty,  w' = w*sx,  h' = h*sy
+    // Returns true and fills the outputs when a design viewport is active;
+    // returns false (identity — outputs untouched) when no viewport is set.
+    //
+    // This is the FORWARD companion to `window_to_root_point()`'s inverse map.
+    // `NativeViewHost` uses it to place an embedded native child at the same
+    // letterbox-scaled position + size as the surrounding Pulp widgets, so a
+    // tree mixing Pulp widgets and a native child stays pixel-aligned under a
+    // design viewport (paint scales the Pulp side; without this the native
+    // child would be pushed at raw design coords and drift on any off-size DAW
+    // pane). Default: no viewport → false. Only the mac plugin hosts and the
+    // GPU window host (the hosts that actually scale paint) override it.
+    virtual bool design_viewport_transform(float& sx, float& sy,
+                                           float& tx, float& ty) const {
+        (void)sx; (void)sy; (void)tx; (void)ty;
+        return false;
+    }
+
     // ── HiDPI scale (W8 Windows / L9 Linux) ─────────────────────────────
     //
     // The DPI scale that maps host *logical* coordinates to physical pixels:

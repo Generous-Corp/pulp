@@ -207,7 +207,19 @@ def open_update_pr(entry: dict, checkout: Path, new_version: str,
 
 def clone(repo: str, dest: Path) -> tuple[bool, str]:
     if dest.exists():
-        return True, "reused existing checkout"
+        # A pre-existing checkout in --workdir. Verify it is actually THIS repo
+        # and refresh it to the remote tip before we rewrite pins / open a PR from
+        # it — never bump a stale or foreign tree and push it as an SDK update.
+        rc, out = _run(["git", "remote", "get-url", "origin"], cwd=dest)
+        url = out.strip().splitlines()[-1].strip() if rc == 0 and out.strip() else ""
+        slug = repo.split("/", 1)[-1].removesuffix(".git")
+        if rc != 0 or slug not in url:
+            return False, f"existing checkout is not {repo} (origin={url or 'unknown'})"
+        rc, _ = _run(["git", "fetch", "--depth", "1", "origin", "HEAD"], cwd=dest)
+        if rc != 0:
+            return False, "reused checkout: fetch failed (stale; refusing to update it)"
+        _run(["git", "reset", "--hard", "FETCH_HEAD"], cwd=dest)
+        return True, "reused + refreshed existing checkout"
     rc, out = _run(["git", "clone", "--depth", "1",
                     f"git@github.com:{repo}.git", str(dest)])
     return rc == 0, (out.strip().splitlines()[-1] if out.strip() else "clone failed")

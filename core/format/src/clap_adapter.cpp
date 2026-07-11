@@ -6,6 +6,7 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
@@ -1182,7 +1183,13 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         const std::size_t p_end = self->output_param_events.size();
         const std::size_t s_end = shorts.size();
         const std::size_t x_end = sysexes.size();
-        auto sample_at = [](int32_t off) -> int32_t { return off < 0 ? 0 : off; };
+        // Shared cross-format outbound-offset contract: offset N in -> N out;
+        // a negative offset clamps to the block start (see
+        // detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp). Kept as
+        // int32 here so the ascending-offset merge comparisons below stay signed.
+        auto sample_at = [](int32_t off) -> int32_t {
+            return static_cast<int32_t>(detail::clap_output_offset(off));
+        };
         auto param_at = [&](std::size_t i) -> int32_t {
             int32_t off = self->output_param_events.begin()[i].sample_offset;
             if (off < 0) return 0;

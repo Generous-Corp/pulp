@@ -17,8 +17,8 @@ Usage:
     python3 tools/scripts/fetch_skia_for_release.py <matrix-platform>
 
 Where `<matrix-platform>` is one of the release-cli.yml matrix values:
-    darwin-arm64, linux-x64, linux-arm64, windows-x64, windows-arm64,
-    ios-device-arm64, ios-simulator-arm64-x86_64
+    darwin-arm64, darwin-x64, darwin-universal, linux-x64, linux-arm64,
+    windows-x64, windows-arm64, ios-device-arm64, ios-simulator-arm64-x86_64
 
 iOS slices intentionally keep the per-arch subdir under
 `build/ios-gpu/lib/Release/` (device-arm64, simulator-arm64,
@@ -68,7 +68,8 @@ from pathlib import Path
 # Matrix uses `darwin-*` and `windows-*`; manifest uses `mac-*` and `win-*`.
 MATRIX_TO_MANIFEST = {
     "darwin-arm64": "mac-arm64",
-    "darwin-x64": "mac-x64",  # not currently in matrix; documented for parity
+    "darwin-x64": "mac-x86_64",  # Intel-thin mac slice (G3 macOS universal support)
+    "darwin-universal": "mac-universal",  # fat arm64+x86_64 mac slice (G3)
     "linux-x64": "linux-x64",
     "linux-arm64": "linux-arm64",
     "windows-x64": "win-x64",

@@ -213,6 +213,22 @@
         "core/view/js/import-runtime.js"
       ]
     },
+    "installable-tools": {
+      "paths": [
+        "experimental/pulp-rs/src/cmd/tool.rs",
+        "experimental/pulp-rs/src/tool_registry.rs"
+      ]
+    },
+    "intel-canary": {
+      "paths": [
+        "tools/scripts/intel_canary_lint.py",
+        "tools/scripts/test_intel_canary_lint.py",
+        "tools/scripts/intel_canary_allowlist.txt",
+        "docs/guides/intel-support.md",
+        ".github/workflows/intel-portability.yml",
+        ".github/workflows/nightly-intel.yml"
+      ]
+    },
     "jsfx-subset": {
       "paths": [
         "tools/scripts/jsfx_subset.py",
@@ -305,7 +321,9 @@
         "tools/build-skia.sh",
         "tools/build-skia-android.sh",
         "tools/cmake/PulpBundleRelocatable.cmake",
-        "tools/cmake/scripts/check_bundle_relocatable.py"
+        "tools/cmake/PulpWgpuUniversal.cmake",
+        "tools/cmake/scripts/check_bundle_relocatable.py",
+        "tools/scripts/check_bundle_architectures.py"
       ]
     },
     "ship": {
