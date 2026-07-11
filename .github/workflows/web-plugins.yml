@@ -16,6 +16,10 @@ on:
       - "tools/cmake/PulpWclap.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/web-plugins.yml"
+  # Run the required `WAMv2 + WebCLAP (Linux, headless Chrome)` check on queued
+  # merge groups so a merge queue on `main` can land PRs. `merge_group` does not
+  # honour the `paths` filter above, so this fires on every group.
+  merge_group:
   workflow_dispatch:
 
 concurrency:
