@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <random>
 #include <span>
 #include <thread>
 #include <vector>
@@ -457,6 +458,59 @@ TEST_CASE("GpuMultiConvolver matches the CPU panned-IR-sum reference",
     REQUIRE(cr > 0.99);
     // The two channels are genuinely different (distinct pans) — not a mono dupe.
     REQUIRE(xcorr(rl.data(), rr.data(), ir_len) < 0.999);
+}
+
+// Flow: at depth 0 the stereo image is steady (an ordinary reverb); above 0 each
+// room's pan drifts per block, so the L/R balance of a STEADY excitation keeps
+// moving. Proves the moving-field feature end-to-end at the node level.
+TEST_CASE("GpuMultiConvolver Flow moves the stereo image, static at 0",
+          "[gpu][superconvolver][flow]") {
+    constexpr uint32_t BLOCK = 512;
+    constexpr uint32_t SR = 48000;
+    constexpr uint32_t N = 16;
+    const std::size_t ir_len = static_cast<std::size_t>(0.05 * SR);
+
+    std::vector<std::vector<float>> irs(N);
+    for (uint32_t k = 0; k < N; ++k)
+        irs[k] = make_reverb_ir(ir_len, 0x4000u + k * 2654435761u);
+
+    // A fixed noise block, fed every iteration → steady-state excitation.
+    std::vector<float> drive(BLOCK);
+    { std::mt19937 rng(7); std::uniform_real_distribution<float> d(-1.f, 1.f);
+      for (auto& s : drive) s = d(rng); }
+
+    auto ratio_variance = [&](float flow) -> double {
+        pulp::gpu_audio::GpuMultiConvolver mc(BLOCK, SR, irs);
+        if (!mc.prepare() || !mc.gpu_available()) return -1.0;
+        mc.set_flow(flow);
+        std::vector<float> ol(BLOCK), orr(BLOCK);
+        std::vector<double> ratios;
+        for (int b = 0; b < 24; ++b) {
+            REQUIRE(mc.convolve_stereo(drive.data(), ol.data(), orr.data(), BLOCK));
+            if (b < 4) continue;  // let the IR tail fill
+            double le = 0, re = 0;
+            for (uint32_t i = 0; i < BLOCK; ++i) { le += ol[i] * ol[i]; re += orr[i] * orr[i]; }
+            ratios.push_back(re / (le + re + 1e-12));
+        }
+        double mean = 0; for (double r : ratios) mean += r; mean /= ratios.size();
+        double var = 0; for (double r : ratios) var += (r - mean) * (r - mean);
+        return var / ratios.size();
+    };
+
+    const double var_static = ratio_variance(0.0f);
+    if (var_static < 0.0) {
+        WARN("GPU compute unavailable — skipping Flow test.");
+        return;
+    }
+    const double var_flow = ratio_variance(0.8f);
+    INFO("L/R ratio variance: static=" << var_static << " flow=" << var_flow);
+    // Static settles to ~constant (numerical-noise variance). Flow keeps the
+    // balance moving — dramatically more variance, and well above noise. (The
+    // aggregate L/R swing is modest because N rooms average out; the per-room
+    // spatial motion is larger — this is the conservative aggregate proof.)
+    REQUIRE(var_static < 1e-6);
+    REQUIRE(var_flow > 1e-8);
+    REQUIRE(var_flow > var_static * 50.0);
 }
 
 // The structural GPU win: at scale (many rooms) the batched GPU multi-convolution

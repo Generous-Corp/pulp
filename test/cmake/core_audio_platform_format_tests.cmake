@@ -276,6 +276,22 @@ if(PULP_HAS_LV2)
     target_link_libraries(pulp-test-lv2-adapter PRIVATE pulp::format lv2-headers Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-lv2-adapter)
 
+    # LV2 run() RT-safety guard (MF-2): asserts the render path neither
+    # allocates nor takes a blocking lock, and reports latency. Links the RT
+    # interposition trap TU + sets PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
+    # (UNIX-only) so an allocation / blocking lock in run() ABORTS the test.
+    # Mirrors pulp-test-standalone-rt / the CLAP/AU-v2 RT-trap targets.
+    add_executable(pulp-test-lv2-rt test_lv2_rt.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/lv2_adapter.cpp
+    )
+    target_sources(pulp-test-lv2-rt PRIVATE
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+    target_link_libraries(pulp-test-lv2-rt PRIVATE
+        pulp::format lv2-headers Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-test-lv2-rt PRIVATE
+        $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+    catch_discover_tests(pulp-test-lv2-rt)
+
     add_executable(pulp-test-lv2-host-discovery test_lv2_host_discovery.cpp)
     target_include_directories(pulp-test-lv2-host-discovery PRIVATE
         ${CMAKE_SOURCE_DIR}/core/host/src)

@@ -83,6 +83,23 @@ TEST_CASE("LV2 TTL generation produces valid plugin.ttl", "[format][lv2]") {
     REQUIRE_THAT(ttl, ContainsSubstring("lv2:default 0"));
 }
 
+TEST_CASE("LV2 TTL emits a latency-reporting output control port",
+          "[format][lv2][issue-mf2]") {
+    auto desc = make_effect_desc();
+    state::StateStore store;
+    add_test_params(store);
+
+    auto ttl = generate_plugin_ttl(desc, store, "http://pulp.audio/plugins/test-lv2");
+
+    // The latency port is an output control port with the standard LV2
+    // latency designation + reportsLatency property so hosts do PDC.
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:symbol \"latency\""));
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:designation lv2:latency"));
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:portProperty lv2:reportsLatency"));
+    // It is the last port: 2 in + 2 out + 2 control = indices 0-5, latency = 6.
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:index 6"));
+}
+
 TEST_CASE("LV2 TTL includes MIDI ports for instruments", "[format][lv2]") {
     PluginDescriptor desc;
     desc.name = "TestSynth";

@@ -501,7 +501,16 @@ void SkiaCanvas::set_shadow_blur(float blur) {
 void SkiaCanvas::set_shadow_offset_x(float dx) { shadow_offset_x_ = dx; }
 void SkiaCanvas::set_shadow_offset_y(float dy) { shadow_offset_y_ = dy; }
 
-void SkiaCanvas::set_fill_color(Color c) { fill_color_ = c; }
+void SkiaCanvas::set_fill_color(Color c) {
+    // Setting a solid fill replaces any previously-set gradient (Canvas2D
+    // fillStyle semantics). Without this, a gradient set via
+    // set_fill_gradient_* would persist and current_fill_paint() would keep
+    // applying its shader to every later fill/text, drawing them off-shader
+    // (invisible) instead of in the requested color.
+    fill_color_ = c;
+    has_gradient_ = false;
+    gradient_shader_ = nullptr;
+}
 void SkiaCanvas::set_stroke_color(Color c) { stroke_color_ = c; }
 void SkiaCanvas::set_line_width(float w) { line_width_ = w; }
 

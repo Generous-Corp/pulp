@@ -488,12 +488,22 @@ public:
     }
     void define_parameters(state::StateStore&) override {}
     void prepare(const PrepareContext&) override {}
-    void process(audio::BufferView<float>&,
-                 const audio::BufferView<const float>&,
+    void process(audio::BufferView<float>& out,
+                 const audio::BufferView<const float>& in,
                  midi::MidiBuffer&,
                  midi::MidiBuffer&,
-                 const ProcessContext&) override {
+                 const ProcessContext& context) override {
+        // Mirrors the f64 copy below so the mixed 32/64 demotion test can
+        // observe the boundary-converted input on the f32 surface.
         ++process_count;
+        observed_num_samples = context.num_samples;
+        const auto channels = std::min(in.num_channels(), out.num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            const auto ic = in.channel(ch);
+            auto oc = out.channel(ch);
+            for (std::size_t i = 0; i < ic.size() && i < oc.size(); ++i)
+                oc[i] = ic[i];
+        }
     }
     void process_f64(ProcessBuffers64& audio,
                      midi::MidiBuffer&,
@@ -1507,6 +1517,46 @@ TEST_CASE("CLAP routes data64 buffers to native process_f64 when opted in",
     for (std::size_t i = 0; i < Harness::kFrames; ++i) {
         REQUIRE(out_l[i] == in_l[i]);
         REQUIRE(out_r[i] == in_r[i]);
+    }
+}
+
+TEST_CASE("CLAP demotes mixed 32/64 buses to the f32 boundary path",
+          "[clap][audio][f64]") {
+    // A native-f64 plugin handed a 64-bit input but a 32-bit output cannot
+    // dispatch process_f64 (the block is not uniformly double), so the adapter
+    // must fall back to the f32 surface and still demote the f64 input into
+    // the boundary scratch — this pins the deferred-conversion ordering.
+    g_native_f64_copy = nullptr;
+    Harness h(make_native_f64_copy);
+    REQUIRE(g_native_f64_copy != nullptr);
+
+    std::array<double, Harness::kFrames> in_l{};
+    std::array<double, Harness::kFrames> in_r{};
+    std::array<float, Harness::kFrames> out_l{};
+    std::array<float, Harness::kFrames> out_r{};
+    for (std::size_t i = 0; i < Harness::kFrames; ++i) {
+        in_l[i] = 0.1 * static_cast<double>(i + 1);
+        in_r[i] = -0.125 * static_cast<double>(i + 1);
+    }
+    double* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    clap_audio_buffer_t audio_in{};
+    audio_in.data64 = in_ptrs;
+    audio_in.channel_count = 2;
+    clap_audio_buffer_t audio_out{};
+    audio_out.data32 = out_ptrs;
+    audio_out.channel_count = 2;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &audio_in, 1,
+                         &audio_out, 1) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_native_f64_copy->process_f64_count == 0);
+    REQUIRE(g_native_f64_copy->process_count == 1);
+    REQUIRE(g_native_f64_copy->observed_num_samples == static_cast<int>(Harness::kFrames));
+
+    for (std::size_t i = 0; i < Harness::kFrames; ++i) {
+        REQUIRE(out_l[i] == static_cast<float>(in_l[i]));
+        REQUIRE(out_r[i] == static_cast<float>(in_r[i]));
     }
 }
 
