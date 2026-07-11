@@ -28,7 +28,7 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format
-    pulp-canvas pulp-view-core pulp-view
+    pulp-osc pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components
 )
 
@@ -178,7 +178,7 @@ if(TARGET SDL3_Headers)
 endif()
 
 # Public headers for each SDK subsystem
-foreach(subsystem platform runtime events state audio midi signal graph format canvas render view gpu_audio native-components)
+foreach(subsystem platform runtime events state audio midi signal graph format osc canvas render view gpu_audio native-components)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
         install(DIRECTORY "${_inc_dir}/pulp/"
