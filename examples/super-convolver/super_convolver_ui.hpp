@@ -116,61 +116,59 @@ public:
             canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy());
         canvas.set_blend_mode(cv::Canvas::BlendMode::normal);  // ensure chrome is not additive
 
-        canvas.set_fill_color(pal_.text);
-        canvas.set_font("Inter", 21.0f * s);
-        canvas.fill_text("SuperConvolver", 20 * s, 32 * s);
-        // Subtitle carries the live engine status so it's always clear whether
-        // the AUDIO is on the GPU (the UI is GPU-rendered either way). When the
-        // GPU engine is active it names the backend; otherwise it says CPU.
-        std::string audio_status = "Audio: CPU";
-        // One coherent snapshot per repaint (single lock) so blocks, misses and
-        // cost can't disagree across the line.
-        const auto g = proc_.gpu_status();
-        if (g.active) {
-            audio_status = g.backend.empty() ? "Audio: GPU"
-                                             : ("Audio: GPU · " + g.backend);
-            // Live proof the GPU is carrying the audio: room count + blocks the
-            // GPU worker produced vs blocks it missed (CPU/silence-filled).
-            if (g.multi)
-                audio_status += " · " + std::to_string(g.rooms) + " rooms";
-            audio_status += " · " + std::to_string(g.blocks) + " blocks";
-            if (g.misses > 0)
-                audio_status += ", " + std::to_string(g.misses) + " misses";
-            // Live GPU cost + headroom: the measured average wall-clock per block
-            // (round-trip included), and what fraction of this device's real-time
-            // budget that uses — so the lower the %, the more rooms the GPU could
-            // still take. Shown once the worker has produced its first block.
-            if (g.blocks > 0 && g.avg_us > 0.0) {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), " · %.0f µs/block (%.0f%% of real-time)",
-                              g.avg_us, g.rt_percent);
-                audio_status += buf;
-            }
-        }
-        canvas.set_fill_color(pal_.text_dim);
-        canvas.set_font("Inter", 12.0f * s);
-        canvas.fill_text(audio_status, 20 * s, 50 * s);
+        // Wordmark — tracked caps, bone (#BCC2CC); info glyph after it.
+        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));
+        canvas.set_font("Inter", 11.0f * s);
+        const float mk_end = tracked_text(canvas, "SuperConvolver", 24 * s, 30 * s, 11.0f * s, 0.22f);
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 48));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_circle(mk_end + 10 * s, 26 * s, 8.5f * s);
+        canvas.set_fill_color(tk_label());
+        canvas.set_font("Inter", 10.0f * s);
+        canvas.fill_text("i", mk_end + 7.5f * s, 30 * s);
 
-        // Source chip — the loaded impulse response, first-class: the one Source
-        // the field of rooms blooms from. Name via clean_source_name (pure, no
-        // per-frame file I/O); "Synthetic room" for the built-in fallback.
+        const auto g = proc_.gpu_status();
+
+        // Engine + emitters — top-right, quiet.
+        {
+            const float rx = local_bounds().width - 24 * s;
+            const char* eng = g.active ? "GPU" : "CPU";
+            canvas.set_fill_color(tk_text());
+            canvas.set_font("Inter", 12.0f * s);
+            right_text(canvas, eng, rx, 29 * s, 12.0f * s);
+            canvas.set_fill_color(cv::Color::rgba8(175, 206, 220));  // cyan status dot
+            canvas.fill_circle(rx - static_cast<float>(std::string(eng).size()) * 12.0f * s * 0.52f - 9 * s,
+                               25 * s, 3.5f * s);
+            char eb[48];
+            std::snprintf(eb, sizeof eb, "%d / 128 emitters",
+                          static_cast<int>(std::lround(store_.get_value(kRooms))));
+            canvas.set_fill_color(tk_label());
+            canvas.set_font("Inter", 10.0f * s);
+            right_text(canvas, eb, rx, 45 * s, 10.0f * s);
+        }
+
+        // Source chip (bordered) — the loaded IR, first-class and clickable to
+        // load. Rect matches load_ir_btn_ (set in layout) for hit-testing.
         {
             const std::string p = proc_.ir_path();
-            const std::string name = p.empty()
-                ? std::string("Synthetic room")
+            const std::string name = p.empty() ? std::string("Synthetic room")
                 : pulp::superconvolver::clean_source_name(p);
-            const float y = 74 * s;
-            canvas.set_fill_color(pal_.accent);
-            canvas.fill_circle(25 * s, y - 4 * s, 4 * s);
-            canvas.set_fill_color(pal_.text_dim);
-            canvas.set_font("Inter", 9.5f * s);
-            canvas.fill_text("SOURCE", 38 * s, y - 9 * s);
-            canvas.set_fill_color(pal_.text);
-            canvas.set_font("Inter", 14.0f * s);
-            canvas.fill_text(name, 38 * s, y + 4 * s);
+            const auto& r = load_ir_btn_;
+            canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 8));
+            canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 10 * s);
+            canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 26));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(r.x, r.y, r.width, r.height, 10 * s);
+            canvas.set_fill_color(cv::Color::rgba8(232, 240, 248));  // white orb
+            canvas.fill_circle(r.x + 18 * s, r.y + r.height * 0.5f, 7 * s);
+            canvas.set_fill_color(tk_text());
+            canvas.set_font("Inter", 12.0f * s);
+            canvas.fill_text(name, r.x + 34 * s, r.y + r.height * 0.46f);
+            canvas.set_fill_color(cv::Color::rgba8(71, 76, 85));  // faint
+            canvas.set_font("Inter", 8.5f * s);
+            tracked_text(canvas, "Source", r.x + 34 * s, r.y + r.height * 0.82f, 8.5f * s, 0.2f);
         }
 
-        paint_load_ir(canvas);
         paint_controls(canvas);
 
         request_repaint();  // self-driven loop for the live field
@@ -240,9 +238,9 @@ private:
         const float m = 20 * s, top = 64 * s;
         const float avail = H - top - m;
 
-        // Load-IR button, top-right of the header.
-        const float btn_w = 104 * s, btn_h = 26 * s;
-        load_ir_btn_ = {W - m - btn_w, 14 * s, btn_w, btn_h};
+        // The Source chip (top-left, below the wordmark) IS the loader — click it
+        // to open the picker. Rect shared by paint (draw) and pointer (hit-test).
+        load_ir_btn_ = {24 * s, 44 * s, 196 * s, 38 * s};
 
         // Hero IR waveform (largest), then spectrum, then the control strip.
         const float ir_h   = avail * 0.42f;
@@ -462,79 +460,104 @@ private:
         canvas.fill_text(txt, cx - w * 0.5f, baseline);
     }
 
+    // Design tokens from the concept (near-monochrome, Leica scientific).
+    static cv::Color tk_text()  { return cv::Color::rgba8(237, 239, 243); }  // values
+    static cv::Color tk_label() { return cv::Color::rgba8(120, 126, 136); }  // DENSITY/FLOW
+    static std::string upper(const std::string& in) {
+        std::string o = in;
+        for (char& ch : o) if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+        return o;
+    }
+    // Right-align text ending at `right` (glyph-advance estimate, ~0.52em).
+    void right_text(cv::Canvas& canvas, const std::string& txt, float right,
+                    float baseline, float px) {
+        canvas.fill_text(txt, right - static_cast<float>(txt.size()) * px * 0.52f, baseline);
+    }
+    // Draw uppercase text with letter-spacing (the concept's tracked caps), char
+    // by char since the canvas has no tracking API. `em` = spacing in ems.
+    float tracked_text(cv::Canvas& canvas, const std::string& in, float x,
+                       float baseline, float px, float em) {
+        const std::string t = upper(in);
+        const float gap = px * em;
+        for (char ch : t) {
+            const char one[2] = {ch, 0};
+            canvas.fill_text(one, x, baseline);
+            // Rough per-glyph advance (uppercase Inter) so tracking reads even.
+            float w = 0.60f;
+            if (ch == 'I' || ch == 'J') w = 0.34f;
+            else if (ch == 'M' || ch == 'W') w = 0.86f;
+            else if (ch == 'L' || ch == 'C' || ch == 'S' || ch == 'E' || ch == 'F') w = 0.55f;
+            else if (ch == ' ') w = 0.40f;
+            x += px * w + gap;
+        }
+        return x;  // end x
+    }
+
     void paint_controls(cv::Canvas& canvas) {
         const float s = scale();
         const auto& c = controls_;
-        // Glass dock floating over the field: translucent panel + hairline edge.
-        canvas.set_fill_color(cv::Color::rgba8(11, 14, 21, 214));
-        canvas.fill_rounded_rect(c.x, c.y, c.width, c.height, 13 * s);
-        canvas.set_stroke_color(cv::Color::rgba8(236, 240, 248, 28));
-        canvas.set_line_width(1.0f);
-        canvas.stroke_rounded_rect(c.x, c.y, c.width, c.height, 13 * s);
+        // No cell — the sliders sit directly on the field (concept style). A soft
+        // dark fade at the bottom keeps labels legible over bright tracers.
+        for (int g = 0; g < 7; ++g) {
+            const float gy = c.y - 24 * s + (c.height + 24 * s) * (g / 7.0f);
+            const float gh = (c.height + 24 * s) / 7.0f + 1.0f;
+            canvas.set_fill_color(cv::Color::rgba8(5, 6, 9, static_cast<std::uint8_t>(14 + g * 22)));
+            canvas.fill_rect(c.x, gy, c.width, gh);
+        }
 
         for (int i = 0; i < 5; ++i) {
             const Slider& sl = sliders_[static_cast<size_t>(i)];
             const auto& t = sl.track;
-            const bool is_flow = (sl.id == kFlow);
             const bool active = (active_slider_ == i);
-            const cv::Color tint = is_flow ? pal_.bypass_on : pal_.accent;  // Flow = amber hero
-            const float cxm = sl.cell.x + sl.cell.width * 0.5f;
 
-            // Label (above the track).
-            canvas.set_fill_color(is_flow ? tint : pal_.text_dim);
-            canvas.set_font("Inter", 10.0f * s);
-            centered_text(canvas, sl.label, cxm, t.y - 11 * s, 10.0f * s);
-
-            const float frac = value_frac(i);
-            const float hx = t.x + frac * t.width;       // horizontal handle
-            const float hy = t.y + t.height * 0.5f;
-            // Track + fill to the LEFT of the handle.
-            canvas.set_fill_color(cv::Color::rgba8(236, 240, 248, 30));
-            canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.height * 0.5f);
-            canvas.set_fill_color(tint.with_alpha(0.65f));
-            canvas.fill_rounded_rect(t.x, t.y, std::max(0.0f, hx - t.x), t.height, t.height * 0.5f);
-            // Handle: a glowing ring (additive halo + dark core + tinted rim).
-            canvas.set_blend_mode(cv::Canvas::BlendMode::lighter);
-            canvas.set_fill_color(tint.with_alpha(active ? 0.5f : 0.28f));
-            canvas.fill_circle(hx, hy, (active ? 12.0f : 9.0f) * s);
-            canvas.set_blend_mode(cv::Canvas::BlendMode::normal);
-            canvas.set_fill_color(cv::Color::rgba8(12, 15, 22));
-            canvas.fill_circle(hx, hy, 6.0f * s);
-            canvas.set_stroke_color(tint);
-            canvas.set_line_width(2.0f);
-            canvas.stroke_circle(hx, hy, 6.0f * s);
-
-            // Value readout (below the track).
+            // Label (uppercase, tracked, dim #787E88) at the track's left; value
+            // (bold, #EDEFF3) right-aligned at the track's right — concept tokens.
+            canvas.set_fill_color(tk_label());
+            canvas.set_font("Inter", 9.5f * s);
+            tracked_text(canvas, sl.label, t.x, t.y - 12 * s, 9.5f * s, 0.26f);
             char buf[40];
             std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
                           static_cast<double>(slider_value(i)),
                           sl.unit[0] ? " " : "", sl.unit);
-            canvas.set_fill_color(is_flow ? tint : pal_.text);
-            canvas.set_font("Inter", 12.0f * s);
-            centered_text(canvas, buf, cxm, t.y + 22 * s, 12.0f * s);
+            canvas.set_fill_color(tk_text());
+            canvas.set_font("Inter", 14.0f * s);
+            right_text(canvas, buf, t.x + t.width, t.y - 11 * s, 14.0f * s);
+
+            const float frac = value_frac(i);
+            const float hx = t.x + frac * t.width;
+            const float hy = t.y + t.height * 0.5f;
+            // Track rgba(220,228,238,.12); fill rgba(236,239,243,.62).
+            canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 31));
+            canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.height * 0.5f);
+            canvas.set_fill_color(cv::Color::rgba8(236, 239, 243, 158));
+            canvas.fill_rounded_rect(t.x, t.y, std::max(0.0f, hx - t.x), t.height, t.height * 0.5f);
+            // Thumb: 14px #EDEFF3 dot with a 2px dark (#050607) border.
+            const float hr = (active ? 8.0f : 7.0f) * s;
+            canvas.set_fill_color(cv::Color::rgba8(5, 6, 7));
+            canvas.fill_circle(hx, hy, hr);
+            canvas.set_fill_color(cv::Color::rgba8(237, 239, 243));
+            canvas.fill_circle(hx, hy, hr - 2.0f * s);
         }
 
-        // Engine chip (CPU / GPU) — pill, lit when GPU requested.
+        // Engine + Bypass — quiet monochrome chips.
         const bool gpu_req = store_.get_value(kEngine) >= 0.5f;
-        paint_chip(canvas, engine_, gpu_req, gpu_req ? "GPU" : "CPU", pal_.accent);
-        // Bypass chip.
+        paint_chip(canvas, engine_, gpu_req, gpu_req ? "GPU" : "CPU");
         const bool bypassed = store_.get_value(kBypass) >= 0.5f;
-        paint_chip(canvas, bypass_, bypassed, bypassed ? "BYPASSED" : "BYPASS", pal_.bypass_on);
+        paint_chip(canvas, bypass_, bypassed, bypassed ? "BYPASSED" : "BYPASS");
     }
 
     void paint_chip(cv::Canvas& canvas, const vw::Rect& r, bool on,
-                    const std::string& label, cv::Color accent) {
+                    const std::string& label) {
         const float s = scale();
-        canvas.set_fill_color(on ? accent : cv::Color::rgba8(236, 240, 248, 22));
+        canvas.set_fill_color(on ? cv::Color::rgba8(237, 239, 243, 30)
+                                 : cv::Color::rgba8(237, 239, 243, 12));
         canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, r.height * 0.5f);
-        if (!on) {
-            canvas.set_stroke_color(cv::Color::rgba8(236, 240, 248, 40));
-            canvas.set_line_width(1.0f);
-            canvas.stroke_rounded_rect(r.x, r.y, r.width, r.height, r.height * 0.5f);
-        }
-        canvas.set_fill_color(on ? pal_.bg : pal_.text);
-        canvas.set_font("Inter", 13.0f * s);
-        centered_text(canvas, label, r.x + r.width * 0.5f, r.y + r.height * 0.62f, 13.0f * s);
+        canvas.set_stroke_color(cv::Color::rgba8(237, 239, 243, on ? 90 : 36));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(r.x, r.y, r.width, r.height, r.height * 0.5f);
+        canvas.set_fill_color(on ? tk_text() : tk_label());
+        canvas.set_font("Inter", 12.0f * s);
+        centered_text(canvas, label, r.x + r.width * 0.5f, r.y + r.height * 0.62f, 12.0f * s);
     }
 
     // ── interaction ──
