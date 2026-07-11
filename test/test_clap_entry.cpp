@@ -367,13 +367,19 @@ TEST_CASE("CLAP entry exposes port, note, latency and tail extensions",
     REQUIRE(input.id == 0);
     REQUIRE(std::string(input.name) == "Audio In");
     REQUIRE(input.channel_count == 2);
-    REQUIRE(input.flags == CLAP_AUDIO_PORT_IS_MAIN);
+    // Every port advertises 64-bit support (the adapter converts at the
+    // boundary for f32-internal processors); PREFERS_64BITS is reserved for
+    // descriptors that opt into native f64, which this test plugin does not.
+    REQUIRE(input.flags ==
+            (CLAP_AUDIO_PORT_IS_MAIN | CLAP_AUDIO_PORT_SUPPORTS_64BITS));
     REQUIRE(std::string(input.port_type) == CLAP_PORT_STEREO);
 
     clap_audio_port_info_t output{};
     REQUIRE(audio_ports->get(plugin, 0, false, &output));
     REQUIRE(output.id == 100);
     REQUIRE(std::string(output.name) == "Audio Out");
+    REQUIRE(output.flags ==
+            (CLAP_AUDIO_PORT_IS_MAIN | CLAP_AUDIO_PORT_SUPPORTS_64BITS));
     REQUIRE_FALSE(audio_ports->get(plugin, 1, true, &input));
 
     REQUIRE(note_ports->count(plugin, true) == 1);
@@ -510,13 +516,15 @@ TEST_CASE("CLAP entry fallback metadata handles missing processors",
     REQUIRE(port.id == 1);
     REQUIRE(std::string(port.name) == "Sidechain");
     REQUIRE(port.channel_count == 1);
-    REQUIRE(port.flags == 0);
+    // Non-main ports carry SUPPORTS_64BITS too (no IS_MAIN); this fallback
+    // descriptor is not native-f64, so PREFERS_64BITS stays clear.
+    REQUIRE(port.flags == CLAP_AUDIO_PORT_SUPPORTS_64BITS);
     REQUIRE(std::string(port.port_type) == CLAP_PORT_MONO);
 
     REQUIRE(pulp::format::clap_generic::audio_ports_get(&plugin, 1, false, &port));
     REQUIRE(port.id == 101);
     REQUIRE(std::string(port.name) == "Aux Out");
-    REQUIRE(port.flags == 0);
+    REQUIRE(port.flags == CLAP_AUDIO_PORT_SUPPORTS_64BITS);
     REQUIRE(std::string(port.port_type) == CLAP_PORT_MONO);
 
     clap_note_port_info_t note{};
@@ -534,6 +542,44 @@ TEST_CASE("CLAP entry fallback metadata handles missing processors",
     clap_istream_t in_stream{.ctx = &source, .read = stream_read};
     REQUIRE_FALSE(pulp::format::clap_generic::state_save(&plugin, &out_stream));
     REQUIRE_FALSE(pulp::format::clap_generic::state_load(&plugin, &in_stream));
+
+    pulp::format::clap_generic::g_desc = saved_desc;
+}
+
+TEST_CASE("CLAP audio ports advertise PREFERS_64BITS for native-f64 descriptors",
+          "[clap][entry][ports][f64]") {
+    auto saved_desc = pulp::format::clap_generic::g_desc;
+
+    pulp::format::PluginDescriptor native{};
+    native.name = "NativeF64Clap";
+    native.manufacturer = "PulpTest";
+    native.bundle_id = "com.pulp.test.native-f64";
+    native.version = "1.0.0";
+    native.category = pulp::format::PluginCategory::Effect;
+    native.input_buses = {{"Main In", 2}};
+    native.output_buses = {{"Main Out", 2}};
+
+    SECTION("legacy descriptor flag") {
+        native.supports_f64_audio = true;
+    }
+    SECTION("node_capabilities flag") {
+        native.node_capabilities.supports_f64_audio = true;
+    }
+    pulp::format::clap_generic::g_desc = native;
+
+    pulp::format::clap_adapter::PulpClapPlugin data;
+    clap_plugin_t plugin{};
+    plugin.plugin_data = &data;
+
+    clap_audio_port_info_t port{};
+    REQUIRE(pulp::format::clap_generic::audio_ports_get(&plugin, 0, true, &port));
+    REQUIRE(port.flags == (CLAP_AUDIO_PORT_IS_MAIN |
+                           CLAP_AUDIO_PORT_SUPPORTS_64BITS |
+                           CLAP_AUDIO_PORT_PREFERS_64BITS));
+    REQUIRE(pulp::format::clap_generic::audio_ports_get(&plugin, 0, false, &port));
+    REQUIRE(port.flags == (CLAP_AUDIO_PORT_IS_MAIN |
+                           CLAP_AUDIO_PORT_SUPPORTS_64BITS |
+                           CLAP_AUDIO_PORT_PREFERS_64BITS));
 
     pulp::format::clap_generic::g_desc = saved_desc;
 }

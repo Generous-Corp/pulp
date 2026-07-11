@@ -142,8 +142,11 @@ TEST_CASE("run_gesture_on_main marshals a background gesture onto the main threa
         [&](state::ParamID) { end_thread = std::this_thread::get_id(); ++ends; });
 
     // A background "MIDI-learn" thread sets the mapped parameter.
+    std::atomic<bool> bg_off_main{false};
     std::thread bg([&] {
-        REQUIRE(std::this_thread::get_id() != host.main_id());
+        // Catch2 assertion macros are not thread-safe; record the thread-identity
+        // check in an atomic here and assert it on the test thread after join().
+        bg_off_main.store(std::this_thread::get_id() != host.main_id());
         store.run_gesture_on_main([&] {
             store.begin_gesture(1);
             store.set_value(1, 0.42f);
@@ -151,6 +154,7 @@ TEST_CASE("run_gesture_on_main marshals a background gesture onto the main threa
         });
     });
     bg.join();
+    REQUIRE(bg_off_main.load());  // the MIDI-learn work really ran off the main thread
 
     host.wait_for_ran(1);  // the posted gesture task ran on the fake main thread
 

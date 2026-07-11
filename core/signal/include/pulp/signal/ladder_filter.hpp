@@ -55,14 +55,16 @@ public:
     }
 
 private:
-    /// Saturating non-linearity. `FastMath::tanh` is a float-only Padé
-    /// approximation (max error ~3e-5 for |x| < 4, hard-clamped to +/-1 beyond
-    /// it), which is well inside the noise floor of any sample format we emit.
-    /// `LadderFilterT<double>` keeps libm because no double approximation
-    /// exists and the double instantiation is not on a real-time hot path.
+    /// Saturating non-linearity. The `float` path goes through
+    /// `signal::ladder_tanh`, which is exact `std::tanh` by default and switches
+    /// to the float-only Padé `FastMath::tanh` only when
+    /// `PULP_SIGNAL_FAST_LADDER_TANH=1` (see fast_math.hpp for the fidelity
+    /// rationale — the Padé form's +/-4 hard clamp alters the ladder's overdrive
+    /// character, so exact saturation is the default). `LadderFilterT<double>`
+    /// always uses libm: no double Padé exists and it is not on a hot path.
     static SampleType saturate(SampleType x) {
         if constexpr (std::is_same_v<SampleType, float>)
-            return FastMath::tanh(x);
+            return ladder_tanh(x);
         else
             return std::tanh(x);
     }

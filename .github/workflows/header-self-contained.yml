@@ -20,6 +20,10 @@ on:
       - 'core/**/include/**'
       - 'tools/scripts/check_headers_selfcontained.py'
       - '.github/workflows/header-self-contained.yml'
+  # Run the required `Public headers compile standalone (Linux Clang)` check on
+  # queued merge groups so a merge queue on `main` can land PRs. `merge_group`
+  # does not honour the `paths` filter above, so this fires on every group.
+  merge_group:
 
 permissions:
   contents: read
@@ -67,8 +71,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base="origin/${{ github.base_ref }}"
-          git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/${base}" || true
+          # github.base_ref is set on pull_request but empty on merge_group;
+          # fall back to main there so the diff is against the merge target
+          # (mirrors the origin/main fallback in build.yml/version-skill-check).
+          target="${{ github.base_ref }}"
+          [ -n "$target" ] || target="main"
+          base="origin/${target}"
+          git fetch --no-tags origin "${target}:refs/remotes/${base}" || true
           git diff --name-only --diff-filter=d "${base}...HEAD" \
             | grep -E '/include/pulp/.*\.(hpp|h|hh|hxx)$' \
             | grep -Ev '^(external/|build/|_deps/)' \

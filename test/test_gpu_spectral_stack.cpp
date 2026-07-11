@@ -5,6 +5,7 @@
 
 #include "support/gpu_audio_test_helpers.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -92,4 +93,100 @@ TEST_CASE("GpuSpectralStack render before capture fails", "[gpu_audio][spectral]
     if (!st.available()) return;
     std::vector<float> out(256, 0.0f);
     REQUIRE_FALSE(st.render(out.data(), nullptr, 0.0f, 0.0f));
+}
+
+namespace {
+// Drive one stack through `muted_hops` renders that park layer 1 at weight 0
+// (layer 0 audible), then a final render that makes layer 1 the only audible
+// layer. Returns that final frame — it is a pure function of how many times
+// layer 1's phase advanced while it was muted.
+template <typename Stack>
+std::vector<float> muted_then_unmuted(Stack& st, uint32_t fft, int muted_hops) {
+    const float mute_l1[2] = {1.0f, 0.0f};  // layer 1 parked (muted)
+    const float only_l1[2] = {0.0f, 1.0f};  // layer 1 alone, audible
+    std::vector<float> out(fft, 0.0f);
+    for (int i = 0; i < muted_hops; ++i)
+        st.render(out.data(), mute_l1, 0.0f, 0.0f);
+    st.render(out.data(), only_l1, 0.0f, 0.0f);
+    return out;
+}
+template <typename Stack>
+std::vector<float> always_hot(Stack& st, uint32_t fft, int hops) {
+    const float both[2] = {1.0f, 1.0f};     // both layers audible the whole time
+    const float only_l1[2] = {0.0f, 1.0f};
+    std::vector<float> out(fft, 0.0f);
+    for (int i = 0; i < hops; ++i)
+        st.render(out.data(), both, 0.0f, 0.0f);
+    st.render(out.data(), only_l1, 0.0f, 0.0f);
+    return out;
+}
+float max_abs_diff(const std::vector<float>& a, const std::vector<float>& b) {
+    float m = 0.0f;
+    for (std::size_t i = 0; i < a.size(); ++i) m = std::max(m, std::abs(a[i] - b[i]));
+    return m;
+}
+}  // namespace
+
+// SF-4 regression: a muted-but-active layer must keep advancing its phase, so it
+// re-enters phase-coherent on un-mute (no click). The consolidation gated the
+// phase advance on the WEIGHT (`weights_[L] == 0.0f`), which froze a parked
+// layer's phase; the fix gates on `active`. This proves layer 1's phase advanced
+// identically whether it spent those hops MUTED or AUDIBLE — bit-exact on the CPU
+// reference (fails on the pre-fix `weights_[L] == 0.0f` gate, which would leave
+// layer 1 many radians behind), and continuity-preserving on the GPU backend,
+// which already advances every layer unconditionally (its advance shader has no
+// weight binding). Together this pins CPU/GPU parity for the parked-layer case.
+TEST_CASE("SpectralStack keeps a muted layer's phase advancing (no un-mute click)",
+          "[gpu_audio][spectral][sf4][regression]") {
+    constexpr uint32_t FFT = 512, HOP = 128, K1 = 21, K2 = 53;
+    constexpr int kMutedHops = 7;
+
+    std::vector<float> a(FFT), b(FFT);
+    fill_sine(a, K1);
+    fill_sine(b, K2);
+
+    SECTION("CPU reference — bit-exact phase continuity") {
+        CpuSpectralStack muted, hot;
+        REQUIRE(muted.prepare(FFT, HOP, 2));
+        REQUIRE(hot.prepare(FFT, HOP, 2));
+        REQUIRE(muted.available());
+        for (auto* s : {&muted, &hot}) {
+            REQUIRE(s->capture(0, a.data()));
+            REQUIRE(s->capture(1, b.data()));
+        }
+        const auto out_muted = muted_then_unmuted(muted, FFT, kMutedHops);
+        const auto out_hot = always_hot(hot, FFT, kMutedHops);
+        // Layer 1 advanced kMutedHops+1 times in BOTH runs → identical frame.
+        for (uint32_t i = 0; i < FFT; ++i)
+            REQUIRE(out_muted[i] == out_hot[i]);
+        // Teeth: the un-muted layer is genuinely non-trivial (not silence).
+        REQUIRE(peak_bin(out_muted) == K2);
+    }
+
+    SECTION("GPU backend — same continuity, CPU/GPU in lockstep") {
+        GpuSpectralStack gmuted, ghot;
+        REQUIRE(gmuted.prepare(FFT, HOP, 2));
+        REQUIRE(ghot.prepare(FFT, HOP, 2));
+        if (!gmuted.available()) return;  // no device in this environment
+        for (auto* s : {&gmuted, &ghot}) {
+            REQUIRE(s->capture(0, a.data()));
+            REQUIRE(s->capture(1, b.data()));
+        }
+        const auto g_out_muted = muted_then_unmuted(gmuted, FFT, kMutedHops);
+        const auto g_out_hot = always_hot(ghot, FFT, kMutedHops);
+        // The GPU advances every layer unconditionally, so muting layer 1 must not
+        // change where its phase lands — same frame as the always-hot run.
+        REQUIRE(max_abs_diff(g_out_muted, g_out_hot) < 1e-4f);
+        REQUIRE(peak_bin(g_out_muted) == K2);
+
+        // CPU/GPU parity for the parked-layer case: both backends land layer 1 at
+        // the same phase, so their un-mute frames agree (to cross-backend FFT
+        // tolerance).
+        CpuSpectralStack cmuted;
+        REQUIRE(cmuted.prepare(FFT, HOP, 2));
+        REQUIRE(cmuted.capture(0, a.data()));
+        REQUIRE(cmuted.capture(1, b.data()));
+        const auto c_out_muted = muted_then_unmuted(cmuted, FFT, kMutedHops);
+        REQUIRE(peak_bin(c_out_muted) == peak_bin(g_out_muted));
+    }
 }

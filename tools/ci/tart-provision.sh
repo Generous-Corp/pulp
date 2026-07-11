@@ -268,6 +268,13 @@ out("MF_AUTOLOGIN", "1" if m.get("auto_login") else "0")
 out("MF_XCODE", m.get("toolchain", {}).get("xcode", ""))
 out("MF_BREW", " ".join(m.get("brew", {}).get("packages", [])))
 out("MF_PIP", " ".join(m.get("pip", {}).get("packages", [])))
+# Intel cross-build layer (optional): rustup + cross targets, and Rosetta 2 so a
+# cross-built x86_64 binary can be RUN in-guest. Only manifests that declare
+# these pay the cost (Pulp's .shipyard/vm-image.intel.toml).
+tc = m.get("toolchain", {})
+out("MF_RUST", "1" if tc.get("rust") else "0")
+out("MF_RUST_TARGETS", " ".join(tc.get("rust_targets", [])))
+out("MF_ROSETTA", "1" if tc.get("rosetta") else "0")
 PY
 }
 
@@ -276,6 +283,7 @@ cmd_manifest(){ # $1=manifest-path  $2=vm-name(optional)
   [ -f "$path" ] || die "manifest not found: $path"
   command -v python3 >/dev/null 2>&1 || die "python3 required to parse the manifest"
   local MF_NAME MF_STRATEGY MF_BASE MF_DISK MF_AUTOLOGIN MF_XCODE MF_BREW MF_PIP
+  local MF_RUST MF_RUST_TARGETS MF_ROSETTA
   eval "$(_manifest_read "$path")"
   vm="${vm:-$MF_NAME}"
   [ -n "$MF_BASE" ] && [ -n "$vm" ] || die "manifest needs base + name (or pass a vm name)"
@@ -293,6 +301,19 @@ cmd_manifest(){ # $1=manifest-path  $2=vm-name(optional)
   vm_ssh "$ip" 'command -v brew >/dev/null || NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
   [ -n "$MF_BREW" ] && vm_ssh "$ip" "eval \"\$(/opt/homebrew/bin/brew shellenv)\" && brew install --quiet $MF_BREW"
   [ -n "$MF_PIP" ]  && vm_ssh "$ip" "python3 -m pip install --break-system-packages --quiet $MF_PIP"
+  # Intel cross-build layer: rustup + cross targets, and Rosetta 2. Only
+  # manifests that declare toolchain.rust / .rosetta pay this cost.
+  if [ "$MF_RUST" = "1" ]; then
+    note "installing Rust toolchain + cross targets: ${MF_RUST_TARGETS:-<none>}"
+    vm_ssh "$ip" 'command -v rustup >/dev/null 2>&1 || curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable'
+    for _t in $MF_RUST_TARGETS; do
+      vm_ssh "$ip" "\$HOME/.cargo/bin/rustup target add $_t"
+    done
+  fi
+  if [ "$MF_ROSETTA" = "1" ]; then
+    note "enabling Rosetta 2 (to run cross-built x86_64 binaries in-guest)"
+    vm_ssh "$ip" 'arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license 2>/dev/null || true'
+  fi
   # Toolchain: only repos that declare toolchain.xcode pay the Xcode cost.
   if [ -n "$MF_XCODE" ]; then
     warn "manifest declares Xcode $MF_XCODE — run '$0 apple-xcode $vm $vm' or set PULP_HOST_XCODE_APP to copy a host Xcode; skipping in manifest bake to keep it unattended"

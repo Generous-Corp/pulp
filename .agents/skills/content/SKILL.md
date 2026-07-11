@@ -32,7 +32,7 @@ Trust rules:
 - update uses an explicit local path, not registry resolution, and rolls back a replaced version on failure;
 - install/update/remove/reveal require safe single-component plugin/package/version ids;
 - rescan is metadata-only and records `plugin_id` plus `manifest_sha256`;
-- removal deletes only the installed pack root; user edits stay in the plugin's normal user preset path.
+- removal deletes only the installed pack root; user edits stay in the plugin's normal user preset path. The OK line names the deleted pack path — `Removed content pack <id> for <plugin> (removed <path>)` — for parity with `tool uninstall`.
 
 Built plugins should embed `pulp.plugin-runtime.json` via `pulp_add_plugin(... CONTENT_CAPABILITIES ... CONTENT_KINDS ...)`. Agents and in-app installers should preview with that manifest before approval, then install with `approved=true`. Validate built bundles with `ValidationHarness::validate_plugin_runtime_manifest(...)`.
 
@@ -71,3 +71,17 @@ Use MCP tools when available:
 - `pulp_content_rescan`
 - `pulp_content_remove`
 - `pulp_content_reveal`
+
+## Related extend surfaces
+
+`packages`, `kits`, `content`, and `installable-tools` are Pulp's four ways to
+extend a project or machine, and they share one lifecycle contract: **add is
+validated, remove is confirmed + confined to the surface's own area + names what
+it deleted, and both add and remove ship tests.** Pick the right surface and read
+the shared contract in
+[extending-pulp.md](../../../docs/reference/extending-pulp.md).
+
+- [`packages`](../packages/SKILL.md) — third-party audio DSP libraries → a project
+- [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
+- [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
+- [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
