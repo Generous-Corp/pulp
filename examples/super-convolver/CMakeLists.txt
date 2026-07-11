@@ -11,7 +11,7 @@ if(PULP_BUILD_TESTS AND TARGET pulp::gpu-audio AND TARGET pulp::render)
     # virtual is create_view()) resolves. create_view() is never CALLED in the
     # headless audio test — no GPU host is needed at runtime, only the symbol at
     # link time — so the view/canvas libs are a link-only dependency here.
-    add_executable(super-convolver-test test_super_convolver.cpp super_convolver_view.cpp)
+    add_executable(super-convolver-test test_super_convolver.cpp test_source_display.cpp super_convolver_view.cpp)
     target_link_libraries(super-convolver-test
         PRIVATE pulp::format pulp::signal pulp::gpu-audio pulp::render
                 pulp::view pulp::canvas

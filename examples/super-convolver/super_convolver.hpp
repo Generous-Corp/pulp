@@ -61,6 +61,9 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/audio_file.hpp>
+#include <pulp/platform/file_dialog.hpp>
+#include "source_display.hpp"
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -442,6 +445,32 @@ public:
     /// background worker rebuilds when it moves; exposed for tests / tooling.
     std::uint32_t ir_path_generation() const {
         return ir_path_gen_.load(std::memory_order_acquire);
+    }
+
+    /// UI / main thread only. Open a native file picker, load the chosen file as
+    /// the Source impulse response, and return its display (clean name + facts).
+    /// Returns nullopt if the user cancels or no dialog backend is registered.
+    std::optional<superconvolver::SourceDisplay> browse_and_load_source() {
+        static const std::vector<platform::FileFilter> kFilters = {
+            {"Impulse Response", "wav;aiff;aif;flac"},
+            {"All Files", "*"},
+        };
+        auto path = platform::FileDialog::open_file(
+            "Load Impulse Response", kFilters, ir_path());
+        if (!path || path->empty()) return std::nullopt;
+        load_ir_path(*path);
+        return superconvolver::derive_source_display(
+            *path, audio::read_audio_file_info(*path));
+    }
+
+    /// The display for the currently-loaded Source (derived from the persisted
+    /// path), or nullopt when the built-in synthetic IR is in use. Lets the
+    /// editor restore the Source name/facts after a preset load. Main-thread only.
+    std::optional<superconvolver::SourceDisplay> current_source_display() const {
+        const std::string p = ir_path();
+        if (p.empty()) return std::nullopt;
+        return superconvolver::derive_source_display(
+            p, audio::read_audio_file_info(p));
     }
 
     /// Persist the IR file path alongside StateStore so a host restores the
