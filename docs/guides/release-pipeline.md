@@ -2,7 +2,8 @@
 
 This doc explains end-to-end how a PR merge becomes a published SDK release —
 from the first commit on `main` to 12 downloadable assets on the Releases page
-(plus 2 optional Intel `darwin-x64` assets when that advisory leg succeeds).
+(the Intel `darwin-x64` pair is disabled as of 2026-07-11 — see the assets
+section).
 
 If you're hunting a specific layer:
 
@@ -150,11 +151,12 @@ PR merge to main
 └─────────────────────────────────────────────────────────┘
 ```
 
-## The release assets (12 base, +2 optional Intel)
+## The release assets (12 base; Intel `darwin-x64` disabled 2026-07-11)
 
-A successful release publishes **12 base assets** to the GitHub Release page,
-plus **2 optional Intel (`darwin-x64`) assets** when the advisory
-`macos-15-intel` leg succeeds (so 12 or 14 total):
+A successful release publishes **12 base assets** to the GitHub Release page. The
+Intel `darwin-x64` CLI+SDK pair is **not currently produced** — the native
+`macos-15-intel` release legs were removed (see the note below the table), so
+Intel returns via the Tart cross-build lane.
 
 | Asset | Purpose |
 |-------|---------|
@@ -169,20 +171,21 @@ plus **2 optional Intel (`darwin-x64`) assets** when the advisory
 | `pulp-sdk-linux-x64.tar.gz` | " |
 | `pulp-sdk-windows-arm64.tar.gz` | " |
 | `pulp-sdk-windows-x64.tar.gz` | " |
-| `pulp-darwin-x64.tar.gz` | *(optional)* Intel CLI tarball — present only when the advisory `macos-15-intel` leg succeeded |
-| `pulp-sdk-darwin-x64.tar.gz` | *(optional)* Intel SDK tarball — same advisory leg |
-| `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above (11 base, or 13 with the Intel pair) |
+| `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above (11 base) |
 
-The Intel pair is advisory: `release-cli.yml`'s `darwin-x64` build/smoke legs are
-`continue-on-error`, so a flaky `macos-15-intel` run leaves the release without
-the Intel slice rather than blocking it. `release-publish.yml` requires the pair
-in its `--exact-required` manifest **only when present** (it appends them after
-confirming `pulp-darwin-x64.tar.gz` downloaded), so a successful-Intel release is
-not rejected for "unexpected" assets and an Intel-absent release still publishes.
+**Intel `darwin-x64` — disabled (2026-07-11).** `release-cli.yml`'s native
+`darwin-x64` build/smoke legs were removed. The hosted `macos-15-intel` runner
+CPU-pegs on a full CLI+SDK build and reliably blows any timeout, producing no
+artifact; worse, its timeout **cancellation** (distinct from a clean failure,
+which `continue-on-error` *would* have absorbed) turned `build-cli`'s matrix
+aggregate `cancelled` and skipped the whole `release` job. The reliable
+x86_64-macOS path is the Tart Intel cross-build golden VM; when it is wired in,
+`pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz` return as optional assets
+and `release-publish.yml` appends them to its `--exact-required` manifest only
+when present. Until then Intel-Mac users source-build.
 
 Anything less than the 12 base assets means part of the pipeline didn't reach the
-end (the 2 Intel assets are expected to be absent on some releases). Triage by
-which assets are present:
+end. Triage by which assets are present:
 
 - **No `appcast.xml` on the release** (or no draft release at all):
   `sign-and-release.yml` didn't reach its "Create GitHub Release" step. The

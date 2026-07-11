@@ -1047,6 +1047,15 @@ TEST_CASE("AU v3 render block substitutes scratch output buffers when host buffe
         auto* processor = g_last_effect_processor;
         REQUIRE(processor != nullptr);
 
+        // The render block's scratch output buffers are pre-allocated in
+        // allocateRenderResources — the audio-thread render path never
+        // allocates (see au_adapter.mm). Real AU hosts always allocate render
+        // resources before rendering; this test exercises the null/undersized
+        // host-buffer substitution on that supported path.
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
         constexpr UInt32 kFrames = 8;
         float undersized = 0.0f;
         struct StereoBufferList {
@@ -1083,6 +1092,7 @@ TEST_CASE("AU v3 render block substitutes scratch output buffers when host buffe
         }
         REQUIRE(output.list.mBuffers[1].mData != &undersized);
 
+        [unit deallocateRenderResources];
         [unit release];
     }
 }

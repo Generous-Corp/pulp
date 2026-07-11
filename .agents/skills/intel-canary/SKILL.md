@@ -27,14 +27,25 @@ live in `docs/guides/intel-support.md` — read it first.
 - The `PULP_INTEL_CANARY` option in the root `CMakeLists.txt`.
 - The Tier 0-3 workflows: `build.yml` (canary step), `intel-portability.yml`
   (Tier 1 advisory PR lane), `nightly-intel.yml` (Tier 2), and the
-  `universal-arch-gate` job in `release-cli.yml` (Tier 3, blocking).
+  `universal-arch-gate` job in `release-cli.yml` (Tier 3).
 
 Note: the Tier-3 `universal-arch-gate` only *validates* a universal build — it
-publishes nothing. The **installable** Intel artifact is a separate concern: a
-native thin `darwin-x64` build+smoke leg in `release-cli.yml` (on
-`macos-15-intel`) that ships `pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz`.
-Don't conflate "Intel is validated" (the gate) with "Intel is shippable" (the
-leg); both live in `release-cli.yml`. See `docs/guides/intel-support.md` →
+publishes nothing. **As of 2026-07-11 it is ADVISORY, not blocking**: it carries
+`continue-on-error: true` and is deliberately dropped from the `release` job's
+required `if:` (a known auval "Bad Max Frames" flake was wedging every publish;
+re-blocking — fix the AU max-frames guard in `core/format/src/au_v2_adapter.cpp`,
+then restore the hard `needs`/`if` — is a tracked follow-up).
+
+The **installable** Intel artifact was a separate concern — a native thin
+`darwin-x64` build+smoke leg in `release-cli.yml` (on `macos-15-intel`) that
+shipped `pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz`. **That leg is
+DISABLED as of 2026-07-11**: `macos-15-intel` CPU-pegs on a full CLI+SDK build,
+blows any timeout, and its timeout *cancellation* (not a clean failure, so
+`continue-on-error` didn't absorb it) turned build-cli's matrix aggregate
+`cancelled` and skipped the whole release. Intel returns via the Tart
+cross-build golden VM lane. Until then: "Intel is validated" (the Tier-3 gate,
+now advisory) still holds, but "Intel is shippable via release-cli" does NOT —
+Intel-Mac users source-build. See `docs/guides/intel-support.md` →
 "Shipped Intel artifacts".
 
 ## The five lint classes (and why they are scoped the way they are)
