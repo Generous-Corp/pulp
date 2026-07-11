@@ -60,8 +60,11 @@ inline void field_glow(canvas::Canvas& c, float x, float y, float radius,
 // near-monochrome silver with rare cool/warm accents (not fat glowing dots).
 // `flow` 0..1 sets streak length (motion); `density` scales tracer count;
 // `energy` 0..1 brightens. Additive. Caller fills the ground first.
+// mode: 0 = Tracers (dotted streaks), 1 = Currents (streamlines), 2 = Field
+// (continuous density fog). Same coherent flow underneath — three renderings.
 inline void draw_acoustic_field(canvas::Canvas& c, float x, float y, float w, float h,
-                                double t_seconds, float flow, int density, float energy) {
+                                double t_seconds, float flow, int density, float energy,
+                                int mode = 0) {
     const float cx = x + w * 0.5f, cy = y + h * 0.5f;
     const float fx = w * 0.54f, fy = h * 0.54f;  // fill most of the frame
     const float bright = 0.55f + 0.45f * energy;
@@ -71,10 +74,29 @@ inline void draw_acoustic_field(canvas::Canvas& c, float x, float y, float w, fl
     detail::field_glow(c, cx, cy, std::fmax(fx, fy) * 1.25f, FieldRGB{34, 42, 56}, 16);
 
     const int d = density < 1 ? 1 : density;
-    const int tracers = 220 + d * 10;                // dense; grows with density
-    const int steps = 30;
+    constexpr int steps = 30;
     const float slen = 0.006f + 0.032f * flow;       // streak length grows with Flow
 
+    if (mode == 2) {
+        // FIELD — continuous illuminated density fog (no streaks, no cores).
+        const int n = 160 + d * 7;
+        for (int k = 0; k < n; ++k) {
+            float sx = field_hash(k * 3 + 1) * 2.3f - 1.15f;
+            float sy = field_hash(k * 7 + 2) * 2.1f - 1.05f;
+            for (int s = 0; s < 14; ++s) {
+                float vx, vy; field_flow_at(sx, sy, t_seconds, vx, vy);
+                sx += vx * slen; sy += vy * slen;
+            }
+            const float gain = bright * (0.6f + 0.6f * field_hash(k * 23 + 8));
+            const float rad = 24.0f + 26.0f * field_hash(k * 5 + 3);
+            detail::field_glow(c, cx + sx * fx, cy + sy * fy, rad,
+                               FieldRGB{222, 230, 240}, static_cast<int>(9.0f * gain));
+        }
+        c.set_blend_mode(canvas::Canvas::BlendMode::normal);
+        return;
+    }
+
+    const int tracers = 220 + d * 10;                // dense; grows with density
     for (int k = 0; k < tracers; ++k) {
         // Seed across the whole frame (slightly beyond so streaks enter/leave).
         float sx = field_hash(k * 3 + 1) * 2.3f - 1.15f;
@@ -86,7 +108,23 @@ inline void draw_acoustic_field(canvas::Canvas& c, float x, float y, float w, fl
                                          : FieldRGB{234, 240, 248};
         const float gain = bright * (0.85f + 0.7f * field_hash(k * 23 + 8));
 
-        // Integrate a dotted streak through the flow; faint tail → bright head.
+        if (mode == 1) {
+            // CURRENTS — smooth streamline (stroke the integrated path).
+            canvas::Canvas::Point2D pts[steps + 1];
+            pts[0] = {cx + sx * fx, cy + sy * fy};
+            for (int s = 0; s < steps; ++s) {
+                float vx, vy; field_flow_at(sx, sy, t_seconds, vx, vy);
+                sx += vx * slen; sy += vy * slen;
+                pts[s + 1] = {cx + sx * fx, cy + sy * fy};
+            }
+            c.set_stroke_color(canvas::Color::rgba8(col.r, col.g, col.b,
+                static_cast<std::uint8_t>(std::min(255.0f, 55.0f * gain))));
+            c.set_line_width(1.1f);
+            c.stroke_path(pts, steps + 1);
+            continue;
+        }
+
+        // TRACERS — dotted streak; faint tail → bright head.
         for (int s = 0; s < steps; ++s) {
             float vx, vy; field_flow_at(sx, sy, t_seconds, vx, vy);
             sx += vx * slen; sy += vy * slen;
@@ -97,7 +135,6 @@ inline void draw_acoustic_field(canvas::Canvas& c, float x, float y, float w, fl
                                                   static_cast<std::uint8_t>(a > 255 ? 255 : a)));
             c.fill_circle(cx + sx * fx, cy + sy * fy, rad);
         }
-        // Bright head — a hot point that makes the streak read.
         const float hx = cx + sx * fx, hy = cy + sy * fy;
         c.set_fill_color(canvas::Color::rgba8(col.r, col.g, col.b,
                                               static_cast<std::uint8_t>(std::min(255.0f, 120.0f * gain))));

@@ -113,7 +113,8 @@ public:
         const int field_density = std::min(96,
             std::max(1, static_cast<int>(std::lround(store_.get_value(kRooms)))));
         pulp::superconvolver::draw_acoustic_field(
-            canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy());
+            canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy(),
+            viz_mode_);
         canvas.set_blend_mode(cv::Canvas::BlendMode::normal);  // ensure chrome is not additive
 
         // Wordmark — tracked caps, bone (#BCC2CC); info glyph after it.
@@ -129,22 +130,60 @@ public:
 
         const auto g = proc_.gpu_status();
 
-        // Engine + emitters — top-right, quiet.
+        // Engine chip — top-right, tap to toggle CPU/GPU (concept tokens). Dot is
+        // cyan for GPU / amber for CPU; the emitter cap is 128 (GPU) / 20 (CPU).
         {
+            (void)g;
             const float rx = local_bounds().width - 24 * s;
-            const char* eng = g.active ? "GPU" : "CPU";
+            const bool gpu = store_.get_value(kEngine) >= 0.5f;
+            const char* eng = gpu ? "GPU" : "CPU";
+            const int cap = gpu ? 128 : 20;
+            const int now = static_cast<int>(std::lround(store_.get_value(kRooms)));
             canvas.set_fill_color(tk_text());
             canvas.set_font("Inter", 12.0f * s);
             right_text(canvas, eng, rx, 29 * s, 12.0f * s);
-            canvas.set_fill_color(cv::Color::rgba8(175, 206, 220));  // cyan status dot
-            canvas.fill_circle(rx - static_cast<float>(std::string(eng).size()) * 12.0f * s * 0.52f - 9 * s,
-                               25 * s, 3.5f * s);
-            char eb[48];
-            std::snprintf(eb, sizeof eb, "%d / 128 emitters",
-                          static_cast<int>(std::lround(store_.get_value(kRooms))));
+            // Status dot with a soft glow.
+            const float dotx = rx - static_cast<float>(std::string(eng).size()) * 12.0f * s * 0.52f - 10 * s;
+            const cv::Color dot = gpu ? cv::Color::rgba8(175, 206, 220)   // --cyan
+                                      : cv::Color::rgba8(231, 199, 154);  // --amber
+            canvas.set_blend_mode(cv::Canvas::BlendMode::lighter);
+            canvas.set_fill_color(dot.with_alpha(0.5f));
+            canvas.fill_circle(dotx, 25 * s, 6.0f * s);
+            canvas.set_blend_mode(cv::Canvas::BlendMode::normal);
+            canvas.set_fill_color(dot);
+            canvas.fill_circle(dotx, 25 * s, 3.0f * s);
+            // "N / CAP emitters": numbers bone, "emitters" dim.
             canvas.set_fill_color(tk_label());
             canvas.set_font("Inter", 10.0f * s);
-            right_text(canvas, eb, rx, 45 * s, 10.0f * s);
+            right_text(canvas, "emitters", rx, 45 * s, 10.0f * s);
+            char nb[24]; std::snprintf(nb, sizeof nb, "%d / %d", now, cap);
+            canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));  // --bone
+            right_text(canvas, nb, rx - 8.0f * 10.0f * s * 0.52f - 4 * s, 45 * s, 10.0f * s);
+        }
+
+        // Mode tabs (Tracers / Currents / Field) — segmented pill, concept tokens.
+        {
+            static const char* kTabs[3] = {"Tracers", "Currents", "Field"};
+            const float pad = 3 * s;
+            const float cx0 = tabs_[0].x - pad, cy0 = tabs_[0].y - pad;
+            const float cw = (tabs_[2].x + tabs_[2].width) - tabs_[0].x + 2 * pad;
+            const float chh = tabs_[0].height + 2 * pad;
+            canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 8));
+            canvas.fill_rounded_rect(cx0, cy0, cw, chh, 9 * s);
+            canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 26));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(cx0, cy0, cw, chh, 9 * s);
+            for (int i = 0; i < 3; ++i) {
+                const auto& r = tabs_[static_cast<size_t>(i)];
+                const bool on = (viz_mode_ == i);
+                if (on) {
+                    canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 26));
+                    canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 7 * s);
+                }
+                canvas.set_fill_color(on ? tk_text() : tk_label());
+                canvas.set_font("Inter", 10.5f * s);
+                centered_text(canvas, kTabs[i], r.x + r.width * 0.5f, r.y + r.height * 0.64f, 10.5f * s);
+            }
         }
 
         // Source chip (bordered) — the loaded IR, first-class and clickable to
@@ -253,7 +292,7 @@ private:
 
         // Five equal columns: four sliders (Mix/Size/Gain/Rooms) + a toggle
         // column holding the Engine (CPU/GPU) toggle stacked over Bypass.
-        const float cw = controls_.width / 6.0f;
+        const float cw = controls_.width / 5.0f;  // five sliders fill the row
         const float label_h = 20 * s, value_h = 22 * s, pad = 10 * s;
         for (int i = 0; i < 5; ++i) {
             Slider& sl = sliders_[static_cast<size_t>(i)];
@@ -265,15 +304,14 @@ private:
             sl.track = {sl.cell.x + hpad, sl.cell.y + sl.cell.height * 0.54f,
                         cw - 2 * hpad, th};
         }
-        // Toggle column (the fifth): Engine on top, Bypass below.
-        const float bw = std::min(cw - 20 * s, 120 * s);
-        const float bh = std::min(controls_.height * 0.34f, 48 * s);
-        const float bx = controls_.x + 5 * cw + (cw - bw) * 0.5f;
-        const float gap = 12 * s;
-        const float stack_h = 2 * bh + gap;
-        const float y0 = controls_.y + (controls_.height - stack_h) * 0.5f;
-        engine_ = {bx, y0, bw, bh};
-        bypass_ = {bx, y0 + bh + gap, bw, bh};
+        // Engine is the top-right chip (tap to toggle CPU/GPU); Bypass lives in
+        // the host chrome. Mode tabs are three equal cells centered at the top.
+        engine_ = {W - 200 * s, 12 * s, 176 * s, 44 * s};
+        bypass_ = {};
+        const float tab_w = 92 * s, tab_h = 26 * s, tab_y = 16 * s;
+        for (int i = 0; i < 3; ++i)
+            tabs_[static_cast<size_t>(i)] =
+                {W * 0.5f - tab_w * 1.5f + i * tab_w, tab_y, tab_w, tab_h};
         layout_dirty_ = false;
     }
 
@@ -539,11 +577,8 @@ private:
             canvas.fill_circle(hx, hy, hr - 2.0f * s);
         }
 
-        // Engine + Bypass — quiet monochrome chips.
-        const bool gpu_req = store_.get_value(kEngine) >= 0.5f;
-        paint_chip(canvas, engine_, gpu_req, gpu_req ? "GPU" : "CPU");
-        const bool bypassed = store_.get_value(kBypass) >= 0.5f;
-        paint_chip(canvas, bypass_, bypassed, bypassed ? "BYPASSED" : "BYPASS");
+        // No bottom Engine/Bypass chips: Engine toggles via the top-right chip,
+        // and Bypass is provided by the host plugin chrome.
     }
 
     void paint_chip(cv::Canvas& canvas, const vw::Rect& r, bool on,
@@ -570,11 +605,10 @@ private:
             open_ir_chooser();
             return;
         }
-        if (in_rect(p, bypass_)) {
-            toggle_param(kBypass);
-            return;
+        for (int i = 0; i < 3; ++i) {
+            if (in_rect(p, tabs_[static_cast<size_t>(i)])) { viz_mode_ = i; return; }
         }
-        if (in_rect(p, engine_)) {
+        if (in_rect(p, engine_)) {   // top-right chip toggles CPU/GPU
             toggle_param(kEngine);
             return;
         }
@@ -652,6 +686,8 @@ private:
     bool pointer_down_ = false;
     bool layout_dirty_ = true;
     double field_time_ = 0.0;   // advances per repaint → the field's animation clock
+    int viz_mode_ = 0;          // 0 Tracers · 1 Currents · 2 Field
+    vw::Rect tabs_[3]{};        // mode-tab hit rects
 };
 
 } // namespace pulp::examples
