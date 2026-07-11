@@ -129,4 +129,73 @@ CheckResult expect_finite_and_unclipped(const ScenarioResult& result,
                     assert_not_clipped(result.metrics, ceiling_dbfs)});
 }
 
+// ── Reported-latency proof ──────────────────────────────────────────────
+
+namespace {
+
+// Overlay the report facts RenderScenario collected onto evidence produced by a
+// pure evaluator (which sees only buffers and cannot know them), then let a
+// mid-render change demote the verdict.
+LatencyEvidence finish(LatencyEvidence evidence, const LatencyObservation& facts) {
+    evidence.report_status = facts.report_status;
+    evidence.reported_samples = facts.reported_samples;
+    evidence.final_reported_samples = facts.final_reported_samples;
+    evidence.report_observation = facts.report_observation;
+    evidence.observation_mode = facts.observation_mode;
+    return apply_report_observation(evidence);
+}
+
+// The value to check the audio against. A report that is unsupported or failed
+// is not a number — passing zero here would turn "we could not ask" into "it
+// claims zero", which is exactly the conflation this contract exists to prevent.
+// An INVALID (negative) report is passed through on purpose, so the evaluator
+// can name it as the reason rather than silently dropping it.
+std::optional<int> checkable_report(const LatencyObservation& facts) {
+    switch (facts.report_status) {
+        case LatencyReportStatus::available:
+        case LatencyReportStatus::invalid:
+            return facts.reported_samples;
+        case LatencyReportStatus::unsupported:
+        case LatencyReportStatus::query_failed:
+            return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+CheckResult to_check(const LatencyEvidence& evidence) {
+    CheckResult check;
+    check.passed =
+        evidence.contract_outcome == LatencyContractOutcome::satisfied;
+    check.message = latency_evidence_summary(evidence);
+    return check;
+}
+
+} // namespace
+
+LatencyEvidence evaluate_reported_latency(const ScenarioResult& result,
+                                          const DelayedNullOptions& options) {
+    return finish(measure_delayed_passthrough(result.input, result.output,
+                                              checkable_report(result.latency),
+                                              options),
+                  result.latency);
+}
+
+LatencyEvidence evaluate_reported_latency_from_marker(
+    const ScenarioResult& result, const MarkerOffsetOptions& options) {
+    return finish(measure_marker_offset(result.input, result.output,
+                                        checkable_report(result.latency),
+                                        options),
+                  result.latency);
+}
+
+CheckResult expect_reported_latency(const ScenarioResult& result,
+                                    const DelayedNullOptions& options) {
+    return to_check(evaluate_reported_latency(result, options));
+}
+
+CheckResult expect_reported_latency_from_marker(
+    const ScenarioResult& result, const MarkerOffsetOptions& options) {
+    return to_check(evaluate_reported_latency_from_marker(result, options));
+}
+
 } // namespace pulp::test::audio

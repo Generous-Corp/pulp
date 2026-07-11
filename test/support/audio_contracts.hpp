@@ -115,4 +115,58 @@ CheckResult expect_tone(const ScenarioResult& result, const ToneClaim& claim);
 CheckResult expect_finite_and_unclipped(const ScenarioResult& result,
                                         double ceiling_dbfs = -0.1);
 
+// ── Reported-latency proof ──────────────────────────────────────────────
+// A processor with nonzero latency tells the host a number, and the host
+// slides the whole track by it. Nothing checks the number. These contracts
+// do: they measure the delay actually present in the rendered audio and
+// compare it against what the processor reported.
+//
+// Both are opt-in and neither ever guesses. A stimulus that cannot pin the
+// delay down — silence, a pure sine, an output that is not a delayed copy
+// of the input — comes back inconclusive, and an inconclusive contract that
+// was ASKED for is a failure, not a pass. See latency_evidence.hpp.
+
+/// Prove the reported latency against a delayed-null comparison — the
+/// strongest policy, because it checks every sample rather than one onset.
+///
+/// Requires the processor to be in a declared identity / bypass / fully-dry
+/// mode for this render, so its output genuinely IS its input, delayed. Feed
+/// it a BROADBAND stimulus (an impulse or noise). A tone whose period is a
+/// whole number of samples cannot pin a delay down — delays one period apart
+/// produce bit-identical output — and is rejected as ambiguous by design
+/// rather than producing a confident wrong answer.
+///
+/// @code
+/// auto scenario = RenderScenario(create_my_lookahead_limiter)
+///     .name("limiter.latency")
+///     .input(make_noise(2, 48000, /*seed=*/1))
+///     .set_param(kBypass, 1.0f);          // declared identity mode
+/// AudioContract contract("limiter reports its true latency", scenario);
+/// contract.expect(expect_reported_latency(contract.result()));
+/// CHECK(contract.verify().passed);
+/// @endcode
+CheckResult expect_reported_latency(const ScenarioResult& result,
+                                    const DelayedNullOptions& options = {});
+
+/// Prove the reported latency from a single input marker — for processors
+/// that reshape the signal (a convolver, a filter) where nulling against the
+/// input is meaningless. Weaker than the delayed-null policy: it checks one
+/// onset, not every sample.
+///
+/// The stimulus must contain exactly one onset, at `options.input_marker_frame`.
+/// Declare any delay the processor adds for reasons other than latency (leading
+/// silence in a known IR, a known attack) in `options.intrinsic_response_offset`.
+CheckResult expect_reported_latency_from_marker(const ScenarioResult& result,
+                                                const MarkerOffsetOptions& options);
+
+/// The structured evidence behind `expect_reported_latency()` — the report
+/// facts, the measurement, and the verdict — for a caller that wants to inspect
+/// or serialize it rather than assert on a pass/fail.
+LatencyEvidence evaluate_reported_latency(const ScenarioResult& result,
+                                          const DelayedNullOptions& options = {});
+
+/// @copydoc evaluate_reported_latency
+LatencyEvidence evaluate_reported_latency_from_marker(
+    const ScenarioResult& result, const MarkerOffsetOptions& options);
+
 } // namespace pulp::test::audio

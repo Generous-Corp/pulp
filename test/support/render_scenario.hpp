@@ -39,27 +39,54 @@
 
 #include <pulp/audio/analysis/audio_metrics.hpp>
 #include <pulp/audio/analysis/audio_assertions.hpp>
+#include <pulp/audio/analysis/latency_evidence.hpp>
 
 #include "audio_signal_generators.hpp"
 
 #include <pulp/format/headless.hpp>
 
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
 namespace pulp::test::audio {
 
+/// Latency facts collected from the processor while a scenario rendered.
+///
+/// These are FACTS, not a verdict — the report at the start and end of the
+/// render, and whether it held still throughout. Turning them into a proof is
+/// the job of `expect_reported_latency()`, which pairs them with a measurement
+/// of the audio itself. `RenderScenario` collects them on every render (they
+/// cost one virtual call per block), so a contract can ask for the proof after
+/// the fact without re-rendering.
+struct LatencyObservation {
+    LatencyReportStatus report_status = LatencyReportStatus::unsupported;
+    std::optional<int> reported_samples;
+    std::optional<int> final_reported_samples;
+    LatencyReportObservation report_observation =
+        LatencyReportObservation::unobservable;
+    LatencyObservationMode observation_mode = LatencyObservationMode::none;
+};
+
 /// Output of RenderScenario::render(): the rendered audio, its analyzed
-/// metrics, and provenance. `write_metrics_artifact(result.metrics,
-/// result.scenario)` serializes it in one call.
+/// metrics, the input it was rendered from, the processor's latency facts, and
+/// provenance. `write_metrics_artifact(result.metrics, result.scenario)`
+/// serializes the metrics in one call.
 struct ScenarioResult {
     std::string scenario;  ///< "name sr=... block=... in=... out=... frames=..."
     double sample_rate = 0.0;
     int block_size = 0;
     pulp::audio::Buffer<float> output;
     BufferMetrics metrics;
+    /// The stimulus actually rendered, at full render length (a fixed input
+    /// shorter than the render is zero-padded). Kept so a latency contract can
+    /// null the output against it without the caller having to reconstruct the
+    /// padding, and so a generated stimulus is comparable at all.
+    pulp::audio::Buffer<float> input;
+    /// What the processor reported about its own latency during this render.
+    LatencyObservation latency;
 };
 
 /// Builder for one deterministic offline render. Copyable — the matrix

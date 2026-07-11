@@ -77,6 +77,30 @@ ScenarioResult RenderScenario::render() const {
     for (const auto& [id, value] : initial_params_)
         host.state().set_value(id, value);
 
+    // Latency facts. A direct Processor exposes both a value and a
+    // changed-flag, so we can poll the value at every block boundary AND catch
+    // a change that reverts before the next poll would see it. In a headless
+    // render there is no format adapter to consume the flag, so consuming it
+    // here steals nothing.
+    LatencyObservation latency;
+    auto* processor = host.processor();
+    if (processor != nullptr) {
+        latency.observation_mode = LatencyObservationMode::processor_flag_and_poll;
+        const int initial = processor->latency_samples();
+        if (initial < 0) {
+            // A negative delay is not a value we can carry as a fact.
+            latency.report_status = LatencyReportStatus::invalid;
+            latency.reported_samples = initial;
+        } else {
+            latency.report_status = LatencyReportStatus::available;
+            latency.reported_samples = initial;
+        }
+        latency.report_observation = LatencyReportObservation::stable;
+        // Clear any flag raised during prepare(): we are measuring stability
+        // across the render, not across construction.
+        (void)processor->consume_latency_changed_flag();
+    }
+
     // Stable-sort scripts by frame so equal-frame events keep script order.
     auto midi_script = midi_script_;
     std::stable_sort(midi_script.begin(), midi_script.end(),
@@ -125,8 +149,24 @@ ScenarioResult RenderScenario::render() const {
         pulp::audio::BufferView<float> out_view(out_ptrs.data(),
                                                 out_ptrs.size(), n);
         host.process(out_view, in_view, midi_in, midi_out);
+
+        // Watch the report at every block boundary. Either signal — a moved
+        // value or a raised flag — means the latency is not fixed. The flag
+        // matters on its own: a processor that changes its latency and changes
+        // it back between two polls would otherwise look stable, and a
+        // fixed-latency proof must not stand over a moving report.
+        if (processor != nullptr) {
+            const int now = processor->latency_samples();
+            const bool flagged = processor->consume_latency_changed_flag();
+            if (flagged ||
+                (latency.reported_samples && now != *latency.reported_samples))
+                latency.report_observation = LatencyReportObservation::changed;
+            latency.final_reported_samples = now;
+        }
     }
 
+    result.latency = latency;
+    result.input = input;
     result.metrics = analyze(result.output, sample_rate_);
     std::ostringstream provenance;
     provenance << name_ << " sr=" << sample_rate_ << " block=" << block_size_
