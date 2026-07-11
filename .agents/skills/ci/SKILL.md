@@ -117,8 +117,16 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    it fails only if THIS PR grows a frozen hotspot past its reference size (main
    growing the same file is NOT your fault and passes). If you must grow one,
    make the change net-neutral (extract to a sibling file) or add
-   `Hotspot-Grow: <path> reason="..."` — do NOT bump `max_loc` in
-   `hotspot_size_guard.json` (that counter no longer gates and editing it races).
+   `Hotspot-Grow: <path> reason="..."` — do NOT *raise* `max_loc` in
+   `hotspot_size_guard.json` (that counter no longer gates growth, and raising it
+   races with other PRs).
+2b3. **Hotspot *shrink*?** The ceiling is a one-way ratchet, and this is the
+   opposite instruction to 2b2. If your PR makes a frozen hotspot **smaller**, the
+   gate fails with `missing hotspot ceiling reduction(s)` until you *lower*
+   `max_loc` to the new LOC. Lowering is safe (it cannot race a concurrent PR into
+   a false pass); raising is not. So: never raise it, always lower it when you
+   shrink. A PR that both grows one hotspot and shrinks another needs a
+   `Hotspot-Grow:` trailer *and* a `max_loc` reduction.
 2c. **Is a RED check even your fault?** Before investigating a failing check,
    run `python3 tools/scripts/pr_check_triage.py <PR#>` — it labels each red
    check REQUIRED vs advisory and PRE-EXISTING (also red / not run on main —

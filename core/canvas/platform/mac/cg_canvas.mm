@@ -483,7 +483,7 @@ void CoreGraphicsCanvas::stroke_line(float x0, float y0, float x1, float y1) {
 }
 
 void CoreGraphicsCanvas::stroke_path(const Point2D* points, size_t count) {
-    if (count < 2) return;
+    if (points == nullptr || count < 2) return;
     CGContextSetShouldAntialias(ctx_, true);
     CGContextSetAllowsAntialiasing(ctx_, true);
     CGContextBeginPath(ctx_);
@@ -501,7 +501,7 @@ void CoreGraphicsCanvas::stroke_path(const Point2D* points, size_t count) {
 }
 
 void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
-    if (count < 3) return;
+    if (points == nullptr || count < 3) return;
     CGContextSetShouldAntialias(ctx_, true);
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, points[0].x, points[0].y);
