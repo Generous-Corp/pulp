@@ -996,6 +996,29 @@ jobs:
             --target PulpGain_VST3 PulpGain_AU PulpGain_CLAP
         shell: bash
 
+      - name: Re-sign universal bundles ad-hoc (lipo invalidates the signature)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Building universal (arm64;x86_64) plus the lipo'd fat wgpu-native dylib
+          # (PulpWgpuUniversal.cmake) leaves the bundle's Mach-O code signatures
+          # invalid — codesign --verify fails and an unsigned arm64 slice is
+          # SIGKILL'd at load. Ad-hoc re-sign each bundle inside-out (embedded
+          # dylibs first, then the bundle) before the BLOCKING assert below —
+          # the same recipe package_cli.py uses after its rpath rewrites.
+          for bundle in \
+              "${BUILD_DIR}/AU/PulpGain.component" \
+              "${BUILD_DIR}/VST3/PulpGain.vst3" \
+              "${BUILD_DIR}/CLAP/PulpGain.clap"; do
+            [ -e "$bundle" ] || continue
+            echo "re-signing: $bundle"
+            find "$bundle" -type f -name '*.dylib' -print0 2>/dev/null \
+              | xargs -0 -r -I{} codesign --force --sign - "{}" || true
+            codesign --force --deep --sign - "$bundle"
+            codesign --verify --strict "$bundle" \
+              || { echo "::error::ad-hoc re-sign did not verify: $bundle"; exit 1; }
+          done
+
       - name: Assert bundle architectures + signature (BLOCKING)
         shell: bash
         run: |
