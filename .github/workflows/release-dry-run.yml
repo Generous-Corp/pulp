@@ -64,7 +64,12 @@ jobs:
         shell: bash
 
       - name: Build CLI
-        run: cmake --build build --config Release --target pulp pulp-cpp pulp-mcp
+        # Build everything with no --target, exactly as release-cli.yml does.
+        # The Rust CLI's CMake target is `pulp-rust-cli` (it only *outputs* a
+        # binary named `pulp`), so `--target pulp` fails with "No rule to make
+        # target 'pulp'" — a latent bug in this dry-run since the Phase-8
+        # rename. Building all also produces pulp-cpp + pulp-mcp for packaging.
+        run: cmake --build build --config Release
         shell: bash
 
       - name: Package CLI (dry-run — no upload)
