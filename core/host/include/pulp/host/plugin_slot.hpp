@@ -180,22 +180,13 @@ public:
     virtual int tail_samples() const = 0;
 
     /// Whether `latency_samples()` is a fact from the plugin, or a placeholder.
-    ///
-    /// `latency_samples()` returns an int either way, so on its own it cannot
-    /// distinguish "this plugin reports zero latency" from "this backend has no
-    /// way to ask." Those are completely different claims, and collapsing them
-    /// turns an unanswered question into a confident zero — which a latency
-    /// proof would then happily certify. Ask this before trusting the number.
-    ///
-    /// Defaults to `Available`: the CLAP, VST3, and AU backends all read a real
-    /// value from the plugin. The LV2 backend overrides it, because Pulp's
-    /// hosted LV2 slot cannot currently read the plugin's latency port.
+    /// See `latency_query()`, which is declared at the end of the class so the
+    /// vtable stays append-only.
     enum class LatencyQuery {
         Available,    ///< The value is the plugin's own report. Zero means zero.
         Unsupported,  ///< This backend cannot ask. The value is meaningless.
         QueryFailed,  ///< The backend asked and the plugin errored.
     };
-    virtual LatencyQuery latency_query() const { return LatencyQuery::Available; }
 
     // Extensions visitor.
     //
@@ -265,6 +256,20 @@ public:
                          const format::ProcessContext& /*transport*/) {
         process(audio, midi_in, midi_out, param_events, num_samples);
     }
+
+    /// Whether `latency_samples()` is a fact from the plugin, or a placeholder.
+    /// Appended last to preserve the existing PluginSlot virtual ordering.
+    ///
+    /// `latency_samples()` returns an int either way, so on its own it cannot
+    /// distinguish "this plugin reports zero latency" from "this backend has no
+    /// way to ask." Those are completely different claims, and collapsing them
+    /// turns an unanswered question into a confident zero — which a latency
+    /// proof would then happily certify. Ask this before trusting the number.
+    ///
+    /// Defaults to `Available`: the CLAP, VST3, and AU backends all read a real
+    /// value from the plugin. The LV2 backend overrides it, because Pulp's
+    /// hosted LV2 slot cannot currently read the plugin's latency port.
+    virtual LatencyQuery latency_query() const { return LatencyQuery::Available; }
 };
 
 } // namespace pulp::host
