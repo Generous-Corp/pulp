@@ -96,6 +96,7 @@ enum SuperConvolverParams : state::ParamID {
     kBypass  = 4,
     kEngine  = 5,  // 0 = CPU (default), 1 = GPU
     kRooms   = 6,  // GPU multi-room reverb: # of distinct IRs in one GPU batch
+    kFlow    = 7,  // 0 = static field; >0 = per-block moving pans (living field)
 };
 
 // Live wet-output magnitude spectrum (dB), published lock-free from the audio
@@ -190,6 +191,12 @@ public:
         // single-IR GPU path. No effect when Engine=CPU.
         store.add_parameter({.id = kRooms, .name = "Rooms", .unit = "",
                              .range = {1.0f, 256.0f, 16.0f, 1.0f}});
+        // Flow: 0 = static rooms (an ordinary reverb); >0 makes each room's pan
+        // drift on its own rate per block — the batch becomes a MOVING field, the
+        // irreducible time-varying case where the GPU wins. GPU multi-room only;
+        // default 0 leaves existing presets and the current sound unchanged.
+        store.add_parameter({.id = kFlow, .name = "Flow", .unit = "%",
+                             .range = {0.0f, 100.0f, 0.0f, 0.1f}});
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -552,6 +559,9 @@ public:
                                 std::memory_order_relaxed);
         requested_rooms_.store(requested_rooms_value(), std::memory_order_relaxed);
         requested_size_.store(current_size(), std::memory_order_relaxed);
+        requested_flow_.store(
+            static_cast<float>(state().get_value(kFlow)) * 0.01f,
+            std::memory_order_relaxed);
 
         // Fill the per-channel wet output FIFO via the active engine. Both engines
         // re-block the host stream into fixed kInternalBlock chunks; only the
@@ -815,6 +825,8 @@ private:
 
         auto fresh = build_gpu_stack(rooms, base_ir);
         gpu_built_rooms_ = rooms > 1 ? rooms : 1;
+        if (fresh && fresh->multi)
+            fresh->multi->set_flow(requested_flow_.load(std::memory_order_relaxed));
         if (!fresh) {
             runtime::log_info(
                 "SuperConvolver: GPU stack rebuild failed (rooms={}); "
@@ -1019,6 +1031,7 @@ private:
             const float want_size = requested_size_.load(std::memory_order_relaxed);
             const int want_engine = requested_engine_.load(std::memory_order_relaxed);
             const int want_rooms = requested_rooms_.load(std::memory_order_relaxed);
+            const float want_flow = requested_flow_.load(std::memory_order_relaxed);
             const std::uint32_t want_gen = ir_path_gen_.load(std::memory_order_acquire);
 
             // Rebuild the base IR whenever its source changed: a new file loaded
@@ -1040,6 +1053,13 @@ private:
             // GPU stack management (only meaningful when a device exists).
             if (device_available_)
                 service_gpu_stack(want_engine, want_rooms);
+
+            // Push the live Flow depth into the multi-room node (worker owns the
+            // stack, so this deref is safe here). The node applies it on its next
+            // block on the transport worker — ~5 ms latency on Flow *changes*,
+            // inaudible for a slow pan LFO.
+            if (current_stack_ && current_stack_->multi)
+                current_stack_->multi->set_flow(want_flow);
 
             for (auto& sw : swapper_) sw.drain_old();
             // Free any retired stack the audio thread has since released (a stack
@@ -1136,6 +1156,7 @@ private:
     std::atomic<float> requested_size_{-1.0f};
     std::atomic<int> requested_engine_{0};          // 0 = CPU, 1 = GPU
     std::atomic<int> requested_rooms_{1};
+    std::atomic<float> requested_flow_{0.0f};        // 0..1 moving-field depth
     int gpu_built_rooms_ = 0;          // worker-thread-local (current_stack_ config)
 
     // IR source. The path is opaque, persisted state (set on the UI/main thread,

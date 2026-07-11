@@ -1,11 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/flow_pans.hpp>
 #include <pulp/render/gpu_compute.hpp>
 
 namespace pulp::gpu_audio {
@@ -65,8 +67,22 @@ public:
 
     /// Per-room constant-power pan gains (linear), available after prepare().
     /// Exposed so a reference/golden can reproduce the exact stereo combination.
+    /// These are the STATIC (Flow=0) pans; with Flow>0 the live per-block pans
+    /// drift around them (see set_flow).
     const std::vector<float>& pan_l() const { return pan_l_; }
     const std::vector<float>& pan_r() const { return pan_r_; }
+
+    /// Flow: 0 = static field (bit-for-bit the pan_l()/pan_r() layout); >0 makes
+    /// each room's pan drift per block on its own rate, turning the reverb into a
+    /// moving, irreducible field. Thread-safe (atomic); call from any thread —
+    /// the transport worker applies it on the next block. `spread` shapes the
+    /// wander depth. Both clamped to [0,1].
+    void set_flow(float depth, float spread = 1.0f) noexcept {
+        flow_depth_.store(depth < 0.f ? 0.f : depth > 1.f ? 1.f : depth,
+                          std::memory_order_relaxed);
+        flow_spread_.store(spread < 0.f ? 0.f : spread > 1.f ? 1.f : spread,
+                           std::memory_order_relaxed);
+    }
 
     /// Convolve one mono input block against all rooms and write the panned
     /// stereo result (out_l / out_r, each `n` samples). RT-UNSAFE (GPU readback);
@@ -92,6 +108,17 @@ private:
     std::vector<float> out_lr_;     // 2*fft_size: L block then R block (readback)
     std::vector<float> carry_l_;    // overlap-add accumulator, fft_size
     std::vector<float> carry_r_;
+
+    // Flow (time-varying pans). flow_depth_/flow_spread_ are set from any thread
+    // (atomic); base_theta_ + pan_norm_ are the prepared static layout the drift
+    // orbits; block_counter_ advances on the transport worker (owns the phase).
+    std::atomic<float> flow_depth_{0.0f};
+    std::atomic<float> flow_spread_{1.0f};
+    std::vector<float> base_theta_;   // per-room base azimuth, from prepare()
+    std::vector<float> pan_l_live_;   // per-block drifting pans (Flow>0 only)
+    std::vector<float> pan_r_live_;
+    float pan_norm_ = 1.0f;           // 1/sqrt(num_ir)
+    std::uint64_t block_counter_ = 0;
 
     bool prepared_ = false;
 };

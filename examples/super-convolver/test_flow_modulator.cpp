@@ -4,12 +4,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "flow_modulator.hpp"
+#include <pulp/gpu_audio/flow_pans.hpp>
 
 #include <cmath>
 #include <vector>
 
-using namespace pulp::superconvolver;
+using namespace pulp::gpu_audio;
 using Catch::Matchers::WithinAbs;
 
 namespace {

@@ -49,13 +49,16 @@ bool GpuMultiConvolver::prepare() {
     // by 1/sqrt(num_ir) so summing decorrelated rooms keeps a sane level.
     pan_l_.assign(num_ir_, 0.0f);
     pan_r_.assign(num_ir_, 0.0f);
-    const float norm = 1.0f / std::sqrt(static_cast<float>(num_ir_));
+    base_theta_.assign(num_ir_, 0.0f);
+    pan_l_live_.assign(num_ir_, 0.0f);
+    pan_r_live_.assign(num_ir_, 0.0f);
+    pan_norm_ = 1.0f / std::sqrt(static_cast<float>(num_ir_));
+    block_counter_ = 0;
     for (uint32_t k = 0; k < num_ir_; ++k) {
-        const float t = (num_ir_ == 1) ? 0.5f
-                                       : static_cast<float>(k) / static_cast<float>(num_ir_ - 1);
-        const float theta = t * 1.57079632679f;  // 0..pi/2
-        pan_l_[k] = std::cos(theta) * norm;
-        pan_r_[k] = std::sin(theta) * norm;
+        const float theta = flow_base_azimuth(k, num_ir_);  // 0..pi/2, even spread
+        base_theta_[k] = theta;
+        pan_l_[k] = std::cos(theta) * pan_norm_;
+        pan_r_[k] = std::sin(theta) * pan_norm_;
     }
 
     gpu_ = render::GpuCompute::create();
@@ -99,7 +102,24 @@ bool GpuMultiConvolver::convolve_stereo(const float* mono_in, float* out_l,
     std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
     for (uint32_t i = 0; i < n; ++i) in_pad_[2u * i] = mono_in[i];
 
-    if (!gpu_->multi_convolve(in_pad_.data(), pan_l_.data(), pan_r_.data(),
+    // Flow: at depth 0 use the static prepared pans verbatim (bit-identical to
+    // before); above 0 drift each room's pan this block. block_counter_ advances
+    // on this (transport-worker) thread, so it owns the modulation phase.
+    const float depth = flow_depth_.load(std::memory_order_relaxed);
+    const float* pl = pan_l_.data();
+    const float* pr = pan_r_.data();
+    if (depth > 0.0f && num_ir_ > 0 && sample_rate_ > 0) {
+        const double t = static_cast<double>(block_counter_) *
+                         static_cast<double>(block_) / sample_rate_;
+        flow_pans_from_base(base_theta_.data(), num_ir_, depth,
+                            flow_spread_.load(std::memory_order_relaxed), t,
+                            pan_norm_, pan_l_live_.data(), pan_r_live_.data());
+        pl = pan_l_live_.data();
+        pr = pan_r_live_.data();
+    }
+    ++block_counter_;
+
+    if (!gpu_->multi_convolve(in_pad_.data(), pl, pr,
                               out_lr_.data(), fft_size_, num_ir_)) {
         return false;
     }
