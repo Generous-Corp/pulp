@@ -1,25 +1,11 @@
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 
+#include <pulp/gpu_audio/detail/gpu_ola.hpp>
+
 #include <algorithm>
 #include <utility>
 
 namespace pulp::gpu_audio {
-
-namespace {
-
-void load_cpu_fallback(std::vector<signal::Convolver>& fallback,
-                       uint32_t channels,
-                       const std::vector<float>& ir,
-                       uint32_t block) {
-    fallback.clear();
-    fallback.resize(channels);
-    for (uint32_t ch = 0; ch < channels; ++ch) {
-        fallback[ch].load_ir(ir.data(), static_cast<int>(ir.size()),
-                             static_cast<int>(block));
-    }
-}
-
-}  // namespace
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
@@ -33,12 +19,12 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     d.output_channels = channels_;
     d.block_size = block_;
     d.sample_rate = sample_rate_;
-    // 2 blocks of worker headroom for the GPU round-trip, and CpuFallback so a
-    // miss is filled by the (RT-safe) CPU convolver — seamless, never a dry
-    // glitch. The node has a real CPU fallback, so this is the right default:
-    // the GPU contributes when it keeps up, the CPU covers it transparently
-    // otherwise, and the plugin always produces correct audio.
-    d.latency_blocks = 2;
+    // kLatencyBlocks of worker headroom for the GPU round-trip, and CpuFallback so
+    // a miss is filled by the continuously-fed, latency-aligned CPU convolver —
+    // seamless, never a dry glitch. The node has a real CPU fallback, so this is
+    // the right default: the GPU contributes when it keeps up, the CPU covers it
+    // transparently otherwise, and the plugin always produces correct audio.
+    d.latency_blocks = kLatencyBlocks;
     d.miss_policy = MissPolicy::CpuFallback;
     d.supports_cpu_fallback = true;
     return d;
@@ -60,9 +46,9 @@ bool GpuConvolver::prepare() {
     ir_spec_.assign(cplx, 0.0f);
     carry_.assign(channels_, std::vector<float>(fft_size_, 0.0f));
 
-    // CPU fallback path (RT-safe after load_ir).
-    load_cpu_fallback(fallback_, channels_, ir_, block_);
-    load_cpu_fallback(worker_fallback_, channels_, ir_, block_);
+    // CPU fallback path (RT-safe after load): the continuously-fed RT miss
+    // fallback + latency-alignment delay ring, and the no-GPU worker fallback.
+    init_fallback();
 
     // GPU path: build the IR spectrum once. If no GPU device, the node still
     // prepares and the worker path uses the CPU fallback.
@@ -94,7 +80,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         return;
     }
     if (!gpu_) {
-        process_cpu_fallback_with(worker_fallback_, input, output, n);
+        render_worker_fallback(input, output, n);
         return;
     }
 
@@ -121,46 +107,12 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
     }
 
     for (uint32_t ch = 0; ch < channels_; ++ch) {
-        float* y = output.channel_ptr(ch);
-        const float* t = time_.data() + static_cast<std::size_t>(ch) * cplx;
-
-        // Overlap-add accumulator: add this block's full result, emit the first
-        // n samples, shift the carry left by n.
-        std::vector<float>& c = carry_[ch];
-        for (uint32_t i = 0; i < fft_size_; ++i) c[i] += t[2u * i];
-        for (uint32_t i = 0; i < n; ++i) y[i] = c[i];
-        for (uint32_t i = 0; i + n < fft_size_; ++i) c[i] = c[i + n];
-        for (uint32_t i = fft_size_ - n; i < fft_size_; ++i) c[i] = 0.0f;
-    }
-}
-
-void GpuConvolver::process_cpu_fallback(const audio::BufferView<const float>& input,
-                                        audio::BufferView<float>& output,
-                                        uint32_t n) noexcept {
-    process_cpu_fallback_with(fallback_, input, output, n);
-}
-
-void GpuConvolver::process_cpu_fallback_with(std::vector<signal::Convolver>& fallback,
-                                             const audio::BufferView<const float>& input,
-                                             audio::BufferView<float>& output,
-                                             uint32_t n) noexcept {
-    // Degraded path (note: signal::Convolver has a one-block streaming latency,
-    // so it is NOT sample-aligned with the GPU path — fine as a fallback, not
-    // for live A/B-switching with the GPU output). Take full-buffer ownership:
-    // clear every output channel first so nothing stale leaks on extra channels
-    // or an unprepared call.
-    const uint32_t out_ch = static_cast<uint32_t>(output.num_channels());
-    for (uint32_t ch = 0; ch < out_ch; ++ch) {
-        float* y = output.channel_ptr(ch);
-        for (uint32_t i = 0; i < n; ++i) y[i] = 0.0f;
-    }
-    if (!prepared_) return;
-
-    const uint32_t ch_count = channels_ < out_ch ? channels_ : out_ch;
-    for (uint32_t ch = 0; ch < ch_count && ch < fallback.size(); ++ch) {
-        if (ch >= input.num_channels()) continue;  // leave cleared
-        fallback[ch].process(input.channel_ptr(ch), output.channel_ptr(ch),
-                             static_cast<int>(n));
+        // Guarded overlap-add: add this block's result, emit the first n, shift
+        // the carry left by n. A non-finite readback resets the carry and emits
+        // silence for this block instead of poisoning the channel forever.
+        detail::overlap_add_block(carry_[ch].data(),
+                                  time_.data() + static_cast<std::size_t>(ch) * cplx,
+                                  /*src_stride=*/2, output.channel_ptr(ch), fft_size_, n);
     }
 }
 
