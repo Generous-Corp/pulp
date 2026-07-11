@@ -4,7 +4,7 @@ macOS is Pulp's primary development platform. This guide covers signing, notariz
 
 ## Requirements
 
-- macOS 13+ on Apple Silicon (ARM64). Intel x86_64 is **not supported** — Rosetta 2 translates x86_64 → ARM64 on Apple Silicon, not the reverse, so Intel Macs cannot run Pulp's ARM64 release binaries. Intel users must build from source via `./setup.sh`, and no lane of Pulp's CI / release pipeline / development targets that configuration
+- macOS 13.3+ on Apple Silicon (ARM64) or Intel (x86_64). Apple Silicon is the primary development platform; Intel is supported for the CLI and SDK via native `darwin-x64` release builds (see [Architectures](#architectures)). The floor is 13.3 (not 13.0) because Apple's libc++ gates `std::to_chars(float)` — reached via `std::format` in Pulp's logging — at 13.3; it is arch-independent and pinned by `tools/cmake/PulpMinOs.cmake`.
 - Xcode 15+ command-line tools
 - CMake 3.24+
 - C++20 compiler (Apple Clang 15+)
@@ -122,17 +122,39 @@ auval -v aumi MyPl Mnfr
 
 ## Architectures
 
-Pulp officially supports **Apple Silicon (ARM64) only** on macOS. Released
-binaries (`pulp-darwin-arm64.tar.gz`, `pulp-sdk-darwin-arm64.tar.gz`) target
-ARM64. Intel Macs cannot run these binaries (Rosetta 2 translates x86_64 →
-ARM64, not the reverse) and `tools/install/install.sh` declines to install
-on x86_64 hosts without building from source.
+Pulp supports both **Apple Silicon (ARM64)** and **Intel (x86_64)** on macOS.
+Apple Silicon is the primary platform; Intel is a supported, natively-built
+second architecture.
 
-Building a universal (arm64+x86_64) plugin from source is possible in
-principle via `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"`, but this is an
-**unsupported source-build experiment** — Pulp's CI lanes, release pipeline,
-and ongoing development assume Apple Silicon. Don't expect parity with the
-ARM64 build.
+The release pipeline publishes per-architecture binaries for the CLI and SDK:
+
+| Architecture | CLI | SDK |
+|--------------|-----|-----|
+| Apple Silicon | `pulp-darwin-arm64.tar.gz` | `pulp-sdk-darwin-arm64.tar.gz` |
+| Intel | `pulp-darwin-x64.tar.gz` | `pulp-sdk-darwin-x64.tar.gz` |
+
+`tools/install/install.sh` detects the host architecture (`uname -m`) and
+installs the matching artifact automatically. The Intel builds are compiled
+**natively** on a GitHub-hosted `macos-15-intel` runner (not cross-compiled),
+so wgpu-native and the GPU render path use genuine x86_64 binaries, and the
+release smoke lane runs each artifact natively. Both target macOS 13.3+
+(the arch-independent floor pinned by `tools/cmake/PulpMinOs.cmake`).
+
+Plugins you build with Pulp can target Intel or a universal binary from source
+via `-DCMAKE_OSX_ARCHITECTURES=x86_64` or `"arm64;x86_64"` — the Skia, Dawn,
+and wgpu-native dependencies all publish x86_64 and universal slices.
+
+The Intel CLI/SDK leg is native-built and native-smoked, but it is **advisory**
+in the release pipeline: because the `macos-15-intel` runner is occasionally
+flaky, a failed Intel leg does not block the arm64/linux/windows release — that
+release simply ships without the Intel slice, and the installer falls back to a
+source build on Intel. So most releases carry the Intel artifacts, but a given
+release may not. The broader Intel plugin/GPU story is **experimental** because
+two things can't be exercised in CI: Metal on a real Intel/AMD discrete GPU, and
+plugin-in-DAW hosting on real Intel hardware. Pulp verifies Intel portability on
+a tiered cadence rather than on every PR — see
+[macOS Intel (x86_64) support](intel-support.md) for the full tiering and the
+honest catch/miss list.
 
 ## Sandbox Considerations
 

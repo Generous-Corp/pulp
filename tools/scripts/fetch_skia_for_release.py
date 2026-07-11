@@ -68,7 +68,7 @@ from pathlib import Path
 # Matrix uses `darwin-*` and `windows-*`; manifest uses `mac-*` and `win-*`.
 MATRIX_TO_MANIFEST = {
     "darwin-arm64": "mac-arm64",
-    "darwin-x64": "mac-x64",  # Intel-thin mac slice (G3 macOS universal support)
+    "darwin-x64": "mac-x86_64",  # Intel-thin mac slice (G3 macOS universal support)
     "darwin-universal": "mac-universal",  # fat arm64+x86_64 mac slice (G3)
     "linux-x64": "linux-x64",
     "linux-arm64": "linux-arm64",

@@ -62,7 +62,13 @@ public:
     void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
                  midi::MidiBuffer&, midi::MidiBuffer&,
                  const format::ProcessContext&) override {}
-    format::ViewSize view_size() const override { return {kW, kH, 320, 240, 1024, 768}; }
+    // A fixed-aspect design editor: declaring aspect_ratio (> 0) opts into the
+    // aspect-lock resize contract (clap_entry.hpp `free_resize = resizable &&
+    // aspect_ratio <= 0`), matching what view_size_from_design derives for a
+    // real design-imported plugin. Without it a resizable editor drags freely.
+    format::ViewSize view_size() const override {
+        return {kW, kH, 320, 240, 1024, 768, static_cast<double>(kW) / static_cast<double>(kH)};
+    }
     std::unique_ptr<view::View> create_view() override {
         auto root = std::make_unique<view::View>();
         root->set_requires_gpu_host(true);

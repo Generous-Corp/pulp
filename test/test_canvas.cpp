@@ -937,6 +937,40 @@ TEST_CASE("SkiaCanvas::set_transform composes onto captured paint baseline",
     REQUIRE(m.getSkewY() == Catch::Approx(0.0f));
 }
 
+TEST_CASE("SkiaCanvas set_fill_color clears a previously-set gradient",
+          "[canvas][skia]") {
+    // Canvas2D fillStyle semantics: assigning a solid color replaces a gradient.
+    // Without clearing has_gradient_, current_fill_paint() kept applying the last
+    // gradient shader to every subsequent fill/text — drawing them off-shader
+    // (invisible). Regression guard for the acoustic-field editor backdrop.
+    SkImageInfo info = SkImageInfo::Make(8, 8, kN32_SkColorType, kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    sk_canvas->clear(SK_ColorBLACK);
+
+    pulp::canvas::SkiaCanvas canvas(sk_canvas);
+    // Set a radial gradient and fill — establishes the persistent shader.
+    const pulp::canvas::Color grad[2] = {pulp::canvas::Color::rgba8(0, 255, 0, 255),
+                                         pulp::canvas::Color::rgba8(0, 255, 0, 0)};
+    const float pos[2] = {0.0f, 1.0f};
+    canvas.set_fill_gradient_radial(4, 4, 3, grad, pos, 2);
+    canvas.fill_rect(0, 0, 8, 8);
+    // Now request a solid red fill over everything.
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(255, 0, 0, 255));
+    canvas.fill_rect(0, 0, 8, 8);
+
+    // A corner pixel (outside the gradient's radius) must be solid red — proof
+    // the gradient no longer governs the fill.
+    std::uint8_t rgba[4] = {0, 0, 0, 0};
+    SkImageInfo one = SkImageInfo::Make(1, 1, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
+    REQUIRE(surface->readPixels(one, rgba, 4, 0, 0));
+    REQUIRE(rgba[0] > 200);  // R high
+    REQUIRE(rgba[1] < 60);   // G low (not the green gradient)
+    REQUIRE(rgba[2] < 60);   // B low
+}
+
 TEST_CASE("SkiaCanvas::set_transform is spec-literal without baseline capture",
           "[canvas][skia][issue-897]") {
     // Direct SkiaCanvas users (e.g. screenshot host) that do NOT go through

@@ -20,6 +20,7 @@
 // the audio thread's per-block parameter echo.
 
 #include "super_convolver.hpp"
+#include "field_renderer.hpp"
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
@@ -93,57 +94,214 @@ public:
 
     void on_resized() override { layout(); }
 
+    /// Show the info card (same overlay the header "i" glyph toggles). For
+    /// headless capture / tests; a click anywhere dismisses it at runtime.
+    void open_info() { show_info_ = true; }
+
+    /// Show a transient message (for headless capture / tests).
+    void test_toast(const std::string& m) { show_toast(m); }
+
     void paint(cv::Canvas& canvas) override {
         if (layout_dirty_) layout();
         const float W = local_bounds().width, H = local_bounds().height;
         const float s = scale();
 
-        canvas.set_fill_color(pal_.bg);
+        // Deep ground for the field to glow against.
+        canvas.set_fill_color(cv::Color::rgba8(7, 9, 14));
         canvas.fill_rect(0, 0, W, H);
 
-        canvas.set_fill_color(pal_.text);
-        canvas.set_font("Inter", 21.0f * s);
-        canvas.fill_text("SuperConvolver", 20 * s, 32 * s);
-        // Subtitle carries the live engine status so it's always clear whether
-        // the AUDIO is on the GPU (the UI is GPU-rendered either way). When the
-        // GPU engine is active it names the backend; otherwise it says CPU.
-        std::string audio_status = "Audio: CPU";
-        // One coherent snapshot per repaint (single lock) so blocks, misses and
-        // cost can't disagree across the line.
+        // The living acoustic field — the plugin's hero, drawn as the backdrop.
+        // Header, status, and controls float on top. Emitter count = Rooms
+        // (capped for a smooth 60fps), motion = Flow, brightness = live energy.
+        read_spectrum();
+        field_time_ += 1.0 / 60.0;
+        const float field_flow = std::clamp(
+            static_cast<float>(store_.get_value(kFlow)) * 0.01f, 0.0f, 1.0f);
+        const int field_density = std::min(96,
+            std::max(1, static_cast<int>(std::lround(store_.get_value(kRooms)))));
+        pulp::superconvolver::draw_acoustic_field(
+            canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy(),
+            viz_mode_);
+        canvas.set_blend_mode(cv::Canvas::BlendMode::normal);  // ensure chrome is not additive
+
+        // Wordmark — tracked caps in bone #BCC2CC; info glyph after it.
+        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));   // --bone
+        canvas.set_font("Inter", 11.0f * s);
+        const float mk_end = tracked_text(canvas, "SuperConvolver", 24 * s, 30 * s, 11.0f * s, 0.24f);
+        // Info glyph — a 19px circle with a dim border and a centered "i", set
+        // off from the wordmark by a clear gap (concept .info token).
+        const float ix = mk_end + 18 * s, iy = 25.5f * s, ir = 9.5f * s;
+        info_ = {ix - ir - 4 * s, iy - ir - 4 * s, 2 * (ir + 4 * s), 2 * (ir + 4 * s)};
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, show_info_ ? 150 : 56));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_circle(ix, iy, ir);
+        canvas.set_fill_color(tk_label());
+        canvas.set_font("Inter", 11.0f * s);
+        centered_text(canvas, "i", ix, iy + 4.0f * s, 11.0f * s);
+
         const auto g = proc_.gpu_status();
-        if (g.active) {
-            audio_status = g.backend.empty() ? "Audio: GPU"
-                                             : ("Audio: GPU · " + g.backend);
-            // Live proof the GPU is carrying the audio: room count + blocks the
-            // GPU worker produced vs blocks it missed (CPU/silence-filled).
-            if (g.multi)
-                audio_status += " · " + std::to_string(g.rooms) + " rooms";
-            audio_status += " · " + std::to_string(g.blocks) + " blocks";
-            if (g.misses > 0)
-                audio_status += ", " + std::to_string(g.misses) + " misses";
-            // Live GPU cost + headroom: the measured average wall-clock per block
-            // (round-trip included), and what fraction of this device's real-time
-            // budget that uses — so the lower the %, the more rooms the GPU could
-            // still take. Shown once the worker has produced its first block.
-            if (g.blocks > 0 && g.avg_us > 0.0) {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), " · %.0f µs/block (%.0f%% of real-time)",
-                              g.avg_us, g.rt_percent);
-                audio_status += buf;
+
+        // Engine chip — top-right, tap to toggle CPU/GPU (concept tokens). Dot is
+        // cyan for GPU / amber for CPU; the emitter cap is 128 (GPU) / 20 (CPU).
+        {
+            (void)g;
+            const float rx = local_bounds().width - 24 * s;
+            const bool gpu = store_.get_value(kEngine) >= 0.5f;
+            const char* eng = gpu ? "GPU" : "CPU";
+            const int cap = gpu ? 128 : 20;
+            const int now = static_cast<int>(std::lround(store_.get_value(kRooms)));
+            canvas.set_fill_color(tk_text());
+            canvas.set_font("Inter", 12.0f * s);
+            right_text(canvas, eng, rx, 29 * s, 12.0f * s);
+            // Status dot with a soft glow.
+            const float dotx = rx - static_cast<float>(std::string(eng).size()) * 12.0f * s * 0.52f - 10 * s;
+            const cv::Color dot = gpu ? cv::Color::rgba8(175, 206, 220)   // --cyan
+                                      : cv::Color::rgba8(231, 199, 154);  // --amber
+            canvas.set_blend_mode(cv::Canvas::BlendMode::lighter);
+            canvas.set_fill_color(dot.with_alpha(0.5f));
+            canvas.fill_circle(dotx, 25 * s, 6.0f * s);
+            canvas.set_blend_mode(cv::Canvas::BlendMode::normal);
+            canvas.set_fill_color(dot);
+            canvas.fill_circle(dotx, 25 * s, 3.0f * s);
+            // "N / CAP emitters": numbers bone, "emitters" dim.
+            canvas.set_fill_color(tk_label());
+            canvas.set_font("Inter", 10.0f * s);
+            right_text(canvas, "emitters", rx, 45 * s, 10.0f * s);
+            char nb[24]; std::snprintf(nb, sizeof nb, "%d / %d", now, cap);
+            canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));  // --bone
+            right_text(canvas, nb, rx - 8.0f * 10.0f * s * 0.52f - 4 * s, 45 * s, 10.0f * s);
+        }
+
+        // Mode tabs (Tracers / Currents / Field) — segmented pill, concept tokens.
+        {
+            static const char* kTabs[3] = {"Tracers", "Currents", "Field"};
+            const float pad = 3 * s;
+            const float cx0 = tabs_[0].x - pad, cy0 = tabs_[0].y - pad;
+            const float cw = (tabs_[2].x + tabs_[2].width) - tabs_[0].x + 2 * pad;
+            const float chh = tabs_[0].height + 2 * pad;
+            canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 8));
+            canvas.fill_rounded_rect(cx0, cy0, cw, chh, 9 * s);
+            canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 26));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(cx0, cy0, cw, chh, 9 * s);
+            for (int i = 0; i < 3; ++i) {
+                const auto& r = tabs_[static_cast<size_t>(i)];
+                const bool on = (viz_mode_ == i);
+                if (on) {
+                    canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 26));
+                    canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 7 * s);
+                }
+                canvas.set_fill_color(on ? tk_text() : tk_label());
+                canvas.set_font("Inter", 10.5f * s);
+                centered_text(canvas, kTabs[i], r.x + r.width * 0.5f, r.y + r.height * 0.64f, 10.5f * s);
             }
         }
-        canvas.set_fill_color(pal_.text_dim);
-        canvas.set_font("Inter", 12.0f * s);
-        canvas.fill_text("Convolution reverb · GPU-rendered UI · " + audio_status,
-                         20 * s, 50 * s);
 
-        paint_load_ir(canvas);
-        read_spectrum();
-        paint_ir(canvas);
-        paint_spectrum(canvas);
+        // Source chip (bordered) — the loaded IR, first-class and clickable to
+        // load. Rect matches load_ir_btn_ (set in layout) for hit-testing.
+        {
+            const std::string p = proc_.ir_path();
+            const std::string name = p.empty() ? std::string("Synthetic room")
+                : pulp::superconvolver::clean_source_name(p);
+            const auto& r = load_ir_btn_;
+            canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 8));
+            canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, 10 * s);
+            canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 26));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(r.x, r.y, r.width, r.height, 10 * s);
+            canvas.set_fill_color(cv::Color::rgba8(232, 240, 248));  // white orb
+            canvas.fill_circle(r.x + 18 * s, r.y + r.height * 0.5f, 7 * s);
+            canvas.set_fill_color(tk_text());
+            canvas.set_font("Inter", 12.0f * s);
+            // A long loaded-IR name (e.g. "DELUXE REVERB OXFORD BIG 48") would
+            // overflow the chip — truncate to the available width with an ellipsis.
+            const float name_max = r.width - 34 * s - 12 * s;
+            canvas.fill_text(fit_text(canvas, name, name_max),
+                             r.x + 34 * s, r.y + r.height * 0.46f);
+            canvas.set_fill_color(cv::Color::rgba8(71, 76, 85));  // faint
+            canvas.set_font("Inter", 8.5f * s);
+            tracked_text(canvas, "Source", r.x + 34 * s, r.y + r.height * 0.82f, 8.5f * s, 0.2f);
+        }
+
         paint_controls(canvas);
 
-        request_repaint();  // self-driven loop for the live panels
+        if (field_time_ < toast_until_ && !toast_msg_.empty()) draw_toast(canvas);
+        if (show_info_) draw_info_overlay(canvas);
+
+        request_repaint();  // self-driven loop for the live field
+    }
+
+    // Show a brief centered message (e.g. a refused engine switch). field_time_ is
+    // the repaint clock, so it fades on its own without a timer.
+    void show_toast(std::string msg) { toast_msg_ = std::move(msg); toast_until_ = field_time_ + 2.6; }
+
+    void draw_toast(cv::Canvas& canvas) {
+        const float s = scale();
+        const float W = local_bounds().width;
+        const float remaining = static_cast<float>(toast_until_ - field_time_);
+        const float a = std::clamp(remaining / 0.4f, 0.0f, 1.0f);  // fade out the last 0.4s
+        canvas.set_font("Inter", 11.5f * s);
+        const float tw = canvas.measure_text(toast_msg_);
+        const float padx = 16 * s, h = 30 * s;
+        const float bw = tw + 2 * padx, bx = (W - bw) * 0.5f, by = 96 * s;
+        canvas.set_fill_color(cv::Color::rgba8(9, 11, 15).with_alpha(0.94f * a));
+        canvas.fill_rounded_rect(bx, by, bw, h, h * 0.5f);
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 40).with_alpha(a));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(bx, by, bw, h, h * 0.5f);
+        canvas.set_fill_color(cv::Color::rgba8(237, 239, 243).with_alpha(a));
+        canvas.fill_text(toast_msg_, bx + padx, by + h * 0.64f);
+    }
+
+    // Info card — a compact "what is this" overlay toggled by the header "i"
+    // glyph. Concept tokens: near-black scrim, hairline border, paper/dim text.
+    // Any click dismisses it (see pointer_press).
+    void draw_info_overlay(cv::Canvas& canvas) {
+        const float s = scale();
+        const float W = local_bounds().width, H = local_bounds().height;
+        // Dim the field so the card reads.
+        canvas.set_fill_color(cv::Color::rgba8(4, 5, 8, 190));
+        canvas.fill_rect(0, 0, W, H);
+        const float cw = std::min(W - 80 * s, 460 * s), chh = 250 * s;
+        const float cx = (W - cw) * 0.5f, cy = (H - chh) * 0.5f;
+        canvas.set_fill_color(cv::Color::rgba8(9, 11, 15, 245));
+        canvas.fill_rounded_rect(cx, cy, cw, chh, 14 * s);
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 34));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(cx, cy, cw, chh, 14 * s);
+
+        const float tx = cx + 28 * s;
+        float ty = cy + 40 * s;
+        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));  // --bone
+        tracked_text(canvas, "SuperConvolver", tx, ty, 14.0f * s, 0.16f);
+        ty += 30 * s;
+        // {label, description}: label in paper, description in dim. A blank label
+        // is a full-width intro sentence in dim.
+        static const std::pair<const char*, const char*> kRows[] = {
+            {"", "A convolution reverb that convolves your signal against a"},
+            {"", "cloud of decorrelated rooms in one batched GPU pass."},
+            {"Source", "load an impulse response, or use the synthetic room"},
+            {"Rooms", "how many decorrelated rooms fill the stereo field"},
+            {"Flow", "drift each room's pan into a living, moving field"},
+            {"Size", "length of the synthetic room's tail"},
+            {"CPU / GPU", "tap the badge to switch engines"},
+        };
+        for (const auto& [label, desc] : kRows) {
+            canvas.set_font("Inter", 11.5f * s);
+            if (label[0] != '\0') {
+                canvas.set_fill_color(cv::Color::rgba8(237, 239, 243));  // --paper
+                canvas.fill_text(label, tx, ty);
+                canvas.set_fill_color(cv::Color::rgba8(120, 126, 136));  // --dim
+                canvas.fill_text(desc, tx + 92 * s, ty);
+            } else {
+                canvas.set_fill_color(cv::Color::rgba8(150, 156, 166));
+                canvas.fill_text(desc, tx, ty);
+            }
+            ty += 22 * s;
+        }
+        canvas.set_fill_color(cv::Color::rgba8(120, 126, 136));
+        canvas.set_font("Inter", 10.0f * s);
+        canvas.fill_text("Click anywhere to close", tx, cy + chh - 20 * s);
     }
 
     void on_mouse_event(const vw::MouseEvent& e) override {
@@ -202,7 +360,7 @@ private:
     }
     float scale() const { return std::max(0.5f, local_bounds().height / 560.0f); }
 
-    std::array<Slider, 4>& sliders() { return sliders_; }
+    std::array<Slider, 5>& sliders() { return sliders_; }
 
     void layout() {
         const float W = local_bounds().width, H = local_bounds().height;
@@ -210,9 +368,9 @@ private:
         const float m = 20 * s, top = 64 * s;
         const float avail = H - top - m;
 
-        // Load-IR button, top-right of the header.
-        const float btn_w = 104 * s, btn_h = 26 * s;
-        load_ir_btn_ = {W - m - btn_w, 14 * s, btn_w, btn_h};
+        // The Source chip (top-left, below the wordmark) IS the loader — click it
+        // to open the picker. Rect shared by paint (draw) and pointer (hit-test).
+        load_ir_btn_ = {24 * s, 44 * s, 196 * s, 38 * s};
 
         // Hero IR waveform (largest), then spectrum, then the control strip.
         const float ir_h   = avail * 0.42f;
@@ -225,26 +383,26 @@ private:
 
         // Five equal columns: four sliders (Mix/Size/Gain/Rooms) + a toggle
         // column holding the Engine (CPU/GPU) toggle stacked over Bypass.
-        const float cw = controls_.width / 5.0f;
+        const float cw = controls_.width / 5.0f;  // five sliders fill the row
         const float label_h = 20 * s, value_h = 22 * s, pad = 10 * s;
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             Slider& sl = sliders_[static_cast<size_t>(i)];
             sl.cell = {controls_.x + i * cw, controls_.y, cw, controls_.height};
-            const float tw = std::min(16 * s, cw * 0.22f);
-            const float tx = sl.cell.x + (cw - tw) * 0.5f;
-            const float ty = sl.cell.y + label_h + pad;
-            const float th = sl.cell.height - label_h - value_h - 2 * pad;
-            sl.track = {tx, ty, tw, std::max(20.0f, th)};
+            (void)label_h; (void)value_h; (void)pad;
+            // Horizontal track: full cell width (minus padding), thin, vertically
+            // centered — the whole row of controls sits on one horizon.
+            const float hpad = 14 * s, th = 4 * s;
+            sl.track = {sl.cell.x + hpad, sl.cell.y + sl.cell.height * 0.54f,
+                        cw - 2 * hpad, th};
         }
-        // Toggle column (the fifth): Engine on top, Bypass below.
-        const float bw = std::min(cw - 20 * s, 120 * s);
-        const float bh = std::min(controls_.height * 0.34f, 48 * s);
-        const float bx = controls_.x + 4 * cw + (cw - bw) * 0.5f;
-        const float gap = 12 * s;
-        const float stack_h = 2 * bh + gap;
-        const float y0 = controls_.y + (controls_.height - stack_h) * 0.5f;
-        engine_ = {bx, y0, bw, bh};
-        bypass_ = {bx, y0 + bh + gap, bw, bh};
+        // Engine is the top-right chip (tap to toggle CPU/GPU); Bypass lives in
+        // the host chrome. Mode tabs are three equal cells centered at the top.
+        engine_ = {W - 200 * s, 12 * s, 176 * s, 44 * s};
+        bypass_ = {};
+        const float tab_w = 92 * s, tab_h = 26 * s, tab_y = 16 * s;
+        for (int i = 0; i < 3; ++i)
+            tabs_[static_cast<size_t>(i)] =
+                {W * 0.5f - tab_w * 1.5f + i * tab_w, tab_y, tab_w, tab_h};
         layout_dirty_ = false;
     }
 
@@ -263,6 +421,12 @@ private:
         const int idx = std::clamp(static_cast<int>(frac * (kSpectrumBins - 1)),
                                    0, kSpectrumBins - 1);
         return spec_display_[static_cast<size_t>(idx)];
+    }
+    // Overall live level (a few bands averaged) → the field's brightness/swell.
+    float overall_energy() const {
+        float e = 0.0f; int n = 0;
+        for (float f = 0.08f; f < 0.95f; f += 0.13f) { e += spectrum_energy_at(f); ++n; }
+        return n ? std::clamp(e / static_cast<float>(n), 0.0f, 1.0f) : 0.0f;
     }
 
     // ── Load-IR button + current source name (header) ──
@@ -416,63 +580,132 @@ private:
     }
 
     // ── controls (vertical sliders + bypass toggle) ──
+    // Center text within a cell width by estimating glyph advance (~0.52em for
+    // Inter) — the canvas has no measure API here, so this keeps labels visually
+    // centered without one.
+    void centered_text(cv::Canvas& canvas, const std::string& txt, float cx,
+                       float baseline, float px) {
+        const float w = static_cast<float>(txt.size()) * px * 0.52f;
+        canvas.fill_text(txt, cx - w * 0.5f, baseline);
+    }
+
+    // Truncate `txt` with a trailing ellipsis so it fits `max_w` at the canvas's
+    // current font (uses the real shaper via measure_text). Returns the input
+    // unchanged when it already fits.
+    static std::string fit_text(cv::Canvas& canvas, const std::string& txt, float max_w) {
+        if (max_w <= 0.0f || canvas.measure_text(txt) <= max_w) return txt;
+        std::string s = txt;
+        while (!s.empty() && canvas.measure_text(s + "\xE2\x80\xA6") > max_w) s.pop_back();
+        while (!s.empty() && s.back() == ' ') s.pop_back();
+        return s + "\xE2\x80\xA6";  // UTF-8 ellipsis
+    }
+
+    // Design tokens from the concept (near-monochrome, Leica scientific).
+    static cv::Color tk_text()  { return cv::Color::rgba8(237, 239, 243); }  // values
+    static cv::Color tk_label() { return cv::Color::rgba8(120, 126, 136); }  // DENSITY/FLOW
+    static std::string upper(const std::string& in) {
+        std::string o = in;
+        for (char& ch : o) if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+        return o;
+    }
+    // Right-align text ending at `right` (glyph-advance estimate, ~0.52em).
+    void right_text(cv::Canvas& canvas, const std::string& txt, float right,
+                    float baseline, float px) {
+        canvas.fill_text(txt, right - static_cast<float>(txt.size()) * px * 0.52f, baseline);
+    }
+    // Draw uppercase text with letter-spacing (the concept's tracked caps), char
+    // by char since the canvas has no tracking API. `em` = spacing in ems.
+    float tracked_text(cv::Canvas& canvas, const std::string& in, float x,
+                       float baseline, float px, float em) {
+        const std::string t = upper(in);
+        const float gap = px * em;
+        for (char ch : t) {
+            const char one[2] = {ch, 0};
+            canvas.fill_text(one, x, baseline);
+            // Per-glyph advance (uppercase Inter, em) so tracking reads even.
+            float w;
+            switch (ch) {
+                case 'I': case 'J': w = 0.30f; break;
+                case 'L': w = 0.52f; break;
+                case 'S': case 'E': case 'F': case 'P': case 'T': case 'Z': w = 0.60f; break;
+                case 'R': case 'B': case 'K': case 'V': case 'A': case 'X': case 'Y': w = 0.66f; break;
+                case 'C': case 'D': case 'H': case 'N': case 'U': case 'O':
+                case 'Q': case 'G': w = 0.73f; break;
+                case 'M': case 'W': w = 0.88f; break;
+                case ' ': w = 0.40f; break;
+                default:  w = 0.64f; break;
+            }
+            x += px * w + gap;
+        }
+        return x;  // end x
+    }
+
     void paint_controls(cv::Canvas& canvas) {
         const float s = scale();
-        canvas.set_fill_color(pal_.surface);
-        canvas.fill_rounded_rect(controls_.x, controls_.y, controls_.width,
-                                 controls_.height, 8 * s);
+        const auto& c = controls_;
+        // No cell — the sliders sit directly on the field (concept style). A soft
+        // linear fade at the bottom keeps labels legible over bright modes without
+        // the banding a stepped fill would show (esp. in Field mode).
+        {
+            const float top = c.y - 26 * s, bot = c.bottom();
+            const cv::Color gcols[2] = {cv::Color::rgba8(5, 6, 9, 0),
+                                        cv::Color::rgba8(4, 5, 8, 224)};
+            const float gpos[2] = {0.0f, 1.0f};
+            canvas.set_fill_gradient_linear(c.x, top, c.x, bot, gcols, gpos, 2);
+            canvas.fill_rect(c.x, top, c.width, bot - top);
+            canvas.set_fill_color(cv::Color::rgba8(0, 0, 0, 0));  // clears the gradient
+        }
 
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             const Slider& sl = sliders_[static_cast<size_t>(i)];
             const auto& t = sl.track;
-            // Label (top of cell), centered.
-            canvas.set_fill_color(pal_.text_dim);
-            canvas.set_font("Inter", 12.0f * s);
-            canvas.fill_text(sl.label, sl.cell.x + (sl.cell.width - 36 * s) * 0.5f,
-                             sl.cell.y + 16 * s);
-
-            const float frac = value_frac(i);
-            const float handle_y = t.bottom() - frac * t.height;
-            // Track + fill below the handle.
-            canvas.set_fill_color(pal_.slider_track);
-            canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.width * 0.5f);
-            canvas.set_fill_color(pal_.slider_fill);
-            canvas.fill_rounded_rect(t.x, handle_y, t.width, t.bottom() - handle_y,
-                                     t.width * 0.5f);
-            // Handle.
             const bool active = (active_slider_ == i);
-            canvas.set_fill_color(active ? pal_.accent_warm : pal_.accent);
-            canvas.fill_circle(t.x + t.width * 0.5f, handle_y, t.width * 0.9f);
 
-            // Value readout (bottom of cell), centered.
+            // Label at the track's left — uppercase, tracked, dim #787E88; value
+            // right-aligned at the track's right — bold #EDEFF3. Concept tokens.
+            canvas.set_fill_color(tk_label());
+            canvas.set_font("Inter", 9.5f * s);
+            tracked_text(canvas, sl.label, t.x, t.y - 12 * s, 9.5f * s, 0.26f);
             char buf[40];
             std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
                           static_cast<double>(slider_value(i)),
                           sl.unit[0] ? " " : "", sl.unit);
-            canvas.set_fill_color(pal_.text);
-            canvas.set_font("Inter", 13.0f * s);
-            canvas.fill_text(buf, sl.cell.x + (sl.cell.width - 44 * s) * 0.5f,
-                             sl.cell.bottom() - 8 * s);
+            canvas.set_fill_color(tk_text());
+            canvas.set_font("Inter", 14.0f * s);
+            right_text(canvas, buf, t.x + t.width, t.y - 11 * s, 14.0f * s);
+
+            const float frac = value_frac(i);
+            const float hx = t.x + frac * t.width;
+            const float hy = t.y + t.height * 0.5f;
+            // Track rgba(220,228,238,.12); fill rgba(236,239,243,.62).
+            canvas.set_fill_color(cv::Color::rgba8(220, 228, 238, 31));
+            canvas.fill_rounded_rect(t.x, t.y, t.width, t.height, t.height * 0.5f);
+            canvas.set_fill_color(cv::Color::rgba8(236, 239, 243, 158));
+            canvas.fill_rounded_rect(t.x, t.y, std::max(0.0f, hx - t.x), t.height, t.height * 0.5f);
+            // Thumb: 14px #EDEFF3 dot with a 2px dark border in #050607.
+            const float hr = (active ? 8.0f : 7.0f) * s;
+            canvas.set_fill_color(cv::Color::rgba8(5, 6, 7));
+            canvas.fill_circle(hx, hy, hr);
+            canvas.set_fill_color(cv::Color::rgba8(237, 239, 243));
+            canvas.fill_circle(hx, hy, hr - 2.0f * s);
         }
 
-        // Engine toggle (CPU / GPU). Lit (accent) when GPU is requested; the
-        // subtitle reports whether the GPU is actually carrying the audio.
-        const bool gpu_req = store_.get_value(kEngine) >= 0.5f;
-        canvas.set_fill_color(gpu_req ? pal_.accent : pal_.elevated);
-        canvas.fill_rounded_rect(engine_.x, engine_.y, engine_.width, engine_.height, 8 * s);
-        canvas.set_fill_color(gpu_req ? pal_.bg : pal_.text);
-        canvas.set_font("Inter", 14.0f * s);
-        canvas.fill_text(gpu_req ? "● GPU" : "CPU",
-                         engine_.x + 16 * s, engine_.y + engine_.height * 0.62f);
+        // No bottom Engine/Bypass chips: Engine toggles via the top-right chip,
+        // and Bypass is provided by the host plugin chrome.
+    }
 
-        // Bypass toggle.
-        const bool bypassed = store_.get_value(kBypass) >= 0.5f;
-        canvas.set_fill_color(bypassed ? pal_.bypass_on : pal_.elevated);
-        canvas.fill_rounded_rect(bypass_.x, bypass_.y, bypass_.width, bypass_.height, 8 * s);
-        canvas.set_fill_color(bypassed ? pal_.bg : pal_.text);
-        canvas.set_font("Inter", 14.0f * s);
-        canvas.fill_text(bypassed ? "● BYPASSED" : "BYPASS",
-                         bypass_.x + 16 * s, bypass_.y + bypass_.height * 0.62f);
+    void paint_chip(cv::Canvas& canvas, const vw::Rect& r, bool on,
+                    const std::string& label) {
+        const float s = scale();
+        canvas.set_fill_color(on ? cv::Color::rgba8(237, 239, 243, 30)
+                                 : cv::Color::rgba8(237, 239, 243, 12));
+        canvas.fill_rounded_rect(r.x, r.y, r.width, r.height, r.height * 0.5f);
+        canvas.set_stroke_color(cv::Color::rgba8(237, 239, 243, on ? 90 : 36));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(r.x, r.y, r.width, r.height, r.height * 0.5f);
+        canvas.set_fill_color(on ? tk_text() : tk_label());
+        canvas.set_font("Inter", 12.0f * s);
+        centered_text(canvas, label, r.x + r.width * 0.5f, r.y + r.height * 0.62f, 12.0f * s);
     }
 
     // ── interaction ──
@@ -481,19 +714,30 @@ private:
         if (layout_dirty_) layout();
         pointer_down_ = true;
 
+        if (show_info_) { show_info_ = false; return; }  // any click closes the info card
+        if (in_rect(p, info_)) { show_info_ = true; return; }
         if (in_rect(p, load_ir_btn_)) {
             open_ir_chooser();
             return;
         }
-        if (in_rect(p, bypass_)) {
-            toggle_param(kBypass);
+        for (int i = 0; i < 3; ++i) {
+            if (in_rect(p, tabs_[static_cast<size_t>(i)])) { viz_mode_ = i; return; }
+        }
+        if (in_rect(p, engine_)) {   // top-right chip toggles CPU/GPU
+            const bool gpu = store_.get_value(kEngine) >= 0.5f;
+            const int rooms = static_cast<int>(std::lround(store_.get_value(kRooms)));
+            // CPU can't sustain more than kCpuRoomCap rooms. GPU->CPU while Rooms
+            // is above that would silently ignore the extra rooms, so refuse and
+            // say why; CPU->GPU is always fine. (Dragging Rooms past the cap on
+            // CPU auto-switches to GPU — see apply_slider.)
+            if (gpu && rooms > static_cast<int>(kCpuRoomCap)) {
+                show_toast("CPU handles up to 20 rooms — lower Rooms to switch to CPU");
+            } else {
+                toggle_param(kEngine);
+            }
             return;
         }
-        if (in_rect(p, engine_)) {
-            toggle_param(kEngine);
-            return;
-        }
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             if (in_rect(p, sliders_[static_cast<size_t>(i)].cell)) {
                 active_slider_ = i;
                 edit_.begin(sliders_[static_cast<size_t>(i)].id);
@@ -516,10 +760,16 @@ private:
     void apply_slider(vw::Point p) {
         const Slider& sl = sliders_[static_cast<size_t>(active_slider_)];
         const auto& t = sl.track;
-        const float frac = std::clamp((t.bottom() - p.y) / t.height, 0.0f, 1.0f);
+        const float frac = std::clamp((p.x - t.x) / t.width, 0.0f, 1.0f);
         float v = sl.lo + frac * (sl.hi - sl.lo);
         if (sl.snap_int) v = std::round(v);   // Rooms is a whole-step control
         edit_.set(sl.id, v);
+        // Rooms is a GPU-only feature. Once it climbs past what the CPU engine
+        // sustains in real time (kCpuRoomCap), auto-switch to GPU so the extra
+        // rooms are actually heard instead of silently ignored. Fires once on the
+        // crossing (the guard sees Engine already GPU on the next drag tick).
+        if (sl.id == kRooms && v > kCpuRoomCap && store_.get_value(kEngine) < 0.5f)
+            toggle_param(kEngine);
     }
 
     // Begin/set/finish a single-shot 0<->1 toggle as a proper host gesture so the
@@ -555,16 +805,28 @@ private:
     ScPalette pal_ = make_ink_signal_palette();   // resolved from the Ink & Signal preset
 
     vw::Rect ir_{}, spectrum_rect_{}, controls_{}, bypass_{}, engine_{}, load_ir_btn_{};
-    std::array<Slider, 4> sliders_{{
+    std::array<Slider, 5> sliders_{{
         {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
         {kSize,  "Size",   0.05f, 4.0f,  2, "s"},
         {kGain,  "Gain",  -24.0f, 24.0f, 1, "dB"},
-        {kRooms, "Rooms",  1.0f, 256.0f, 0, "", true},
+        {kRooms, "Rooms",  1.0f, 128.0f, 0, "", true},
+        {kFlow,  "Flow",   0.0f, 100.0f, 0, "%"},
     }};
     std::array<float, kSpectrumBins> spec_display_{};
     int active_slider_ = -1;
     bool pointer_down_ = false;
     bool layout_dirty_ = true;
+    double field_time_ = 0.0;   // advances per repaint → the field's animation clock
+    int viz_mode_ = 0;          // 0 Tracers · 1 Currents · 2 Field
+    vw::Rect tabs_[3]{};        // mode-tab hit rects
+    vw::Rect info_{};           // header "i" glyph hit rect (set during paint)
+    bool show_info_ = false;    // info card overlay visible
+    std::string toast_msg_;     // transient centered message (e.g. refused toggle)
+    double toast_until_ = 0.0;  // field_time_ value after which the toast is gone
+
+    // Rooms count the CPU engine is expected to sustain in real time; above it
+    // the editor auto-switches to GPU (matches the "N / 20" CPU cap badge).
+    static constexpr float kCpuRoomCap = 20.0f;
 };
 
 } // namespace pulp::examples

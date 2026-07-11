@@ -275,19 +275,32 @@ jobs:
           path: artifacts/
           retention-days: 30
 
-      - name: Create GitHub Release
+      - name: Attach appcast.xml to the release
         if: startsWith(github.ref, 'refs/tags/')
-        # v1 is too old per actionlint (GH deprecated its runner version);
-        # v2 uses the Node 20 runner and is a drop-in replacement.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # release-cli.yml is the SOLE creator of the GitHub release for this tag
+        # (pulp release hygiene 2026-07-10). This job only ATTACHES the Sparkle
+        # feed (appcast.xml) to that release — it must NOT create/name/draft it,
+        # or the two workflows race and clobber release-cli.yml's title, body,
+        # and draft state (the inconsistent "Pulp CLI vX" vs "vX", draft vs
+        # published, and compare-vs-CHANGELOG footer the owner saw). Wait for the
+        # release to exist (it may be a draft) and upload the feed onto it.
         #
-        # pulp #1737 — only upload appcast.xml to the release page. This
-        # workflow deliberately keeps example plugins out of the release
-        # configuration; if a future release configuration emits plugin .pkg
-        # artifacts, actions/upload-artifact above retains them for debugging,
-        # but they are still not promoted to the user-facing release page. The
-        # SDK + CLI artifacts (pulp-*, pulp-sdk-*) are uploaded by
-        # .github/workflows/release-cli.yml.
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/appcast.xml
-          draft: true
+        # pulp #1737 — only the appcast goes on the release page; example plugin
+        # .pkg artifacts stay in the workflow run (actions/upload-artifact above)
+        # for debugging and are never promoted. The pulp-*/pulp-sdk-* binaries are
+        # uploaded by release-cli.yml.
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          for attempt in $(seq 1 60); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" artifacts/appcast.xml --clobber
+              echo "attached appcast.xml to release $TAG"
+              exit 0
+            fi
+            echo "waiting for release $TAG (created by release-cli.yml)… ($attempt/60)"
+            sleep 10
+          done
+          echo "::error::release $TAG never appeared; release-cli.yml may have failed"
+          exit 1

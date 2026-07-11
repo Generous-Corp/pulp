@@ -6,22 +6,6 @@
 
 namespace pulp::gpu_audio {
 
-namespace {
-
-void load_cpu_fallback(std::vector<signal::Convolver>& fallback,
-                       uint32_t channels,
-                       const std::vector<float>& ir,
-                       uint32_t block) {
-    fallback.clear();
-    fallback.resize(channels);
-    for (uint32_t ch = 0; ch < channels; ++ch) {
-        fallback[ch].load_ir(ir.data(), static_cast<int>(ir.size()),
-                             static_cast<int>(block));
-    }
-}
-
-}  // namespace
-
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
@@ -34,7 +18,7 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     d.output_channels = channels_;
     d.block_size = block_;
     d.sample_rate = sample_rate_;
-    d.latency_blocks = 2;
+    d.latency_blocks = kLatencyBlocks;
     d.miss_policy = MissPolicy::CpuFallback;
     d.supports_cpu_fallback = true;
     return d;
@@ -47,8 +31,9 @@ bool GpuConvolver::prepare() {
     fft_size_ = 1;
     while (fft_size_ < block_ + static_cast<uint32_t>(ir_.size())) fft_size_ <<= 1;
 
-    load_cpu_fallback(fallback_, channels_, ir_, block_);
-    load_cpu_fallback(worker_fallback_, channels_, ir_, block_);
+    // Same continuously-fed fallback + latency-alignment delay ring as the render
+    // build; here it is the ONLY audio path (no GPU device).
+    init_fallback();
 
     gpu_.reset();
     prepared_ = true;
@@ -62,32 +47,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         output.clear();
         return;
     }
-    process_cpu_fallback_with(worker_fallback_, input, output, n);
-}
-
-void GpuConvolver::process_cpu_fallback(const audio::BufferView<const float>& input,
-                                        audio::BufferView<float>& output,
-                                        uint32_t n) noexcept {
-    process_cpu_fallback_with(fallback_, input, output, n);
-}
-
-void GpuConvolver::process_cpu_fallback_with(std::vector<signal::Convolver>& fallback,
-                                             const audio::BufferView<const float>& input,
-                                             audio::BufferView<float>& output,
-                                             uint32_t n) noexcept {
-    const uint32_t out_ch = static_cast<uint32_t>(output.num_channels());
-    for (uint32_t ch = 0; ch < out_ch; ++ch) {
-        float* y = output.channel_ptr(ch);
-        for (uint32_t i = 0; i < n; ++i) y[i] = 0.0f;
-    }
-    if (!prepared_) return;
-
-    const uint32_t ch_count = std::min(channels_, out_ch);
-    for (uint32_t ch = 0; ch < ch_count && ch < fallback.size(); ++ch) {
-        if (ch >= input.num_channels()) continue;
-        fallback[ch].process(input.channel_ptr(ch), output.channel_ptr(ch),
-                             static_cast<int>(n));
-    }
+    render_worker_fallback(input, output, n);
 }
 
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
