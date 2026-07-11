@@ -21,6 +21,17 @@ export const CLAP_EXT_PARAMS = "clap.params";
 export const CLAP_EXT_STATE = "clap.state";
 export const CLAP_EXT_AUDIO_PORTS = "clap.audio-ports";
 export const CLAP_EXT_NOTE_PORTS = "clap.note-ports";
+// Host-provided extensions the web host answers via clap_host.get_extension —
+// the services a Pulp CLAP plugin queries during activate/process (parity with
+// the native ClapSlot host path). `clap.latency`/`clap.tail` carry PDC through
+// request_callback → plugin.on_main_thread → host->…->changed; `clap.log` and
+// `clap.thread-check` are the diagnostic/assertion surfaces; the host sides of
+// `clap.state` (mark_dirty) and `clap.params` (rescan/clear/request_flush) let
+// the plugin tell the host its persisted state or parameter set went stale.
+export const CLAP_EXT_LOG = "clap.log";
+export const CLAP_EXT_THREAD_CHECK = "clap.thread-check";
+export const CLAP_EXT_LATENCY = "clap.latency";
+export const CLAP_EXT_TAIL = "clap.tail";
 
 // ── event spaces + types ─────────────────────────────────────────────────────
 export const CLAP_CORE_EVENT_SPACE_ID = 0;
@@ -78,6 +89,24 @@ export const HOST = { size: 48, name: 16, vendor: 20, url: 24, version: 28, get_
 export const STATE_EXT = { save: 0, load: 4 };
 export const OSTREAM = { size: 8, ctx: 0, write: 4 };
 export const ISTREAM = { size: 8, ctx: 0, read: 4 };
+// Plugin-side latency/tail: uint32_t get(plugin) @0 — the host reads these when
+// the plugin signals a change so PDC/tail can be reported.
+export const PLUGIN_LATENCY = { get: 0 };
+export const PLUGIN_TAIL = { get: 0 };
+// Host-extension vtables (the structs the web host allocates + returns from
+// clap_host.get_extension). All wasm32, fn pointers 4 bytes.
+// clap_host_log_t: void log(host, severity, msg) @0.
+export const HOST_LOG = { size: 4, log: 0 };
+// clap_host_thread_check_t: bool is_main_thread(host) @0, is_audio_thread @4.
+export const HOST_THREAD_CHECK = { size: 8, is_main_thread: 0, is_audio_thread: 4 };
+// clap_host_latency_t / clap_host_tail_t: void changed(host) @0.
+export const HOST_LATENCY = { size: 4, changed: 0 };
+export const HOST_TAIL = { size: 4, changed: 0 };
+// clap_host_state_t: void mark_dirty(host) @0.
+export const HOST_STATE = { size: 4, mark_dirty: 0 };
+// clap_host_params_t: void rescan(host, flags) @0, clear(host, param_id, flags)
+// @4, request_flush(host) @8.
+export const HOST_PARAMS = { size: 12, rescan: 0, clear: 4, request_flush: 8 };
 
 // ── host-callback trampoline modules ─────────────────────────────────────────
 // Each is a ~48-byte wasm module that imports a JS function `h.f` and exports a
@@ -87,10 +116,16 @@ export const ISTREAM = { size: 8, ctx: 0, read: 4 };
 // i=i32, I=i64. The stream key "iiI->I" is the clap_ostream.write /
 // clap_istream.read signature `(ctx, buffer, uint64 size) -> int64` — new for
 // the worklet host's clap.state support; verified to compile + round-trip a
-// BigInt i64 by scripts/gen-trampoline (see the PR notes).
+// BigInt i64 by scripts/gen-trampoline (see the PR notes). The void-returning
+// "ii->" / "iii->" keys are the host-extension callbacks with no result:
+// clap_host_params.rescan(host, flags), and clap_host_log.log(host, severity,
+// msg) / clap_host_params.clear(host, id, flags). Every entry is verified to
+// compile + forward its exact signature by the package test.
 export const TRAMPOLINES = {
   "ii->i": "AGFzbQEAAAABBwFgAn9/AX8CBwEBaAFmAAADAgEABwYBAmZuAAEKCgEIACAAIAEQAAs=",
   "i->i": "AGFzbQEAAAABBgFgAX8BfwIHAQFoAWYAAAMCAQAHBgECZm4AAQoIAQYAIAAQAAs=",
   "i->": "AGFzbQEAAAABBQFgAX8AAgcBAWgBZgAAAwIBAAcGAQJmbgABCggBBgAgABAACw==",
   "iiI->I": "AGFzbQEAAAABCAFgA39/fgF+AgcBAWgBZgAAAwIBAAcGAQJmbgABCgwBCgAgACABIAIQAAs=",
+  "ii->": "AGFzbQEAAAABBgFgAn9/AAIHAQFoAWYAAAMCAQAHBgECZm4AAQoKAQgAIAAgARAACw==",
+  "iii->": "AGFzbQEAAAABBwFgA39/fwACBwEBaAFmAAADAgEABwYBAmZuAAEKDAEKACAAIAEgAhAACw==",
 };

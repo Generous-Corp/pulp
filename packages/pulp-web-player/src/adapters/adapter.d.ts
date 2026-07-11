@@ -38,6 +38,13 @@ export interface Descriptor {
   hasMidiOutput?: boolean;
   hasAudioInput?: boolean;
   hasAudioOutput?: boolean;
+  /**
+   * Plugin-reported delay-compensation latency, in samples. WAM fills it from
+   * the processor's latency export; WebCLAP from the clap.latency plugin
+   * extension. Kept live on the WebCLAP adapter when the plugin signals a change
+   * (clap_host_latency.changed) so a shell reading it compensates PDC.
+   */
+  latencySamples?: number;
 }
 
 /** One plugin-emitted MIDI event delivered to the onMidiOut handler. */
@@ -81,6 +88,20 @@ export interface HostAdapter {
    * parameters (e.g. a preset load). Called as `onParamsChanged(values, params)`.
    */
   onParamsChanged: ((values: number[], params: ParameterInfo[]) => void) | null;
+
+  /**
+   * OPTIONAL, additive (WebCLAP): assignable handler invoked when the plugin
+   * changes its reported latency (clap_host_latency.changed). `descriptor.
+   * latencySamples` is updated before this fires. The shared shell does not
+   * require it; backends that cannot report it simply never call it.
+   */
+  onLatencyChanged?: ((latencySamples: number) => void) | null;
+  /**
+   * OPTIONAL, additive (WebCLAP): assignable handler invoked when the plugin
+   * marks its state dirty (clap_host_state.mark_dirty) — a hint that an app
+   * tracking a saved blob may want to re-snapshot getState(). Advisory.
+   */
+  onStateDirty?: (() => void) | null;
 
   /**
    * Create another instance on the SAME AudioContext (the chained-synth voice

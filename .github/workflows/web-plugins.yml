@@ -122,6 +122,9 @@ jobs:
           node core/format/src/wasm/wclap_probe.mjs        examples/web-demos/wclap-build/build/PulpGain.wasm
           node core/format/src/wasm/wclap_host_runner.mjs  examples/web-demos/wclap-build/build/PulpGain.wasm --gain-db 6
           node core/format/src/wasm/pack-wclap.test.mjs
+          # Host-provided CLAP extensions (log/thread-check/latency/tail/state/
+          # params) driven through the real host-vtable trampolines — no wasm.
+          node core/format/src/wasm/wclap-host-extensions.test.mjs
           # Pure-JS host helpers: no wasm, no browser, so they run anywhere.
           node core/format/src/wasm/wam-scope.test.mjs
           # MIDI-out wire records, per-URL processor naming, and version-skew

@@ -81,6 +81,8 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
   const paramValues = new Map();   // id -> current value (mirror)
   let onParamsChangedCb = null;
   let onMidiOutCb = null;
+  let onLatencyChangedCb = null;   // additive: (samples) => void
+  let onStateDirtyCb = null;       // additive: () => void — plugin marked its state dirty
   const stateWaiters = new Map();  // token -> {resolve,reject}
   let stateToken = 0;
 
@@ -99,6 +101,10 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
             hasMidiInput: !!m.descriptor.hasMidiInput,
             hasMidiOutput: !!m.descriptor.hasMidiOutput,
             hasState: !!m.descriptor.hasState,
+            // Plugin-reported delay-compensation latency, in samples (from the
+            // clap.latency plugin extension). Mirrors WAM's descriptor.latencySamples
+            // so the shell can compensate PDC identically across both backends.
+            latencySamples: m.descriptor.latencySamples || 0,
             id: m.descriptor.id,
           };
           paramInfo = m.params.map((p) => ({
@@ -117,6 +123,19 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
         case "midiOut":
           onMidiOutCb && onMidiOutCb(m.events);
           break;
+        case "latencyChanged":
+          // Plugin changed its reported latency (clap_host_latency.changed). Keep
+          // descriptor.latencySamples live so a shell re-reading it compensates PDC.
+          if (descriptor) descriptor.latencySamples = m.latencySamples || 0;
+          onLatencyChangedCb && onLatencyChangedCb(m.latencySamples || 0);
+          break;
+        case "stateDirty":
+          // Plugin marked its state dirty (clap_host_state.mark_dirty) — the app
+          // may want to re-snapshot getState(). Advisory; ignored if unhandled.
+          onStateDirtyCb && onStateDirtyCb();
+          break;
+        // "tailChanged" / "restartRequested" are advisory host notifications the
+        // shared shell does not act on today; ignored (no throw).
         case "stateResult": {
           const w = stateWaiters.get(m.token); if (!w) break; stateWaiters.delete(m.token);
           if (m.error) w.reject(new Error(m.error)); else w.resolve(m.bytes ? new Uint8Array(m.bytes) : null);
@@ -191,6 +210,12 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
     set onMidiOut(fn) { onMidiOutCb = fn; },
     get onParamsChanged() { return onParamsChangedCb; },
     set onParamsChanged(fn) { onParamsChangedCb = fn; },
+    // Additive (beyond the shared HostAdapter contract): notifications the
+    // WebCLAP host forwards from the plugin. Safe no-ops if the shell ignores them.
+    get onLatencyChanged() { return onLatencyChangedCb; },
+    set onLatencyChanged(fn) { onLatencyChangedCb = fn; },
+    get onStateDirty() { return onStateDirtyCb; },
+    set onStateDirty(fn) { onStateDirtyCb = fn; },
 
     // Another worklet-resident instance on the SAME AudioContext (voice pool).
     createSecondary(secondaryUrls) {
