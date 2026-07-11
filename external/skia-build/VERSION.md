@@ -104,6 +104,7 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-linux-x64-gpu-release.zip` | `518b74ee7f0b245c209349023e58a2891a83a7ab776504d7d8a23d1e76fbf4de` |
 | `skia-build-mac-arm64-gpu-release.zip` | `648250f9ee625f0c6c73c521b5a2de7cf46812b06aa2300e4bec8b2bb6d4081b` |
 | `skia-build-mac-universal-gpu-release.zip` | `284964fda380a2cc5ff4f885ae557ef04dab5987ebd94fc01354b95878ad85cf` |
+| `skia-build-mac-x86_64-gpu-release.zip` | `f1734e9f41c0d01700d446282550725a7b6b42ebc906ba295f1f563112831f17` |
 
 ## Libraries Per Platform
 
