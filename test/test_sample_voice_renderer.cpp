@@ -406,6 +406,39 @@ TEST_CASE("SampleVoiceRenderer finishes invalid explicit regions silently",
     REQUIRE_THAT(output.channel(0)[1], WithinAbs(0.0f, 1.0e-6f));
 }
 
+TEST_CASE("SampleVoiceRenderer finishes invalid interpolation modes silently",
+          "[audio][sampler][voice-render][loop][edge]") {
+    std::array<float, 2> samples{0.25f, 0.5f};
+    PublishedSampleStore store;
+    prepare_store(store, samples);
+
+    auto region = playback_region(0, 2, LoopPlaybackMode::Forward);
+    region.interpolation = static_cast<LoopInterpolationMode>(99);
+
+    Buffer<float> output(1, 2);
+    std::array<const float*, 1> source_channels{};
+    SampleVoiceRenderState state{
+        .active = true,
+        .sample = resolve_sample(store),
+        .use_playback_region = true,
+        .playback_region = region,
+    };
+
+    const auto result = SampleVoiceRenderer::render(
+        state,
+        output.view(),
+        2,
+        source_channels,
+        SampleVoiceRenderOptions{.accumulate = false});
+
+    REQUIRE(result.rendered_frames == 0);
+    REQUIRE(result.silent_frames == 2);
+    REQUIRE(result.finished);
+    REQUIRE_FALSE(state.active);
+    REQUIRE_THAT(output.channel(0)[0], WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE_THAT(output.channel(0)[1], WithinAbs(0.0f, 1.0e-6f));
+}
+
 TEST_CASE("SampleVoiceRenderer loops explicit forward regions",
           "[audio][sampler][voice-render][loop]") {
     std::array<float, 4> samples{10.0f, 20.0f, 30.0f, 40.0f};

@@ -15,6 +15,16 @@ bool positive_finite(double value) noexcept {
     return value > 0.0 && std::isfinite(value);
 }
 
+bool valid_interpolation(LoopInterpolationMode mode) noexcept {
+    switch (mode) {
+        case LoopInterpolationMode::None:
+        case LoopInterpolationMode::Linear:
+        case LoopInterpolationMode::Cubic:
+            return true;
+    }
+    return false;
+}
+
 void clear_destination(BufferView<float> destination,
                        std::uint64_t frames) noexcept {
     const auto frame_count = std::min<std::uint64_t>(
@@ -388,7 +398,8 @@ SampleVoiceRenderResult SampleVoiceRenderer::render(
 
     const auto playback_region =
         playback_region_for(state, options.interpolation);
-    if (!validate_loop_region(playback_region, source_frames).ok) {
+    if (!validate_loop_region(playback_region, source_frames).ok ||
+        !valid_interpolation(playback_region.interpolation)) {
         state.active = false;
         result.finished = true;
         result.silent_frames = frame_count;
