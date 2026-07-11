@@ -135,7 +135,7 @@ features (timestamp-query, f16). All are validated against CPU references.
 |---|---|---|
 | FFT / iFFT | `fft_forward` / `fft_inverse` (+ `fft_forward_timed`) | spectral analysis, fast convolution |
 | Fused convolution | `prepare_convolution` + `convolve` | one-readback FFT convolution with a resident IR |
-| Batched convolution | `prepare_convolution_batch` + `convolve_batch` | many blocks/instances in one submit+readback (≈16× at batch 16) |
+| Batched convolution | `prepare_convolution_batch` + `convolve_batch` | many blocks/instances in one submit+readback (amortizes per-dispatch + readback overhead; measured ~2× at batch 2 / stereo — the multiplier grows with batch size until it becomes bandwidth- or readback-bound) |
 | Magnitude / complex-mul | `compute_magnitude`, `complex_multiply`, `batch_magnitude` | spectral building blocks |
 | Dense matmul | `matmul` | neural layers, matrix DSP (ambisonics, mixing) |
 | Dense layer | `dense_tanh` | neural inference (NAM dense / LSTM gates) |

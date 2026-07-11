@@ -134,7 +134,12 @@ the adapter-boundary conversion path: copy host double buffers to f32 scratch,
 run the existing f32 Processor callback, and copy active outputs back to double.
 Only call `Processor::process_f64(ProcessBuffers64&, ...)` for plugins that
 explicitly opt in; native f64 processors are responsible for doing real double
-DSP, not relying on the compatibility conversion.
+DSP, not relying on the compatibility conversion. On the boundary path the
+output scratch is pre-zeroed for only `num_samples` frames (the writeback
+copies exactly that many), and the aux f32→f64 writeback is bounded by the
+routed view's channel count — not the host bus channel count — so a bus
+demoted by a null mid-bus channel pointer keeps its block-start pre-zero
+instead of reading back stale scratch.
 
 ### Parameters
 

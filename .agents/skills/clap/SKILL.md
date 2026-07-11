@@ -101,7 +101,15 @@ struct. It owns:
   converts f32 outputs back to `data64`. If the plugin opts in, every active
   routed bus for the block must be f64 before the adapter calls
   `Processor::process_f64(ProcessBuffers64&, ...)`; mixed f32/f64 blocks stay
-  on the compatibility path.
+  on the compatibility path. Every audio port advertises
+  `CLAP_AUDIO_PORT_SUPPORTS_64BITS` (in `audio_ports_get`), and native-f64
+  descriptors additionally advertise `CLAP_AUDIO_PORT_PREFERS_64BITS` — a
+  spec-compliant host only sends `data64` to ports carrying the SUPPORTS
+  flag, so dropping it silently kills the whole f64 path. The boundary
+  f64→f32 demotion and output-scratch pre-zero are deferred until after the
+  native-f64 decision inside `clap_process` (native blocks read the host's
+  double buffers directly and skip the conversion); keep any new bus wiring
+  consistent with that ordering.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
 - `bridge` + `editor_host` + `editor_visible` — gated on
