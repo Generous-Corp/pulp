@@ -719,23 +719,38 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string product_name;
 
         // Standalone `.app`: a choice in the combined installer (→ /Applications),
-        // or its own `.dmg` when --dmg.
-        auto standalone_dir = build_dir / "Standalone";
-        if (fs::exists(standalone_dir)) {
-            for (auto& entry : fs::directory_iterator(standalone_dir)) {
+        // or its own `.dmg` when --dmg. Discover it from the conventional
+        // build/Standalone dir AND (there is no enforced convention, and examples
+        // build the standalone under their own dir) from build/examples/*/. Dedup
+        // by path so an app present in both isn't packaged twice.
+        std::vector<fs::path> standalone_apps;
+        auto add_apps_in = [&](const fs::path& dir) {
+            if (!fs::exists(dir)) return;
+            for (auto& entry : fs::directory_iterator(dir)) {
                 if (entry.path().extension().string() != ".app") continue;
-                auto name = entry.path().stem().string();
-                if (!product_filter.empty() && name != product_filter) continue;
-                product_name = name;
-                if (want_dmg) {
-                    auto dmg_path = artifacts / (name + "-" + version + ".dmg");
-                    std::cout << "Packaging " << name << " (Standalone .app → .dmg)...\n";
-                    if (pulp::ship::create_dmg(entry.path().string(), dmg_path.string(), name))
-                        ++dmg_count;
-                    else std::cerr << "  FAILED to create .dmg for " << name << "\n";
-                } else {
-                    combined.push_back({entry.path().string(), "/Applications", "Standalone App"});
-                }
+                if (!product_filter.empty() &&
+                    entry.path().stem().string() != product_filter) continue;
+                standalone_apps.push_back(entry.path());
+            }
+        };
+        add_apps_in(build_dir / "Standalone");
+        if (fs::exists(build_dir / "examples"))
+            for (auto& ex : fs::directory_iterator(build_dir / "examples"))
+                if (ex.is_directory()) add_apps_in(ex.path());
+        std::sort(standalone_apps.begin(), standalone_apps.end());
+        standalone_apps.erase(std::unique(standalone_apps.begin(), standalone_apps.end()),
+                              standalone_apps.end());
+        for (auto& app : standalone_apps) {
+            auto name = app.stem().string();
+            product_name = name;
+            if (want_dmg) {
+                auto dmg_path = artifacts / (name + "-" + version + ".dmg");
+                std::cout << "Packaging " << name << " (Standalone .app → .dmg)...\n";
+                if (pulp::ship::create_dmg(app.string(), dmg_path.string(), name))
+                    ++dmg_count;
+                else std::cerr << "  FAILED to create .dmg for " << name << "\n";
+            } else {
+                combined.push_back({app.string(), "/Applications", "Standalone App"});
             }
         }
 #endif
