@@ -65,6 +65,7 @@
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
+#include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -721,6 +722,16 @@ struct ScopedAuV3HostWriting {
             return noErr;
         }
         if (!outputData) return noErr;
+        // Max-block contract for AU v3 is REJECT, not clamp. Unlike the
+        // push-based adapters (CLAP/VST3 clamp+zero-fill; AAX grows its offline
+        // scratch), AU renders through a pull graph: pullInputBlock feeds
+        // upstream at `frameCount`, so clamping would advance this node by fewer
+        // frames than the host and its siblings, desyncing the pull chain.
+        // `maximumFramesToRender` is a hard host contract (queried up front and
+        // never exceeded; auval never overruns it), and kAudioUnitErr_TooMany-
+        // FramesToProcess is the spec-defined response. Returning it here also
+        // upholds the frameCount <= max_frames invariant the scratch asserts
+        // below rely on.
         if (frameCount > bridge->max_frames) {
             return kAudioUnitErr_TooManyFramesToProcess;
         }
@@ -736,11 +747,16 @@ struct ScopedAuV3HostWriting {
         UInt32 outChans = std::min(outputData->mNumberBuffers,
             static_cast<UInt32>(pulp::format::au::kMaxChannels));
 
-        const std::size_t neededOutputStorage =
+        // Hard invariant, not a live allocation: output_storage was sized to
+        // kMaxChannels * max_frames in allocateRenderResources, outChans is
+        // clamped to kMaxChannels, and frameCount is clamped to max_frames
+        // above — so the scratch always fits. Assert it (debug/sanitizer
+        // builds) instead of an on-the-audio-thread assign().
+        [[maybe_unused]] const std::size_t neededOutputStorage =
             static_cast<std::size_t>(outChans) * frameCount;
-        if (bridge->output_storage.size() < neededOutputStorage) {
-            bridge->output_storage.assign(neededOutputStorage, 0.0f);
-        }
+        PULP_DBG_ASSERT(bridge->output_storage.size() >= neededOutputStorage,
+            "AU render: output_storage undersized; allocateRenderResources must "
+            "pre-size to kMaxChannels * max_frames");
 
         // Output buffer view (uses preallocated scratch when the host passes
         // null mData during validation/probing).
@@ -761,10 +777,14 @@ struct ScopedAuV3HostWriting {
         if (pullInputBlock && bridge->input_channels > 0) {
             auto& abl = bridge->input_abl;
             abl.mNumberBuffers = outChans;
-            const std::size_t input_samples =
+            [[maybe_unused]] const std::size_t input_samples =
                 static_cast<std::size_t>(outChans) * frameCount;
-            if (bridge->input_storage.size() < input_samples)
-                bridge->input_storage.assign(input_samples, 0.0f);
+            // Hard invariant (see output_storage above): input_storage is
+            // pre-sized to kMaxChannels * max_frames, so it always fits — never
+            // an assign() on the audio thread.
+            PULP_DBG_ASSERT(bridge->input_storage.size() >= input_samples,
+                "AU render: input_storage undersized; allocateRenderResources "
+                "must pre-size to kMaxChannels * max_frames");
             for (UInt32 i = 0; i < outChans; ++i) {
                 abl.mBuffers[i].mNumberChannels = 1;
                 abl.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
@@ -792,12 +812,14 @@ struct ScopedAuV3HostWriting {
         if (pullInputBlock && scChans > 0) {
             UInt32 scBufs = std::min(static_cast<UInt32>(scChans),
                                      static_cast<UInt32>(pulp::format::au::kMaxChannels));
-            // Size sidechain_storage for this block if needed (rare —
-            // max_frames should cover; guard anyway).
-            std::size_t needed = static_cast<std::size_t>(scBufs) * frameCount;
-            if (bridge->sidechain_storage.size() < needed) {
-                bridge->sidechain_storage.assign(needed, 0.0f);
-            }
+            // Hard invariant (see output_storage above): sidechain_storage is
+            // pre-sized to kMaxChannels * max_frames, so it always fits — never
+            // an assign() on the audio thread.
+            [[maybe_unused]] std::size_t needed =
+                static_cast<std::size_t>(scBufs) * frameCount;
+            PULP_DBG_ASSERT(bridge->sidechain_storage.size() >= needed,
+                "AU render: sidechain_storage undersized; allocateRenderResources "
+                "must pre-size to kMaxChannels * max_frames");
             auto& scAbl = bridge->sidechain_abl;
             scAbl.mNumberBuffers = scBufs;
             for (UInt32 i = 0; i < scBufs; ++i) {
