@@ -118,15 +118,18 @@ public:
         canvas.set_blend_mode(cv::Canvas::BlendMode::normal);  // ensure chrome is not additive
 
         // Wordmark — tracked caps in bone #BCC2CC; info glyph after it.
-        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));
+        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));   // --bone
         canvas.set_font("Inter", 11.0f * s);
-        const float mk_end = tracked_text(canvas, "SuperConvolver", 24 * s, 30 * s, 11.0f * s, 0.22f);
-        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 48));
+        const float mk_end = tracked_text(canvas, "SuperConvolver", 24 * s, 30 * s, 11.0f * s, 0.24f);
+        // Info glyph — a 19px circle with a dim border and a centered "i", set
+        // off from the wordmark by a clear gap (concept .info token).
+        const float ix = mk_end + 18 * s, iy = 25.5f * s, ir = 9.5f * s;
+        canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 56));
         canvas.set_line_width(1.0f);
-        canvas.stroke_circle(mk_end + 10 * s, 26 * s, 8.5f * s);
+        canvas.stroke_circle(ix, iy, ir);
         canvas.set_fill_color(tk_label());
-        canvas.set_font("Inter", 10.0f * s);
-        canvas.fill_text("i", mk_end + 7.5f * s, 30 * s);
+        canvas.set_font("Inter", 11.0f * s);
+        centered_text(canvas, "i", ix, iy + 4.0f * s, 11.0f * s);
 
         const auto g = proc_.gpu_status();
 
