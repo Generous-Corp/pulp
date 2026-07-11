@@ -40,8 +40,15 @@ inline void flow_pan_room(float base_theta, std::uint32_t room_index, float dept
                           float& pan_l, float& pan_r) {
     constexpr float kHalfPi = 1.5707963f;
     constexpr float kTwoPi = 6.2831853f;
-    const float swing = depth * (0.4f + 0.6f * spread);  // radians at full depth
-    const float rate = 0.05f + 0.09f * flow_hash(room_index * 5u + 2u);   // Hz
+    // Swing: radians of azimuth wander at full depth. ~1.2 rad (≈69°) sweeps a
+    // room most of the way across the field, so the per-room pan gains move by
+    // well over 6 dB — clearly audible motion, not a subtle wobble.
+    const float swing = depth * (0.6f + 0.6f * spread);  // radians at full depth
+    // Rate: each room drifts on its own LFO. 0.15–0.5 Hz (2–6.7 s periods) is
+    // slow enough to read as an evolving field yet fast enough that the movement
+    // is obvious within a couple of seconds. The previous 0.05–0.14 Hz band gave
+    // 7–20 s periods — so slow that over a few seconds Flow was nearly inaudible.
+    const float rate = 0.15f + 0.35f * flow_hash(room_index * 5u + 2u);   // Hz
     const float phase = flow_hash(room_index * 11u + 4u) * kTwoPi;
     float theta = base_theta + swing * std::sin(kTwoPi * rate *
                                         static_cast<float>(t_seconds) + phase);

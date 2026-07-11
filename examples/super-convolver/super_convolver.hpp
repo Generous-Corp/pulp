@@ -105,6 +105,44 @@ inline constexpr int kSpectrumBins = 256;
 using SpectrumFrame = std::array<float, kSpectrumBins>;
 using SpectrumBus = pulp::runtime::TripleBuffer<SpectrumFrame>;
 
+/// Normalize `ir` so its maximum magnitude frequency response (max_f |H(f)|) is
+/// `target` — i.e. 0 dB of steady-state gain at `target == 1`. This BOUNDS the
+/// output peak: a full-scale sinusoid at ANY frequency comes out at ≤ target, so
+/// at unity output gain the wet can never exceed full scale (and any convex
+/// dry/wet Mix stays ≤ full scale too). Unit-ENERGY normalization does NOT give
+/// this guarantee — it fixes the average (RMS) gain to 0 dB but leaves the
+/// response's resonant peaks free to grow, and a longer / denser IR has taller
+/// peaks (empirically ~+6 dB), so an energy-normalized synthetic reverb clips the
+/// DAC as the Size knob is raised even though its RMS gain is unchanged. Peak-
+/// response normalization keeps the clip headroom identical across every Size.
+/// Off-thread work (one FFT); never call from the audio thread.
+inline void normalize_peak_response(std::vector<float>& ir, float target = 1.0f) {
+    if (ir.size() < 2) {
+        // Too short for a meaningful spectrum — fall back to unit energy.
+        double energy = 0.0;
+        for (float v : ir) energy += static_cast<double>(v) * v;
+        if (energy > 0.0) {
+            const float g = static_cast<float>(target / std::sqrt(energy));
+            for (float& v : ir) v *= g;
+        }
+        return;
+    }
+    std::size_t nfft = 1;
+    while (nfft < ir.size()) nfft <<= 1;
+    signal::Fft fft(static_cast<int>(nfft));
+    std::vector<float> time(nfft, 0.0f);
+    std::vector<std::complex<float>> freq(nfft);
+    std::copy(ir.begin(), ir.end(), time.begin());
+    fft.forward_real(time.data(), freq.data());
+    float peak = 0.0f;
+    for (std::size_t k = 0; k <= nfft / 2; ++k)
+        peak = std::max(peak, std::abs(freq[k]));
+    if (peak > 0.0f) {
+        const float g = target / peak;
+        for (float& v : ir) v *= g;
+    }
+}
+
 /// Build a deterministic, plausible reverb IR: exponentially-decaying white
 /// noise (seeded LCG → reproducible, so a golden test can rebuild it). length
 /// samples. The first sample is 1 so a delta IR-ish onset is present.
@@ -119,18 +157,13 @@ inline std::vector<float> make_reverb_ir(std::size_t length, std::uint32_t seed 
         ir[i] = white * std::exp(-decay * static_cast<float>(i));
     }
     ir[0] = 1.0f;  // direct onset
-    // Normalize to UNIT ENERGY so a fully-wet convolution sits at roughly the dry
-    // signal's loudness — otherwise the wet is the sum of `length` (tens of
-    // thousands of) scaled taps and swamps the dry, making the Mix knob useless
-    // (anything above ~1% reads as fully wet). With sum(ir^2)=1 the output RMS for
-    // broadband input ≈ the input RMS, so Mix becomes a perceptually sensible
-    // dry/wet balance.
-    double energy = 0.0;
-    for (float v : ir) energy += static_cast<double>(v) * v;
-    if (energy > 0.0) {
-        const float g = static_cast<float>(1.0 / std::sqrt(energy));
-        for (float& v : ir) v *= g;
-    }
+    // Normalize to 0 dB MAX gain (peak magnitude response == 1), not unit energy.
+    // Unit energy keeps the wet at a sane loudness but lets the response's peaks
+    // exceed unity, so a fully-wet, full-scale input clips the DAC — and worse as
+    // Size grows (taller peaks). Peak-response normalization keeps Mix a sensible
+    // dry/wet balance (broadband wet RMS still lands within a few dB of the input)
+    // AND guarantees no clipping at any Size. See normalize_peak_response.
+    normalize_peak_response(ir, 1.0f);
     return ir;
 }
 
@@ -990,15 +1023,13 @@ private:
             cur.swap(y);
         }
 
-        // Re-normalize to unit energy (the all-pass + pre-delay are near energy-
-        // preserving, but truncation to the base length can shave a little). If
-        // the variant came out silent or non-finite (degenerate short IR), fall
-        // back to the base so the room never reads as a zero-energy slot.
+        // Guard against a degenerate (silent / non-finite) variant, then peak-
+        // response normalize to the SAME 0 dB max-gain rule as the base IR so no
+        // room can push the batched multi-room sum past unity either.
         double energy = 0.0;
         for (float v : cur) energy += static_cast<double>(v) * v;
         if (!std::isfinite(energy) || energy <= 0.0) return base;
-        const float gain = static_cast<float>(1.0 / std::sqrt(energy));
-        for (float& v : cur) v *= gain;
+        normalize_peak_response(cur, 1.0f);
         return cur;
     }
 
