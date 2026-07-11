@@ -5,6 +5,7 @@
 // Built from CLAP specification headers (MIT license)
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -62,11 +63,12 @@ struct PulpClapPlugin {
     // Per-output-channel dry delay used by the bypass pass-through. The host
     // compensates the plugin path by its reported latency, so the bypassed
     // dry signal must be delayed by the same amount to stay sample-aligned
-    // with the host's plugin-delay-compensation. Each line's storage is
-    // allocated in clap_activate() (off the audio thread). Unused when the
-    // reported latency is 0, preserving the zero-copy pass-through.
-    std::array<signal::DelayLine, kMaxChannels> bypass_dry_delay{};
-    int bypass_delay_samples = 0;
+    // with the host's plugin-delay-compensation. Storage is allocated in
+    // clap_activate() (off the audio thread) via prepare(); unused when the
+    // reported latency is 0, preserving the zero-copy pass-through. Shared
+    // adapter-boundary component (SF-1) so every format's bypass latency is
+    // identical by construction.
+    boundary::LatencyCompensatedBypassT<static_cast<std::size_t>(kMaxChannels)> bypass;
 
     // Stored at create_plugin() time so the adapter can publish
     // latency / tail change notifications back to the
