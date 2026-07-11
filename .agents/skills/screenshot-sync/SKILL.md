@@ -140,8 +140,8 @@ fired. A token change lists every target.
 For a plugin's native editor rendered to a PNG with no window. See the
 `screenshot` skill for backend selection; the essentials:
 
-- Prefer a per-editor dumper target (the `examples/bitches-brew/ui/brew_shots.cpp`
-  → `brew-shots` pattern; each plugin repo copies it as `pulp-<name>-shot`,
+- Prefer a per-editor dumper target (the `pulp-bitches-brew` repo's
+  `ui/brew_shots.cpp` → `brew-shots` pattern; each plugin repo copies it as `pulp-<name>-shot`,
   named by the manifest `tool =`), or `pulp-screenshot --demo` for SDK demos.
 - **Skia backend for asset-heavy UIs** — the CoreGraphics canvas can't composite
   file images and renders filenames as placeholder text (the classic

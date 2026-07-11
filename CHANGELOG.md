@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06520"></a>
+## [0.652.0] - 2026-07-11
+
+- chore/reconcile sdk minor bump ([#5997](https://github.com/danielraffel/pulp/pull/5997))
+- feature/export osc sdk ([#5935](https://github.com/danielraffel/pulp/pull/5935))
+
+<a id="v06510"></a>
+## [0.651.0] - 2026-07-11
+
+- feature/multi convolve roofline ([#5944](https://github.com/danielraffel/pulp/pull/5944))
+- fix/coreaudio input only open ([#5810](https://github.com/danielraffel/pulp/pull/5810))
+
 <a id="v06500"></a>
 ## [0.650.0] - 2026-07-11
 
@@ -6258,6 +6270,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.652.0]: https://github.com/danielraffel/pulp/releases/tag/v0.652.0
+[0.651.0]: https://github.com/danielraffel/pulp/releases/tag/v0.651.0
 [0.650.0]: https://github.com/danielraffel/pulp/releases/tag/v0.650.0
 [0.649.0]: https://github.com/danielraffel/pulp/releases/tag/v0.649.0
 [0.647.0]: https://github.com/danielraffel/pulp/releases/tag/v0.647.0
