@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06530"></a>
+## [0.653.0] - 2026-07-11
+
+- feature/sf1 adapter boundary core ([#6003](https://github.com/danielraffel/pulp/pull/6003))
+- feature/mf7 wclap host extensions ([#6001](https://github.com/danielraffel/pulp/pull/6001))
+- fix/appcast wait window ([#6002](https://github.com/danielraffel/pulp/pull/6002))
+- fix/bench brace ([#6012](https://github.com/danielraffel/pulp/pull/6012))
+- fix/wam wclap planar test ([#6009](https://github.com/danielraffel/pulp/pull/6009))
+- test(wam): repair test_wam_adapter for the planar process() signature ([#6004](https://github.com/danielraffel/pulp/pull/6004))
+- docs/gpu roofline sequence ([#5999](https://github.com/danielraffel/pulp/pull/5999))
+- fix/screenshot sync stale brew path ([#5998](https://github.com/danielraffel/pulp/pull/5998))
+
 <a id="v06520"></a>
 ## [0.652.0] - 2026-07-11
 
@@ -6270,6 +6282,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.653.0]: https://github.com/danielraffel/pulp/releases/tag/v0.653.0
 [0.652.0]: https://github.com/danielraffel/pulp/releases/tag/v0.652.0
 [0.651.0]: https://github.com/danielraffel/pulp/releases/tag/v0.651.0
 [0.650.0]: https://github.com/danielraffel/pulp/releases/tag/v0.650.0
