@@ -13,6 +13,7 @@ add_library(pulp-audio-analysis STATIC
     src/audio_artifacts.cpp
     src/audio_spectrum.cpp
     src/audio_doctor_artifacts.cpp
+    src/latency_evidence.cpp
 )
 add_library(pulp::audio-analysis ALIAS pulp-audio-analysis)
 

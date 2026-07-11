@@ -162,6 +162,11 @@ add_executable(pulp-test-audio-doctor test_audio_doctor.cpp)
 target_link_libraries(pulp-test-audio-doctor PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-doctor PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-audio-doctor)
+# Measured-versus-reported latency. Its fixture is a source-owned delay line, so
+# it needs no example plugin.
+add_executable(pulp-test-latency-contract test_latency_contract.cpp)
+target_link_libraries(pulp-test-latency-contract PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-latency-contract)
 add_executable(pulp-test-cli-audio-validate test_cli_audio_validate.cpp)
 target_link_libraries(pulp-test-cli-audio-validate PRIVATE pulp::audio pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-validate)
