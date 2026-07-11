@@ -61,6 +61,9 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/audio_file.hpp>
+#include <pulp/platform/file_dialog.hpp>
+#include "source_display.hpp"
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -93,6 +96,7 @@ enum SuperConvolverParams : state::ParamID {
     kBypass  = 4,
     kEngine  = 5,  // 0 = CPU (default), 1 = GPU
     kRooms   = 6,  // GPU multi-room reverb: # of distinct IRs in one GPU batch
+    kFlow    = 7,  // 0 = static field; >0 = per-block moving pans (living field)
 };
 
 // Live wet-output magnitude spectrum (dB), published lock-free from the audio
@@ -100,6 +104,44 @@ enum SuperConvolverParams : state::ParamID {
 inline constexpr int kSpectrumBins = 256;
 using SpectrumFrame = std::array<float, kSpectrumBins>;
 using SpectrumBus = pulp::runtime::TripleBuffer<SpectrumFrame>;
+
+/// Normalize `ir` so its maximum magnitude frequency response (max_f |H(f)|) is
+/// `target` — i.e. 0 dB of steady-state gain at `target == 1`. This BOUNDS the
+/// output peak: a full-scale sinusoid at ANY frequency comes out at ≤ target, so
+/// at unity output gain the wet can never exceed full scale (and any convex
+/// dry/wet Mix stays ≤ full scale too). Unit-ENERGY normalization does NOT give
+/// this guarantee — it fixes the average (RMS) gain to 0 dB but leaves the
+/// response's resonant peaks free to grow, and a longer / denser IR has taller
+/// peaks (empirically ~+6 dB), so an energy-normalized synthetic reverb clips the
+/// DAC as the Size knob is raised even though its RMS gain is unchanged. Peak-
+/// response normalization keeps the clip headroom identical across every Size.
+/// Off-thread work (one FFT); never call from the audio thread.
+inline void normalize_peak_response(std::vector<float>& ir, float target = 1.0f) {
+    if (ir.size() < 2) {
+        // Too short for a meaningful spectrum — fall back to unit energy.
+        double energy = 0.0;
+        for (float v : ir) energy += static_cast<double>(v) * v;
+        if (energy > 0.0) {
+            const float g = static_cast<float>(target / std::sqrt(energy));
+            for (float& v : ir) v *= g;
+        }
+        return;
+    }
+    std::size_t nfft = 1;
+    while (nfft < ir.size()) nfft <<= 1;
+    signal::Fft fft(static_cast<int>(nfft));
+    std::vector<float> time(nfft, 0.0f);
+    std::vector<std::complex<float>> freq(nfft);
+    std::copy(ir.begin(), ir.end(), time.begin());
+    fft.forward_real(time.data(), freq.data());
+    float peak = 0.0f;
+    for (std::size_t k = 0; k <= nfft / 2; ++k)
+        peak = std::max(peak, std::abs(freq[k]));
+    if (peak > 0.0f) {
+        const float g = target / peak;
+        for (float& v : ir) v *= g;
+    }
+}
 
 /// Build a deterministic, plausible reverb IR: exponentially-decaying white
 /// noise (seeded LCG → reproducible, so a golden test can rebuild it). length
@@ -115,19 +157,44 @@ inline std::vector<float> make_reverb_ir(std::size_t length, std::uint32_t seed 
         ir[i] = white * std::exp(-decay * static_cast<float>(i));
     }
     ir[0] = 1.0f;  // direct onset
-    // Normalize to UNIT ENERGY so a fully-wet convolution sits at roughly the dry
-    // signal's loudness — otherwise the wet is the sum of `length` (tens of
-    // thousands of) scaled taps and swamps the dry, making the Mix knob useless
-    // (anything above ~1% reads as fully wet). With sum(ir^2)=1 the output RMS for
-    // broadband input ≈ the input RMS, so Mix becomes a perceptually sensible
-    // dry/wet balance.
-    double energy = 0.0;
-    for (float v : ir) energy += static_cast<double>(v) * v;
-    if (energy > 0.0) {
-        const float g = static_cast<float>(1.0 / std::sqrt(energy));
-        for (float& v : ir) v *= g;
-    }
+    // Normalize to 0 dB MAX gain (peak magnitude response == 1), not unit energy.
+    // Unit energy keeps the wet at a sane loudness but lets the response's peaks
+    // exceed unity, so a fully-wet, full-scale input clips the DAC — and worse as
+    // Size grows (taller peaks). Peak-response normalization keeps Mix a sensible
+    // dry/wet balance (broadband wet RMS still lands within a few dB of the input)
+    // AND guarantees no clipping at any Size. See normalize_peak_response.
+    normalize_peak_response(ir, 1.0f);
     return ir;
+}
+
+/// Window a loaded IR down to `target_len` samples with a short raised-cosine
+/// fade-out over the last `fade_len` samples. This is what makes the Size knob
+/// audibly do something with a LOADED file IR: shortening Size truncates the
+/// loaded space's tail (shorter reverb) with a smooth fade so the cut never
+/// clicks. A truncation with NO fade would leave a hard step at the cut sample
+/// — an audible click on every tail — so the fade is not cosmetic. We do NOT
+/// time-stretch (that would shift pitch); this is a pure length window.
+///
+/// If the IR is already ≤ target_len it is returned UNCHANGED — a real recorded
+/// space is never zero-pad-extended into silence, so a Size longer than the file
+/// is a no-op (the file is its own natural length). After a real cut the result
+/// is re-normalized to 0 dB peak response so a shortened IR keeps the exact same
+/// clip headroom as every other Size (see normalize_peak_response). Off-thread
+/// only (one FFT in the normalize); never call from the audio thread.
+inline std::vector<float> window_ir_to_length(const std::vector<float>& ir,
+                                              std::size_t target_len,
+                                              std::size_t fade_len) {
+    if (target_len == 0 || ir.size() <= target_len) return ir;
+    std::vector<float> out(ir.begin(), ir.begin() + static_cast<std::ptrdiff_t>(target_len));
+    const std::size_t fade = fade_len < target_len ? fade_len : target_len;
+    // Raised cosine from 1 (start of the fade) down to 0 (last sample).
+    for (std::size_t i = 0; i < fade; ++i) {
+        const float x = static_cast<float>(i) / static_cast<float>(fade);
+        const float w = 0.5f * (1.0f + std::cos(3.14159265f * x));
+        out[target_len - fade + i] *= w;
+    }
+    normalize_peak_response(out, 1.0f);
+    return out;
 }
 
 class SuperConvolverProcessor : public format::Processor {
@@ -186,7 +253,13 @@ public:
         // CPU (which would need Rooms× independent convolvers). Rooms=1 keeps the
         // single-IR GPU path. No effect when Engine=CPU.
         store.add_parameter({.id = kRooms, .name = "Rooms", .unit = "",
-                             .range = {1.0f, 256.0f, 16.0f, 1.0f}});
+                             .range = {1.0f, 128.0f, 16.0f, 1.0f}});
+        // Flow: 0 = static rooms (an ordinary reverb); >0 makes each room's pan
+        // drift on its own rate per block — the batch becomes a MOVING field, the
+        // irreducible time-varying case where the GPU wins. GPU multi-room only;
+        // default 0 leaves existing presets and the current sound unchanged.
+        store.add_parameter({.id = kFlow, .name = "Flow", .unit = "%",
+                             .range = {0.0f, 100.0f, 0.0f, 0.1f}});
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -320,6 +393,11 @@ public:
         }
         wet_.assign(kInternalBlock, 0.0f);
 
+        // Drop any decoded-file cache from a previous prepare — it was resampled
+        // to the OLD session rate, so a re-prepare must re-decode at ctx.sample_rate.
+        worker_file_raw_.clear();
+        worker_file_raw_gen_ = 0;
+
         rebuild_ir_inline(current_size());   // first IR loaded synchronously (CPU)
 
         // Learn the GPU transport latency by pre-building the stack once when a
@@ -444,6 +522,32 @@ public:
         return ir_path_gen_.load(std::memory_order_acquire);
     }
 
+    /// UI / main thread only. Open a native file picker, load the chosen file as
+    /// the Source impulse response, and return its display (clean name + facts).
+    /// Returns nullopt if the user cancels or no dialog backend is registered.
+    std::optional<superconvolver::SourceDisplay> browse_and_load_source() {
+        static const std::vector<platform::FileFilter> kFilters = {
+            {"Impulse Response", "wav;aiff;aif;flac"},
+            {"All Files", "*"},
+        };
+        auto path = platform::FileDialog::open_file(
+            "Load Impulse Response", kFilters, ir_path());
+        if (!path || path->empty()) return std::nullopt;
+        load_ir_path(*path);
+        return superconvolver::derive_source_display(
+            *path, audio::read_audio_file_info(*path));
+    }
+
+    /// The display for the currently-loaded Source (derived from the persisted
+    /// path), or nullopt when the built-in synthetic IR is in use. Lets the
+    /// editor restore the Source name/facts after a preset load. Main-thread only.
+    std::optional<superconvolver::SourceDisplay> current_source_display() const {
+        const std::string p = ir_path();
+        if (p.empty()) return std::nullopt;
+        return superconvolver::derive_source_display(
+            p, audio::read_audio_file_info(p));
+    }
+
     /// Persist the IR file path alongside StateStore so a host restores the
     /// loaded impulse response with the project / preset. The path is opaque
     /// non-parameter state, exactly what serialize_plugin_state() is for.
@@ -523,6 +627,9 @@ public:
                                 std::memory_order_relaxed);
         requested_rooms_.store(requested_rooms_value(), std::memory_order_relaxed);
         requested_size_.store(current_size(), std::memory_order_relaxed);
+        requested_flow_.store(
+            static_cast<float>(state().get_value(kFlow)) * 0.01f,
+            std::memory_order_relaxed);
 
         // Fill the per-channel wet output FIFO via the active engine. Both engines
         // re-block the host stream into fixed kInternalBlock chunks; only the
@@ -786,6 +893,8 @@ private:
 
         auto fresh = build_gpu_stack(rooms, base_ir);
         gpu_built_rooms_ = rooms > 1 ? rooms : 1;
+        if (fresh && fresh->multi)
+            fresh->multi->set_flow(requested_flow_.load(std::memory_order_relaxed));
         if (!fresh) {
             runtime::log_info(
                 "SuperConvolver: GPU stack rebuild failed (rooms={}); "
@@ -859,39 +968,66 @@ private:
     }
 
     // True when the base IR must be rebuilt: the loaded-file generation changed,
-    // or (synthetic fallback only) the Size knob moved. Worker-thread only.
+    // or the Size knob moved. Size governs the synthetic IR's length AND (via
+    // window_ir_to_length) truncates a loaded file's tail, so a Size change must
+    // rebuild in BOTH cases — the earlier `!worker_has_file_` guard is exactly
+    // why the Size knob felt dead once a file IR was loaded. Worker-thread only.
     bool base_needs_rebuild(std::uint32_t want_gen, float want_size) const {
         if (want_gen != worker_base_gen_) return true;
-        if (!worker_has_file_ && want_size > 0.0f && want_size != worker_base_size_)
-            return true;
+        if (want_size > 0.0f && want_size != worker_base_size_) return true;
         return false;
     }
 
     // Produce the base IR for the current source. With a readable IR path set the
-    // base is the loaded file (summed to mono, resampled to the session SR,
-    // unit-energy normalized); otherwise it is the synthetic reverb at `seconds`.
-    // Sets worker_has_file_. Worker / prepare thread only (file IO + alloc).
+    // base is the loaded file (summed to mono, resampled to the session SR),
+    // WINDOWED by the Size knob to `seconds` with a short fade tail so Size stays
+    // live for loaded files too (see window_ir_to_length); otherwise it is the
+    // synthetic reverb at `seconds`. The full decoded file is cached in
+    // worker_file_raw_ keyed by ir_path_gen_, so a Size change only re-windows
+    // (cheap) — the expensive decode/resample runs once per file, not per Size
+    // step. Sets worker_has_file_. Worker / prepare thread only (file IO + alloc).
     std::vector<float> build_base_ir(float seconds) {
         const std::string path = ir_path();
         if (!path.empty()) {
-            // Any exception during decode/resample (e.g. bad_alloc on a huge or
-            // corrupt file) must never escape onto the worker or prepare thread —
-            // fall back to the synthetic IR rather than drop audio or crash.
-            std::optional<std::vector<float>> loaded;
-            try {
-                loaded = load_ir_file(path);
-            } catch (...) {
-                loaded = std::nullopt;
+            const std::uint32_t gen = ir_path_gen_.load(std::memory_order_acquire);
+            if (worker_file_raw_.empty() || worker_file_raw_gen_ != gen) {
+                // Any exception during decode/resample (e.g. bad_alloc on a huge
+                // or corrupt file) must never escape onto the worker or prepare
+                // thread — fall back to the synthetic IR rather than crash.
+                std::optional<std::vector<float>> loaded;
+                try {
+                    loaded = load_ir_file(path);
+                } catch (...) {
+                    loaded = std::nullopt;
+                }
+                if (loaded && !loaded->empty()) {
+                    worker_file_raw_ = std::move(*loaded);
+                    worker_file_raw_gen_ = gen;
+                } else {
+                    worker_file_raw_.clear();
+                    runtime::log_warn(
+                        "SuperConvolver: IR file '{}' is unreadable, too large, or "
+                        "empty; falling back to the built-in synthetic IR.", path);
+                }
             }
-            if (loaded && !loaded->empty()) {
+            if (!worker_file_raw_.empty()) {
                 worker_has_file_ = true;
-                return std::move(*loaded);
+                // Size truncates the loaded space's tail (bounded by kMaxIrSeconds,
+                // which the loader already enforces on decode). A ~30 ms fade tail
+                // (capped to the target) smooths the cut. If the file is shorter
+                // than Size the window is a no-op (never zero-pad-extended).
+                std::size_t target = ir_length_for(seconds);
+                const std::size_t cap =
+                    static_cast<std::size_t>(kMaxIrSeconds * sample_rate_);
+                if (target > cap) target = cap;
+                const std::size_t fade =
+                    static_cast<std::size_t>(0.030 * sample_rate_);
+                return window_ir_to_length(worker_file_raw_, target, fade);
             }
-            runtime::log_warn(
-                "SuperConvolver: IR file '{}' is unreadable, too large, or empty; "
-                "falling back to the built-in synthetic IR.", path);
         }
         worker_has_file_ = false;
+        worker_file_raw_.clear();
+        worker_file_raw_gen_ = 0;
         return make_reverb_ir(ir_length_for(seconds));
     }
 
@@ -949,15 +1085,13 @@ private:
             cur.swap(y);
         }
 
-        // Re-normalize to unit energy (the all-pass + pre-delay are near energy-
-        // preserving, but truncation to the base length can shave a little). If
-        // the variant came out silent or non-finite (degenerate short IR), fall
-        // back to the base so the room never reads as a zero-energy slot.
+        // Guard against a degenerate (silent / non-finite) variant, then peak-
+        // response normalize to the SAME 0 dB max-gain rule as the base IR so no
+        // room can push the batched multi-room sum past unity either.
         double energy = 0.0;
         for (float v : cur) energy += static_cast<double>(v) * v;
         if (!std::isfinite(energy) || energy <= 0.0) return base;
-        const float gain = static_cast<float>(1.0 / std::sqrt(energy));
-        for (float& v : cur) v *= gain;
+        normalize_peak_response(cur, 1.0f);
         return cur;
     }
 
@@ -990,6 +1124,7 @@ private:
             const float want_size = requested_size_.load(std::memory_order_relaxed);
             const int want_engine = requested_engine_.load(std::memory_order_relaxed);
             const int want_rooms = requested_rooms_.load(std::memory_order_relaxed);
+            const float want_flow = requested_flow_.load(std::memory_order_relaxed);
             const std::uint32_t want_gen = ir_path_gen_.load(std::memory_order_acquire);
 
             // Rebuild the base IR whenever its source changed: a new file loaded
@@ -1008,9 +1143,34 @@ private:
                 gpu_base_dirty_ = true;
             }
 
+            // Debounce Rooms: rebuilding the GPU stack retires the live stack and
+            // builds a fresh one, so the audio drops to the CPU/single-IR path for
+            // the gap. Dragging the Rooms slider changes the value every poll, which
+            // would rebuild dozens of times and glitch the sound in and out. Hold
+            // the currently-built count until Rooms has been STABLE for a moment,
+            // then rebuild once. Engine toggles and IR/Size changes are NOT
+            // debounced (they route through the other branches immediately).
+            if (want_rooms != rooms_last_seen_) {
+                rooms_last_seen_ = want_rooms;
+                rooms_stable_polls_ = 0;
+            } else if (rooms_stable_polls_ < kRoomsSettlePolls) {
+                ++rooms_stable_polls_;
+            }
+            const bool rooms_settled = rooms_stable_polls_ >= kRoomsSettlePolls;
+            const int effective_rooms =
+                rooms_settled ? want_rooms
+                              : (gpu_built_rooms_ > 0 ? gpu_built_rooms_ : want_rooms);
+
             // GPU stack management (only meaningful when a device exists).
             if (device_available_)
-                service_gpu_stack(want_engine, want_rooms);
+                service_gpu_stack(want_engine, effective_rooms);
+
+            // Push the live Flow depth into the multi-room node (worker owns the
+            // stack, so this deref is safe here). The node applies it on its next
+            // block on the transport worker — ~5 ms latency on Flow *changes*,
+            // inaudible for a slow pan LFO.
+            if (current_stack_ && current_stack_->multi)
+                current_stack_->multi->set_flow(want_flow);
 
             for (auto& sw : swapper_) sw.drain_old();
             // Free any retired stack the audio thread has since released (a stack
@@ -1107,7 +1267,15 @@ private:
     std::atomic<float> requested_size_{-1.0f};
     std::atomic<int> requested_engine_{0};          // 0 = CPU, 1 = GPU
     std::atomic<int> requested_rooms_{1};
+    std::atomic<float> requested_flow_{0.0f};        // 0..1 moving-field depth
     int gpu_built_rooms_ = 0;          // worker-thread-local (current_stack_ config)
+    // Rooms debounce (worker-thread-local): hold the built count until the Rooms
+    // request has been stable for kRoomsSettlePolls worker polls (~120 ms at the
+    // 5 ms poll), so dragging the slider rebuilds the GPU stack once on release
+    // instead of glitching the audio in and out on every intermediate value.
+    static constexpr int kRoomsSettlePolls = 24;
+    int rooms_last_seen_ = -1;
+    int rooms_stable_polls_ = 0;
 
     // IR source. The path is opaque, persisted state (set on the UI/main thread,
     // read on the worker / prepare); ir_path_gen_ is the lock-free trigger the
@@ -1124,6 +1292,11 @@ private:
     float worker_base_size_ = -1.0f;
     bool worker_has_file_ = false;
     bool gpu_base_dirty_ = false;
+    // Full decoded loaded file (mono, session SR), cached so a Size change only
+    // re-windows instead of re-decoding. Keyed by the ir_path generation that
+    // produced it; a new file (generation moves) forces a fresh decode.
+    std::vector<float> worker_file_raw_;
+    std::uint32_t worker_file_raw_gen_ = 0;
 
     // UI display snapshot (UI + worker thread only; never audio thread).
     mutable std::mutex ir_display_mutex_;

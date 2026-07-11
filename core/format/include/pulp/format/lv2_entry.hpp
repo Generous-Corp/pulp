@@ -13,6 +13,7 @@
 #include <pulp/format/lv2_adapter.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <lv2/core/lv2.h>
 #include <lv2/atom/atom.h>
@@ -29,6 +30,12 @@ namespace pulp::format::lv2_generic {
 // Populated at static init by PULP_LV2_PLUGIN
 inline ProcessorFactory g_factory = nullptr;
 inline const char* g_uri = nullptr;
+
+// Worst-case MIDI events per block the RT MIDI buffers are sized to. Matches
+// the CLAP adapter's realtime MIDI capacity so behavior is uniform; add()
+// beyond this drops (set_realtime_capacity_limit) rather than allocating.
+inline constexpr std::size_t kRealtimeMidiEventCapacity =
+    state::ParameterEventQueue::kCapacity;
 
 // ── LV2 Callbacks ────────────────────────────────────────────────────────
 
@@ -90,6 +97,14 @@ inline LV2_Handle instantiate(
     inst->accepts_midi = desc.accepts_midi;
     inst->produces_midi = desc.produces_midi;
 
+    // Pre-reserve the RT MIDI buffers here (control thread) so run() never
+    // allocates on the audio thread. set_realtime_capacity_limit(true) makes
+    // add() drop-past-capacity instead of growing — mirrors the CLAP adapter.
+    inst->midi_in.reserve(kRealtimeMidiEventCapacity);
+    inst->midi_out.reserve(kRealtimeMidiEventCapacity);
+    inst->midi_in.set_realtime_capacity_limit(true);
+    inst->midi_out.set_realtime_capacity_limit(true);
+
     // Prepare the processor
     format::PrepareContext ctx;
     ctx.sample_rate = sample_rate;
@@ -112,6 +127,9 @@ inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     // (optional) input. TTL emits these in the same order in
     // generate_plugin_ttl(), so the host's port index matches.
     int atom_out_end = atom_in_end + (inst->produces_midi ? 1 : 0);
+    // The latency-reporting output control port is always the last port,
+    // emitted unconditionally by generate_plugin_ttl() after the atom ports.
+    int latency_end = atom_out_end + 1;
 
     int idx = static_cast<int>(port);
 
@@ -129,6 +147,10 @@ inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
         // buffer sized by lv2:minimumSize in the TTL. run() writes
         // outgoing MIDI events into it.
         inst->midi_out_atom = data;
+    } else if (idx < latency_end) {
+        // Latency output control port — host reads the value run() writes
+        // here for plugin delay compensation.
+        inst->latency_port = static_cast<float*>(data);
     }
 }
 
@@ -178,6 +200,18 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle);
     if (!inst->processor) return;
 
+    // Hardware flush-to-zero for the whole audio-thread render, matching every
+    // other adapter (clap_adapter.cpp, vst3_adapter.cpp, au_adapter.mm, ...).
+    // Protects recursive DSP feedback from denormal stalls under LV2.
+    pulp::signal::ScopedFlushDenormals flush_denormals;
+
+    // Report current processing latency to the host's latency control port
+    // (see generate_plugin_ttl's lv2:reportsLatency port) for PDC.
+    if (inst->latency_port) {
+        *inst->latency_port =
+            static_cast<float>(inst->processor->latency_samples());
+    }
+
     // Read control port values into the parameter store. LV2 run() is
     // the audio thread, so use the RT-safe path — atomic store + SPSC
     // push for Main listeners, no allocation. Editor pumps via
@@ -223,52 +257,60 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
-    // MIDI: parse the connected LV2_Atom_Sequence (if any) and promote each
-    // MidiEvent into the Processor's MidiBuffer. Sysex atoms are currently
-    // ignored here; LV2 variable-length event support is not wired yet.
-    midi::MidiBuffer midi_in, midi_out;
-    if (inst->midi_in_atom && inst->urid_atom_sequence && inst->urid_midi_event) {
-        const auto* seq = static_cast<const LV2_Atom_Sequence*>(inst->midi_in_atom);
-        if (seq->atom.type == inst->urid_atom_sequence) {
-            LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
-                if (ev->body.type != inst->urid_midi_event) continue;
-                const auto* data = reinterpret_cast<const uint8_t*>(ev + 1);
-                const uint32_t size = ev->body.size;
-                if (size >= 1 && size <= 3 && (data[0] & 0x80)) {
-                    midi::MidiEvent me;
-                    me.message = choc::midi::ShortMessage(
-                        data[0],
-                        size > 1 ? data[1] : uint8_t{0},
-                        size > 2 ? data[2] : uint8_t{0});
-                    me.sample_offset = static_cast<int32_t>(ev->time.frames);
-                    midi_in.add(me);
-                }
-            }
-        }
-    }
-
     format::ProcessContext proc_ctx;
     proc_ctx.sample_rate = inst->sample_rate;
     proc_ctx.num_samples = static_cast<int>(n_samples);
     proc_ctx.process_mode = format::ProcessMode::Realtime;
     proc_ctx.render_speed_hint = format::RenderSpeedHint::Realtime;
 
-    // Uniform param-events contract + RT-safety guard. The queue carries no
-    // atom-sourced events yet; control-port params still flow via store. Wrap
-    // only the process call in ScopedNoAlloc.
+    // Uniform param-events contract. The queue carries no atom-sourced events
+    // yet; control-port params still flow via store.
     inst->param_events.clear();
     inst->processor->set_param_events(&inst->param_events);
+
+    // RT-safety guard spans the whole audio-thread render: MIDI parse, the
+    // process() call, and MIDI serialization. Because midi_in/midi_out are
+    // pre-reserved instance members (see instantiate()), the parse below reuses
+    // that storage instead of heap-allocating — the very allocation this guard
+    // exists to catch. Reset them here, inside the guarded region.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        inst->processor->process(process_buffers, midi_in, midi_out, proc_ctx);
-    }
 
-    // Serialize outgoing MIDI back to the LV2 atom output port.
-    write_midi_out_to_sequence(
-        static_cast<LV2_Atom_Sequence*>(inst->midi_out_atom),
-        inst->urid_atom_sequence,
-        inst->urid_midi_event,
-        midi_out);
+        // MIDI: parse the connected LV2_Atom_Sequence (if any) and promote each
+        // MidiEvent into the Processor's MidiBuffer. Sysex atoms are currently
+        // ignored here; LV2 variable-length event support is not wired yet.
+        inst->midi_in.clear();
+        inst->midi_out.clear();
+        if (inst->midi_in_atom && inst->urid_atom_sequence && inst->urid_midi_event) {
+            const auto* seq = static_cast<const LV2_Atom_Sequence*>(inst->midi_in_atom);
+            if (seq->atom.type == inst->urid_atom_sequence) {
+                LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
+                    if (ev->body.type != inst->urid_midi_event) continue;
+                    const auto* data = reinterpret_cast<const uint8_t*>(ev + 1);
+                    const uint32_t size = ev->body.size;
+                    if (size >= 1 && size <= 3 && (data[0] & 0x80)) {
+                        midi::MidiEvent me;
+                        me.message = choc::midi::ShortMessage(
+                            data[0],
+                            size > 1 ? data[1] : uint8_t{0},
+                            size > 2 ? data[2] : uint8_t{0});
+                        me.sample_offset = static_cast<int32_t>(ev->time.frames);
+                        inst->midi_in.add(me);
+                    }
+                }
+            }
+        }
+
+        inst->processor->process(process_buffers, inst->midi_in, inst->midi_out,
+                                 proc_ctx);
+
+        // Serialize outgoing MIDI back to the LV2 atom output port.
+        write_midi_out_to_sequence(
+            static_cast<LV2_Atom_Sequence*>(inst->midi_out_atom),
+            inst->urid_atom_sequence,
+            inst->urid_midi_event,
+            inst->midi_out);
+    }
 }
 
 inline void deactivate(LV2_Handle) {

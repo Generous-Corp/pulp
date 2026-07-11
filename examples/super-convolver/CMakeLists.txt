@@ -11,7 +11,7 @@ if(PULP_BUILD_TESTS AND TARGET pulp::gpu-audio AND TARGET pulp::render)
     # virtual is create_view()) resolves. create_view() is never CALLED in the
     # headless audio test — no GPU host is needed at runtime, only the symbol at
     # link time — so the view/canvas libs are a link-only dependency here.
-    add_executable(super-convolver-test test_super_convolver.cpp super_convolver_view.cpp)
+    add_executable(super-convolver-test test_super_convolver.cpp test_source_display.cpp test_flow_modulator.cpp super_convolver_view.cpp)
     target_link_libraries(super-convolver-test
         PRIVATE pulp::format pulp::signal pulp::gpu-audio pulp::render
                 pulp::view pulp::canvas
@@ -29,6 +29,12 @@ if(APPLE AND TARGET pulp::gpu-audio AND TARGET pulp::render AND
         pulp::format pulp::audio pulp::signal pulp::gpu-audio pulp::render
         pulp::view pulp::canvas)
     target_include_directories(super-convolver-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # Native render of the acoustic-field concept (Phase B visual target).
+    add_executable(super-convolver-field-shot field_shot.cpp)
+    target_link_libraries(super-convolver-field-shot PRIVATE
+        pulp::render pulp::view pulp::canvas)
+    target_include_directories(super-convolver-field-shot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
 # Honest CPU-vs-GPU convolution benchmark. macOS + GPU only (it instantiates the
