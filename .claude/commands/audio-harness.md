@@ -43,6 +43,29 @@ What you get:
     control-port nature, and on any plugin that reads its params once per block)
   - also exposed as the `pulp_audio_render` MCP tool (returns the metrics JSON;
     takes a single `param`/`midi` token — use the CLI for multiple)
+- **Latency proof (`--latency-report`)** — prove a plugin's `latency_samples()`
+  against the delay actually in its rendered audio. The host slides the whole
+  track by that number and nothing else checks it, so a wrong one comb-filters
+  every parallel/multi-mic mix silently.
+
+  ```bash
+  # Needs a pass-through/dry mode (arrange with --param) and a broadband,
+  # aperiodic stimulus — never silence or a sine.
+  pulp audio render --plugin My.clap --input-signal noise --duration-frames 32768 \
+      --param <dry-mix-id>=0 --out /tmp/o.wav --latency-report /tmp/lat.json
+  ```
+
+  It **refuses rather than guesses**: an unprovable claim exits nonzero exactly
+  like a disproven one. Read `null_depth_db` / `ambiguity_margin_db` in the
+  artifact — a pass with a small margin is a finding, not a clean bill of health.
+  Add `--latency-expect <n>` to pin the value the plugin is *supposed* to have;
+  without it the proof is self-consistency only, so a plugin whose true delay AND
+  report both grew still passes. Same evidence over MCP via `latency: true`.
+
+  **Most plugins do not need this** — of Pulp's 24 example plugins only two ever
+  report nonzero latency. It is for convolution / FFT / lookahead / oversampling /
+  neural DSP, where the number is *derived* and a refactor moves it. See
+  `docs/guides/latency-proof.md` for when NOT to use it.
 
 To add coverage for a new effect, copy the nearest contract fixture in
 `test/test_audio_contracts.cpp` (or a Doctor case in `test/test_audio_doctor.cpp`)
