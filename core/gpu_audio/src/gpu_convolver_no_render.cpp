@@ -28,6 +28,15 @@ bool GpuConvolver::prepare() {
     prepared_ = false;
     if (channels_ == 0 || block_ == 0 || ir_.empty()) return false;
 
+    // The fallback is a signal::PartitionedConvolver loaded at `block_`, and
+    // load_ir() rounds a non-power-of-two block UP to the next power of two for
+    // its radix-2 FFT. It would then be partitioned for a block size the
+    // transport never delivers, so every block would be a block-size violation.
+    // Here that is fatal rather than degrading: with no render backend the
+    // fallback is the ONLY audio path, so the node would emit nothing but
+    // silence. Refuse to prepare instead.
+    if ((block_ & (block_ - 1u)) != 0u) return false;
+
     fft_size_ = 1;
     while (fft_size_ < block_ + static_cast<uint32_t>(ir_.size())) fft_size_ <<= 1;
 
