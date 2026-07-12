@@ -179,6 +179,60 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         return false;
     }
 
+    // EnableIO FIRST, before binding CurrentDevice below.
+    //
+    // AUHAL starts out with output element 0 ENABLED and input element 1 disabled.
+    // Binding an output-enabled unit to a device that has NO output streams — a
+    // plain USB microphone, an interface input, an aggregate capture device — is
+    // rejected with kAudioUnitErr_InvalidPropertyValue (-10851), so an input-only
+    // open of any pure-input device failed. It only appeared to work on machines
+    // whose default input happened to be a duplex device.
+    //
+    // Apple's required order is EnableIO -> CurrentDevice -> stream formats ->
+    // AudioUnitInitialize. Setting EnableIO here also still satisfies the
+    // "before AudioUnitInitialize" constraint the format code below relies on.
+
+    // Enable input on bus 1 if input channels are requested
+    input_enabled_ = false;
+    if (want_input) {
+        UInt32 enable_input = 1;
+        status = AudioUnitSetProperty(audio_unit_,
+            kAudioOutputUnitProperty_EnableIO,
+            kAudioUnitScope_Input, 1,
+            &enable_input, sizeof(enable_input));
+        if (status != noErr) {
+            if (input_only) {
+                // Output is also disabled, so a failed input-enable would leave a
+                // unit with no IO at all — fatal for an input-only open.
+                runtime::log_error("CoreAudio: could not enable input for input-only open ({})",
+                    static_cast<int>(status));
+                close();
+                return false;
+            }
+            runtime::log_warn("CoreAudio: could not enable input ({})", static_cast<int>(status));
+            // Continue without input — effects will receive silence
+        } else {
+            input_enabled_ = true;
+        }
+    }
+
+    // Disable output on bus 0 when no output channels are requested. AUHAL rejects
+    // a zero-channel output stream format (kAudioUnitErr_FormatNotSupported,
+    // -10868), so an input-only unit must turn output IO off rather than set a
+    // degenerate format.
+    if (!want_output) {
+        UInt32 disable_output = 0;
+        status = AudioUnitSetProperty(audio_unit_,
+            kAudioOutputUnitProperty_EnableIO,
+            kAudioUnitScope_Output, 0,
+            &disable_output, sizeof(disable_output));
+        if (status != noErr) {
+            runtime::log_error("CoreAudio: could not disable output IO ({})", static_cast<int>(status));
+            close();
+            return false;
+        }
+    }
+
     // Set the device. Some output-only standalone apps can still play through
     // the system default even when AUHAL refuses kAudioOutputUnitProperty_
     // CurrentDevice for the selected/default device (for example, virtual or
@@ -245,47 +299,6 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
                 actual_rate = config_.sample_rate;
         }
         config_.sample_rate = actual_rate;
-    }
-
-    // Enable input on bus 1 if input channels are requested
-    input_enabled_ = false;
-    if (want_input) {
-        UInt32 enable_input = 1;
-        status = AudioUnitSetProperty(audio_unit_,
-            kAudioOutputUnitProperty_EnableIO,
-            kAudioUnitScope_Input, 1,
-            &enable_input, sizeof(enable_input));
-        if (status != noErr) {
-            if (input_only) {
-                // Output is also disabled, so a failed input-enable would leave a
-                // unit with no IO at all — fatal for an input-only open.
-                runtime::log_error("CoreAudio: could not enable input for input-only open ({})",
-                    static_cast<int>(status));
-                close();
-                return false;
-            }
-            runtime::log_warn("CoreAudio: could not enable input ({})", static_cast<int>(status));
-            // Continue without input — effects will receive silence
-        } else {
-            input_enabled_ = true;
-        }
-    }
-
-    // Disable output on bus 0 when no output channels are requested. AUHAL rejects
-    // a zero-channel output stream format (kAudioUnitErr_FormatNotSupported,
-    // -10868), so an input-only unit must turn output IO off rather than set a
-    // degenerate format. EnableIO must be set before AudioUnitInitialize.
-    if (!want_output) {
-        UInt32 disable_output = 0;
-        status = AudioUnitSetProperty(audio_unit_,
-            kAudioOutputUnitProperty_EnableIO,
-            kAudioUnitScope_Output, 0,
-            &disable_output, sizeof(disable_output));
-        if (status != noErr) {
-            runtime::log_error("CoreAudio: could not disable output IO ({})", static_cast<int>(status));
-            close();
-            return false;
-        }
     }
 
     // The non-interleaved 32-bit float PCM format shared by both buses; the
