@@ -13,7 +13,8 @@ findings are updated as the work progresses.
 
 - Worktree: `/Users/danielraffel/Code/pulp-parameter-state-hardening`
 - Branch: `feature/parameter-state-hardening`
-- Base: `origin/main` at `8efe1f9865ff792e53b7436f55e6a142eb1d9d5f`
+- Original base: `origin/main` at `8efe1f9865ff792e53b7436f55e6a142eb1d9d5f`
+- Pre-merge rebase: `origin/main` at `26b27de44c5257c7f8488e08699ddf10740cac59`
 - Reference trees: `/Users/danielraffel/Code/truce`,
   `/Users/danielraffel/Code/JUCE`, `/Users/danielraffel/Code/iPlug2`
 
@@ -183,3 +184,31 @@ Adopt a hybrid:
   per-layout native IDs, unconnected sidechain silence, large snapshot save
   behavior, enum numeric rejection, and full focused regression. No unresolved
   must-fix finding remains.
+
+### Pre-merge review against current main
+
+- Rebased all eight implementation commits onto current `origin/main` before
+  reviewing the actual merge candidate.
+- Thermo-nuclear code-health review found that new sidechain/task coverage
+  pushed `test_headless.cpp` from 969 to 1,108 lines and mixed unrelated
+  responsibilities. Extracted `pulp-test-format-hardening`; the original suite
+  is now 984 lines and the focused suite owns sidechain/task behavior.
+- Adversarial review found raw `try/catch` in the public background-task header,
+  which failed Pulp's `-fno-exceptions` portability contract, and a `noexcept`
+  author handler that would terminate on an exception. The lane now uses the
+  portable exception macros, contains handler failures, continues to later
+  tasks, and passes both a throwing-handler test and a direct `-fno-exceptions`
+  header compile.
+- Found `supported_bus_layouts` inserted before the existing trailing
+  `supports_f64_audio` descriptor field. Moved it to the true end and added a
+  legacy positional-initializer regression test.
+- Separated named descriptor layouts from `Processor::BusesLayout`; the latter
+  remains the original two-vector negotiation type, eliminating warnings and
+  avoiding host metadata in the runtime proposal contract.
+- Found explicit enum/integer/toggle parameters could still store fractional
+  values through direct, RT, normalized, or deserialize paths when no numeric
+  step was supplied. Centralized explicit-kind quantization in `StateStore`
+  while preserving legacy continuous direct-set behavior.
+- Focused review-fix validation passes: format hardening 127 assertions/5
+  cases, explicit-kind StateStore 5/1, layout/source compatibility 17/5, CLAP
+  port/config 54/2, and headless layout selection 4/1.

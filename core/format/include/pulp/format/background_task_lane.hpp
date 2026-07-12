@@ -7,6 +7,7 @@
 #include <thread>
 #include <type_traits>
 
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 
@@ -25,7 +26,7 @@ class BackgroundTaskLane {
     static_assert(std::is_trivially_copyable_v<Task>,
                   "RT task payloads must be trivially copyable");
 public:
-    using Handler = void (*)(void*, const Task&) noexcept;
+    using Handler = void (*)(void*, const Task&);
 
     BackgroundTaskLane() = default;
     ~BackgroundTaskLane() { stop(); }
@@ -40,9 +41,9 @@ public:
         policy_ = policy;
         latest_generation_.store(0, std::memory_order_relaxed);
         stopping_.store(false, std::memory_order_release);
-        try {
+        PULP_TRY {
             worker_ = std::thread([this] { worker_loop(); });
-        } catch (...) {
+        } PULP_CATCH_ALL {
             handler_ = nullptr;
             return false;
         }
@@ -77,22 +78,27 @@ private:
             if (policy_ == BackgroundTaskPolicy::Latest) {
                 const auto generation = latest_generation_.load(std::memory_order_acquire);
                 if (generation != consumed_generation) {
-                    handler_(context_, latest_.read());
+                    invoke(latest_.read());
                     consumed_generation = generation;
                     handled = true;
                 }
             } else if (auto task = ordered_.try_pop()) {
-                handler_(context_, *task);
+                invoke(*task);
                 handled = true;
             }
             if (!handled) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (policy_ == BackgroundTaskPolicy::Ordered) {
-            while (auto task = ordered_.try_pop()) handler_(context_, *task);
+            while (auto task = ordered_.try_pop()) invoke(*task);
         } else {
             const auto generation = latest_generation_.load(std::memory_order_acquire);
-            if (generation != consumed_generation) handler_(context_, latest_.read());
+            if (generation != consumed_generation) invoke(latest_.read());
         }
+    }
+
+    void invoke(const Task& task) noexcept {
+        PULP_TRY { handler_(context_, task); }
+        PULP_CATCH_ALL {}
     }
 
     runtime::SpscQueue<Task, Capacity> ordered_;

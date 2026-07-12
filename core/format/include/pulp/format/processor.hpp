@@ -187,10 +187,6 @@ struct PluginDescriptor {
     /// into effective_capabilities().
     NodeCapabilities node_capabilities;
 
-    /// Explicit host-selectable layouts. Empty preserves the legacy flexible
-    /// mono/stereo negotiation derived from the default bus declarations.
-    std::vector<BusLayoutConfiguration> supported_bus_layouts;
-
     /// Opt in to native double-precision audio processing. Appended after
     /// the original descriptor fields so positional aggregate initializers
     /// keep their existing meaning. Existing plugins leave this false and
@@ -199,6 +195,12 @@ struct PluginDescriptor {
     /// process_f64() for their real double-precision DSP; the default still
     /// converts through the f32 process() path so an early opt-in remains safe.
     bool supports_f64_audio = false;
+
+    /// Explicit host-selectable layouts. Appended at the true end of the
+    /// descriptor so every pre-existing positional aggregate initializer,
+    /// including one that supplies supports_f64_audio, retains its meaning.
+    /// Empty preserves legacy flexible mono/stereo negotiation.
+    std::vector<BusLayoutConfiguration> supported_bus_layouts;
 
     NodeCapabilities effective_capabilities() const {
         return {
@@ -757,7 +759,10 @@ public:
     /// Format adapters call this on the host thread before applying the
     /// layout. Returning false rejects the proposal and the adapter is
     /// expected to refuse the host's `setBusArrangements` / equivalent call.
-    using BusesLayout = BusLayoutConfiguration;
+    struct BusesLayout {
+        std::vector<int> inputs;
+        std::vector<int> outputs;
+    };
 
     /// Validate a proposed bus layout. Default acceptance policy:
     ///

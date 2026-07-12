@@ -275,6 +275,19 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
 
 } // namespace detail
 
+namespace {
+
+float constrain_stored_value(const ParamInfo& param, float value) {
+    // Preserve the legacy direct-set behavior for untyped parameters, even
+    // when their range carries a compatibility step. Explicit semantic kinds
+    // opt into canonical integer/toggle/enum quantization on every write path.
+    if (param.kind == ParamKind::Continuous)
+        return std::clamp(value, param.range.min, param.range.max);
+    return constrain_param_value(param, value);
+}
+
+} // namespace
+
 StateStore::StateStore()
     : registry_(std::make_shared<detail::ListenerRegistry>()) {
     // Let the registry read live parameter values when draining queued
@@ -309,8 +322,7 @@ void StateStore::add_parameter(const ParamInfo& info) {
     // round-trip failure. Clamping the ParamInfo too keeps get_default()/info()
     // reporting the same effective default that the store actually holds.
     ParamInfo clamped = info;
-    clamped.range.default_value =
-        std::clamp(info.range.default_value, info.range.min, info.range.max);
+    clamped.range.default_value = constrain_stored_value(info, info.range.default_value);
     params_.push_back(clamped);
     values_.emplace_back(clamped.range.default_value);
     id_to_index_[info.id] = index;
@@ -356,7 +368,7 @@ void StateStore::set_value(ParamID id, float value) {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end()) return;
     auto& param = params_[it->second];
-    float clamped = std::clamp(value, param.range.min, param.range.max);
+    float clamped = constrain_stored_value(param, value);
     values_[it->second].set(clamped);
 
     // Wait-free fan-out: notify() does a single atomic pointer load and
@@ -370,7 +382,7 @@ void StateStore::set_value_rt(ParamID id, float value) {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end()) return;
     auto& param = params_[it->second];
-    float clamped = std::clamp(value, param.range.min, param.range.max);
+    float clamped = constrain_stored_value(param, value);
     values_[it->second].set(clamped);
     if (registry_) registry_->notify_rt(id, clamped);
 }
@@ -681,8 +693,7 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         auto it = id_to_index_.find(id);
         if (it != id_to_index_.end()) {
             const auto index = it->second;
-            const auto& range = params_[index].range;
-            values_[index].set(std::clamp(value, range.min, range.max));
+            values_[index].set(constrain_stored_value(params_[index], value));
         }
     }
 

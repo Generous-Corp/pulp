@@ -2597,3 +2597,25 @@ TEST_CASE("StateStore clamps an out-of-range default and round-trips it",
     REQUIRE(first == second);
     REQUIRE_THAT(store.get_value(1), WithinAbs(0.001, 1e-9));
 }
+
+TEST_CASE("StateStore quantizes explicitly typed parameters on every write path",
+          "[state][param-kind]") {
+    StateStore store;
+    auto mode = make_param_info(1, "Mode", "", {0.0f, 2.0f, 0.6f});
+    mode.kind = ParamKind::Enum;
+    mode.value_labels = {"Clean", "Warm", "Hot"};
+    store.add_parameter(mode);
+
+    REQUIRE_THAT(store.get_default(1), WithinAbs(1.0, 0.0001));
+    store.set_value(1, 1.6f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(2.0, 0.0001));
+    store.set_value_rt(1, 0.49f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.0, 0.0001));
+    store.set_normalized(1, 0.74f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.0001));
+
+    auto legacy = make_param_info(2, "Legacy stepped", "", {0.0f, 2.0f, 0.0f, 1.0f});
+    store.add_parameter(legacy);
+    store.set_value(2, 0.6f);
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.6, 0.0001));
+}

@@ -145,7 +145,7 @@ bool HeadlessHost::try_prepare_bus_layout(
     if (!processor_ || layout_index >= descriptor_.supported_bus_layouts.size())
         return false;
     const auto& layout = descriptor_.supported_bus_layouts[layout_index];
-    if (!processor_->is_bus_layout_supported(layout)) return false;
+    if (!processor_->is_bus_layout_supported({layout.inputs, layout.outputs})) return false;
     const int input_channels = layout.inputs.empty() ? 0 : layout.inputs.front();
     const int output_channels = layout.outputs.empty() ? 0 : layout.outputs.front();
     return try_prepare(sample_rate, max_buffer_size, input_channels,

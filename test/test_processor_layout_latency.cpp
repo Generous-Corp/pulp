@@ -148,6 +148,16 @@ TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo
     REQUIRE(p.is_bus_layout_supported(mixed));
 }
 
+TEST_CASE("PluginDescriptor preserves the legacy positional trailing f64 field",
+          "[processor][descriptor][source-compatibility]") {
+    const PluginDescriptor descriptor{
+        "Legacy", "Vendor", "com.vendor.legacy", "1.0.0",
+        PluginCategory::Effect, {{"In", 2}}, {{"Out", 2}},
+        false, false, false, false, false, 0, {}, {}, {}, true};
+    REQUIRE(descriptor.supports_f64_audio);
+    REQUIRE(descriptor.supported_bus_layouts.empty());
+}
+
 TEST_CASE("Processor::is_bus_layout_supported default policy rejects "
           "non-mono/stereo channel counts and bus-count mismatches",
           "[processor][bus-layout]") {

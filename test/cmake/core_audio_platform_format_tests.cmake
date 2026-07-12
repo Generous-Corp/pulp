@@ -101,6 +101,7 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-format-hardening LIBRARIES pulp::format)
 
 # Standalone host render-path RT-safety guard. Drives the extracted
 # StandaloneApp::render_audio_block() seam for one steady-state block under

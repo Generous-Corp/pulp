@@ -171,8 +171,9 @@ inline bool audio_ports_config_select(const clap_plugin_t* plugin, clap_id confi
     if (!self || !self->processor) return false;
     const auto desc = self->processor->descriptor();
     if (config_id >= desc.supported_bus_layouts.size()) return false;
+    const auto& layout = desc.supported_bus_layouts[config_id];
     if (!self->processor->is_bus_layout_supported(
-            desc.supported_bus_layouts[config_id])) return false;
+            {layout.inputs, layout.outputs})) return false;
     self->selected_bus_layout = config_id;
     return true;
 }
