@@ -42,6 +42,10 @@ const PLUGIN_TAIL = { get: 0 };
 // clap_param_info_t (wasm32): id@0, flags@4, cookie@8, name[256]@12,
 // module[1024]@268, min@1296, max@1304, default@1312.  Size 1320.
 const PARAM_INFO = { size: 1320, id: 0, name: 12, min: 1296, max: 1304, def: 1312 };
+// clap_plugin_params_t vtable: count@0, get_info@4, get_value@8, value_to_text@12,
+// text_to_value@16, flush@20. value_to_text is CLAP's ONLY display source — the
+// param info struct has no unit field (see deriveDisplayUnit in wclap-abi.mjs).
+const PARAMS_EXT = { count: 0, get_info: 4, get_value: 8, value_to_text: 12, text_to_value: 16, flush: 20 };
 // clap_event_param_value (wasm32): header(16) + param_id@16 + cookie@20 +
 // note_id@24 + port_index@28 + channel@30 + key@32 + (pad) + value@40.  Size 48.
 const PARAM_EVENT_SIZE = 48;
@@ -306,23 +310,48 @@ export class WebClapPlugin {
     return h.call(h.u32(this._tailExt + PLUGIN_TAIL.get), this.ptr) >>> 0;
   }
 
-  // Query the clap.params extension; returns [{id, name, min, max, default}].
+  // Render a parameter value as a CLAP host displays it — clap_plugin_params
+  // .value_to_text(plugin, id, value, buf, size) → "35.00 %". CLAP defines no
+  // unit field on clap_param_info, so this is the only display source; a caller
+  // that needs the bare unit feeds two probes to deriveDisplayUnit (wclap-abi.mjs).
+  // Returns null when the plugin exposes no clap.params / declines the call.
+  valueToText(id, value) {
+    const h = this.host;
+    if (this._paramsExt === undefined) this._paramsExt = this._ext(CLAP_EXT_PARAMS) || 0;
+    if (!this._paramsExt) return null;
+    const fn = h.u32(this._paramsExt + PARAMS_EXT.value_to_text);
+    if (!fn) return null;
+    if (!this._textBuf) this._textBuf = h.ex.malloc(256);
+    if (!h.call(fn, this.ptr, id, value, this._textBuf, 256)) return null;
+    return h.readCstr(this._textBuf, 256);
+  }
+
+  // Query the clap.params extension; returns
+  // [{id, name, min, max, default, textProbes}]. `textProbes` are two
+  // {value, text} value_to_text renderings the caller turns into a display unit
+  // (deriveDisplayUnit) — the same seam the worklet host hands the browser adapter.
   params() {
-    const ext = this.host.call(this._fn(40), this.ptr, this.host.cstr(CLAP_EXT_PARAMS));
+    const ext = this._paramsExt = this._ext(CLAP_EXT_PARAMS) || 0;
     if (!ext) return [];
-    const count = this.host.call(this.host.u32(ext + 0), this.ptr);
+    const count = this.host.call(this.host.u32(ext + PARAMS_EXT.count), this.ptr);
     const infoBuf = this.host.ex.malloc(PARAM_INFO.size);
     const out = [];
     for (let i = 0; i < count; i++) {
-      if (!this.host.call(this.host.u32(ext + 4), this.ptr, i, infoBuf)) continue;
+      if (!this.host.call(this.host.u32(ext + PARAMS_EXT.get_info), this.ptr, i, infoBuf)) continue;
+      const id = this.host.u32(infoBuf + PARAM_INFO.id);
+      const def = this.host.f64(infoBuf + PARAM_INFO.def);
+      const max = this.host.f64(infoBuf + PARAM_INFO.max);
+      const min = this.host.f64(infoBuf + PARAM_INFO.min);
+      const other = max !== def ? max : min;
       out.push({
-        id: this.host.u32(infoBuf + PARAM_INFO.id),
+        id,
         name: this.host.readCstr(infoBuf + PARAM_INFO.name, 256),
-        min: this.host.f64(infoBuf + PARAM_INFO.min),
-        max: this.host.f64(infoBuf + PARAM_INFO.max),
-        default: this.host.f64(infoBuf + PARAM_INFO.def),
+        min, max, default: def,
+        textProbes: [{ value: def, text: this.valueToText(id, def) },
+                     { value: other, text: this.valueToText(id, other) }],
       });
     }
+    this.host.ex.free(infoBuf);
     return out;
   }
 

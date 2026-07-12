@@ -28,6 +28,8 @@
 //   • createSecondary                           — real (another worklet-resident
 //     instance on the same context; the chained-synth voice pool).
 
+import { deriveDisplayUnit } from "../vendor/pulp-wasm/wclap-abi.mjs";
+
 const WORKLET_NAME = "pulp-wclap";
 const addedModules = new WeakMap(); // ctx.audioWorklet -> Set<workletUrl> already added
 
@@ -110,7 +112,14 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
           paramInfo = m.params.map((p) => ({
             id: p.id, label: p.name,
             type: p.boolean ? "boolean" : "float",
-            unit: "", minValue: p.min, maxValue: p.max, defaultValue: p.default,
+            // The display unit ("%", "s", "dB") the WAM ABI reports directly in
+            // its descriptor JSON. CLAP has no unit field — it exposes display
+            // text through clap_plugin_params.value_to_text — so the worklet host
+            // probes value_to_text and we recover the suffix here. Without this
+            // the identical shared player rendered "1.50" on the WebCLAP page and
+            // "1.50 s" on the WAM page for the same plugin.
+            unit: deriveDisplayUnit(p.textProbes),
+            minValue: p.min, maxValue: p.max, defaultValue: p.default,
             step: p.stepped ? 1 : 0,
           }));
           for (const p of m.params) paramValues.set(p.id, p.default);

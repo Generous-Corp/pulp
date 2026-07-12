@@ -60,6 +60,11 @@ export const DESC = { id: 12, name: 16 };
 // clap_param_info_t: id@0, flags@4, cookie@8, name[256]@12, module[1024]@268,
 // min@1296, max@1304, default@1312. Size 1320.
 export const PARAM_INFO = { size: 1320, id: 0, flags: 4, name: 12, min: 1296, max: 1304, def: 1312 };
+// clap_plugin_params_t vtable (wasm32): count@0, get_info@4, get_value@8,
+// value_to_text@12, text_to_value@16, flush@20. `value_to_text` is the ONLY
+// display source CLAP defines — clap_param_info deliberately carries no unit
+// field, so a host that wants "1.50 s" instead of "1.50" must call it.
+export const PARAMS_EXT = { count: 0, get_info: 4, get_value: 8, value_to_text: 12, text_to_value: 16, flush: 20 };
 // clap_event_header_t: size@0, time@4, space_id@8, type@10, flags@12. Size 16.
 export const EVENT_HEADER = { size: 0, time: 4, space_id: 8, type: 10, flags: 12 };
 // clap_event_param_value_t (48): +param_id@16 +cookie@20 +note_id@24 +port@28
@@ -129,3 +134,34 @@ export const TRAMPOLINES = {
   "ii->": "AGFzbQEAAAABBgFgAn9/AAIHAQFoAWYAAAMCAQAHBgECZm4AAQoKAQgAIAAgARAACw==",
   "iii->": "AGFzbQEAAAABBwFgA39/fwACBwEBaAFmAAADAgEABwYBAmZuAAEKDAEKACAAIAEgAhAACw==",
 };
+
+// ── display unit, recovered from clap_plugin_params.value_to_text ────────────
+// The WAM ABI reports a parameter's display unit directly (descriptor JSON:
+// {"unit":"%"}); CLAP deliberately does NOT — clap_param_info has no unit field,
+// and a host is expected to DISPLAY whatever value_to_text() renders ("35.00 %").
+// The Pulp web UI (and the shared player's generated widgets) format the number
+// themselves and need the unit SUFFIX, so the WebCLAP hosts probe value_to_text
+// at two values and hand the raw strings here.
+//
+// A probe is { value, text }. The suffix that follows the rendered number IS the
+// unit when both probes agree AND each rendered number reads back as the probed
+// value. A plugin with a fully custom to_string ("12 o'clock", an enum label,
+// "quality=0.75") has no such stable suffix — this then reports "" rather than
+// inventing one, and the widget shows a bare number, exactly as before.
+const NUMBER_PREFIX = /^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(.*)$/;
+export function deriveDisplayUnit(probes) {
+  let unit = null;
+  for (const probe of probes || []) {
+    const m = NUMBER_PREFIX.exec(String(probe.text ?? ""));
+    if (!m) return "";
+    // value_to_text rounds (Pulp's CLAP entry renders 2 fixed decimals), so the
+    // read-back only has to land near the probed value; a custom rendering that
+    // happens to start with an unrelated number is rejected here.
+    const tolerance = 0.01 + Math.abs(probe.value) * 1e-6;
+    if (!(Math.abs(parseFloat(m[1]) - probe.value) <= tolerance)) return "";
+    const suffix = m[2].trim();
+    if (unit === null) unit = suffix;
+    else if (unit !== suffix) return "";   // suffix varies with the value ⇒ not a unit
+  }
+  return unit || "";
+}

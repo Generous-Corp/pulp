@@ -19,6 +19,10 @@
 import { readFileSync } from "node:fs";
 import { makeWasmImports, makeBridge, makeWamAudioPorts } from "../../../core/format/src/wasm/wam-runtime.mjs";
 import { WebClapHost } from "../../../core/format/src/wasm/wclap-host.mjs";
+// The SAME helper the browser's WebCLAP adapter uses to recover a display unit
+// from clap_plugin_params.value_to_text (CLAP has no unit field), so the text
+// asserted here is the text the demo page renders.
+import { deriveDisplayUnit } from "../../../packages/pulp-web-player/src/vendor/pulp-wasm/wclap-abi.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) { console.error("usage: node superconvolver_runner.mjs <SuperConvolver.wasm>"); process.exit(2); }
@@ -32,6 +36,14 @@ const INTERNAL_BLOCK = 512;
 const bytes = readFileSync(wasmPath);
 const isWclap = WebAssembly.Module.exports(new WebAssembly.Module(bytes))
   .some((e) => e.name === "clap_entry");
+
+// The display string a Pulp UI builds from a parameter's value + unit: two fixed
+// decimals, a space, the unit — byte-for-byte what the SuperConvolver web UI's
+// format_value() renders (super_convolver_web_ui.hpp) AND what the native CLAP
+// entry's params_value_to_text() returns (clap_entry.hpp). That both formulas
+// agree is the whole point: the WAM lane gets there from the descriptor's `unit`,
+// the WebCLAP lane by calling the plugin's value_to_text — same pixels either way.
+const formatParamText = (value, unit) => value.toFixed(2) + (unit ? " " + unit : "");
 
 // ── One engine interface over the two ABIs. Everything below this point is
 //    ABI-agnostic, which is what makes the parity claim mean something.
@@ -49,7 +61,15 @@ async function openWam() {
   return {
     abi: "WAM",
     name: JSON.parse(wam.descriptorJson()).name,
-    params: JSON.parse(wam.parametersJson()).map((p) => ({ id: p.id, label: p.label, min: p.minValue, max: p.maxValue })),
+    // The WAM ABI reports the display unit in its parameter JSON; the page's UI
+    // formats the number and appends it.
+    params: JSON.parse(wam.parametersJson()).map((p) => ({
+      id: p.id, label: p.label, min: p.minValue, max: p.maxValue, unit: p.unit || "",
+    })),
+    paramText(id, value) {
+      const p = this.params.find((q) => q.id === id);
+      return formatParamText(value, p ? p.unit : "");
+    },
     setParam: (id, v) => wam.setParam(id, v),
     getParam: (id) => wam.getParam(id),
     latency: () => wam.latencySamples(),
@@ -78,7 +98,14 @@ async function openWclap() {
   return {
     abi: "WebCLAP",
     name: plugin.descriptor.name,
-    params: plugin.params().map((p) => ({ id: p.id, label: p.name, min: p.min, max: p.max })),
+    // CLAP carries no unit on clap_param_info: the display unit is recovered from
+    // the plugin's value_to_text probes, exactly as adapters/wclap.js does in the
+    // browser. paramText() then goes STRAIGHT to value_to_text — the real CLAP
+    // display call a native host makes — so this lane proves both halves agree.
+    params: plugin.params().map((p) => ({
+      id: p.id, label: p.name, min: p.min, max: p.max, unit: deriveDisplayUnit(p.textProbes),
+    })),
+    paramText: (id, value) => plugin.valueToText(id, value),
     setParam: (id, v) => { pending.push({ id, value: v }); values.set(id, v); },
     getParam: (id) => values.get(id),
     latency: () => plugin.currentLatency(),
@@ -159,7 +186,25 @@ check("Mix / Size / Gain parameters exposed",
       !!byLabel.Mix && !!byLabel.Size && !!byLabel.Gain,
       eng.params.map((p) => p.label).join(", "));
 
-const MIX = idOf("Mix"), SIZE = idOf("Size");
+const MIX = idOf("Mix"), SIZE = idOf("Size"), GAIN = idOf("Gain");
+
+// ── (0) parameter DISPLAY TEXT is identical across the two ABIs. ─────────────
+// The demo pages mount the SAME shared player and the SAME Pulp web UI, so a
+// parameter must read "35.00 %" on both. It did not: the WebCLAP adapter
+// hardcoded an empty unit (CLAP has no unit field on clap_param_info) and the
+// page showed a bare "35.00" while the WAM page showed "35.00 %". Both lanes now
+// answer from the plugin: WAM from its descriptor unit, WebCLAP from the CLAP
+// value_to_text call a native host uses. Golden strings, so a divergence in
+// EITHER lane fails here rather than in someone's browser.
+const UNITS = { Mix: "%", Size: "s", Gain: "dB" };
+for (const [label, unit] of Object.entries(UNITS)) {
+  check(`${label} reports its display unit ("${unit}")`, byLabel[label].unit === unit,
+        `got "${byLabel[label].unit}"`);
+}
+for (const [id, value, expected] of [[MIX, 35, "35.00 %"], [SIZE, 1.5, "1.50 s"], [GAIN, 0, "0.00 dB"]]) {
+  const text = eng.paramText(id, value);
+  check(`parameter text "${expected}"`, text === expected, `got "${text}"`);
+}
 
 // ── (a) the built-in synthetic IR convolves — wet sound, no file I/O. ────────
 // Fully wet (Mix=100) so the output IS the convolution: a noise burst followed

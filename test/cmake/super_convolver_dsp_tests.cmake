@@ -13,6 +13,21 @@ if(PULP_BUILD_TESTS AND TARGET pulp::gpu-audio AND TARGET pulp::render)
         INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/super-convolver)
 endif()
 
+# CLAP parameter-display coverage: the units SuperConvolver declares only reach a
+# host through clap_plugin_params.value_to_text (clap_param_info has no unit
+# field), and the WAM / WebCLAP demo pages assert the same golden strings. Needs
+# the CLAP adapter TUs + headers, hence its own target rather than the DSP one.
+if(PULP_BUILD_TESTS AND PULP_HAS_CLAP AND TARGET pulp::gpu-audio AND TARGET pulp::render)
+    pulp_add_test_suite(pulp-test-super-convolver-clap-params
+        SOURCES test_super_convolver_clap_params.cpp
+                ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+                ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
+                ${CMAKE_SOURCE_DIR}/examples/super-convolver/super_convolver_view.cpp
+        LIBRARIES pulp::format pulp::signal pulp::gpu-audio pulp::render
+                  pulp::view pulp::canvas clap
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/super-convolver)
+endif()
+
 # Web-lane compile guard. The processor must still compile with PULP_WASM +
 # PULP_HEADLESS — the two web plugin lanes (WAM, WCLAP), where there is no GPU
 # runtime, no file dialog, no FormatRegistry, no editor, and no thread to run a

@@ -97,6 +97,25 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
   translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
 
+## Landmine: CLAP has no parameter `unit` — only `value_to_text`
+
+The WAM ABI reports a parameter's display unit directly (`wam_adapter.cpp`
+emits `{"unit":"%"}`). CLAP deliberately does **not**: `clap_param_info` has
+no unit field, and a host is expected to *display whatever
+`clap_plugin_params.value_to_text()` renders* ("35.00 %"). A WebCLAP host that
+marshals only the info struct therefore produces unitless parameters, and the
+shared player — same page code, same plugin — renders "1.50" on the WebCLAP
+demo and "1.50 s" on the WAM one. That was a real, shipped divergence.
+
+Both WebCLAP hosts (`packages/…/vendor/pulp-wasm/wclap-processor.js` worklet
+and `core/format/src/wasm/wclap-host.mjs` offline) therefore call
+`value_to_text` at **two probe values** per parameter and report the raw
+strings as `textProbes`; `deriveDisplayUnit()` in `wclap-abi.mjs` recovers the
+suffix (and returns `""` rather than inventing one when a plugin uses a custom
+`to_string`, e.g. enum labels). If you add a field the Pulp web UI needs and
+CLAP has no struct slot for it, this is the pattern — go through the plugin's
+own display call, don't hardcode a default in the adapter.
+
 ## Testing — the assertions a native test cannot reach
 
 The `WAMv2 + WebCLAP (Linux, headless Chrome)` lane
