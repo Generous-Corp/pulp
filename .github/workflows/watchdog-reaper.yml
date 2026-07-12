@@ -1,12 +1,13 @@
 name: Release-watchdog reaper
 
-# The release watchdogs (release-cadence-check, release-cli-watchdog,
-# release-draft-stuck-check, auto-release-watchdog) file a per-version tracker
-# when a release lags, but only auto-close trackers inside a recent scan window.
-# Historical per-version trackers therefore orphan forever — 334 had piled up by
-# 2026-05-22 (pulp #2576). This reaper sweeps ALL open trackers daily and closes
-# any whose version is now released or superseded by a newer release, so stale
-# noise can't re-accumulate.
+# Sweeps up the per-version release trackers that the watchdogs left behind.
+#
+# The per-version-tracker pattern is retired: release-reconcile.yml now owns
+# release health and keeps exactly ONE incident issue, updated in place, so no
+# new trackers of this shape are minted. This reaper stays because the historical
+# ones still need closing (they orphan forever — 334 had piled up by 2026-05-22,
+# pulp #2576) and because release-cadence-check and auto-release-watchdog still
+# file per-version trackers of their own.
 #
 # Conservative by construction: it only touches issues whose titles match the
 # exact auto-generated watchdog patterns, and only closes when the release

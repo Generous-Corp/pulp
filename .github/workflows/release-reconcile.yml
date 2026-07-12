@@ -1,0 +1,83 @@
+name: Release reconciler
+
+# The single owner of "did every recent tag actually ship?", and the only
+# workflow allowed to do something about it.
+#
+# It replaces four overlapping watchdogs (release-guard, release-health,
+# release-cli-watchdog, release-draft-stuck-check). Those only ever *reported*:
+# between them they filed 413 issues in two weeks, none of which fixed anything,
+# while the actual recovery was a human running `gh workflow run` by hand. Worse,
+# each had its own grace window (15/30/45/60 min) and none of them exceeded the
+# real pipeline duration (70-165+ min), so they alarmed on healthy releases that
+# were still building.
+#
+# This workflow reconciles instead of reporting. For each recent SDK tag it
+# compares desired state (a published release) against actual state, and drives
+# the difference to zero by RE-DISPATCHING the release. It never cancels or
+# deletes anything: the failure mode we are recovering from was caused by
+# automation that destroyed in-flight work.
+#
+# Convergence rules:
+#   - A tag whose release is published is done. (release-cli publishes only after
+#     an --exact-required asset check, so "published" already means "complete".)
+#   - A tag with a release-cli run still queued or in progress is LEFT ALONE, no
+#     matter how long it has been running. Slow is not broken.
+#   - A tag younger than GRACE_MINUTES is left alone even if no run is visible
+#     yet, to cover the gap between the tag push and the run appearing.
+#   - Anything else — no release, or a draft left behind by a finalizer that died
+#     — is re-dispatched, up to MAX_ATTEMPTS times.
+#   - A tag that exhausts MAX_ATTEMPTS is a real, human-shaped problem (a broken
+#     build, not a flake). It gets ONE issue, updated in place, never duplicated.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report what would be re-dispatched, change nothing.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read     # read tags/releases
+  actions: write     # re-dispatch release-cli.yml (dispatch only — never cancel)
+  issues: write      # one stable incident issue
+
+concurrency:
+  group: release-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # Never run on forks — it would dispatch workflows in someone else's repo.
+    if: github.repository == 'danielraffel/pulp'
+    runs-on: ubuntu-latest
+    env:
+      # Well above the observed p95 pipeline duration. This is only the window
+      # before we consider a *silent* tag (no run at all) to be stuck; a tag with
+      # a live run is never touched regardless of age, so this does not need to
+      # bound how long a release may legitimately take.
+      GRACE_MINUTES: '45'
+      # Look-back for reconciliation. Older tags are history, not incidents.
+      MAX_AGE_HOURS: '72'
+      # Re-dispatch budget per tag. A genuine build break will burn through these
+      # and then correctly escalate to a human instead of looping forever.
+      MAX_ATTEMPTS: '3'
+      # Only releases at or above this version are held to the current asset
+      # contract (13 assets + SHA256SUMS). Earlier releases legitimately predate
+      # the Intel darwin-x64 pair and the checksum manifest, and flagging them
+      # would just be a new false-alarm firehose. Raise this when the required
+      # asset set changes; do not lower it.
+      ASSET_CONTRACT_FLOOR: 'v0.659.0'
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Reconcile tags against releases
+        run: python3 tools/scripts/release_reconcile.py

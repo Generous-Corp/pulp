@@ -4,6 +4,17 @@ name: Release CLI
 # docs/guides/release-pipeline.md — keep that doc in sync when you change
 # this workflow.
 
+# Put the TAG in the run's display title, for both trigger types.
+#
+# This is load-bearing, not cosmetic. A `workflow_dispatch` run's `head_branch`
+# is the ref it was dispatched FROM (`main`), NOT the tag it is building — so a
+# repair run dispatched by release-reconcile.yml is indistinguishable, by
+# head_branch, from any other run on main. Without a tag-bearing display title
+# the reconciler cannot see its own repairs: it would count zero attempts, never
+# escalate, and fire a fresh re-dispatch every 30 minutes forever.
+run-name: >-
+  Release ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+
 on:
   push:
     tags:
@@ -32,12 +43,24 @@ on:
         type: boolean
         default: false
 
-# Never cancel an in-flight release. If two tags push back-to-back,
-# serialize rather than cancel — interrupting a binary build halfway
-# through leaves partial artifacts on the runner and can miss
-# publishing the earlier tag's release.
+# Serialize on the TAG BEING BUILT, not on `github.ref`.
+#
+# `github.ref` for a workflow_dispatch is the ref it was dispatched from
+# (`refs/heads/main`), so keying on it put a repair dispatch for v0.655.0 in a
+# DIFFERENT concurrency group from v0.655.0's own tag-push run. The two could
+# then finalize the same release concurrently — and softprops/action-gh-release
+# replaces same-named assets, so one run could delete an asset out from under
+# the other's just-verified exact-asset set and publish an incomplete release.
+#
+# Keying on the tag puts every run for a given tag — push or repair — in one
+# queue. Combined with cancel-in-progress: false, a repair simply waits for the
+# in-flight run and then no-ops (its "already published?" guard short-circuits).
+#
+# Never cancel an in-flight release: interrupting a binary build halfway through
+# leaves partial artifacts on the runner, and cancelling releases is precisely
+# the behaviour that used to lose them.
 concurrency:
-  group: release-cli-${{ github.ref }}
+  group: release-cli-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -1008,14 +1031,16 @@ jobs:
     # only to another Apple-Silicon-capable label.
     runs-on: ${{ fromJSON(vars.PULP_UNIVERSAL_GATE_MACOS_RUNS_ON_JSON || '["macos-15"]') }}
     name: Universal + dual-arch auval gate
-    # BLOCKING. It was temporarily made advisory when it wedged the whole release
-    # pipeline (0.646->0.653), which was misdiagnosed as an AU-adapter "Bad Max
-    # Frames" conformance issue. The real cause was a shell bug in the auval step
-    # below: `auval | tee /dev/stderr | grep -q PASS` under `set -o pipefail` —
-    # `grep -q` exits on the first match and SIGPIPEs `tee`, failing the step even
-    # though auval reported "AU VALIDATION SUCCEEDED". auval itself passes both
-    # arches (incl. Bad Max Frames, which AUBase::DoRender already rejects). With
-    # the step fixed to capture-then-grep, the gate is clean and blocking again.
+    # ADVISORY, and genuinely off the critical path: this job is NOT in the
+    # `release` job's `needs` (see the comment there). `continue-on-error` alone
+    # was never enough — it makes a job's RESULT advisory but leaves it in the
+    # dependency graph, so the release still blocked on it finishing, and this
+    # job routinely sat 2–7 HOURS in the GitHub-hosted macos-15 queue.
+    #
+    # It stays visible and running because universal/Intel validation is worth
+    # having; it simply may not hold a release hostage. If it goes red, the
+    # release still ships and the red X is the signal to investigate.
+    continue-on-error: true
     timeout-minutes: 120
     env:
       BUILD_DIR: build-universal-gate
@@ -1100,43 +1125,91 @@ jobs:
           trap cleanup EXIT
           killall -KILL AudioComponentRegistrar 2>/dev/null || true
           sleep 1
-          # Capture to a file, then grep it — do NOT pipe `auval | tee | grep -q`.
-          # `grep -q` exits on the first match, which SIGPIPEs `tee`; under
-          # `set -o pipefail` that broken pipe fails the step even when auval
-          # itself printed "AU VALIDATION SUCCEEDED" (the long-standing false
-          # failure that made this gate advisory). `|| true` also ignores auval's
-          # own exit code so the authoritative check is the SUCCEEDED verdict, not
-          # a per-subtest "PASS" line (which prints even on an overall failure).
-          echo "--- native (arm64) auval ---"
-          auval -v aufx PGan Pulp > auval-native.log 2>&1 || true
-          cat auval-native.log
-          grep -q 'AU VALIDATION SUCCEEDED' auval-native.log \
-            || { echo "::error::native (arm64) auval did not report SUCCEEDED"; exit 1; }
-          echo "--- arch -x86_64 auval (Rosetta) ---"
-          arch -x86_64 auval -v aufx PGan Pulp > auval-x86.log 2>&1 || true
-          cat auval-x86.log
-          grep -q 'AU VALIDATION SUCCEEDED' auval-x86.log \
-            || { echo "::error::x86_64 (Rosetta) auval did not report SUCCEEDED"; exit 1; }
+
+          # Do NOT pipe auval into `grep -q`. Two bugs, one line:
+          #
+          #  1. SIGPIPE. `grep -q` exits at its FIRST match, closing the pipe;
+          #     `tee` then dies writing to it ("tee: stdout: Broken pipe") and
+          #     `set -o pipefail` promotes that to a step failure — AFTER the log
+          #     has already printed "AU VALIDATION SUCCEEDED". A passing plugin
+          #     reported as a failed release gate.
+          #  2. Wrong predicate. auval prints "* * PASS" after each SUB-test, so
+          #     matching bare 'PASS' would pass a plugin that failed overall.
+          #
+          # Use auval's own exit code, and assert on the TERMINAL success marker.
+          run_auval() {
+            local label="$1"; shift
+            echo "--- ${label} ---"
+            local out status=0
+            out=$("$@" -v aufx PGan Pulp 2>&1) || status=$?
+            printf '%s\n' "$out"
+            if [ "$status" -ne 0 ]; then
+              echo "::error::${label}: auval exited ${status}"
+              return 1
+            fi
+            if ! printf '%s\n' "$out" | grep -q 'AU VALIDATION SUCCEEDED'; then
+              echo "::error::${label}: auval did not report AU VALIDATION SUCCEEDED"
+              return 1
+            fi
+            echo "OK: ${label} — AU VALIDATION SUCCEEDED"
+          }
+
+          run_auval "native (arm64) auval" auval
+          run_auval "arch -x86_64 auval (Rosetta)" arch -x86_64 auval
 
   release:
-    needs: [build-cli, smoke-cli, universal-arch-gate]
+    # THIS JOB IS THE SOLE OWNER OF THE RELEASE, end to end: it collects the
+    # build artifacts, writes the Sparkle appcast, creates the release, attaches
+    # every asset, generates SHA256SUMS, and publishes — all inside one job.
+    #
+    # It used to be a distributed handshake across three workflows (release-cli
+    # created a draft → sign-and-release polled for that draft to attach
+    # appcast.xml → release-publish.yml flipped the draft once BOTH legs
+    # reported success). That design coupled publication to the slowest, least
+    # reliable leg and made a release destroyable by anything that touched it
+    # mid-flight. It is why 11 of 18 tags in 2026-07 never published at all.
+    #
+    # The draft still exists, but only for the few seconds between "create" and
+    # "publish" INSIDE this job — GitHub makes a published release immutable, so
+    # assets must land while it is still a draft. Nothing outside this job
+    # observes that window.
+    #
+    # `universal-arch-gate` is deliberately NOT in `needs`. `continue-on-error`
+    # makes a job's *result* advisory but does NOT remove it from the dependency
+    # graph — the release job still WAITS for it, and that gate runs on the
+    # GitHub-hosted macos-15 pool where queue times of 2–7 hours are routine.
+    # An advisory gate must not be able to hold the release hostage.
+    needs: [build-cli, smoke-cli]
     runs-on: ubuntu-latest
-    # Publish when the real cross-platform build+smoke matrices AND the
-    # universal/dual-arch auval gate all succeed. `always()` forces evaluation
-    # even if a needed job did not succeed (so a failed gate can't be silently
-    # skipped by the implicit success() gate) — the explicit `== 'success'`
-    # checks are what enforce the requirement. The universal-arch-gate is
-    # required again now that its shell-bug false failure is fixed; a genuine
-    # universal-arch/signature/auval failure blocks publish.
+    # ONE release may be in its publish transaction at a time, repo-wide.
+    #
+    # The latest-pointer decision below is a read-then-write: "am I the greatest
+    # published SemVer?" then "claim /releases/latest". Releases now legitimately
+    # finish OUT OF ORDER, so without this, v0.655 and v0.656 could both read
+    # while v0.654 was still latest, both conclude they are greatest, and
+    # whichever wrote last would win — moving /releases/latest BACKWARD.
+    #
+    # Serializing makes that read-then-write atomic with respect to other
+    # releases. It costs little: this job only downloads artifacts, checksums,
+    # and publishes — the expensive matrices already ran.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    # `always()` forces evaluation even if a needed job did not succeed, so the
+    # explicit result checks below are the real gate. A genuine build/smoke
+    # failure still blocks publish.
     if: >-
       always()
       && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
       && needs.build-cli.result == 'success'
       && needs.smoke-cli.result == 'success'
-      && needs.universal-arch-gate.result == 'success'
     permissions:
       contents: write
       issues: read
+      # The Sparkle feed is generated and attested here now (it used to be
+      # attested in sign-and-release, which no longer touches the release).
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v5
@@ -1175,7 +1248,66 @@ jobs:
           echo "$NOTES" >> "$GITHUB_OUTPUT"
           echo "HIGHLIGHTS_EOF" >> "$GITHUB_OUTPUT"
 
+      # The Sparkle feed is a pure function of the tag name and the current date
+      # — no enclosure, no download URL, no EdDSA signature, no dependency on any
+      # signed or notarized artifact. It used to be produced by sign-and-release
+      # and bolted onto the release afterwards, which is the ONLY reason
+      # publication was ever coupled to macOS signing/notarization. Writing it
+      # here removes that coupling entirely.
+      - name: Generate appcast.xml (Sparkle feed)
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          DATE=$(date -u '+%a, %d %b %Y %H:%M:%S +0000')
+          mkdir -p artifacts
+          cat > artifacts/appcast.xml <<XMLEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Pulp Updates</title>
+              <item>
+                <title>Version ${VERSION}</title>
+                <pubDate>${DATE}</pubDate>
+                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+              </item>
+            </channel>
+          </rss>
+          XMLEOF
+          cat artifacts/appcast.xml
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+
+      - name: Attest appcast
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/appcast.xml
+
+      # A published GitHub release is IMMUTABLE — asset uploads onto one fail
+      # hard. release-reconcile.yml re-dispatches this workflow to repair stuck
+      # releases, and a tag can perfectly well have been published in between
+      # (by a slow first run finishing, or by a human). Without this check, the
+      # create step below would fail on exactly the tags that turned out fine,
+      # which is a rude way to learn that recovery is not idempotent.
+      - name: Is this tag already published?
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
+          if [ "${state}" = "false" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${TAG} is already published — nothing to do."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "${TAG} release state: ${state} (will create/complete the draft)."
+          fi
+
       - name: Create release
+        if: steps.existing.outputs.published != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -1210,18 +1342,98 @@ jobs:
             Or download the binary archive for your platform below.
           files: |
             artifacts/**/*
-          # On a tag PUSH, keep the release a DRAFT so the parallel
-          # `Sign and Release` workflow can still attach its appcast.xml — GitHub
-          # now makes a PUBLISHED release immutable, so whichever workflow
-          # published first locked the other out ("Cannot upload asset to an
-          # immutable release"). The `Release publish coordinator`
-          # (release-publish.yml) flips the draft to published once BOTH legs
-          # succeed. A manual workflow_dispatch backfill (CLI-only, no
-          # sign-and-release run) still publishes directly.
-          draft: ${{ github.event_name == 'push' }}
+          # ALWAYS a draft here. A published GitHub release is immutable, so the
+          # assets and SHA256SUMS below can only be attached while it is still a
+          # draft. The "Verify assets, checksum, publish" step immediately after
+          # flips it. The draft is never observable outside this job.
+          draft: true
           prerelease: false
-          # Explicitly claim GitHub's "latest release" pointer for normal tag
-          # pushes. Manual dispatches are often old-tag backfills, so they must
-          # opt in with `make_latest=true`; otherwise a backfill for an older
-          # tag can move `/releases/latest` backward.
-          make_latest: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}
+          # The latest-release pointer is decided in the publish step below, which
+          # refuses to move it BACKWARD. Releases now complete out of order (a
+          # slow v0.645 can finish after a fast v0.646), so unconditionally
+          # claiming "latest" here would regress /releases/latest.
+          make_latest: false
+
+      # The finalizer. Tag pushes AND manual backfills both land here, so a
+      # recovery dispatch is held to the same asset contract as an automatic
+      # release rather than publishing straight past the checks.
+      - name: Verify assets, generate SHA256SUMS, publish
+        if: steps.existing.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+          # A manual dispatch is usually an OLD-tag backfill, so it must opt in
+          # before it may claim the latest-release pointer.
+          ALLOW_LATEST: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}
+        run: |
+          set -euo pipefail
+
+          # Every asset a consumer is entitled to find on a Pulp release. The
+          # `--exact-required` check below fails closed: a missing asset OR an
+          # unexpected extra one aborts the publish and leaves a draft behind,
+          # rather than shipping a release that is quietly missing a platform.
+          required_assets=(
+            appcast.xml
+            pulp-darwin-arm64.tar.gz
+            pulp-darwin-x64.tar.gz
+            pulp-linux-arm64.tar.gz
+            pulp-linux-x64.tar.gz
+            pulp-windows-arm64.zip
+            pulp-windows-x64.zip
+            pulp-sdk-darwin-arm64.tar.gz
+            pulp-sdk-darwin-x64.tar.gz
+            pulp-sdk-linux-arm64.tar.gz
+            pulp-sdk-linux-x64.tar.gz
+            pulp-sdk-windows-arm64.tar.gz
+            pulp-sdk-windows-x64.tar.gz
+          )
+
+          state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
+          if [ "${state}" = "false" ]; then
+            echo "::notice::${TAG} is already published — nothing to do."
+            exit 0
+          fi
+          if [ "${state}" = "missing" ]; then
+            echo "::error::no release object for ${TAG} after the create step."
+            exit 1
+          fi
+
+          rm -rf release-assets && mkdir -p release-assets
+          gh release download "${TAG}" --repo "${REPO}" --dir release-assets --clobber
+
+          checksum_args=()
+          for asset in "${required_assets[@]}"; do
+            checksum_args+=(--required-name "${asset}")
+          done
+          python3 tools/scripts/release_checksum_manifest.py generate release-assets \
+            --output release-assets/SHA256SUMS \
+            --exact-required \
+            "${checksum_args[@]}"
+          python3 tools/scripts/release_checksum_manifest.py verify \
+            release-assets release-assets/SHA256SUMS
+          gh release upload "${TAG}" release-assets/SHA256SUMS --repo "${REPO}" --clobber
+
+          # Never move /releases/latest backward. Claim it only when this tag is
+          # the greatest published SemVer — releases can and do complete out of
+          # order now that a slow leg no longer destroys the release.
+          latest_flag="--latest=false"
+          if [ "${ALLOW_LATEST}" = "true" ]; then
+            newest=$(gh api "repos/${REPO}/releases?per_page=100" --paginate \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+              | sed 's/^v//' \
+              | sort -t. -k1,1n -k2,2n -k3,3n \
+              | tail -1)
+            this="${TAG#v}"
+            greatest=$(printf '%s\n%s\n' "${newest:-0.0.0}" "$this" \
+              | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+            if [ "$greatest" = "$this" ]; then
+              latest_flag="--latest"
+              echo "${TAG} is the greatest published SemVer — claiming /releases/latest."
+            else
+              echo "::notice::${TAG} is older than v${newest} — publishing WITHOUT moving /releases/latest."
+            fi
+          fi
+
+          gh release edit "${TAG}" --repo "${REPO}" --draft=false ${latest_flag}
+          echo "::notice::Published ${TAG} with $(( ${#required_assets[@]} + 1 )) assets."

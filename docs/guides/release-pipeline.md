@@ -39,117 +39,130 @@ PR merge to main
 └─────────────────────────────────────────────────────────┘
      │
      │  (tag push: refs/tags/vX.Y.Z)
-     │  Two workflows trigger off the same tag push:
+     │  Two workflows trigger off the same tag push — but only ONE of
+     │  them can affect the release.
      │
-     ├──────────────────────┬───────────────────────────────┐
-     ▼                      ▼                               ▼
-┌──────────────────┐   ┌──────────────────────┐   ┌──────────────────────────┐
-│ 2a.              │   │ 2b.                  │   │ 2c. Tag-triggered        │
-│  release-cli.yml │   │  sign-and-release.yml│   │  watchdogs (see          │
-│  on: push tag v* │   │  on: push tag v*     │   │  release-watchdog.md)    │
-└──────────────────┘   └──────────────────────┘   └──────────────────────────┘
+     ├────────────────────────────┬────────────────────────────────┐
+     ▼                            ▼
+┌──────────────────┐   ┌──────────────────────┐
+│ 2a.              │   │ 2b.                  │
+│  release-cli.yml │   │  sign-and-release.yml│
+│  on: push tag v* │   │  on: push tag v*     │
+│  OWNS THE RELEASE│   │  cannot touch it     │
+└──────────────────┘   └──────────────────────┘
      │
      ▼
 ┌─────────────────────────────────────────────────────────┐
-│ 2a. release-cli.yml — the heavy lifter                   │
+│ 2a. release-cli.yml — builds AND publishes               │
 │                                                          │
-│ Matrix (5 platforms, parallel):                          │
+│ Matrix (6 platforms, parallel):                          │
 │   - darwin-arm64    → resolved release macOS runner      │
+│   - darwin-x64      → cross-compiled on Apple Silicon    │
 │   - linux-x64       → github-hosted ubuntu-latest        │
 │   - linux-arm64     → github-hosted ubuntu-22.04-arm     │
 │   - windows-x64     → github-hosted windows-latest       │
 │   - windows-arm64   → github-hosted windows-11-arm       │
 │                                                          │
-│ For each platform:                                       │
-│   1. checkout the vX.Y.Z tag                            │
-│   2. cmake configure (PULP_BUILD_TESTS=OFF, Release,    │
-│      PULP_REQUIRE_GPU_FOR_SDK=ON to fail-loud if Skia   │
-│      is missing — pulp #1817)                           │
-│   3. cmake --build (the linux-x64 leg is the historical │
-│      sore spot; see "fontconfig link-order" below)      │
-│   4. strip binaries                                      │
-│   5. fix rpaths (Linux patchelf) / install-name (macOS) │
-│   6. package_cli.py → `pulp-${PLATFORM}.tar.gz`         │
-│      Contents: pulp (Rust), pulp-cpp (C++ delegate),    │
-│      pulp-mcp (Claude Code MCP server), and             │
-│      libwgpu_native.dylib (or .so / .dll)               │
-│   7. Reconfigure into `build-sdk/` with                 │
-│      PULP_BUILD_WEBVIEW=ON, repackage as                │
-│      `pulp-sdk-${PLATFORM}.tar.gz`                      │
-│   8. smoke-cli matrix gate (#395): extract on a fresh   │
-│      runner and run `pulp help`, `pulp-cpp help`, and   │
-│      `pulp-mcp --version` to catch missing-symbol /     │
-│      bad-rpath bugs before publish                      │
-│   9. Generate GitHub artifact attestations for the CLI   │
-│      and SDK archives                                   │
-│  10. Upload as a GitHub Actions artifact                │
+│ For each platform: configure → build → strip → fix       │
+│ rpaths → package `pulp-${PLATFORM}.tar.gz` → repackage   │
+│ the SDK as `pulp-sdk-${PLATFORM}.tar.gz` → attest →      │
+│ upload as an Actions artifact. The `smoke-cli` matrix    │
+│ then extracts each tarball on a fresh runner and runs    │
+│ `pulp help`, `pulp-cpp help`, `pulp-mcp --version` to    │
+│ catch missing-symbol / bad-rpath bugs before publish.    │
 │                                                          │
-│ Final `release` job (runs once, after all 5 platforms): │
-│   - Downloads all 10 matrix artifacts                   │
-│     (5 CLI tarballs + 5 SDK tarballs)                   │
-│   - Composes the Release body as grouped Highlights      │
-│     from compose_release_notes.py, then GitHub's native  │
-│     "What's Changed" / "Full Changelog" block, then     │
-│     the install instructions.                            │
-│   - Creates or patches the GitHub Release draft:        │
-│     uploads the 10 platform tarballs alongside any      │
-│     appcast.xml already attached by sign-and-release.   │
-│   - Does NOT generate appcast.xml; that is owned by     │
-│     sign-and-release.yml (2b below).                    │
-│   - On tag pushes, leaves the Release as a draft for    │
-│     release-publish.yml to publish once both release    │
-│     legs have succeeded. Manual workflow_dispatch       │
-│     backfills can publish directly.                     │
+│ Final `release` job — the SOLE writer of the release:    │
+│   1. Download all 12 matrix artifacts.                   │
+│   2. Compose the body (compose_release_notes.py).        │
+│   3. Generate + attest `appcast.xml`. The Sparkle feed   │
+│      is a pure function of the tag name and the date, so │
+│      it is written HERE. Nothing about the release       │
+│      depends on macOS signing.                           │
+│   4. Create the release as a DRAFT and attach all 13     │
+│      assets. (A published release is immutable, so       │
+│      assets can only land while it is still a draft.)    │
+│   5. Verify the EXACT required asset set, generate and   │
+│      upload SHA256SUMS.                                  │
+│   6. Publish — claiming /releases/latest only if this    │
+│      tag is the greatest published SemVer.               │
+│                                                          │
+│ Steps 4-6 are one job, so the draft exists for seconds   │
+│ and is never observable from outside. `needs:` is        │
+│ [build-cli, smoke-cli] ONLY — the advisory               │
+│ universal-arch-gate is deliberately absent (see below).  │
 └─────────────────────────────────────────────────────────┘
      │
      ▼
 ┌─────────────────────────────────────────────────────────┐
-│ 2b. sign-and-release.yml (parallel to release-cli.yml)   │
+│ 2b. sign-and-release.yml (parallel, and inert)           │
 │                                                          │
-│   - Builds the macOS example plugin .pkg bundles as a    │
-│     smoke pass (catches regressions when the SDK         │
-│     touches examples/). These .pkg files are uploaded    │
-│     to the workflow run via actions/upload-artifact for  │
-│     debugging only — pulp #1737 deliberately keeps them  │
-│     OFF the user-facing release page.                    │
-│   - Code-signs those bundles with Developer ID and       │
-│     notarizes them with Apple, then staples.             │
-│   - Prefers the isolated release macOS runner, then      │
-│     Namespace/hosted; never imports keys on PR runners.  │
-│   - Generates `appcast.xml` (Sparkle auto-update feed).  │
-│   - Generates a GitHub artifact attestation for          │
-│     `appcast.xml`.                                      │
-│   - Calls softprops/action-gh-release@v2 with            │
-│     `draft: true` to CREATE the GitHub Release as a      │
-│     draft, attaching only `appcast.xml`. The 10          │
-│     platform tarballs are owned by release-cli.yml;       │
-│     release-publish.yml owns the published flip.          │
-│                                                          │
-│ Concurrency group `sign-and-release-${ref}` with         │
-│ cancel-in-progress=false: partial notarization is hard   │
-│ to recover, so serialize rather than cancel.             │
+│   - Builds, code-signs, notarizes and staples the macOS  │
+│     example plugin .pkg bundles, and keeps them as       │
+│     workflow artifacts for debugging (pulp #1737 keeps   │
+│     them off the user-facing release page).              │
+│   - Holds `contents: read`. It CANNOT write to a         │
+│     release. That is the point: it may fail, hang, or be │
+│     cancelled without affecting whether the SDK ships.   │
 └─────────────────────────────────────────────────────────┘
      │
      ▼
 ┌─────────────────────────────────────────────────────────┐
-│ Post-publish (back on main, separate workflows)         │
+│ 3. release-reconcile.yml (every 30 min)                  │
 │                                                          │
-│   - shipyard changelog regenerate commits               │
-│     "docs: regenerate changelog for vX.Y.Z [skip ci]"   │
-│     so CHANGELOG.md links the new release block.        │
+│   The only failure-handling workflow, and the only one   │
+│   that can FIX anything. For each SDK tag in the last    │
+│   72h it compares desired state (a published release)    │
+│   against actual state and re-dispatches release-cli for │
+│   any tag that is stuck, up to 3 attempts.               │
 │                                                          │
-│   - release-draft-stuck-check.yml runs on a 30-min      │
-│     schedule. If a tag exists but no published release  │
-│     appears after the configured window, opens a        │
-│     watchdog issue (see release-watchdog.md).           │
-│                                                          │
-│   - auto-release-watchdog.yml runs on auto-release.yml  │
-│     completion. If conclusion=failure, opens a tracking │
-│     issue. This catches the silent-failure case where a │
-│     YAML drift in auto-release.yml makes GitHub reject  │
-│     the workflow at dispatch — zero jobs, no logs.      │
+│   - A tag with a live release-cli run is LEFT ALONE, at  │
+│     ANY age. Slow is not broken.                         │
+│   - It never cancels a run and never deletes a release.  │
+│   - Tags that exhaust the retry budget get ONE incident  │
+│     issue, updated in place, which closes itself on      │
+│     recovery.                                            │
 └─────────────────────────────────────────────────────────┘
 ```
+
+## Why publication lives in one job
+
+Publication used to be a handshake across three workflows: `release-cli`
+created a draft, `sign-and-release` polled up to 50 minutes for that draft so it
+could attach `appcast.xml`, and `release-publish.yml` flipped the draft to
+published only once **both** legs reported success.
+
+Every part of that was load-bearing, and the whole thing was only as reliable as
+its worst leg. In July 2026 it produced a **7% first-attempt release success
+rate**: 11 of 18 consecutive tags never published, several with all six platform
+binaries built green. Three separate mechanisms conspired:
+
+1. **The 50-minute poll was a time bomb.** `release-cli` does not create the
+   draft until its full build matrix finishes, which really takes 70–165+
+   minutes (its macOS legs queue for hours on the shared GitHub-hosted pool). So
+   on every slow release, `sign-and-release` timed out — and the coordinator
+   then withheld a release whose binaries were all present and correct.
+2. **A "supersede reaper" destroyed in-flight releases.** `auto-release.yml`
+   cancelled any release run, and deleted any draft, whose tag was older than
+   the latest published release. Because the pipeline (70–165+ min) outlasts the
+   gap between tags (~100 min), releases routinely complete **out of order** —
+   so "older SemVer" did not mean "obsolete", and the reaper reaped healthy work.
+3. **An advisory gate still blocked.** `universal-arch-gate` carried
+   `continue-on-error: true`, which makes a job's *result* advisory but does
+   **not** remove it from the dependency graph. The release job kept waiting on
+   its 2–7 hour hosted-runner queue.
+
+The fixes are structural rather than conventional, so they cannot quietly
+regress:
+
+- `sign-and-release.yml` holds `contents: read` — it *cannot* write a release.
+- `auto-release.yml` has no `actions` scope — it *cannot* cancel a run.
+- `universal-arch-gate` is not in `release`'s `needs` — it *cannot* block.
+- `release-reconcile.yml` has no delete or cancel path — recovery can only ever
+  drive a release *forward*.
+
+The governing rule, learned the hard way: **slow is survivable, racy is not.** A
+three-hour release still publishes. A release that something else is allowed to
+cancel does not.
 
 ## The release assets (14 base)
 
@@ -180,21 +193,22 @@ slice on the healthy Apple-Silicon runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64`
 + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin`, NOT the flaky native
 `macos-15-intel` runner (which CPU-pegs, blows any timeout, and whose timeout
 *cancellation* — not absorbed by `continue-on-error` — used to skip the whole
-release). The pair is REQUIRED: `release-publish.yml` lists it unconditionally in
-`required_assets`, so a regression that drops Intel fails the `--exact-required`
-check instead of silently shipping an Intel-less release. See
+release). The pair is REQUIRED: `release-cli.yml`'s finalizer lists it
+unconditionally in `required_assets`, so a regression that drops Intel fails the
+`--exact-required` check instead of silently shipping an Intel-less release. See
 `docs/guides/intel-support.md`.
 
 Anything less than the 14 base assets means part of the pipeline didn't reach the
 end. Triage by which assets are present:
 
-- **No `appcast.xml` on the release** (or no draft release at all):
-  `sign-and-release.yml` didn't reach its "Create GitHub Release" step. The
-  appcast is generated and the draft is created by that workflow, not by
-  `release-cli.yml` — so its absence points at a failure BEFORE
-  `action-gh-release@v2` ran. Common causes: code-signing or
-  notarization step failed (often a missing Apple credential secret), or
-  the .pkg build steps that run earlier in the same job errored out.
+- **No release at all, or a release missing assets**: this cannot happen on a
+  published release — the finalizer verifies the EXACT required asset set before
+  it publishes, so a missing asset leaves a draft rather than shipping a partial
+  release. Look at the `release-cli.yml` run for the tag. `release-reconcile.yml`
+  will also re-dispatch it automatically within 30 minutes.
+- **No `appcast.xml`**: `release-cli.yml`'s `release` job failed before its
+  "Generate appcast.xml" step. Note `sign-and-release.yml` is NOT involved — it
+  can no longer write to a release at all.
 - **`appcast.xml` present, but some platform tarballs missing**: at least
   one platform leg of `release-cli.yml`'s matrix failed before its
   artifact upload. Common shape: Linux + GNU-ld link order producing
@@ -202,11 +216,11 @@ end. Triage by which assets are present:
   below). The `release` job uploads whatever
   `actions/download-artifact` finds; failed matrix legs simply don't
   contribute artifacts.
-- **All base assets present but the release stays in DRAFT**:
-  `release-publish.yml` either did not reach its publish step after both release
-  legs produced their assets, or failed while generating/uploading
-  `SHA256SUMS`. Inspect the coordinator run and its upstream workflow
-  conclusions before rerunning either asset-producing workflow.
+- **All base assets present but the release stays in DRAFT**: the `release`
+  job's finalizer died between creating the draft and publishing it — most
+  likely in the `--exact-required` asset check or while uploading `SHA256SUMS`.
+  `release-reconcile.yml` re-dispatches this automatically; the re-run is
+  idempotent and will re-drive the existing draft to published.
 
 ## Verifying a published release
 
@@ -285,8 +299,9 @@ The signing secret is required only when automation is about to create a release
 tag or bot-maintained commit. If it is missing, that step fails closed instead
 of quietly publishing an unsigned source ref.
 
-Independently of manual verification, the `release-draft-stuck-check` watchdog
-will eventually flag a stuck draft (see release-watchdog.md).
+Independently of manual verification, `release-reconcile.yml` re-dispatches any
+recent tag that is not published within its grace window, so a stuck release
+normally repairs itself without anyone looking (see release-watchdog.md).
 
 ## Manual release-cli backfills
 
@@ -347,8 +362,8 @@ Update this doc whenever you change any of these files:
 - `.github/workflows/auto-release.yml`
 - `.github/workflows/release-cli.yml`
 - `.github/workflows/sign-and-release.yml`
-- `.github/workflows/release-draft-stuck-check.yml`
-- `.github/workflows/release-cli-watchdog.yml`
+- `.github/workflows/release-reconcile.yml`
+- `tools/scripts/release_reconcile.py`
 - `.github/workflows/auto-release-watchdog.yml`
 - `.github/workflows/release-cadence-check.yml`
 - `tools/scripts/package_cli.py`

@@ -47,6 +47,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SIGN_AND_RELEASE = REPO_ROOT / ".github" / "workflows" / "sign-and-release.yml"
@@ -422,17 +424,29 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertNotIn("package_analyzer_descriptors.cpp", run_block)
 
 
-class ReleasePublishChecksumGate(unittest.TestCase):
-    """release-publish.yml must generate SHA256SUMS before publishing."""
+class SingleOwnerReleasePublication(unittest.TestCase):
+    """release-cli.yml's `release` job must own publication END TO END.
+
+    Publication used to be a handshake across three workflows: release-cli made a
+    draft, sign-and-release polled 50 minutes for that draft to attach
+    appcast.xml, and release-publish.yml flipped the draft only once BOTH legs
+    reported success. That coupled the release to the slowest, least reliable leg
+    — and 11 of 18 tags in 2026-07 never published, several of them with all six
+    platform binaries built green.
+
+    These tests pin the collapse so it cannot be reintroduced.
+    """
 
     REQUIRED_RELEASE_ASSETS = [
         "appcast.xml",
         "pulp-darwin-arm64.tar.gz",
+        "pulp-darwin-x64.tar.gz",
         "pulp-linux-arm64.tar.gz",
         "pulp-linux-x64.tar.gz",
         "pulp-windows-arm64.zip",
         "pulp-windows-x64.zip",
         "pulp-sdk-darwin-arm64.tar.gz",
+        "pulp-sdk-darwin-x64.tar.gz",
         "pulp-sdk-linux-arm64.tar.gz",
         "pulp-sdk-linux-x64.tar.gz",
         "pulp-sdk-windows-arm64.tar.gz",
@@ -441,54 +455,255 @@ class ReleasePublishChecksumGate(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.text = RELEASE_PUBLISH.read_text(encoding="utf-8")
+        cls.text = RELEASE_CLI.read_text(encoding="utf-8")
+        cls.workflow = yaml.safe_load(cls.text)
 
-    def test_publish_coordinator_generates_and_uploads_sha256sums(self) -> None:
+    def test_no_publish_coordinator_workflow_exists(self) -> None:
+        self.assertFalse(
+            RELEASE_PUBLISH.exists(),
+            "release-publish.yml is back. Publication must live in release-cli's "
+            "`release` job. A cross-workflow coordinator can only publish when "
+            "EVERY leg it waits on succeeds, which makes the release only as "
+            "reliable as its worst leg.",
+        )
+
+    def test_release_job_generates_the_appcast_itself(self) -> None:
+        """The Sparkle feed must be written where the release is written.
+
+        appcast.xml is a pure function of the tag name and the date — no
+        enclosure, no signature, no dependency on a notarized artifact. Sourcing
+        it from sign-and-release was the ONLY thing coupling publication to macOS
+        signing, and that coupling is what let a notarization hiccup withhold a
+        complete SDK release.
+        """
+        self.assertIn("name: Generate appcast.xml (Sparkle feed)", self.text)
+        self.assertIn("artifacts/appcast.xml", self.text)
+
+    def test_release_job_does_not_wait_on_the_advisory_universal_gate(self) -> None:
+        """`continue-on-error` makes a result advisory, NOT the dependency.
+
+        universal-arch-gate runs on the GitHub-hosted macos-15 pool, where queue
+        times of 2-7 hours are routine. While it sat in `needs`, the release job
+        waited for it regardless of continue-on-error — an advisory gate holding
+        the release hostage.
+        """
+        needs = self.workflow["jobs"]["release"]["needs"]
+        self.assertNotIn(
+            "universal-arch-gate",
+            needs,
+            "universal-arch-gate is back in the release job's `needs`. "
+            "continue-on-error does not remove a job from the dependency graph; "
+            "the release will block on its (2-7h) queue time.",
+        )
+        self.assertEqual(sorted(needs), ["build-cli", "smoke-cli"])
+
+    def test_release_job_checksums_and_publishes_in_one_job(self) -> None:
         generate = "release_checksum_manifest.py generate"
         verify = "release_checksum_manifest.py verify"
-        upload = "gh release upload \"${TAG}\" release-assets/SHA256SUMS"
-        publish = "gh release edit \"${TAG}\""
-
-        self.assertIn(generate, self.text)
-        self.assertIn(verify, self.text)
-        self.assertIn(upload, self.text)
-        self.assertIn(publish, self.text)
+        upload = 'gh release upload "${TAG}" release-assets/SHA256SUMS'
+        publish = 'gh release edit "${TAG}"'
+        for needle in (generate, verify, upload, publish, "--exact-required"):
+            self.assertIn(needle, self.text)
         self.assertLess(self.text.index(generate), self.text.index(publish))
         self.assertLess(self.text.index(verify), self.text.index(publish))
         self.assertLess(self.text.index(upload), self.text.index(publish))
-        self.assertIn("--exact-required", self.text)
 
-    def test_publish_coordinator_requires_every_user_facing_release_asset(self) -> None:
+    def test_every_user_facing_asset_is_required_before_publish(self) -> None:
         for asset in self.REQUIRED_RELEASE_ASSETS:
             self.assertIn(asset, self.text)
 
-    def test_publish_coordinator_downloads_existing_draft_assets(self) -> None:
-        self.assertIn("actions/checkout@v5", self.text)
-        self.assertNotIn("ref: ${{ github.event.workflow_run.head_sha }}", self.text)
-        self.assertIn("gh release download \"${TAG}\"", self.text)
-        self.assertIn("--dir release-assets", self.text)
+    def test_republishing_an_already_published_tag_is_a_no_op(self) -> None:
+        """Re-dispatch must be idempotent — release-reconcile.yml depends on it.
 
-    def test_publish_coordinator_requires_intel_assets_only_when_present(self) -> None:
-        # The advisory darwin-x64 (Intel) CLI+SDK pair must NOT be in the static
-        # required_assets list (that would negate continue-on-error and block
-        # every release when the macos-15-intel runner is down), but MUST be
-        # appended to the required set WHEN PRESENT — otherwise --exact-required
-        # rejects them as "unexpected" and a successful-Intel release stays a
-        # draft (the success-path bug this guards).
-        for intel_asset in ("pulp-darwin-x64.tar.gz", "pulp-sdk-darwin-x64.tar.gz"):
-            self.assertNotIn(intel_asset, self.REQUIRED_RELEASE_ASSETS)
-        # Present in the workflow, gated behind a presence check on the CLI tarball.
-        self.assertIn("release-assets/pulp-darwin-x64.tar.gz", self.text)
-        self.assertIn(
-            "required_assets+=(pulp-darwin-x64.tar.gz pulp-sdk-darwin-x64.tar.gz)",
-            self.text,
+        A published GitHub release is IMMUTABLE: uploading an asset onto one fails
+        hard. The reconciler re-dispatches this workflow to repair stuck releases,
+        and the tag may well have been published in between (a slow first run
+        finishing, or a human backfilling). So both the create step and the
+        finalizer must be skipped when the tag is already published — otherwise
+        recovery blows up on exactly the tags that turned out fine.
+        """
+        steps = self.workflow["jobs"]["release"]["steps"]
+        by_name = {s.get("name"): s for s in steps}
+
+        guard = by_name.get("Is this tag already published?")
+        self.assertIsNotNone(
+            guard, "release job must check for an existing published release."
         )
-        # The presence check must precede where checksum_args is built from
-        # required_assets, so the append actually takes effect.
-        self.assertLess(
-            self.text.index("required_assets+=(pulp-darwin-x64.tar.gz"),
-            self.text.index("checksum_args=()"),
+        self.assertEqual(guard["id"], "existing")
+
+        for step_name in ("Create release", "Verify assets, generate SHA256SUMS, publish"):
+            with self.subTest(step=step_name):
+                self.assertEqual(
+                    by_name[step_name].get("if"),
+                    "steps.existing.outputs.published != 'true'",
+                    f"`{step_name}` must be skipped when the tag is already "
+                    "published, or a re-dispatch will try to write to an "
+                    "immutable release.",
+                )
+
+    def test_runs_are_serialized_on_the_TAG_not_the_dispatch_ref(self) -> None:
+        """Same-tag runs must share one concurrency group.
+
+        `github.ref` for a workflow_dispatch is the ref it was dispatched FROM
+        (`refs/heads/main`), so keying on it put a repair dispatch for v0.655.0 in
+        a DIFFERENT group from v0.655.0's own tag-push run — letting both finalize
+        the same release concurrently. softprops/action-gh-release replaces
+        same-named assets, so one run could delete an asset out from under the
+        other's just-verified exact-asset set and publish an incomplete release.
+        """
+        group = self.workflow["concurrency"]["group"]
+        self.assertIn("inputs.version", group)
+        self.assertIn("github.ref_name", group)
+        self.assertNotIn(
+            "github.ref }}",
+            group,
+            "release-cli concurrency is keyed on github.ref again — for a "
+            "workflow_dispatch that is the dispatch ref (main), not the tag being "
+            "built, so a repair run can race the tag's own run.",
         )
+        self.assertIs(self.workflow["concurrency"]["cancel-in-progress"], False)
+
+    def test_run_name_carries_the_tag_so_repairs_are_attributable(self) -> None:
+        """release-reconcile.py identifies repair runs by display_title."""
+        run_name = self.workflow["run-name"]
+        self.assertIn("inputs.version", run_name)
+        self.assertIn("github.ref_name", run_name)
+        self.assertTrue(run_name.startswith("Release "))
+
+    def test_publish_transaction_is_globally_serialized(self) -> None:
+        """The latest-pointer decision is a read-then-write; serialize it.
+
+        Releases now finish OUT OF ORDER, so two tags could otherwise both read
+        while an older tag was latest, both conclude they are greatest, and the
+        later write would move /releases/latest BACKWARD.
+        """
+        job = self.workflow["jobs"]["release"]
+        self.assertEqual(job["concurrency"]["group"], "release-publish")
+        self.assertIs(job["concurrency"]["cancel-in-progress"], False)
+
+    def test_latest_pointer_cannot_move_backward(self) -> None:
+        """Releases now complete OUT OF ORDER, so `--latest` must be conditional.
+
+        A slow v0.645 can finish after a fast v0.646. Unconditionally claiming the
+        latest-release pointer (what the old coordinator did) would regress
+        /releases/latest to the older tag.
+        """
+        self.assertIn("latest_flag=\"--latest=false\"", self.text)
+        self.assertIn("greatest published SemVer", self.text)
+
+
+class SignAndReleaseCannotTouchTheRelease(unittest.TestCase):
+    """sign-and-release.yml must be structurally incapable of gating a release.
+
+    It formerly polled `gh release view` 150 times at 20s (50 minutes) for a draft
+    that release-cli does not create until its full build matrix finishes — which
+    really takes 70-165+ minutes. So on every slow release, this workflow failed by
+    timeout, and the coordinator then withheld an otherwise-complete release.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+        cls.workflow = yaml.safe_load(cls.text)
+
+    def test_no_polling_for_the_release(self) -> None:
+        for needle in ("gh release view", "gh release upload", "gh release edit"):
+            self.assertNotIn(
+                needle,
+                self.text,
+                f"sign-and-release.yml must not run `{needle}`. release-cli.yml's "
+                "`release` job is the sole writer of the GitHub Release; a second "
+                "writer here can only ever delay or clobber it.",
+            )
+
+    def test_contents_scope_is_read_only(self) -> None:
+        """Withholding the write scope is what makes single-ownership structural."""
+        perms = self.workflow["jobs"]["build-and-sign-macos"]["permissions"]
+        self.assertEqual(
+            perms.get("contents"),
+            "read",
+            "sign-and-release.yml regained `contents: write`. It has no business "
+            "writing to a release — release-cli.yml owns publication.",
+        )
+
+
+class NoSupersedeReaper(unittest.TestCase):
+    """auto-release.yml must never cancel a release run or delete a release.
+
+    The "supersede reaper" cancelled any in-flight release-cli / sign-and-release
+    run, and DELETED any draft release, whose tag was older than the latest
+    published release. Because the pipeline (70-165+ min) outlasts the gap between
+    tags (~100 min), releases routinely complete out of order — so "older SemVer"
+    did not mean "obsolete", and the reaper destroyed healthy, in-flight releases.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        path = REPO_ROOT / ".github" / "workflows" / "auto-release.yml"
+        cls.text = path.read_text(encoding="utf-8")
+        cls.workflow = yaml.safe_load(cls.text)
+
+    def test_no_actions_write_scope(self) -> None:
+        self.assertNotIn(
+            "actions",
+            self.workflow.get("permissions", {}),
+            "auto-release.yml regained an `actions` scope. Without it the workflow "
+            "CANNOT cancel a release run, which is the point: the reaper is not "
+            "meant to be re-addable by accident.",
+        )
+
+    def test_does_not_cancel_runs_or_delete_releases(self) -> None:
+        # Match the destructive CALLS, not any string containing a run URL — the
+        # stranded-fix/feat tracker legitimately embeds an .../actions/runs/<id>
+        # link in an issue body.
+        for forbidden in (
+            "/cancel",          # POST /repos/…/actions/runs/{id}/cancel
+            '"DELETE"',         # DELETE /repos/…/releases/{id}
+            "-X DELETE",
+            "gh run cancel",
+            "gh release delete",
+        ):
+            self.assertNotIn(
+                forbidden,
+                self.text,
+                f"auto-release.yml contains {forbidden!r} — it is cancelling runs "
+                "or deleting releases again. Nothing in the release path may "
+                "destroy work that is still in flight.",
+            )
+
+
+class ReleaseReconcilerIsTheSingleWatchdog(unittest.TestCase):
+    """One reconciler that FIXES, not four watchdogs that only report.
+
+    release-guard, release-health, release-cli-watchdog and release-draft-stuck-check
+    filed 413 issues in two weeks and fixed nothing; recovery was always a human
+    running `gh workflow run` by hand. Their grace windows (15/30/45/60 min) were
+    all below the real pipeline duration, so they also alarmed on healthy releases.
+    """
+
+    RETIRED = [
+        "release-guard.yml",
+        "release-health.yml",
+        "release-cli-watchdog.yml",
+        "release-draft-stuck-check.yml",
+    ]
+
+    def test_retired_watchdogs_stay_retired(self) -> None:
+        for name in self.RETIRED:
+            self.assertFalse(
+                (REPO_ROOT / ".github" / "workflows" / name).exists(),
+                f"{name} is back. Release health belongs to release-reconcile.yml, "
+                "which re-dispatches stuck releases and keeps ONE incident issue. "
+                "Adding another reporter re-creates the issue firehose.",
+            )
+
+    def test_reconciler_exists_and_can_dispatch_but_not_cancel(self) -> None:
+        path = REPO_ROOT / ".github" / "workflows" / "release-reconcile.yml"
+        self.assertTrue(path.exists(), "release-reconcile.yml is missing.")
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        perms = workflow["permissions"]
+        self.assertEqual(perms["actions"], "write")   # to re-dispatch release-cli
+        self.assertEqual(perms["contents"], "read")   # never writes release state
 
 
 class ReleaseArtifactAttestations(unittest.TestCase):
@@ -507,12 +722,15 @@ class ReleaseArtifactAttestations(unittest.TestCase):
         self.assertIn("pulp-${{ matrix.platform }}.*", self.release_cli)
         self.assertIn("pulp-sdk-${{ matrix.platform }}.*", self.release_cli)
 
-    def test_sign_and_release_attests_appcast(self) -> None:
-        self.assertIn("id-token: write", self.sign_and_release)
-        self.assertIn("attestations: write", self.sign_and_release)
-        self.assertIn("name: Attest appcast", self.sign_and_release)
-        self.assertIn("uses: actions/attest@v4", self.sign_and_release)
-        self.assertIn("subject-path: artifacts/appcast.xml", self.sign_and_release)
+    def test_release_cli_attests_the_appcast_it_now_generates(self) -> None:
+        """The appcast attestation follows the appcast into release-cli.
+
+        It used to live in sign-and-release, which no longer produces the feed and
+        no longer holds the write scopes to attest anything onto a release.
+        """
+        self.assertIn("name: Attest appcast", self.release_cli)
+        self.assertIn("subject-path: artifacts/appcast.xml", self.release_cli)
+        self.assertNotIn("name: Attest appcast", self.sign_and_release)
 
 
 class ReleaseBotSshSigning(unittest.TestCase):
@@ -701,16 +919,21 @@ class ReleaseCliLatestPointer(unittest.TestCase):
         self.assertIn("type: boolean", input_block)
         self.assertIn("default: false", input_block)
 
-    def test_create_release_promotes_latest_only_for_tag_push_or_opt_in(self) -> None:
+    def test_create_step_defers_the_latest_pointer_to_the_publish_step(self) -> None:
+        """The create step must not claim `latest`; the publish step decides.
+
+        `softprops/action-gh-release` can only be told latest-or-not up front,
+        which cannot express "only if this is the greatest published SemVer". With
+        releases now completing OUT OF ORDER (a slow v0.645 finishing after a fast
+        v0.646), that guard is the difference between a correct pointer and
+        regressing /releases/latest to an older tag.
+        """
         step_block = self._find_step_block("Create release")
-        self.assertIn(
-            "make_latest: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}",
-            step_block,
-        )
+        self.assertIn("make_latest: false", step_block)
         self.assertNotIn(
             "make_latest: true",
             step_block,
-            "Unconditional make_latest lets an old-tag workflow_dispatch backfill "
+            "Unconditional make_latest lets an out-of-order or backfilled release "
             "move GitHub's /releases/latest pointer backward.",
         )
 
@@ -718,53 +941,6 @@ class ReleaseCliLatestPointer(unittest.TestCase):
         job_block = self._find_release_job_block()
         self.assertIn("contents: write", job_block)
         self.assertIn("issues: read", job_block)
-
-
-class SignAndReleaseContentsWriteTest(unittest.TestCase):
-    """#724: sign-and-release.yml must declare `contents: write` on its
-    macOS job so the final `Create GitHub Release` step can upload appcast.xml
-    to the draft Release. Without this scope, every sign-and-release run fails
-    at the last step with `Resource not accessible by integration` and
-    macOS-signed artifacts never land on the release — classic silent release
-    failure pattern.
-    """
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        root = Path(__file__).resolve().parent.parent.parent
-        cls.workflow_path = root / ".github" / "workflows" / "sign-and-release.yml"
-        cls.text = cls.workflow_path.read_text(encoding="utf-8")
-
-    def test_macos_job_declares_contents_write(self) -> None:
-        """The build-and-sign-macos job must have `contents: write`.
-
-        The regex matches across the job's header to the first `steps:`
-        key, so reordering within the header is fine — only the presence
-        of the scope matters.
-        """
-        # Match the build-and-sign-macos job block up to its `steps:`.
-        macos_job = re.search(
-            r"build-and-sign-macos:\s*\n([\s\S]{1,800}?)^\s{4}steps:",
-            self.text,
-            re.MULTILINE,
-        )
-        self.assertTrue(
-            macos_job,
-            "sign-and-release.yml must define a `build-and-sign-macos` job "
-            "with a `steps:` block. If the job was renamed, update this test "
-            "to match.",
-        )
-        job_header = macos_job.group(1)
-        self.assertRegex(
-            job_header,
-            r"permissions:\s*\n\s*contents:\s*write",
-            "sign-and-release.yml `build-and-sign-macos` job must declare "
-            "`permissions: contents: write` (issue #724). Without this, the "
-            "final `Create GitHub Release` step fails with `Resource not "
-            "accessible by integration` while uploading appcast.xml. Every "
-            "sign-and-release run then silently fails and macOS-signed "
-            "artifacts never land on the release.",
-        )
 
 
 class SignAndReleaseMacosRoutingTest(unittest.TestCase):

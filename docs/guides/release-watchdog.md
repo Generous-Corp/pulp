@@ -1,33 +1,100 @@
 # Release Watchdog
 
-Three layers of protection against silent release failures (plus two
-PR-time prevention layers — `fix/feat-needs-bump` for #1009 and the
-release-path PR gate for #1962). All use only standard, agent-agnostic
-tooling (GitHub Actions, `gh` CLI, `yamllint`, `actionlint`, Python) —
-any contributor or automation (Claude, Codex, a human) can understand
-and invoke them.
+How Pulp detects — and now *repairs* — release failures.
 
-## Why three layers
+The important change: release health is owned by **one reconciler that fixes
+things**, not by a fleet of watchdogs that only report. Four reporting watchdogs
+(`release-guard`, `release-health`, `release-cli-watchdog`,
+`release-draft-stuck-check`) were retired after filing **413 issues in two
+weeks** while fixing nothing — recovery was always a human running
+`gh workflow run` by hand.
 
-Releases fail silently when a single check covers only one failure mode.
-A real incident on 2026-04-20 proved the point: PR #501 merged an
-`auto-release.yml` with a YAML-indent bug that caused GitHub to reject
-the workflow file at dispatch time. The run surfaced `conclusion=failure`
-with **zero jobs** and no logs — which visually looks identical to
-"still running." Every auto-release attempt for the next 24h (8 merges,
-including the v0.23.1 version bump) failed the same way. Discovery came
-only when someone noticed no new GitHub Release had appeared.
+They failed in two distinct ways, both worth remembering before adding another
+reporter:
 
-Each layer catches a different failure mode:
+- **Their grace windows were shorter than the pipeline.** They alarmed after
+  15/30/45/60 minutes on a pipeline that really takes 70–165+ minutes, so they
+  fired on *healthy* releases that were still building. Roughly half of all
+  issues filed self-resolved.
+- **Dedupe silently broke, so one condition minted issues forever.**
+  `release-health.yml` created issues with a `--label release-health` that *does
+  not exist in this repo*; the labelled create failed, an unlabelled fallback
+  fired, and its dedupe/auto-close lookups (which filter by that label) could
+  never match their own issues. It opened a fresh "🚨 Release pipeline DOWN"
+  issue every two hours, forever — 69 of them, none closable. Its title also
+  embedded an escalating count, so they were not even title-identical. (It had a
+  second latent bug: `gh api --paginate` without `--slurp` emits one JSON
+  document *per page*, which is not valid JSON — once the repo passed 100
+  releases, parsing failed and every tag looked unreleased.)
+
+If you add a watchdog, it must (a) know whether the thing it is judging is still
+running, and (b) be able to find its own previous issue. Otherwise it becomes a
+firehose.
+
+## The layers
 
 | Layer | Trigger | Failure mode caught | Median detection |
 |---|---|---|---|
 | 0. release-path PR gate | PR touching release-path files | prebuilt-Skia / link-order / CMake breakage at PR time (#1962) | 5-15 min (pre-merge) |
 | 1. Workflow lint | PR review | bad YAML / bad `uses:` / bad shell | seconds (pre-merge) |
-| 2. Auto-release watchdog | `workflow_run` completion | runtime failure (any cause) | 1-2 minutes |
-| 2b. Release-CLI watchdog | `workflow_run` completion | per-tag missing SDK/CLI assets (#1375) | 1-2 minutes |
-| 3. Cadence check | `schedule` every 30 min | any outcome drift — even unknown-unknowns | ≤45 min |
-| 3b. Draft-stuck check | `schedule` every 30 min | tag exists, Release stuck as draft (#1962) | ≤90 min |
+| 2. Auto-release watchdog | `workflow_run` completion | auto-release.yml runtime failure (any cause) | 1-2 minutes |
+| 3. Cadence check | `schedule` every 30 min | version bumped on main but no tag created | ≤45 min |
+| 4. **Release reconciler** | `schedule` every 30 min | **tag exists but never published — and REPAIRS it** | ≤30 min |
+
+Layers 0-3 are prevention and detection. Layer 4 is the only one that changes
+release state, and it can only ever drive a release *forward*.
+
+## Layer 4 — Release reconciler (detection AND repair)
+
+`.github/workflows/release-reconcile.yml` + `tools/scripts/release_reconcile.py`.
+
+Every 30 minutes it compares desired state (every recent SDK tag has a published
+release) against actual state, and drives the difference to zero by
+re-dispatching `release-cli.yml` for any tag that is stuck.
+
+The decision rules — `decide()` in `release_reconcile.py`, unit-tested in
+`test_release_reconcile.py`:
+
+| Tag state | Action |
+|---|---|
+| Published, with every required asset | nothing |
+| Published but MISSING assets (at/above the asset-contract floor) | incident — a published release is immutable, so it needs a new patch tag |
+| A `release-cli` run is queued/in-progress | **nothing, at ANY age** |
+| Younger than the grace window, no run yet | nothing |
+| Unpublished, but a NEWER version already shipped | nothing — see "superseded" below |
+| No release, no live run, not superseded | re-dispatch `release-cli.yml` (up to 3 attempts) |
+| A draft was left behind | re-dispatch — the re-run re-drives the draft to published |
+| Retry budget exhausted | ONE incident issue, updated in place, closes on recovery |
+
+**"Superseded" is not the old reaper.** The reaper *cancelled* in-flight runs and
+*deleted* drafts for any tag older than the latest published release — destructive,
+and racing releases that were merely slow. This rule only declines to **start** a
+speculative rebuild of a tag whose users are already served by a newer release. It
+never touches release state, and a live run always outranks it. Without it, the
+reconciler's first sweep would have re-dispatched twelve superseded tags at once,
+saturating the very runners the current release depends on.
+
+**The asset-contract floor** (`ASSET_CONTRACT_FLOOR`) exists for the same reason.
+Releases from before the Intel `darwin-x64` pair and `SHA256SUMS` legitimately lack
+them; holding them to today's contract would flag a pile of perfectly good historical
+releases — a brand-new false-alarm firehose. Raise the floor when the required asset
+set changes; never lower it.
+
+Two properties are load-bearing:
+
+**A live run outranks everything, at any age.** A release that has been building
+for four hours is *slow*, not stuck. The predecessor of this workflow — a
+"supersede reaper" in `auto-release.yml` — kept concluding otherwise and
+cancelling in-flight releases, which is how 11 of 18 tags in July 2026 were
+destroyed with all their binaries built green.
+
+**It cannot destroy anything.** There is no cancel path and no delete path, and
+a test (`NeverDestructive`) asserts the source contains neither. Recovery by
+destroying release state is the bug this workflow exists to undo.
+
+Re-dispatch runs `release-cli.yml` from `main` (so it picks up the *current*,
+fixed workflow) with `version=<tag>` (so it builds the *tag's* source). It is
+idempotent: the finalizer no-ops on an already-published tag.
 
 ## Layer 1 — Workflow lint (pre-merge)
 
@@ -78,32 +145,6 @@ Tracking issue title: `Auto-release workflow failed — RELEASES BLOCKED`.
 One issue, edited in place, auto-closed on recovery — mirrors the #475
 close-path pattern used by the orphan-branch and deps-drift sweeps.
 
-## Layer 2b — Release-CLI watchdog (per-tag asset check)
-
-**File:** `.github/workflows/release-cli-watchdog.yml`
-
-Triggers on `workflow_run` completion for `release-cli.yml`. Resolves
-the tag from `head_branch`, then queries the corresponding GitHub
-release for `pulp-sdk-*` and `pulp-{darwin,linux,windows}-*` assets
-via `gh release view`. Three alert classes:
-
-- `run_failure` — `release-cli` concluded `failure`. Most common cause
-  on Windows-arm64 is the shared-cache priming flake (#1375, exit 127
-  during Yoga priming). Tracker body suggests `gh workflow run
-  release-cli.yml --ref vX.Y.Z` to retrigger.
-- `success_with_missing_assets` — `release-cli` concluded `success`
-  but the release has 0 `pulp-sdk-*` tarballs. Matches the v0.74.0
-  pattern where `sign-and-release.yml` published plugin .pkg files but
-  `release-cli` failed mid-matrix and uploaded no SDK/CLI artifacts.
-- `no_release` — no GitHub release exists for the tag. The `release`
-  job in `release-cli.yml` runs only after `build-cli` and
-  `smoke-cli` clear, so this means the matrix gated the release out.
-
-Per-tag tracker title (`release-cli failed for vX.Y.Z — SDK/CLI
-artifacts may be missing`) so each stranded tag gets its own thread —
-backfills via `workflow_dispatch` are independent per tag.
-Auto-closes on the next run for the same tag if SDK assets land.
-
 ## Layer 3 — Release cadence check (invariant)
 
 **File:** `.github/workflows/release-cadence-check.yml`
@@ -126,41 +167,6 @@ YAML bug (Layer 1 would catch), a runtime job failure (Layer 2 would
 catch), a missing secret (neither of the above might catch), a
 forgotten manual step, or a GitHub outage — the invariant fires because
 the *symptom* (missing release) appears.
-
-## Layer 3b — Release draft stuck check (invariant, sibling to Layer 3)
-
-**File:** `.github/workflows/release-draft-stuck-check.yml`
-
-Runs every 30 minutes (plus `workflow_dispatch`). Sibling to Layer 3:
-where Layer 3 catches "VERSION bump landed, no tag", Layer 3b catches
-"tag exists, GitHub Release still `draft: true`". Both are
-cause-agnostic, both watch the symptom rather than the cause.
-
-For each Release returned by `gh api releases?per_page=100` that is
-within the lookback window (default 14 days), checks:
-
-1. Is the corresponding git tag present?
-2. Is the Release flagged `draft: true`?
-3. Has the Release been drafted longer than the grace window
-   (default 60 min — release-cli + sign-and-release together can take
-   30–45 min cold-cache; 60 leaves slack)?
-
-If yes-yes-yes → add to findings and open/update a tracking issue
-titled `Release pipeline: tag exists but GitHub Release is draft`.
-Auto-closes on the next sweep when every recent tag is published.
-
-**Motivating incident (#1962, 2026-05-12..2026-05-14):** Five tags
-(v0.95.0..v0.98.0) were drafted by `sign-and-release.yml` (which
-creates `draft: true`) but never promoted to published because
-`release-cli.yml`'s linux-x64 leg failed for 5 consecutive runs on a
-Skia chrome/m144 link-order bug. The `release` job that flips
-`draft: false` and uploads the SDK assets is gated on the matrix
-being green, so it skipped each time. Existing layers were quiet:
-`auto-release.yml` and the cadence check both saw "tag exists" and
-moved on; the per-tag release-cli watchdog (Layer 2b) opened
-trackers but those got buried in the issue list and the actual user-
-visible signal — `https://github.com/danielraffel/pulp/releases`
-showing 5 "Draft" rows — wasn't surfaced anywhere actionable.
 
 ## release-path PR gate (pre-tag prevention, issue #1962)
 
@@ -377,28 +383,3 @@ contributors who touch CI workflows frequently.
   in `~/.claude` documents the shape; a future Layer 4 could smoke-test
   the produced binary.
 
-## Layer 4 — `release-health.yml` (symptom-level escalation)
-
-The Layers 1–3 triad *detects* release breakage, but the 2026-06-19..21 outage
-showed two blind spots: alerts arrived as **per-version noise** (~16 separate
-issues, none signalling "this is now systemic") and **only as GitHub issues** — a
-surface the owner doesn't watch — so a loud, week-long outage stayed invisible.
-
-`release-health.yml` is the symptom-level catch-all. Every 2h it asks the only
-question that matters — *are PUBLISHED releases with binaries keeping pace with
-the version tags?* — so it covers **any** release-build failure (macOS leg,
-Windows/CLI leg, a future leg) without a watchdog per workflow. When the newest
-`CONSECUTIVE_THRESHOLD` tags (default 2) lack a non-draft release with ≥1 asset it:
-
-- **fails the job** → a RED scheduled check on the Actions dashboard that stays
-  red until releases recover (a passive surface you actually see),
-- maintains **ONE rolling, rising-severity issue** (label `release-health`) — no
-  per-version spam — and auto-closes it on recovery,
-- optionally posts to Discord **iff** the `RELEASE_ALERT_DISCORD_WEBHOOK` repo
-  secret is set. **Disabled by default**: the wiring ships inert; add the secret
-  to turn on the proactive push (tracked as a feature request).
-
-Auto-remediation is intentionally *not* in this layer — detect-and-escalate only,
-so a real bug (like the macos-14 runner config) is surfaced fast rather than
-masked. Auto-retry-once of a failed leg is a candidate follow-up for the
-per-workflow watchdogs.
