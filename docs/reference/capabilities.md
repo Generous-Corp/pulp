@@ -113,7 +113,7 @@ If you hit a limitation not listed, check
 | Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
 | Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, CI |
 | iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
-| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2 (Emscripten) canary loads + renders in Chrome; WebCLAP (wasi-sdk) builds + is Node-hosted with audio + parameter control; in-browser WebCLAP host pending |
+| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2 (Emscripten) and WebCLAP (wasi-sdk) plugins, both exercised in a headless-Chrome CI lane. Pulp's view tree also renders in the browser via Skia Ganesh on WebGL2. DSP is CPU-only — no GPU audio in the browser. |
 
 Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 
@@ -329,8 +329,19 @@ Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp
 | Dawn/D3D12 surface (Windows) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
 | Dawn/Vulkan surface (Linux) | experimental | [render](modules.md#render) | X11 surface creation implemented; Wayland extraction exists but presentation is not wired; not runtime-validated |
 | CoreGraphics fallback | usable | [render](modules.md#render) | Default render path on macOS |
+| Skia Ganesh on WebGL2 (browser) | experimental | [render](modules.md#render) | The wasm render path. Paints `core/view`'s widget tree into a browser canvas, driven by a `requestAnimationFrame` render loop; DOM pointer/key events are translated into the View tree. |
 
-Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
+Native GPU rendering is **Skia Graphite over Dawn**. The browser is the one
+exception: the published Skia wasm slice is **Ganesh on WebGL2** and ships no
+Dawn at all, so Graphite/Dawn-on-wasm is not what runs there. The backend is
+confined to `core/render/src/skia_surface_ganesh.cpp` — nothing above the render
+boundary knows which one it got. WebGL context loss is handled (the surface
+reports unavailable, the loop keeps pumping, and Ganesh is rebuilt on restore),
+and a browser without a WebGL2 context is a supported configuration that the host
+page must be prepared to fall back from
+(`pulp::view::web::browser_host_gpu_available()`).
+
+Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`, `pulp/view/web/web_event_translate.hpp`
 
 ---
 
@@ -350,6 +361,14 @@ false`, falling back to the `signal::*` CPU path.
 | GPU WaveNet neural-inference primitive | experimental | [render](modules.md#render) | [GPU NAM example](../examples/gpu-nam.md) |
 
 Key headers: `pulp/gpu_audio/gpu_audio_transport.hpp`, `pulp/gpu_audio/gpu_convolver.hpp`, `pulp/render/gpu_compute.hpp`
+
+**Not available on the web.** No GPU-compute code compiles to wasm. The Skia wasm
+slice is Ganesh on WebGL2, and WebGL2 has no compute shaders, so a plugin with a
+GPU engine runs its **CPU** engine in the browser (SuperConvolver's WAM/WebCLAP
+builds run the CPU `PartitionedConvolver`). A GPU-DSP lane in the browser would
+need WebGPU in a dedicated worker; that is not implemented. Note also that GPU is
+not automatically faster than CPU for audio — a measured spike found a competent
+CPU implementation beats or ties the GPU at all musical settings.
 
 ---
 
@@ -496,4 +515,41 @@ The `Processor` base class defines what plugin developers implement.
 | Transport context (tempo, time sig, position) | usable | [format](modules.md#format) | | |
 | Latency reporting | usable | [format](modules.md#format) | | |
 | Tail time | usable | [format](modules.md#format) | | |
+| Non-realtime maintenance tick (`on_non_realtime_tick()` / `non_realtime_tick_pending()`) | experimental | [format](modules.md#format) | | super-convolver |
 | Plugin registry (multi-plugin bundles) | usable | [format](modules.md#format) | | |
+
+### Non-realtime maintenance tick
+
+`Processor::on_non_realtime_tick()` (default no-op) gives a processor a place to
+do control-driven work that `process()` must never do — decode, resample,
+FFT-plan, allocate — when the host provides **no thread to do it on**. The
+motivating case is the browser: a WAM v2 module lives entirely inside an
+`AudioWorklet` and a WebCLAP module has no `std::thread`.
+
+`Processor::non_realtime_tick_pending()` (default `false`) is the realtime-safe
+query the adapter peeks from `process()` to discover that a tick is owed. It
+**must** be RT-safe: read atomics and compare — no locks, no allocation.
+
+Who calls it — the contract is narrower than "any host":
+
+- **WAM v2** — the adapter marks the processor dirty on a control write and calls
+  the tick **once per render turn**, so a burst of control messages (a knob drag
+  delivers many in one turn) collapses into a single pass over the *latest*
+  values. Do not rely on one tick per parameter write; rely on "eventually, with
+  the latest values."
+- **CLAP — including native CLAP, not only WebCLAP.** `clap_on_main_thread` and
+  `state.load` call it unconditionally, and `process()` peeks
+  `non_realtime_tick_pending()` each block to request the main-thread callback
+  (the same mechanism already used for latency/tail changes). A processor that
+  already owns a worker thread should do nothing in the tick, or the worker and
+  the host race.
+- **VST3, AU, and the standalone host do not call it at all.** A processor that
+  depends on it for correctness must *also* have a worker (or do the work in
+  `prepare()`), or it will never reconcile in those formats.
+
+It is never called from inside `process()`. In a worklet-only host it does run on
+the same OS thread as the render callback (just outside it), so a long tick can
+still make the next quantum late — keep the work bounded.
+
+Both methods are appended at the **end** of the `Processor` vtable to keep vtable
+ordering additive-only.

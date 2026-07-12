@@ -426,6 +426,19 @@
         "tools/cmake/PulpInfoPlist.vst3.in"
       ]
     },
+    "web-plugins": {
+      "paths": [
+        "core/format/src/wasm/**",
+        "core/format/include/pulp/format/web/**",
+        "core/view/platform/web/**",
+        "core/view/include/pulp/view/web/**",
+        "core/render/src/render_loop_emscripten.cpp",
+        "core/render/src/skia_surface_ganesh.cpp",
+        "tools/cmake/PulpWam.cmake",
+        "tools/cmake/PulpWclap.cmake",
+        "tools/cmake/PulpWebUi.cmake"
+      ]
+    },
     "webview-ui": {
       "paths": [
         "examples/webview-*/**"

@@ -137,6 +137,75 @@ without opening a window.
   of them. `--allow-tree-drift` exists only on `shipyard run` (not `pr`/`ship`), so
   fixing the symlink is the durable answer, not suppressing the guard.
 
+## Emscripten / wasm: the slice is **Ganesh on WebGL2**, not Graphite/Dawn
+
+The one platform where the sentence at the top of this skill ("Pulp's GPU path
+is Skia Graphite over Dawn") is **false**. The `wasm-gpu` slice published by
+skia-builder contains **zero** `wgpu` symbols and no `libdawn_combined.a`, so
+`SK_GRAPHITE` / `SK_DAWN` must NOT be defined there — `FindSkia.cmake`'s
+Emscripten arm defines `SK_GANESH` + `SK_GL` instead, and
+`tools/scripts/verify_wasm_skia_slice.py` asserts that invariant so a future
+slice that quietly changes backends fails the CI lane instead of a demo page.
+Everything Ganesh-specific is confined to `core/render/src/skia_surface_ganesh.cpp`;
+nothing above the render boundary knows the backend.
+
+Consequences worth knowing before you debug for an hour:
+
+- **WebGL2 has no compute shaders.** There is no GPU-compute path in wasm at
+  all. GPU *audio* is not, and cannot be, in the browser on this slice — it
+  would need WebGPU (emdawnwebgpu) in a worker. Never describe the browser lane
+  as GPU-accelerated DSP; it is a GPU-rendered UI over CPU DSP.
+- **No skottie/sksg in the wasm slice** — its `libskottie.a` leaves `skjson::*`
+  undefined and the zip ships no jsonreader/skresources archive. `PULP_LOTTIE`
+  cannot be enabled for wasm.
+- **Emscripten also sets `UNIX=1`.** The `elseif(EMSCRIPTEN)` arm in
+  `FindSkia.cmake` MUST precede the `UNIX` arm, or the probe looks for
+  `build/linux-gpu/` and reports Skia missing — which, per the top of this
+  skill, silently degrades to a CPU-only build rather than erroring. Same
+  ordering hazard applies to any new platform arm.
+
+### Landmine: no `SK_TRIVIAL_ABI` → a silently **trapping** link
+
+The wasm slice is built by gn with `is_trivial_abi=true`. That flag changes the
+calling convention of `sk_sp<T>` (and friends) — the callee, not the caller,
+destroys the argument. If Pulp's TUs compile **without** `SK_TRIVIAL_ABI`, the
+two sides disagree about who runs the destructor, and `wasm-ld` does not error:
+it links a **trapping stub** for the cross-boundary call. The failure surfaces at
+runtime as the first frame dying with a bare, context-free:
+
+```
+RuntimeError: unreachable
+```
+
+No symbol, no stack, nothing to grep. `SK_TRIVIAL_ABI` is now an INTERFACE
+define on the `skia::skia` target for the Emscripten arm. If you ever see a bare
+`RuntimeError: unreachable` on the first paint of a wasm build, check that define
+**before** you suspect your own code. Any new ABI-affecting gn flag in the slice
+needs the same treatment.
+
+### Landmine: `SkFontMgr_New_Custom_Empty` returns a **non-null, glyph-less** fontmgr
+
+Emscripten's font manager is the pathological case for every "do we have fonts?"
+guard you would naturally write:
+
+- it is **not null**, so a null-check passes;
+- it reports **1 family with 1 face**, so a `countFamilies() > 0` guard passes;
+- and that face has **no glyphs**, so every string measures at **zero width**.
+
+The result is text that silently lays out to nothing — no error, no warning, just
+an empty UI that looks like a layout bug. **Do not probe font-DB usability by
+counting families or null-checking the manager.** Probe it by asking for an
+actual glyph:
+
+```cpp
+// Usable iff a real typeface maps a real character to a real glyph id.
+const bool usable = typeface && typeface->unicharToGlyph('A') != 0;
+```
+
+`core/canvas/src/text_font_context.cpp` does this now. The same trap applies to
+any host that hands you an "empty" custom fontmgr, not just wasm — bundled fonts
+must be registered and then *proven* to draw.
+
 ## GPU bundles MUST be relocatable (the libwgpu_native.dylib rpath footgun)
 
 A GPU plugin/app links `libwgpu_native.dylib`. The upstream WebGPU FetchContent

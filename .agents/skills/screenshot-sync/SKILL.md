@@ -248,6 +248,25 @@ own layout.
 
 ## Gotchas
 
+- **Cache-bust the main-thread player entry ONLY — never the worklet processor
+  or the DSP module.** An AudioWorklet processor's *registered name* is derived
+  from the URL it was added from, so the main thread and the worklet must agree
+  on exactly one URL. A `?v=` on either side forks the name and the node never
+  constructs — the page loads, the UI paints, and there is simply no audio. The
+  corollary bites in the other direction too: **every module the `?v=` IS stamped
+  on must be an input to the hash** (`assemble-gallery.mjs`'s `playerVersion()`
+  hashes the shell, widgets, both adapters, and the UI entry). Add a bustable
+  module without adding it to the hash and its next change ships behind a stale
+  cache entry — an OG shot regenerated against a page that is still serving the
+  old bundle is the worst version of this, because it looks correct.
+- **A page's UI module may be optional; a screenshot of the fallback is not a
+  bug.** The gallery assembler skips the both-ABI SuperConvolver section entirely
+  when the WAM build tree (`--wam-build`) is absent, and builds pages with **no
+  custom UI** when the wasm UI module (`--ui-build`) is absent — the player then
+  renders its generated parameter grid. A browser with no WebGL2 context lands on
+  that same grid at runtime. So before re-shooting a demo, confirm which UI the
+  page actually mounted; otherwise you will capture the parameter grid, commit it
+  as the plugin's og.png, and have "wrong" screenshots with a green build.
 - **CoreGraphics can't composite file images** → filename-as-text placeholders;
   use the Skia backend for anything with assets.
 - **Headless GPU** → the offscreen `gpu` backend, not the live host (which hangs

@@ -1253,6 +1253,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `video-proof` | Desktop validation videos: record raw proof, render Remotion context, publish/serve report, prepare review issue body |
 | `view-bridge` | Editor lifecycle and multi-view attach — `Processor::create_view()`, open/notify/resize/close protocol |
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
+| `web-plugins` | Pulp in the browser: WAM v2 / WebCLAP adapters, wasm runtime, Skia-Ganesh/WebGL2 browser host, worklet constraints |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
 When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.

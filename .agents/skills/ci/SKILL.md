@@ -611,6 +611,34 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `--exclude-regex` flake lists by catching not-yet-listed flakes generically —
   prefer it over growing the exclude list for transient timing flakes.
 
+### `web-plugins.yml` — pin the wasm toolchain, and fetch Skia from the manifest
+
+The WAM / WebCLAP / browser-UI lane (`WAMv2 + WebCLAP (Linux, headless Chrome)`)
+has two rules that exist because breaking them produces failures on PRs that
+touched nothing:
+
+- **emsdk is PINNED, never `latest`.** emsdk floats, and has already shipped
+  breaking WebGPU API changes and a change to how `SINGLE_FILE` embeds the wasm.
+  Each landed here as a mystery red X on an unrelated PR. The lane pins the
+  version it is verified against (6.0.2 today); 4.0.10 is the floor for the
+  emdawnwebgpu port, so a bump stays at or above it. Bump it deliberately, in
+  its own PR, and update `determinism.web_toolchain` in `tools/deps/manifest.json`
+  in the same change.
+- **The Skia wasm slice is fetched from `tools/deps/manifest.json`, not a
+  hardcoded URL.** The lane reads the URL + sha256 out of the manifest, verifies
+  the checksum, and keys the `actions/cache` entry on `hashFiles('tools/deps/manifest.json')`
+  — so the CI lane and the dependency audit can never disagree about which binary
+  is in use, and a pin bump self-invalidates the cache. Do not paste a release URL
+  into the workflow. The lane then runs `tools/scripts/verify_wasm_skia_slice.py`
+  to assert the slice really is Ganesh/WebGL2 (no Dawn, no Graphite) — the
+  invariant `FindSkia.cmake`'s Emscripten arm is built on. See the
+  `skia-gpu-build` skill.
+
+Path-filter hygiene: this workflow is `paths:`-filtered, so a new web-facing
+directory (a demo, a `packages/pulp-web-player/**` change, a new `PulpWeb*.cmake`
+module) is **not covered until you add its glob**. A web demo that silently stops
+being built is the failure mode.
+
 ## Current Build-and-Test routing
 
 As of the 2026-05-20 classify gate, `build.yml` runs a cheap
