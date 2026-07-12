@@ -2,6 +2,8 @@
 
 #include <pulp/render/gpu_surface.hpp>
 
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -401,6 +403,74 @@ public:
     /// `instance` selects the plan slot prepared above (default 0).
     virtual bool wavenet_forward(const float* in_block, float* out_block,
                                  uint32_t block_size, uint32_t instance = 0) = 0;
+
+    // ── Asynchronous readback (compute_magnitude ONLY, so far) ──────────────
+    //
+    // SCOPE FIRST, so nobody reads the contract below as a general promise:
+    // exactly ONE operation has an async variant — compute_magnitude_async().
+    // fft_forward, convolve, convolve_batch, multi_convolve, multi_fdl_convolve,
+    // spectral_stack_render, matmul, conv_stack_forward and wavenet_forward ALL
+    // still block. This is not a non-blocking mode for GpuCompute; it is a
+    // non-blocking compute_magnitude plus the completion machinery the rest of
+    // the ops would reuse when they are converted.
+    //
+    // Nor does any of this compile to WebAssembly today: the Dawn implementation
+    // of GpuCompute is native-only, and the browser demo ships NO GPU-compute
+    // wasm module at all. The async shape exists because a browser port would
+    // need it (see below) — not because one exists.
+    //
+    // Every blocking operation pumps the device event queue until the GPU map
+    // resolves. That is only viable where the caller owns a thread it may stall
+    // (the GPU worker, an offline render). On a single-threaded event loop it is
+    // fatal — spinning starves the very loop that would resolve the map. The
+    // async path submits the dispatch, returns immediately, and hands results
+    // back from poll_readbacks(), so the caller decides when completions run.
+    //
+    // Contract (of the async path, i.e. compute_magnitude_async):
+    // - An accepted request (non-zero id) completes EXACTLY ONCE, from
+    //   poll_readbacks() or from ~GpuCompute(). It never hangs: a request whose
+    //   map has not resolved by its deadline completes as `Expired`, which the
+    //   caller routes to its miss policy (gpu_audio::MissPolicy) exactly as it
+    //   would route a late block.
+    // - Completions fire in submission order.
+    // - `dest` must stay valid until the completion fires. It is written only
+    //   on `Success`; a map that lands after an `Expired` completion is
+    //   discarded without touching `dest`.
+    // - Not real-time-safe: submit and poll from the GPU worker, never from the
+    //   audio callback. The audio thread's contract (never wait on, allocate
+    //   for, or synchronize with the GPU) is upheld by the transport, not here.
+
+    enum class ReadbackStatus {
+        Success,   ///< `dest` holds the full payload.
+        Expired,   ///< Deadline passed before the map resolved; `dest` untouched.
+        Failed,    ///< Map error, or the device went away before the map landed.
+    };
+
+    struct ReadbackResult {
+        uint64_t id = 0;                                  ///< request id
+        ReadbackStatus status = ReadbackStatus::Failed;
+        uint32_t bytes = 0;                               ///< written to dest (0 unless Success)
+    };
+
+    using ReadbackCallback = std::function<void(const ReadbackResult&)>;
+
+    /// Non-blocking counterpart of compute_magnitude(). Submits the dispatch and
+    /// returns a request id; `magnitudes` receives `num_bins` floats when the
+    /// completion reports Success. `deadline` is measured from this call.
+    /// Returns 0 if the request was rejected (not initialized, invalid args, no
+    /// callback) — the callback does NOT fire in that case.
+    virtual uint64_t compute_magnitude_async(const float* complex_pairs,
+                                             float* magnitudes, uint32_t num_bins,
+                                             std::chrono::microseconds deadline,
+                                             ReadbackCallback on_complete) = 0;
+
+    /// Pump the device event queue once and fire the completions that are ready
+    /// or past their deadline. Never blocks. Returns the number of requests
+    /// still in flight. Re-entrant calls (from inside a completion) are a no-op.
+    virtual std::size_t poll_readbacks() = 0;
+
+    /// Requests submitted whose completion has not fired yet.
+    virtual std::size_t readbacks_in_flight() const = 0;
 
     // ── Capabilities ─────────────────────────────────────────────────────
 

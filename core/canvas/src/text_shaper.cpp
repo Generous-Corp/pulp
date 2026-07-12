@@ -29,23 +29,13 @@
 
 #include <pulp/canvas/text_font_context.hpp>
 
-// Platform font managers — must mirror what SkiaCanvas uses, otherwise
-// `mgr->matchFamilyStyle("Inter", ...)` returns null and SkFont falls
-// back to a typeface-less default whose `measureText()` advance is
-// effectively zero. That collapses Label::intrinsic_width() and Yoga
-// reserves no horizontal space for the label, which paints into the
-// now-tiny box and clips.
-#if defined(__APPLE__)
-#include "include/ports/SkFontMgr_mac_ct.h"
-#elif defined(_WIN32)
-#include "include/ports/SkTypeface_win.h"
-#elif defined(__ANDROID__)
-#include "include/ports/SkFontMgr_android.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#elif defined(__linux__)
-#include "include/ports/SkFontMgr_fontconfig.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#endif
+// The font manager itself comes from `platform_font_manager()`
+// (bundled_fonts.cpp), which owns the single OS switch. It must be the same
+// manager SkiaCanvas uses, otherwise `mgr->matchFamilyStyle("Inter", ...)`
+// returns null and SkFont falls back to a typeface-less default whose
+// `measureText()` advance is effectively zero. That collapses
+// Label::intrinsic_width() and Yoga reserves no horizontal space for the
+// label, which paints into the now-tiny box and clips.
 #endif
 
 namespace pulp::canvas {
@@ -633,7 +623,18 @@ struct TextShaper::Impl {
             // get_cached_typeface honours the same precedence).
             auto tf = match_registered_typeface(clean, SkFontStyle::Normal());
             if (tf) return tf;
-            if (font_mgr && font_mgr->countFamilies() > 0) {
+            // Bundled next, same rung as the FontResolver cascade paint uses.
+            // Skipping it measured a bundled-only family (Inter, JetBrains
+            // Mono) against the platform default face on any machine that does
+            // not have it installed — and against NOTHING at all where the
+            // manager enumerates no families (a browser's custom-empty
+            // manager), which reports a zero advance and collapses the label.
+            if (font_mgr) {
+                tf = match_bundled_typeface(font_mgr.get(), clean,
+                                            SkFontStyle::Normal());
+                if (tf) return tf;
+            }
+            if (font_mgr && platform_font_db_usable()) {
                 tf = font_mgr->matchFamilyStyle(clean.c_str(),
                                                 SkFontStyle::Normal());
                 // Verify the matcher didn't silently substitute the
@@ -678,8 +679,14 @@ struct TextShaper::Impl {
 
         // Final fallback — platform default. Used only when every
         // family in the list missed (or no list was provided).
-        if (!typeface && font_mgr && font_mgr->countFamilies() > 0) {
+        if (!typeface && font_mgr && platform_font_db_usable()) {
             typeface = font_mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
+        }
+        // No system font database at all (browser): the platform default is a
+        // glyph-less face that measures every string at zero. Use a bundled
+        // face instead so measurement matches what FontResolver will paint.
+        if (!typeface) {
+            typeface = bundled_fallback_typeface();
         }
         if (typeface) font.setTypeface(std::move(typeface));
         font.setSize(font_size);

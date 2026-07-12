@@ -33,7 +33,9 @@
 #include "pulp/canvas/bidi.hpp"            // BidiAnalyzer (item 6.8)
 
 #include <algorithm>
+#include <cstdlib>
 #include <future>
+#include <string_view>
 #include <thread>
 
 #ifdef PULP_HAS_SKIA
@@ -560,19 +562,45 @@ ShapedText TextRunPlanner::shape(std::string_view text,
     return out;
 }
 
+namespace {
+
+// True when shape_batch() must run its inputs one at a time.
+//
+// Emscripten: a non-pthread wasm module cannot create threads at all —
+// `std::async(std::launch::async, ...)` throws std::system_error rather than
+// falling back to deferred execution, so the parallel arm is not merely slow,
+// it aborts.
+//
+// `PULP_TEXT_SHAPE_SERIAL` forces the same arm on native builds. Read live
+// (not cached) so a test can flip it between two batches and prove the serial
+// and parallel arms produce identical artifacts.
+bool serial_batch_shaping() {
+#if defined(__EMSCRIPTEN__)
+    return true;
+#else
+    const char* v = std::getenv("PULP_TEXT_SHAPE_SERIAL");
+    return v && *v != '\0' && std::string_view(v) != "0";
+#endif
+}
+
+} // namespace
+
 // Fans shape() calls out via std::async(launch::async). Resolver,
 // FontFlightRecorder, and the per-planner cache are all thread-safe
 // (internal mutexes); ShapedText is owned-by-value so moving it out
 // of a future is safe. Concurrency is bounded by hardware_concurrency
 // to avoid kernel-thread oversubscription on big batches across many
-// UI surfaces.
+// UI surfaces. Single-threaded builds take the serial arm, which produces
+// the same artifacts in the same order.
 std::vector<ShapedText> TextRunPlanner::shape_batch(
     const std::vector<std::pair<std::string, FontOptions>>& inputs) {
     if (inputs.empty()) return {};
-    if (inputs.size() == 1) {
+    if (inputs.size() == 1 || serial_batch_shaping()) {
         std::vector<ShapedText> out;
-        out.reserve(1);
-        out.push_back(shape(inputs.front().first, inputs.front().second));
+        out.reserve(inputs.size());
+        for (const auto& in : inputs) {
+            out.push_back(shape(in.first, in.second));
+        }
         return out;
     }
 

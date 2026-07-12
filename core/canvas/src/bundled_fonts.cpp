@@ -40,7 +40,9 @@
 // Platform font manager used by the public `register_font` API so plugin
 // authors can register .ttf/.otf bytes without callers injecting a manager.
 // Keep this OS matrix as the single canvas-side source for CoreText,
-// DirectWrite, Android, and fontconfig construction.
+// DirectWrite, Android, fontconfig, and the Emscripten custom-empty manager.
+// Every other canvas font path goes through `platform_font_manager()` below;
+// there is deliberately no second OS switch in this module.
 #if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(_WIN32)
@@ -48,6 +50,12 @@
 #elif defined(__ANDROID__)
 #include "include/ports/SkFontMgr_android.h"
 #include "include/ports/SkFontScanner_FreeType.h"
+#elif defined(__EMSCRIPTEN__)
+// The browser exposes no system font database, and Emscripten does not
+// define __linux__, so without an explicit arm the manager would be null and
+// every bundled face would fail to materialise — SkFontMgr::RefEmpty() then
+// reports a near-zero advance for every string and collapses label layout.
+#include "include/ports/SkFontMgr_empty.h"
 #elif defined(__linux__)
 #include "include/ports/SkFontMgr_fontconfig.h"
 #include "include/ports/SkFontScanner_FreeType.h"
@@ -152,6 +160,55 @@ std::size_t bundled_font_count() {
     return bundled_blobs().size();
 }
 
+std::vector<RegisteredTypeface> bundled_typefaces_snapshot() {
+    std::vector<RegisteredTypeface> out;
+    sk_sp<SkFontMgr> mgr = platform_font_manager();
+    if (!mgr) return out;
+    const auto& cache = ensure_registered(mgr.get());
+    out.reserve(cache.size());
+    for (const auto& [family, face] : cache) {
+        if (face) out.push_back(RegisteredTypeface{family, face});
+    }
+    return out;
+}
+
+bool platform_font_db_usable() {
+    // Computed once: `platform_font_manager()` is a process-wide singleton and
+    // none of the OS managers we construct gain families after construction.
+    //
+    // The test is deliberately "can the platform's DEFAULT face actually draw a
+    // Latin glyph", not "does the manager enumerate any families". Emscripten's
+    // SkFontMgr_New_Custom_Empty reports ONE family containing ONE typeface and
+    // returns that typeface from `matchFamilyStyle(...)` — but it carries no
+    // glyphs, so every string measures at 0.0 advance and paints nothing.
+    // Counting families cannot tell the two apart (verified in a browser:
+    // countFamilies()==1, family 0 count()==1); asking the face for a glyph can.
+    static const bool usable = [] {
+        sk_sp<SkFontMgr> mgr = platform_font_manager();
+        if (!mgr) return false;
+        sk_sp<SkTypeface> def = mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
+        if (!def) return false;
+        return def->unicharToGlyph('A') != 0;
+    }();
+    return usable;
+}
+
+sk_sp<SkTypeface> bundled_fallback_typeface() {
+    sk_sp<SkFontMgr> mgr = platform_font_manager();
+    if (!mgr) return nullptr;
+    const auto& cache = ensure_registered(mgr.get());
+    if (cache.empty()) return nullptr;
+    auto inter = cache.find("Inter");
+    if (inter != cache.end()) return inter->second;
+    // No Inter in this build: pick the lexicographically first family so the
+    // choice is deterministic (the cache is an unordered_map).
+    const std::pair<const std::string, sk_sp<SkTypeface>>* best = nullptr;
+    for (const auto& entry : cache) {
+        if (!best || entry.first < best->first) best = &entry;
+    }
+    return best ? best->second : nullptr;
+}
+
 // ── Plugin-registered font registry ──────────────────────────────────────
 // Bundled fonts are baked in at build time and live forever in the binary;
 // plugin-registered fonts come at runtime from `register_font(...)`. They
@@ -198,22 +255,33 @@ void bump_generation() noexcept {
 
 // Single canonical platform-font-manager helper, exported from
 // `bundled_fonts.hpp`, so canvas/font code shares one OS switch for CoreText,
-// DirectWrite, Android, and fontconfig managers.
+// DirectWrite, Android, fontconfig, and custom-empty (Emscripten) managers.
+//
+// Constructed through a function-local static so concurrent first callers all
+// block on one initialisation. A hand-rolled `tried` flag is NOT safe here: a
+// second thread can observe `tried == true` while the first is still building
+// the manager and walk away with a null one, which silently drops the whole
+// bundled + platform cascade and measures every string at zero advance.
 sk_sp<SkFontMgr> platform_font_manager() {
-    static sk_sp<SkFontMgr> mgr;
-    static bool tried = false;
-    if (!tried) {
-        tried = true;
+    static const sk_sp<SkFontMgr> mgr = []() -> sk_sp<SkFontMgr> {
 #if defined(__APPLE__)
-        mgr = SkFontMgr_New_CoreText(nullptr);
+        return SkFontMgr_New_CoreText(nullptr);
 #elif defined(_WIN32)
-        mgr = SkFontMgr_New_DirectWrite();
+        return SkFontMgr_New_DirectWrite();
 #elif defined(__ANDROID__)
-        mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+        return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+#elif defined(__EMSCRIPTEN__)
+        // No system font database in a browser tab. The custom-empty manager
+        // ships no families of its own but keeps `makeFromData()` live (the
+        // wasm Skia slice links FreeType), which is all the bundled + plugin
+        // registration paths need.
+        return SkFontMgr_New_Custom_Empty();
 #elif defined(__linux__)
-        mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+        return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+#else
+        return nullptr;
 #endif
-    }
+    }();
     return mgr;
 }
 
@@ -442,6 +510,24 @@ std::future<FontState> register_font_url(const std::string& url,
         path = url;
     }
 
+#if defined(__EMSCRIPTEN__)
+    // Emscripten: the file lives in MEMFS (assets are preloaded into the wasm
+    // module), so the read is a memcpy and there is nothing to move off the
+    // main thread. A worker would also require a pthread-enabled build —
+    // without one `std::thread` aborts the module.
+    {
+        std::promise<FontState> p;
+        FontState state = FontState::Failed;
+        try {
+            state = register_font_file(path, family_override) ? FontState::Loaded
+                                                             : FontState::Failed;
+        } catch (...) {
+            state = FontState::Failed;
+        }
+        p.set_value(state);
+        return p.get_future();
+    }
+#else
     // `std::async(std::launch::async, ...)` returns a future whose destructor
     // blocks the caller until the task completes when the future is dropped
     // without `.get()` / `.wait()`. Use a promise + detached-thread pattern so
@@ -470,6 +556,7 @@ std::future<FontState> register_font_url(const std::string& url,
         }
     }).detach();
     return fut;
+#endif
 }
 
 FontProbe probe_font_glyph(const std::string& family,

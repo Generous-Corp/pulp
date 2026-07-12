@@ -12,6 +12,7 @@
 //   iOS     : CADisplayLink                       (real vblank)
 //   Android : AChoreographer                      (real vblank)
 //   Windows : DwmFlush (DWM-composed vblank wait)  (real vblank)
+//   Browser : requestAnimationFrame               (real vblank)
 //   Linux   : timer fallback                      (conscious fallback —
 //             a real X11/Wayland present-sync source drops in behind the
 //             same factory seam when available; see render_loop.cpp)
@@ -36,6 +37,7 @@ enum class RenderLoopBackend {
     ca_display_link,   ///< iOS — real vblank.
     choreographer,     ///< Android — real vblank.
     dwm_flush,         ///< Windows — DWM-composed vblank wait.
+    raf,               ///< Browser — requestAnimationFrame (compositor vblank).
     timer,             ///< Conscious ~60 Hz timer fallback (Linux/other).
 };
 
@@ -61,6 +63,11 @@ public:
     // worker thread and never depends on a native run loop / compositor, so
     // it is deterministic in headless contexts. Intended for unit tests and
     // for callers that deliberately want the no-vsync fallback.
+    //
+    // Exception — Emscripten: the timer loop is thread-backed and a wasm build
+    // without pthreads cannot construct a std::thread at all, so this returns
+    // the requestAnimationFrame loop there. Callers must not assume
+    // backend() == timer; check it if the distinction matters.
     static std::unique_ptr<RenderLoop> create_timer_loop();
 
     virtual ~RenderLoop() = default;

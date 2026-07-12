@@ -62,7 +62,107 @@ public:
 std::unique_ptr<pulp::format::Processor> make_midi_probe() {
     return std::make_unique<MidiProbe>();
 }
+
+// Counts non-realtime ticks and records the parameter value each tick saw. Stands
+// in for a processor whose control changes need heavy off-audio work (
+// SuperConvolver rebuilds its impulse response when `Size` moves: decode,
+// resample, FFT re-partition). In a worklet there is no other thread to do it on,
+// so what matters is that the bridge asks for that work ONCE per block with the
+// LATEST value — never once per control message.
+struct TickCounts {
+    int ticks = 0;
+    std::vector<float> values_seen;
+};
+TickCounts g_tick_counts;
+
+class TickProbe : public pulp::format::Processor {
+public:
+    static constexpr pulp::state::ParamID kSize = 1;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return pulp::format::PluginDescriptor{
+            .name = "TickProbe",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({.id = kSize, .name = "Size", .unit = "s",
+                             .range = {0.0f, 10.0f, 1.0f, 0.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            auto ch = out.channel(c);
+            for (std::size_t i = 0; i < out.num_samples(); ++i) ch[i] = 0.0f;
+        }
+    }
+    void on_non_realtime_tick() override {
+        ++g_tick_counts.ticks;
+        g_tick_counts.values_seen.push_back(state().get_value(kSize));
+        built_ = state().get_value(kSize);
+    }
+    bool non_realtime_tick_pending() const override {
+        return state().get_value(kSize) != built_;
+    }
+
+private:
+    float built_ = -1.0f;   // nothing built yet
+};
+std::unique_ptr<pulp::format::Processor> make_tick_probe() {
+    return std::make_unique<TickProbe>();
+}
 } // namespace
+
+// A knob drag delivers a BURST of parameter messages to the worklet in one turn,
+// all dispatched on the render thread. Ticking inline per message would run the
+// processor's whole rebuild once per message (~200 rebuilds for one Size sweep,
+// only the last of which is ever audible) between two render quanta — an
+// underrun while the user drags. The bridge must coalesce them into one pass.
+TEST_CASE("WAM bridge coalesces the non-realtime tick to once per block",
+          "[wam][rt-safety]") {
+    g_tick_counts = {};
+    WamProcessorBridge bridge(make_tick_probe);
+    REQUIRE(bridge.initialize(48000.0, 128));
+    // initialize() prepares the processor, which reconciles once.
+    const int after_init = g_tick_counts.ticks;
+
+    constexpr int CH = 2, FR = 128, N = CH * FR;
+    std::vector<float> in(N, 0.0f), out(N, 0.0f);
+    const float* in_ch[] = {in.data(), in.data() + FR};
+    float* out_ch[] = {out.data(), out.data() + FR};
+
+    // The drag: 200 distinct values, no render call in between.
+    for (int i = 1; i <= 200; ++i)
+        bridge.set_parameter_value("1", static_cast<float>(i) * 0.05f);
+    REQUIRE(g_tick_counts.ticks == after_init);   // NOT ONE rebuild while dragging
+
+    // One block later: exactly one reconcile, and it saw the LAST value.
+    bridge.process(in_ch, out_ch, CH, FR);
+    REQUIRE(g_tick_counts.ticks == after_init + 1);
+    REQUIRE(g_tick_counts.values_seen.back() == Catch::Approx(10.0f).margin(1e-5f));
+
+    // Nothing changed since -> no further work is asked for.
+    bridge.process(in_ch, out_ch, CH, FR);
+    REQUIRE(g_tick_counts.ticks == after_init + 1);
+
+    // A state restore names a different derived source; same coalescing, and it
+    // still reconciles (a restored IR must reach the audio path).
+    bridge.set_parameter_value("1", 3.0f);
+    auto state = bridge.get_state();
+    bridge.set_parameter_value("1", 8.0f);
+    bridge.process(in_ch, out_ch, CH, FR);
+    const int before_restore = g_tick_counts.ticks;
+    REQUIRE(bridge.set_state(state.data(), state.size()));
+    REQUIRE(g_tick_counts.ticks == before_restore);   // deferred, not inline
+    bridge.process(in_ch, out_ch, CH, FR);
+    REQUIRE(g_tick_counts.ticks == before_restore + 1);
+    REQUIRE(g_tick_counts.values_seen.back() == Catch::Approx(3.0f).margin(1e-5f));
+}
 
 TEST_CASE("WAM bridge rejects malformed parameter ids without throwing", "[wam][rt-safety]") {
     WamProcessorBridge bridge(pulp::examples::create_pulp_gain);

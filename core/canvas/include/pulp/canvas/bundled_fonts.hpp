@@ -271,6 +271,35 @@ struct RegisteredTypeface {
 /// SkParagraph). This snapshot is the bridge.
 std::vector<RegisteredTypeface> registered_typefaces_snapshot();
 
+/// Snapshot of every BUNDLED typeface (the .ttfs compiled into the binary),
+/// keyed by the family name the face reports. Same bridging purpose as
+/// `registered_typefaces_snapshot()`, but for the built-in bundle: without it
+/// the SkParagraph `FontCollection` can only see the platform font manager,
+/// which on a browser build (custom-empty manager, no system font DB) knows
+/// no families at all and renders every Label with zero glyphs.
+std::vector<RegisteredTypeface> bundled_typefaces_snapshot();
+
+/// True when the platform font manager exposes a usable system font database —
+/// defined as "its DEFAULT face can draw a Latin glyph".
+///
+/// This is FALSE on Emscripten. `SkFontMgr_New_Custom_Empty()` reports one
+/// family holding one typeface and hands that non-null typeface back from
+/// `matchFamilyStyle(...)` — but the face has NO GLYPHS, so every string
+/// measures at 0.0 advance and paints nothing. Neither a null check nor a
+/// family count can tell that apart from a real font DB (verified in a browser:
+/// `countFamilies() == 1`, family 0 `count() == 1`); asking the face for a
+/// glyph can. Cascades must skip the platform rung entirely — and fall back to
+/// the bundle — when this returns false.
+bool platform_font_db_usable();
+
+/// Last-resort bundled face for the default cascade (empty family stack, or a
+/// generic family like `sans-serif` that nothing in the bundle advertises).
+/// Prefers "Inter"; otherwise returns the first bundled face. Style is
+/// deliberately ignored — a Regular face with glyphs beats a perfectly-styled
+/// face with none. Returns nullptr when no font manager is available or the
+/// bundle is empty.
+sk_sp<SkTypeface> bundled_fallback_typeface();
+
 /// Number of embedded bundled fonts compiled in. Useful for tests that want
 /// to assert "the build actually pulled in some .ttfs". Always returns the
 /// embedded count regardless of whether `match_bundled_typeface` has been

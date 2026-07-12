@@ -212,6 +212,11 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
                 "(universal). Pass -DPULP_SKIA_AUTOFETCH=OFF and set SKIA_DIR "
                 "by hand to build against a slice Pulp does not auto-provision.")
         endif()
+    elseif(EMSCRIPTEN)
+        # Emscripten also sets UNIX=1 — this arm must precede the UNIX arm or a
+        # wasm configure would provision (and then fail to find) a linux slice.
+        set(_pulp_skia_plat "wasm")
+        set(_pulp_skia_cache_suffix "-wasm")
     elseif(UNIX)
         if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
             set(_pulp_skia_plat "linux-arm64")
@@ -220,7 +225,15 @@ if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         endif()
     endif()
 
-    file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/*-gpu/lib/Release/libskia.a")
+    # A checkout that already carries a native slice must NOT satisfy a wasm
+    # configure (and vice versa) — probe for the slice this target needs.
+    if(EMSCRIPTEN)
+        set(_pulp_skia_slice_glob "wasm-gpu")
+    else()
+        set(_pulp_skia_slice_glob "*-gpu")
+    endif()
+
+    file(GLOB _pulp_local_skia "${PULP_ROOT_DIR}/external/skia-build/build/${_pulp_skia_slice_glob}/lib/Release/libskia.a")
     if(NOT _pulp_local_skia)
         if(DEFINED ENV{PULP_SKIA_CACHE})
             set(_pulp_skia_cache "$ENV{PULP_SKIA_CACHE}")
@@ -261,11 +274,19 @@ if(PULP_ENABLE_GPU)
             set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
         endif()
 
-        # Text shaping via SkParagraph (HarfBuzz + ICU, bundled in Skia pre-built)
+        # Text shaping via SkParagraph (HarfBuzz + ICU, bundled in Skia pre-built).
+        # The wasm slice ships libskparagraph/libskshaper/libskunicode_{core,icu}
+        # too, so text shaping stays available on Emscripten.
         if(PULP_TEXT_SHAPING)
             set(PULP_HAS_TEXT_SHAPING TRUE)
             message(STATUS "Pulp: SkParagraph text shaping enabled (HarfBuzz/ICU via Skia)")
         endif()
+
+        # ICU data file. Browsers have no host filesystem, so an Emscripten
+        # target must package icudtl.dat into its virtual FS (--preload-file or
+        # --embed-file). Export the resolved path for the web-UI link rules.
+        set(PULP_SKIA_ICUDTL_FILE "${SKIA_ICUDTL_FILE}"
+            CACHE INTERNAL "icudtl.dat shipped with the resolved Skia slice" FORCE)
     else()
         if(PULP_TEXT_SHAPING)
             message(STATUS "Pulp: Text shaping disabled (Skia not found)")

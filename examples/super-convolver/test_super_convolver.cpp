@@ -1105,14 +1105,19 @@ TEST_CASE("SuperConvolver IR state blob is versioned and reads legacy raw paths"
     proc.define_parameters(store);
     proc.set_ir_path(path);
 
-    // Versioned blob: "SCv1" magic + version byte + the path.
+    // Versioned blob: "SCv2" magic + version byte + a TAGGED IR-source payload.
+    // v1 wrote the raw path straight after the header, which means nothing to a
+    // host with no filesystem (either browser lane), so v2 prefixes the payload
+    // with an IrStateKind byte — here kind 3 (Path), then the path bytes.
     const auto blob = proc.serialize_plugin_state();
-    REQUIRE(blob.size() == 5 + path.size());
+    REQUIRE(blob.size() == 5 + 1 + path.size());
     REQUIRE(blob[0] == 'S');
     REQUIRE(blob[1] == 'C');
     REQUIRE(blob[2] == 'v');
-    REQUIRE(blob[3] == '1');
-    REQUIRE(blob[4] == 1);
+    REQUIRE(blob[3] == '2');
+    REQUIRE(blob[4] == 2);
+    REQUIRE(blob[5] == 3);   // IrStateKind::Path
+    REQUIRE(std::string(blob.begin() + 6, blob.end()) == path);
 
     // A fresh processor restores the path from the versioned blob.
     SuperConvolverProcessor proc2;
@@ -1131,6 +1136,18 @@ TEST_CASE("SuperConvolver IR state blob is versioned and reads legacy raw paths"
     proc3.define_parameters(store3);
     REQUIRE(proc3.deserialize_plugin_state(legacy));
     REQUIRE(proc3.ir_path() == path);
+
+    // A v1 blob — "SCv1" + version 1 + an UNTAGGED raw path — is what every
+    // native project saved before the web lanes existed. It must still restore,
+    // or those projects lose their IR on open.
+    std::vector<std::uint8_t> v1{'S', 'C', 'v', '1', 1};
+    v1.insert(v1.end(), path.begin(), path.end());
+    SuperConvolverProcessor proc_v1;
+    pulp::state::StateStore store_v1;
+    proc_v1.set_state_store(&store_v1);
+    proc_v1.define_parameters(store_v1);
+    REQUIRE(proc_v1.deserialize_plugin_state(v1));
+    REQUIRE(proc_v1.ir_path() == path);
 
     // An empty blob clears back to the synthetic IR (empty path).
     SuperConvolverProcessor proc4;

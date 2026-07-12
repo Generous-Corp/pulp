@@ -1318,9 +1318,17 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // from clap_on_main_thread() so we never call host APIs from process().
     // Peek (don't consume) so the on_main_thread handler still sees the same
     // edge.
+    // Same mechanism carries a processor's request for a NON-REALTIME tick.
+    // CLAP hands parameter changes to the plugin as events inside process(), so
+    // a processor with no worker thread of its own (every wasm build: a WebCLAP
+    // module has no `std::thread`) can only get off the audio thread by asking
+    // the host for a main-thread callback. `non_realtime_tick_pending()` is
+    // RT-safe by contract and defaults to false, so plugins that don't need it
+    // pay one non-virtual-dispatch-free false per block.
     if (self->host && self->host->request_callback && self->processor &&
         (self->processor->latency_change_pending() ||
-         self->processor->tail_change_pending())) {
+         self->processor->tail_change_pending() ||
+         self->processor->non_realtime_tick_pending())) {
         self->host->request_callback(self->host);
     }
 
@@ -1410,6 +1418,11 @@ void clap_on_main_thread(const clap_plugin_t* plugin) {
             self->host->get_extension(self->host, CLAP_EXT_TAIL));
         if (ext && ext->changed) ext->changed(self->host);
     }
+
+    // This IS the control thread. Give a worker-less processor its non-RT pass
+    // (SuperConvolver rebuilds the impulse response its `Size` parameter asked
+    // for). Default no-op, so nothing changes for processors that don't opt in.
+    self->processor->on_non_realtime_tick();
 }
 
 } // namespace pulp::format::clap_adapter

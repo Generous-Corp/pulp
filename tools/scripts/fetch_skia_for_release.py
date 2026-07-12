@@ -18,7 +18,8 @@ Usage:
 
 Where `<matrix-platform>` is one of the release-cli.yml matrix values:
     darwin-arm64, darwin-x64, darwin-universal, linux-x64, linux-arm64,
-    windows-x64, windows-arm64, ios-device-arm64, ios-simulator-arm64-x86_64
+    windows-x64, windows-arm64, ios-device-arm64, ios-simulator-arm64-x86_64,
+    wasm
 
 iOS slices intentionally keep the per-arch subdir under
 `build/ios-gpu/lib/Release/` (device-arm64, simulator-arm64,
@@ -79,6 +80,9 @@ MATRIX_TO_MANIFEST = {
     # and the post-unpack flatten guard).
     "ios-device-arm64": "ios-device-arm64",
     "ios-simulator-arm64-x86_64": "ios-simulator-arm64-x86_64",
+    # Emscripten/wasm slice. Ganesh + WebGL2 (no Dawn, no Graphite); libs ship
+    # flat under build/wasm-gpu/lib/Release/, so the flatten step is a no-op.
+    "wasm": "wasm",
 }
 
 # iOS keeps its per-arch subdir under Release/ (device-arm64,
@@ -105,6 +109,10 @@ def expected_library_path(matrix_platform: str, dest_root: str = "external/skia-
     elif matrix_platform.startswith("windows"):
         plat_dir = "win-gpu"
         lib_name = "skia.lib"
+        arch_subdir = ""
+    elif matrix_platform == "wasm":
+        plat_dir = "wasm-gpu"
+        lib_name = "libskia.a"
         arch_subdir = ""
     elif matrix_platform == "ios-device-arm64":
         # Device + simulator share build/ios-gpu/ and keep

@@ -4,7 +4,7 @@
 // on: the MIDI-out record layout, per-URL processor naming, and the bridge's
 // graceful degradation when a stale DSP module lacks the newer wam_* exports.
 
-import { parseMidiOutRecords, processorNameForUrl, makeBridge, makeWamAudioPorts } from "./wam-runtime.mjs";
+import { parseMidiOutRecords, processorNameForUrl, makeBridge, makeWamAudioPorts, makeWasmImports } from "./wam-runtime.mjs";
 
 let failed = 0;
 const eq = (name, got, want) => {
@@ -170,6 +170,50 @@ function pack(records) {
   const z = new Float32Array(128).fill(9); // pre-dirty
   ports.readInto([new Float32Array(128), z], 128);
   ok("planar ports zero-fill a missing input channel", z.every((v) => v === 0));
+}
+
+// ── emscripten_resize_heap ───────────────────────────────────────────────────
+// The modules are linked with -sALLOW_MEMORY_GROWTH=1, so every malloc past the
+// initial heap lowers to this import. It used to `return false` unconditionally,
+// which turned the first such allocation into abort() with no diagnostic — fine
+// while every WAM demo's DSP was a few KB, fatal for one with a real buffer
+// (SuperConvolver's impulse response is up to 10 s at 48 kHz plus FFT tables).
+{
+  const memory = new WebAssembly.Memory({ initial: 2, maximum: 4096 }); // 128 KiB
+  const { emscripten_resize_heap: resize } = makeWasmImports(() => memory).env;
+
+  ok("resize_heap: a request within the current heap succeeds without growing",
+     resize(64 * 1024) === 1 && memory.buffer.byteLength === 128 * 1024,
+     `${memory.buffer.byteLength} bytes`);
+
+  const before = memory.buffer.byteLength;
+  const grew = resize(before + 1);
+  ok("resize_heap: a request past the heap actually grows it",
+     grew === 1 && memory.buffer.byteLength > before,
+     `${before} -> ${memory.buffer.byteLength}`);
+  ok("resize_heap: growth covers the requested size",
+     memory.buffer.byteLength >= before + 1);
+  ok("resize_heap: growth is page-aligned",
+     memory.buffer.byteLength % 65536 === 0);
+
+  // Geometric, not one page per malloc: a run of increasing allocations must not
+  // call memory.grow() on every single one.
+  const doubled = memory.buffer.byteLength;
+  ok("resize_heap: growth is geometric (>= 2x the old heap)", doubled >= before * 2,
+     `${before} -> ${doubled}`);
+
+  ok("resize_heap: a request past the wasm32 address space fails cleanly",
+     resize(2147483649) === 0);
+
+  // A grow detaches / replaces the ArrayBuffer. Every heap view in the bridge is
+  // rebuilt per access, so a grown heap must still be readable through it.
+  const exports = { memory, malloc: () => 0, free: () => {} };
+  const bridge = makeBridge(exports);
+  const sizeBefore = bridge.f32().length;
+  resize(memory.buffer.byteLength + 1);
+  ok("bridge heap views follow a grown heap (no stale ArrayBuffer)",
+     bridge.f32().length > sizeBefore,
+     `${sizeBefore} -> ${bridge.f32().length} floats`);
 }
 
 console.log(failed ? `\n❌ ${failed} FAILED` : "\n✅ ALL WAM-RUNTIME CHECKS PASSED");

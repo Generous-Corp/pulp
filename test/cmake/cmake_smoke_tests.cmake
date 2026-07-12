@@ -143,6 +143,26 @@ add_test(NAME cmake-pulp-install-skia-compat-source
 set_tests_properties(cmake-pulp-install-skia-compat-source PROPERTIES
     LABELS "cmake;sdk;skia;linux;slow"
     TIMEOUT 120)
+# Skia wasm slice invariants that FindSkia.cmake's EMSCRIPTEN arm depends on:
+# Ganesh/WebGL2 entry points present, zero wgpu/Dawn symbols, and libskottie.a
+# still unlinkable (undefined skjson::*) so the skottie/sksg exclusion stays
+# justified. Skips (77) when no wasm slice is unpacked or llvm-nm is absent.
+find_program(PULP_PYTHON3_FOR_TESTS NAMES python3 python)
+if(PULP_PYTHON3_FOR_TESTS)
+    add_test(NAME wasm-skia-slice-invariants
+        COMMAND ${PULP_PYTHON3_FOR_TESTS}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_wasm_skia_slice.py)
+    set_tests_properties(wasm-skia-slice-invariants PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "cmake;skia;wasm;web"
+        TIMEOUT 120)
+    add_test(NAME wasm-skia-fetch-mapping
+        COMMAND ${PULP_PYTHON3_FOR_TESTS}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_wasm_skia_slice.py --self-test)
+    set_tests_properties(wasm-skia-fetch-mapping PROPERTIES
+        LABELS "cmake;skia;wasm;web"
+        TIMEOUT 30)
+endif()
 # PULP_REQUIRE_GPU_FOR_SDK gate smoke. Two full configures
 # in a tmpdir: ON+missing-skia must FAIL, OFF+missing-skia must SUCCEED.
 # Tagged `slow` because each configure pays the SDL3 / FetchContent cost.

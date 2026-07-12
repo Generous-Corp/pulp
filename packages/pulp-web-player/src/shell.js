@@ -17,6 +17,11 @@
 //   • hasMidiOutput && !hasAudioOutput       → a per-plugin MIDI visualiser
 //   • always                                 → auto-generated parameter controls
 //
+// mountDemo({ customUi }) swaps ONLY that generated parameter grid for a
+// consumer-supplied renderer (ui/custom-ui.js). Everything else above — overlay,
+// touch hygiene, keyboard, scope, meter, limiter, PLST state — is shell-owned
+// and unaffected, and a customUi that fails degrades back to the grid.
+//
 // Everything the reference solved is preserved here: synchronous AudioContext
 // unlock inside the gesture, silent-buffer + audioSession unlock, secure-context
 // guard, re-entrancy guard, idempotent handler install, waitForParams(),
@@ -34,6 +39,7 @@
 
 import { createWidget, kindFor, formatValue } from "./widgets/index.js";
 import { initModality } from "./widgets/base.js";
+import { mountCustomUi } from "./ui/custom-ui.js";
 // The oscilloscope trigger is pure DSP math (finds the rising zero-crossing so a
 // periodic waveform stands still) — host-agnostic, vendored from the Pulp SDK.
 import { triggeredView } from "./vendor/pulp-wasm/wam-scope.mjs";
@@ -526,7 +532,7 @@ export async function mountDemo(opts) {
     // the plugin emits (MPE Spreader gives every held note its own channel)
     // needs its own voice to sound at the same time.
     pool: [], voiceByChan: new Map(), voiceClock: 0,
-    descriptor: null, params: null, mode: null,
+    descriptor: null, params: null, mode: null, customUi: null,
   };
 
   // Test seam / inspectable state.
@@ -541,9 +547,47 @@ export async function mountDemo(opts) {
   // editor: canvas widgets (knob/fader/toggle/combo) on the kCell/kGap/kRowH
   // grid, each with its caption below. A per-demo opts.widgets map (keyed by
   // param id or label) can force a widget kind, e.g. { "gain": "fader" }.
+  //
+  // opts.customUi replaces THIS grid (and only this grid) with a consumer
+  // renderer; it is handed the same adapter and the same slot. A customUi that
+  // throws, yields no handle, or fails ASYNCHRONOUSLY (its `ready` promise
+  // rejects — e.g. a browser with no WebGL2) falls back to the generated grid, so
+  // a broken UI module can never take the audio demo down and never leaves an
+  // empty panel behind.
   function buildParams(params) {
     const host = $("#params");
     host.innerHTML = "";
+    S.customUi?.destroy();
+    S.customUi = null;
+    window.__widgets = {};
+
+    if (opts.customUi) {
+      // Seed each parameter's declared default so the plugin starts in the same
+      // place whichever UI renders it (parity with the grid path below).
+      for (const p of params) S.wam?.setParameterValue(p.id, p.defaultValue);
+      S.customUi = mountCustomUi({
+        host,
+        adapter: S.wam,
+        factory: opts.customUi,
+        params,
+        // Async mount failed after we had already returned. mountCustomUi has
+        // unmounted it; build the grid we would have built had it failed up front.
+        onFailed: () => {
+          S.customUi = null;
+          host.innerHTML = "";
+          buildGeneratedGrid(params, host);
+        },
+      });
+      if (S.customUi) return;
+      host.innerHTML = "";
+    }
+
+    buildGeneratedGrid(params, host);
+  }
+
+  // The auto-generated parameter grid — the fallback whenever no custom UI is
+  // configured or a custom UI failed (synchronously or asynchronously).
+  function buildGeneratedGrid(params, host) {
     const registry = (window.__widgets = {});
     for (const raw of params) {
       // Some plugins expose a stepped choice as a plain int with no labels
@@ -601,6 +645,10 @@ export async function mountDemo(opts) {
   // onChange), so this cannot feed back into the plugin.
   function startParamSync() {
     S.wam.onParamsChanged = (values, params) => {
+      demo.paramEpochUpdates = (demo.paramEpochUpdates || 0) + 1;   // test seam
+      // A custom UI owns the parameter surface; forward the push to it instead
+      // of repainting a grid that isn't there.
+      if (S.customUi) { S.customUi.paramsChanged(values, params); return; }
       const reg = window.__widgets || {};
       params.forEach((param, i) => {
         const e = reg[param.id];
@@ -612,7 +660,6 @@ export async function mountDemo(opts) {
         e.el.setValue(v);
         if (e.valEl) e.valEl.textContent = formatValue(e.param, v);
       });
-      demo.paramEpochUpdates = (demo.paramEpochUpdates || 0) + 1;   // test seam
     };
   }
 
@@ -1405,6 +1452,10 @@ function connectOutput(S) {
     stopSource();
     S.meterToken++;                    // stop the meter/scope loop
     S.meterWidget?.reset();
+    // A custom UI can hold a render loop and a GPU canvas — release it with the
+    // context that feeds it. buildParams() re-mounts a fresh one on restart.
+    S.customUi?.destroy();
+    S.customUi = null;
     await S.ctx.close();
     if (S.synthCtx) { try { await S.synthCtx.close(); } catch {} }
     S.ctx = null; S.wam = null; S.synth = null; S.synthCtx = null; S.analyser = null;

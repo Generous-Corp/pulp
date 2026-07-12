@@ -215,7 +215,14 @@ inline bool state_load(const clap_plugin_t* plugin, const clap_istream_t* stream
         if (read <= 0) break;
         data.insert(data.end(), buf, buf + read);
     }
-    return plugin_state_io::deserialize(data, self->store, *self->processor);
+    const bool ok = plugin_state_io::deserialize(data, self->store, *self->processor);
+    // state.load is a main-thread call. A restored state can name a different
+    // derived source than the live one (SuperConvolver: a different impulse
+    // response), and a worker-less processor — every wasm build — has no thread
+    // to notice. Reconcile here or the audio thread renders the OLD state for
+    // the rest of the session. Default no-op for processors that don't opt in.
+    self->processor->on_non_realtime_tick();
+    return ok;
 }
 
 inline const clap_plugin_state_t state_ext = { .save = state_save, .load = state_load };

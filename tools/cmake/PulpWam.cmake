@@ -85,6 +85,16 @@ set(_PULP_WAM_CHAIN_ENTRY  ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_chain_entr
 
 add_library(pulp-wam-dsp OBJECT ${_PULP_WAM_CORE_SOURCES})
 target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
+# PULP_WASM / PULP_HEADLESS are FACTS about this lane, not per-target options:
+# this file hard-returns unless EMSCRIPTEN (see the guard above), and a WAM
+# module is always a headless AudioWorklet DSP module with no editor, no file
+# I/O, and no GPU. They are therefore defined here (and in
+# _pulp_wam_apply_lane_defines for the executables) rather than left to each
+# call site to remember — the same unconditional gating pulp_add_wclap applies.
+# Keeping them symmetric with the WebCLAP lane is what makes "same header,
+# bit-identical DSP across WAM and WebCLAP" true by construction instead of by
+# convention.
+target_compile_definitions(pulp-wam-dsp PUBLIC PULP_WASM=1 PULP_HEADLESS=1)
 target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 
 # The wam_* C symbols every plugin entry point exports.
@@ -102,9 +112,19 @@ set(_PULP_WAM_EXPORTED_FUNCTIONS
     "['_malloc','_free','_wam_init','_wam_process','_wam_set_param','_wam_get_param','_wam_midi','_wam_param_epoch','_wam_read_param_values','_wam_midi_sysex','_wam_midi_out_drain','_wam_reset','_wam_prepare','_wam_latency_samples','_wam_set_transport','_wam_descriptor','_wam_parameters','_wam_state_size','_wam_read_state','_wam_write_state']")
 
 # Shared link-flag + output-naming logic for a WAM target (plugin or rack). The
-# SINGLE_FILE form BASE64-embeds the wasm with synchronous compilation (required
-# inside an AudioWorkletGlobalScope — no fetch / no async compile there); the
-# default separate-wasm form is for the Node runner + export inspection.
+# SINGLE_FILE form embeds the wasm INSIDE the emitted .js and compiles it
+# synchronously — required inside an AudioWorkletGlobalScope, which has no fetch
+# and no async compile; the default separate-wasm form is for the Node runner +
+# export inspection. (The embedding encoding is an emcc implementation detail and
+# has changed under us: base64 through emcc 4.0.17, a raw UTF-8-safe encoding
+# from 4.0.18 on. Nothing here depends on which — only that the wasm ships inside
+# the .js — but the emsdk pin in .github/workflows/web-plugins.yml is exact so a
+# floating toolchain cannot change it silently.)
+function(_pulp_wam_apply_lane_defines TARGET)
+    # See the note on pulp-wam-dsp: the WAM lane is by definition wasm + headless.
+    target_compile_definitions(${TARGET} PRIVATE PULP_WASM=1 PULP_HEADLESS=1)
+endfunction()
+
 function(_pulp_wam_apply_link_flags TARGET NAME IS_SINGLE_FILE)
     set(_link
         "-sALLOW_MEMORY_GROWTH=1"
@@ -114,8 +134,8 @@ function(_pulp_wam_apply_link_flags TARGET NAME IS_SINGLE_FILE)
         "-O2"
     )
     if(IS_SINGLE_FILE)
-        # AudioWorklet DSP module: BASE64-embed the wasm (SINGLE_FILE) and emit
-        # an ES-module factory (MODULARIZE+EXPORT_ES6). The processor module
+        # AudioWorklet DSP module: embed the wasm in the .js (SINGLE_FILE) and
+        # emit an ES-module factory (MODULARIZE+EXPORT_ES6). The processor module
         # imports this factory and awaits it at top level, so Module is fully
         # ready when the AudioWorkletProcessor constructs — a plain global
         # Module is module-scoped under addModule() and never becomes visible.
@@ -141,12 +161,20 @@ endfunction()
 #     ENTRY    <entry.cpp>              # required: the wam_* C entry point
 #     [SOURCES <extra .cpp> ...]        # optional: extra plugin DSP sources
 #     [INCLUDES <dir> ...]              # optional: extra include dirs (plugin headers)
-#     [SINGLE_FILE])                    # optional: BASE64-embed wasm for AudioWorklet
+#     [DEFINES  <MACRO=1> ...]          # optional: extra compile definitions
+#     [SINGLE_FILE])                    # optional: embed the wasm for AudioWorklet
 #
 # Emits <Name>.js (+ <Name>.wasm unless SINGLE_FILE). Links wam_entry.cpp (one
 # global WamProcessorBridge — a single plugin per module).
+#
+# PULP_WASM=1 and PULP_HEADLESS=1 are ALWAYS defined (see the note above the
+# pulp-wam-dsp target): they gate out every desktop-only surface a plugin header
+# may carry (native editor, file I/O, GPU engine) behind `#if !PULP_HEADLESS` /
+# `#if !PULP_WASM`, exactly as pulp_add_wclap does for the WebCLAP lane. A plugin
+# with no such surface (PulpGain, PulpPluck) is unaffected. DEFINES is for
+# genuine per-plugin extras only — never for the lane identity.
 function(pulp_add_wam_plugin NAME)
-    cmake_parse_arguments(ARG "SINGLE_FILE;NATIVE_EDITOR" "ENTRY" "SOURCES;INCLUDES" ${ARGN})
+    cmake_parse_arguments(ARG "SINGLE_FILE;NATIVE_EDITOR" "ENTRY" "SOURCES;INCLUDES;DEFINES" ${ARGN})
     if(NOT ARG_ENTRY)
         message(FATAL_ERROR "pulp_add_wam_plugin(${NAME}): ENTRY <entry.cpp> is required.")
     endif()
@@ -159,6 +187,10 @@ function(pulp_add_wam_plugin NAME)
     )
     target_include_directories(${NAME}-wam PRIVATE ${_PULP_WAM_INCLUDES} ${ARG_INCLUDES})
     target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+    _pulp_wam_apply_lane_defines(${NAME}-wam)
+    if(ARG_DEFINES)
+        target_compile_definitions(${NAME}-wam PRIVATE ${ARG_DEFINES})
+    endif()
 
     _pulp_wam_apply_link_flags(${NAME}-wam ${NAME} "${ARG_SINGLE_FILE}")
 
@@ -221,6 +253,7 @@ function(pulp_add_wam_rack NAME)
     )
     target_include_directories(${NAME}-wam PRIVATE ${_PULP_WAM_INCLUDES} ${ARG_INCLUDES})
     target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+    _pulp_wam_apply_lane_defines(${NAME}-wam)
 
     _pulp_wam_apply_link_flags(${NAME}-wam ${NAME} "${ARG_SINGLE_FILE}")
 endfunction()

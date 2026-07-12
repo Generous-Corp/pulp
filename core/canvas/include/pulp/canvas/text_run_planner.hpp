@@ -49,6 +49,11 @@ public:
     /// synchronized internally. The cache lookup happens once per future,
     /// so duplicate inputs across the batch coalesce as expected.
     ///
+    /// Shapes SERIALLY, in the same input order and with identical output,
+    /// where there is no thread to fan out to: a non-pthread wasm build
+    /// (`__EMSCRIPTEN__`, where `std::async(launch::async, ...)` throws), and
+    /// natively under `PULP_TEXT_SHAPE_SERIAL` so that arm stays testable.
+    ///
     /// The serial `shape()` API is preferred for one-off labels; this
     /// batch entry point is intended for design-tool panels, docs
     /// views, or any other surface that needs to lay out many

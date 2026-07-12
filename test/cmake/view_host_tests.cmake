@@ -276,3 +276,10 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # Right-click routing + root->local coordinate conversion shared by the window
 # hosts (test/test_pointer_dispatch.cpp).
 pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
+
+# Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
+# the HiDPI backing-store rule, browser-event translation, and View-tree routing
+# from core/view/include/pulp/view/web/web_event_translate.hpp. Header-only and
+# Emscripten-free by design, so it runs on every native host; the live canvas
+# host is proven by the web-UI headless-Chrome pixel fixture.
+pulp_add_test_suite(pulp-test-window-host-web LIBRARIES pulp::view)

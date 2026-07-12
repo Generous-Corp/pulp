@@ -30,6 +30,24 @@ class SkImageFilter;
 namespace skgpu::graphite {
 class Recorder;
 }
+class GrDirectContext;
+
+// Which Skia GPU backend this build links. Native builds link Graphite on
+// Dawn; the Emscripten slice links Ganesh on WebGL2, which ships no Graphite
+// or Dawn symbols at all. The two are mutually exclusive, and neither is
+// defined for a CPU-raster-only build. These macros gate implementation code
+// only — the SkiaCanvas layout below is identical on every backend so a TU
+// that misses the Skia compile definitions can still consume this header.
+#if defined(SK_GRAPHITE)
+#define PULP_CANVAS_GRAPHITE 1
+#else
+#define PULP_CANVAS_GRAPHITE 0
+#endif
+#if defined(SK_GANESH)
+#define PULP_CANVAS_GANESH 1
+#else
+#define PULP_CANVAS_GANESH 0
+#endif
 
 namespace pulp::canvas {
 
@@ -40,6 +58,15 @@ public:
     // Create wrapping an existing SkCanvas (e.g., from a surface)
     explicit SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder = nullptr);
     ~SkiaCanvas() override;
+
+    // Attach the Ganesh direct context that owns the surface this canvas draws
+    // into. Raster-decoded images must be uploaded to a GPU texture before a
+    // GPU-backed canvas can draw them — Graphite canvases do that through the
+    // recorder passed to the constructor, Ganesh canvases through this context.
+    // Leaving it null keeps the CPU-raster behaviour (the decoded image is
+    // drawn as-is), which is correct for raster surfaces and degraded — draws
+    // are dropped by the backend — for a GPU surface.
+    void set_gpu_upload_context(GrDirectContext* context);
 
     // ── State ────────────────────────────────────────────────────────────
     void save() override;
@@ -357,14 +384,15 @@ private:
     // defaults so non-set callers keep getting kLinear.
     SkSamplingOptions sampling_options_for_image_smoothing() const;
 
-    // Upload a raster-decoded SkImage to a Graphite GPU texture when a
-    // recorder is attached. Returns the input image unchanged on the
-    // CPU raster path or if Graphite upload fails. Centralised so every
-    // draw_image_* method takes the same branch.
+    // Upload a raster-decoded SkImage to a GPU texture when a Graphite
+    // recorder or a Ganesh context is attached. Returns the input image
+    // unchanged on the CPU raster path or if the upload fails. Centralised so
+    // every draw_image_* method takes the same branch.
     sk_sp<SkImage> ensure_gpu_image(sk_sp<SkImage> image) const;
 
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller
     skgpu::graphite::Recorder* recorder_ = nullptr; // Non-owning — owned by SkiaSurface
+    GrDirectContext* gr_context_ = nullptr;         // Non-owning — owned by the GL host
     Color fill_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
     Color stroke_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
     float line_width_ = 1.0f;

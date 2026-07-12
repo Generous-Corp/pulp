@@ -44,7 +44,8 @@
 #include "skia_gradient_compat.hpp"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "include/gpu/graphite/Image.h"  // SkImages::TextureFromImage (GPU upload)
+
+#include <functional>
 
 #endif  // PULP_HAS_SKIA
 
@@ -319,9 +320,10 @@ std::pair<float, float> parse_mask_size(const std::string& s, float w, float h) 
 // masks a value-height gradient by an illustration PNG). Mirrors
 // decode_pattern_image() in skia_canvas_gradients.cpp. kDecal tiling makes
 // everything outside the image box fully transparent (= masked away).
-sk_sp<SkShader> parse_url_image_mask(const std::string& value,
-                                     float x, float y, float w, float h,
-                                     skgpu::graphite::Recorder* recorder) {
+sk_sp<SkShader> parse_url_image_mask(
+    const std::string& value,
+    float x, float y, float w, float h,
+    const std::function<sk_sp<SkImage>(sk_sp<SkImage>)>& to_gpu) {
     const auto open = value.find("url(");
     if (open == std::string::npos) return nullptr;
     const auto close = value.find(')', open);
@@ -344,16 +346,15 @@ sk_sp<SkShader> parse_url_image_mask(const std::string& value,
     if (!data) return nullptr;
     auto image = SkImages::DeferredFromEncodedData(data);
     if (!image || image->width() <= 0 || image->height() <= 0) return nullptr;
-    // Graphite (live GPU) cannot draw a raster-backed image as a shader — it
+    // A GPU backend cannot draw a raster-backed image as a shader — Graphite
     // logs "Couldn't convert SkImage to a Graphite-backed representation" and
     // silently drops the masked geometry every frame (the design-import shape
-    // value-fill overlay). Upload to a GPU texture when a recorder is present;
-    // raster/CPU canvases (headless screenshots) pass recorder=nullptr and keep
-    // the deferred image, where makeShader composites fine.
-    if (recorder) {
-        if (auto gpu = SkImages::TextureFromImage(recorder, image.get()))
-            image = gpu;
-    }
+    // value-fill overlay); Ganesh drops it too. `to_gpu` is the canvas's
+    // ensure_gpu_image, which uploads when a GPU backend is attached and hands
+    // the deferred image straight back on raster/CPU canvases (headless
+    // screenshots), where makeShader composites fine.
+    image = to_gpu(std::move(image));
+    if (!image) return nullptr;
     SkMatrix m = SkMatrix::Translate(x, y);
     m.preScale(w / static_cast<float>(image->width()),
                h / static_cast<float>(image->height()));
@@ -381,8 +382,11 @@ void SkiaCanvas::save_layer_with_mask(float x, float y, float w, float h,
     if (mask_image.find("linear-gradient(") != std::string::npos) {
         mask_shader = parse_linear_gradient_mask(mask_image, x, y, scaled_w, scaled_h);
     } else if (mask_image.find("url(") != std::string::npos) {
-        mask_shader = parse_url_image_mask(mask_image, x, y, scaled_w, scaled_h,
-                                           recorder_);
+        mask_shader = parse_url_image_mask(
+            mask_image, x, y, scaled_w, scaled_h,
+            [this](sk_sp<SkImage> img) {
+                return ensure_gpu_image(std::move(img));
+            });
     }
     // Other forms (radial-gradient / none / unparseable) drop to the
     // no-mask path: the layer opens with content opacity, restore() sees

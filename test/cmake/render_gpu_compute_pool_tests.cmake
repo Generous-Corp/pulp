@@ -24,3 +24,12 @@
         endif()
     endif()
     catch_discover_tests(pulp-test-gpu-compute-pool ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
+    # Asynchronous GPU readback: equivalence with the blocking path, in-order
+    # delivery of concurrent in-flight requests, bounded deadline expiry, and the
+    # audio-thread contract through GpuAudioTransport. Public API only (no Dawn
+    # headers); the cases SKIP when no GPU compute device is available.
+    pulp_add_test_suite(pulp-test-gpu-compute-async
+        SOURCES test_gpu_compute_async.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::render pulp::gpu-audio pulp::audio
+        DISCOVERY_ARGS ${PULP_GPU_TEST_DISCOVERY_ARGS})

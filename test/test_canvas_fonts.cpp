@@ -44,9 +44,17 @@ using namespace pulp::canvas;
 // returns null on a stock macOS install — and the next non-ASCII fill_text
 // call would throw std::out_of_range during glyph fallback.
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/font_resolver.hpp>
+#include <pulp/canvas/text_run_planner.hpp>
+#include "include/core/SkBitmap.h"
+#include "include/core/SkData.h"
+#include "include/core/SkFont.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
+#include "include/encode/SkPngEncoder.h"
+#include <cstdlib>
+#include <string>
 #if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(_WIN32)
@@ -568,6 +576,158 @@ TEST_CASE("registered fonts are visible to the SkParagraph font collection",
     // through SkParagraph.)
 }
 
+// ── Font-manager coverage across every supported platform ──────────────────
+
+// platform_font_manager() is an OS switch with one arm per platform. A missing
+// arm returns nullptr, which is silent and catastrophic: ensure_registered()
+// short-circuits on a null manager and leaves the bundled-typeface cache empty,
+// TextShaper falls back to SkFontMgr::RefEmpty(), measureText() reports a
+// near-zero advance for every string, and every Label collapses to ~0 width.
+// Nothing throws and nothing logs. Assert the manager exists on whatever
+// platform this test binary runs on, so a new port cannot ship without an arm.
+TEST_CASE("platform_font_manager is available on this platform",
+          "[canvas][skia][fonts]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    INFO("platform_font_manager() returned null — the OS switch in "
+         "bundled_fonts.cpp has no arm for this platform, so no bundled or "
+         "plugin-registered font can be materialised.");
+    REQUIRE(mgr != nullptr);
+}
+
+// The label-collapse regression itself, asserted end to end: with the platform
+// manager in hand, both bundled families materialise and shape to a strictly
+// positive advance. A null manager (or an empty typeface cache) fails here with
+// advance == 0 rather than by crashing.
+TEST_CASE("Bundled typefaces measure a positive advance",
+          "[canvas][skia][fonts]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+
+    const SkFontStyle upright{SkFontStyle::kNormal_Weight,
+                              SkFontStyle::kNormal_Width,
+                              SkFontStyle::kUpright_Slant};
+    const std::string probe = "Hamburgefonstiv";
+
+    for (const char* family : {"Inter", "JetBrains Mono"}) {
+        INFO("bundled family: " << family);
+        auto face = pulp::canvas::match_bundled_typeface(mgr.get(), family,
+                                                         upright);
+        REQUIRE(face != nullptr);
+
+        SkFont font(face, 16.0f);
+        const float advance = font.measureText(probe.data(), probe.size(),
+                                               SkTextEncoding::kUTF8);
+        REQUIRE(advance > 0.0f);
+    }
+}
+
+// ── TextRunPlanner batch shaping: serial arm parity ────────────────────────
+
+namespace {
+
+// PULP_TEXT_SHAPE_SERIAL is the override TextRunPlanner reads to force the
+// single-threaded batch arm that Emscripten always takes.
+void set_serial_shaping(bool on) {
+#if defined(_WIN32)
+    _putenv_s("PULP_TEXT_SHAPE_SERIAL", on ? "1" : "");
+#else
+    if (on) {
+        ::setenv("PULP_TEXT_SHAPE_SERIAL", "1", 1);
+    } else {
+        ::unsetenv("PULP_TEXT_SHAPE_SERIAL");
+    }
+#endif
+}
+
+} // namespace
+
+// shape_batch() fans out over std::async(launch::async). A wasm module built
+// without pthreads cannot create threads — std::async THROWS there — so the
+// planner takes a serial arm instead. PULP_TEXT_SHAPE_SERIAL forces that same
+// arm on native builds; this test drives both and asserts the artifacts are
+// identical, so the single-threaded arm is behaviour-preserving and not merely
+// compilable.
+TEST_CASE("shape_batch serial arm matches the parallel arm",
+          "[canvas][skia][fonts][text]") {
+    std::vector<std::pair<std::string, pulp::canvas::FontOptions>> inputs;
+    for (const char* text : {"Cutoff", "Resonance", "Drive", "Mix",
+                             "Feedback", "Wet / Dry"}) {
+        pulp::canvas::FontOptions opts;
+        opts.family_stack.push_back("Inter");
+        opts.size = 14.0f;
+        inputs.emplace_back(text, opts);
+    }
+
+    auto& planner = pulp::canvas::TextRunPlanner::instance();
+
+    // The planner caches by (text, FontOptions), so clear between arms —
+    // otherwise the second batch would trivially replay the first one's
+    // artifacts and prove nothing.
+    planner.clear_cache();
+    set_serial_shaping(false);
+    const auto parallel = planner.shape_batch(inputs);
+
+    planner.clear_cache();
+    set_serial_shaping(true);
+    const auto serial = planner.shape_batch(inputs);
+    set_serial_shaping(false);
+
+    REQUIRE(serial.size() == inputs.size());
+    REQUIRE(parallel.size() == serial.size());
+
+    for (std::size_t i = 0; i < serial.size(); ++i) {
+        INFO("batch input " << i << ": " << inputs[i].first);
+        REQUIRE(serial[i].text == inputs[i].first);
+        REQUIRE(parallel[i].text == serial[i].text);
+        REQUIRE(serial[i].total_width > 0.0f);
+        REQUIRE(parallel[i].total_width ==
+                Catch::Approx(serial[i].total_width));
+        REQUIRE(parallel[i].runs.size() == serial[i].runs.size());
+        REQUIRE(parallel[i].clusters.size() == serial[i].clusters.size());
+        for (std::size_t r = 0; r < serial[i].runs.size(); ++r) {
+            REQUIRE(parallel[i].runs[r].glyph_ids == serial[i].runs[r].glyph_ids);
+            REQUIRE(parallel[i].runs[r].advances == serial[i].runs[r].advances);
+        }
+    }
+}
+
+// ── GPU upload context ─────────────────────────────────────────────────────
+
+// A raster SkiaCanvas attaches neither a Graphite recorder nor a Ganesh upload
+// context. In that state ensure_gpu_image() must hand the decoded image
+// straight through — the documented degraded path — so headless screenshot
+// canvases keep compositing images. Attaching a null context explicitly must
+// not change that.
+TEST_CASE("SkiaCanvas draws images with no GPU upload context attached",
+          "[canvas][skia][image]") {
+    SkBitmap source;
+    REQUIRE(source.tryAllocPixels(
+        SkImageInfo::MakeN32Premul(4, 4, SkColorSpace::MakeSRGB())));
+    source.eraseColor(SkColorSetARGB(255, 255, 0, 0));
+    SkPixmap source_pixels;
+    REQUIRE(source.peekPixels(&source_pixels));
+    sk_sp<SkData> png = SkPngEncoder::Encode(source_pixels, {});
+    REQUIRE(png != nullptr);
+
+    auto info = SkImageInfo::MakeN32Premul(8, 8, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_gpu_upload_context(nullptr);
+    REQUIRE(canvas.draw_image_from_data(png->bytes(), png->size(),
+                                        0.0f, 0.0f, 8.0f, 8.0f));
+
+    SkBitmap read;
+    REQUIRE(read.tryAllocPixels(info));
+    REQUIRE(surface->readPixels(read, 0, 0));
+    const SkColor centre = read.getColor(4, 4);
+    REQUIRE(SkColorGetR(centre) > 200);
+    REQUIRE(SkColorGetG(centre) < 50);
+    REQUIRE(SkColorGetB(centre) < 50);
+}
+
 #endif  // PULP_HAS_SKIA
 
 // Regression: the base-Canvas text_x_for_byte default measures a PREFIX
@@ -619,3 +779,93 @@ TEST_CASE("Canvas::text_x_for_byte clamps mid-codepoint indices to a UTF-8 "
         REQUIRE(is_valid_utf8(prefix));
     }
 }
+
+
+#ifdef PULP_HAS_SKIA
+
+// ── The browser default-cascade collapse ────────────────────────────────────
+//
+// A browser build has no system font database: `platform_font_manager()` returns
+// `SkFontMgr_New_Custom_Empty()`. That manager is not empty in the way a caller
+// would expect — it reports ONE family holding ONE typeface, and hands that
+// typeface back from `matchFamilyStyle(...)`. The face has no glyphs, so every
+// string it measures is 0.0 wide and every string it paints is invisible. The
+// default cascade (empty family stack, or a generic family like `sans-serif`
+// that nothing in the bundle advertises) walked straight into it, and every
+// Label in the first browser render came out blank while the knobs drew fine.
+//
+// `platform_font_db_usable()` is the discriminator that fixed it, and these are
+// its contract tests. They run natively — the invariant they encode ("a non-null
+// typeface is NOT proof of a usable font DB; ask it for a glyph") is exactly
+// what a null-check-based implementation would get wrong on either platform.
+
+TEST_CASE("platform_font_db_usable agrees with the default face's glyphs",
+          "[canvas][skia][fonts]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+
+    const bool usable = pulp::canvas::platform_font_db_usable();
+
+    // Whatever the answer, it must be the answer the DEFAULT FACE gives — never
+    // merely "matchFamilyStyle returned non-null" (the empty manager does that
+    // too) and never merely "countFamilies() > 0" (the empty manager reports 1).
+    sk_sp<SkTypeface> def = mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
+    const bool default_face_has_glyphs = def && def->unicharToGlyph('A') != 0;
+    REQUIRE(usable == default_face_has_glyphs);
+
+    // Cached: a second call cannot disagree with the first.
+    REQUIRE(pulp::canvas::platform_font_db_usable() == usable);
+
+    // Every desktop CI platform Pulp builds on ships a real font DB. If this
+    // fails on a Linux container, the container has no fonts — which the bundled
+    // last-resort below now covers, but it is worth knowing.
+    INFO("no usable platform font database on this host");
+    REQUIRE(usable);
+}
+
+TEST_CASE("bundled_fallback_typeface is a real, drawable last resort",
+          "[canvas][skia][fonts]") {
+    sk_sp<SkTypeface> face = pulp::canvas::bundled_fallback_typeface();
+    REQUIRE(face != nullptr);
+
+    // It is the thing the empty manager's default face is NOT: it has glyphs.
+    REQUIRE(face->unicharToGlyph('A') != 0);
+
+    SkFont font(face, 14.0f);
+    const float advance =
+        font.measureText("Mix", 3, SkTextEncoding::kUTF8, nullptr);
+    INFO("bundled fallback measured a zero advance — this is the exact failure "
+         "mode the browser hit with the empty manager's glyph-less default");
+    REQUIRE(advance > 0.0f);
+
+    // Deterministic across calls (the family cache is an unordered_map; the
+    // fallback picks Inter, or the lexicographically first family if Inter is
+    // ever dropped from the bundle).
+    REQUIRE(pulp::canvas::bundled_fallback_typeface() == face);
+}
+
+TEST_CASE("The default font cascade resolves to a face that can draw",
+          "[canvas][skia][fonts]") {
+    // The three shapes of the default cascade that the browser hit:
+    //   * no family at all
+    //   * a generic family the bundle does not advertise
+    //   * a family that simply does not exist anywhere
+    // All three must land on SOMETHING with glyphs — never on a face that
+    // measures every string at zero.
+    for (const auto& stack : std::vector<std::vector<std::string>>{
+             {}, {"sans-serif"}, {"No Such Family At All"}}) {
+        FontOptions opts;
+        opts.family_stack = stack;
+        opts.size = 14.0f;
+
+        auto resolved = FontResolver::instance().resolve_family_list(opts);
+        INFO("family stack: " << (stack.empty() ? "<empty>" : stack.front()));
+        REQUIRE(resolved.has_typeface());
+        REQUIRE(resolved.typeface->unicharToGlyph('A') != 0);
+
+        SkFont font(resolved.typeface, opts.size);
+        REQUIRE(font.measureText("Mix", 3, SkTextEncoding::kUTF8, nullptr) > 0.0f);
+    }
+}
+
+#endif  // PULP_HAS_SKIA

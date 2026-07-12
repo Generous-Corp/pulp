@@ -22,7 +22,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node test/adapter-seam.test.mjs && node test/wclap-adapter.test.mjs"
+    "test": "node test/adapter-seam.test.mjs && node test/wclap-adapter.test.mjs && node test/custom-ui.test.mjs"
   },
   "keywords": [
     "pulp",
