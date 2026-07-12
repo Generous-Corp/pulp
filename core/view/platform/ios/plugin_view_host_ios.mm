@@ -620,6 +620,7 @@ private:
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/window_host.hpp>  // WindowHost::compute_design_viewport_transform
 #include <pulp/runtime/log.hpp>
 #include <functional>
@@ -1022,22 +1023,26 @@ public:
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 
-    void tick() {
+    /// `frame_time` is the CADisplayLink's own targetTimestamp (the moment this
+    /// frame will be on screen), in the CACurrentMediaTime timebase. Everything
+    /// time-integrating is advanced by ONE measured dt derived from it — on a
+    /// 120 Hz iPad the old hardcoded 1/60 ran every animation at double speed.
+    /// Seed the pump's nominal (first-frame / wake) interval from the display's
+    /// real refresh period. Called by the CADisplayLink target.
+    void set_nominal_frame_dt(float dt) { frame_pump_.set_nominal_dt(dt); }
+
+    void tick(double frame_time) {
         if (!alive_->load(std::memory_order_acquire)) return;
         // Pump idle (scripted poll: async results, timers, rAF) FIRST so any
         // request_repaint they trigger is seen below.
         if (idle_callback_) idle_callback_();
+        if (!alive_->load(std::memory_order_acquire)) return;
 
-        const bool tick_subscribers = frame_clock_.has_active_subscribers();
-        const bool animate_css = tree_has_active_css_animation(&root_);
-        const bool gesture_work = root_.has_time_driven_gestures();
-        if (tick_subscribers || animate_css || gesture_work) {
-            if (tick_subscribers)
-                frame_clock_.tick(1.0f / 60.0f);
-            if (animate_css)
-                root_.tick_animations(1.0f / 60.0f);
-            if (gesture_work)
-                root_.advance_gesture_recognizers();
+        const auto tick_result = begin_host_frame(
+            &root_, frame_clock_, frame_pump_, frame_time,
+            needs_repaint_.load(std::memory_order_relaxed));
+        if (tick_result.should_render) {
+            advance_host_frame(&root_, frame_clock_, tick_result.dt);
             needs_repaint_.store(true, std::memory_order_relaxed);
         }
         if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {
@@ -1167,6 +1172,8 @@ private:
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     FrameClock frame_clock_;
+    // Measured-dt source, fed by the CADisplayLink's targetTimestamp.
+    HostFramePump frame_pump_;
     std::atomic<bool> needs_repaint_{false};
     CADisplayLink* display_link_ = nil;
     PulpIOSPluginDisplayLinkTarget* display_link_target_ = nil;
@@ -1194,18 +1201,6 @@ private:
         return UIScreen.mainScreen.scale;
     }
 
-    static bool tree_has_active_css_animation(View* view) {
-        if (!view) return false;
-        if (view->animation_play_state() != "paused") {
-            for (const auto& a : view->active_animations()) {
-                if (a.active) return true;
-            }
-        }
-        for (size_t i = 0; i < view->child_count(); ++i) {
-            if (tree_has_active_css_animation(view->child_at(i))) return true;
-        }
-        return false;
-    }
 
     void handle_window_change() {
         if (metal_view_.window) {
@@ -1229,6 +1224,9 @@ private:
 
     void start_display_link() {
         if (display_link_) return;
+        // The editor was not being pumped while the link was stopped: the first
+        // frame after a (re)start is a resume, not a multi-second frame.
+        frame_pump_.suspend();
         @autoreleasepool {
             display_link_target_ = [[PulpIOSPluginDisplayLinkTarget alloc] init];
             display_link_target_.host = this;
@@ -1240,6 +1238,7 @@ private:
     }
 
     void stop_display_link() {
+        frame_pump_.suspend();
         @autoreleasepool {
             if (display_link_) {
                 [display_link_ invalidate];
@@ -1305,8 +1304,16 @@ private:
 
 @implementation PulpIOSPluginDisplayLinkTarget
 - (void)tick:(CADisplayLink*)link {
-    (void)link;
-    if (_host) _host->tick();
+    if (!_host) return;
+    // targetTimestamp is when this frame will actually be displayed; it is the
+    // interval the user perceives, and it stays right when the callback is
+    // delivered late. `duration` is this display's nominal frame period (1/120
+    // on a ProMotion iPad) — seed the pump with it so the first / wake frame
+    // advances by one real frame of THIS display.
+    if (link.duration > 0) _host->set_nominal_frame_dt(static_cast<float>(link.duration));
+    const double frame_time = link.targetTimestamp > 0 ? link.targetTimestamp
+                                                       : CACurrentMediaTime();
+    _host->tick(frame_time);
 }
 @end
 

@@ -18,6 +18,10 @@
 @interface PulpView : NSView
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, assign) pulp::view::FrameClock* frameClock;
+// Measured-dt source for the animation timer. Owned by the host; set alongside
+// frameClock. Without it the timer would have to invent a dt (it used to
+// hardcode 1/60), which desynchronises every animation from wall time.
+@property (nonatomic, assign) pulp::view::HostFramePump* framePump;
 @property (nonatomic, strong) NSTimer* animationTimer;
 @property (nonatomic, strong) NSTrackingArea* trackingArea;
 // Inverse design-viewport transform applied to every window-space input

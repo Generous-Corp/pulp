@@ -590,6 +590,20 @@ void TextEditor::ensure_caret_blink_subscription() {
     }
 }
 
+void TextEditor::on_frame_clock_changed() {
+    // The tree's clock was attached, swapped, or CLEARED. This notification is the
+    // cached clock's last safe moment: a host that owns its FrameClock clears the
+    // tree's clock (root->set_frame_clock(nullptr)) from its destructor, while the
+    // clock is still alive, and frees it immediately after. Leave the subscription
+    // in place and `caret_blink_clock_` outlives the clock — then ~TextEditor
+    // unsubscribes through a dangling pointer (use-after-free on editor close, in
+    // BOTH plugin-view hosts: the view tree belongs to the Processor and outlives
+    // the host). So drop it here, then re-subscribe on the new clock if we still
+    // hold focus. Same contract Meter already follows.
+    clear_caret_blink_subscription();
+    if (has_focus()) ensure_caret_blink_subscription();
+}
+
 void TextEditor::clear_caret_blink_subscription() {
     if (caret_blink_sub_ >= 0 && caret_blink_clock_)
         caret_blink_clock_->unsubscribe(caret_blink_sub_);

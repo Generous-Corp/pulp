@@ -38,5 +38,6 @@ class View;
 class WindowHost;
 class PluginViewHost;
 class FrameClock;
+class HostFramePump;
 
 }  // namespace pulp::view

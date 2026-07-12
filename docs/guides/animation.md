@@ -15,10 +15,73 @@ FrameClock clock;
 root_view.set_frame_clock(&clock);
 
 // In your render loop:
-clock.tick(dt_seconds); // e.g., 0.016f for 60fps
+clock.tick(dt_seconds);   // the MEASURED delta for this frame
 ```
 
 Children access the clock via `frame_clock()`, which walks up the parent chain.
+
+`dt_seconds` must be **measured**, never assumed. A hardcoded `1.0f/60.0f` runs
+animations at double speed on a 120 Hz display and slow whenever frames are
+dropped or coalesced — motion duration becomes a function of the display and the
+machine. `FrameClock::tick()` integrates whatever it is handed and deliberately
+does not clamp (its `time()` is also the shader clock, so clamping would
+desynchronise it from wall time permanently).
+
+### HostFramePump — the frame-timing contract
+
+Hosts don't call `tick()` directly. `pulp/view/host_frame_pump.hpp` turns the
+vsync source's own presentation timestamp (`CVTimeStamp::hostTime`,
+`CADisplayLink.targetTimestamp`) into a measured dt and delivers that ONE dt to
+every consumer — FrameClock subscribers, CSS animation timelines, widget
+animations, and wake-from-idle activity probes:
+
+```cpp
+#include <pulp/view/host_frame_pump.hpp>
+
+HostFramePump pump;   // owned by the host, lives as long as the render loop
+
+// Once per host tick, with the vsync source's presentation timestamp:
+const auto tick = pulp::view::begin_host_frame(&root, clock, pump, now_seconds,
+                                               host_needs_repaint);
+if (tick.should_render) {
+    pulp::view::advance_host_frame(&root, clock, tick.dt);   // one dt, everywhere
+    render();
+}
+```
+
+The one place the pump does *not* pass the raw delta through is **wake-from-idle**:
+Pulp idles a static UI at 0 fps, so the wall-clock gap since the host stopped
+pumping is not elapsed animation time. A resume — the first frame, an explicit
+`suspend()`, a skipped vsync (below), or a gap larger than `wake_threshold()`
+(default 250 ms) — advances by one nominal frame instead. Otherwise an animation
+that starts on wake would teleport straight to its end state on its first frame.
+Everything else, including dropped and slow frames, passes through raw so
+animations track wall time.
+
+Set `pump.set_nominal_dt()` from the display's real refresh period so the first
+frame and any resume advance by one frame *of that display*. On macOS that is
+`CVDisplayLinkGetNominalOutputVideoRefreshPeriod` — **not** the `Actual...`
+variant, which reports a *measured* period and returns 0 until the link has run,
+i.e. at exactly the moment a host seeds its pump. On iOS/iPadOS it is
+`CADisplayLink.duration`.
+
+### Skipped vsyncs
+
+A host that idles a static tree at 0 fps typically leaves its display link
+running and simply declines to turn those vsyncs into frames. Those vsyncs are
+never measured, so the pump's last timestamp goes stale — and the next real frame
+would otherwise measure the whole idle gap and hand it to whatever animation just
+started (a 100 ms mouse-away followed by a hover would complete an 80 ms hover
+fade on frame one). Route that decision through `should_dispatch_host_frame`,
+which records the skip so the next frame resumes:
+
+```cpp
+// On the vsync source's own thread (e.g. the CVDisplayLink thread):
+if (!pulp::view::should_dispatch_host_frame(pump, needs_repaint, continuous,
+                                            has_idle_callback))
+    return;  // skip recorded: the next dispatched frame is a resume
+dispatch_to_ui_thread(...);   // begin_host_frame / advance_host_frame as above
+```
 
 ### ValueAnimation
 

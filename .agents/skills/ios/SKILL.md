@@ -248,6 +248,34 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   exist on iOS. `hot_reload.hpp` is gated so the iOS path gets a no-op
   `HotReloader`; keep file-watched hot reload off for AUv3 / HostApp builds.
 
+### Frame timing (CADisplayLink)
+
+- **Never hand the animation system a hardcoded `1.0f/60.0f`.** Every iOS host
+  drives frames from a `CADisplayLink`, and on a 120 Hz ProMotion iPad the link
+  fires ~120×/s. A constant 1/60 per tick made animation time run at *double
+  speed* on those devices (and slow whenever ticks were dropped or coalesced).
+  Both iOS hosts now route through the shared pump in
+  `core/view/include/pulp/view/host_frame_pump.hpp`:
+  `begin_host_frame(root, clock, pump, frame_time, needs_repaint)` measures the
+  dt, pumps the FrameClock's activity probes with it, and reports whether the
+  frame composites; `advance_host_frame(root, clock, dt)` then advances the
+  FrameClock, widget animations, and CSS timelines by that ONE dt.
+- **Take the timestamp from the link, not from a wall-clock read.** Use
+  `link.targetTimestamp` (when the frame will actually be *presented*) — it stays
+  correct when the callback is delivered late. Seed the pump's nominal interval
+  from `link.duration` (1/120 on ProMotion) via `set_nominal_frame_dt`, so the
+  first frame and any wake-from-idle frame advance by one real frame of *that*
+  display.
+- **Suspend the pump whenever the link stops.** `HostFramePump::suspend()` on
+  `stop_display_link()` / `start_display_link()`: a UI that idled at 0 fps for 30 s
+  must not resume with a 30-second dt — that would teleport any animation that
+  starts on wake straight to its end state.
+- **`window_host_ios.mm` used to own no FrameClock at all** (only
+  `plugin_view_host_ios.mm` did), so a *standalone* iOS app advanced nothing but
+  gesture recognizers — no FrameClock subscribers, no widget animations, no CSS
+  timelines. If you add a third iOS host, bind a `FrameClock` + `HostFramePump`
+  and go through the shared pump; do not re-invent the tick.
+
 ### Toolchain
 
 - **Use the Xcode generator**, not Unix Makefiles/Ninja with

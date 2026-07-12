@@ -163,17 +163,28 @@ TEST_CASE("a running CSS animation keeps frames alive; paused does not",
     REQUIRE_FALSE(needs_continuous_frames(&v));
 }
 
-// pump_view_frame ties the FrameClock activity channel to the repaint decision:
-// it pumps wake-from-idle probes, THEN reports whether this frame renders. This
-// is the seam that lets an embedded editor idle at 0 fps yet wake the moment a
-// probe flips continuous_repaint — without a per-View host-tick vtable hook.
-#include <pulp/view/frame_pump.hpp>
+// begin_host_frame ties the FrameClock activity channel to the repaint decision:
+// it pumps wake-from-idle probes, THEN reports whether this frame renders. The
+// two cases below assert that ordering — a probe that flips continuous_repaint
+// on tick N makes tick N itself render, and an activity subscription on its own
+// is never render-liveness. That is the seam that lets an embedded editor idle
+// at 0 fps yet wake on the frame a meter starts moving, with no per-View
+// host-tick vtable hook.
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
 
-TEST_CASE("pump_view_frame wakes from idle via an activity probe",
+TEST_CASE("begin_host_frame wakes from idle via an activity probe",
           "[view][continuous-frames][frame-pump]") {
     View root;
     FrameClock clock;
+    HostFramePump pump;
+    double t = 0.0;
+    // Every vsync reaches the pump here (has_idle-style host): the frames the
+    // gate would skip are covered by the host-gate tests in test_host_frame_pump.
+    auto tick = [&] {
+        t += 1.0 / 60.0;
+        return begin_host_frame(&root, clock, pump, t, /*needs_repaint=*/false);
+    };
     bool liveness = false;  // stands in for "a meter is moving"
 
     // The view self-subscribes an activity probe that reflects liveness into
@@ -182,26 +193,29 @@ TEST_CASE("pump_view_frame wakes from idle via an activity probe",
 
     // Idle: the probe runs every pump but reports not-moving, so no render. An
     // activity subscription on its own is NOT render-liveness.
-    REQUIRE_FALSE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+    REQUIRE_FALSE(tick().should_render);
     REQUIRE_FALSE(clock.has_active_subscribers());
 
     // Live: the probe flips continuous_repaint on, so the SAME tick renders
     // (pump runs before the gate — that ordering is the whole point).
     liveness = true;
-    REQUIRE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+    REQUIRE(tick().should_render);
 
     // Back to idle: renders once more to clear, then idles.
     liveness = false;
-    REQUIRE_FALSE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+    REQUIRE_FALSE(tick().should_render);
 }
 
-TEST_CASE("pump_view_frame honors the host's own needs_repaint flag",
+TEST_CASE("begin_host_frame honors the host's own needs_repaint flag",
           "[view][continuous-frames][frame-pump]") {
     View root;
     FrameClock clock;
+    HostFramePump pump;
     // No probes, static tree: needs_repaint short-circuits to a render.
-    REQUIRE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/true));
-    REQUIRE_FALSE(pump_view_frame(&root, clock, 0.016f, /*needs_repaint=*/false));
+    REQUIRE(begin_host_frame(&root, clock, pump, 0.016, /*needs_repaint=*/true).should_render);
+    REQUIRE_FALSE(
+        begin_host_frame(&root, clock, pump, 0.032, /*needs_repaint=*/false).should_render);
     // Null-safe root.
-    REQUIRE_FALSE(pump_view_frame(nullptr, clock, 0.016f, /*needs_repaint=*/false));
+    REQUIRE_FALSE(
+        begin_host_frame(nullptr, clock, pump, 0.048, /*needs_repaint=*/false).should_render);
 }

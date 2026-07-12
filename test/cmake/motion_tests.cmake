@@ -7,6 +7,11 @@ pulp_add_test_suite(pulp-test-animation LIBRARIES pulp::view)
 # FrameClock tests
 pulp_add_test_suite(pulp-test-frame-clock LIBRARIES pulp::view)
 
+# Host frame-timing seam: measured-dt pump (60/120 Hz, variable refresh,
+# dropped + coalesced callbacks, first frame, wake-from-idle) and the
+# one-dt-to-every-consumer contract the hosts are wired to.
+pulp_add_test_suite(pulp-test-host-frame-pump LIBRARIES pulp::view)
+
 # Meter/scalar host->view source + subscription lifecycle
 pulp_add_test_suite(pulp-test-meter-source LIBRARIES pulp::view)
 

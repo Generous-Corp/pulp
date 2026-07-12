@@ -1586,6 +1586,9 @@ public:
     void on_text_input(const TextInputEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;
+    /// Re-home the caret-blink subscription when the tree's FrameClock changes —
+    /// same dangling-cached-clock hazard as TextEditor. See the definition.
+    void on_frame_clock_changed() override;
     bool wants_mouse_input() const override { return true; }
 
 private:

@@ -6,6 +6,8 @@
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/drag_drop.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
 #include <SDL3/SDL.h>
 #include <cstdint>  // uintptr_t (X11 Window id for outbound file drag)
 #include <string>
@@ -28,6 +30,13 @@ class SdlWindowHostImpl : public SdlWindowHost {
 public:
     SdlWindowHostImpl(View& root, Options options)
         : root_(root), options_(std::move(options)) {
+
+        // The SDL host (the Windows / Linux standalone window) previously owned
+        // no FrameClock and advanced no animation at all: widget hover/thumb
+        // animations, CSS timelines, and FrameClock subscribers were frozen on
+        // those platforms. It now runs the same measured-dt frame-pump contract
+        // as the Apple hosts (host_frame_pump.hpp).
+        root_.set_frame_clock(&frame_clock_);
 
         if (!SDL_Init(SDL_INIT_VIDEO)) {
             std::cerr << "[pulp] SDL_Init failed: " << SDL_GetError() << "\n";
@@ -53,6 +62,7 @@ public:
     }
 
     ~SdlWindowHostImpl() {
+        root_.set_frame_clock(nullptr);
         shutdown_dispatcher();
         if (renderer_) SDL_DestroyRenderer(renderer_);
         if (window_) SDL_DestroyWindow(window_);
@@ -169,7 +179,19 @@ public:
             // tech is connected; a no-op on the sentinel handle.
             accessibility_pump(accessibility_handle_);
 
-            if (needs_repaint_) {
+            // One measured dt per loop iteration, from SDL's monotonic
+            // performance counter — never the 16 ms the delay below ASKS for
+            // (the loop body takes time, the OS oversleeps, and a busy frame
+            // slips). begin_host_frame pumps the activity probes and decides
+            // whether this iteration composites; advance_host_frame then drives
+            // the FrameClock, widget animations, and CSS timelines by that ONE dt.
+            const double now =
+                static_cast<double>(SDL_GetPerformanceCounter()) /
+                static_cast<double>(SDL_GetPerformanceFrequency());
+            const auto tick = begin_host_frame(&root_, frame_clock_, frame_pump_,
+                                               now, needs_repaint_);
+            if (tick.should_render) {
+                advance_host_frame(&root_, frame_clock_, tick.dt);
                 render_frame();
                 needs_repaint_ = false;
             }
@@ -240,6 +262,9 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     std::function<void()> close_callback_;
     bool needs_repaint_ = false;
+    FrameClock frame_clock_;
+    // Measured-dt source for the loop (SDL_GetPerformanceCounter).
+    HostFramePump frame_pump_;
 
     // Opaque OS-accessibility provider handle (Linux AT-SPI today). Owned for
     // the lifetime of run_event_loop(): created after the window is shown,

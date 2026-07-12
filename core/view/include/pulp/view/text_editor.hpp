@@ -195,6 +195,11 @@ public:
     void on_focus_changed(bool gained) override;
     bool wants_mouse_input() const override { return true; }
     void on_attached() override;
+    /// Re-home the caret-blink subscription when the tree's FrameClock changes.
+    /// A host that OWNS its clock clears the tree's clock from its destructor and
+    /// frees the clock immediately after; this is the cached pointer's last safe
+    /// moment. See the definition.
+    void on_frame_clock_changed() override;
     void on_resized() override { invalidate_layout_cache(); }
 
     // ── Style ─────────────────────────────────────────────────────────────

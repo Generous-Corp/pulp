@@ -41,6 +41,7 @@
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include "window_host_mac_capture.h"  // mac_capture::encode_rgba_to_png
@@ -67,6 +68,15 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 // Fired from -viewDidMoveToWindow so the host can start/stop its CPU frame
 // driver only while the view actually lives in a window.
 @property (nonatomic, copy) void (^onWindowChange)(void);
+// Fired from -setNeedsDisplay: (flag=YES) — the ONE funnel every "this editor
+// is dirty" signal already passes through: the event handlers below, the host's
+// repaint() override (and therefore View::request_repaint), resize, and AppKit
+// itself. The host mirrors it into a link-thread-readable atomic so its
+// CVDisplayLink callback can gate a vsync WITHOUT hopping to the main thread
+// (see should_dispatch_host_frame). Without a dirty signal the gate could never
+// re-open: a static editor would idle forever and never see the hover that woke
+// it. Nil-ed in the host destructor before `this` is freed.
+@property (nonatomic, copy) void (^onNeedsDisplay)(void);
 // Inverse-design-viewport transform applied to every host-space input point
 // before hit_test, mirroring the standalone PulpView. nil = identity. Set
 // by MacPluginViewHost::set_design_viewport.
@@ -1005,6 +1015,15 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     }
 }
 
+// Every dirty signal in this file goes through -setNeedsDisplay: — the event
+// handlers, the host's repaint()/set_size(), and AppKit's own invalidations.
+// Tapping it here is what lets the display-link callback gate on an atomic
+// instead of dispatching a tree walk to the main thread every vsync.
+- (void)setNeedsDisplay:(BOOL)flag {
+    [super setNeedsDisplay:flag];
+    if (flag && self.onNeedsDisplay) self.onNeedsDisplay();
+}
+
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.onWindowChange) self.onWindowChange();
@@ -1124,21 +1143,11 @@ static void detach_child_view_from_host(NSView* container, void* child_view_hand
 
 namespace pulp::view {
 
-// Shared frame-pump helper used by BOTH the CPU and GPU plugin hosts so the
-// widget-animation behaviour is identical on either path. Pure function over
-// the view tree (no host state). The companion continuous-frame predicate is
-// the shared pulp::view::needs_continuous_frames() (continuous_frames.hpp).
-static void advance_widget_animations(View* view, float dt) {
-    if (!view) return;
-    if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
-    else if (auto* t = dynamic_cast<Toggle*>(view)) t->advance_animations(dt);
-    else if (auto* f = dynamic_cast<Fader*>(view)) f->advance_animations(dt);
-    else if (auto* sv = dynamic_cast<ScrollView*>(view)) sv->advance_animations(dt);
-    else if (auto* tip = dynamic_cast<Tooltip*>(view)) tip->advance_animations(dt);
-    view->tick_animations(dt);
-    for (size_t i = 0; i < view->child_count(); ++i)
-        advance_widget_animations(view->child_at(i), dt);
-}
+// Both plugin hosts drive frames through the shared frame-pump contract
+// (host_frame_pump.hpp): begin_host_frame() measures the dt from the display
+// link's own presentation timestamp, pumps the activity probes, and reports
+// whether the frame composites; advance_host_frame() then advances the
+// FrameClock, the widget animations, and the CSS timelines by that ONE dt.
 
 class MacPluginViewHost : public PluginViewHost {
 public:
@@ -1146,6 +1155,10 @@ public:
         : root_(root), size_(size) {
         @autoreleasepool {
             pulp_mac_plugin_text_input_client_category_anchor();
+            // Parity with the GPU plugin host: the CPU editor path owns a
+            // FrameClock too, so FrameClock subscribers (and anything reading
+            // frame_clock()->time(), e.g. shader time) actually advance.
+            root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(0, 0, size.width, size.height);
             view_ = [[PulpPluginView alloc] initWithFrame:frame];
             view_.rootView = &root_;
@@ -1156,6 +1169,13 @@ public:
             // Start/stop the CPU frame driver as the view enters/leaves a
             // window (cleared in the destructor before `this` is freed).
             view_.onWindowChange = ^{ this->update_render_link(); };
+            // Mirror every dirty signal into the link-thread-readable flag that
+            // re-opens the vsync gate. Captures the shared state, NOT `this`, so
+            // a late AppKit invalidation after teardown cannot touch freed memory.
+            auto state = link_state_;
+            view_.onNeedsDisplay = ^{
+                state->needs_repaint.store(true, std::memory_order_relaxed);
+            };
         }
     }
 
@@ -1165,6 +1185,7 @@ public:
         // main queue (or a reentrant one) bails out before touching `this`.
         link_state_->alive.store(false, std::memory_order_release);
         stop_render_link();
+        root_.set_frame_clock(nullptr);
         root_.set_plugin_view_host(nullptr);
         // CRITICAL: clear pointTransform BEFORE the host C++ object is freed.
         // The block captures `this` by raw pointer. If the DAW retains the
@@ -1176,6 +1197,7 @@ public:
             view_.pointTransform = nil;
             view_.onResize = nil;
             view_.onWindowChange = nil;
+            view_.onNeedsDisplay = nil;
         }
         detach();
     }
@@ -1221,26 +1243,35 @@ public:
 
     // The CPU host repaints only on input (setNeedsDisplay) by default, which
     // strands live content (a spectrum that animates, values that track host
-    // automation) and the idle callback that drains the store's automation
-    // listeners. So while the editor is in a window AND an idle pump is
-    // installed (every format adapter installs one), run a CVDisplayLink
-    // that — each vsync, on the main thread — runs the idle callback,
-    // advances widget/CSS animations, and marks the CPU view dirty if any
-    // view needs continuous frames. Lifecycle-tied + reentrancy-safe to
-    // match MacGpuPluginViewHost.
+    // automation, a blinking caret, a widget hover fade) and the idle callback
+    // that drains the store's automation listeners. So while the editor is in a
+    // window, run a CVDisplayLink that — for each vsync worth dispatching — runs
+    // the idle callback if there is one, advances the FrameClock / widget / CSS
+    // animations, and marks the CPU view dirty while any view needs continuous
+    // frames. "Worth dispatching" is decided on the LINK THREAD from three
+    // atomics (dirty / animating / scripted), so a static native editor inside a
+    // DAW does zero main-thread work per vsync. Lifecycle-tied + reentrancy-safe
+    // to match MacGpuPluginViewHost.
     void set_idle_callback(std::function<void()> callback) override {
         idle_cb_ = std::move(callback);
+        // A scripted editor's idle pump (rAF / timers / async results) must run
+        // every vsync regardless of native dirtiness, so it holds the gate open.
+        link_state_->has_idle_callback.store(static_cast<bool>(idle_cb_),
+                                             std::memory_order_release);
         // The window-change hook starts the link on attach; if the view is
         // already in a window (e.g. AU returned it then the DAW attached it
         // before this call), reconcile now.
         update_render_link();
     }
 
-    // Start iff in a window with an idle pump; stop otherwise. Idempotent.
+    // Start iff in a window; stop otherwise. Idempotent. See
+    // plugin_view_wants_render_link() for why an idle callback is NOT required.
     void update_render_link() {
-        const bool want = view_ != nil && view_.window != nil && (bool)idle_cb_;
-        if (want) start_render_link();
-        else stop_render_link();
+        if (pulp::view::mac_frame_timing::plugin_view_wants_render_link(
+                view_ != nil, view_ != nil && view_.window != nil))
+            start_render_link();
+        else
+            stop_render_link();
     }
     void start_render_link() {
         if (render_link_) return;
@@ -1248,8 +1279,17 @@ public:
         if (!render_link_) return;
         CVDisplayLinkSetOutputCallback(render_link_, &render_link_callback, this);
         CVDisplayLinkStart(render_link_);
+        if (const float nominal =
+                pulp::view::mac_frame_timing::display_link_nominal_dt(render_link_);
+            nominal > 0.0f) {
+            frame_pump_.set_nominal_dt(nominal);
+        }
+        // The editor was not being pumped while the link was stopped; the next
+        // frame is a resume, not a multi-second frame.
+        frame_pump_.suspend();
     }
     void stop_render_link() {
+        frame_pump_.suspend();
         if (render_link_) {
             CVDisplayLinkStop(render_link_);   // synchronous: no callback after this
             CVDisplayLinkRelease(render_link_);
@@ -1258,13 +1298,34 @@ public:
     }
 
     static CVReturn render_link_callback(CVDisplayLinkRef, const CVTimeStamp*,
-                                         const CVTimeStamp*, CVOptionFlags,
+                                         const CVTimeStamp* output_time, CVOptionFlags,
                                          CVOptionFlags*, void* ctx) {
         auto* self = static_cast<MacPluginViewHost*>(ctx);
+        // The link's own presentation timestamp — captured on the link thread,
+        // consumed on main. See mac_frame_timing::display_link_seconds.
+        const double frame_time =
+            pulp::view::mac_frame_timing::display_link_seconds(output_time);
         // Capture the shared liveness/queue token: it outlives `self`, so the
         // dispatched block never touches a freed host.
         auto state = self->link_state_;
         if (!state->alive.load(std::memory_order_acquire)) return kCVReturnSuccess;
+
+        // Gate on the LINK THREAD — parity with the GPU hosts, and the whole
+        // reason a native (unscripted) editor can now run a link at all. The
+        // link keeps firing at the display's refresh rate even when the editor
+        // is completely static; without this, every one of those vsyncs would
+        // dispatch_async to the main thread of someone's DAW and walk the entire
+        // view tree (needs_continuous_frames) 60-120x/sec to conclude nothing
+        // changed. A skipped vsync is a vsync the pump never measured, so
+        // should_dispatch_host_frame records it and the next real frame resumes
+        // at one nominal frame instead of measuring the whole idle gap.
+        if (!pulp::view::should_dispatch_host_frame(
+                self->frame_pump_,
+                state->needs_repaint.load(std::memory_order_relaxed),
+                state->continuous.load(std::memory_order_relaxed),
+                state->has_idle_callback.load(std::memory_order_acquire)))
+            return kCVReturnSuccess;
+
         bool expected = false;
         if (!state->queued.compare_exchange_strong(
                 expected, true, std::memory_order_acq_rel, std::memory_order_relaxed))
@@ -1287,10 +1348,27 @@ public:
                 // shared state, so leaving it set after teardown is harmless
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
-                self->root_.advance_gesture_recognizers();
-                advance_widget_animations(&self->root_, 1.0f / 60.0f);
-                if (self->view_ && pulp::view::needs_continuous_frames(&self->root_))
-                    [self->view_ setNeedsDisplay:YES];
+                // Consume the dirty flag AFTER the idle callback, so a repaint it
+                // requested lands in THIS frame; anything that dirties the view
+                // later (during the advance below) re-arms it for the next one.
+                const bool dirty =
+                    state->needs_repaint.exchange(false, std::memory_order_relaxed);
+                const auto tick = pulp::view::begin_host_frame(
+                    &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
+                    dirty);
+                // Publish the tree's liveness for the next vsync's gate.
+                state->continuous.store(tick.continuous, std::memory_order_relaxed);
+                if (tick.should_render) {
+                    pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    // Repaint only for an ANIMATING tree. A dirty-only frame was
+                    // already marked dirty by whatever set the flag (AppKit will
+                    // paint it), and re-marking it here would re-arm needs_repaint
+                    // through -setNeedsDisplay: forever — a dirty flag that feeds
+                    // itself is an ungated link with extra steps. When the tree IS
+                    // animating the re-arm is exactly right: it keeps the gate open
+                    // for the settling frame after the last animation frame.
+                    if (tick.continuous && self->view_) [self->view_ setNeedsDisplay:YES];
+                }
                 state->queued.store(false, std::memory_order_release);
             }
         });
@@ -1403,6 +1481,8 @@ public:
 
 private:
     View& root_;
+    FrameClock frame_clock_;
+    HostFramePump frame_pump_;
     Size size_;
     PulpPluginView* view_ = nil;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
@@ -1415,6 +1495,17 @@ private:
     struct FrameLink {
         std::atomic<bool> alive{true};
         std::atomic<bool> queued{false};
+        // The three inputs to the link-thread vsync gate (should_dispatch_host_frame).
+        // They live here rather than on the host so the link callback and the
+        // -setNeedsDisplay: hook can read/write them without a host pointer.
+        //   needs_repaint — host dirty flag; set by -setNeedsDisplay: (input,
+        //                   request_repaint, resize), consumed by the frame.
+        //                   Starts true: the first mount frame must run.
+        //   continuous    — did the last dispatched frame report an animating tree?
+        //   has_idle_callback — a scripted editor's pump must run every vsync.
+        std::atomic<bool> needs_repaint{true};
+        std::atomic<bool> continuous{false};
+        std::atomic<bool> has_idle_callback{false};
     };
     std::shared_ptr<FrameLink> link_state_ = std::make_shared<FrameLink>();
     // Design viewport: when (>0, >0) root paints at design size and the
@@ -1940,6 +2031,8 @@ private:
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     CVDisplayLinkRef display_link_ = nullptr;
     FrameClock frame_clock_;
+    // Measured-dt source fed by the CVDisplayLink's presentation timestamps.
+    HostFramePump frame_pump_;
     std::atomic<bool> needs_repaint_{true};
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
@@ -2164,10 +2257,12 @@ private:
     }
 
     static CVReturn display_link_callback(
-        CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp*,
+        CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp* output_time,
         CVOptionFlags, CVOptionFlags*, void* context)
     {
         auto* self = static_cast<MacGpuPluginViewHost*>(context);
+        const double frame_time =
+            pulp::view::mac_frame_timing::display_link_seconds(output_time);
         // Copy the liveness token so the atomic outlives a teardown that
         // races this callback.
         auto alive = self->alive_;
@@ -2186,10 +2281,17 @@ private:
             }
         }
 
-        const bool has_idle = self->has_idle_callback_.load(std::memory_order_acquire);
-        if (self->needs_repaint_.load(std::memory_order_relaxed) ||
-            self->continuous_frames_.load(std::memory_order_relaxed) ||
-            has_idle) {
+        // Gate on the link thread — see should_dispatch_host_frame(). A vsync we
+        // decline to dispatch is a vsync the pump never measures, so it is
+        // recorded as a skip and the next real frame resumes at one nominal
+        // frame instead of measuring the whole idle gap. Without that, an editor
+        // that idles for 100 ms and is then hovered advances the hover animation
+        // by 100 ms on its FIRST frame (an 80 ms fade never plays).
+        if (pulp::view::should_dispatch_host_frame(
+                self->frame_pump_,
+                self->needs_repaint_.load(std::memory_order_relaxed),
+                self->continuous_frames_.load(std::memory_order_relaxed),
+                self->has_idle_callback_.load(std::memory_order_acquire))) {
             bool expected = false;
             if (!self->render_dispatch_queued_.compare_exchange_strong(
                     expected, true, std::memory_order_acq_rel,
@@ -2210,18 +2312,16 @@ private:
                     // self member (parity with the CPU host's render_link_callback).
                     if (!alive->load(std::memory_order_acquire)) return;
 
-                    bool animate = pulp::view::needs_continuous_frames(&self->root_);
-                    bool tick_subscribers = self->frame_clock_.has_active_subscribers();
-                    if (!self->needs_repaint_.load(std::memory_order_relaxed) &&
-                        !animate && !tick_subscribers) {
+                    const auto tick = pulp::view::begin_host_frame(
+                        &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
+                        self->needs_repaint_.load(std::memory_order_relaxed));
+                    if (!tick.should_render) {
                         self->continuous_frames_.store(false, std::memory_order_relaxed);
                         self->render_dispatch_queued_.store(false, std::memory_order_release);
                         return;
                     }
-                    self->frame_clock_.tick(1.0f / 60.0f);
-                    self->root_.advance_gesture_recognizers();
-                    advance_widget_animations(&self->root_, 1.0f / 60.0f);
-                    if (animate || tick_subscribers) {
+                    pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    if (tick.continuous) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
                     }
                     self->render_frame();
@@ -2268,11 +2368,15 @@ private:
         CVDisplayLinkSetOutputCallback(display_link_, display_link_callback, this);
         bind_to_window_screen();
         CVDisplayLinkStart(display_link_);
+        frame_pump_.suspend();  // the editor was not being pumped: next frame is a resume
     }
 
     // Bind the display link to the screen the embedded view is actually on,
     // so we render at that display's vsync (the host window may live on a
-    // secondary monitor).
+    // secondary monitor), and re-seed the pump's nominal (first-frame / wake)
+    // interval from THAT display — 1/120 on ProMotion, not an assumed 1/60.
+    // Seeding lives here, not in start_display_link(), because the editor can be
+    // dragged to a display with a different refresh rate while the link runs.
     void bind_to_window_screen() {
         if (!display_link_) return;
         NSScreen* screen = metal_view_.window ? metal_view_.window.screen : nil;
@@ -2282,9 +2386,15 @@ private:
             CVDisplayLinkSetCurrentCGDisplay(
                 display_link_, (CGDirectDisplayID)num.unsignedIntValue);
         }
+        if (const float nominal =
+                pulp::view::mac_frame_timing::display_link_nominal_dt(display_link_);
+            nominal > 0.0f) {
+            frame_pump_.set_nominal_dt(nominal);
+        }
     }
 
     void stop_display_link() {
+        frame_pump_.suspend();
         if (display_link_) {
             CVDisplayLinkStop(display_link_);
             CVDisplayLinkRelease(display_link_);
@@ -2292,20 +2402,10 @@ private:
         }
     }
 
-    // ── Continuous-frame / animation drivers (parity with MacGpuWindowHost) ──
-    // The continuous-frame predicate is the shared
-    // pulp::view::needs_continuous_frames() (continuous_frames.hpp).
-    static void advance_widget_animations(View* view, float dt) {
-        if (!view) return;
-        if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
-        else if (auto* t = dynamic_cast<Toggle*>(view)) t->advance_animations(dt);
-        else if (auto* f = dynamic_cast<Fader*>(view)) f->advance_animations(dt);
-        else if (auto* sv = dynamic_cast<ScrollView*>(view)) sv->advance_animations(dt);
-        else if (auto* tip = dynamic_cast<Tooltip*>(view)) tip->advance_animations(dt);
-        view->tick_animations(dt);
-        for (size_t i = 0; i < view->child_count(); ++i)
-            advance_widget_animations(view->child_at(i), dt);
-    }
+    // The widget/CSS animation walk lives in shared code
+    // (pulp::view::advance_host_frame → advance_widget_animations), driven from
+    // display_link_callback via begin_host_frame(). The continuous-frame
+    // predicate is the shared pulp::view::needs_continuous_frames().
 };
 
 } // namespace pulp::view (close GPU class block)
