@@ -36,6 +36,7 @@
 // Defaults: --build ../build   --out ./public
 import { mkdir, copyFile, readFile, writeFile, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -644,7 +645,28 @@ async function emitSuperConvolver() {
     // built — unlike pulp-ui.js, which is only imported when the module is there.
     await copyFile(join(UI_SRC, "ir-source.js"), join(pdir, "ir-source.js"));
     if (withUi) {
-      for (const f of uiFiles) await copyFile(join(UI_BUILD, f), join(pdir, f));
+      for (const f of uiFiles) {
+        // The .data MEMFS image ships PRE-COMPRESSED (see _headers). Cloudflare
+        // does not auto-compress application/octet-stream, so this file — the
+        // LARGEST asset on the site — was going out at 10.4 MB raw while the 8.5 MB
+        // wasm beside it arrived brotli'd at 3.3 MB. Compress it here and let the
+        // header declare the encoding; the browser inflates it transparently and
+        // the Emscripten loader reads the same bytes.
+        if (f.endsWith(".data")) {
+          const raw = await readFile(join(UI_BUILD, f));
+          const packed = brotliCompressSync(raw, {
+            params: {
+              [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+              [zlibConstants.BROTLI_PARAM_SIZE_HINT]: raw.length,
+            },
+          });
+          await writeFile(join(pdir, f), packed);
+          console.log(`  ${f}  ${(raw.length / 1048576).toFixed(1)} MB → ` +
+                      `${(packed.length / 1048576).toFixed(1)} MB (brotli, pre-compressed)`);
+        } else {
+          await copyFile(join(UI_BUILD, f), join(pdir, f));
+        }
+      }
       await copyFile(join(UI_SRC, "pulp-ui.js"), join(pdir, "pulp-ui.js"));
     }
   }
