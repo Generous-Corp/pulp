@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06540"></a>
+## [0.654.0] - 2026-07-11
+
+- feat(release): ship Intel (x86_64) macOS by cross-compiling on Apple Silicon ([#6024](https://github.com/danielraffel/pulp/pull/6024))
+- docs(licensing): credit PreText in Projects That Inspired Pulp ([#6022](https://github.com/danielraffel/pulp/pull/6022))
+- ci(tart): thorough stray-VM reaper + scheduled cleanup ([#6021](https://github.com/danielraffel/pulp/pull/6021))
+- fix(release): harden the release pipeline so advisory legs can't skip publish ([#6020](https://github.com/danielraffel/pulp/pull/6020))
+- feature/voice renderer block kernel ([#6000](https://github.com/danielraffel/pulp/pull/6000))
+
 <a id="v06530"></a>
 ## [0.653.0] - 2026-07-11
 
@@ -6282,6 +6291,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.654.0]: https://github.com/danielraffel/pulp/releases/tag/v0.654.0
 [0.653.0]: https://github.com/danielraffel/pulp/releases/tag/v0.653.0
 [0.652.0]: https://github.com/danielraffel/pulp/releases/tag/v0.652.0
 [0.651.0]: https://github.com/danielraffel/pulp/releases/tag/v0.651.0
