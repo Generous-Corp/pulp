@@ -3640,3 +3640,112 @@ TEST_CASE("CLAP bypass pass-through is a zero-delay copy when latency is zero",
     REQUIRE(h.out_left == h.in_left);
     REQUIRE(h.out_right == h.in_right);
 }
+
+// ── Non-realtime tick: escaping the audio thread through request_callback ──
+
+namespace {
+
+// A processor whose control changes need work process() must never do (decode,
+// resample, FFT-plan, allocate) and that has NO worker thread to do it on — every
+// wasm build, i.e. WebCLAP. CLAP hands it parameter changes as events INSIDE
+// process(), so the only way out is to raise non_realtime_tick_pending() and let
+// the adapter ask the host for a main-thread callback.
+struct ClapTickState {
+    int ticks = 0;
+    bool pending = false;
+};
+ClapTickState g_clap_tick;
+
+class TickProcessor : public Processor {
+public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "TickCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.tick";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {}
+
+    // RT-safe by contract: a plain read, no lock, no allocation.
+    bool non_realtime_tick_pending() const override { return g_clap_tick.pending; }
+    void on_non_realtime_tick() override {
+        ++g_clap_tick.ticks;
+        g_clap_tick.pending = false;   // the work asked for is now done
+    }
+};
+std::unique_ptr<Processor> make_tick() { return std::make_unique<TickProcessor>(); }
+
+int g_request_callback_count = 0;
+void host_request_callback(const clap_host_t*) { ++g_request_callback_count; }
+void host_request_restart(const clap_host_t*) {}
+void host_request_process(const clap_host_t*) {}
+const void* host_get_extension(const clap_host_t*, const char*) { return nullptr; }
+
+clap_host_t make_fake_host() {
+    clap_host_t host{};
+    host.clap_version = CLAP_VERSION;
+    host.name = "PulpTestHost";
+    host.vendor = "PulpTest";
+    host.url = "";
+    host.version = "1.0.0";
+    host.get_extension = host_get_extension;
+    host.request_restart = host_request_restart;
+    host.request_process = host_request_process;
+    host.request_callback = host_request_callback;
+    return host;
+}
+
+} // namespace
+
+TEST_CASE("CLAP requests a main-thread callback for a pending non-realtime tick",
+          "[clap][non-realtime-tick]") {
+    g_clap_tick = {};
+    g_request_callback_count = 0;
+
+    Harness h(make_tick);
+    clap_host_t host = make_fake_host();
+    h.plugin.host = &host;
+
+    InputEventList empty;
+
+    // Nothing pending: the per-block peek costs one false and asks for nothing.
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    REQUIRE(g_request_callback_count == 0);
+    REQUIRE(g_clap_tick.ticks == 0);
+
+    // The processor discovers work (a Size event arrived in this block's event
+    // list). process() must NOT do it — it must ask the host for the main thread.
+    g_clap_tick.pending = true;
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    REQUIRE(g_request_callback_count == 1);
+    REQUIRE(g_clap_tick.ticks == 0);   // never on the audio thread
+
+    // The flag is PEEKED, not consumed: a host that renders another block before
+    // servicing the callback must still see the request, not lose the edge.
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    REQUIRE(g_request_callback_count == 2);
+    REQUIRE(g_clap_tick.ticks == 0);
+
+    // The host calls back on the main thread. THAT is where the work runs.
+    clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+    REQUIRE(g_clap_tick.ticks == 1);
+    REQUIRE_FALSE(g_clap_tick.pending);
+
+    // Serviced: the next block asks for nothing more.
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    REQUIRE(g_request_callback_count == 2);
+
+    // An unsolicited main-thread callback (hosts batch them) is a no-op tick —
+    // the default-false query means a processor that never opts in pays nothing.
+    clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+    REQUIRE(g_clap_tick.ticks == 2);   // the hook fires unconditionally...
+    REQUIRE(g_request_callback_count == 2);   // ...but nothing new was requested
+}
