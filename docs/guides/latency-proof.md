@@ -73,6 +73,28 @@ It is worth the most when the latency is *derived* rather than fixed: computed
 from FFT size, block size, filter length, or an engine mode that can change at
 run time.
 
+### Oversampling
+
+`signal::Oversampler`'s linear-phase FIR lane is designed to plug directly into
+this contract. Return `oversampler.latency_samples()` from the owning
+`Processor::latency_samples()`, render the oversampler with an identity callback,
+and run `expect_reported_latency()` over an aperiodic signal confined to the
+filter passband. Apply `apply_expected_samples()` as a second assertion so a
+tap-count change cannot increase both the real and reported delay unnoticed.
+
+The DSP object exposes `latency()` as well: `exact_input_samples` retains the
+base-rate value used by an internal dry-path alignment strategy, while
+`input_samples` is the integer report hosts accept. The shipped ×2/×4/×8/×16
+linear-phase designs deliberately have integral exact delays, so the two values
+agree. Factor and quality are setup operations; a plugin that changes either
+while active must notify the host after the new latency is stable.
+
+Do not apply the delayed-null policy to the minimum-phase Biquad or polyphase-IIR
+lanes. Their group delay varies with frequency, so no single delay can make an
+identity render null across the passband. Those modes report
+`latency().constant == false` instead of presenting an arbitrary group-delay
+sample as exact host compensation.
+
 ## When NOT to use it
 
 **Most plugins have zero latency, and for them this tool has nothing to say.**

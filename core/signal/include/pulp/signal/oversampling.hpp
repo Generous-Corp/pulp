@@ -2,7 +2,9 @@
 
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/halfband_iir.hpp>
+#include <pulp/signal/oversampling_fir.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -10,39 +12,55 @@
 
 namespace pulp::signal {
 
-// Oversampling processor — runs a callback at 2x or 4x sample rate
+// Oversampling processor — runs a callback at 2x, 4x, 8x, or 16x sample rate
 // with anti-aliasing filters on input and output.
 //
-// Two filter `Kind`s are available:
+// Three filter `Kind`s are available:
 //
-//   * `fir_biquad` (default, original behaviour) — a single biquad on the
-//     upsample path and another on the downsample path. Lightweight and
-//     symmetric, but transition-band selectivity is limited and the
-//     filter's cutoff scales with the labelled sample rate.
+//   * `fir_biquad` (default) — the source-compatible single Biquad pair for
+//     x2/x4, with staged pairs for x8/x16. Lightweight and symmetric, but
+//     transition-band selectivity is limited and the filters' cutoffs scale
+//     with the labelled sample rate.
 //   * `polyphase_iir` — half-band polyphase IIR (Vaidyanathan /
 //     Regalia-Mitra) using `HalfBandUpsampler2x` /
 //     `HalfBandDownsampler2x`. Sample-rate-invariant, < 0.001 dB
 //     passband ripple, single-multiply-per-section inner loop. x4
 //     cascades two half-band stages.
+//   * `linear_phase_fir` — Kaiser-windowed FIR with a transition that ends at
+//     the base-rate Nyquist. `Quality::standard` is a 96 dB design flat to
+//     80% of Nyquist; `Quality::pristine` uses a 140 dB prototype flat to 90%.
 //
-// Switch with `set_kind()`. Both kinds share the same callback API so
+// Switch with `set_kind()`. All kinds share the same callback API so
 // callers don't need to know which filter is active. Configure factor,
 // sample rate, and kind outside the audio callback; `process()` and
 // `process_block()` do not allocate after construction/configuration as
 // long as the supplied callback is also allocation-free.
 //
-template <typename SampleType = float>
-class OversamplerT {
-public:
-    enum class Factor { x2 = 2, x4 = 4 };
+template <typename SampleType = float> class OversamplerT {
+  public:
+    enum class Factor { x2 = 2, x4 = 4, x8 = 8, x16 = 16 };
 
     /// Which anti-aliasing filter family the oversampler uses.
     enum class Kind {
-        fir_biquad,    ///< Original biquad lowpass on both sides.
-        polyphase_iir, ///< Half-band polyphase IIR (allpass-network).
+        fir_biquad,       ///< Original biquad lowpass on both sides.
+        polyphase_iir,    ///< Half-band polyphase IIR (allpass-network).
+        linear_phase_fir, ///< Linear-phase FIR with reported integer latency.
     };
 
-    OversamplerT() { configure_filters(); }
+    enum class Quality {
+        standard, ///< 96 dB stopband, passband edge at 80% of Nyquist.
+        pristine, ///< 140 dB prototype, passband edge at 90% of Nyquist.
+    };
+
+    struct Latency {
+        int input_samples = 0;
+        double exact_input_samples = 0.0;
+        bool constant = false;
+    };
+
+    OversamplerT() {
+        configure_filters();
+    }
 
     /// RT contract: set_factor(), set_sample_rate(), set_kind(), and reset()
     /// are setup/control operations that mutate filter state and should run
@@ -60,35 +78,70 @@ public:
         configure_filters();
         reset();
     }
-    void set_kind(Kind k) { kind_ = k; reset(); }
-    Kind kind() const { return kind_; }
-    Factor factor() const { return factor_; }
-    int factor_value() const { return static_cast<int>(factor_); }
+    void set_kind(Kind kind) {
+        kind_ = kind;
+        if (kind_ == Kind::linear_phase_fir)
+            configure_linear_phase_filters();
+        reset();
+    }
+    void set_quality(Quality quality) {
+        quality_ = quality;
+        if (kind_ == Kind::linear_phase_fir)
+            configure_linear_phase_filters();
+        reset();
+    }
+    Kind kind() const {
+        return kind_;
+    }
+    Quality quality() const {
+        return quality_;
+    }
+    Factor factor() const {
+        return factor_;
+    }
+    int factor_value() const {
+        return static_cast<int>(factor_);
+    }
+
+    /// Linear-phase modes expose a constant delay suitable for host
+    /// compensation. Minimum-phase IIR modes have frequency-dependent group
+    /// delay, so `constant` is false and no exact scalar is claimed.
+    Latency latency() const noexcept {
+        if (kind_ != Kind::linear_phase_fir)
+            return {};
+        double exact = 0.0;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            exact += static_cast<double>(fir_stages_[stage].taps() - 1u) /
+                     static_cast<double>(1u << (stage + 1));
+        }
+        return {static_cast<int>(exact), exact, true};
+    }
+
+    int latency_samples() const noexcept {
+        return latency().input_samples;
+    }
 
     // Process a single sample with oversampled callback.
     // The callback receives an upsampled sample and returns the processed
     // output. The same callback fires N times per `process()` call for factor
     // xN (the loop runs at the oversampled rate). Prefer this templated path
     // for realtime use; it does not need to type-erase callbacks.
-    template <typename Callback>
-    SampleType process(SampleType input, Callback&& callback) {
+    template <typename Callback> SampleType process(SampleType input, Callback&& callback) {
         return process_with_callback(input, std::forward<Callback>(callback));
     }
 
     // Source-compatible convenience overload for callers that already hold a
     // std::function. Capturing or heap-backed std::function payloads are not a
     // realtime-safety guarantee; hot paths should use the templated overload.
-    SampleType process(SampleType input,
-                       std::function<SampleType(SampleType)> callback) {
+    SampleType process(SampleType input, std::function<SampleType(SampleType)> callback) {
         return process_with_callback(input, callback);
     }
 
     // Process a contiguous block through the same callback. `input` and
     // `output` may alias for in-place processing.
     template <typename Callback>
-    void process_block(const SampleType* input,
-                       SampleType* output,
-                       std::size_t num_samples,
+    void process_block(const SampleType* input, SampleType* output, std::size_t num_samples,
                        Callback&& callback) {
         for (std::size_t i = 0; i < num_samples; ++i)
             output[i] = process(input[i], callback);
@@ -97,23 +150,41 @@ public:
     void reset() {
         aa_up_.reset();
         aa_down_.reset();
-        hb_up_stage1_.reset();
-        hb_down_stage1_.reset();
-        hb_up_stage2_.reset();
-        hb_down_stage2_.reset();
+        for (auto& stage : biquad_up_stages_)
+            stage.reset();
+        for (auto& stage : biquad_down_stages_)
+            stage.reset();
+        for (auto& stage : hb_up_stages_)
+            stage.reset();
+        for (auto& stage : hb_down_stages_)
+            stage.reset();
+        for (auto& stage : fir_stages_)
+            stage.reset();
     }
 
-private:
+  private:
+    static constexpr std::size_t kMaxStages = 4;
     Factor factor_ = Factor::x2;
     Kind kind_ = Kind::fir_biquad;
+    Quality quality_ = Quality::standard;
     SampleType sample_rate_ = SampleType{44100.0f};
 
     static constexpr int factor_value(Factor factor) noexcept {
-        return factor == Factor::x4 ? 4 : 2;
+        return static_cast<int>(factor);
+    }
+
+    int stage_count() const noexcept {
+        int count = 0;
+        for (int factor = factor_value(); factor > 1; factor >>= 1)
+            ++count;
+        return count;
     }
 
     template <typename Callback>
     SampleType process_with_callback(SampleType input, Callback&& callback) {
+        if (kind_ == Kind::linear_phase_fir) {
+            return process_linear_phase_fir(input, callback);
+        }
         if (kind_ == Kind::polyphase_iir) {
             return process_polyphase_iir(input, callback);
         }
@@ -121,65 +192,142 @@ private:
     }
 
     // ── fir_biquad lane ────────────────────────────────────────────────
-    BiquadT<SampleType> aa_up_, aa_down_;
+    BiquadT<SampleType> aa_up_;
+    BiquadT<SampleType> aa_down_;
+    std::array<BiquadT<SampleType>, kMaxStages> biquad_up_stages_;
+    std::array<BiquadT<SampleType>, kMaxStages> biquad_down_stages_;
 
     void configure_filters() {
-        SampleType os_rate =
-            sample_rate_ * static_cast<SampleType>(factor_value(factor_));
         SampleType cutoff = sample_rate_ * SampleType{0.4f}; // Below Nyquist of original rate
-        aa_up_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
-                                SampleType{0.707f}, os_rate);
-        aa_down_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
-                                  SampleType{0.707f}, os_rate);
+        const SampleType os_rate = sample_rate_ * static_cast<SampleType>(factor_value(factor_));
+        aa_up_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff, SampleType{0.707f},
+                                os_rate);
+        aa_down_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff, SampleType{0.707f},
+                                  os_rate);
+        for (std::size_t stage = 0; stage < kMaxStages; ++stage) {
+            const SampleType stage_rate = sample_rate_ * static_cast<SampleType>(1u << (stage + 1));
+            biquad_up_stages_[stage].set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
+                                                      SampleType{0.707f}, stage_rate);
+            biquad_down_stages_[stage].set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
+                                                        SampleType{0.707f}, stage_rate);
+        }
+        if (kind_ == Kind::linear_phase_fir)
+            configure_linear_phase_filters();
+    }
+
+    void configure_linear_phase_filters() {
+        const bool pristine = quality_ == Quality::pristine;
+        fir_stages_[0].configure(pristine ? 0.45 : 0.40, pristine ? 140.0 : 96.0,
+                                 pristine ? 385u : 129u);
+        // Upper stages only keep distant images out of the next lower stage.
+        // Standard filters there preserve the base-band guarantee without
+        // multiplying the steepest filter's cost at high rates. These edges
+        // shrink as fractions because each stage's input rate doubles: 0.20 of
+        // 2Fs and 0.10 of 4Fs both preserve the same absolute 0.40Fs band.
+        if (pristine) {
+            fir_stages_[1].configure(0.225, 140.0, 69u);
+            fir_stages_[2].configure(0.1125, 140.0, 57u);
+            fir_stages_[3].configure(0.05625, 140.0, 49u);
+        } else {
+            fir_stages_[1].configure(0.20, 96.0, 49u);
+            fir_stages_[2].configure(0.10, 96.0, 33u);
+            fir_stages_[3].configure(0.05, 96.0, 33u);
+        }
     }
 
     template <typename Callback>
     SampleType process_fir_biquad(SampleType input, Callback& callback) {
-        const int n = factor_value(factor_);
-        // Upsample: insert zeros.
-        std::array<SampleType, static_cast<std::size_t>(Factor::x4)> upsampled{};
-        upsampled[0] = input * static_cast<SampleType>(n); // scale-up to preserve energy
-        for (int i = 0; i < n; ++i)
-            upsampled[i] = aa_up_.process(upsampled[i]);
-        for (int i = 0; i < n; ++i)
-            upsampled[i] = callback(upsampled[i]);
-        for (int i = 0; i < n; ++i)
-            upsampled[i] = aa_down_.process(upsampled[i]);
-        return upsampled[0];
+        if (factor_ == Factor::x2 || factor_ == Factor::x4) {
+            const int factor = factor_value(factor_);
+            std::array<SampleType, static_cast<std::size_t>(Factor::x4)> values{};
+            values[0] = input * static_cast<SampleType>(factor);
+            for (int i = 0; i < factor; ++i)
+                values[i] = aa_up_.process(values[i]);
+            for (int i = 0; i < factor; ++i)
+                values[i] = callback(values[i]);
+            for (int i = 0; i < factor; ++i)
+                values[i] = aa_down_.process(values[i]);
+            return values[0];
+        }
+
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
+        values[0] = input;
+        std::size_t count = 1;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            for (std::size_t i = 0; i < count; ++i) {
+                expanded[2 * i] = biquad_up_stages_[stage].process(SampleType{2} * values[i]);
+                expanded[2 * i + 1] = biquad_up_stages_[stage].process(SampleType{0});
+            }
+            count *= 2;
+            std::copy_n(expanded.begin(), count, values.begin());
+        }
+        for (std::size_t i = 0; i < count; ++i)
+            values[i] = callback(values[i]);
+        for (int stage = stages; stage-- > 0;) {
+            count /= 2;
+            for (std::size_t i = 0; i < count; ++i) {
+                values[i] = biquad_down_stages_[stage].process(values[2 * i]);
+                static_cast<void>(biquad_down_stages_[stage].process(values[2 * i + 1]));
+            }
+        }
+        return values[0];
     }
 
     // ── polyphase_iir lane ─────────────────────────────────────────────
-    // x2 uses one stage; x4 cascades two stages (Fs → 2Fs → 4Fs and back).
-    HalfBandUpsampler2xT<SampleType>   hb_up_stage1_;
-    HalfBandDownsampler2xT<SampleType> hb_down_stage1_;
-    HalfBandUpsampler2xT<SampleType>   hb_up_stage2_;
-    HalfBandDownsampler2xT<SampleType> hb_down_stage2_;
+    std::array<HalfBandUpsampler2xT<SampleType>, kMaxStages> hb_up_stages_;
+    std::array<HalfBandDownsampler2xT<SampleType>, kMaxStages> hb_down_stages_;
+    std::array<detail::LinearPhaseOversamplingStage2x<SampleType>, kMaxStages> fir_stages_;
 
     template <typename Callback>
     SampleType process_polyphase_iir(SampleType input, Callback& callback) {
-        if (factor_ == Factor::x2) {
-            // 1 in → 2 oversampled samples → 2 callback hits → 1 out.
-            SampleType u_lo = 0.f, u_hi = 0.f;
-            hb_up_stage1_.process(input, u_lo, u_hi);
-            const SampleType p_lo = callback(u_lo);
-            const SampleType p_hi = callback(u_hi);
-            return hb_down_stage1_.process(p_lo, p_hi);
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
+        values[0] = input;
+        std::size_t count = 1;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            for (std::size_t i = 0; i < count; ++i) {
+                hb_up_stages_[stage].process(values[i], expanded[2 * i], expanded[2 * i + 1]);
+            }
+            count *= 2;
+            std::copy_n(expanded.begin(), count, values.begin());
         }
-        // x4: cascade. Stage 1 produces (lo, hi) at 2Fs. Stage 2 expands
-        // each of those to (lo, hi) at 4Fs, the callback runs 4×, and
-        // the decimation mirror-images the structure.
-        SampleType s1_lo = 0.f, s1_hi = 0.f;
-        hb_up_stage1_.process(input, s1_lo, s1_hi);
-        SampleType a_lo = 0.f, a_hi = 0.f, b_lo = 0.f, b_hi = 0.f;
-        hb_up_stage2_.process(s1_lo, a_lo, a_hi);
-        hb_up_stage2_.process(s1_hi, b_lo, b_hi);
-        const SampleType pa_lo = callback(a_lo);
-        const SampleType pa_hi = callback(a_hi);
-        const SampleType pb_lo = callback(b_lo);
-        const SampleType pb_hi = callback(b_hi);
-        const SampleType d_a = hb_down_stage2_.process(pa_lo, pa_hi);
-        const SampleType d_b = hb_down_stage2_.process(pb_lo, pb_hi);
-        return hb_down_stage1_.process(d_a, d_b);
+        for (std::size_t i = 0; i < count; ++i)
+            values[i] = callback(values[i]);
+        for (int stage = stages; stage-- > 0;) {
+            count /= 2;
+            for (std::size_t i = 0; i < count; ++i) {
+                values[i] = hb_down_stages_[stage].process(values[2 * i], values[2 * i + 1]);
+            }
+        }
+        return values[0];
+    }
+
+    template <typename Callback>
+    SampleType process_linear_phase_fir(SampleType input, Callback& callback) {
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
+        values[0] = input;
+        std::size_t count = 1;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            for (std::size_t i = 0; i < count; ++i) {
+                fir_stages_[stage].upsample(values[i], expanded[2 * i], expanded[2 * i + 1]);
+            }
+            count *= 2;
+            std::copy_n(expanded.begin(), count, values.begin());
+        }
+        for (std::size_t i = 0; i < count; ++i)
+            values[i] = callback(values[i]);
+        for (int stage = stages; stage-- > 0;) {
+            count /= 2;
+            for (std::size_t i = 0; i < count; ++i) {
+                values[i] = fir_stages_[stage].downsample(values[2 * i], values[2 * i + 1]);
+            }
+        }
+        return values[0];
     }
 };
 

@@ -140,6 +140,7 @@ pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-oversampling-quality LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
