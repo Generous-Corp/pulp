@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_reconcile import (  # noqa: E402
+    DEFERRED,
     ESCALATE,
     GRACE,
     IN_FLIGHT,
@@ -294,6 +295,59 @@ class SupersededTagsAreNotRebuilt(unittest.TestCase):
     def test_superseded_tag_is_not_an_incident(self) -> None:
         s = state(run_states=("completed",), dispatch_attempts=9)
         self.assertFalse(s.unresolved(newest_published=self.NEWER, floor=None))
+
+
+class DeferBehindALiveNewerTag(unittest.TestCase):
+    """Don't rebuild a stuck tag while a NEWER tag is still building.
+
+    If the newer one publishes, this tag is SUPERSEDED and never needed a rebuild —
+    so repairing it now is speculative work competing for the very runners the
+    newer release is waiting on. On a starved pool that is self-defeating: it slows
+    down the release that would have made this one unnecessary.
+
+    Observed live: with v0.660/661/662 queued and v0.654.0 the latest published,
+    the reconciler happily started rebuilding v0.659.0 and then v0.658.1 — adding
+    load to the macOS queue that was already the reason nothing could publish.
+
+    This is a WAIT, not a write-off: nothing is cancelled, and if the newer tag's
+    run ends without publishing, it stops being live and this tag becomes
+    repairable on the very next sweep.
+    """
+
+    def test_older_stuck_tag_waits_while_a_newer_tag_builds(self) -> None:
+        decision = decide(
+            state(run_states=("completed",)),          # v0.655.0, stuck
+            NOW,
+            newest_live=(0, 662, 0),                   # v0.662.0 still building
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, DEFERRED)
+        self.assertIn("supersedes this one", decision.reason)
+
+    def test_the_newest_stuck_tag_is_still_repaired(self) -> None:
+        """Deferral must not deadlock: the newest tag always remains repairable."""
+        decision = decide(
+            state(run_states=("completed",)), NOW,
+            newest_live=(0, 640, 0),                   # only OLDER tags are live
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, REDISPATCH)
+
+    def test_nothing_live_means_normal_repair(self) -> None:
+        decision = decide(
+            state(run_states=("completed",)), NOW, newest_live=None, **LIMITS
+        )
+        self.assertEqual(decision.action, REDISPATCH)
+
+    def test_a_tag_with_its_own_live_run_is_in_flight_not_deferred(self) -> None:
+        decision = decide(
+            state(run_states=("queued",)), NOW, newest_live=(0, 662, 0), **LIMITS
+        )
+        self.assertEqual(decision.action, IN_FLIGHT)
+
+    def test_deferral_never_cancels_anything(self) -> None:
+        """DEFERRED is a wait. It must not be in the set of acting decisions."""
+        self.assertNotIn(DEFERRED, (REDISPATCH, ESCALATE))
 
 
 class AssetContractFloor(unittest.TestCase):

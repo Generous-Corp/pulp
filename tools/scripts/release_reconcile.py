@@ -40,6 +40,7 @@ IN_FLIGHT = "in-flight"      # a run is working on it; leave it alone
 GRACE = "grace"              # too young to judge
 TOO_OLD = "too-old"          # outside the reconciliation window
 SUPERSEDED = "superseded"    # a newer version already shipped; not worth a rebuild
+DEFERRED = "deferred"        # a NEWER tag is still building; wait and see
 REDISPATCH = "redispatch"    # stuck, and we still have budget to retry
 ESCALATE = "escalate"        # stuck, and out of budget — a human must look
 
@@ -147,6 +148,7 @@ def decide(
     max_age_hours: int,
     max_attempts: int,
     newest_published: tuple | None = None,
+    newest_live: tuple | None = None,
     asset_floor: tuple | None = None,
 ) -> Decision:
     """Decide what to do about one tag. Pure."""
@@ -188,6 +190,23 @@ def decide(
             SUPERSEDED,
             f"{state.tag} never published, but a newer release already shipped — "
             f"not spending a rebuild on it",
+        )
+
+    # A NEWER tag is still building. Wait for it.
+    #
+    # If it publishes, this tag becomes SUPERSEDED and never needed a rebuild at
+    # all — so repairing it now is speculative work that competes for the very
+    # runners the newer release is waiting on. That is self-defeating on a starved
+    # pool: we would be slowing down the release that makes this one unnecessary.
+    #
+    # This is a WAIT, not a write-off. Nothing is cancelled or deleted, and if the
+    # newer tag's run ends without publishing, it stops being live and this tag
+    # becomes repairable on the very next sweep.
+    if version_of(state.tag) and newest_live and version_of(state.tag) < newest_live:
+        return Decision(
+            DEFERRED,
+            f"{state.tag} is stuck, but a NEWER tag is still building — waiting, "
+            f"since publishing that one supersedes this one",
         )
 
     if state.dispatch_attempts >= max_attempts:
@@ -424,6 +443,18 @@ def main() -> int:
         (version_of(s.tag) for s in states if s.published and version_of(s.tag)),
         default=None,
     )
+    # The newest tag that currently has a release-cli run in flight. Anything older
+    # than this waits: if that run publishes, the older tags are superseded and
+    # never needed a rebuild.
+    newest_live = max(
+        (
+            version_of(s.tag)
+            for s in states
+            if version_of(s.tag)
+            and any(r in LIVE_RUN_STATES for r in s.run_states)
+        ),
+        default=None,
+    )
     # Only tags at or above this version are held to the CURRENT asset contract.
     # Older releases legitimately predate the Intel pair and SHA256SUMS.
     floor_raw = os.environ.get("ASSET_CONTRACT_FLOOR", "").strip()
@@ -445,7 +476,8 @@ def main() -> int:
         decision = decide(
             state, now,
             grace_minutes=grace, max_age_hours=max_age, max_attempts=max_attempts,
-            newest_published=newest_published, asset_floor=asset_floor,
+            newest_published=newest_published, newest_live=newest_live,
+            asset_floor=asset_floor,
         )
         print(f"  [{decision.action:11}] {decision.reason}")
         if decision.action == REDISPATCH:
