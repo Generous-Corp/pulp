@@ -96,19 +96,23 @@ jobs:
           - os: macos-15
             platform: darwin-arm64
             artifact: pulp
-          # Intel Mac (darwin-x64) is DISABLED as a native release leg.
-          # The GitHub-hosted `macos-15-intel` image is pathologically slow
-          # for a full Pulp CLI+SDK build — it CPU-pegs and reliably blows a
-          # 75-min cap (observed: a 71-min build cancelled at the timeout,
-          # every run), producing no artifact while its cancellation makes
-          # build-cli's matrix aggregate `cancelled` and skips `release`
-          # (continue-on-error masks a clean *failure*, not a cancellation).
-          # The reliable x86_64-macOS path is the Tart Intel cross-build
-          # golden VM (arm64 host cross-compiling x86_64) — that lane is
-          # productized separately and is where Intel returns to the release.
-          # Until it is wired in here, Intel-Mac users source-build (the prior
-          # status quo). See planning/2026-07-10-intel-mac-cli-support.md
-          # (Option A) and docs/guides/intel-support.md.
+          # Intel Mac (darwin-x64): CROSS-COMPILED on the healthy Apple-Silicon
+          # runner, NOT the flaky native `macos-15-intel` image (which CPU-pegs
+          # and never shipped an artifact — see nightly-intel.yml, whose Job B
+          # universal cross-check exists precisely because the native Job A is
+          # unreliable). The `macos-15-xcompile` sentinel routes to the pinned
+          # hosted arm64 pool via PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON below
+          # (default `["macos-15"]`) — deliberately NOT `resolve-macos-runner`,
+          # to keep Intel work off the self-hosted Studios that back the
+          # required `macos` gate. The x86_64 slice is produced by
+          # `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) plus
+          # `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI); the leg
+          # smoke-tests the thin binary under Rosetta. This is a REQUIRED leg
+          # (same reliability class as darwin-arm64), so Intel ships in every
+          # release. See docs/guides/intel-support.md.
+          - os: macos-15-xcompile
+            platform: darwin-x64
+            artifact: pulp
           - os: ubuntu-24.04
             platform: linux-x64
             artifact: pulp
@@ -126,12 +130,17 @@ jobs:
             platform: windows-arm64
             artifact: pulp.exe
 
-    runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
-    # Every current leg is required (no advisory legs today). GitHub's 360-min
-    # default cap applies. When the Intel cross-build lane returns as an
-    # advisory leg, reintroduce a per-leg continue-on-error + tighter timeout
-    # keyed on a matrix flag — but make it FAIL clean, never time-out-cancel,
-    # or its cancellation will skip `release` (see the release job's if:).
+    # macos-15 → self-hosted/Namespace via resolve-macos-runner; macos-15-xcompile
+    # (the Intel cross-compile leg) → pinned hosted arm64 pool via
+    # PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON (default ["macos-15"]), never the
+    # Studios; every other matrix.os runs on its literal label.
+    runs-on: >-
+      ${{ matrix.os == 'macos-15'
+          && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json)
+          || (matrix.os == 'macos-15-xcompile'
+              && fromJSON(vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON || '["macos-15"]'))
+          || matrix.os }}
+    # Every current leg is required. GitHub's 360-min default cap applies.
     timeout-minutes: 360
     # Empty for non-container cells (mac/win/linux-arm64) = run directly on the runner.
     container: ${{ matrix.container }}
@@ -330,8 +339,36 @@ jobs:
           print("Patched tools/cli/CMakeLists.txt with the fontconfig tail-link block")
           PY
 
+      # The Intel leg cross-compiles on an Apple-Silicon runner, whose
+      # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
+      # a thin arm64 `libskia.a` into external/skia-build/build. The x86_64 fetch
+      # below refuses to clobber that flat file, so without this purge the
+      # x86_64 link silently pulls arm64 Skia. Proven by intel-vm-cross-build.sh.
+      - name: Purge host-arch Skia before Intel cross-fetch (darwin-x64)
+        if: matrix.platform == 'darwin-x64'
+        run: rm -rf external/skia-build/build external/skia-build/.skia-asset-sha256
+        shell: bash
+
       - name: Fetch Skia binaries
         run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
+        shell: bash
+
+      # Defense-in-depth for the Skia arch-clobber hazard: prove the flat
+      # libskia.a we just fetched is actually x86_64 before we link it. Catches
+      # a stale arm64 Skia surviving the purge above (a wrong-arch link would
+      # otherwise fail much later in the build with cryptic symbol errors).
+      - name: Verify fetched Skia is x86_64 (darwin-x64)
+        if: matrix.platform == 'darwin-x64'
+        run: |
+          set -euo pipefail
+          lib="$(find external/skia-build/build -name libskia.a -path '*Release*' 2>/dev/null | head -1)"
+          [ -n "$lib" ] || { echo "::error::no libskia.a found after darwin-x64 fetch"; exit 1; }
+          archs="$(lipo -archs "$lib")"
+          echo "fetched Skia: $lib -> $archs"
+          case "$archs" in
+            *x86_64*) : ;;
+            *) echo "::error::fetched Skia is '$archs', expected x86_64 — arm64 Skia survived the purge"; exit 1;;
+          esac
         shell: bash
 
       # On Linux, building with PULP_BUILD_WEBVIEW=ON pulls webkit2gtk
@@ -403,6 +440,15 @@ jobs:
           exit 1
         shell: bash
 
+      # The Intel leg cross-compiles the Rust CLI to x86_64 via
+      # PULP_RUST_CLI_TARGET; that cargo target's std is not installed by
+      # default (rust-toolchain.toml pins the channel but declares no targets),
+      # so add it explicitly or the cross-build hard-fails.
+      - name: Add Rust cross target (darwin-x64)
+        if: matrix.platform == 'darwin-x64'
+        run: rustup target add x86_64-apple-darwin
+        shell: bash
+
       # Build the CLI binary WITHOUT WebView; the SDK build below
       # reconfigures with WebView=ON so plugin authors still get the
       # WebView code in the SDK tarball.
@@ -422,18 +468,30 @@ jobs:
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
               ;;
           esac
+          # Intel leg: cross-compile the x86_64 slice on the Apple-Silicon
+          # runner. -DCMAKE_OSX_ARCHITECTURES=x86_64 drives the C++ (and the
+          # target-arch wgpu/Skia selection in PulpDependencies/PulpFetchContent);
+          # -DPULP_RUST_CLI_TARGET builds the Rust `pulp` CLI for the x86_64
+          # triple. Unset SKIA_DIR so an arm64 auto-provisioned cache can't
+          # shadow the x86_64 external/skia-build we just fetched.
+          EXTRA_ARCH=""
+          if [ "${{ matrix.platform }}" = "darwin-x64" ]; then
+            unset SKIA_DIR
+            EXTRA_ARCH="-DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin"
+          fi
           # No explicit CMAKE_OSX_DEPLOYMENT_TARGET here: tools/cmake/PulpMinOs.cmake
           # is included BEFORE project() and force-sets the floor to the max of every
           # linked dependency's minimum per tools/deps/min_os.json (macOS 13.3, driven
-          # by Apple's libc++ std::to_chars gate), for BOTH arches — so the native
-          # macos-15-intel runner cannot stamp a 15.0 floor that would lock out
-          # macOS 13/14 Intel Macs. Passing 13.0 here would only trip PulpMinOs's
-          # "below the floor, raising it" warning.
+          # by Apple's libc++ std::to_chars gate), for BOTH arches — so a macOS-15
+          # runner cannot stamp a 15.0 floor that would lock out macOS 13/14 Intel
+          # Macs. Passing 13.0 here would only trip PulpMinOs's "below the floor,
+          # raising it" warning.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
             $REQUIRE_GPU \
+            $EXTRA_ARCH \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
         shell: bash
 
@@ -718,10 +776,14 @@ jobs:
           - os: macos-15
             platform: darwin-arm64
             artifact: pulp
-          # Intel Mac (darwin-x64) smoke is disabled alongside the build leg
-          # above — there is no x86_64-macOS artifact to smoke while the native
-          # `macos-15-intel` release leg is off. Returns with the Intel
-          # cross-build lane.
+          # Intel Mac (darwin-x64): smoke the thin x86_64 tarball on the same
+          # pinned Apple-Silicon pool as the build leg — the binary execs
+          # transparently under Rosetta, and the smoke steps' darwin-x64
+          # EXPECT_ARCH / dylib-arch asserts prove we shipped a real x86_64
+          # slice (not an arm64 mislabel).
+          - os: macos-15-xcompile
+            platform: darwin-x64
+            artifact: pulp
           - os: ubuntu-24.04
             platform: linux-x64
             artifact: pulp
@@ -734,7 +796,12 @@ jobs:
           - os: windows-11-arm
             platform: windows-arm64
             artifact: pulp.exe
-    runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
+    runs-on: >-
+      ${{ matrix.os == 'macos-15'
+          && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json)
+          || (matrix.os == 'macos-15-xcompile'
+              && fromJSON(vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON || '["macos-15"]'))
+          || matrix.os }}
     timeout-minutes: 360
     name: Smoke ${{ matrix.platform }}
 

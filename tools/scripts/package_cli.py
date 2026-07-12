@@ -66,12 +66,13 @@ from pathlib import Path
 def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
     """Locate the wgpu-native dylib/so/dll the build linked against.
 
-    Strategy:
-    1. Inspect the binary's load commands for the bad absolute rpath
-       wgpu fetched into Pulp's cache (most reliable — that's the
-       directory the binary ACTUALLY looks in at load time).
-    2. Fall back to scanning the build dir + the standard Pulp
-       FetchContent cache for libwgpu_native.* if step 1 misses.
+    Scans the build dir and the standard Pulp FetchContent cache roots for
+    ``libwgpu_native.*``. On macOS the cache can hold BOTH arch slices at once
+    (e.g. an arm64 prefetch plus an x86_64 cross-build), so darwin candidates
+    are arch-filtered via ``lipo -archs`` to the target arch — otherwise the
+    packager can bundle the wrong-arch dylib into the tarball, which only
+    surfaces as a load-time crash on the user's machine. ``lipo`` is macOS-only,
+    so the filter is a best-effort no-op elsewhere.
     """
     suffix = {
         "darwin-arm64":  "*.dylib",
@@ -125,7 +126,29 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
         for path in root.rglob(f"wgpu_native{suffix.lstrip('*')}"):
             if path.is_file():
                 candidates.append(path)
-    return candidates[0] if candidates else None
+    if not candidates:
+        return None
+
+    # macOS: a warm cache can hold both arm64 and x86_64 wgpu slices, so blindly
+    # taking candidates[0] can bundle the wrong arch (an arm64 dylib into an
+    # x86_64 cross-build tarball crashes at load). Prefer a candidate whose
+    # Mach-O arch matches the target. `lipo` is macOS-only → no-op elsewhere;
+    # fat/universal dylibs match any arch. If none match (lipo-less env), fall
+    # through to candidates[0] rather than dropping the dylib entirely — the
+    # release-cli smoke gate's arch assert is the backstop.
+    if platform.startswith("darwin-"):
+        want = "arm64" if platform == "darwin-arm64" else "x86_64"
+        for cand in candidates:
+            try:
+                archs = subprocess.run(
+                    ["lipo", "-archs", str(cand)],
+                    capture_output=True, text=True, check=True,
+                ).stdout.split()
+            except (OSError, subprocess.CalledProcessError):
+                archs = []
+            if want in archs:
+                return cand
+    return candidates[0]
 
 
 def fix_rpath_macos(binary: Path) -> None:

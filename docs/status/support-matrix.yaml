@@ -6,11 +6,14 @@ platforms:
   macos:
     status: usable
     notes: Primary development platform. ARM64 (Apple Silicon) is the usable, primary
-      target. x86_64 (Intel) and universal (arm64;x86_64) builds are supported and
-      configure+build via -DCMAKE_OSX_ARCHITECTURES, but ship experimental — GitHub
-      CI VMs have no representative Intel GPU and Rosetta caps SIMD at SSE4.2/AVX2, so
-      Metal-on-Intel-GPU behavior, AVX3 dispatch, and Intel-native DAW hosting are not
-      yet verified on real Intel hardware. skia-builder publishes all three mac Skia
+      target. x86_64 (Intel) now ships in EVERY release — the darwin-x64 CLI+SDK pair
+      is a required leg, cross-compiled on the Apple-Silicon runner via
+      -DCMAKE_OSX_ARCHITECTURES=x86_64 + -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin and
+      smoke-tested under Rosetta (release-cli.yml, os macos-15-xcompile). It remains
+      experimental in maturity, not availability — GitHub CI VMs have no representative
+      Intel GPU and Rosetta caps SIMD at SSE4.2/AVX2, so Metal-on-Intel-GPU behavior,
+      AVX3 dispatch, and Intel-native DAW hosting are not yet verified on real Intel
+      hardware (nightly-intel.yml Job A carries the native-silicon signal). skia-builder publishes all three mac Skia
       slices (mac-arm64, mac-x86_64, mac-universal); wgpu-native ships no universal
       dylib, so a universal build lipo's the two thin slices and ad-hoc re-signs the fat
       dylib (tools/cmake/PulpWgpuUniversal.cmake). Minimum macOS 13.3 (Ventura),

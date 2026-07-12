@@ -66,11 +66,13 @@ jobs:
           required_assets=(
             appcast.xml
             pulp-darwin-arm64.tar.gz
+            pulp-darwin-x64.tar.gz
             pulp-linux-arm64.tar.gz
             pulp-linux-x64.tar.gz
             pulp-windows-arm64.zip
             pulp-windows-x64.zip
             pulp-sdk-darwin-arm64.tar.gz
+            pulp-sdk-darwin-x64.tar.gz
             pulp-sdk-linux-arm64.tar.gz
             pulp-sdk-linux-x64.tar.gz
             pulp-sdk-windows-arm64.tar.gz
@@ -88,22 +90,13 @@ jobs:
             mkdir -p release-assets
             gh release download "${TAG}" --repo "${REPO}" --dir release-assets --clobber
 
-            # Intel (darwin-x64) CLI+SDK is an ADVISORY release leg
-            # (release-cli.yml, continue-on-error): present when the
-            # macos-15-intel build succeeded, absent otherwise. Because the
-            # publish check runs --exact-required, the pair must be listed
-            # as required WHEN PRESENT (or --exact-required rejects them as
-            # "unexpected" and the release stays a draft — the success-path
-            # bug), yet must NOT be required unconditionally (that would
-            # negate the advisory design and block every release whenever
-            # the Intel runner is down). build-cli uploads both Intel
-            # archives from one job, so they arrive atomically (both/neither).
-            if [ -f release-assets/pulp-darwin-x64.tar.gz ]; then
-              required_assets+=(pulp-darwin-x64.tar.gz pulp-sdk-darwin-x64.tar.gz)
-              echo "Intel (darwin-x64) assets present — requiring them in the manifest."
-            else
-              echo "Intel (darwin-x64) assets absent (advisory leg did not publish) — release proceeds without them."
-            fi
+            # Intel (darwin-x64) CLI+SDK is now a REQUIRED leg: it is
+            # cross-compiled on the healthy Apple-Silicon runner (release-cli.yml,
+            # macos-15-xcompile), the same reliability class as darwin-arm64, so
+            # it must ship in every release. Listed unconditionally in
+            # required_assets above; a missing Intel pair now correctly fails the
+            # --exact-required publish check instead of silently shipping an
+            # Intel-less release.
 
             checksum_args=()
             for asset in "${required_assets[@]}"; do
