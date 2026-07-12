@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06550"></a>
+## [0.655.0] - 2026-07-12
+
+- docs: fix GPU-audio/render doc inaccuracies found in accuracy audit ([#6015](https://github.com/danielraffel/pulp/pull/6015))
+
 <a id="v06540"></a>
 ## [0.654.0] - 2026-07-11
 
@@ -6291,6 +6296,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.655.0]: https://github.com/danielraffel/pulp/releases/tag/v0.655.0
 [0.654.0]: https://github.com/danielraffel/pulp/releases/tag/v0.654.0
 [0.653.0]: https://github.com/danielraffel/pulp/releases/tag/v0.653.0
 [0.652.0]: https://github.com/danielraffel/pulp/releases/tag/v0.652.0
