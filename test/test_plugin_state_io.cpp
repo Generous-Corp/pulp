@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -59,11 +60,14 @@ public:
                  const pulp::format::ProcessContext&) override {}
 
     std::vector<uint8_t> serialize_plugin_state() const override {
+        ++serialize_calls;
+        if (throw_on_serialize) throw std::runtime_error("serialize");
         return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
     }
 
     bool deserialize_plugin_state(std::span<const uint8_t> data) override {
         ++deserialize_calls;
+        if (throw_on_deserialize) throw std::runtime_error("deserialize");
         last_payload.assign(data.begin(), data.end());
         const std::string payload(data.begin(), data.end());
         if (!rejected_payload.empty() && payload == rejected_payload) {
@@ -77,6 +81,9 @@ public:
     std::string plugin_state;
     std::string rejected_payload;
     int deserialize_calls = 0;
+    mutable int serialize_calls = 0;
+    bool throw_on_serialize = false;
+    bool throw_on_deserialize = false;
     std::vector<uint8_t> last_payload;
 };
 
@@ -114,6 +121,26 @@ struct TestRig {
         processor.define_parameters(store);
     }
 };
+
+TEST_CASE("plugin_state_io prefers immutable published snapshots over live serialization",
+          "[format][state][snapshot]") {
+    TestRig rig;
+    rig.processor.plugin_state = "live serializer must not run";
+    std::vector<uint8_t> large_snapshot(2 * 1024 * 1024, 0x5a);
+    large_snapshot.front() = 0x11;
+    large_snapshot.back() = 0x22;
+    rig.processor.publish_plugin_state_snapshot(std::move(large_snapshot));
+
+    const auto blob = pulp::format::plugin_state_io::serialize(rig.store, rig.processor);
+    REQUIRE(rig.processor.serialize_calls == 0);
+
+    TestRig restored;
+    REQUIRE(pulp::format::plugin_state_io::deserialize(blob, restored.store,
+                                                       restored.processor));
+    REQUIRE(restored.processor.last_payload.size() == 2 * 1024 * 1024);
+    REQUIRE(restored.processor.last_payload.front() == 0x11);
+    REQUIRE(restored.processor.last_payload.back() == 0x22);
+}
 
 constexpr uint8_t kEnvelopeMagic[4] = {'P', 'L', 'S', 'T'};
 
@@ -715,3 +742,23 @@ TEST_CASE("plugin_state_io rolls back StateStore when plugin payload restore fai
             std::vector<uint8_t>({'k', 'e', 'e', 'p'}));
     REQUIRE(restored.processor.deserialize_calls == 2);
 }
+
+#if defined(__cpp_exceptions) && __cpp_exceptions
+TEST_CASE("plugin_state_io contains author callback exceptions",
+          "[format][plugin-state][abi-guard]") {
+    TestRig source;
+    source.processor.throw_on_serialize = true;
+    const auto state_only = pulp::format::plugin_state_io::serialize(
+        source.store, source.processor);
+    REQUIRE_FALSE(state_only.empty());
+
+    source.processor.throw_on_serialize = false;
+    source.processor.plugin_state = "payload";
+    const auto envelope = pulp::format::plugin_state_io::serialize(
+        source.store, source.processor);
+    TestRig restored;
+    restored.processor.throw_on_deserialize = true;
+    REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize(
+        envelope, restored.store, restored.processor));
+}
+#endif

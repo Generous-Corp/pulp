@@ -13,6 +13,7 @@
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/parameter_text.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
@@ -22,6 +23,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 #include <clap/clap.h>
+#include <clap/ext/audio-ports-config.h>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -89,9 +91,18 @@ inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
     if (index >= buses.size()) return false;
     auto& bus = buses[index];
 
+    int channel_count = bus.default_channels;
+    if (!desc.supported_bus_layouts.empty()) {
+        const auto selected = std::min<std::size_t>(
+            self->selected_bus_layout, desc.supported_bus_layouts.size() - 1);
+        const auto& layout = desc.supported_bus_layouts[selected];
+        const auto& widths = is_input ? layout.inputs : layout.outputs;
+        if (index < widths.size()) channel_count = widths[index];
+    }
+
     info->id = static_cast<clap_id>((is_input ? 0 : 100) + index);
     runtime::copy_c_string(info->name, bus.name);
-    info->channel_count = bus.default_channels;
+    info->channel_count = static_cast<uint32_t>(std::max(0, channel_count));
     // Every Pulp port accepts 64-bit buffers: clap_process() converts f64 at
     // the adapter boundary for f32-internal processors and dispatches
     // process_f64() natively when the descriptor opts in — the same posture as
@@ -108,13 +119,69 @@ inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
     if (desc.effective_capabilities().supports_f64_audio) {
         info->flags |= CLAP_AUDIO_PORT_PREFERS_64BITS;
     }
-    info->port_type = bus.default_channels == 1 ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
+    info->port_type = channel_count == 1 ? CLAP_PORT_MONO
+                    : channel_count == 2 ? CLAP_PORT_STEREO : nullptr;
     info->in_place_pair = CLAP_INVALID_ID;
     return true;
 }
 
 inline const clap_plugin_audio_ports_t audio_ports_ext = {
     .count = audio_ports_count, .get = audio_ports_get,
+};
+
+inline uint32_t audio_ports_config_count(const clap_plugin_t* plugin) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!self || !self->processor) return 0;
+    return static_cast<uint32_t>(
+        self->processor->descriptor().supported_bus_layouts.size());
+}
+
+inline bool audio_ports_config_get(const clap_plugin_t* plugin, uint32_t index,
+                                   clap_audio_ports_config_t* config) {
+    if (!config) return false;
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!self || !self->processor) return false;
+    const auto desc = self->processor->descriptor();
+    if (index >= desc.supported_bus_layouts.size()) return false;
+    const auto& layout = desc.supported_bus_layouts[index];
+    std::memset(config, 0, sizeof(*config));
+    config->id = index;
+    runtime::copy_c_string(config->name,
+        layout.name.empty() ? std::string("Layout ") + std::to_string(index + 1)
+                            : layout.name);
+    config->input_port_count = static_cast<uint32_t>(layout.inputs.size());
+    config->output_port_count = static_cast<uint32_t>(layout.outputs.size());
+    config->has_main_input = !layout.inputs.empty() && layout.inputs.front() > 0;
+    config->main_input_channel_count = config->has_main_input
+        ? static_cast<uint32_t>(layout.inputs.front()) : 0;
+    config->main_input_port_type = layout.inputs.empty() ? nullptr
+        : layout.inputs.front() == 1 ? CLAP_PORT_MONO
+        : layout.inputs.front() == 2 ? CLAP_PORT_STEREO : nullptr;
+    config->has_main_output = !layout.outputs.empty() && layout.outputs.front() > 0;
+    config->main_output_channel_count = config->has_main_output
+        ? static_cast<uint32_t>(layout.outputs.front()) : 0;
+    config->main_output_port_type = layout.outputs.empty() ? nullptr
+        : layout.outputs.front() == 1 ? CLAP_PORT_MONO
+        : layout.outputs.front() == 2 ? CLAP_PORT_STEREO : nullptr;
+    return true;
+}
+
+inline bool audio_ports_config_select(const clap_plugin_t* plugin, clap_id config_id) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!self || !self->processor) return false;
+    const auto desc = self->processor->descriptor();
+    if (config_id >= desc.supported_bus_layouts.size()) return false;
+    const auto& layout = desc.supported_bus_layouts[config_id];
+    if (!self->processor->is_bus_layout_supported(
+            {layout.inputs, layout.outputs})) return false;
+    self->selected_bus_layout = config_id;
+    return true;
+}
+
+inline const clap_plugin_audio_ports_config_t audio_ports_config_ext = {
+    .count = audio_ports_config_count,
+    .get = audio_ports_config_get,
+    .select = audio_ports_config_select,
 };
 
 // ── State extension ────────────────────────────────────────────────────
@@ -171,8 +238,9 @@ inline bool params_get_info(const clap_plugin_t* plugin, uint32_t index, clap_pa
     info->max_value = p.range.max;
     info->default_value = p.range.default_value;
     info->flags = CLAP_PARAM_IS_AUTOMATABLE;
-    if (p.range.step >= 1.0f && (p.range.max - p.range.min) < 10.0f)
+    if (state::is_discrete_param(p))
         info->flags |= CLAP_PARAM_IS_STEPPED;
+    if (state::is_bypass_param(p)) info->flags |= CLAP_PARAM_IS_BYPASS;
     return true;
 }
 
@@ -187,28 +255,8 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     auto* info = self->store.info(static_cast<state::ParamID>(param_id));
     if (!info) return false;
-    if (info->to_string) {
-        auto str = info->to_string(static_cast<float>(value));
-        snprintf(display, size, "%s", str.c_str());
-        return true;
-    }
-
-    // Format the numeric value with locale-independent std::to_chars so a
-    // comma-decimal host locale (de_DE, fr_FR, …) can never turn "0.50" into
-    // "0,50". This matches the previous "%.2f": fixed notation, two fractional
-    // digits. The CLAP-supplied `size` is the byte cap of the `display` buffer.
-    // The buffer is sized generously because chars_format::fixed for a very
-    // large-magnitude double needs hundreds of integer digits; if it still
-    // overflows we return false rather than emit a host-visible lie.
-    char number[512];
-    auto conv = std::to_chars(number, number + sizeof(number), value,
-                              std::chars_format::fixed, 2);
-    if (conv.ec != std::errc{}) return false;
-    std::string out(number, conv.ptr);
-    if (!info->unit.empty()) {
-        out += ' ';
-        out += info->unit;
-    }
+    const auto out = format_parameter_text(*info, static_cast<float>(value));
+    if (out.empty()) return false;
     snprintf(display, size, "%s", out.c_str());
     return true;
 }
@@ -217,37 +265,13 @@ inline bool params_text_to_value(const clap_plugin_t* plugin, clap_id param_id,
                                  const char* text, double* value) {
     if (!text) return false;
 
-    // Prefer the author-supplied from_string parser: it is the inverse of the
-    // to_string used by params_value_to_text, so a fully custom rendering
-    // ("quality=0.75", "12 o'clock", an enum label) round-trips even though a
-    // bare numeric parse would reject it. CLAP values are plain (min..max),
-    // the same domain from_string returns, so no normalization step is needed.
-    if (plugin) {
-        auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-        auto* info = self->store.info(static_cast<state::ParamID>(param_id));
-        if (info && info->from_string) {
-            const float parsed = info->from_string(text);
-            // Reject a non-finite parse rather than writing garbage; fall
-            // through to the generic numeric parse so a partly-numeric string
-            // still has a chance (author from_string is best-effort).
-            if (std::isfinite(parsed)) {
-                *value = parsed;
-                return true;
-            }
-        }
-    }
-
-    // Locale-independent parse via a C-locale strtod. std::from_chars' float
-    // overload is =deleted on some toolchains (see locale_independent_float.hpp),
-    // so we cannot use it for the value. strtod skips leading whitespace and
-    // accepts a leading '+'/'-', and trailing text (e.g. a unit suffix) is
-    // allowed — matching the historical strtod leniency this path documents.
-    // Reject when nothing was consumed ("%", "", "   ") or the magnitude was
-    // out of range ("1e999999") rather than writing a garbage 0.
-    double parsed = 0.0;
-    const auto result = detail::parse_double_c_locale(std::string_view(text), parsed);
-    if (result.consumed == 0 || result.range_error) return false;
-    *value = parsed;
+    if (!plugin) return false;
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    const auto* info = self->store.info(static_cast<state::ParamID>(param_id));
+    if (!info) return false;
+    const auto parsed = parse_parameter_text(*info, text);
+    if (!parsed) return false;
+    *value = *parsed;
     return true;
 }
 
@@ -672,7 +696,7 @@ inline const clap_plugin_gui_t gui_ext = {
 #endif // PULP_CLAP_GUI
 
 // ── Extension dispatch ─────────────────────────────────────────────────
-inline const void* get_static_extension(const clap_plugin_t*, const char* id) {
+inline const void* get_static_extension(const clap_plugin_t* plugin, const char* id) {
     if (!id) return nullptr;
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     if (strcmp(id, CLAP_EXT_GUI) == 0) {
@@ -681,6 +705,8 @@ inline const void* get_static_extension(const clap_plugin_t*, const char* id) {
     }
 #endif
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &audio_ports_ext;
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0)
+        return audio_ports_config_count(plugin) > 0 ? &audio_ports_config_ext : nullptr;
     if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &note_ports_ext;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &state_ext;

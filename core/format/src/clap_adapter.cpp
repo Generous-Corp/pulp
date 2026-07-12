@@ -174,6 +174,13 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     ctx.max_buffer_size = static_cast<int>(max_frames);
     ctx.input_channels = desc.default_input_channels();
     ctx.output_channels = desc.default_output_channels();
+    if (!desc.supported_bus_layouts.empty()) {
+        const auto selected = std::min<std::size_t>(
+            self->selected_bus_layout, desc.supported_bus_layouts.size() - 1);
+        const auto& layout = desc.supported_bus_layouts[selected];
+        ctx.input_channels = layout.inputs.empty() ? 0 : layout.inputs.front();
+        ctx.output_channels = layout.outputs.empty() ? 0 : layout.outputs.front();
+    }
     self->processor->prepare(ctx);
     self->processor->prepare_f64_fallback_scratch(ctx);
     self->native_f64_enabled = desc.effective_capabilities().supports_f64_audio;

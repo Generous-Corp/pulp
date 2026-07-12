@@ -52,6 +52,13 @@ stop — `analyze()` already did it correctly. The only thing you author is the
 
 ## Tier 1 — headless Processor scene (DSP bugs)
 
+For sidechain scenes, use `process_with_sidechain()` or
+`render_offline_with_sidechain()`; main and sidechain remain independent buses,
+and ordinary `process()` clears stale sidechain state. Use
+`try_prepare_bus_layout()` for a declared layout. `BackgroundTaskLane<T>` is a
+fixed-capacity prewarmed lane with ordered/latest policies and exception
+containment; `AudioTap` uses the planar SPSC ring and drops whole aligned frames.
+
 Fast, deterministic, no Apple frameworks. Use `HeadlessHost` + the offline audio
 analysis helpers. Pattern (see `tests/test_scenes.cpp` in a plugin repo):
 

@@ -83,6 +83,24 @@ TEST_CASE("LV2 TTL generation produces valid plugin.ttl", "[format][lv2]") {
     REQUIRE_THAT(ttl, ContainsSubstring("lv2:default 0"));
 }
 
+TEST_CASE("LV2 TTL advertises explicit enum semantics and labels", "[format][lv2][params]") {
+    auto desc = make_effect_desc();
+    state::StateStore store;
+    store.add_parameter({
+        .id = 9,
+        .name = "Mode",
+        .range = {0.0f, 2.0f, 0.0f, 1.0f},
+        .kind = state::ParamKind::Enum,
+        .value_labels = {"Clean", "Warm", "Hot"},
+    });
+
+    const auto ttl = generate_plugin_ttl(desc, store, "http://pulp.audio/plugins/enum");
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:portProperty lv2:enumeration , lv2:integer"));
+    REQUIRE_THAT(ttl, ContainsSubstring("rdfs:label \"Clean\" ; rdf:value 0"));
+    REQUIRE_THAT(ttl, ContainsSubstring("rdfs:label \"Warm\" ; rdf:value 1"));
+    REQUIRE_THAT(ttl, ContainsSubstring("rdfs:label \"Hot\" ; rdf:value 2"));
+}
+
 TEST_CASE("LV2 TTL emits a latency-reporting output control port",
           "[format][lv2][issue-mf2]") {
     auto desc = make_effect_desc();

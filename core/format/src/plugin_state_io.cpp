@@ -66,6 +66,23 @@ struct ParsedBlob {
     std::span<const uint8_t> plugin_blob;
 };
 
+std::vector<uint8_t> safe_serialize_plugin_state(const Processor& processor) noexcept {
+    PULP_TRY {
+        return processor.serialize_plugin_state();
+    } PULP_CATCH_ALL {
+        return {};
+    }
+}
+
+bool safe_deserialize_plugin_state(Processor& processor,
+                                   std::span<const uint8_t> bytes) noexcept {
+    PULP_TRY {
+        return processor.deserialize_plugin_state(bytes);
+    } PULP_CATCH_ALL {
+        return false;
+    }
+}
+
 struct EnvelopeSizes {
     uint32_t store_size = 0;
     uint32_t plugin_size = 0;
@@ -290,8 +307,10 @@ bool restore_previous_state(const std::vector<uint8_t>& store_blob,
         return false;
     }
 
-    const bool plugin_restored = processor.deserialize_plugin_state(plugin_blob);
-    PULP_ASSERT(plugin_restored, "Processor plugin-state rollback must succeed");
+    const bool plugin_restored = safe_deserialize_plugin_state(processor, plugin_blob);
+    // Author restore code may reject or throw for both the requested payload
+    // and the rollback payload. Never turn that into a host-process abort; the
+    // StateStore has still been restored and the adapter reports failure.
     return plugin_restored;
 }
 
@@ -434,7 +453,8 @@ bool register_envelope_migration(uint32_t from_version,
 std::vector<uint8_t> serialize(const state::StateStore& store,
                                const Processor& processor) {
     auto store_blob = store.serialize();
-    auto plugin_blob = processor.serialize_plugin_state();
+    auto published = processor.published_plugin_state_snapshot();
+    auto plugin_blob = published ? *published : safe_serialize_plugin_state(processor);
     if (plugin_blob.empty()) {
         return store_blob;
     }
@@ -474,7 +494,7 @@ bool deserialize(std::span<const uint8_t> bytes,
     }
 
     const auto previous_store_blob = store.serialize();
-    const auto previous_plugin_blob = processor.serialize_plugin_state();
+    const auto previous_plugin_blob = safe_serialize_plugin_state(processor);
 
     if (!store.deserialize(parsed.store_blob)) {
         restore_previous_state(previous_store_blob, previous_plugin_blob,
@@ -482,7 +502,7 @@ bool deserialize(std::span<const uint8_t> bytes,
         return false;
     }
 
-    if (processor.deserialize_plugin_state(parsed.plugin_blob)) {
+    if (safe_deserialize_plugin_state(processor, parsed.plugin_blob)) {
         return true;
     }
 

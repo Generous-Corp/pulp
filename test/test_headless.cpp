@@ -28,6 +28,10 @@ public:
             .category = pulp::format::PluginCategory::Effect,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},
+            .supported_bus_layouts = {
+                {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+                {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+            },
         };
     }
 
@@ -340,6 +344,17 @@ TEST_CASE("HeadlessHost forwards prepare context and release",
 
     host.release();
     REQUIRE(processor->release_calls == 1);
+}
+
+TEST_CASE("HeadlessHost prepares a declared bus layout by index",
+          "[headless][bus-layout]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    auto* processor = last_processor;
+
+    REQUIRE(host.try_prepare_bus_layout(1, 48000.0, 256));
+    REQUIRE(processor->last_prepare_context.input_channels == 1);
+    REQUIRE(processor->last_prepare_context.output_channels == 1);
+    REQUIRE_FALSE(host.try_prepare_bus_layout(2, 48000.0, 256));
 }
 
 TEST_CASE("HeadlessHost try_prepare enforces processor resource budgets",

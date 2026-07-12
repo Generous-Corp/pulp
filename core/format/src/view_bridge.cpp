@@ -1,10 +1,29 @@
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/remote_view_session.hpp>
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 
 namespace pulp::format {
+namespace {
+
+std::unique_ptr<view::View> safe_create_view(Processor& processor) noexcept {
+    PULP_TRY { return processor.create_view(); }
+    PULP_CATCH_ALL { return nullptr; }
+}
+
+view::ScriptedUiSession* safe_active_scripted_ui(Processor& processor) noexcept {
+    PULP_TRY { return processor.active_scripted_ui(); }
+    PULP_CATCH_ALL { return nullptr; }
+}
+
+ViewSize safe_view_size(Processor& processor) noexcept {
+    PULP_TRY { return processor.view_size(); }
+    PULP_CATCH_ALL { return {}; }
+}
+
+} // namespace
 
 ViewBridge::ViewBridge(Processor& processor, state::StateStore& store)
     : ViewBridge(processor, store, Options{}) {}
@@ -13,7 +32,7 @@ ViewBridge::ViewBridge(Processor& processor, state::StateStore& store, Options o
     : processor_(processor),
       store_(store),
       options_(options),
-      size_hints_(processor.view_size()) {
+      size_hints_(safe_view_size(processor)) {
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
 }
@@ -35,10 +54,10 @@ bool ViewBridge::open(std::string* error) {
     last_error_.clear();
 
     // First chance: let the processor supply a fully custom view.
-    auto custom = processor_.create_view();
+    auto custom = safe_create_view(processor_);
     if (custom) {
         view_ = std::move(custom);
-        if (processor_.active_scripted_ui()) {
+        if (safe_active_scripted_ui(processor_)) {
             uses_script_ui_ = true;
         }
     } else {
@@ -54,7 +73,7 @@ bool ViewBridge::open(std::string* error) {
     }
     view_raw_ = view_.get();
 
-    size_hints_ = processor_.view_size();
+    size_hints_ = safe_view_size(processor_);
     // A NATIVE create_view() already computed its own layout bounds; make the
     // host window match them exactly so the editor's own edge padding is never
     // clipped (otherwise a plugin that doesn't declare DESIGN_WIDTH/HEIGHT gets
@@ -94,7 +113,7 @@ bool ViewBridge::poll_editor_reload() {
 bool ViewBridge::rebuild_primary_view() {
     if (!view_raw_) return false;
     // Re-run create_view() on the (hot-swapped) processor to get the new editor.
-    auto fresh = processor_.create_view();
+    auto fresh = safe_create_view(processor_);
     if (!fresh) return false;
 
     // Transplant the fresh content into the SAME root View object the host holds
@@ -129,7 +148,7 @@ bool ViewBridge::rebuild_primary_view() {
     // host owns the window; a preferred-size CHANGE across reload is not renotified
     // to the host here (review 3.2, LOW) — the editor lays out to the host's current
     // size, and a size change needs a re-instantiate for now.
-    size_hints_ = processor_.view_size();
+    size_hints_ = safe_view_size(processor_);
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
     return true;
@@ -137,18 +156,20 @@ bool ViewBridge::rebuild_primary_view() {
 
 view::ScriptedUiSession* ViewBridge::scripted_ui() {
     if (scripted_ui_) return scripted_ui_.get();
-    return processor_.active_scripted_ui();
+    return safe_active_scripted_ui(processor_);
 }
 
 const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
     if (scripted_ui_) return scripted_ui_.get();
-    return processor_.active_scripted_ui();
+    PULP_TRY { return processor_.active_scripted_ui(); }
+    PULP_CATCH_ALL { return nullptr; }
 }
 
 void ViewBridge::notify_attached() {
     if (!view_raw_ || attached_) return;
     attached_ = true;
-    processor_.on_view_opened(*view_raw_);
+    PULP_TRY { processor_.on_view_opened(*view_raw_); }
+    PULP_CATCH_ALL {}
 }
 
 std::unique_ptr<view::View> ViewBridge::release_view() {
@@ -160,7 +181,8 @@ std::unique_ptr<view::View> ViewBridge::release_view() {
 void ViewBridge::close() {
     if (!view_raw_) return;
     if (attached_) {
-        processor_.on_view_closed(*view_raw_);
+        PULP_TRY { processor_.on_view_closed(*view_raw_); }
+        PULP_CATCH_ALL {}
         attached_ = false;
     }
     scripted_ui_.reset();
@@ -175,7 +197,8 @@ void ViewBridge::resize(uint32_t width, uint32_t height) {
     width_ = width;
     height_ = height;
     if (view_raw_ && attached_) {
-        processor_.on_view_resized(*view_raw_, width, height);
+        PULP_TRY { processor_.on_view_resized(*view_raw_, width, height); }
+        PULP_CATCH_ALL {}
     }
 }
 

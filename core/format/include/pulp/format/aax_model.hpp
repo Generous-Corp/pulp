@@ -33,6 +33,7 @@ enum class StemKind {
 };
 
 struct ParameterBinding {
+    state::ParamInfo info;
     state::ParamID id = 0;
     std::string aax_id;
     std::string name;

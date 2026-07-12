@@ -12,6 +12,7 @@
 #include <pulp/midi/message.hpp>
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/parameter_text.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
@@ -270,10 +271,11 @@ tresult PLUGIN_API PulpVst3Processor::getNoteExpressionValueByString(
 tresult PLUGIN_API PulpVst3Processor::getParamStringByValue(
     ParamID tag, ParamValue valueNormalized, String128 string) {
     const auto* info = store_.info(static_cast<state::ParamID>(tag));
-    if (info && info->to_string) {
+    if (info) {
         const float plain =
             info->range.denormalize(static_cast<float>(valueNormalized));
-        const std::string text = info->to_string(plain);
+        const std::string text = format_parameter_text(*info, plain);
+        if (text.empty()) return kResultFalse;
         // fromAscii matches the rest of this adapter's String128 handling
         // (parameter titles/units are converted the same way). Typical display
         // units (dB, Hz, %, semitones) are ASCII.
@@ -286,16 +288,14 @@ tresult PLUGIN_API PulpVst3Processor::getParamStringByValue(
 tresult PLUGIN_API PulpVst3Processor::getParamValueByString(
     ParamID tag, TChar* string, ParamValue& valueNormalized) {
     const auto* info = store_.info(static_cast<state::ParamID>(tag));
-    if (info && info->from_string && string) {
+    if (info && string) {
         char ascii[256] = {0};
         Steinberg::UString(string, 128).toAscii(ascii, sizeof(ascii));
-        const float plain = info->from_string(ascii);
-        if (std::isfinite(plain)) {
-            valueNormalized = info->range.normalize(plain);
+        if (const auto plain = parse_parameter_text(*info, ascii)) {
+            valueNormalized = info->range.normalize(*plain);
             return kResultTrue;
         }
-        // Non-finite parse — fall through to the base numeric parser rather
-        // than write a garbage normalized value.
+        return kResultFalse;
     }
     return SingleComponentEffect::getParamValueByString(tag, string, valueNormalized);
 }
@@ -464,10 +464,10 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     for (const auto& param : store_.all_params()) {
         int32 flags = ParameterInfo::kCanAutomate;
 
-        // Boolean parameters (step == 1, range 0-1) get step count 1
         int32 step_count = 0;
-        if (param.range.step >= 1.0f && param.range.min == 0.0f && param.range.max == 1.0f) {
-            step_count = 1;
+        if (state::is_discrete_param(param)) {
+            const auto count = state::param_value_count(param);
+            step_count = count > 0 ? static_cast<int32>(count - 1u) : 0;
         }
 
         // Tag the bypass param via the shared designation-first contract: a

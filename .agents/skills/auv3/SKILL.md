@@ -108,6 +108,10 @@ processor factory at static init — no `force_link` shim required.
 
 ### Bus construction
 
+When `PluginDescriptor::supported_bus_layouts` is non-empty, expose those main
+input/output pairs through `channelCapabilities`. Keep that advertised list and
+`Processor::is_bus_layout_supported()` aligned during negotiation.
+
 Inside `initWithComponentDescription:…`:
 
 - Output bus: one `AUAudioUnitBus` at 48 kHz default with
@@ -122,6 +126,12 @@ Inside `initWithComponentDescription:…`:
 This mirrors the CLAP / VST3 "bus 0 = main, bus 1 = sidechain" rule.
 
 ### Parameters: `AUParameterTree`
+
+Parameter metadata is semantic, not range-inferred: `ParamInfo::kind` selects
+continuous/integer/boolean/indexed behavior, and `value_labels` supplies the
+reversible label table. String conversion must use the shared canonical helpers
+so host text entry, labels, units, finite checks, snapping, and author-exception
+containment stay identical to CLAP/VST3/AUv2/AAX.
 
 `- (AUParameterTree *)parameterTree` builds one `AUParameter` per
 `StateStore` param:

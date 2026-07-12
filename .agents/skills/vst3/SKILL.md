@@ -706,6 +706,15 @@ shift.
 
 ## Validation recipes
 
+### Explicit parameter semantics and layout sets
+
+VST3 flags, step counts, labels, and text conversion consume the shared
+`ParamInfo::kind`, `value_labels`, and canonical parameter-text helpers. Do not
+restore range heuristics or numeric enum parsing. Named
+`supported_bus_layouts` constrain `setBusArrangements` through
+`is_bus_layout_supported`; `Processor::BusesLayout` remains the unnamed
+two-vector runtime proposal.
+
 Build and validate a VST3 bundle:
 
 ```bash

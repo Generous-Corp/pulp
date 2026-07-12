@@ -50,6 +50,13 @@ public:
         int input_channels = 2, int output_channels = 2,
         PrepareResourceLimits resource_limits = {});
 
+    /// Prepare one of PluginDescriptor::supported_bus_layouts by index.
+    /// Returns false for an undeclared/invalid layout or when resource limits
+    /// reject the derived main-bus widths.
+    [[nodiscard]] bool try_prepare_bus_layout(
+        std::size_t layout_index, double sample_rate, int max_buffer_size,
+        PrepareResourceLimits resource_limits = {});
+
     /// Last prepare-limit failure from try_prepare(). None means the last
     /// checked prepare either fit the limits or no processor exists.
     PrepareResourceLimit last_prepare_limit_failure() const {
@@ -67,6 +74,15 @@ public:
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  ProcessContext context);
+
+    /// Process with an independently supplied sidechain bus. The sidechain is
+    /// never concatenated with or aliased to the main input; processors reach
+    /// it through ProcessBuffers::sidechain_input() / sidechain_input().
+    void process_with_sidechain(
+        audio::BufferView<float>& output,
+        const audio::BufferView<const float>& input,
+        const audio::BufferView<const float>& sidechain,
+        ProcessContext context = {});
 
     /// Process a block of audio with MIDI input and output.
     void process(audio::BufferView<float>& output,
@@ -86,6 +102,14 @@ public:
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& midi_out,
                  ProcessContext context);
+
+    void process_with_sidechain(
+        audio::BufferView<float>& output,
+        const audio::BufferView<const float>& input,
+        const audio::BufferView<const float>& sidechain,
+        midi::MidiBuffer& midi_in,
+        midi::MidiBuffer& midi_out,
+        ProcessContext context);
 
     /// Low-level process call with MIDI, context, and parameter events.
     void process(audio::BufferView<float>& output,
@@ -144,6 +168,14 @@ public:
         const audio::AudioFileData& input,
         const audio::OfflineRenderOptions& options = {});
 
+    /// Offline render with a separate sidechain file. Sample rates and frame
+    /// counts must match; channel widths may differ. Tail frames receive a
+    /// silent sidechain after the supplied file ends.
+    std::optional<audio::AudioFileData> render_offline_with_sidechain(
+        const audio::AudioFileData& input,
+        const audio::AudioFileData& sidechain,
+        const audio::OfflineRenderOptions& options = {});
+
     /// Release processing resources. Safe to call multiple times.
     void release();
 
@@ -180,6 +212,10 @@ public:
     bool load_state(std::span<const uint8_t> data);
 
 private:
+    std::optional<audio::AudioFileData> render_offline_impl(
+        const audio::AudioFileData& input,
+        const audio::AudioFileData* sidechain,
+        const audio::OfflineRenderOptions& options);
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
     // may read it from its destructor or from a worker thread that destructor is

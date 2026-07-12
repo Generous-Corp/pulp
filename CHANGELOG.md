@@ -250,7 +250,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
 - feat(view): VirtualGrid recycling 2D grid widget ([#5700](https://github.com/danielraffel/pulp/pull/5700))
 - feat(release): tier release-note weight by semver bump level ([#5697](https://github.com/danielraffel/pulp/pull/5697))
-- docs: acknowledge Truce inspiration ([#5698](https://github.com/danielraffel/pulp/pull/5698))
 
 <a id="v06060"></a>
 ## [0.606.0] - 2026-07-07

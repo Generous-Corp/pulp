@@ -80,6 +80,7 @@ struct PulpClapPlugin {
     // Audio working state
     double sample_rate = 48000.0;
     int max_buffer_size = 512;
+    clap_id selected_bus_layout = 0;
 
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};

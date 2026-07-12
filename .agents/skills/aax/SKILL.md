@@ -179,6 +179,16 @@ the regression tests that prove the fixed behavior.
 
 ## Review Checklist
 
+### Parameter semantics and declared layouts
+
+AAX bindings consume the shared `ParamInfo::kind`, `value_labels`, and
+canonical parameter text helpers. Do not infer discreteness from `range.step`
+or compute AAX step counts as intervals: `param_value_count()` is the number of
+host values. `PluginDescriptor::supported_bus_layouts` expands to one AAX
+component per declared configuration, with a distinct derived native ID; AAX
+stem-incompatible configurations are rejected by the model instead of silently
+advertised. The SDK-free AAX model tests are required coverage for both.
+
 After any AAX-related change:
 
 1. Build with AAX disabled and confirm the repo still works normally.

@@ -148,6 +148,16 @@ TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo
     REQUIRE(p.is_bus_layout_supported(mixed));
 }
 
+TEST_CASE("PluginDescriptor preserves the legacy positional trailing f64 field",
+          "[processor][descriptor][source-compatibility]") {
+    const PluginDescriptor descriptor{
+        "Legacy", "Vendor", "com.vendor.legacy", "1.0.0",
+        PluginCategory::Effect, {{"In", 2}}, {{"Out", 2}},
+        false, false, false, false, false, 0, {}, {}, {}, true};
+    REQUIRE(descriptor.supports_f64_audio);
+    REQUIRE(descriptor.supported_bus_layouts.empty());
+}
+
 TEST_CASE("Processor::is_bus_layout_supported default policy rejects "
           "non-mono/stereo channel counts and bus-count mismatches",
           "[processor][bus-layout]") {
@@ -167,6 +177,26 @@ TEST_CASE("Processor::is_bus_layout_supported default policy rejects "
     REQUIRE(p.is_bus_layout_supported(empty_in));
     Processor::BusesLayout empty_out{{2}, {}};
     REQUIRE(p.is_bus_layout_supported(empty_out));
+}
+
+TEST_CASE("Processor::is_bus_layout_supported honors an explicit layout set",
+          "[processor][bus-layout]") {
+    class ExplicitLayouts final : public StereoEffect {
+    public:
+        PluginDescriptor descriptor() const override {
+            auto d = StereoEffect::descriptor();
+            d.supported_bus_layouts = {
+                {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+                {.inputs = {6}, .outputs = {6}, .name = "5.1"},
+            };
+            return d;
+        }
+    } p;
+
+    REQUIRE(p.is_bus_layout_supported({.inputs = {1}, .outputs = {1}}));
+    REQUIRE(p.is_bus_layout_supported({.inputs = {6}, .outputs = {6}}));
+    REQUIRE_FALSE(p.is_bus_layout_supported({.inputs = {2}, .outputs = {2}}));
+    REQUIRE_FALSE(p.is_bus_layout_supported({.inputs = {6}, .outputs = {2}}));
 }
 
 TEST_CASE("Processor::is_bus_layout_supported override can enforce a "

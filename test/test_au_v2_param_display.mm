@@ -130,12 +130,19 @@ TEST_CASE("AU v2 ParameterStringFromValue formats via to_string",
     REQUIRE(std::string(buf) == "440 Hz");
     CFRelease(sfv.outString);
 
-    // A param without to_string declines.
+    // A continuous param without a custom formatter uses canonical numeric
+    // fallback, matching the shared adapter text contract.
+    Float32 plain_value = 0.5f;
     AudioUnitParameterStringFromValue plain{};
     plain.inParamID = kPlainId;
-    plain.inValue = &value;
+    plain.inValue = &plain_value;
     REQUIRE(effect.GetProperty(kAudioUnitProperty_ParameterStringFromValue,
-                               kAudioUnitScope_Global, 0, &plain) != noErr);
+                               kAudioUnitScope_Global, 0, &plain) == noErr);
+    REQUIRE(plain.outString != nullptr);
+    REQUIRE(CFStringGetCString(plain.outString, buf, sizeof(buf),
+                               kCFStringEncodingUTF8));
+    REQUIRE(std::string(buf) == "0.50");
+    CFRelease(plain.outString);
 }
 
 TEST_CASE("AU v2 ParameterValueFromString parses via from_string",
@@ -163,10 +170,12 @@ TEST_CASE("AU v2 ParameterValueFromString parses via from_string",
     REQUIRE(std::string(buf) == "880 Hz");
     CFRelease(sfv.outString);
 
-    // A param without from_string declines.
+    // A continuous param without a custom parser uses canonical numeric
+    // fallback, matching the shared adapter text contract.
     AudioUnitParameterValueFromString plain{};
     plain.inParamID = kPlainId;
     plain.inString = CFSTR("0.5");
     REQUIRE(effect.GetProperty(kAudioUnitProperty_ParameterValueFromString,
-                               kAudioUnitScope_Global, 0, &plain) != noErr);
+                               kAudioUnitScope_Global, 0, &plain) == noErr);
+    REQUIRE_THAT(plain.outValue, WithinAbs(0.5f, 1e-6f));
 }

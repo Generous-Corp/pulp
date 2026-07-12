@@ -34,6 +34,8 @@ public:
             .name = "Mode",
             .unit = "",
             .range = {0.0f, 3.0f, 0.0f, 1.0f},
+            .kind = pulp::state::ParamKind::Enum,
+            .value_labels = {"A", "B", "C", "D"},
         });
     }
 
@@ -256,6 +258,29 @@ TEST_CASE("AAX model preserves mono sidechain layouts", "[aax][model]") {
     REQUIRE(result.definition.components[0].sidechain_channels == 1);
 }
 
+TEST_CASE("AAX model emits one component per declared bus layout", "[aax][model]") {
+    auto descriptor = descriptor_with_buses({{"Input", 2}}, {{"Output", 2}});
+    descriptor.supported_bus_layouts = {
+        {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+    };
+    ConfigurableProcessor::configure(std::move(descriptor));
+    pulp::format::aax::PluginCodes codes{
+        .manufacturer_id = pulp::format::aax::fourcc("Pulp"),
+        .product_id = pulp::format::aax::fourcc("Lays"),
+        .native_id_base = pulp::format::aax::fourcc("PLay"),
+    };
+
+    const auto result = pulp::format::aax::build_plugin_definition(
+        make_configured_processor, codes);
+    REQUIRE(result.ok);
+    REQUIRE(result.definition.components.size() == 2);
+    REQUIRE(result.definition.components[0].main_input_channels == 1);
+    REQUIRE(result.definition.components[1].main_input_channels == 2);
+    REQUIRE(result.definition.components[0].native_plugin_id !=
+            result.definition.components[1].native_plugin_id);
+}
+
 TEST_CASE("AAX model allows MIDI instruments with no audio input bus", "[aax][model]") {
     pulp::format::aax::PluginCodes codes{
         .manufacturer_id = pulp::format::aax::fourcc("Pulp"),
@@ -456,6 +481,8 @@ TEST_CASE("AAX model carries descriptor and parameter metadata into definitions"
                 .name = "Shape",
                 .unit = "",
                 .range = {0.0f, 1.0f, 0.0f, 0.25f},
+                .kind = pulp::state::ParamKind::Enum,
+                .value_labels = {"0", "1", "2", "3", "4"},
             },
         },
         128);
@@ -534,8 +561,10 @@ TEST_CASE("AAX model preserves linear, log, and enum parameter tapers", "[aax][m
             // Log/skewed frequency 20..20k, 1 kHz at the normalized midpoint.
             {.id = 2, .name = "Freq", .unit = "Hz",
              .range = pulp::state::ParamRange::with_centre(20.0f, 20000.0f, 1000.0f, 1000.0f)},
-            // Enum/discrete: 3 positions (0,1,2) via step = 1.
-            {.id = 3, .name = "Mode", .unit = "", .range = {0.0f, 2.0f, 0.0f, 1.0f}},
+            // Enum/discrete: 3 explicitly declared positions (0,1,2).
+            {.id = 3, .name = "Mode", .unit = "", .range = {0.0f, 2.0f, 0.0f, 1.0f},
+             .kind = pulp::state::ParamKind::Enum,
+             .value_labels = {"A", "B", "C"}},
         });
 
     auto result = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);

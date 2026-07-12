@@ -1036,6 +1036,14 @@ bridge code path.
 
 ## References
 
+### Author callback exception containment
+
+`ViewBridge` is the shared containment boundary for author editor callbacks.
+Creation, size and scripted-session lookup, open, close, and resize return safe
+defaults or no-op when author code throws. Format ABI callbacks must not bypass
+this boundary. Parameter text and custom state have matching containment in
+`parameter_text.hpp` and `plugin_state_io.cpp`.
+
 - `core/format/include/pulp/format/view_bridge.hpp` — public API
 - `core/format/include/pulp/format/gpu_host_select.hpp` — GPU host auto-select helper
 - `core/format/src/view_bridge.cpp` — implementation

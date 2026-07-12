@@ -3,9 +3,13 @@
 #include <string>
 #include <atomic>
 #include <functional>
+#include <optional>
+#include <string_view>
+#include <vector>
 #include <cstdint>
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 
 namespace pulp::state {
 
@@ -21,6 +25,19 @@ using ParamID = uint32_t;
 enum class ParamRate {
     ControlRate,
     AudioRate,
+};
+
+/// Author-declared parameter semantics.
+///
+/// This is deliberately independent from ParamRange::step. A continuous
+/// parameter may still snap to a grid, while integer, toggle, and enum
+/// parameters must be advertised to hosts as discrete even if their range was
+/// assembled by compatibility code that omitted a step.
+enum class ParamKind {
+    Continuous,
+    Integer,
+    Toggle,
+    Enum,
 };
 
 /// Declared semantic role of a parameter.
@@ -295,6 +312,15 @@ struct ParamInfo {
     /// block rather than firing late on the next non-bypassed block.
     bool is_trigger = false;
 
+    /// Semantic value kind. Existing declarations remain continuous until
+    /// they opt in; adapters must not infer this from the parameter name.
+    ParamKind kind = ParamKind::Continuous;
+
+    /// Ordered display/parse labels for Toggle and Enum parameters. Index zero
+    /// corresponds to range.min, index one to range.min + range.step (or +1
+    /// when the legacy range omitted a step), and so on.
+    std::vector<std::string> value_labels;
+
     /// True when this parameter should auto-reset to its default after each
     /// process block — i.e. it is an explicit trigger or carries the `Reset`
     /// designation (which is defined to behave as a trigger).
@@ -302,6 +328,55 @@ struct ParamInfo {
         return is_trigger || designation == ParamDesignation::Reset;
     }
 };
+
+inline bool is_discrete_param(const ParamInfo& info) {
+    // Semantic kind is author-declared metadata. A continuous parameter may
+    // still use range.step to quantize its plain value without being exposed
+    // to hosts as an integer/indexed control.
+    return info.kind != ParamKind::Continuous;
+}
+
+inline bool is_boolean_param(const ParamInfo& info) {
+    return info.kind == ParamKind::Toggle;
+}
+
+inline uint32_t param_value_count(const ParamInfo& info) {
+    if (!info.value_labels.empty())
+        return static_cast<uint32_t>(info.value_labels.size());
+    if (!is_discrete_param(info)) return 0;
+    const float step = info.range.step > 0.0f ? info.range.step : 1.0f;
+    const float span = std::max(0.0f, info.range.max - info.range.min);
+    return static_cast<uint32_t>(std::llround(span / step)) + 1u;
+}
+
+inline float constrain_param_value(const ParamInfo& info, float value) {
+    if (!std::isfinite(value)) return info.range.default_value;
+    value = std::clamp(value, info.range.min, info.range.max);
+    const float step = info.range.step > 0.0f
+        ? info.range.step
+        : (is_discrete_param(info) ? 1.0f : 0.0f);
+    if (step > 0.0f) {
+        value = info.range.min
+            + std::round((value - info.range.min) / step) * step;
+    }
+    return std::clamp(value, info.range.min, info.range.max);
+}
+
+inline std::optional<float> param_value_for_label(const ParamInfo& info,
+                                                   std::string_view text) {
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+        text.remove_prefix(1);
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+        text.remove_suffix(1);
+    const float step = info.range.step > 0.0f ? info.range.step : 1.0f;
+    for (std::size_t i = 0; i < info.value_labels.size(); ++i) {
+        if (text == info.value_labels[i]) {
+            return constrain_param_value(
+                info, info.range.min + static_cast<float>(i) * step);
+        }
+    }
+    return std::nullopt;
+}
 
 /// Decide whether @p info is a bypass control.
 ///

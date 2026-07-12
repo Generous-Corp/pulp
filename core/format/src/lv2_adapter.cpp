@@ -34,6 +34,7 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
     ttl << "@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .\n";
     ttl << "@prefix doap: <http://usefulinc.com/ns/doap#> .\n";
     ttl << "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n";
+    ttl << "@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
     ttl << "@prefix atom: <http://lv2plug.in/ns/ext/atom#> .\n";
     ttl << "@prefix midi: <http://lv2plug.in/ns/ext/midi#> .\n";
     ttl << "@prefix urid: <http://lv2plug.in/ns/ext/urid#> .\n";
@@ -122,7 +123,21 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
         ttl << "        lv2:default " << std::fixed << std::setprecision(4)
             << param.range.default_value << " ;\n";
         ttl << "        lv2:minimum " << param.range.min << " ;\n";
-        ttl << "        lv2:maximum " << param.range.max << "\n";
+        ttl << "        lv2:maximum " << param.range.max;
+        if (state::is_boolean_param(param)) {
+            ttl << " ;\n        lv2:portProperty lv2:toggled , lv2:integer";
+        } else if (param.kind == state::ParamKind::Enum) {
+            ttl << " ;\n        lv2:portProperty lv2:enumeration , lv2:integer";
+        } else if (param.kind == state::ParamKind::Integer) {
+            ttl << " ;\n        lv2:portProperty lv2:integer";
+        }
+        const float label_step = param.range.step > 0.0f ? param.range.step : 1.0f;
+        for (std::size_t i = 0; i < param.value_labels.size(); ++i) {
+            ttl << " ;\n        lv2:scalePoint [ rdfs:label \""
+                << param.value_labels[i] << "\" ; rdf:value "
+                << (param.range.min + static_cast<float>(i) * label_step) << " ]";
+        }
+        ttl << "\n";
         ttl << "    ]";
         port_index++;
     }

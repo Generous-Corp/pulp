@@ -58,6 +58,38 @@ ProcessBuffersT<SampleType> make_process_buffers(
     };
 }
 
+template <typename SampleType>
+ProcessBuffersT<SampleType> make_process_buffers_with_sidechain(
+    audio::BufferView<SampleType>& output,
+    const audio::BufferView<const SampleType>& input,
+    const audio::BufferView<const SampleType>& sidechain,
+    std::array<ProcessBusBufferView<const SampleType>, 2>& input_buses,
+    std::array<ProcessBusBufferView<SampleType>, 1>& output_buses) {
+    input_buses = {{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     static_cast<int>(input.num_channels()), false, !input.empty()},
+            .buffer = input,
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
+                     static_cast<int>(sidechain.num_channels()), true, !sidechain.empty()},
+            .buffer = sidechain,
+        },
+    }};
+    output_buses = {{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     static_cast<int>(output.num_channels()), false, !output.empty()},
+            .buffer = output,
+        },
+    }};
+    return ProcessBuffersT<SampleType>{
+        .inputs = ProcessBusBufferSet<const SampleType>(input_buses),
+        .outputs = ProcessBusBufferSet<SampleType>(output_buses),
+    };
+}
+
 } // namespace
 
 RenderSpeedHint render_speed_hint_for(double ratio) {
@@ -107,10 +139,33 @@ bool HeadlessHost::try_prepare(double sample_rate, int max_buffer_size,
     return true;
 }
 
+bool HeadlessHost::try_prepare_bus_layout(
+    std::size_t layout_index, double sample_rate, int max_buffer_size,
+    PrepareResourceLimits resource_limits) {
+    if (!processor_ || layout_index >= descriptor_.supported_bus_layouts.size())
+        return false;
+    const auto& layout = descriptor_.supported_bus_layouts[layout_index];
+    if (!processor_->is_bus_layout_supported({layout.inputs, layout.outputs})) return false;
+    const int input_channels = layout.inputs.empty() ? 0 : layout.inputs.front();
+    const int output_channels = layout.outputs.empty() ? 0 : layout.outputs.front();
+    return try_prepare(sample_rate, max_buffer_size, input_channels,
+                       output_channels, resource_limits);
+}
+
 void HeadlessHost::process(audio::BufferView<float>& output,
                             const audio::BufferView<const float>& input) {
     midi::MidiBuffer midi_in, midi_out;
     process(output, input, midi_in, midi_out);
+}
+
+void HeadlessHost::process_with_sidechain(
+    audio::BufferView<float>& output,
+    const audio::BufferView<const float>& input,
+    const audio::BufferView<const float>& sidechain,
+    ProcessContext context) {
+    midi::MidiBuffer midi_in, midi_out;
+    process_with_sidechain(output, input, sidechain, midi_in, midi_out,
+                           std::move(context));
 }
 
 void HeadlessHost::process(audio::BufferView<float>& output,
@@ -156,6 +211,26 @@ void HeadlessHost::process(audio::BufferView<float>& output,
     std::array<ProcessBusBufferView<float>, 1> output_buses;
     auto process_buffers =
         make_process_buffers(output, input, input_buses, output_buses);
+    pulp::runtime::ScopedNoAlloc no_alloc_guard;
+    processor_->process(process_buffers, midi_in, midi_out, context);
+}
+
+void HeadlessHost::process_with_sidechain(
+    audio::BufferView<float>& output,
+    const audio::BufferView<const float>& input,
+    const audio::BufferView<const float>& sidechain,
+    midi::MidiBuffer& midi_in,
+    midi::MidiBuffer& midi_out,
+    ProcessContext context) {
+    if (!processor_) return;
+    if (context.sample_rate <= 0.0) context.sample_rate = sample_rate_;
+    if (context.num_samples <= 0)
+        context.num_samples = static_cast<int>(output.num_samples());
+    processor_->set_param_events(nullptr);
+    std::array<ProcessBusBufferView<const float>, 2> input_buses;
+    std::array<ProcessBusBufferView<float>, 1> output_buses;
+    auto process_buffers = make_process_buffers_with_sidechain(
+        output, input, sidechain, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
     processor_->process(process_buffers, midi_in, midi_out, context);
 }
@@ -260,7 +335,27 @@ void HeadlessHost::process_f64(
 std::optional<audio::AudioFileData> HeadlessHost::render_offline(
     const audio::AudioFileData& input,
     const audio::OfflineRenderOptions& options) {
+    return render_offline_impl(input, nullptr, options);
+}
+
+std::optional<audio::AudioFileData> HeadlessHost::render_offline_with_sidechain(
+    const audio::AudioFileData& input,
+    const audio::AudioFileData& sidechain,
+    const audio::OfflineRenderOptions& options) {
+    if (input.sample_rate != sidechain.sample_rate ||
+        input.num_frames() != sidechain.num_frames() || sidechain.empty()) {
+        return std::nullopt;
+    }
+    return render_offline_impl(input, &sidechain, options);
+}
+
+std::optional<audio::AudioFileData> HeadlessHost::render_offline_impl(
+    const audio::AudioFileData& input,
+    const audio::AudioFileData* sidechain,
+    const audio::OfflineRenderOptions& options) {
     if (!processor_) return std::nullopt;
+
+    uint64_t sidechain_position = 0;
 
     return audio::offline_render(
         input,
@@ -272,6 +367,20 @@ std::optional<audio::AudioFileData> HeadlessHost::render_offline(
             audio::Buffer<float> output_block(
                 static_cast<std::size_t>(channels),
                 static_cast<std::size_t>(context.frames));
+            audio::Buffer<float> sidechain_block;
+            if (sidechain) {
+                sidechain_block.resize(sidechain->num_channels(),
+                                       static_cast<std::size_t>(context.frames));
+                for (std::size_t channel = 0; channel < sidechain->num_channels(); ++channel) {
+                    for (int frame = 0; frame < context.frames; ++frame) {
+                        const auto source = sidechain_position + static_cast<uint64_t>(frame);
+                        sidechain_block.channel(channel)[static_cast<std::size_t>(frame)] =
+                            source < sidechain->num_frames()
+                                ? sidechain->channels[channel][static_cast<std::size_t>(source)]
+                                : 0.0f;
+                    }
+                }
+            }
 
             for (int frame = 0; frame < context.frames; ++frame) {
                 for (int channel = 0; channel < channels; ++channel) {
@@ -307,8 +416,20 @@ std::optional<audio::AudioFileData> HeadlessHost::render_offline(
             process_context.position_samples =
                 static_cast<int64_t>(context.sample_position);
 
-            process(output_view, input_view, midi_in, midi_out,
-                    std::move(process_context));
+            if (sidechain) {
+                std::vector<const float*> sidechain_ptrs(sidechain->num_channels());
+                for (std::size_t channel = 0; channel < sidechain->num_channels(); ++channel)
+                    sidechain_ptrs[channel] = sidechain_block.channel(channel).data();
+                audio::BufferView<const float> sidechain_view(
+                    sidechain_ptrs.data(), sidechain_ptrs.size(),
+                    static_cast<std::size_t>(context.frames));
+                process_with_sidechain(output_view, input_view, sidechain_view,
+                                       midi_in, midi_out, std::move(process_context));
+                sidechain_position += static_cast<uint64_t>(context.frames);
+            } else {
+                process(output_view, input_view, midi_in, midi_out,
+                        std::move(process_context));
+            }
 
             for (int frame = 0; frame < context.frames; ++frame) {
                 for (int channel = 0; channel < channels; ++channel) {
