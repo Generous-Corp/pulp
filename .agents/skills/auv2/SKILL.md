@@ -282,6 +282,19 @@ into it.
 
 ## Current Gaps
 
+### Explicit parameter kinds and declared layouts
+
+`PluginDescriptor::supported_bus_layouts` is authoritative when non-empty:
+`build_channel_info` emits the unique declared main-input/main-output pairs in
+descriptor order instead of synthesizing the legacy mono/stereo ladder. Keep
+sidechain/aux widths out of `AUChannelInfo`; those remain separate elements.
+
+AUv2 display conversion routes through the shared canonical parameter-text
+helpers. Explicit `Integer`, `Toggle`, and `Enum` kinds drive indexed/boolean
+metadata; `value_labels` drive display and reverse parsing. Never add an
+adapter-local numeric fallback for toggle/enum text or invoke author callbacks
+directly—the shared helpers contain exceptions.
+
 - **AU v3 parity** for MIDI on effects is not re-audited in this pass. If you touch `core/format/src/au_adapter.mm`, confirm the AUv3 `componentType` logic in `_pulp_add_auv3` still matches the fix in `_pulp_add_au`.
 
 - **AU v2 instrument MIDI output** is still unwired: `PulpAUInstrument::Render` builds a local `midi_out` that is discarded. Mirror the effect's `kAudioUnitProperty_MIDIOutputCallback` path against `MusicDeviceBase` when an instrument needs to emit MIDI.

@@ -128,6 +128,11 @@ REAPER crash in `gui_create()` or `clap_activate()` touching a bogus
 
 ### Parameters
 
+Parameter semantics come from `ParamInfo::kind`, not heuristics over step/range.
+`value_labels` are the single display and parse table; toggle/enum host text does
+not accept arbitrary numeric fallback. Route conversion through
+`parameter_text.hpp`, which also contains author exceptions.
+
 Parameters are defined by the Processor during `define_parameters(store)`
 and enumerated to the host by the `params` extension in
 `clap_entry.hpp`:
@@ -175,6 +180,10 @@ current mod offset. Plugins that only read `store.get_value(id)` do
 **not** see host modulation.
 
 ### Audio buses (incl. sidechain)
+
+When `supported_bus_layouts` is non-empty, expose
+`CLAP_EXT_AUDIO_PORTS_CONFIG`. `audio_ports_get` and `clap_activate` must both
+use the selected widths so `PrepareContext` matches host metadata.
 
 `audio_ports` enumeration in `clap_entry.hpp` is descriptor-driven:
 `desc.input_buses` / `desc.output_buses`. **Bus 0 is always the main
