@@ -396,6 +396,59 @@ try {
           `available=${lossOk.afterRestore}, ${lossOk.nonZero} painted px`);
   }
 
+  // Gesture hygiene. A Pulp canvas is a control surface, not a document. Each of
+  // these three shipped broken and was reported from a real page: a knob drag
+  // selected page text, a drag panned the page, and focus() on pointerdown
+  // scrolled the canvas into view — yanking the page out from under the pointer
+  // mid-drag. Assert the styles AND the scroll behaviour, because the styles are
+  // what the browser consults before it decides a gesture is a scroll.
+  const hygiene = await page.evaluate(async () => {
+    // Whichever canvas the module bound to — the harness page and the deployed
+    // demo page name it differently, and this check must hold for both.
+    const c = document.querySelector("canvas#pulp-ui, canvas#pulp-ui-canvas") ||
+              document.querySelector("canvas");
+    const s = getComputedStyle(c);
+    // The canvas must be OFF-SCREEN for this to mean anything: focus() only
+    // scrolls when the element is not already in view. A spacer appended after
+    // the canvas leaves it at the top of the page and the check passes even when
+    // the bug is present — so push the canvas below the fold and scroll to top.
+    const spacer = document.createElement("div");
+    spacer.style.height = "3000px";
+    c.parentNode.insertBefore(spacer, c);
+    // The canvas is already focused from the earlier drag, and focus() on an
+    // already-focused element never scrolls — so blur it, or this check cannot
+    // fail even when the bug is present.
+    if (document.activeElement === c) c.blur();
+    window.scrollTo(0, 0);
+    const scrollable = document.documentElement.scrollHeight > window.innerHeight;
+    const r = c.getBoundingClientRect();
+    c.dispatchEvent(new PointerEvent("pointerdown", {
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      pointerId: 7, isPrimary: true, bubbles: true, cancelable: true,
+    }));
+    await new Promise((res) => requestAnimationFrame(res));
+    const scrolledY = window.scrollY;
+    // A drag across the canvas must not leave a text selection behind.
+    const selLen = (window.getSelection()?.toString() || "").length;
+    spacer.remove();
+    return {
+      touchAction: s.touchAction,
+      userSelect: s.userSelect || s.webkitUserSelect,
+      scrolledY,
+      selLen,
+      focused: document.activeElement === c,
+    };
+  });
+  check("canvas surrenders touch-action (a drag must not pan the page)",
+        hygiene.touchAction === "none", `touch-action: ${hygiene.touchAction}`);
+  check("canvas is unselectable (a knob drag must not select page text)",
+        hygiene.userSelect === "none", `user-select: ${hygiene.userSelect}`);
+  check("pointerdown focuses the canvas WITHOUT scrolling the page",
+        hygiene.focused && hygiene.scrolledY === 0,
+        `focused=${hygiene.focused} scrollY=${hygiene.scrolledY} (must be 0)`);
+  check("no text selected after a canvas gesture",
+        hygiene.selLen === 0, `${hygiene.selLen} chars selected`);
+
   console.log(`  fingerprint(FNV-1a, GPU readback) = ${probe.gpu.fingerprint}`);
 
   if (artifact) {

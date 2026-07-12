@@ -145,6 +145,18 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
     Module.__pulpWebListeners = Module.__pulpWebListeners || {};
     if (Module.__pulpWebListeners[sel]) return;
 
+    // Gesture hygiene. A Pulp canvas is a control surface, not a document: a
+    // knob drag must not select page text, pan the page, or raise the iOS
+    // touch callout, and a double-click must not select anything. preventDefault
+    // on pointerdown does NOT reliably suppress selection (WebKit starts it from
+    // the mousedown that follows), so the canvas must also be unselectable by
+    // style, and touch-action must be surrendered BEFORE the browser decides the
+    // gesture is a scroll — it consults the style, not our listeners.
+    canvas.style.touchAction = 'none';
+    canvas.style.userSelect = 'none';
+    canvas.style.webkitUserSelect = 'none';
+    canvas.style.webkitTouchCallout = 'none';
+
     var mods = function(e) {
         return (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) |
                (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
@@ -174,7 +186,12 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
         if (canvas.setPointerCapture) {
             try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
         }
-        if (canvas.focus) canvas.focus();
+        // preventScroll is load-bearing: focus() otherwise scrolls the canvas
+        // into view, so clicking a knob on a page that scrolls yanks the page
+        // out from under the pointer mid-gesture.
+        if (canvas.focus) {
+            try { canvas.focus({ preventScroll: true }); } catch (err) { canvas.focus(); }
+        }
         pointer(e, 0);
         e.preventDefault();
     };
@@ -182,6 +199,11 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
     state.pointerup = function(e) { pointer(e, 2); e.preventDefault(); };
     state.pointercancel = function(e) { pointer(e, 3); };
     state.contextmenu = function(e) { e.preventDefault(); };
+    // A double-click on a control is a gesture (reset-to-default), never a text
+    // selection; selectstart catches the drag-select the pointerdown handler's
+    // preventDefault does not.
+    state.selectstart = function(e) { e.preventDefault(); };
+    state.dblclick = function(e) { e.preventDefault(); };
     state.wheel = function(e) {
         var p = pos(e);
         _pulp_web_on_wheel(p[0], p[1], e.deltaX, e.deltaY, e.deltaMode | 0, mods(e));
@@ -203,6 +225,8 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
     canvas.addEventListener('pointerup', state.pointerup);
     canvas.addEventListener('pointercancel', state.pointercancel);
     canvas.addEventListener('contextmenu', state.contextmenu);
+    canvas.addEventListener('selectstart', state.selectstart);
+    canvas.addEventListener('dblclick', state.dblclick);
     canvas.addEventListener('wheel', state.wheel, { passive: false });
     // Key events go to the focused element; the canvas only gets them once it
     // is focusable, so make it so and still listen on the window as a backstop
@@ -236,6 +260,8 @@ EM_JS(void, pulp_web_remove_listeners, (const char* selector), {
         canvas.removeEventListener('pointerup', state.pointerup);
         canvas.removeEventListener('pointercancel', state.pointercancel);
         canvas.removeEventListener('contextmenu', state.contextmenu);
+        canvas.removeEventListener('selectstart', state.selectstart);
+        canvas.removeEventListener('dblclick', state.dblclick);
         canvas.removeEventListener('wheel', state.wheel);
     }
     window.removeEventListener('keydown', state.keydown);
