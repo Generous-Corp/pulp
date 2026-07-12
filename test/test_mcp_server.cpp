@@ -2788,3 +2788,37 @@ TEST_CASE("pulp_inspect_pending_requests returns a project's unconsumed queue",
 
     fs::remove_all(dir, ec);
 }
+
+TEST_CASE("pulp_audio_render validates its latency arguments before shelling out",
+          "[mcp][tools][audio][latency]") {
+    // Each guard below returns an actionable arg_error BEFORE the CLI is
+    // spawned, so a bad latency request costs nothing and says what is wrong.
+    // The proof itself is exercised end-to-end by the CLI shellout tests; what
+    // is asserted here is that the MCP surface refuses garbage rather than
+    // forwarding it.
+    ScopedCurrentPath cwd(repo_root());
+    int id = 90;
+    auto call = [&](const char* args) {
+        return handle_request(tool_call(std::to_string(id++), "pulp_audio_render", args));
+    };
+
+    // A negative tolerance / intrinsic / expected latency is not a delay.
+    require_contains(
+        call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_tolerance":-1})"),
+        "latency_tolerance must be an integer >= 0");
+    require_contains(
+        call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_intrinsic":-5})"),
+        "latency_intrinsic must be an integer >= 0");
+    require_contains(
+        call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,"latency_expect":-2})"),
+        "latency_expect must be an integer >= 0");
+
+    // A well-formed latency request reaches the shellout (which fails here --
+    // the plugin does not exist -- but as a well-formed JSON-RPC result, not a
+    // validation error). This is the branch that assembles the CLI flags.
+    auto ok = call(R"({"plugin":"X.clap","duration_ms":100,"latency":true,
+                       "input_signal":"noise","latency_policy":"delayed-null",
+                       "latency_tolerance":0,"latency_expect":512})");
+    require_contains(ok, R"JSON("jsonrpc":"2.0")JSON");
+    require_contains(ok, R"JSON("content")JSON");
+}

@@ -19,6 +19,8 @@
 #include <pulp/signal/spectral_frame_engine.hpp>
 
 #include <complex>
+#include <limits>
+#include <string>
 
 #include <algorithm>
 #include <memory>
@@ -745,4 +747,248 @@ TEST_CASE("Latency contract: a pinned expectation does not mask a real mismatch"
     REQUIRE(evidence.contract_outcome == LatencyContractOutcome::violated);
     // The reason must still name the audio-vs-report mismatch, not the pin.
     REQUIRE(evidence.reason.find("delayed by 512") != std::string::npos);
+}
+
+// ── The refusals, tested directly ───────────────────────────────────────────
+//
+// "It refuses rather than guesses" is the load-bearing claim of this whole
+// contract, and every branch below is one of those refusals. They are pure
+// functions over buffers, so they are exercised here directly rather than
+// through a render: hand-built inputs make the degenerate cases (NaN, an empty
+// buffer, a too-short render) expressible at all.
+//
+// Each asserts the OUTCOME and that the reason names the actual problem — a
+// refusal whose message does not tell you what to fix is barely better than a
+// wrong answer.
+
+namespace {
+
+pulp::audio::Buffer<float> filled(int channels, int frames, float value) {
+    pulp::audio::Buffer<float> b(static_cast<std::size_t>(channels),
+                                 static_cast<std::size_t>(frames));
+    for (int ch = 0; ch < channels; ++ch) {
+        auto s = b.channel(static_cast<std::size_t>(ch));
+        for (int i = 0; i < frames; ++i) s[static_cast<std::size_t>(i)] = value;
+    }
+    return b;
+}
+
+// A buffer whose only onset sits at `frame` — the marker policy's stimulus.
+pulp::audio::Buffer<float> single_marker(int channels, int frames, int frame) {
+    auto b = filled(channels, frames, 0.0f);
+    for (int ch = 0; ch < channels; ++ch)
+        b.channel(static_cast<std::size_t>(ch))[static_cast<std::size_t>(frame)] = 1.0f;
+    return b;
+}
+
+bool mentions(const LatencyEvidence& e, const char* fragment) {
+    return e.reason.find(fragment) != std::string::npos;
+}
+
+} // namespace
+
+TEST_CASE("Latency evidence: a measured delay with no report to check is inconclusive",
+          "[audio][contract][latency][refusal]") {
+    // Long enough to clear the default 8192-sample search window — otherwise the
+    // "render too short" refusal fires first and this branch is never reached.
+    const auto in = make_white_noise(1, 16384, /*seed=*/1, 0.5f);
+    const auto evidence = measure_delayed_passthrough(in, in, /*reported=*/std::nullopt);
+
+    // The delay IS measured (0) — but there is nothing to check it against, and
+    // an unchecked measurement is not a passing contract.
+    REQUIRE(evidence.measured_samples == 0);
+    REQUIRE(evidence.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(evidence.gates_failure());
+    REQUIRE(mentions(evidence, "no latency report"));
+}
+
+TEST_CASE("Latency evidence: a negative report is not a valid delay",
+          "[audio][contract][latency][refusal]") {
+    const auto in = make_white_noise(1, 16384, /*seed=*/2, 0.5f);
+    const auto evidence = measure_delayed_passthrough(in, in, /*reported=*/-64);
+
+    REQUIRE(evidence.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(mentions(evidence, "negative"));
+}
+
+TEST_CASE("Latency evidence: empty buffers cannot be measured",
+          "[audio][contract][latency][refusal]") {
+    pulp::audio::Buffer<float> empty;
+    const auto in = make_white_noise(1, 4096, /*seed=*/3, 0.5f);
+
+    const auto null_ev = measure_delayed_passthrough(empty, empty, 0);
+    REQUIRE(null_ev.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(mentions(null_ev, "empty"));
+
+    const auto marker_ev = measure_marker_offset(empty, empty, 0);
+    REQUIRE(marker_ev.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(mentions(marker_ev, "empty"));
+}
+
+TEST_CASE("Latency evidence: a NaN/Inf output is refused, not measured",
+          "[audio][contract][latency][refusal]") {
+    // A processor that has blown up produces numbers, and an evaluator that
+    // trusts them produces a confident delay drawn from garbage.
+    const auto in = make_white_noise(1, 4096, /*seed=*/4, 0.5f);
+
+    auto nan_out = in;
+    nan_out.channel(0)[100] = std::numeric_limits<float>::quiet_NaN();
+    const auto nan_ev = measure_delayed_passthrough(in, nan_out, 0);
+    REQUIRE(nan_ev.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(mentions(nan_ev, "NaN"));
+
+    auto inf_out = single_marker(1, 4096, 64);
+    inf_out.channel(0)[200] = std::numeric_limits<float>::infinity();
+    const auto inf_ev = measure_marker_offset(single_marker(1, 4096, 64), inf_out, 0);
+    REQUIRE(inf_ev.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(mentions(inf_ev, "NaN"));
+}
+
+TEST_CASE("Latency evidence: a silent stimulus cannot reveal a delay",
+          "[audio][contract][latency][refusal]") {
+    const auto silence = filled(1, 16384, 0.0f);
+    const auto evidence = measure_delayed_passthrough(silence, silence, 0);
+
+    REQUIRE(evidence.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(mentions(evidence, "silent"));
+}
+
+TEST_CASE("Latency evidence: a render too short for the search window is refused",
+          "[audio][contract][latency][refusal]") {
+    // Reserving max_delay frames for the search leaves too few to score on.
+    // Reporting a delay drawn from a handful of samples would be a guess.
+    const auto in = make_white_noise(1, 300, /*seed=*/5, 0.5f);
+    DelayedNullOptions options;
+    options.max_delay_samples = 280;  // leaves 20 frames < the 64-frame minimum
+
+    const auto evidence = measure_delayed_passthrough(in, in, 0, options);
+    REQUIRE(evidence.contract_outcome == LatencyContractOutcome::inconclusive);
+    REQUIRE(mentions(evidence, "too short"));
+    // The refusal must be actionable, not just a rejection.
+    REQUIRE(mentions(evidence, "Render longer"));
+}
+
+TEST_CASE("Latency evidence: the marker policy refuses a non-unique or absent onset",
+          "[audio][contract][latency][refusal]") {
+    SECTION("no onset in the input") {
+        const auto flat = filled(1, 2048, 0.0f);
+        const auto evidence = measure_marker_offset(flat, flat, 0);
+        REQUIRE(evidence.contract_outcome == LatencyContractOutcome::inconclusive);
+        REQUIRE(mentions(evidence, "no marker"));
+    }
+
+    SECTION("two onsets — the output onset cannot be attributed to one of them") {
+        auto two = single_marker(1, 2048, 64);
+        two.channel(0)[512] = 1.0f;
+        const auto evidence = measure_marker_offset(two, two, 0);
+        REQUIRE(evidence.contract_outcome == LatencyContractOutcome::inconclusive);
+        REQUIRE(mentions(evidence, "not unique"));
+    }
+
+    SECTION("the declared marker frame disagrees with the stimulus") {
+        // The author says the marker is at 0; it is actually at 64. Every number
+        // downstream would be off by 64, silently.
+        const auto in = single_marker(1, 2048, 64);
+        MarkerOffsetOptions options;
+        options.input_marker_frame = 0;
+
+        const auto evidence = measure_marker_offset(in, in, 0, options);
+        REQUIRE(evidence.contract_outcome == LatencyContractOutcome::inconclusive);
+        REQUIRE(mentions(evidence, "disagree"));
+    }
+}
+
+TEST_CASE("Latency evidence: the marker policy measures an onset offset",
+          "[audio][contract][latency][latency-marker]") {
+    constexpr int kMarker = 64, kDelay = 300;
+    const auto in = single_marker(1, 4096, kMarker);
+    const auto out = single_marker(1, 4096, kMarker + kDelay);
+
+    MarkerOffsetOptions options;
+    options.input_marker_frame = kMarker;
+
+    SECTION("an honest report is proven") {
+        const auto evidence = measure_marker_offset(in, out, kDelay, options);
+        INFO(latency_evidence_summary(evidence));
+        REQUIRE(evidence.measured_samples == kDelay);
+        REQUIRE(evidence.contract_outcome == LatencyContractOutcome::satisfied);
+    }
+
+    SECTION("delay the processor adds that is NOT latency is declared, not charged") {
+        // e.g. leading silence in a known IR: the onset moves, but the host must
+        // not compensate for it. Declaring it keeps it out of the latency claim.
+        constexpr int kIntrinsic = 100;
+        auto opts = options;
+        opts.intrinsic_response_offset = kIntrinsic;
+
+        const auto evidence = measure_marker_offset(in, out, kDelay - kIntrinsic, opts);
+        REQUIRE(evidence.measured_samples == kDelay - kIntrinsic);
+        REQUIRE(evidence.contract_outcome == LatencyContractOutcome::satisfied);
+    }
+
+    SECTION("a misreport is caught") {
+        const auto evidence = measure_marker_offset(in, out, kDelay + 32, options);
+        REQUIRE(evidence.contract_outcome == LatencyContractOutcome::violated);
+        REQUIRE(evidence.delta_samples == -32);
+    }
+}
+
+TEST_CASE("Latency evidence: the artifact serializes every field it claims",
+          "[audio][contract][latency][artifact]") {
+    // The JSON artifact is the agent-facing surface. A field that silently stops
+    // being written is a downstream tool reading stale or absent evidence.
+    g_config = {.true_delay = 512, .reported_delay = 512};
+    auto evidence = evaluate_reported_latency(delay_scenario("latency.artifact").render());
+    apply_expected_samples(evidence, 512);
+
+    const auto json = latency_evidence_to_json(evidence);
+    INFO(json);
+    for (const char* key : {"schema_version", "report_status", "reported_samples",
+                            "final_reported_samples", "report_observation",
+                            "observation_mode", "policy", "measurement_status",
+                            "measured_samples", "delta_samples", "tolerance_samples",
+                            "null_depth_db", "ambiguity_margin_db", "expected_samples",
+                            "contract_outcome", "gates_failure", "reason"})
+        REQUIRE(json.find(key) != std::string::npos);
+
+    // Every enum spells itself — a to_string() that falls through to a default
+    // would make the artifact lie about what happened.
+    REQUIRE(std::string(to_string(LatencyReportStatus::available)) == "available");
+    REQUIRE(std::string(to_string(LatencyReportStatus::unsupported)) == "unsupported");
+    REQUIRE(std::string(to_string(LatencyReportStatus::query_failed)) == "query_failed");
+    REQUIRE(std::string(to_string(LatencyContractOutcome::satisfied)) == "satisfied");
+    REQUIRE(std::string(to_string(LatencyContractOutcome::violated)) == "violated");
+    REQUIRE(std::string(to_string(LatencyContractOutcome::inconclusive)) == "inconclusive");
+    REQUIRE(std::string(to_string(LatencyContractOutcome::not_requested)) == "not_requested");
+    REQUIRE(std::string(to_string(LatencyPolicy::delayed_passthrough_null)) ==
+            "delayed_passthrough_null");
+    REQUIRE(std::string(to_string(LatencyPolicy::marker_offset)) == "marker_offset");
+    REQUIRE(std::string(to_string(LatencyPolicy::none)) == "none");
+    REQUIRE(std::string(to_string(LatencyMeasurementStatus::match)) == "match");
+    REQUIRE(std::string(to_string(LatencyMeasurementStatus::mismatch)) == "mismatch");
+    REQUIRE(std::string(to_string(LatencyMeasurementStatus::not_measurable)) ==
+            "not_measurable");
+    REQUIRE(std::string(to_string(LatencyMeasurementStatus::not_requested)) ==
+            "not_requested");
+    REQUIRE(std::string(to_string(LatencyReportObservation::stable)) == "stable");
+    REQUIRE(std::string(to_string(LatencyReportObservation::changed)) == "changed");
+    REQUIRE(std::string(to_string(LatencyReportObservation::unobservable)) ==
+            "unobservable");
+    REQUIRE(std::string(to_string(LatencyObservationMode::per_block_poll)) ==
+            "per_block_poll");
+    REQUIRE(std::string(to_string(LatencyObservationMode::none)) == "none");
+}
+
+TEST_CASE("Latency evidence: an unsupported report is never shown as verified",
+          "[audio][contract][latency][refusal]") {
+    // "This format cannot expose latency" is a different claim from "reports
+    // zero", and must never be laundered into a passing contract.
+    LatencyEvidence e;
+    e.report_status = LatencyReportStatus::unsupported;
+    e.reported_samples.reset();
+    apply_report_observation(e);
+
+    REQUIRE_FALSE(e.reported_samples.has_value());
+    const auto json = latency_evidence_to_json(e);
+    REQUIRE(json.find("unsupported") != std::string::npos);
 }
