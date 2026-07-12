@@ -18,6 +18,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 // Minimal test processor
@@ -336,6 +337,18 @@ TEST_CASE("PULP_CLAP_PLUGIN generates valid entry", "[clap][entry]") {
 
     clap_entry.deinit();
 }
+
+#if defined(__cpp_exceptions) && __cpp_exceptions
+TEST_CASE("canonical parameter text contains author callback exceptions",
+          "[clap][params][abi-guard]") {
+    pulp::state::ParamInfo info{
+        .id = 99, .name = "Throwing", .range = {0.0f, 1.0f, 0.5f}};
+    info.to_string = [](float) -> std::string { throw std::runtime_error("format"); };
+    info.from_string = [](const std::string&) -> float { throw std::runtime_error("parse"); };
+    REQUIRE(pulp::format::format_parameter_text(info, 0.5f).empty());
+    REQUIRE_FALSE(pulp::format::parse_parameter_text(info, "0.5").has_value());
+}
+#endif
 
 TEST_CASE("CLAP entry exposes port, note, latency and tail extensions",
           "[clap][entry][ports]") {

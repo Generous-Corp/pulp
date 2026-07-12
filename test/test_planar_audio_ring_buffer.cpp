@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/audio_stream_handoff.hpp>
+#include <pulp/audio/audio_tap.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/planar_audio_ring_buffer.hpp>
 #include <pulp/audio/published_sample_store.hpp>
@@ -180,4 +181,22 @@ TEST_CASE("PlanarAudioRingBuffer zero-channel writes do not advance audio",
     REQUIRE(ring.free_frames() == 4);
     REQUIRE(ring.stats().overrun_frames == 0);
     REQUIRE(ring.stats().dropped_write_frames == 0);
+}
+
+TEST_CASE("AudioTap drops overflow in whole aligned frames", "[audio][tap]") {
+    pulp::audio::AudioTap tap;
+    REQUIRE(tap.prepare(2, 2));
+    Buffer<float> source(2, 4);
+    for (std::size_t frame = 0; frame < 4; ++frame) {
+        source.channel(0)[frame] = static_cast<float>(frame + 1);
+        source.channel(1)[frame] = static_cast<float>(101 + frame);
+    }
+    std::vector<const float*> pointers;
+    REQUIRE(tap.push(const_view(source, pointers)) == 2);
+    REQUIRE(tap.stats().dropped_write_frames == 2);
+
+    Buffer<float> output(2, 2);
+    REQUIRE(tap.read(output.view()));
+    REQUIRE(output.channel(0)[1] == 2.0f);
+    REQUIRE(output.channel(1)[1] == 102.0f);
 }

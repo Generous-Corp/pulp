@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/detail/locale_independent_float.hpp>
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/state/parameter.hpp>
 
 #include <charconv>
@@ -15,7 +16,13 @@ namespace pulp::format {
 inline std::string format_parameter_text(const state::ParamInfo& info,
                                          float plain_value) {
     const float value = state::constrain_param_value(info, plain_value);
-    if (info.to_string) return info.to_string(value);
+    if (info.to_string) {
+        PULP_TRY {
+            return info.to_string(value);
+        } PULP_CATCH_ALL {
+            return {};
+        }
+    }
 
     if (!info.value_labels.empty()) {
         const float step = info.range.step > 0.0f ? info.range.step : 1.0f;
@@ -43,8 +50,12 @@ inline std::string format_parameter_text(const state::ParamInfo& info,
 inline std::optional<float> parse_parameter_text(const state::ParamInfo& info,
                                                  std::string_view text) {
     if (info.from_string) {
-        const float parsed = info.from_string(std::string(text));
-        if (std::isfinite(parsed)) return state::constrain_param_value(info, parsed);
+        PULP_TRY {
+            const float parsed = info.from_string(std::string(text));
+            if (std::isfinite(parsed)) return state::constrain_param_value(info, parsed);
+        } PULP_CATCH_ALL {
+            return std::nullopt;
+        }
     }
 
     if (auto labelled = state::param_value_for_label(info, text)) return labelled;

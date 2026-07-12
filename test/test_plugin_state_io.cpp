@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -60,11 +61,13 @@ public:
 
     std::vector<uint8_t> serialize_plugin_state() const override {
         ++serialize_calls;
+        if (throw_on_serialize) throw std::runtime_error("serialize");
         return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
     }
 
     bool deserialize_plugin_state(std::span<const uint8_t> data) override {
         ++deserialize_calls;
+        if (throw_on_deserialize) throw std::runtime_error("deserialize");
         last_payload.assign(data.begin(), data.end());
         const std::string payload(data.begin(), data.end());
         if (!rejected_payload.empty() && payload == rejected_payload) {
@@ -79,6 +82,8 @@ public:
     std::string rejected_payload;
     int deserialize_calls = 0;
     mutable int serialize_calls = 0;
+    bool throw_on_serialize = false;
+    bool throw_on_deserialize = false;
     std::vector<uint8_t> last_payload;
 };
 
@@ -737,3 +742,23 @@ TEST_CASE("plugin_state_io rolls back StateStore when plugin payload restore fai
             std::vector<uint8_t>({'k', 'e', 'e', 'p'}));
     REQUIRE(restored.processor.deserialize_calls == 2);
 }
+
+#if defined(__cpp_exceptions) && __cpp_exceptions
+TEST_CASE("plugin_state_io contains author callback exceptions",
+          "[format][plugin-state][abi-guard]") {
+    TestRig source;
+    source.processor.throw_on_serialize = true;
+    const auto state_only = pulp::format::plugin_state_io::serialize(
+        source.store, source.processor);
+    REQUIRE_FALSE(state_only.empty());
+
+    source.processor.throw_on_serialize = false;
+    source.processor.plugin_state = "payload";
+    const auto envelope = pulp::format::plugin_state_io::serialize(
+        source.store, source.processor);
+    TestRig restored;
+    restored.processor.throw_on_deserialize = true;
+    REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize(
+        envelope, restored.store, restored.processor));
+}
+#endif

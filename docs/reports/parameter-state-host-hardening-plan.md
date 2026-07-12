@@ -80,8 +80,8 @@ Adopt a hybrid:
 | Standalone/headless sidechain injection | Complete | Independent main/sidechain files and harness buffers; unconnected bus is silence |
 | Declarative supported bus layouts | Complete | Multiple layouts reach VST3, AU, CLAP, AAX model, standalone selection |
 | Process mode | Already present on baseline; verification pending | `ProcessMode`, render-speed hint, and offline-quality helper are propagated and tested |
-| Background tasks and AudioTap | Pending | Bounded, pre-warmed, lifetime-safe task lanes and whole-frame tap behavior |
-| ABI exception shields | Pending | Author callbacks cannot unwind across format C/Objective-C boundaries |
+| Background tasks and AudioTap | Complete | Bounded, pre-warmed, lifetime-safe task lanes and whole-frame tap behavior |
+| ABI exception shields | Complete | Author callbacks cannot unwind across format C/Objective-C boundaries |
 | Architectural review | Pending | Must-fix findings resolved |
 | Adversarial review | Pending | Correctness gaps resolved and claims revalidated |
 
@@ -135,6 +135,18 @@ Adopt a hybrid:
   `pulp-test-processor-layout-latency` focused suite PASS (15/4), and
   `pulp-test-headless` focused suite PASS (222/26). `PulpGain_AUv3` Release
   build also passes with AU channel-capability integration.
+- Added typed `BackgroundTaskLane`: fixed-capacity ordered lanes report
+  overflow, latest-value lanes coalesce bursts, each lane has one prewarmed
+  consumer (serialized per type), and separate lanes run concurrently. Focused
+  tests PASS (108 assertions/2 cases).
+- Added `AudioTap` over the existing fixed planar SPSC ring. Overflow drops
+  complete frames across every channel; focused stereo alignment test PASS
+  (6 assertions/1 case).
+- Canonical parameter format/parse, plugin custom-state save/load/rollback, and
+  ViewBridge editor creation/size/open/close/resize callbacks now contain
+  author exceptions and return safe defaults. Throwing-callback tests PASS for
+  parameter text (2 assertions) and state IO (2 assertions); `pulp-format`
+  Release build passes with editor guards.
 
 ## Review log
 

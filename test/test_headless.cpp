@@ -2,10 +2,14 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/format/background_task_lane.hpp>
 #include <pulp/format/registry.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <atomic>
+#include <chrono>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1062,4 +1066,43 @@ TEST_CASE("HeadlessHost save/load fail cleanly without a processor", "[headless]
 
     const std::vector<uint8_t> bad_state = {'N', 'O', 'P', 'E'};
     REQUIRE_FALSE(host.load_state(bad_state));
+}
+
+TEST_CASE("BackgroundTaskLane is bounded, prewarmed, and serialized",
+          "[format][background-task]") {
+    struct State { std::atomic<int> count{0}; std::atomic<int> last{0}; } state;
+    const auto handler = [](void* context, const int& value) noexcept {
+        auto& s = *static_cast<State*>(context);
+        s.last.store(value, std::memory_order_release);
+        s.count.fetch_add(1, std::memory_order_release);
+    };
+    pulp::format::BackgroundTaskLane<int, 4> lane;
+    REQUIRE(lane.start(handler, &state));
+    REQUIRE(lane.try_spawn(1));
+    REQUIRE(lane.try_spawn(2));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (state.count.load(std::memory_order_acquire) != 2 &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    lane.stop();
+    REQUIRE(state.count.load() == 2);
+    REQUIRE(state.last.load() == 2);
+    REQUIRE_FALSE(lane.try_spawn(3));
+}
+
+TEST_CASE("BackgroundTaskLane latest policy coalesces safely",
+          "[format][background-task]") {
+    std::atomic<int> last{0};
+    const auto handler = [](void* context, const int& value) noexcept {
+        static_cast<std::atomic<int>*>(context)->store(value, std::memory_order_release);
+    };
+    pulp::format::BackgroundTaskLane<int> lane;
+    REQUIRE(lane.start(handler, &last, pulp::format::BackgroundTaskPolicy::Latest));
+    for (int value = 1; value <= 100; ++value) REQUIRE(lane.try_spawn(value));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (last.load(std::memory_order_acquire) != 100 &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    lane.stop();
+    REQUIRE(last.load() == 100);
 }
