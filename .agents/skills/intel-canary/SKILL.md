@@ -30,11 +30,14 @@ live in `docs/guides/intel-support.md` — read it first.
   `universal-arch-gate` job in `release-cli.yml` (Tier 3).
 
 Note: the Tier-3 `universal-arch-gate` only *validates* a universal build — it
-publishes nothing. **As of 2026-07-11 it is ADVISORY, not blocking**: it carries
-`continue-on-error: true` and is deliberately dropped from the `release` job's
-required `if:` (a known auval "Bad Max Frames" flake was wedging every publish;
-re-blocking — fix the AU max-frames guard in `core/format/src/au_v2_adapter.cpp`,
-then restore the hard `needs`/`if` — is a tracked follow-up).
+publishes nothing. **It is BLOCKING** (required in the `release` job's `if:`). It
+was briefly advisory when it wedged the release pipeline — misdiagnosed as an
+AU-adapter "Bad Max Frames" issue. The real cause was a shell bug in the auval
+step (`auval | tee /dev/stderr | grep -q PASS` under `set -o pipefail`: `grep -q`
+exits early and SIGPIPEs `tee`, failing the step even though auval printed "AU
+VALIDATION SUCCEEDED"). auval passes both arches (Bad Max Frames is already
+rejected by `AUBase::DoRender`); the fix is capture-to-file + grep for the
+`AU VALIDATION SUCCEEDED` verdict. NEVER pipe `auval | tee | grep -q` under pipefail.
 
 The **installable** Intel artifact is a separate concern — a REQUIRED
 `darwin-x64` build+smoke leg in `release-cli.yml` (`os: macos-15-xcompile`) that

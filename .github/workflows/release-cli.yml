@@ -1008,16 +1008,14 @@ jobs:
     # only to another Apple-Silicon-capable label.
     runs-on: ${{ fromJSON(vars.PULP_UNIVERSAL_GATE_MACOS_RUNS_ON_JSON || '["macos-15"]') }}
     name: Universal + dual-arch auval gate
-    # ADVISORY (does not block the release). This brand-new gate has repeatedly
-    # wedged the ENTIRE release pipeline (0.646->0.653 all failed to publish): the
-    # arm64;x86_64 arch + code-signature validation (its core purpose) now passes
-    # after the ad-hoc re-sign fix above, but the bundled auval conformance check
-    # ("Bad Max Frames — Render should fail") surfaces a pre-existing AU-adapter
-    # issue that is orthogonal to shipping a valid universal SDK. A hard-blocking
-    # validation gate that halts every release on an unrelated conformance nit is
-    # the wrong tradeoff; keep it VISIBLE + running but non-blocking, and fix the
-    # auval gap as a tracked follow-up. Flip back to blocking once auval is clean.
-    continue-on-error: true
+    # BLOCKING. It was temporarily made advisory when it wedged the whole release
+    # pipeline (0.646->0.653), which was misdiagnosed as an AU-adapter "Bad Max
+    # Frames" conformance issue. The real cause was a shell bug in the auval step
+    # below: `auval | tee /dev/stderr | grep -q PASS` under `set -o pipefail` —
+    # `grep -q` exits on the first match and SIGPIPEs `tee`, failing the step even
+    # though auval reported "AU VALIDATION SUCCEEDED". auval itself passes both
+    # arches (incl. Bad Max Frames, which AUBase::DoRender already rejects). With
+    # the step fixed to capture-then-grep, the gate is clean and blocking again.
     timeout-minutes: 120
     env:
       BUILD_DIR: build-universal-gate
@@ -1102,27 +1100,40 @@ jobs:
           trap cleanup EXIT
           killall -KILL AudioComponentRegistrar 2>/dev/null || true
           sleep 1
+          # Capture to a file, then grep it — do NOT pipe `auval | tee | grep -q`.
+          # `grep -q` exits on the first match, which SIGPIPEs `tee`; under
+          # `set -o pipefail` that broken pipe fails the step even when auval
+          # itself printed "AU VALIDATION SUCCEEDED" (the long-standing false
+          # failure that made this gate advisory). `|| true` also ignores auval's
+          # own exit code so the authoritative check is the SUCCEEDED verdict, not
+          # a per-subtest "PASS" line (which prints even on an overall failure).
           echo "--- native (arm64) auval ---"
-          auval -v aufx PGan Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'
+          auval -v aufx PGan Pulp > auval-native.log 2>&1 || true
+          cat auval-native.log
+          grep -q 'AU VALIDATION SUCCEEDED' auval-native.log \
+            || { echo "::error::native (arm64) auval did not report SUCCEEDED"; exit 1; }
           echo "--- arch -x86_64 auval (Rosetta) ---"
-          arch -x86_64 auval -v aufx PGan Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'
+          arch -x86_64 auval -v aufx PGan Pulp > auval-x86.log 2>&1 || true
+          cat auval-x86.log
+          grep -q 'AU VALIDATION SUCCEEDED' auval-x86.log \
+            || { echo "::error::x86_64 (Rosetta) auval did not report SUCCEEDED"; exit 1; }
 
   release:
     needs: [build-cli, smoke-cli, universal-arch-gate]
     runs-on: ubuntu-latest
-    # Publish when the real cross-platform build+smoke matrices both succeed.
-    # `always()` forces evaluation even if a *needed* job did not succeed, so an
-    # advisory job can't silently skip the release via the implicit success()
-    # gate. universal-arch-gate is deliberately NOT required here — it is
-    # advisory (a known auval "Bad Max Frames" flake; re-blocking is tracked
-    # separately). If it or any future advisory leg fails, the release still
-    # ships as long as build-cli + smoke-cli are green. A genuine build/smoke
-    # failure still blocks publish.
+    # Publish when the real cross-platform build+smoke matrices AND the
+    # universal/dual-arch auval gate all succeed. `always()` forces evaluation
+    # even if a needed job did not succeed (so a failed gate can't be silently
+    # skipped by the implicit success() gate) — the explicit `== 'success'`
+    # checks are what enforce the requirement. The universal-arch-gate is
+    # required again now that its shell-bug false failure is fixed; a genuine
+    # universal-arch/signature/auval failure blocks publish.
     if: >-
       always()
       && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
       && needs.build-cli.result == 'success'
       && needs.smoke-cli.result == 'success'
+      && needs.universal-arch-gate.result == 'success'
     permissions:
       contents: write
       issues: read
