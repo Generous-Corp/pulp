@@ -70,6 +70,9 @@ using NativeViewHandle = void*;
 /// the handle changes, or in the destructor (the backstop — `on_detached()` is
 /// not fired for deeply nested nodes on host teardown).
 class NativeViewHost : public View {
+    friend class PluginViewHost;
+    friend class WindowHost;
+
 public:
     /// Returns a PNG-encoded snapshot of the native child at the requested pixel
     /// size, or empty bytes when unavailable / not ready. Called on the main
@@ -157,6 +160,12 @@ private:
     /// Detach from whichever host we attached to (uses the stored raw pointer,
     /// valid even while the host is nulling its back-reference at teardown).
     void detach_from_host();
+    /// Called by the host's BASE destructor when the host is going away while we
+    /// are still attached. Drops our back-pointer WITHOUT touching the host —
+    /// the derived object is already gone, so any call back into it (including a
+    /// virtual) would be a use-after-free. The real OS detach has already been
+    /// done by the derived destructor through its live vtable.
+    void on_host_destroyed();
     /// Detach if the host we attached to is no longer the active host.
     void reconcile_host();
     /// Push frame + clip to the host if either changed since the last push.

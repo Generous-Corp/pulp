@@ -18,6 +18,8 @@ class Canvas;
 
 namespace pulp::view {
 
+class NativeViewHost;
+
 enum class WindowType;  // Forward-declared from window_manager.hpp
 
 struct WindowOptions {
@@ -91,7 +93,10 @@ public:
     static void clear_factory();
     static bool has_factory();
 
-    virtual ~WindowHost() = default;
+    /// Out-of-line, and NOT trivial: it clears the back-pointer of every
+    /// NativeViewHost still attached to this host. See the registry at the
+    /// bottom of this class.
+    virtual ~WindowHost();
 
     // Show/hide the window
     virtual void show() = 0;
@@ -484,6 +489,26 @@ private:
     bool dirty_full_ = true;
     bool have_dirty_bounds_ = false;
     Rect dirty_bounds_{};
+
+private:
+    // ── Attached-view registry ──────────────────────────────────────────────
+    //
+    // See the equivalent block in PluginViewHost. A NativeViewHost holds a RAW,
+    // non-owning pointer back here and dereferences it in its destructor; if the
+    // host dies first, that is a use-after-free. Every built-in host nulls the
+    // back-reference in its own destructor, but that is a per-subclass
+    // convention, and `set_factory` is public API.
+    //
+    // The BASE destructor clears every still-attached view's pointer. It does
+    // NOT call detach_native_child_view() — the derived object is already gone,
+    // so that would dispatch to the base default and the real OS detach would
+    // silently not happen. Derived destructors keep doing the OS detach through
+    // their live vtable; this only makes the pointer invariant structural.
+    friend class NativeViewHost;
+    void register_native_view(NativeViewHost* view);
+    void unregister_native_view(NativeViewHost* view);
+
+    std::vector<NativeViewHost*> attached_native_views_;
 };
 
 } // namespace pulp::view

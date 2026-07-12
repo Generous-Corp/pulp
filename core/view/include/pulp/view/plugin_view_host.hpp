@@ -12,6 +12,8 @@ class GpuSurface;
 
 namespace pulp::view {
 
+class NativeViewHost;
+
 // Platform-specific handle types
 #ifdef __APPLE__
 using NativeViewHandle = void*; // NSView* (macOS) or UIView* (iOS)
@@ -57,7 +59,10 @@ public:
     static void clear_factory();
     static bool has_factory();
 
-    virtual ~PluginViewHost() = default;
+    /// Out-of-line, and NOT trivial: it clears the back-pointer of every
+    /// NativeViewHost still attached to this host. See the registry at the
+    /// bottom of this class.
+    virtual ~PluginViewHost();
 
     // Get the native view handle to pass to the DAW host. A non-null host view
     // does not by itself guarantee that this host can also embed other native
@@ -318,6 +323,32 @@ public:
     // 1.0 (CPU/stub hosts that do not scale).
     virtual void set_scale_factor(float scale) { (void)scale; }
     virtual float scale_factor() const { return 1.0f; }
+
+private:
+    // ── Attached-view registry ──────────────────────────────────────────────
+    //
+    // A NativeViewHost holds a RAW, non-owning pointer back to the host it
+    // attached to, and dereferences it in its destructor to detach. Nothing made
+    // that safe: if the host dies first, the view derefs a dead object.
+    //
+    // Every built-in Apple host happens to null the back-reference in its OWN
+    // destructor body, which works — but that is a per-subclass convention, not
+    // an invariant, and `set_factory` is public API, so a downstream host that
+    // implements native-child embedding and forgets that line gets a
+    // use-after-free on editor close. The best evidence it is easy to miss: the
+    // test fixtures are host subclasses, and they got it wrong.
+    //
+    // So the BASE destructor now clears every still-attached view's pointer. It
+    // deliberately does NOT call detach_native_child_view(): by then the derived
+    // object is gone and the call would dispatch to the base default (false), so
+    // the real OS detach would silently not happen. The derived destructors keep
+    // doing that through their live vtable; this is purely the safety net that
+    // makes the pointer invariant structural rather than conventional.
+    friend class NativeViewHost;
+    void register_native_view(NativeViewHost* view);
+    void unregister_native_view(NativeViewHost* view);
+
+    std::vector<NativeViewHost*> attached_native_views_;
 };
 
 // Install the built-in platform PluginViewHost factory (and matching headless
