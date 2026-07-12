@@ -322,7 +322,27 @@ void HeadlessHost::process_f64(
 std::optional<audio::AudioFileData> HeadlessHost::render_offline(
     const audio::AudioFileData& input,
     const audio::OfflineRenderOptions& options) {
+    return render_offline_impl(input, nullptr, options);
+}
+
+std::optional<audio::AudioFileData> HeadlessHost::render_offline_with_sidechain(
+    const audio::AudioFileData& input,
+    const audio::AudioFileData& sidechain,
+    const audio::OfflineRenderOptions& options) {
+    if (input.sample_rate != sidechain.sample_rate ||
+        input.num_frames() != sidechain.num_frames() || sidechain.empty()) {
+        return std::nullopt;
+    }
+    return render_offline_impl(input, &sidechain, options);
+}
+
+std::optional<audio::AudioFileData> HeadlessHost::render_offline_impl(
+    const audio::AudioFileData& input,
+    const audio::AudioFileData* sidechain,
+    const audio::OfflineRenderOptions& options) {
     if (!processor_) return std::nullopt;
+
+    uint64_t sidechain_position = 0;
 
     return audio::offline_render(
         input,
@@ -334,6 +354,20 @@ std::optional<audio::AudioFileData> HeadlessHost::render_offline(
             audio::Buffer<float> output_block(
                 static_cast<std::size_t>(channels),
                 static_cast<std::size_t>(context.frames));
+            audio::Buffer<float> sidechain_block;
+            if (sidechain) {
+                sidechain_block.resize(sidechain->num_channels(),
+                                       static_cast<std::size_t>(context.frames));
+                for (std::size_t channel = 0; channel < sidechain->num_channels(); ++channel) {
+                    for (int frame = 0; frame < context.frames; ++frame) {
+                        const auto source = sidechain_position + static_cast<uint64_t>(frame);
+                        sidechain_block.channel(channel)[static_cast<std::size_t>(frame)] =
+                            source < sidechain->num_frames()
+                                ? sidechain->channels[channel][static_cast<std::size_t>(source)]
+                                : 0.0f;
+                    }
+                }
+            }
 
             for (int frame = 0; frame < context.frames; ++frame) {
                 for (int channel = 0; channel < channels; ++channel) {
@@ -369,8 +403,20 @@ std::optional<audio::AudioFileData> HeadlessHost::render_offline(
             process_context.position_samples =
                 static_cast<int64_t>(context.sample_position);
 
-            process(output_view, input_view, midi_in, midi_out,
-                    std::move(process_context));
+            if (sidechain) {
+                std::vector<const float*> sidechain_ptrs(sidechain->num_channels());
+                for (std::size_t channel = 0; channel < sidechain->num_channels(); ++channel)
+                    sidechain_ptrs[channel] = sidechain_block.channel(channel).data();
+                audio::BufferView<const float> sidechain_view(
+                    sidechain_ptrs.data(), sidechain_ptrs.size(),
+                    static_cast<std::size_t>(context.frames));
+                process_with_sidechain(output_view, input_view, sidechain_view,
+                                       midi_in, midi_out, std::move(process_context));
+                sidechain_position += static_cast<uint64_t>(context.frames);
+            } else {
+                process(output_view, input_view, midi_in, midi_out,
+                        std::move(process_context));
+            }
 
             for (int frame = 0; frame < context.frames; ++frame) {
                 for (int channel = 0; channel < channels; ++channel) {

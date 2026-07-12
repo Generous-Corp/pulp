@@ -161,6 +161,14 @@ public:
         const audio::AudioFileData& input,
         const audio::OfflineRenderOptions& options = {});
 
+    /// Offline render with a separate sidechain file. Sample rates and frame
+    /// counts must match; channel widths may differ. Tail frames receive a
+    /// silent sidechain after the supplied file ends.
+    std::optional<audio::AudioFileData> render_offline_with_sidechain(
+        const audio::AudioFileData& input,
+        const audio::AudioFileData& sidechain,
+        const audio::OfflineRenderOptions& options = {});
+
     /// Release processing resources. Safe to call multiple times.
     void release();
 
@@ -197,6 +205,10 @@ public:
     bool load_state(std::span<const uint8_t> data);
 
 private:
+    std::optional<audio::AudioFileData> render_offline_impl(
+        const audio::AudioFileData& input,
+        const audio::AudioFileData* sidechain,
+        const audio::OfflineRenderOptions& options);
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
     // may read it from its destructor or from a worker thread that destructor is

@@ -77,7 +77,7 @@ Adopt a hybrid:
 |---|---|---|
 | Parameter semantics and canonical text conversion | Core adapter work complete; broader validation pending | All adapters consume the shared model; enum/toggle/stepped/text tests pass |
 | Published custom-state snapshots | Complete | Host saves copy immutable published bytes; large-state test does no serialization in save callback |
-| Standalone/headless sidechain injection | Headless block injection complete; offline-file surface pending | Independent main/sidechain files and harness buffers; unconnected bus is silence |
+| Standalone/headless sidechain injection | Complete | Independent main/sidechain files and harness buffers; unconnected bus is silence |
 | Declarative supported bus layouts | Pending | Multiple layouts reach VST3, AU, CLAP, AAX model, standalone selection |
 | Process mode | Already present on baseline; verification pending | `ProcessMode`, render-speed hint, and offline-quality helper are propagated and tested |
 | Background tasks and AudioTap | Pending | Bounded, pre-warmed, lifetime-safe task lanes and whole-frame tap behavior |
@@ -121,6 +121,10 @@ Adopt a hybrid:
   main/sidechain buffers reach separate process buses without aliasing; the
   ordinary no-sidechain path clears the sidechain view instead of retaining a
   stale bus from the previous block.
+- `pulp-test-headless`: expanded PASS, 225 assertions in 27 test cases. Offline
+  rendering accepts a separate sidechain `AudioFileData`, preserves independent
+  widths and block schedules, rejects mismatched sample rates/frame counts, and
+  supplies silence beyond sidechain data during a rendered tail.
 
 ## Review log
 

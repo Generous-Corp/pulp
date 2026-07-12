@@ -304,6 +304,25 @@ TEST_CASE("HeadlessHost injects sidechain as an independent bus", "[headless][si
     REQUIRE_FALSE(probe->saw_sidechain);
 }
 
+TEST_CASE("HeadlessHost offline render drives an independent sidechain file",
+          "[headless][sidechain][offline]") {
+    pulp::format::HeadlessHost host(create_sidechain_probe);
+    host.prepare(48000.0, 3, 1, 1);
+    pulp::audio::AudioFileData main{{{1.0f, 2.0f, 3.0f, 4.0f}}, 48000};
+    pulp::audio::AudioFileData side{{{0.1f, 0.2f, 0.3f, 0.4f}}, 48000};
+    pulp::audio::OfflineRenderOptions options;
+    options.block_size_schedule = {3, 1};
+
+    const auto rendered = host.render_offline_with_sidechain(main, side, options);
+    REQUIRE(rendered.has_value());
+    REQUIRE(rendered->num_frames() == 4);
+    for (std::size_t i = 0; i < 4; ++i)
+        REQUIRE_THAT(rendered->channels[0][i], WithinAbs(2.0 * (i + 1), 0.0001));
+
+    side.sample_rate = 44100;
+    REQUIRE_FALSE(host.render_offline_with_sidechain(main, side, options).has_value());
+}
+
 TEST_CASE("HeadlessHost creates processor", "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
     REQUIRE(host.descriptor().name == "TestGain");
