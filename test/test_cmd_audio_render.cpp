@@ -379,4 +379,21 @@ TEST_CASE("audio render parser: the latency probe refuses a stimulus that cannot
     REQUIRE(marker_probe.impulse_frame == 32);
     REQUIRE(marker_probe.latency_intrinsic == 100);
     REQUIRE(marker_probe.latency_tolerance == 2);
+
+    // An expected value pins the latency the plugin is SUPPOSED to have, which
+    // is only meaningful once a proof is being drawn at all.
+    REQUIRE_FALSE(with({"--input-signal", "noise", "--latency-expect", "512"}).ok);
+
+    const auto pinned = with({"--input-signal", "noise", "--latency-report", "l.json",
+                              "--latency-expect", "512"});
+    REQUIRE(pinned.ok);
+    REQUIRE(pinned.latency_expect == 512);
+
+    // Absent by default — the pin is opt-in, and zero is a real expectation, not
+    // the same thing as "not asked for".
+    REQUIRE_FALSE(null_probe.latency_expect.has_value());
+    const auto pinned_zero = with({"--input-signal", "noise", "--latency-report",
+                                   "l.json", "--latency-expect", "0"});
+    REQUIRE(pinned_zero.ok);
+    REQUIRE(pinned_zero.latency_expect == 0);
 }

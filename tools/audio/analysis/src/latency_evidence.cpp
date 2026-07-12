@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <iomanip>
 #include <sstream>
 #include <vector>
 
@@ -199,7 +200,9 @@ LatencyEvidence measure_delayed_passthrough(const pulp::audio::Buffer<float>& in
             << options.null_floor_db
             << " dB). The delayed-null policy requires the processor to be in a "
                "declared identity / bypass / fully-dry mode.";
-        return not_measurable(kPolicy, why.str(), reported_samples);
+        auto e = not_measurable(kPolicy, why.str(), reported_samples);
+        e.null_depth_db = best_db;
+        return e;
     }
 
     // Could a DIFFERENT delay explain the output just as well? A periodic
@@ -224,11 +227,16 @@ LatencyEvidence measure_delayed_passthrough(const pulp::audio::Buffer<float>& in
             << " dB, within the " << options.ambiguity_margin_db
             << " dB margin. A periodic stimulus cannot pin a delay down — use a "
                "broadband, aperiodic one (an impulse or noise).";
-        return not_measurable(kPolicy, why.str(), reported_samples);
+        auto e = not_measurable(kPolicy, why.str(), reported_samples);
+        e.null_depth_db = best_db;
+        e.ambiguity_margin_db = competitor_db - best_db;
+        return e;
     }
 
     LatencyEvidence e;
     e.policy = kPolicy;
+    e.null_depth_db = best_db;
+    if (competitor_delay >= 0) e.ambiguity_margin_db = competitor_db - best_db;
     settle_verdict(e, best_delay, reported_samples, options.tolerance_samples);
     return e;
 }
@@ -355,6 +363,36 @@ LatencyEvidence& apply_report_observation(LatencyEvidence& evidence) {
     return evidence;
 }
 
+LatencyEvidence& apply_expected_samples(LatencyEvidence& evidence, int expected,
+                                        std::int64_t tolerance_samples) {
+    evidence.expected_samples = expected;
+
+    // Only meaningful once the report itself is trustworthy. If the audio and
+    // the report already disagree (or could not be compared), that finding is
+    // the more fundamental one — do not overwrite it with a value complaint.
+    if (evidence.contract_outcome != LatencyContractOutcome::satisfied)
+        return evidence;
+
+    // Compare against the REPORTED value, not the measured one: at this point
+    // they agree within tolerance, and the report is what the host acts on.
+    if (!evidence.reported_samples.has_value()) return evidence;
+
+    const std::int64_t drift = static_cast<std::int64_t>(*evidence.reported_samples) -
+                               static_cast<std::int64_t>(expected);
+    if (std::llabs(static_cast<long long>(drift)) <= tolerance_samples)
+        return evidence;
+
+    evidence.contract_outcome = LatencyContractOutcome::violated;
+    std::ostringstream why;
+    why << "latency is self-consistent at " << *evidence.reported_samples
+        << " samples, but the expected value is " << expected << " (drift "
+        << (drift > 0 ? "+" : "") << drift
+        << "). The processor and the host agree with each other — the delay "
+           "itself changed.";
+    evidence.reason = why.str();
+    return evidence;
+}
+
 // ── Serialization ───────────────────────────────────────────────────────────
 
 const char* to_string(LatencyReportStatus status) {
@@ -437,6 +475,13 @@ std::string latency_evidence_to_json(const LatencyEvidence& evidence) {
     if (evidence.delta_samples)
         root.setMember("delta_samples", *evidence.delta_samples);
     root.setMember("tolerance_samples", evidence.tolerance_samples);
+    if (evidence.null_depth_db)
+        root.setMember("null_depth_db", *evidence.null_depth_db);
+    if (evidence.ambiguity_margin_db)
+        root.setMember("ambiguity_margin_db", *evidence.ambiguity_margin_db);
+    if (evidence.expected_samples)
+        root.setMember("expected_samples",
+                       static_cast<std::int64_t>(*evidence.expected_samples));
 
     root.setMember("contract_outcome", to_string(evidence.contract_outcome));
     root.setMember("gates_failure", evidence.gates_failure());
@@ -459,6 +504,14 @@ std::string latency_evidence_summary(const LatencyEvidence& evidence) {
         if (evidence.delta_samples)
             s << " (delta " << (*evidence.delta_samples > 0 ? "+" : "")
               << *evidence.delta_samples << ")";
+    }
+
+    if (evidence.null_depth_db) {
+        s << " [null " << std::fixed << std::setprecision(1)
+          << *evidence.null_depth_db << " dB";
+        if (evidence.ambiguity_margin_db)
+            s << ", margin " << *evidence.ambiguity_margin_db << " dB";
+        s << "]";
     }
 
     s << " — " << to_string(evidence.contract_outcome);

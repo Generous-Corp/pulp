@@ -86,7 +86,10 @@ void print_render_usage() {
         "                                 For plugins that reshape the signal.\n"
         "  --latency-tolerance <n>      Samples of drift allowed (default: 0)\n"
         "  --latency-intrinsic <n>      Delay the plugin adds that is NOT latency (leading\n"
-        "                               silence in a known IR). --latency-policy marker only.\n\n"
+        "                               silence in a known IR). --latency-policy marker only.\n"
+        "  --latency-expect <n>         Pin the INTENDED latency. Without it the proof is\n"
+        "                               self-consistency only -- a plugin whose true delay\n"
+        "                               AND report both moved together still passes.\n\n"
         "  Example (a bypassed plugin must report its true delay):\n"
         "    pulp audio render --plugin My.clap --out /tmp/o.wav --duration-ms 500 \\\n"
         "        --input-signal noise --param 3=1 --latency-report /tmp/latency.json\n";
@@ -431,6 +434,13 @@ int cmd_audio_render(const std::vector<std::string>& args) {
             : latency_changed  ? analysis::LatencyReportObservation::changed
                                : analysis::LatencyReportObservation::stable;
         analysis::apply_report_observation(evidence);
+
+        // Pin the intended VALUE too, when the caller declared one. Without this
+        // the proof is self-consistency only: a plugin whose true delay and whose
+        // report both moved together still passes.
+        if (req.latency_expect)
+            analysis::apply_expected_samples(evidence, *req.latency_expect,
+                                             req.latency_tolerance);
 
         std::ofstream report(req.latency_report_path, std::ios::binary | std::ios::trunc);
         if (!report) {

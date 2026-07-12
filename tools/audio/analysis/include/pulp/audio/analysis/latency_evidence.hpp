@@ -126,6 +126,42 @@ struct LatencyEvidence {
     /// How far |delta| may stray and still count as a match.
     std::int64_t tolerance_samples = 0;
 
+    // ── How much to trust the measurement ───────────────────────────────────
+    //
+    // Both are populated by the delayed-null policy only; the marker policy
+    // finds an onset rather than nulling, so neither number exists for it.
+    //
+    // They are the difference between "the measurement passed" and "the
+    // measurement passed, and here is how far it was from being a coin flip."
+    // An agent reading the artifact should treat a 2 dB margin as a hair's
+    // breadth from ambiguous even though it technically cleared the bar.
+
+    /// Residual level at the winning delay, relative to the input, in dB. How
+    /// completely the delayed input explains the output. A pure delay line
+    /// nulls to the float noise floor; DSP that reconstructs the signal (an
+    /// STFT, an oversampler) leaves a real residual and nulls less deeply.
+    std::optional<double> null_depth_db;
+
+    /// How much worse the best COMPETING delay nulled, in dB — the winner's
+    /// margin of victory. Large means the delay is pinned; small means another
+    /// delay explained the audio nearly as well, and the answer is a guess
+    /// dressed up as a fact. Below `DelayedNullOptions::ambiguity_margin_db`
+    /// the measurement is refused outright as `not_measurable`.
+    std::optional<double> ambiguity_margin_db;
+
+    /// An optional INTENDED latency, independent of what the processor reports.
+    ///
+    /// The rest of this struct proves self-consistency: the audio is delayed by
+    /// exactly as much as the processor claims. That is the property a host
+    /// cares about — a processor that reports 4096 and delays 4096 is compensated
+    /// correctly and sounds right.
+    ///
+    /// But it is not the only thing that can regress. Someone doubles an FFT
+    /// size, the true delay doubles, `latency_samples()` dutifully reports the
+    /// new value, and self-consistency still holds — while your plugin quietly
+    /// grew 43 ms of latency. Set this to pin the value itself and catch that.
+    std::optional<int> expected_samples;
+
     // ── The verdict ─────────────────────────────────────────────────────────
     LatencyContractOutcome contract_outcome = LatencyContractOutcome::not_requested;
     /// Why the outcome is inconclusive, or why the measurement was not possible.
@@ -213,6 +249,15 @@ LatencyEvidence measure_marker_offset(const pulp::audio::Buffer<float>& input,
 /// back. Call this after a measurement to demote such a result to
 /// `inconclusive`.
 LatencyEvidence& apply_report_observation(LatencyEvidence& evidence);
+
+/// Additionally require the latency to equal `expected`, pinning the value
+/// rather than only its self-consistency. Violates a passing result whose
+/// reported latency is not the intended one. Call after a measurement.
+///
+/// Use it to regression-pin a known-good latency: it is the only thing that
+/// catches a processor whose true delay AND report both moved together.
+LatencyEvidence& apply_expected_samples(LatencyEvidence& evidence, int expected,
+                                        std::int64_t tolerance_samples = 0);
 
 // ── Serialization ───────────────────────────────────────────────────────────
 // One schema, shared by tests, the CLI, and MCP, so a verdict cannot drift

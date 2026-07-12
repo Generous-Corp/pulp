@@ -630,6 +630,15 @@ by the number the plugin reports, and nothing else checks it. `RenderScenario`
 collects the report facts on **every** render (`ScenarioResult::latency`), so a
 contract can ask for the proof without re-rendering.
 
+**Do not reach for this on a processor that has no latency.** Most don't: of
+Pulp's 24 example plugins, three override `latency_samples()` and only two ever
+report nonzero. Gain, EQ, compressors without lookahead, waveshapers, delay
+*effects*, synths, and samplers all correctly report zero, and rendering them to
+prove `0 == 0` is ceremony. This is for DSP whose latency is *derived* — FFT
+size, partition scheme, lookahead window, oversampling ratio — because that is
+the number a refactor silently changes. User-facing rationale, including when
+NOT to use it: `docs/guides/latency-proof.md`.
+
 The schema and both evaluators live in `pulp::audio-analysis`
 (`latency_evidence.hpp`) as pure functions over buffers, so the test harness, the
 `pulp` CLI, and MCP all produce the same verdict. Add a policy there, never in
@@ -658,3 +667,26 @@ claim, never a silent pass. Expect a refusal when:
   because a host notified mid-render has already acted on the intermediate number.
   (Consuming the flag is safe here: a headless render has no adapter to steal it
   from.)
+
+**Read the confidence numbers, not just the verdict.** The evidence carries
+`null_depth_db` (how completely the delayed input explained the output) and
+`ambiguity_margin_db` (how much worse the best competing delay scored). Measured
+references: a pure delay line nulls to the -200 dB floor with a 203 dB margin;
+`SpectralFrameEngine` in identity mode — real STFT, real overlap-add rounding —
+nulls to -137 dB with a 140 dB margin. Both are nowhere near the -60 dB floor or
+the 12 dB ambiguity bar. A pass with a *small* margin technically cleared the bar
+and is still a coin flip waiting to happen — treat it as a finding and say so.
+
+**A pass proves self-consistency, not the right value.** The audio is delayed by
+exactly what the processor reports — which is all the host needs, and is why it
+sounds correct. It does NOT prove the latency is what it should be: double an FFT
+size and the processor honestly reports its new, larger delay, passes the
+contract, and has silently added 43 ms to every session. `apply_expected_samples`
+(C++) / `--latency-expect` (CLI) / `latency_expect` (MCP) pins the intended value
+so that drift fails too. It never masks a real mismatch — an audio-vs-report
+disagreement is still reported as *that*.
+
+**Dogfood reference.** `test/test_latency_contract.cpp` proves the contract
+against `SpectralFrameEngine` (true latency `fft_size + analysis_hop` = 2560),
+not just against a delay line, and a companion case deliberately misreports by
+one analysis hop to confirm the catch. Copy that shape when covering real DSP.

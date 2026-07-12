@@ -9,6 +9,7 @@
 // device.
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -87,6 +88,10 @@ struct ParseAudioRenderResult {
     /// `--latency-intrinsic <n>`: delay the plugin adds for reasons that are not
     /// latency (leading silence in a known IR). Marker policy only.
     std::int64_t latency_intrinsic = 0;
+    /// `--latency-expect <n>`: the INTENDED latency, pinned independently of what
+    /// the plugin reports. Without it the proof is self-consistency only — a
+    /// plugin whose true delay AND report both moved together still passes.
+    std::optional<int> latency_expect;
 
     std::vector<AudioRenderParam> params;
     std::vector<AudioRenderMidi> midi;

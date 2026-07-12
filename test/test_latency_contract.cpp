@@ -16,6 +16,9 @@
 #include "support/audio_contracts.hpp"
 
 #include <pulp/format/processor.hpp>
+#include <pulp/signal/spectral_frame_engine.hpp>
+
+#include <complex>
 
 #include <algorithm>
 #include <memory>
@@ -547,4 +550,199 @@ TEST_CASE("Latency contract: evidence serializes with a stable schema",
     REQUIRE(json.find("\"delta_samples\": 1") != std::string::npos);
     REQUIRE(json.find("\"contract_outcome\": \"violated\"") != std::string::npos);
     REQUIRE(json.find("\"gates_failure\": true") != std::string::npos);
+}
+
+// ── Dogfood: the contract against REAL DSP, not just the fixture above ──────
+//
+// The delay-line fixture proves the evaluators are correct. It does not prove
+// they work on DSP that genuinely buffers, reshapes, and reconstructs a signal.
+// SpectralFrameEngine does: it is Pulp's STFT analysis→resynthesis engine, and
+// its latency is fft_size + analysis_hop — a real, nontrivial, easy-to-get-wrong
+// number (2560 samples here, 53 ms at 48 kHz).
+//
+// This is also the archetype the whole contract exists for. Bump the FFT size
+// from 2048 to 4096 and the true latency moves by 2048 samples; if the reported
+// constant does not move with it, the plugin misaligns against every other track
+// in the session and nothing errors.
+
+namespace {
+
+constexpr int kFftSize = 2048;
+constexpr int kAnalysisHop = 512;
+constexpr int kSpectralLatency = kFftSize + kAnalysisHop;  // 2560
+
+// Report `kSpectralLatency + g_spectral_latency_error` so a test can make this
+// processor misreport by a known amount without touching the DSP.
+int g_spectral_latency_error = 0;
+
+// An identity spectral processor: analyze → (touch nothing) → resynthesize.
+// The output is the input, delayed by the engine's latency and reconstructed
+// through the STFT. Not bit-exact — overlap-add reconstruction is exact only up
+// to float rounding, which is exactly why the contract has a null FLOOR rather
+// than demanding a perfect null.
+class SpectralIdentityProcessor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "SpectralIdentity",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.test.spectral-identity",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Audio In", 2}},
+            .output_buses = {{"Audio Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+
+    void prepare(const pulp::format::PrepareContext& context) override {
+        pulp::signal::SpectralFrameEngineConfig config;
+        config.fft_size = kFftSize;
+        config.analysis_hop = kAnalysisHop;
+        config.channels = static_cast<int>(context.output_channels);
+        config.max_block = std::max(context.max_buffer_size, 4096);
+        engine_.prepare(config);
+        reported_ = engine_.latency_samples() + g_spectral_latency_error;
+    }
+
+    int latency_samples() const override { return reported_; }
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        const auto n = static_cast<int>(out.num_samples());
+        const auto channels = std::min(out.num_channels(), in.num_channels());
+
+        in_ptrs_.resize(channels);
+        out_ptrs_.resize(channels);
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            in_ptrs_[ch] = in.channel_ptr(ch);
+            out_ptrs_[ch] = out.channel_ptr(ch);
+        }
+        // Identity: hand every frame straight back untouched.
+        engine_.process(in_ptrs_.data(), out_ptrs_.data(), n,
+                        [](std::complex<float>* const*, int) {});
+    }
+
+private:
+    pulp::signal::SpectralFrameEngine engine_;
+    std::vector<const float*> in_ptrs_;
+    std::vector<float*> out_ptrs_;
+    int reported_ = 0;
+};
+
+std::unique_ptr<pulp::format::Processor> create_spectral_identity() {
+    return std::make_unique<SpectralIdentityProcessor>();
+}
+
+RenderScenario spectral_scenario(const char* name) {
+    return RenderScenario(create_spectral_identity)
+        .name(name)
+        .sample_rate(kSampleRate)
+        .block_size(512)
+        // Long enough to clear the 2560-sample latency AND leave a comfortable
+        // window past the delay search. A too-short render is refused, not
+        // silently mismeasured.
+        .duration_frames(32768)
+        .input(make_white_noise(2, 32768, /*seed=*/0x5EC7A, 0.5f));
+}
+
+// The engine's WOLA reconstruction is exact only up to float rounding, so the
+// residual at the true delay does not reach zero. Measured: it nulls to
+// -137.1 dB and beats its nearest competing delay by 140.0 dB (a pure delay
+// line, for contrast, nulls to the -200 dB floor with a 202.9 dB margin). Both
+// clear the default -60 dB null floor and 12 dB ambiguity margin with room to
+// spare, which is the point: the thresholds are set for real DSP, not for
+// bit-exact wires.
+DelayedNullOptions spectral_options() {
+    DelayedNullOptions options;
+    options.max_delay_samples = 4096;  // must exceed the 2560 we expect
+    return options;
+}
+
+} // namespace
+
+TEST_CASE("Latency contract: real spectral DSP proves its own reported latency",
+          "[audio][contract][latency][spectral]") {
+    g_spectral_latency_error = 0;
+
+    const auto evidence = evaluate_reported_latency(
+        spectral_scenario("latency.spectral-identity").render(), spectral_options());
+
+    INFO(latency_evidence_summary(evidence));
+    REQUIRE(evidence.reported_samples == kSpectralLatency);   // 2560
+    REQUIRE(evidence.measured_samples == kSpectralLatency);   // and the audio agrees
+    REQUIRE(evidence.contract_outcome == LatencyContractOutcome::satisfied);
+
+    // Guard the confidence figures the docs quote. Real STFT DSP nulls nowhere
+    // near the -60 dB floor -- it nulls into the float noise floor -- and it is
+    // not a close call between candidate delays. If a change to the engine's
+    // reconstruction ever makes this a near-miss, that is a finding, and this
+    // test is where it surfaces.
+    REQUIRE(evidence.null_depth_db);
+    REQUIRE(*evidence.null_depth_db < -100.0);
+    REQUIRE(evidence.ambiguity_margin_db);
+    REQUIRE(*evidence.ambiguity_margin_db > 50.0);
+}
+
+TEST_CASE("Latency contract: a spectral processor that misreports is caught",
+          "[audio][contract][latency][spectral]") {
+    // The bug this whole contract exists for: someone changed the FFT geometry
+    // and the reported constant did not follow. Simulate the report lagging the
+    // true delay by one analysis hop.
+    g_spectral_latency_error = -kAnalysisHop;
+
+    const auto evidence = evaluate_reported_latency(
+        spectral_scenario("latency.spectral-misreport").render(), spectral_options());
+    g_spectral_latency_error = 0;
+
+    INFO(latency_evidence_summary(evidence));
+    REQUIRE(evidence.reported_samples == kSpectralLatency - kAnalysisHop);
+    REQUIRE(evidence.measured_samples == kSpectralLatency);
+    REQUIRE(evidence.delta_samples == kAnalysisHop);
+    REQUIRE(evidence.contract_outcome == LatencyContractOutcome::violated);
+}
+
+// ── Pinning the intended VALUE, not just self-consistency ───────────────────
+
+TEST_CASE("Latency contract: expected_samples catches a delay that grew honestly",
+          "[audio][contract][latency]") {
+    // The gap self-consistency cannot see. A processor whose true delay AND
+    // whose report both moved together is still perfectly compensated by the
+    // host -- it SOUNDS right -- but the plugin quietly got slower. Only a
+    // pinned expectation catches that.
+    g_config = {.true_delay = 1024, .reported_delay = 1024};
+    auto result = delay_scenario("latency.grew").render();
+
+    auto honest = evaluate_reported_latency(result);
+    REQUIRE(honest.contract_outcome == LatencyContractOutcome::satisfied);
+
+    // Same evidence, now pinned to the latency this processor is SUPPOSED to have.
+    apply_expected_samples(honest, /*expected=*/512);
+    INFO(latency_evidence_summary(honest));
+    REQUIRE(honest.expected_samples == 512);
+    REQUIRE(honest.contract_outcome == LatencyContractOutcome::violated);
+    REQUIRE(honest.reason.find("self-consistent") != std::string::npos);
+
+    // And it does not fire when the value is what it should be.
+    auto pinned_ok = evaluate_reported_latency(result);
+    apply_expected_samples(pinned_ok, /*expected=*/1024);
+    REQUIRE(pinned_ok.contract_outcome == LatencyContractOutcome::satisfied);
+}
+
+TEST_CASE("Latency contract: a pinned expectation does not mask a real mismatch",
+          "[audio][contract][latency]") {
+    // If the audio and the report already disagree, THAT is the more fundamental
+    // finding. Pinning a value must not overwrite it with a value complaint.
+    g_config = {.true_delay = 512, .reported_delay = 256};
+
+    auto evidence = evaluate_reported_latency(delay_scenario("latency.pin-vs-mismatch").render());
+    apply_expected_samples(evidence, /*expected=*/256);  // matches the (wrong) report
+
+    INFO(latency_evidence_summary(evidence));
+    REQUIRE(evidence.contract_outcome == LatencyContractOutcome::violated);
+    // The reason must still name the audio-vs-report mismatch, not the pin.
+    REQUIRE(evidence.reason.find("delayed by 512") != std::string::npos);
 }

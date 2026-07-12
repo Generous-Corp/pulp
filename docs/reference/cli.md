@@ -1563,6 +1563,10 @@ The `validate` subcommands are the offline analysis CLI over captured audio. The
 
 #### Proving reported latency (`--latency-report`)
 
+> For when to reach for this, when *not* to, and how far to trust the numbers,
+> see the [latency-proof guide](../guides/latency-proof.md). Most plugins have
+> zero latency and do not need any of this.
+
 A plugin with nonzero latency tells the host a number, and the host slides the
 whole track by it to keep everything in the session aligned. Nothing checks the
 number. When the true delay and the reported delay drift apart — an FFT size
@@ -1608,6 +1612,23 @@ when the claim is disproven *or* when it was asked for and could not be proven �
 an unprovable claim is a failed claim. Gate on the exit code, not on whether the
 file appeared. The same evidence, with the same verdict, is what
 `pulp_audio_render` returns over MCP with `latency: true`.
+
+**How much to trust a pass.** The artifact carries the two numbers the verdict
+was drawn from: `null_depth_db` (how completely the delayed input explained the
+output — a pure delay line reaches the -200 dB floor; an STFT that reconstructs
+the signal nulls to about -137 dB) and `ambiguity_margin_db` (how much worse the
+best *competing* delay scored). A pass with a 2 dB margin cleared the bar but is
+one small change away from being a coin flip; read the numbers, don't just read
+the verdict.
+
+**Pinning the intended value (`--latency-expect <n>`).** By default the proof is
+*self-consistency*: the audio is delayed by exactly what the plugin reports,
+which is all the host needs. It will not catch a plugin whose true delay **and**
+report both grew together — someone doubles an FFT size and the plugin honestly
+reports its new, larger latency. It is correctly compensated; it just got slower.
+`--latency-expect` pins the value the plugin is *supposed* to have, so that drift
+fails too. It never masks a real mismatch: if the audio and the report already
+disagree, that is what you are told.
 
 `pulp audio scope` is the lower-level sample-window view. Live mode wraps
 `pulp run --audio-scope-json` and may open the audio device; use

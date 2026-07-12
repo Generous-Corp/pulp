@@ -1094,6 +1094,11 @@ std::string handle_audio_render(const std::string& params_json) {
             if (intrinsic < 0) return arg_error("Error: latency_intrinsic must be an integer >= 0");
             cmd += " --latency-intrinsic " + std::to_string(intrinsic);
         }
+        if (has("latency_expect")) {
+            const int expect = extract_int(params_json, "latency_expect", -1);
+            if (expect < 0) return arg_error("Error: latency_expect must be an integer >= 0");
+            cmd += " --latency-expect " + std::to_string(expect);
+        }
     }
     cmd += flags;
     // Read the manifest from a FILE (like audio scope) so stderr — plugin load /
