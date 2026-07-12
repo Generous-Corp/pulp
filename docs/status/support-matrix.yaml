@@ -49,10 +49,14 @@ platforms:
       (core/view/platform/web/ + core/render/src/skia_surface_ganesh.cpp), driven by
       a requestAnimationFrame render loop, with DOM pointer/key events translated
       into the View tree. The UI module is DSP-free and mounts against BOTH ABIs
-      through the web player's HostAdapter seam. DSP on the web is CPU-only — no
-      GPU-compute code compiles to wasm (the Skia wasm slice is Ganesh/WebGL2, which
-      has no compute shaders), so there is no GPU audio in the browser. File-backed
-      loaders and native editors are compiled out (PULP_WASM / PULP_HEADLESS).
+      through the web player's HostAdapter seam. DSP on the web is CPU-only TODAY:
+      no GPU-compute code compiles to wasm yet. That is a gap, not a browser limit —
+      the RENDER path uses WebGL2 (the Skia wasm slice is Ganesh), which has no
+      compute shaders, but browser WebGPU does, and GPU DSP is reachable by running
+      the compute in a Worker (WebGPU is unavailable in an AudioWorkletGlobalScope)
+      and handing blocks to the audio callback over a SharedArrayBuffer ring. The
+      audio callback itself stays on the CPU either way. File-backed loaders and
+      native editors are compiled out (PULP_WASM / PULP_HEADLESS).
 
 # macOS CPU-architecture tiers. macOS as a platform is `usable` (see
 # platforms.macos), but that maturity is the arm64 (Apple Silicon) primary

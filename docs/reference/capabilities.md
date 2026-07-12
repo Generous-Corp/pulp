@@ -113,7 +113,7 @@ If you hit a limitation not listed, check
 | Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
 | Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, CI |
 | iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
-| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2 (Emscripten) and WebCLAP (wasi-sdk) plugins, both exercised in a headless-Chrome CI lane. Pulp's view tree also renders in the browser via Skia Ganesh on WebGL2. DSP is CPU-only — no GPU audio in the browser. |
+| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2 (Emscripten) and WebCLAP (wasi-sdk) plugins, both exercised in a headless-Chrome CI lane. Pulp's view tree also renders in the browser via Skia Ganesh on WebGL2. DSP is CPU-only today — GPU compute does not yet compile to wasm. Browser WebGPU does support compute shaders, so GPU DSP is reachable (compute in a Worker, blocks handed to the AudioWorklet over a SharedArrayBuffer ring); it is simply not wired yet. |
 
 Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 

@@ -552,12 +552,10 @@ ${ogUrlAndImage(pageUrl, hasOgImage, "")}
     </a>
   </div>
   <footer>
-    Both pages mount the same player, so the UI, the keyboard, the scope and the meter are identical —
-    only the ABI underneath differs. Open them side by side; if you can tell which is which without
-    reading the badge, that is a bug.
+    Both pages mount the same player; only the ABI underneath differs.
     <div style="margin-top:6px">
-      The DSP is the CPU convolution engine, which is also the desktop default. There is no GPU audio
-      in the browser — WebGL2 has no compute shaders — though the editor above is GPU-rendered.
+      The editor is GPU-rendered. The DSP is not — this build runs the CPU convolution engine, the
+      same one the desktop uses by default.
     </div>
     <div style="margin-top:6px"><a href="${SC_SRC}">Source on GitHub &nearr;</a></div>
   </footer>
