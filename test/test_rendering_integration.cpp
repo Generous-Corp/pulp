@@ -60,11 +60,89 @@ TEST_CASE("EffectChain composes multiple effects", "[render][effect]") {
     REQUIRE(chain->needs_layer());
 }
 
-TEST_CASE("CustomShaderEffect stores SkSL", "[render][effect]") {
-    canvas::CustomShaderEffect cse;
-    cse.sksl = "half4 main(float2 c) { return half4(1); }";
-    cse.value = 0.5f;
-    REQUIRE_FALSE(cse.sksl.empty());
+// An effect must push exactly `layer_count()` layers, because View::paint_all
+// pops that many. EffectChain pushes one per child, so it must report the sum —
+// reporting 1 (the base default) leaked every layer past the first, on every
+// paint, corrupting the canvas save stack for the rest of the frame.
+TEST_CASE("EffectChain reports one layer per effect", "[render][effect]") {
+    auto chain = std::make_shared<canvas::EffectChain>();
+    REQUIRE(chain->layer_count() == 0);
+    REQUIRE_FALSE(chain->needs_layer());
+
+    chain->add(std::make_shared<canvas::GpuBlurEffect>());
+    REQUIRE(chain->layer_count() == 1);
+
+    chain->add(std::make_shared<canvas::VignetteEffect>());
+    chain->add(std::make_shared<canvas::ChromaticAberrationEffect>());
+    REQUIRE(chain->layer_count() == 3);
+
+    // Nested chains sum through.
+    auto outer = std::make_shared<canvas::EffectChain>();
+    outer->add(chain);
+    outer->add(std::make_shared<canvas::GpuBlurEffect>());
+    REQUIRE(outer->layer_count() == 4);
+}
+
+TEST_CASE("Simple effects push exactly one layer", "[render][effect]") {
+    REQUIRE(canvas::GpuBlurEffect{}.layer_count() == 1);
+    REQUIRE(canvas::GpuBloomEffect{}.layer_count() == 1);
+    REQUIRE(canvas::VignetteEffect{}.layer_count() == 1);
+    REQUIRE(canvas::ChromaticAberrationEffect{}.layer_count() == 1);
+}
+
+// The save stack a View leaves behind must be exactly as deep as it found it.
+// paint_all() pops `layer_count()` layers; before that existed it always popped
+// one, so a 3-effect chain leaked 2 layers on every paint and every subsequent
+// draw in the frame ran against a corrupted stack.
+TEST_CASE("A View with a multi-effect chain leaves the save stack balanced",
+          "[render][effect][view]") {
+    auto chain = std::make_shared<canvas::EffectChain>();
+    chain->add(std::make_shared<canvas::GpuBlurEffect>());
+    chain->add(std::make_shared<canvas::VignetteEffect>());
+    chain->add(std::make_shared<canvas::GpuBloomEffect>());
+
+    view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_effect(chain);
+
+    canvas::RecordingCanvas canvas;
+    const int depth_before = canvas.save_count();
+    root.paint_all(canvas);
+    REQUIRE(canvas.save_count() == depth_before);
+}
+
+// A single-effect View was always balanced; keep it that way.
+TEST_CASE("A View with one effect leaves the save stack balanced",
+          "[render][effect][view]") {
+    view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_effect(std::make_shared<canvas::GpuBlurEffect>());
+
+    canvas::RecordingCanvas canvas;
+    const int depth_before = canvas.save_count();
+    root.paint_all(canvas);
+    REQUIRE(canvas.save_count() == depth_before);
+}
+
+// An effect that wants no layer (an empty EffectChain) must not swallow the
+// layer that opacity still needs. paint_all() takes the effect branch only when
+// the effect reports needs_layer(); otherwise opacity would be silently dropped
+// — and, before layer_count() existed, the unmatched restore() underflowed the
+// save stack.
+TEST_CASE("An empty EffectChain does not swallow the opacity layer",
+          "[render][effect][view]") {
+    view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_opacity(0.5f);
+    root.set_effect(std::make_shared<canvas::EffectChain>());  // no children
+
+    canvas::RecordingCanvas canvas;
+    const int depth_before = canvas.save_count();
+    root.paint_all(canvas);
+
+    // Balanced, and the opacity layer was actually pushed.
+    REQUIRE(canvas.save_count() == depth_before);
+    REQUIRE(canvas.count(canvas::DrawCommand::Type::save) >= 1);
 }
 
 // ── Dimension tests ─────────────────────────────────────────────────────

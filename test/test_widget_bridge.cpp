@@ -2479,7 +2479,29 @@ TEST_CASE("WidgetBridge GPU info and fallback canvas descriptors are scriptable"
     REQUIRE(engine.evaluate("gpu_texture.label").toString() == "pulp-native-gpu-texture");
 }
 
-TEST_CASE("WidgetBridge applyShader reports results and marks targets active",
+// `applyShader` was removed: it never compiled or applied anything, and
+// reported success for any non-empty string — including un-compilable SkSL and
+// ids matching no widget. Canvas widgets have no shader path, so there was
+// nothing an honest version could do. Assert it is gone rather than silently
+// lying again.
+TEST_CASE("WidgetBridge no longer exposes applyShader",
+          "[view][bridge][gpu][shader]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("globalThis.has_apply = (typeof applyShader);");
+    REQUIRE(engine.evaluate("has_apply").toString() == "undefined");
+}
+
+// setWidgetShader must never silently do nothing. Every rejection path — no
+// such widget, a widget with no shader support, empty source, SkSL that does
+// not compile — has to say so, and a shader that fails to compile must NOT be
+// installed (a widget holding un-compilable SkSL paints the CPU fallback rect
+// forever, which reads as a rendering bug rather than a shader error).
+TEST_CASE("WidgetBridge setWidgetShader reports every failure honestly",
           "[view][bridge][gpu][shader]") {
     ScriptEngine engine;
     View root;
@@ -2488,25 +2510,89 @@ TEST_CASE("WidgetBridge applyShader reports results and marks targets active",
     WidgetBridge bridge(engine, root, store);
 
     bridge.load_script(R"(
-        createLabel('shader-target', 'Shader', '');
-        globalThis.shader_ok = applyShader(
-            'shader-target',
-            'half4 main(float2 p) { return half4(1); }');
-        globalThis.shader_empty = applyShader('shader-target', '');
-        globalThis.shader_missing = applyShader(
-            'missing-target',
-            'half4 main(float2 p) { return half4(1); }');
+        createKnob('knob', 'Drive', 0.5);
+        createLabel('plain-label', 'Not shader-capable', '');
+
+        globalThis.ok = setWidgetShader(
+            'knob', 'uniform float time; half4 main(float2 p) { return half4(time); }');
+        globalThis.garbage  = setWidgetShader('knob', 'this is not valid sksl');
+        globalThis.empty    = setWidgetShader('knob', '');
+        globalThis.missing  = setWidgetShader('nope', 'half4 main(float2 p) { return half4(1); }');
+        globalThis.unsupported = setWidgetShader(
+            'plain-label', 'half4 main(float2 p) { return half4(1); }');
+        globalThis.cleared  = clearWidgetShader('knob');
     )");
 
-    REQUIRE(engine.evaluate("shader_ok.success").getWithDefault<bool>(false));
-    REQUIRE_FALSE(engine.evaluate("shader_empty.success").getWithDefault<bool>(true));
-    REQUIRE(engine.evaluate("shader_missing.success").getWithDefault<bool>(false));
-    REQUIRE(engine.evaluate("shader_ok.error").toString().empty());
+    REQUIRE(engine.evaluate("ok.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("ok.error").toString().empty());
 
-    auto* target = bridge.widget("shader-target");
-    REQUIRE(target != nullptr);
-    REQUIRE_THAT(target->theme().dimension("shader.active").value_or(0.0f),
-                 WithinAbs(1.0f, 0.001f));
+    // Garbage SkSL: rejected, with the compiler's reason.
+    REQUIRE_FALSE(engine.evaluate("garbage.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("garbage.error").toString().empty());
+
+    // Empty source is not a silent clear — clearWidgetShader() does that.
+    REQUIRE_FALSE(engine.evaluate("empty.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("empty.error").toString().empty());
+
+    // Unknown id, and a widget with no shader support: both say so.
+    REQUIRE_FALSE(engine.evaluate("missing.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("missing.error").toString().empty());
+    REQUIRE_FALSE(engine.evaluate("unsupported.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("unsupported.error").toString().empty());
+
+    REQUIRE(engine.evaluate("cleared.success").getWithDefault<bool>(false));
+
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE_FALSE(knob->has_custom_shader());  // clearWidgetShader took effect
+}
+
+// A shader that does not compile must not reach the widget at all.
+TEST_CASE("WidgetBridge setWidgetShader does not install un-compilable SkSL",
+          "[view][bridge][gpu][shader]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.result = setWidgetShader('knob', 'this is not valid sksl');
+    )");
+
+    REQUIRE_FALSE(engine.evaluate("result.success").getWithDefault<bool>(true));
+
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE_FALSE(knob->has_custom_shader());
+}
+
+// shader_uses_time() decides whether the render loop stays pinned, and is read
+// once per widget per frame. It must be a real uniform lookup: a `timeline`
+// uniform must not force continuous repaint, and a shader with no time uniform
+// must not either — the old substring search on "time" got both wrong.
+TEST_CASE("Custom shader time detection is a uniform lookup, not a substring",
+          "[view][widget][shader]") {
+    Knob knob;
+
+    knob.set_custom_shader(
+        "uniform float time; half4 main(float2 p) { return half4(time); }");
+    REQUIRE(knob.shader_uses_time());
+
+    // Declares `timeline`, not `time` — must not pin the render loop.
+    knob.set_custom_shader(
+        "uniform float timeline; half4 main(float2 p) { return half4(timeline); }");
+    REQUIRE_FALSE(knob.shader_uses_time());
+
+    // The word "time" appears only in a comment.
+    knob.set_custom_shader(
+        "// animate over time\nhalf4 main(float2 p) { return half4(1); }");
+    REQUIRE_FALSE(knob.shader_uses_time());
+
+    knob.clear_custom_shader();
+    REQUIRE_FALSE(knob.shader_uses_time());
+    REQUIRE_FALSE(knob.has_custom_shader());
 }
 
 // ── setTransform on a View ────────────────────────────────────────────────

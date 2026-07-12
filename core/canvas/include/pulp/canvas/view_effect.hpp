@@ -15,11 +15,19 @@ class ViewEffect {
 public:
     virtual ~ViewEffect() = default;
 
-    /// Configure the layer paint before the subtree is rendered.
-    /// Implementations set opacity, image filters, blend modes, etc.
-    /// The canvas.save_layer() call happens before this, and canvas.restore()
-    /// happens after the subtree paints.
+    /// Push the compositing layer(s) this effect needs, configured with its
+    /// opacity, image filters, blend mode, etc. The subtree paints into the
+    /// layer(s); the caller pops them once the subtree is done.
+    ///
+    /// An implementation MUST push exactly `layer_count()` layers. The caller
+    /// (`View::paint_all`) pops that many, so an effect that saves a different
+    /// number than it reports unbalances the canvas save stack for the rest of
+    /// the frame.
     virtual void configure_layer(Canvas& canvas, float x, float y, float w, float h) = 0;
+
+    /// How many layers `configure_layer()` pushes. One for a simple effect;
+    /// `EffectChain` reports the sum across its children.
+    virtual int layer_count() const { return 1; }
 
     /// Whether this effect requires a compositing layer (most do).
     virtual bool needs_layer() const { return true; }
@@ -81,17 +89,13 @@ struct VignetteEffect : ViewEffect {
     }
 };
 
-/// Custom SkSL shader applied as a post-effect to a View's content.
-/// The shader receives the layer's rendered content as a child shader.
-struct CustomShaderEffect : ViewEffect {
-    std::string sksl;  ///< SkSL source for the post-effect
-    float value = 0.0f;
-    float time = 0.0f;
-
-    void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        canvas.save_layer(x, y, w, h);
-    }
-};
+// A `CustomShaderEffect` (arbitrary SkSL as a view post-effect) used to live
+// here. It stored `sksl`, `value`, and `time` and then ignored all three —
+// `configure_layer()` pushed a plain layer, so setting one had no visual effect
+// whatsoever. Applying SkSL to already-rendered subtree content needs a
+// child-shader compositor (Skia's runtime-shader image filter) that Pulp does
+// not have yet; `draw_with_sksl()` fills a fresh rect and cannot post-process.
+// Widget body shaders — which do work — are `CustomShaderHost`.
 
 /// Chains multiple effects in sequence.
 class EffectChain : public ViewEffect {
@@ -105,6 +109,15 @@ public:
         for (auto& effect : effects_) {
             effect->configure_layer(canvas, x, y, w, h);
         }
+    }
+
+    /// One layer per child, summed — a chain pushes as many layers as it has
+    /// effects. Reporting 1 here (the base default) would leak every layer past
+    /// the first on every paint.
+    int layer_count() const override {
+        int total = 0;
+        for (const auto& effect : effects_) total += effect->layer_count();
+        return total;
     }
 
     bool needs_layer() const override {

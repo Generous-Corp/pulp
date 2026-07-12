@@ -828,8 +828,10 @@ runtime_apis:
   webgpu_shaders:
     status: usable
     notes: >
-      Dawn/WebGPU backend available. applyShader(canvasId, skslCode) for custom
-      SkSL fragment shaders. getGPUInfo() queries backend. compileShader() validates.
+      Dawn/WebGPU backend available. setWidgetShader(id, skslCode) installs a custom
+      SkSL body shader on a shader-capable widget, reporting compile errors rather
+      than failing silently. getGPUInfo() queries backend. compileShader() validates.
+      SkSL as a view post-effect (filtering already-rendered content) is not supported.
 
 ai_shader_design:
   yoga_layout:

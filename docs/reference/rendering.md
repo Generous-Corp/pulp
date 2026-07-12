@@ -70,9 +70,17 @@ state and backend path.
 ```cpp
 view.set_effect(std::make_shared<GpuBlurEffect>());           // Gaussian blur
 view.set_effect(std::make_shared<GpuBloomEffect>());          // HDR bloom
-view.set_effect(std::make_shared<CustomShaderEffect>());      // Arbitrary SkSL
 view.set_effect(std::make_shared<EffectChain>());             // Compose multiple
 ```
+
+An effect pushes `layer_count()` compositing layers (one for a simple
+effect; `EffectChain` pushes one per child) and `View::paint_all` pops
+exactly that many.
+
+Arbitrary SkSL as a *view post-effect* is not supported — filtering a
+subtree's rendered pixels needs a child-shader compositor Pulp does not
+have. SkSL reaches widgets as a **body shader** instead; see the
+[Shader Reference](shaders.md).
 
 ## DirtyTracker
 

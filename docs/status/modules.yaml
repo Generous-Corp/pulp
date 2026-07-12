@@ -59,7 +59,8 @@ modules:
       ConicGradient, FillStyle, gradient tile modes. Path builder, clipping, 16 blend modes,
       SVG, TextShaper, AttributedString with word-wrap, RectangleList, ImageConvolutionKernel.
       ViewEffect system: GpuBlurEffect, GpuBloomEffect, ChromaticAberration, Vignette,
-      CustomShaderEffect (arbitrary SkSL), EffectChain.
+      EffectChain. SkSL reaches widgets as a body shader (CustomShaderHost), not as a
+      view post-effect.
     status: usable
     dependencies: [runtime]
     docs: reference/rendering.md#canvas

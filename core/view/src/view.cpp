@@ -375,9 +375,18 @@ void View::paint_all(canvas::Canvas& canvas) {
                        || (effect_ && effect_->needs_layer())
                        || needs_blend_layer
                        || needs_mask_layer;
+    // How many layers we pushed, so we pop exactly that many below. Only an
+    // effect can push more than one (EffectChain pushes one per child); every
+    // other path pushes a single layer.
+    //
+    // The effect branch is gated on effect_->needs_layer(), not merely on
+    // effect_ being set: an effect that wants no layer (an empty EffectChain)
+    // must not swallow the layer that opacity / blur / blend / mask still need.
+    int layers_pushed = 0;
     if (needs_layer) {
-        if (effect_) {
+        if (effect_ && effect_->needs_layer()) {
             effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
+            layers_pushed = effect_->layer_count();
         } else if (needs_mask_layer) {
             // CSS mask-image + mask-size composite. SkiaCanvas opens a layer
             // and queues a mask shader; restore() applies the mask via
@@ -430,6 +439,8 @@ void View::paint_all(canvas::Canvas& canvas) {
         } else {
             canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
         }
+        // Every non-effect branch above pushes exactly one layer.
+        if (layers_pushed == 0) layers_pushed = 1;
     }
 
     // Outset drop shadows paint inside the compositing layer so the view's
@@ -728,8 +739,11 @@ void View::paint_all(canvas::Canvas& canvas) {
         // skip the generic ring.
     }
 
-    // End compositing layer (restore pops the saveLayer, compositing the subtree)
-    if (needs_layer)
+    // End compositing layer(s) — each restore pops one saveLayer, compositing
+    // the subtree back through that layer's filter / opacity. An EffectChain
+    // pushes one layer per effect, so pop what we actually pushed rather than
+    // assuming one.
+    for (int i = 0; i < layers_pushed; ++i)
         canvas.restore();
 
     // End backdrop-filter layer. Composites the widget's own
