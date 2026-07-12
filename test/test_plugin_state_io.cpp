@@ -59,6 +59,7 @@ public:
                  const pulp::format::ProcessContext&) override {}
 
     std::vector<uint8_t> serialize_plugin_state() const override {
+        ++serialize_calls;
         return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
     }
 
@@ -77,6 +78,7 @@ public:
     std::string plugin_state;
     std::string rejected_payload;
     int deserialize_calls = 0;
+    mutable int serialize_calls = 0;
     std::vector<uint8_t> last_payload;
 };
 
@@ -114,6 +116,26 @@ struct TestRig {
         processor.define_parameters(store);
     }
 };
+
+TEST_CASE("plugin_state_io prefers immutable published snapshots over live serialization",
+          "[format][state][snapshot]") {
+    TestRig rig;
+    rig.processor.plugin_state = "live serializer must not run";
+    std::vector<uint8_t> large_snapshot(2 * 1024 * 1024, 0x5a);
+    large_snapshot.front() = 0x11;
+    large_snapshot.back() = 0x22;
+    rig.processor.publish_plugin_state_snapshot(std::move(large_snapshot));
+
+    const auto blob = pulp::format::plugin_state_io::serialize(rig.store, rig.processor);
+    REQUIRE(rig.processor.serialize_calls == 0);
+
+    TestRig restored;
+    REQUIRE(pulp::format::plugin_state_io::deserialize(blob, restored.store,
+                                                       restored.processor));
+    REQUIRE(restored.processor.last_payload.size() == 2 * 1024 * 1024);
+    REQUIRE(restored.processor.last_payload.front() == 0x11);
+    REQUIRE(restored.processor.last_payload.back() == 0x22);
+}
 
 constexpr uint8_t kEnvelopeMagic[4] = {'P', 'L', 'S', 'T'};
 

@@ -76,7 +76,7 @@ Adopt a hybrid:
 | Area | Status | Completion gate |
 |---|---|---|
 | Parameter semantics and canonical text conversion | Core adapter work complete; broader validation pending | All adapters consume the shared model; enum/toggle/stepped/text tests pass |
-| Published custom-state snapshots | Pending | Host saves copy immutable published bytes; large-state test does no serialization in save callback |
+| Published custom-state snapshots | Complete | Host saves copy immutable published bytes; large-state test does no serialization in save callback |
 | Standalone/headless sidechain injection | Pending | Independent main/sidechain files and harness buffers; unconnected bus is silence |
 | Declarative supported bus layouts | Pending | Multiple layouts reach VST3, AU, CLAP, AAX model, standalone selection |
 | Process mode | Already present on baseline; verification pending | `ProcessMode`, render-speed hint, and offline-quality helper are propagated and tested |
@@ -113,6 +113,10 @@ Adopt a hybrid:
   values rather than re-deriving an interval count in the runtime.
 - `PulpGain_AUv3`: Release build PASS after AUv3 value strings and canonical
   format/parse callback integration.
+- `pulp-test-plugin-state-io`: PASS, 164 assertions in 15 test cases. A 2 MiB
+  published immutable snapshot round-trips while the legacy live serializer is
+  provably not invoked by the host save path. Plugins that do not publish retain
+  the existing compatibility fallback.
 
 ## Review log
 

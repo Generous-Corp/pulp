@@ -630,6 +630,30 @@ public:
     /// Called on a host/main thread, never from process().
     virtual std::vector<uint8_t> serialize_plugin_state() const { return {}; }
 
+    /// Publish an immutable custom-state snapshot from a non-audio thread.
+    /// Once a snapshot has been published, host save callbacks copy it instead
+    /// of invoking serialize_plugin_state(). This keeps large sampler,
+    /// wavetable, and analysis payload serialization out of host-controlled
+    /// save timing while preserving serialize_plugin_state() as a compatibility
+    /// fallback for plugins that have not opted in.
+    void publish_plugin_state_snapshot(std::vector<uint8_t> bytes) {
+        auto snapshot = std::make_shared<const std::vector<uint8_t>>(std::move(bytes));
+        std::atomic_store_explicit(&published_plugin_state_, std::move(snapshot),
+                                   std::memory_order_release);
+    }
+
+    void publish_plugin_state_snapshot(std::span<const uint8_t> bytes) {
+        publish_plugin_state_snapshot(std::vector<uint8_t>(bytes.begin(), bytes.end()));
+    }
+
+    /// Returns null until the plugin opts into published snapshots. A non-null
+    /// empty vector is meaningful: the plugin explicitly published no custom
+    /// payload and serialize_plugin_state() must not be called.
+    std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_snapshot() const {
+        return std::atomic_load_explicit(&published_plugin_state_,
+                                         std::memory_order_acquire);
+    }
+
     /// Restore plugin-owned state previously returned by
     /// serialize_plugin_state().
     ///
@@ -1110,6 +1134,7 @@ public:
     void set_output_param_events(state::ParameterEventQueue* events) { output_param_events_ = events; }
 
 private:
+    std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;
 
     static std::size_t fallback_bus_channels(const std::vector<BusInfo>& buses,

@@ -434,7 +434,8 @@ bool register_envelope_migration(uint32_t from_version,
 std::vector<uint8_t> serialize(const state::StateStore& store,
                                const Processor& processor) {
     auto store_blob = store.serialize();
-    auto plugin_blob = processor.serialize_plugin_state();
+    auto published = processor.published_plugin_state_snapshot();
+    auto plugin_blob = published ? *published : processor.serialize_plugin_state();
     if (plugin_blob.empty()) {
         return store_blob;
     }
