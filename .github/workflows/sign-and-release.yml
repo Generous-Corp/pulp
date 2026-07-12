@@ -306,23 +306,32 @@ jobs:
         # uploaded by release-cli.yml.
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          # release-cli.yml creates the release only after its full cross-platform
-          # build chain (build-cli → smoke-cli → universal-arch-gate), which
-          # includes a self-hosted darwin-arm64 leg that can queue behind a busy
-          # runner. That routinely runs far longer than the old 10-minute window,
-          # so this poll lost the race on every tag and left releases without the
-          # Sparkle feed. Wait long enough to cover release-cli's worst case
-          # (150 * 20s = 50 min).
-          for attempt in $(seq 1 150); do
+          # release-cli.yml creates the release (draft) only after its full
+          # cross-platform build chain (build-cli → smoke-cli →
+          # universal-arch-gate). Since #6024 that chain includes the Intel
+          # darwin-x64 cross-compile leg, which QUEUES for a GitHub-hosted
+          # macos-15 runner (0-40 min) and then builds (~40 min) — so the release
+          # draft can now appear 60-90 min after the tag, well past the old 50-min
+          # window. A too-short wait left releases without the Sparkle appcast and
+          # forced a manual publish (pulp #35). Cover the Intel-inclusive worst
+          # case: 300 * 20s = 100 min.
+          #
+          # NOTE (follow-up): this poll runs ON the macOS notarize VM, so it holds
+          # a scarce self-hosted release VM for the whole wait. The proper fix is
+          # to emit appcast.xml as an artifact here and move the wait+attach to a
+          # cheap ubuntu job (freeing the macOS VM right after notarization) — but
+          # that restructure needs validation on a real tag, so this bounded
+          # timeout bump is the low-risk interim.
+          for attempt in $(seq 1 300); do
             if gh release view "$TAG" >/dev/null 2>&1; then
               gh release upload "$TAG" artifacts/appcast.xml --clobber
               echo "attached appcast.xml to release $TAG"
               exit 0
             fi
-            echo "waiting for release $TAG (created by release-cli.yml)… ($attempt/150)"
+            echo "waiting for release $TAG (created by release-cli.yml)… ($attempt/300)"
             sleep 20
           done
-          echo "::error::release $TAG never appeared after 50 min; release-cli.yml may have failed"
+          echo "::error::release $TAG never appeared after 100 min; release-cli.yml may have failed"
           exit 1
 
       - name: Clean up signing keychain
