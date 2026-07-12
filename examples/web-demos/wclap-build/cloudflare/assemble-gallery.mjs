@@ -371,6 +371,16 @@ const SC_TITLE = "SuperConvolver";
 const SC_SUBTITLE =
   "A convolution reverb running in your browser. Size sets how long the space rings; " +
   "Mix balances the dry sound against the reverb. Nothing is uploaded — it all runs on your machine.";
+
+// What the two cards are actually showing, stated plainly. The interesting part is
+// not that a plugin runs on a web page; it is that this is the SAME processor that
+// builds as a native VST3/AU/CLAP, and that the WebCLAP page is a real compiled
+// CLAP plugin — the browser is just another host calling clap_entry. Say that once,
+// without adjectives, and let the demo carry the rest.
+const SC_LEDE =
+  "The same C++ processor that builds as a native VST3, AU and CLAP plugin, compiled for the web. " +
+  "The editor is not HTML: it is Pulp's own view tree — the widgets, layout and text shaping the " +
+  "desktop editor uses — drawn by Skia straight onto the page's canvas.";
 const SC_CFG = { mode: "audio-effect", paramRows: 2 };
 
 // Cache-bust the MAIN-THREAD player entry only. The worklet processor and the
@@ -522,24 +532,33 @@ ${ogUrlAndImage(pageUrl, hasOgImage, "")}
   <header>
     <h1>SuperConvolver <span style="color:var(--text-secondary);font-size:14px">— one plugin, two web ABIs</span></h1>
     <p>${esc(SC_SUBTITLE)}</p>
+    <p>${esc(SC_LEDE)}</p>
   </header>
   <div class="abis">
     <a class="abi wam" href="./wam/index.html">
       <span class="tag">Web Audio Module</span>
       <h2>SuperConvolver — WAM</h2>
-      <p>A headless DSP module in an AudioWorklet. Runs on any static host — no special headers.</p>
+      <p>The processor compiled to a headless DSP module and driven directly by an AudioWorklet.
+         Runs on any static host — no special headers.</p>
       <span class="go">▶ Open the WAM demo</span>
     </a>
     <a class="abi wclap" href="./wclap/index.html">
       <span class="tag">WebCLAP</span>
       <h2>SuperConvolver — WebCLAP</h2>
-      <p>A real CLAP plugin compiled to wasm, hosted in a worklet-resident CLAP host. Needs COOP/COEP.</p>
+      <p>Not a port: the CLAP plugin itself, compiled to wasm and loaded by a CLAP host that lives
+         inside the audio worklet. It calls the same <code>clap_entry</code> a desktop DAW calls.
+         Needs COOP/COEP.</p>
       <span class="go">▶ Open the WebCLAP demo</span>
     </a>
   </div>
   <footer>
-    Both pages mount the SAME player, so the UI, the keyboard, the scope and the meter are identical —
-    only the plugin ABI underneath differs. Open them side by side.
+    Both pages mount the same player, so the UI, the keyboard, the scope and the meter are identical —
+    only the ABI underneath differs. Open them side by side; if you can tell which is which without
+    reading the badge, that is a bug.
+    <div style="margin-top:6px">
+      The DSP is the CPU convolution engine, which is also the desktop default. There is no GPU audio
+      in the browser — WebGL2 has no compute shaders — though the editor above is GPU-rendered.
+    </div>
     <div style="margin-top:6px"><a href="${SC_SRC}">Source on GitHub &nearr;</a></div>
   </footer>
 </div>

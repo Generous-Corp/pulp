@@ -84,6 +84,23 @@ jobs:
         run: |
           node assemble.mjs                 # single-plugin isolation proof (/)
           node assemble-player.mjs          # shared-player WebCLAP demo (/player/)
+          node assemble-gallery.mjs         # the demo galleries + super-convolver (both ABIs)
+
+      # OG previews are rendered from the ASSEMBLED pages, on every deploy, so a
+      # change to a plugin's UI cannot leave a stale unfurl image behind: the
+      # screenshot is always taken from the page being shipped. Each plugin page
+      # is shot STARTED, so the image is the plugin actually running. The second
+      # assemble-gallery pass is required — it bakes the og:image/twitter tags in
+      # only for pages whose og.png now exists.
+      - name: Render OG preview images (per page, from the started plugin)
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: |
+          node gen-og-images.mjs
+          node assemble-gallery.mjs
+
+      - name: Guard — every demo page has a fresh OG image
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: node check-og-images.mjs
 
       - name: Prove @danielraffel/web-player adapter unit tests
         working-directory: packages/pulp-web-player

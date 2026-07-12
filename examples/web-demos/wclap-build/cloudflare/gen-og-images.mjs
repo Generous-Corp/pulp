@@ -64,6 +64,22 @@ if (!CHROME) {
 // dirs straight from it (single source of truth, mirrors WAM's gen-og-images).
 const SECTIONS = ["example-plugins", "classic-effects"];
 
+// super-convolver is not a plugins-array gallery — it is ONE plugin presented in
+// two ABIs, so its dirs are fixed rather than parsed. Same convention as the
+// sections above: each demo page is shot STARTED (`#panel` only exists once the
+// player has mounted, so the image is the plugin actually running, not a
+// click-to-start overlay), and the index is shot as its card grid.
+const SUPER_CONVOLVER = { slug: "super-convolver", dirs: ["wam", "wclap"] };
+
+// The two standalone pages assemble.mjs / assemble-player.mjs write. They are not
+// galleries and have no plugins array, but they are shareable URLs like any other
+// — a bare unfurl is a bare unfurl — so they get previews too. `/player/` mounts
+// the shared player, so it is shot started; `/` is the isolation proof card.
+const STANDALONE = [
+  { url: "/player/", selector: "#panel", out: ["player", "og.png"], label: "player", start: true },
+  { url: "/", selector: ".card", out: ["og.png"], label: "root (isolation proof)", start: false },
+];
+
 // Serve the deploy dir under its own _headers (COOP/COEP/CORP + MIME) so the
 // threaded-wasm module instantiates exactly as it will on Cloudflare.
 const server = spawn(process.execPath,
@@ -135,6 +151,23 @@ try {
     }
     // Gallery card: the card grid itself.
     await shoot(`${BASE}/${slug}/`, ".wrap", join(OUT, slug, "og.png"), `${slug} gallery`, false);
+  }
+
+  if (existsSync(join(OUT, SUPER_CONVOLVER.slug, "index.html"))) {
+    const { slug, dirs } = SUPER_CONVOLVER;
+    for (const dir of dirs) {
+      await shoot(`${BASE}/${slug}/${dir}/`, "#panel",
+                  join(OUT, slug, dir, "og.png"), `${slug}/${dir}`, true);
+    }
+    await shoot(`${BASE}/${slug}/`, ".wrap", join(OUT, slug, "og.png"), `${slug} gallery`, false);
+  } else {
+    console.log(`  skip ${SUPER_CONVOLVER.slug} (not assembled)`);
+  }
+
+  for (const s of STANDALONE) {
+    const page = join(OUT, ...s.out.slice(0, -1), "index.html");
+    if (!existsSync(page)) { console.log(`  skip ${s.label} (not assembled)`); continue; }
+    await shoot(`${BASE}${s.url}`, s.selector, join(OUT, ...s.out), s.label, s.start);
   }
 } finally {
   await browser.close();
