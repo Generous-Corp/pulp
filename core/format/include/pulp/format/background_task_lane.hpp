@@ -38,6 +38,7 @@ public:
         handler_ = handler;
         context_ = context;
         policy_ = policy;
+        latest_generation_.store(0, std::memory_order_relaxed);
         stopping_.store(false, std::memory_order_release);
         try {
             worker_ = std::thread([this] { worker_loop(); });
@@ -88,6 +89,9 @@ private:
         }
         if (policy_ == BackgroundTaskPolicy::Ordered) {
             while (auto task = ordered_.try_pop()) handler_(context_, *task);
+        } else {
+            const auto generation = latest_generation_.load(std::memory_order_acquire);
+            if (generation != consumed_generation) handler_(context_, latest_.read());
         }
     }
 

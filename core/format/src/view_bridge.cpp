@@ -13,6 +13,11 @@ std::unique_ptr<view::View> safe_create_view(Processor& processor) noexcept {
     PULP_CATCH_ALL { return nullptr; }
 }
 
+view::ScriptedUiSession* safe_active_scripted_ui(Processor& processor) noexcept {
+    PULP_TRY { return processor.active_scripted_ui(); }
+    PULP_CATCH_ALL { return nullptr; }
+}
+
 ViewSize safe_view_size(Processor& processor) noexcept {
     PULP_TRY { return processor.view_size(); }
     PULP_CATCH_ALL { return {}; }
@@ -52,7 +57,7 @@ bool ViewBridge::open(std::string* error) {
     auto custom = safe_create_view(processor_);
     if (custom) {
         view_ = std::move(custom);
-        if (processor_.active_scripted_ui()) {
+        if (safe_active_scripted_ui(processor_)) {
             uses_script_ui_ = true;
         }
     } else {
@@ -151,12 +156,13 @@ bool ViewBridge::rebuild_primary_view() {
 
 view::ScriptedUiSession* ViewBridge::scripted_ui() {
     if (scripted_ui_) return scripted_ui_.get();
-    return processor_.active_scripted_ui();
+    return safe_active_scripted_ui(processor_);
 }
 
 const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
     if (scripted_ui_) return scripted_ui_.get();
-    return processor_.active_scripted_ui();
+    PULP_TRY { return processor_.active_scripted_ui(); }
+    PULP_CATCH_ALL { return nullptr; }
 }
 
 void ViewBridge::notify_attached() {

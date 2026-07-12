@@ -79,11 +79,11 @@ Adopt a hybrid:
 | Published custom-state snapshots | Complete | Host saves copy immutable published bytes; large-state test does no serialization in save callback |
 | Standalone/headless sidechain injection | Complete | Independent main/sidechain files and harness buffers; unconnected bus is silence |
 | Declarative supported bus layouts | Complete | Multiple layouts reach VST3, AU, CLAP, AAX model, standalone selection |
-| Process mode | Already present on baseline; verification pending | `ProcessMode`, render-speed hint, and offline-quality helper are propagated and tested |
+| Process mode | Complete on baseline and revalidated | `ProcessMode`, render-speed hint, and offline-quality helper are propagated and tested |
 | Background tasks and AudioTap | Complete | Bounded, pre-warmed, lifetime-safe task lanes and whole-frame tap behavior |
 | ABI exception shields | Complete | Author callbacks cannot unwind across format C/Objective-C boundaries |
-| Architectural review | Pending | Must-fix findings resolved |
-| Adversarial review | Pending | Correctness gaps resolved and claims revalidated |
+| Architectural review | Complete | Must-fix findings resolved |
+| Adversarial review | Complete | Correctness gaps resolved and claims revalidated |
 
 ## Constraints
 
@@ -147,7 +147,39 @@ Adopt a hybrid:
   author exceptions and return safe defaults. Throwing-callback tests PASS for
   parameter text (2 assertions) and state IO (2 assertions); `pulp-format`
   Release build passes with editor guards.
+- Full focused regression after implementation: CLAP 302 assertions/19 cases,
+  LV2 105/13, AAX model 142/17, plugin-state IO 166/16, headless 337/30,
+  Processor layout/latency/mode 129/20, and planar ring/AudioTap 60/7 all PASS.
+  `PulpGain_AUv3` also builds successfully in Release.
 
 ## Review log
 
-Not started.
+### Architectural review
+
+- Found and fixed a source-compatibility regression where adding the layout
+  name before the existing input/output vectors changed positional aggregate
+  initialization. The name is now the trailing optional field.
+- Kept task concurrency compositional: one serialized worker per typed lane,
+  rather than a global pool that would couple unrelated plugin work. All
+  producer storage is fixed before realtime use.
+- Reused `PlanarAudioRingBuffer` for AudioTap instead of introducing a second
+  ring implementation with different overflow semantics.
+- Extended the existing shared parameter/state/view seams so formats inherit
+  one policy rather than accumulating adapter-specific exception behavior.
+
+### Adversarial review
+
+- Found a startup race in latest-value task lanes: the worker could establish
+  its initial generation after the producer published, treating the newest task
+  as stale. Generation is now reset before thread creation; the focused suite
+  passed 20 consecutive stress repetitions.
+- Found that a throwing plugin-state rollback callback still reached a debug
+  assertion and aborted the process. Rollback failure now remains a reported
+  restore failure and never becomes a host-process abort.
+- Found and removed a duplicate include introduced in the AUv2 layout patch.
+- Expanded editor containment to active scripted-session lookup in addition to
+  create/size/open/close/resize callbacks.
+- Rechecked selected CLAP layouts at activation (not only metadata query), AAX
+  per-layout native IDs, unconnected sidechain silence, large snapshot save
+  behavior, enum numeric rejection, and full focused regression. No unresolved
+  must-fix finding remains.
