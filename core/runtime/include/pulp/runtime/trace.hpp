@@ -50,10 +50,10 @@ namespace pulp::runtime::trace_detail {
 
 // Compile-time PRETTY_FUNCTION → "Class::method" trimmer.
 //
-// Ported (adapted) from sudara/melatonin_perfetto (MIT) — the one genuinely
-// clever artifact worth copying: it keeps the trimmed name a compile-time value
-// so the span name stays a perfetto::StaticString with zero runtime formatting.
-// JUCE-isms dropped; behavior preserved. See NOTICE.md (melatonin_perfetto).
+// Adapted from sudara/melatonin_perfetto (MIT). Its clever compile-time approach
+// keeps the trimmed name a compile-time value, so the span name stays a
+// perfetto::StaticString with zero runtime formatting on the hot path. Behavior
+// preserved. See NOTICE.md (melatonin_perfetto).
 //
 // The lambda-wrapped-string trick (accu.org/journals/overload/30/172/wu) lets a
 // string be a template parameter so trimming happens at compile time.
