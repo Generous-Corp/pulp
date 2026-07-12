@@ -104,6 +104,10 @@ secrets/
 templates/secrets/notary.env
 examples/web-demos/wasm-build/build/
 examples/web-demos/wclap-build/build/
+examples/web-demos/super-convolver-ui/build-webui/
+examples/web-demos/super-convolver-ui/node_modules/
+examples/web-demos/wclap-build/cloudflare/.wrangler/
+examples/web-demos/wclap-build/cloudflare/package-lock.json
 /.private/
 test/assets/
 android/app/.cxx/
