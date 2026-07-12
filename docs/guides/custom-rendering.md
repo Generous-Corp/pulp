@@ -244,124 +244,92 @@ TEST_CASE("SpectrumDisplay draws correctly") {
 
 ---
 
-## Layer C+: Dawn/WebGPU Shaders
+## Layer C+: Custom Shaders and GPU Compute
 
-For fully custom GPU rendering — particle systems, spectrograms, oscilloscopes, or any effect that benefits from running per-pixel on the GPU.
+When the Canvas primitives aren't enough — a per-pixel effect, a spectrogram,
+or an offline GPU DSP kernel — Pulp exposes three escalating drop-down paths.
+There is no `RenderContext` façade; you reach for the real interface that fits
+the job.
 
-### Architecture
+### Custom fragment shaders on the canvas
 
-```
-View::paint()
-  └── Dawn render pass
-        ├── Vertex buffer (quad or custom geometry)
-        ├── Uniform buffer (theme colors, time, audio data)
-        └── WGSL fragment shader (your custom effect)
-```
-
-### Shader Widget Pattern
-
-```cpp
-#include <pulp/render/render_context.hpp>
-#include <pulp/view/view.hpp>
-
-class ShaderWidget : public pulp::view::View {
-public:
-    void initialize(pulp::render::RenderContext& ctx) {
-        // Compile shader
-        auto result = ctx.compile_shader(vertex_wgsl, fragment_wgsl);
-        pipeline_ = result.pipeline;
-
-        // Create uniform buffer for per-frame data
-        uniform_buffer_ = ctx.create_buffer(sizeof(Uniforms),
-            wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst);
-    }
-
-    void paint(pulp::canvas::Canvas& canvas) override {
-        auto* ctx = render_context();
-        if (!ctx || !pipeline_) return;
-
-        // Update uniforms
-        Uniforms u {
-            .time = static_cast<float>(elapsed_seconds()),
-            .resolution = {bounds().width, bounds().height},
-            .accent = theme_color_vec4("accent"),
-        };
-        ctx->write_buffer(uniform_buffer_, &u, sizeof(u));
-
-        // Draw fullscreen quad with our shader
-        ctx->draw_quad(pipeline_, uniform_buffer_);
-    }
-
-private:
-    struct Uniforms {
-        float time;
-        float resolution[2];
-        float accent[4];
-    };
-
-    wgpu::RenderPipeline pipeline_;
-    wgpu::Buffer uniform_buffer_;
-};
-```
-
-### WGSL Fragment Shader
-
-```wgsl
-struct Uniforms {
-    time: f32,
-    resolution: vec2<f32>,
-    accent: vec4<f32>,
-}
-
-@group(0) @binding(0) var<uniform> u: Uniforms;
-
-@fragment
-fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // Animated gradient using theme accent color
-    let t = sin(u.time * 2.0 + uv.x * 6.28) * 0.5 + 0.5;
-    let bg = vec4<f32>(0.06, 0.06, 0.1, 1.0);
-    return mix(bg, u.accent, t * uv.y);
-}
-```
-
-### Validating Shaders
-
-Validate shader code without running it:
-
-```js
-// From JS
-const result = compileShader(skslCode);
-if (!result.success) {
-    console.error("Shader error: " + result.error);
-}
-```
+The supported "custom shader" path is `Canvas::draw_with_sksl`
+(`core/canvas/include/pulp/canvas/canvas.hpp`). It fills a rectangle with a
+Skia runtime effect (SkSL, fragment-only) and passes the standard
+`Canvas::ShaderUniforms` (value, time, and up to five named theme colors).
+GPU backends (`SkiaCanvas`) render it; CPU backends draw a fallback rect.
 
 ```cpp
-// From C++
-auto result = render_context.compile_shader(vertex_src, fragment_src);
-if (!result.success) {
-    log::error("Shader: {}", result.error);
+void paint(pulp::canvas::Canvas& canvas) override {
+    const auto b = bounds();
+    pulp::canvas::Canvas::ShaderUniforms u;
+    u.value = value_;                       // widget value, 0..1
+    u.time = animation_time_;               // seconds (FrameClock-fed)
+    u.accent_color = pulp::canvas::Color::rgba(0.2f, 0.6f, 1.0f, 1.0f);
+    // Fills the rect with the SkSL effect. Returns false and draws a
+    // flat-color fallback rect on non-GPU canvases.
+    canvas.draw_with_sksl(kFragmentSksl, b.x, b.y, b.width, b.height, u);
 }
 ```
 
-### Passing Audio Data to Shaders
+Validate a shader without drawing it via the static
+`Canvas::compile_sksl(source)` (returns an error string; empty on success).
+The shader receives `uniform float2 resolution`, `float value`, `float time`,
+and `layout(color) float4 accentColor/bgColor/trackColor/fillColor/thumbColor`.
+See [`docs/reference/shaders.md`](../reference/shaders.md) for the full uniform
+contract and the JS-side `compileShader` / `setWidgetShader` API.
 
-For audio-reactive visuals, push data from the audio thread to a GPU buffer:
+### GPU compute kernels
+
+For non-rendering GPU work — spectral analysis, batch convolution, FFT,
+matmul, neural inference — use `pulp::render::GpuCompute`
+(`core/render/include/pulp/render/gpu_compute.hpp`). It runs WebGPU compute
+(not fragment shaders) on a Dawn device that can be shared with the render
+surface, and is explicitly **not** for the audio callback (upload/readback
+latency is too high — do it on a background/offline path).
 
 ```cpp
-// Audio thread → TripleBuffer → UI thread → GPU buffer
-AudioBridge bridge;
-
-// In process():
-bridge.push_spectrum(fft_magnitudes, bin_count);
-
-// In paint():
-if (bridge.poll_spectrum()) {
-    auto& data = bridge.spectrum_data();
-    ctx->write_buffer(spectrum_buffer_, data.bins.data(),
-        data.bin_count * sizeof(float));
+auto gpu = pulp::render::GpuCompute::create();
+if (gpu && gpu->initialize_standalone()) {
+    gpu->batch_magnitude(complex_frames, magnitude_frames, num_frames, num_bins);
 }
 ```
+
+Read the header for the full primitive surface before calling — don't wrap it
+in a convenience layer that doesn't exist.
+
+### Raw Dawn / WebGPU
+
+The lowest escape hatch is `pulp::render::GpuSurface`
+(`core/render/include/pulp/render/gpu_surface.hpp`), which owns the Dawn
+instance, adapter, device, queue, and native surface. It exposes the device
+through opaque handles (`dawn_device_handle()`, `dawn_queue_handle()`,
+`dawn_instance_handle()`, `current_texture_handle()`) that you cast to the
+Dawn types yourself when you need native device access for a custom render
+pass. This is a deliberate escape hatch — most UIs never touch it.
+
+### Passing audio data to visuals
+
+Move data from the audio thread to the UI thread with the real meter bridge,
+`pulp::view::AudioBridge`
+(`core/view/include/pulp/view/audio_bridge.hpp`) — a lock-free triple buffer:
+
+```cpp
+// Audio thread, in process():
+bridge.analyze_and_push(channels, num_channels, num_samples);  // peak/RMS
+// or push a pre-computed MeterData with bridge.push_meter(data);
+
+// UI thread, in paint():
+pulp::view::MeterData meter;
+if (bridge.pop_latest_meter(meter)) {
+    // meter.peak[ch] / meter.rms[ch] are per-channel linear levels ...
+}
+```
+
+For a full magnitude spectrum, feed a `SpectrogramView`
+(`core/view/include/pulp/view/widgets.hpp`) directly with
+`push_spectrum(const float* magnitudes_db, int num_bins)` from the UI thread;
+the widget owns the scroll/paint of the spectrogram.
 
 ---
 

@@ -91,7 +91,9 @@ modules:
       (each op is upload → dispatch → blocking readback); the transport is the
       RT seam.
     status: experimental
-    dependencies: [render, signal, audio]
+    # audio/runtime/signal link unconditionally; render is GPU-build-only
+    # (linked only under `if(TARGET pulp::render)`).
+    dependencies: [audio, runtime, signal, render]
     docs: guides/gpu-audio-sdk.md
 
   - name: view
