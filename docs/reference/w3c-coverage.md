@@ -32,7 +32,7 @@ Pulp's web-compat layer was audited against **28 web specifications** — 16 W3C
 | 24 | [Encoding](https://encoding.spec.whatwg.org/) | Living | ✅ Complete | TextEncoder, TextDecoder, atob/btoa | — |
 | 25 | [Web Crypto](https://www.w3.org/TR/WebCryptoAPI/) | — | ⚠️ Minimal | getRandomValues (not cryptographic) | SubtleCrypto |
 | 26 | [Structured Clone](https://html.spec.whatwg.org/multipage/structured-data.html) | Living | ✅ Complete | structuredClone (via JSON) | — |
-| 27 | [WebGPU](https://www.w3.org/TR/webgpu/) | — | ⚠️ Shader API | Dawn backend, applyShader (SkSL), getGPUInfo | Full navigator.gpu pipeline |
+| 27 | [WebGPU](https://www.w3.org/TR/webgpu/) | — | ⚠️ Shader API | Dawn backend, setWidgetShader (SkSL), getGPUInfo | Full navigator.gpu pipeline |
 | 28 | [Font Loading](https://www.w3.org/TR/css-font-loading-3/) | L3 | ⚠️ Partial | loadFont(path), registerFont(family, path) | FontFace constructor, document.fonts |
 **Legend:** ✅ Complete or nearly so — ⚠️ Partial, see details below — ❌ Not implemented
 
@@ -464,13 +464,15 @@ Pulp uses **Dawn** (Google's WebGPU implementation) as its GPU backend. The Dawn
 | Dawn GPU backend (Metal/D3D12/Vulkan) | ✅ | GpuSurface with presentable textures |
 | Skia Graphite over Dawn | ✅ | 2D rendering through WebGPU device |
 | `compileShader(skslCode)` | ✅ | Validate SkSL shader code |
-| `applyShader(canvasId, skslCode)` | ✅ | Apply custom shader to canvas widget |
+| `setWidgetShader(id, skslCode)` | ✅ | Install a custom SkSL body shader on a shader-capable widget |
+| `clearWidgetShader(id)` | ✅ | Remove it, restoring the default paint path |
 | `getGPUInfo()` | ✅ | Query backend and Skia availability |
+| SkSL as a view post-effect | ❌ | Needs a child-shader compositor; body shaders only |
 | `navigator.gpu.requestAdapter()` | ❌ | Full WebGPU JS API not exposed |
 | GPURenderPipeline / GPUBuffer | ❌ | Use Canvas 2D + shaders instead |
 | GPUComputePipeline | ❌ | Not needed for plugin UIs |
 
-**Design rationale:** Pulp exposes GPU power through the Canvas 2D API + SkSL custom shaders, rather than the raw WebGPU pipeline API. This is simpler for UI development while still allowing custom GPU effects. For advanced visualization, use `applyShader()` with SkSL fragment shaders.
+**Design rationale:** Pulp exposes GPU power through the Canvas 2D API + SkSL custom shaders, rather than the raw WebGPU pipeline API. This is simpler for UI development while still allowing custom GPU effects. For advanced visualization, use `setWidgetShader()` with an SkSL fragment shader — it compiles up front and reports errors rather than silently doing nothing.
 
 ### 28. Font Loading API
 **Spec:** https://www.w3.org/TR/css-font-loading-3/

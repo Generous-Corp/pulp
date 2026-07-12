@@ -1180,6 +1180,14 @@ std::string Canvas::compile_sksl(const std::string& sksl) {
     return effect ? "" : cache.last_error();
 }
 
+bool Canvas::sksl_declares_uniform(const std::string& sksl,
+                                   const std::string& uniform_name) {
+    if (sksl.empty() || uniform_name.empty()) return false;
+    auto effect = RuntimeEffectCache::instance().get_or_compile(sksl);
+    if (!effect) return false;  // Won't run, so it declares nothing that matters.
+    return effect->findUniform(std::string_view(uniform_name)) != nullptr;
+}
+
 
 } // namespace pulp::canvas
 

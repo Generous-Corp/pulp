@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <pulp/view/view.hpp>
 #include <pulp/view/caret.hpp>
+#include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/canvas/attributed_string.hpp>
 #include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
@@ -328,7 +329,7 @@ public:
 ///           sprite-strip PNGs (no PNG bleed, crisp at any scale).
 enum class WidgetRenderStyle { standard, minimal, silver };
 
-class Knob : public View {
+class Knob : public View, public CustomShaderHost {
 public:
     Knob() { set_access_role(AccessRole::slider); set_focusable(true); }
 
@@ -417,13 +418,9 @@ public:
     static constexpr float start_angle = 2.356f;  // 135 degrees (bottom-left)
     static constexpr float end_angle = 7.069f;    // 405 degrees (bottom-right via top)
 
-    // Custom shader: if set, replaces the body/track/fill arc drawing with SkSL GPU shader.
-    // Labels, value text, and hover glow still draw in C++.
-    void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
-    void clear_custom_shader() { custom_sksl_.clear(); }
-    bool has_custom_shader() const { return !custom_sksl_.empty(); }
-    const std::string& custom_shader() const { return custom_sksl_; }
-    bool shader_uses_time() const { return custom_sksl_.find("time") != std::string::npos; }
+    // Custom body shader comes from CustomShaderHost — it replaces the
+    // body/track/fill arc drawing; labels, value text, and hover glow still
+    // draw in C++.
 
     // Declarative widget schema: JSON defining appearance as data (Rive-inspired)
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
@@ -501,7 +498,6 @@ private:
     float drag_start_value_ = 0;
     bool gesture_active_ = false;
     bool show_label_ = true;
-    std::string custom_sksl_;     // SkSL source for GPU shader body
     std::string widget_schema_;   // JSON declarative schema
     std::string lottie_json_;     // Lottie animation JSON
     WidgetRenderStyle render_style_ = WidgetRenderStyle::standard;
@@ -567,7 +563,7 @@ private:
 // ── Fader ────────────────────────────────────────────────────────────────────
 // Linear slider for audio parameters
 
-class Fader : public View {
+class Fader : public View, public CustomShaderHost {
 public:
     enum class Orientation { vertical, horizontal };
     enum class ThumbShape { circle, rectangle };
@@ -663,11 +659,7 @@ public:
         return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
     }
 
-    void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
-    void clear_custom_shader() { custom_sksl_.clear(); }
-    bool has_custom_shader() const { return !custom_sksl_.empty(); }
-    const std::string& custom_shader() const { return custom_sksl_; }
-    bool shader_uses_time() const { return custom_sksl_.find("time") != std::string::npos; }
+    // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
     const std::string& widget_schema() const { return widget_schema_; }
     void set_lottie_json(std::string json) { lottie_json_ = std::move(json); }
@@ -688,7 +680,6 @@ private:
     std::string label_;
     ValueAnimation hover_thumb_scale_{1.0f};
     bool dragging_ = false;
-    std::string custom_sksl_;
     std::string widget_schema_;
     std::string lottie_json_;
     float lottie_time_ = 0.0f;
@@ -902,7 +893,7 @@ private:
 // ── Toggle ───────────────────────────────────────────────────────────────────
 // Boolean on/off switch
 
-class Toggle : public View {
+class Toggle : public View, public CustomShaderHost {
 public:
     Toggle() : thumb_position_(0.0f), hover_opacity_(0.0f) {
         set_access_role(AccessRole::toggle); set_focusable(true);
@@ -934,11 +925,7 @@ public:
     float hover_opacity() const { return hover_opacity_.value(); }
     void advance_animations(float dt);
 
-    void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
-    void clear_custom_shader() { custom_sksl_.clear(); }
-    bool has_custom_shader() const { return !custom_sksl_.empty(); }
-    const std::string& custom_shader() const { return custom_sksl_; }
-    bool shader_uses_time() const { return custom_sksl_.find("time") != std::string::npos; }
+    // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
     const std::string& widget_schema() const { return widget_schema_; }
     void set_lottie_json(std::string json) { lottie_json_ = std::move(json); }
@@ -951,7 +938,6 @@ private:
     std::string label_;
     ValueAnimation thumb_position_;
     ValueAnimation hover_opacity_;
-    std::string custom_sksl_;
     std::string widget_schema_;
     std::string lottie_json_;
     float lottie_time_ = 0.0f;

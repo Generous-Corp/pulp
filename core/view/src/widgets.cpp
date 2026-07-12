@@ -623,7 +623,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         // Fall through to draw labels on top
     }
     // ── Custom shader path: replaces body/track/fill, keeps labels/glow ──
-    else if (!custom_sksl_.empty()) {
+    else if (has_custom_shader()) {
         canvas::Canvas::ShaderUniforms u;
         u.value = value_;
         u.time = shader_time;
@@ -632,7 +632,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
         u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.draw_with_sksl(custom_sksl_, 0, 0, b.width, b.height, u);
+        canvas.draw_with_sksl(custom_shader(), 0, 0, b.width, b.height, u);
         // Fall through to draw labels and value text on top of the shader
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
@@ -884,7 +884,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
     } else if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, value_, *this);
-    } else if (!custom_sksl_.empty()) {
+    } else if (has_custom_shader()) {
         canvas::Canvas::ShaderUniforms u;
         u.value = value_;
         u.time = shader_time;
@@ -893,7 +893,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
         u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.draw_with_sksl(custom_sksl_, 0, 0, b.width, b.height, u);
+        canvas.draw_with_sksl(custom_shader(), 0, 0, b.width, b.height, u);
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal: thin track only, no fill, no thumb (matches design tools) ──
         auto track_color = resolve_color("control.track", canvas::Color::rgba8(69, 71, 90));
@@ -1235,7 +1235,7 @@ void Toggle::paint(canvas::Canvas& canvas) {
 
     if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, on_ ? 1.0f : 0.0f, *this);
-    } else if (!custom_sksl_.empty()) {
+    } else if (has_custom_shader()) {
         canvas::Canvas::ShaderUniforms u;
         u.value = on_ ? 1.0f : 0.0f;
         u.time = shader_time;
@@ -1244,7 +1244,7 @@ void Toggle::paint(canvas::Canvas& canvas) {
         u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
         u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.draw_with_sksl(custom_sksl_, 0, 0, b.width, b.height, u);
+        canvas.draw_with_sksl(custom_shader(), 0, 0, b.width, b.height, u);
     } else {
 
         // Track — blend color based on animated thumb position

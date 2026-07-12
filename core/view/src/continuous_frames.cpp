@@ -11,17 +11,22 @@ bool needs_continuous_frames(const View* view) {
     if (view->wants_continuous_repaint()) return true;
     if (view->has_time_driven_gestures()) return true;
 
+    // Any shader-capable widget whose shader declares a `time` uniform must
+    // keep painting. One cast covers every CustomShaderHost, so a new
+    // shader-capable widget is picked up here for free.
+    if (auto* cs = dynamic_cast<const CustomShaderHost*>(view)) {
+        if (cs->shader_uses_time()) return true;
+    }
+
+    // Mid-flight widget animations (hover glow, thumb travel, hover scale).
     if (auto* k = dynamic_cast<const Knob*>(view)) {
-        if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
-            return true;
+        if (k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) return true;
     }
     if (auto* t = dynamic_cast<const Toggle*>(view)) {
-        if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
-            return true;
+        if (t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) return true;
     }
     if (auto* f = dynamic_cast<const Fader*>(view)) {
-        if (f->hover_scale() > 1.01f || f->shader_uses_time())
-            return true;
+        if (f->hover_scale() > 1.01f) return true;
     }
     if (auto* sv = dynamic_cast<const ScrollView*>(view)) {
         if (sv->scroll_animating()) return true;

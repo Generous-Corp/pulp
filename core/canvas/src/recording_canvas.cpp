@@ -1,5 +1,8 @@
 #include <pulp/canvas/canvas.hpp>
 
+#include <algorithm>
+#include <cctype>
+
 #include <cmath>
 
 namespace pulp::canvas {
@@ -713,6 +716,60 @@ void RecordingCanvas::round_rect(float x, float y, float w, float h,
 std::string Canvas::compile_sksl(const std::string& sksl) {
     (void)sksl;
     return "Skia not available — shader compilation requires GPU build";
+}
+
+// Without Skia there is no compiler to ask, so scan the declarations directly.
+// This answers the same question the Skia path answers via findUniform() — does
+// the source declare a uniform of this name — so the two backends agree.
+//
+// A `uniform` declaration runs to the next `;`, and the name is the last
+// identifier in it (`uniform float time;`, `layout(color) uniform float4
+// accentColor;`, `uniform float t[2];`). Comments are stripped first so a
+// mention of the name in prose cannot match.
+bool Canvas::sksl_declares_uniform(const std::string& sksl,
+                                   const std::string& uniform_name) {
+    if (sksl.empty() || uniform_name.empty()) return false;
+
+    std::string src;
+    src.reserve(sksl.size());
+    for (size_t i = 0; i < sksl.size();) {
+        if (sksl.compare(i, 2, "//") == 0) {
+            while (i < sksl.size() && sksl[i] != '\n') ++i;
+        } else if (sksl.compare(i, 2, "/*") == 0) {
+            i += 2;
+            while (i + 1 < sksl.size() && sksl.compare(i, 2, "*/") != 0) ++i;
+            i = std::min(i + 2, sksl.size());
+        } else {
+            src += sksl[i++];
+        }
+    }
+
+    auto is_ident = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+
+    for (size_t i = 0; i < src.size();) {
+        // Find the next `uniform` keyword on a token boundary.
+        if (!is_ident(src[i])) { ++i; continue; }
+        size_t start = i;
+        while (i < src.size() && is_ident(src[i])) ++i;
+        if (src.compare(start, i - start, "uniform") != 0) continue;
+
+        // Walk the declaration to its `;`, remembering the last identifier —
+        // that is the uniform's name (an array suffix `[N]` follows it).
+        std::string last_ident;
+        while (i < src.size() && src[i] != ';') {
+            if (is_ident(src[i])) {
+                size_t tok = i;
+                while (i < src.size() && is_ident(src[i])) ++i;
+                last_ident = src.substr(tok, i - tok);
+            } else if (src[i] == '[') {
+                while (i < src.size() && src[i] != ']' && src[i] != ';') ++i;
+            } else {
+                ++i;
+            }
+        }
+        if (last_ident == uniform_name) return true;
+    }
+    return false;
 }
 #endif
 

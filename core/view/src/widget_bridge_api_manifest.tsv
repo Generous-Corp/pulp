@@ -369,7 +369,6 @@ canvasPutImageData	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cp
 registerDrop	events	function	core/view/src/widget_bridge/event_api.cpp
 loadFont	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
 registerFont	storage_assets	function	core/view/src/widget_bridge/storage_assets_api.cpp
-applyShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
 getGPUInfo	gpu	function	core/view/src/widget_bridge/gpu_api.cpp
 navigatorGPU	gpu	host_object	core/view/src/widget_bridge/gpu_api.cpp
 __describeNativeAdapterImpl	gpu	function	core/view/src/widget_bridge/gpu_api.cpp

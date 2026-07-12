@@ -1203,6 +1203,16 @@ public:
     /// Static so it can be called without a Canvas instance.
     static std::string compile_sksl(const std::string& sksl);
 
+    /// Whether an SkSL shader declares a uniform of the given name. Compiles via
+    /// the same process-lifetime cache as `compile_sksl`, so repeat queries are
+    /// free; false if the source does not compile.
+    ///
+    /// Used to decide whether a shader is time-driven and needs continuous
+    /// repaint. Not a substring search: a `timeline` uniform must not pin the
+    /// render loop, and a differently-spelled one must not silently freeze.
+    static bool sksl_declares_uniform(const std::string& sksl,
+                                      const std::string& uniform_name);
+
     /// Draw a rectangle filled by a custom SkSL shader.
     /// Only works on GPU backends (SkiaCanvas). CPU backends draw a fallback rect.
     /// The shader receives: uniform float2 resolution, float value, float time,

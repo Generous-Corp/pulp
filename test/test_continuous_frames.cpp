@@ -74,31 +74,71 @@ TEST_CASE("idle widgets do not force frames", "[view][continuous-frames]") {
     REQUIRE_FALSE(needs_continuous_frames(&root));
 }
 
+// A shader that declares a `time` uniform animates every frame, so the widget's
+// subtree needs continuous frames. Any CustomShaderHost is covered by the single
+// dynamic_cast in needs_continuous_frames().
+namespace {
+// Valid SkSL that really declares `time`. The fixture used to be
+// `half4 main() { return half4(time); }`, which declares no uniform and does not
+// compile (`main` takes a float2; `time` is undeclared) — it only counted as
+// time-driven because the old check was a substring search for "time". That
+// pinned the render loop for a shader which could never paint.
+constexpr const char* kTimeShader =
+    "uniform float time; half4 main(float2 p) { return half4(time); }";
+constexpr const char* kStaticShader =
+    "half4 main(float2 p) { return half4(1); }";
+} // namespace
+
 TEST_CASE("a time-driven widget shader keeps the tree live", "[view][continuous-frames]") {
-    // A shader whose body samples `time` animates every frame, so the widget's
-    // subtree needs continuous frames. This exercises the per-widget
-    // dynamic_cast branches (which the generic continuous-repaint opt-in would
-    // otherwise short-circuit past).
     SECTION("knob") {
         View root;
         auto knob = std::make_unique<Knob>();
-        knob->set_custom_shader("half4 main() { return half4(time); }");
+        knob->set_custom_shader(kTimeShader);
         root.add_child(std::move(knob));
         REQUIRE(needs_continuous_frames(&root));
     }
     SECTION("fader") {
         View root;
         auto fader = std::make_unique<Fader>();
-        fader->set_custom_shader("half4 main() { return half4(time); }");
+        fader->set_custom_shader(kTimeShader);
         root.add_child(std::move(fader));
         REQUIRE(needs_continuous_frames(&root));
     }
     SECTION("toggle") {
         View root;
         auto toggle = std::make_unique<Toggle>();
-        toggle->set_custom_shader("half4 main() { return half4(time); }");
+        toggle->set_custom_shader(kTimeShader);
         root.add_child(std::move(toggle));
         REQUIRE(needs_continuous_frames(&root));
+    }
+}
+
+// The inverse, which the substring search got wrong: a shader with no `time`
+// uniform must NOT pin the render loop, even when the word appears in it.
+TEST_CASE("a static widget shader does not keep the tree live",
+          "[view][continuous-frames]") {
+    SECTION("no time uniform") {
+        View root;
+        auto knob = std::make_unique<Knob>();
+        knob->set_custom_shader(kStaticShader);
+        root.add_child(std::move(knob));
+        REQUIRE_FALSE(needs_continuous_frames(&root));
+    }
+    SECTION("a differently-named uniform that merely contains 'time'") {
+        View root;
+        auto knob = std::make_unique<Knob>();
+        knob->set_custom_shader(
+            "uniform float timeline; half4 main(float2 p) { return half4(timeline); }");
+        root.add_child(std::move(knob));
+        REQUIRE_FALSE(needs_continuous_frames(&root));
+    }
+    SECTION("'time' only in a comment") {
+        View root;
+        auto knob = std::make_unique<Knob>();
+        knob->set_custom_shader(
+            "// animates over time\nhalf4 main(float2 p) { return half4(1); }");
+        root.add_child(std::move(knob));
+        REQUIRE_FALSE(needs_continuous_frames(&root));
     }
 }
 

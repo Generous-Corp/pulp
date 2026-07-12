@@ -182,26 +182,31 @@ over a panel), use `ViewEffect` from
 ```cpp
 #include <pulp/canvas/view_effect.hpp>
 
-auto fx = std::make_shared<pulp::canvas::CustomShaderEffect>();
-fx->sksl  = my_post_effect_sksl;
-fx->value = 0.5f;
-fx->time  = clock_seconds();
-view.set_effect(fx);
+view.set_effect(std::make_shared<pulp::canvas::GpuBlurEffect>());
 
 // Compose multiple in order
 auto chain = std::make_shared<pulp::canvas::EffectChain>();
 chain->add(std::make_shared<pulp::canvas::GpuBlurEffect>());
-chain->add(fx);
+chain->add(std::make_shared<pulp::canvas::VignetteEffect>());
 view.set_effect(chain);
 ```
 
 Built-in effects: `GpuBlurEffect`, `GpuBloomEffect`,
-`ChromaticAberrationEffect`, `VignetteEffect`, `CustomShaderEffect`,
-`EffectChain`. Each calls `Canvas::save_layer(...)` before the
-subtree paints; the layer is composited back with the configured
-filter / opacity on `restore()`. See the
+`ChromaticAberrationEffect`, `VignetteEffect`, `EffectChain`. Each
+pushes `layer_count()` compositing layers before the subtree paints
+(one for a simple effect; `EffectChain` pushes one per child), and the
+layers composite back with the configured filter / opacity when
+`View::paint_all` pops them. See the
 [Rendering Reference](rendering.md) for the broader effect-graph
 context.
+
+**Not supported: arbitrary SkSL as a view post-effect.** Running a
+shader over a View's *already-rendered* content needs a child-shader
+compositor (Skia's runtime-shader image filter), which Pulp does not
+have — `draw_with_sksl()` fills a fresh rect and cannot post-process a
+subtree. SkSL reaches widgets through the **body shader** path below
+(`setWidgetShader` / `CustomShaderHost`), which replaces a widget's
+body/track/fill drawing rather than filtering rendered pixels.
 
 ## JS bridge
 
@@ -211,17 +216,30 @@ The same pipeline is reachable from JS UIs:
 const result = compileShader(skslSource);
 if (!result.success) console.error(result.error);
 
-setWidgetShader('my-knob', skslSource);   // Knob / Fader / Toggle
-applyShader('my-canvas', skslSource);     // canvas-targeted variant
-const info = getGPUInfo();                 // { backendType: 'Metal' | 'D3D12' | ... }
-clearWidgetShader('my-knob');
+// Shader-capable widgets (Knob / Fader / Toggle — any CustomShaderHost).
+// Returns { success, error }; the shader is compiled first and is NOT
+// installed if it fails to compile.
+const applied = setWidgetShader('my-knob', skslSource);
+if (!applied.success) console.error(applied.error);
+
+const info = getGPUInfo();                // { backendType: 'Metal' | 'D3D12' | ... }
+clearWidgetShader('my-knob');             // also returns { success, error }
 ```
 
-All five functions are registered under `core/view/src/widget_bridge/`
-(`compileShader`, `setWidgetShader`, `applyShader`, and `clearWidgetShader`
-in `shader_api.cpp`; `getGPUInfo` in `gpu_api.cpp`) and route to the same
+`setWidgetShader` and `clearWidgetShader` never fail silently: an unknown
+id, a widget with no shader support, empty source, and SkSL that does not
+compile each come back as `{ success: false, error }`.
+
+The four functions are registered under `core/view/src/widget_bridge/`
+(`compileShader`, `setWidgetShader`, and `clearWidgetShader` in
+`shader_api.cpp`; `getGPUInfo` in `gpu_api.cpp`) and route to the same
 `RuntimeEffectCache`, so a shader compiled from JS is shared with C++ paint
 code that uses the same source.
+
+There is no `applyShader`. It existed, but never compiled or applied
+anything — it reported success for any non-empty string, including
+un-compilable SkSL and ids matching no widget. Canvas widgets have no
+shader path, so there was nothing an honest version of it could do.
 
 ## Performance notes
 
