@@ -6,32 +6,41 @@
 
 #include <pulp/format/reload/swap_pack.hpp>
 #include <pulp/format/reload/key_store.hpp>
+#include <pulp/platform/child_process.hpp>
 
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
+
+
+using namespace pulp::format::reload;
 
 namespace fs = std::filesystem;
-using namespace pulp::format::reload;
 
 namespace {
 const char* kCliBin = PULP_CLI_BIN;      // $<TARGET_FILE:pulp-cli>
 const char* kRepoRoot = PULP_REPO_ROOT;  // find_project_root() needs a project cwd
 
-std::string run_capture(const std::string& cmd, int& code) {
-    std::string full = "cd '" + std::string(kRepoRoot) + "' && " + cmd + " 2>&1";
-    FILE* p = popen(full.c_str(), "r");
-    std::string out;
-    if (p) {
-        char buf[512];
-        while (fgets(buf, sizeof(buf), p)) out += buf;
-        code = pclose(p);
-    } else {
-        code = -1;
-    }
-    return out;
+// Run the CLI directly -- no shell in between.
+//
+// This used to compose a `cd '<root>' && <cmd> 2>&1` string for popen(), which is
+// POSIX-only twice over: MSVC has no `popen`, and cmd.exe does not treat '...' as
+// quoting, so single-quoted paths would have reached the binary as literal
+// apostrophes. Handing argv to ChildProcess (posix_spawn / CreateProcess) skips
+// the shell and its quoting rules entirely.
+//
+// The child inherits this process's stdin, which under ctest is not a terminal
+// and reads EOF immediately -- which is what the no-confirmation case below
+// needs (it used to spell that `printf '' |`).
+std::string run_cli(const std::vector<std::string>& args, int& code) {
+    pulp::platform::ProcessOptions options;
+    options.working_directory = kRepoRoot;
+    options.timeout_ms = 60000;
+    const auto r = pulp::platform::ChildProcess::run(kCliBin, args, options);
+    code = r.timed_out ? -1 : r.exit_code;
+    return r.stdout_output + r.stderr_output;
 }
 
 fs::path make_bundle() {
@@ -55,10 +64,9 @@ TEST_CASE("pulp ship swap-pack signs a bundle with inferred capabilities", "[cli
     const fs::path manifest = bundle / "swap-pack.manifest.json";
 
     int code = 0;
-    const std::string out = run_capture(
-        std::string("'") + kCliBin + "' ship swap-pack --bundle '" + bundle.string() +
-        "' --plugin-id com.pulp.clitest --pack-version 4 --sign-key '" + key.string() + "' --yes",
-        code);
+    const std::string out = run_cli({"ship", "swap-pack", "--bundle", bundle.string(),
+                                     "--plugin-id", "com.pulp.clitest", "--pack-version", "4",
+                                     "--sign-key", key.string(), "--yes"}, code);
 
     REQUIRE(code == 0);
     // Content-aware summary with capabilities inferred from the JS.
@@ -89,11 +97,10 @@ TEST_CASE("pulp ship swap-pack --backup-github refuses the core Pulp repo",
     const fs::path key = bundle.parent_path() / (bundle.filename().string() + "-bk.key");
     fs::remove(key);
     int code = 0;
-    const std::string out = run_capture(
-        std::string("'") + kCliBin + "' ship swap-pack --bundle '" + bundle.string() +
-        "' --plugin-id com.pulp.clitest --sign-key '" + key.string() +
-        "' --backup-github --repo danielraffel/pulp --yes",
-        code);
+    const std::string out = run_cli({"ship", "swap-pack", "--bundle", bundle.string(),
+                                     "--plugin-id", "com.pulp.clitest",
+                                     "--sign-key", key.string(), "--backup-github",
+                                     "--repo", "danielraffel/pulp", "--yes"}, code);
     // The pack signs, but publishing the key to the core repo is refused (no gh call).
     REQUIRE(code != 0);
     REQUIRE(out.find("refusing to back up") != std::string::npos);
@@ -110,10 +117,9 @@ TEST_CASE("pulp ship swap-pack refuses to sign without confirmation", "[cli][shi
 
     // No --yes and empty stdin → the confirm gate blocks; nothing is signed/written.
     int code = 0;
-    const std::string out = run_capture(
-        std::string("printf '' | '") + kCliBin + "' ship swap-pack --bundle '" + bundle.string() +
-        "' --plugin-id com.pulp.clitest --sign-key '" + key.string() + "'",
-        code);
+    const std::string out = run_cli({"ship", "swap-pack", "--bundle", bundle.string(),
+                                     "--plugin-id", "com.pulp.clitest",
+                                     "--sign-key", key.string()}, code);
     REQUIRE(code != 0);
     REQUIRE_FALSE(fs::exists(manifest));
     REQUIRE_FALSE(fs::exists(key));  // no key generated when we never got to signing

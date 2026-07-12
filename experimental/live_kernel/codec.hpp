@@ -24,6 +24,7 @@
 // endianness-explicit and never over-reads (each read is bounds-checked against
 // len before it happens).
 
+#include <bit>
 #include <cstdint>
 #include <cstddef>
 
@@ -97,9 +98,10 @@ inline uint16_t rd_u16(const uint8_t* p) {
 inline float rd_f32(const uint8_t* p) {
     uint32_t bits = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
                     ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-    float f;
-    __builtin_memcpy(&f, &bits, 4);
-    return f;
+    // std::bit_cast, not __builtin_memcpy: the builtin is a GCC/Clang extension
+    // MSVC does not provide. bit_cast is the portable C++20 spelling of the same
+    // type-punning, and is constexpr besides.
+    return std::bit_cast<float>(bits);
 }
 } // namespace detail
 

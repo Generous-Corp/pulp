@@ -6,11 +6,12 @@
 
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/platform/child_process.hpp>
 
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -18,19 +19,21 @@ namespace {
 const char* kCliBin = PULP_CLI_BIN;
 const char* kRepoRoot = PULP_REPO_ROOT;
 
-std::string run_capture(const std::string& cmd, int& code) {
-    std::string full = "cd '" + std::string(kRepoRoot) + "' && " + cmd + " 2>&1";
-    FILE* p = popen(full.c_str(), "r");
-    std::string out;
-    if (p) {
-        char buf[512];
-        while (fgets(buf, sizeof(buf), p)) out += buf;
-        int raw = pclose(p);
-        code = WIFEXITED(raw) ? WEXITSTATUS(raw) : -1;
-    } else {
-        code = -1;
-    }
-    return out;
+// Run the CLI directly — no shell in between.
+//
+// This used to compose a `cd '<root>' && <cmd> 2>&1` string for popen(), which is
+// POSIX-only twice over: MSVC has neither `popen` nor `WEXITSTATUS`, and cmd.exe
+// does not treat '...' as quoting, so single-quoted paths would have reached the
+// binary as literal apostrophes. Handing argv to ChildProcess (posix_spawn /
+// CreateProcess) skips the shell and its quoting rules entirely, so a path with
+// spaces is safe on every platform.
+std::string run_cli(const std::vector<std::string>& args, int& code) {
+    pulp::platform::ProcessOptions options;
+    options.working_directory = kRepoRoot;
+    options.timeout_ms = 60000;
+    const auto r = pulp::platform::ChildProcess::run(kCliBin, args, options);
+    code = r.timed_out ? -1 : r.exit_code;
+    return r.stdout_output + r.stderr_output;  // callers grep the merged stream
 }
 
 // A minimal lowerable graph: input -> gain -> output. Serialize it to a .pulpgraph.
@@ -64,18 +67,15 @@ TEST_CASE("pulp bake signs a graph and verify accepts it under trust", "[cli][ba
     const fs::path key = d / "signing.key";  // minted on first use by load_or_generate_key_file
 
     int code = 0;
-    const std::string baked = run_capture(
-        std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-            "' --sign-key '" + key.string() + "'",
-        code);
+    const std::string baked = run_cli(
+        {"bake", graph.string(), "-o", out.string(), "--sign-key", key.string()}, code);
     INFO(baked);
     REQUIRE(code == 0);
     REQUIRE(baked.find("signer public key") != std::string::npos);
     REQUIRE(fs::exists(out));
 
-    const std::string verified = run_capture(
-        std::string(kCliBin) + " bake verify '" + out.string() + "' --trust '" + key.string() + "'",
-        code);
+    const std::string verified =
+        run_cli({"bake", "verify", out.string(), "--trust", key.string()}, code);
     INFO(verified);
     REQUIRE(code == 0);
     REQUIRE(verified.find("ACCEPTED") != std::string::npos);
@@ -89,19 +89,15 @@ TEST_CASE("pulp bake verify rejects tampering and an untrusted signer", "[cli][b
     const fs::path otherkey = d / "other.key";
 
     int code = 0;
-    run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                    "' --sign-key '" + key.string() + "'",
-                code);
+    run_cli({"bake", graph.string(), "-o", out.string(), "--sign-key", key.string()}, code);
     REQUIRE(code == 0);
 
     SECTION("untrusted signer (verify under a different key) -> REJECTED") {
         // Mint an unrelated key by baking to a throwaway with it.
-        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" +
-                        (d / "throwaway.pulpbake").string() + "' --sign-key '" + otherkey.string() + "'",
-                    code);
-        const std::string v = run_capture(std::string(kCliBin) + " bake verify '" + out.string() +
-                                              "' --trust '" + otherkey.string() + "'",
-                                          code);
+        run_cli({"bake", graph.string(), "-o", (d / "throwaway.pulpbake").string(),
+                 "--sign-key", otherkey.string()}, code);
+        const std::string v =
+            run_cli({"bake", "verify", out.string(), "--trust", otherkey.string()}, code);
         INFO(v);
         REQUIRE(code != 0);
         REQUIRE(v.find("REJECTED") != std::string::npos);
@@ -116,9 +112,8 @@ TEST_CASE("pulp bake verify rejects tampering and an untrusted signer", "[cli][b
         f.seekp(-1, std::ios::end);
         f.write(&last, 1);
         f.close();
-        const std::string v = run_capture(std::string(kCliBin) + " bake verify '" + out.string() +
-                                              "' --trust '" + key.string() + "'",
-                                          code);
+        const std::string v =
+            run_cli({"bake", "verify", out.string(), "--trust", key.string()}, code);
         INFO(v);
         REQUIRE(code != 0);
         REQUIRE(v.find("REJECTED") != std::string::npos);
@@ -127,9 +122,8 @@ TEST_CASE("pulp bake verify rejects tampering and an untrusted signer", "[cli][b
 
 TEST_CASE("pulp bake fails cleanly on a missing input", "[cli][bake]") {
     int code = 0;
-    const std::string out = run_capture(
-        std::string(kCliBin) + " bake /nonexistent/nope.pulpgraph -o /tmp/x.pulpbake --sign-key /tmp/k",
-        code);
+    const std::string out = run_cli({"bake", "/nonexistent/nope.pulpgraph", "-o",
+                                     "/tmp/x.pulpbake", "--sign-key", "/tmp/k"}, code);
     INFO(out);
     REQUIRE(code != 0);
 }
@@ -143,52 +137,39 @@ TEST_CASE("pulp bake enforces arg guards, --force, --no-mint, and empty-trust re
     int code = 0;
 
     SECTION("malformed --sr / --block -> exit 2, no crash") {
-        const std::string a = run_capture(
-            std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                "' --sign-key '" + key.string() + "' --sr not-a-number",
-            code);
+        const std::string a = run_cli({"bake", graph.string(), "-o", out.string(),
+                                       "--sign-key", key.string(), "--sr", "not-a-number"}, code);
         INFO(a);
         REQUIRE(code == 2);
-        const std::string b = run_capture(
-            std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                "' --sign-key '" + key.string() + "' --block zero",
-            code);
+        const std::string b = run_cli({"bake", graph.string(), "-o", out.string(),
+                                       "--sign-key", key.string(), "--block", "zero"}, code);
         INFO(b);
         REQUIRE(code == 2);
     }
     SECTION("--no-mint with an absent key -> exit 2 (no silent identity mint)") {
         const fs::path absent = d / "does-not-exist.key";
-        const std::string a = run_capture(
-            std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                "' --sign-key '" + absent.string() + "' --no-mint",
-            code);
+        const std::string a = run_cli({"bake", graph.string(), "-o", out.string(),
+                                       "--sign-key", absent.string(), "--no-mint"}, code);
         INFO(a);
         REQUIRE(code == 2);
         REQUIRE_FALSE(fs::exists(absent));  // did NOT mint
     }
     SECTION("--force guard") {
-        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                        "' --sign-key '" + key.string() + "'",
-                    code);
+        run_cli({"bake", graph.string(), "-o", out.string(), "--sign-key", key.string()}, code);
         REQUIRE(code == 0);
         // Second bake without --force is refused.
-        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                        "' --sign-key '" + key.string() + "'",
-                    code);
+        run_cli({"bake", graph.string(), "-o", out.string(), "--sign-key", key.string()}, code);
         REQUIRE(code != 0);
         // With --force it succeeds.
-        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                        "' --sign-key '" + key.string() + "' --force",
-                    code);
+        run_cli({"bake", graph.string(), "-o", out.string(), "--sign-key", key.string(),
+                 "--force"}, code);
         REQUIRE(code == 0);
     }
     SECTION("verify with NO --trust -> REJECTED (no anchor = reject)") {
-        run_capture(std::string(kCliBin) + " bake '" + graph.string() + "' -o '" + out.string() +
-                        "' --sign-key '" + key.string() + "'",
-                    code);
+        run_cli({"bake", graph.string(), "-o", out.string(), "--sign-key", key.string()}, code);
         REQUIRE(code == 0);
         const std::string v =
-            run_capture(std::string(kCliBin) + " bake verify '" + out.string() + "'", code);
+            run_cli({"bake", "verify", out.string()}, code);
         INFO(v);
         REQUIRE(code != 0);
         REQUIRE(v.find("REJECTED") != std::string::npos);

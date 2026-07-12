@@ -25,6 +25,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <numbers>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -119,8 +120,10 @@ PluginInfo make_info(PluginFormat format, const std::string& id) {
 // Deterministic phase-continuous sine sampled at an absolute frame index, so a
 // dropped or repeated block shows up as a discontinuity against this reference.
 float reference_sample(std::uint64_t absolute_frame) {
-    const double phase =
-        2.0 * M_PI * kSineHz * static_cast<double>(absolute_frame) / kSampleRate;
+    // std::numbers::pi, not M_PI: the latter is a POSIX extension that MSVC's
+    // <cmath> does not define without _USE_MATH_DEFINES.
+    const double phase = 2.0 * std::numbers::pi * kSineHz *
+                         static_cast<double>(absolute_frame) / kSampleRate;
     return static_cast<float>(std::sin(phase));
 }
 
