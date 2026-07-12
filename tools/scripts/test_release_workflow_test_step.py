@@ -598,6 +598,53 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertIn("greatest published SemVer", self.text)
 
 
+class NightlyIsTheRealIntelGate(unittest.TestCase):
+    """Removing the release gate is only safe if the nightly one actually asserts.
+
+    The release path used to carry a BLOCKING dual-arch auval gate. It is gone — a
+    redundant canary for a universal build we do not ship (the release ships thin
+    per-arch binaries), sitting on the same starved hosted macOS pool the release
+    itself needs.
+
+    "Redundant" was only half true when that argument was made. nightly-intel's
+    universal-crosscheck did assert the universal build and the lipo/codesign
+    checks, but its auval step ran `auval ... | tail -5 || true` and `Compute
+    result` never even read the outcome — so auval was, in practice, asserted
+    NOWHERE but the release gate. These tests make the redundancy real.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        path = REPO_ROOT / ".github" / "workflows" / "nightly-intel.yml"
+        cls.text = path.read_text(encoding="utf-8")
+
+    def test_nightly_auval_asserts_the_terminal_success_marker(self) -> None:
+        self.assertIn("grep -q 'AU VALIDATION SUCCEEDED'", self.text)
+
+    def test_nightly_auval_does_not_throw_its_result_away(self) -> None:
+        self.assertNotIn(
+            "auval -v aufx PGan Pulp 2>&1 | tail -5 || true",
+            self.text,
+            "nightly-intel's auval is print-only again. It is the ONLY place "
+            "dual-arch auval is asserted now that the release gate is removed.",
+        )
+
+    def test_nightly_auval_never_uses_the_sigpipe_prone_pipeline(self) -> None:
+        """`auval | tee | grep -q PASS` under pipefail is a false-failure machine.
+
+        `grep -q` exits on its first match and SIGPIPEs `tee`, failing the step even
+        though auval printed "AU VALIDATION SUCCEEDED" — and bare `PASS` matches a
+        per-subtest line that prints even on an overall failure. This bug is what
+        got auval misdiagnosed as flaky, and it wedged the release pipeline.
+        """
+        self.assertNotIn("tee /dev/stderr | grep -q", self.text)
+        self.assertNotIn("grep -q 'PASS'", self.text)
+
+    def test_nightly_result_counts_auval(self) -> None:
+        self.assertIn("steps.auval.outputs.status", self.text)
+        self.assertIn('[ "$auval" = "pass" ]', self.text)
+
+
 class SignAndReleaseCannotTouchTheRelease(unittest.TestCase):
     """sign-and-release.yml must be structurally incapable of gating a release.
 

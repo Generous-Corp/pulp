@@ -225,27 +225,60 @@ jobs:
             echo "status=fail" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Dual-arch auval (informational)
+      # This is now the ONLY place dual-arch auval is actually asserted. The
+      # release path used to carry a blocking copy; that gate has been removed
+      # (it was a redundant canary for a universal build we do not ship, sitting
+      # on the same starved hosted pool the release itself needs). So this step
+      # has to be a real check, not a print.
+      #
+      # It used to run `auval ... | tail -5 || true` — output only, result thrown
+      # away, and `Compute result` did not even look at it. Which means the "the
+      # nightly covers auval" claim was never true.
+      - name: Dual-arch auval
         id: auval
-        continue-on-error: true
+        continue-on-error: true   # records status; `Compute result` decides
         shell: bash
         run: |
           set -uo pipefail
-          # auval on a GitHub-hosted VM is unreliable (no persistent AU
-          # registration); run it best-effort so the run captures the signal
-          # without gating on the VM's AU quirks. The BLOCKING dual-arch auval
-          # lives in the Tier-3 release gate on a capable runner.
           comp="${BUILD_DIR}/AU/PulpGain.component"
           dest="$HOME/Library/Audio/Plug-Ins/Components/PulpGain.nightly.component"
           rm -rf "$dest"
-          cp -R "$comp" "$dest" 2>/dev/null || { echo "no component to auval"; exit 0; }
+          cp -R "$comp" "$dest" 2>/dev/null || {
+            echo "::error::no component to auval"
+            echo "status=fail" >> "$GITHUB_OUTPUT"; exit 1
+          }
+          trap 'rm -rf "$dest"' EXIT
           killall -KILL AudioComponentRegistrar 2>/dev/null || true
           sleep 1
-          echo "--- native (arm64) auval ---"
-          auval -v aufx PGan Pulp 2>&1 | tail -5 || true
-          echo "--- arch -x86_64 auval ---"
-          arch -x86_64 auval -v aufx PGan Pulp 2>&1 | tail -5 || true
-          rm -rf "$dest"
+
+          # Never pipe auval into a quiet grep. A quiet grep exits on its first
+          # match and SIGPIPEs the tee ahead of it; under `set -o pipefail` that
+          # broken pipe fails the step even when auval printed "AU VALIDATION
+          # SUCCEEDED". Matching a bare "PASS" is wrong too — auval prints one per
+          # sub-test, so an overall FAILURE would still match. Capture to a file,
+          # then assert on the TERMINAL marker. (That false failure is why auval was
+          # long believed to be "unreliable on hosted VMs". It is not.)
+          run_auval() {
+            local label="$1" log="$2"; shift 2
+            echo "--- ${label} ---"
+            "$@" -v aufx PGan Pulp > "$log" 2>&1 || true
+            cat "$log"
+            grep -q 'AU VALIDATION SUCCEEDED' "$log" || {
+              echo "::error::${label}: auval did not report AU VALIDATION SUCCEEDED"
+              return 1
+            }
+            echo "OK: ${label}"
+          }
+
+          rc=0
+          run_auval "native (arm64) auval" auval-native.log auval || rc=1
+          run_auval "arch -x86_64 auval (Rosetta)" auval-x86.log arch -x86_64 auval || rc=1
+          if [ "$rc" -eq 0 ]; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$rc"
 
       - name: Compute result
         id: report
@@ -255,13 +288,19 @@ jobs:
           set -euo pipefail
           build='${{ steps.build.outputs.status }}'
           lipo='${{ steps.lipo.outputs.status }}'
-          if [ "$build" = "pass" ] && [ "$lipo" = "pass" ]; then
+          auval='${{ steps.auval.outputs.status }}'
+          # auval counts. It did not before — the step printed its output, threw the
+          # result away, and this line never read it, so a genuinely failing auval
+          # scored a green nightly. This is the only place dual-arch auval is
+          # asserted now that the release gate is gone, so a silent pass here would
+          # mean no Intel auval coverage at all.
+          if [ "$build" = "pass" ] && [ "$lipo" = "pass" ] && [ "$auval" = "pass" ]; then
             result="success"
           else
             result="failure"
           fi
           echo "result=${result}" >> "$GITHUB_OUTPUT"
-          echo "universal-crosscheck: build=${build} lipo=${lipo} -> ${result}"
+          echo "universal-crosscheck: build=${build} lipo=${lipo} auval=${auval} -> ${result}"
 
       - name: Upload universal logs
         if: always()
