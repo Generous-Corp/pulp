@@ -212,3 +212,12 @@ Adopt a hybrid:
 - Focused review-fix validation passes: format hardening 127 assertions/5
   cases, explicit-kind StateStore 5/1, layout/source compatibility 17/5, CLAP
   port/config 54/2, and headless layout selection 4/1.
+- Final rebased affected-suite run passes: StateStore 1,825 assertions/98
+  cases, CLAP 302/19, LV2 105/13, AAX model 142/17, plugin-state IO 166/16,
+  headless 214/26, format hardening 127/5, Processor layout/latency/mode 131/21,
+  and AudioTap/ring 60/7. `PulpGain_AUv3` builds successfully in Release.
+- Changed-header standalone check compiled nine public headers. The AUv2 header
+  could not be checked by that local script because this build lacks the
+  external `AudioUnitSDK/AUMIDIEffectBase.h`; the AUv3 Objective-C++ adapter
+  build above covers the locally available Apple adapter surface, and cloud CI
+  owns the AUv2 SDK-enabled header lane.
