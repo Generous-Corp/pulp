@@ -27,17 +27,21 @@ live in `docs/guides/intel-support.md` — read it first.
 - The `PULP_INTEL_CANARY` option in the root `CMakeLists.txt`.
 - The Tier 0-3 workflows: `build.yml` (canary step), `intel-portability.yml`
   (Tier 1 advisory PR lane), `nightly-intel.yml` (Tier 2), and the
-  `universal-arch-gate` job in `release-cli.yml` (Tier 3).
+  `universal-crosscheck` job in `nightly-intel.yml` (Tier 3, nightly).
 
-Note: the Tier-3 `universal-arch-gate` only *validates* a universal build — it
-publishes nothing. **It is BLOCKING** (required in the `release` job's `if:`). It
-was briefly advisory when it wedged the release pipeline — misdiagnosed as an
-AU-adapter "Bad Max Frames" issue. The real cause was a shell bug in the auval
-step (`auval | tee /dev/stderr | grep -q PASS` under `set -o pipefail`: `grep -q`
-exits early and SIGPIPEs `tee`, failing the step even though auval printed "AU
-VALIDATION SUCCEEDED"). auval passes both arches (Bad Max Frames is already
-rejected by `AUBase::DoRender`); the fix is capture-to-file + grep for the
-`AU VALIDATION SUCCEEDED` verdict. NEVER pipe `auval | tee | grep -q` under pipefail.
+Note: the Tier-3 universal check only *validates* a universal build — it publishes
+nothing, and the release ships THIN per-arch binaries. It lives in
+`nightly-intel.yml`'s `universal-crosscheck` job (nightly), NOT on the release
+path: a redundant canary for an artifact we do not ship must never be able to
+block or starve a release. `intel-portability.yml` covers Intel at PR time.
+
+Its `auval` step must never be written as `auval | tee /dev/stderr | grep -q PASS`.
+Under `set -o pipefail`, `grep -q` exits on its first match and SIGPIPEs `tee`,
+failing the step even though auval printed "AU VALIDATION SUCCEEDED" — and `grep`
+for bare `PASS` matches a per-subtest line that prints even on an overall failure.
+Capture to a file, then assert on `AU VALIDATION SUCCEEDED`. That false failure is
+what got auval misdiagnosed as flaky ("Bad Max Frames") and as "unreliable on
+hosted VMs"; it passes fine there.
 
 The **installable** Intel artifact is a separate concern — a REQUIRED
 `darwin-x64` build+smoke leg in `release-cli.yml` (`os: macos-15-xcompile`) that

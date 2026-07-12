@@ -478,7 +478,7 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   (release-cli is the sole creator of the GitHub release; sign-and-release only
   attaches `appcast.xml` on top), sign-and-release polls `gh release view "$TAG"`
   until the release exists. release-cli creates it only after its whole chain
-  (`build-cli → smoke-cli → universal-arch-gate`), which includes a self-hosted
+  (`build-cli → smoke-cli`), which includes a self-hosted
   darwin-arm64 leg that can queue behind a busy runner — routinely far longer
   than 10 minutes. A too-short poll loses that race on every tag and leaves the
   published release without its Sparkle feed (the watchdog flags it as a broken
@@ -3796,7 +3796,7 @@ full design in `docs/guides/intel-support.md`). CI-relevant facts:
   (quarantined here, `timeout-minutes: 120`, infra-vs-product watchdog), job B a
   universal cross-check on `macos-15`. Opens/auto-closes one dedup watchdog
   issue.
-- **Tier 3** is the **blocking** `universal-arch-gate` job in `release-cli.yml`.
+- **Tier 3** is the `universal-crosscheck` job in `nightly-intel.yml` (nightly, advisory). It is deliberately NOT on the release path: an advisory gate must never compete with the release for the hosted macOS pool.
 
 Hard rule: **no Intel work ever routes to the self-hosted Studios** (they host
 the required `macos` gate) and **Namespace is never used**. All Intel lanes run

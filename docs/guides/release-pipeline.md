@@ -89,7 +89,7 @@ PR merge to main
 │ Steps 4-6 are one job, so the draft exists for seconds   │
 │ and is never observable from outside. `needs:` is        │
 │ [build-cli, smoke-cli] ONLY — the advisory               │
-│ universal-arch-gate is deliberately absent (see below).  │
+│ no advisory universal/auval gate (see below).            │
 └─────────────────────────────────────────────────────────┘
      │
      ▼
@@ -146,17 +146,23 @@ binaries built green. Three separate mechanisms conspired:
    the latest published release. Because the pipeline (70–165+ min) outlasts the
    gap between tags (~100 min), releases routinely complete **out of order** —
    so "older SemVer" did not mean "obsolete", and the reaper reaped healthy work.
-3. **An advisory gate still blocked.** `universal-arch-gate` carried
+3. **An advisory gate blocked, then starved.** `universal-arch-gate` carried
    `continue-on-error: true`, which makes a job's *result* advisory but does
-   **not** remove it from the dependency graph. The release job kept waiting on
-   its 2–7 hour hosted-runner queue.
+   **not** remove it from the dependency graph — so the release job kept waiting
+   on its 2–7 hour hosted-runner queue. Taking it out of `needs` was not enough
+   either: pinned to GitHub-hosted `macos-15` and running ~2h on every one of
+   ~14 daily tags, it queued ~28 macOS-hours/day of hosted work *ahead of* the
+   release's own required `darwin-x64` legs, which need that same pool. It has
+   been removed from the release path entirely. It was redundant anyway —
+   `nightly-intel.yml`'s `universal-crosscheck` is the same check, and
+   `intel-portability.yml` covers Intel at PR time.
 
 The fixes are structural rather than conventional, so they cannot quietly
 regress:
 
 - `sign-and-release.yml` holds `contents: read` — it *cannot* write a release.
 - `auto-release.yml` has no `actions` scope — it *cannot* cancel a run.
-- `universal-arch-gate` is not in `release`'s `needs` — it *cannot* block.
+- There is no advisory gate on the release path — nothing *can* block or starve it.
 - `release-reconcile.yml` has no delete or cancel path — recovery can only ever
   drive a release *forward*.
 

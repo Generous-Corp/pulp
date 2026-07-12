@@ -479,22 +479,28 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertIn("name: Generate appcast.xml (Sparkle feed)", self.text)
         self.assertIn("artifacts/appcast.xml", self.text)
 
-    def test_release_job_does_not_wait_on_the_advisory_universal_gate(self) -> None:
-        """`continue-on-error` makes a result advisory, NOT the dependency.
+    def test_no_advisory_gate_competes_with_the_release_for_hosted_macos(self) -> None:
+        """The release path must not run an advisory universal/auval gate.
 
-        universal-arch-gate runs on the GitHub-hosted macos-15 pool, where queue
-        times of 2-7 hours are routine. While it sat in `needs`, the release job
-        waited for it regardless of continue-on-error — an advisory gate holding
-        the release hostage.
+        `universal-arch-gate` pinned itself to GitHub-hosted `macos-15` and took
+        ~2 hours — the same scarce pool the release's REQUIRED `darwin-x64` legs
+        need. At ~14 tags/day it queued ~28 macOS-hours/day of hosted work AHEAD of
+        the leg that actually gates publication, while the self-hosted Studios sat
+        idle. And it was redundant: nightly-intel.yml's `universal-crosscheck` is
+        the same check, and intel-portability.yml covers Intel at PR time.
+
+        Two failure modes here, and both cost releases: an advisory job left in
+        `needs` still BLOCKS (continue-on-error makes the RESULT advisory, not the
+        dependency), and even out of `needs` it still STARVES.
         """
-        needs = self.workflow["jobs"]["release"]["needs"]
         self.assertNotIn(
             "universal-arch-gate",
-            needs,
-            "universal-arch-gate is back in the release job's `needs`. "
-            "continue-on-error does not remove a job from the dependency graph; "
-            "the release will block on its (2-7h) queue time.",
+            self.workflow["jobs"],
+            "The universal/auval gate is back on the release path. It is redundant "
+            "with nightly-intel.yml, and it competes with the release's own "
+            "required darwin-x64 legs for the hosted macOS pool.",
         )
+        needs = self.workflow["jobs"]["release"]["needs"]
         self.assertEqual(sorted(needs), ["build-cli", "smoke-cli"])
 
     def test_release_job_checksums_and_publishes_in_one_job(self) -> None:
