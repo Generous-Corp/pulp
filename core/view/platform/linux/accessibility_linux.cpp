@@ -47,10 +47,12 @@
 // re-reads the changed object.
 //
 // Tree-walk model (mirrors mac collect_accessible / Windows build_fragment_nodes):
-// depth-first; every View with a non-none AccessRole becomes one accessible
-// object; AccessRole::none containers are skipped as objects but recursed into,
-// so a deeply-nested accessible descendant re-parents onto the nearest
-// accessible ancestor (or onto the application root when there is none).
+// depth-first; every View that is_accessibility_element() becomes one accessible
+// object — a role alone is not enough, it must also have something to say (a
+// name, a value source, or a state). Views that are not accessibility elements
+// are skipped as objects but recursed into, so a deeply-nested accessible
+// descendant re-parents onto the nearest accessible ancestor (or onto the
+// application root when there is none).
 //
 // Run-loop requirement: the registry calls methods on us asynchronously, so the
 // host must pump DBus::dispatch() periodically or those calls hang the AT. The
@@ -58,6 +60,7 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
+#include <cassert>
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/view.hpp>
@@ -817,12 +820,29 @@ struct AtspiProvider {
         const std::string& iface = ctx.interface();
         if (iface == kIfaceAccessible)  return handle_accessible(ctx, index);
         if (iface == kIfaceComponent)   return handle_component(ctx, index);
+        // Text METHODS (GetText, GetCaretOffset, …). GetInterfaces advertises
+        // org.a11y.atspi.Text and handle_properties serves its CharacterCount /
+        // CaretOffset properties, but without this route a screen reader's
+        // GetText(0, -1) falls through to `return false` and D-Bus answers
+        // UnknownMethod — an advertised interface that errors on every read,
+        // which is worse than never advertising it. Orca announces "entry" and
+        // then reads nothing.
+        if (iface == kIfaceText)        return handle_text(ctx, index);
         if (iface == kIfaceApplication) return index == 0 && handle_application(ctx);
         if (iface == kIfaceSocket)      return index == 0 && handle_socket(ctx);
         if (iface == kIfaceProperties)  return handle_properties(ctx, index);
         if (iface == kIfaceIntrospect)  return handle_introspect(ctx, index);
         // Legacy interface-less calls → best-effort Accessible.
         if (iface.empty()) return handle_accessible(ctx, index);
+
+        // An interface we ADVERTISE but do not route is a bug, and a silent one:
+        // returning false makes D-Bus answer UnknownMethod, so the screen reader
+        // simply reads nothing and the user has no idea why. (Value is absent
+        // here on purpose — AT-SPI's Value interface is property-based, so
+        // handle_properties serves it; Text is method-based and must be routed.)
+        // Fail loudly in a debug build rather than going quiet in a user's ear.
+        assert((iface != kIfaceText) &&
+               "advertised AT-SPI interface has no dispatch route");
         return false;
     }
 

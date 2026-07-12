@@ -1018,13 +1018,18 @@ void notify_accessibility_value_changed(void* handle, View& target) {
 
     if (PulpFragmentProvider* frag = fragment_for(session, target)) {
         // Populate the new value so the reader can announce it directly.
+        //
+        // Resolve through accessibility_value_string(), the same path
+        // GetPropertyValue(UIA_ValueValuePropertyId) uses. Hand-rolling the
+        // lookup here (value interface, else the raw access_value slot) skipped
+        // the text interface, so a TextEditor whose content changed raised
+        // "the value changed" carrying VT_EMPTY — Narrator announced a change
+        // with no new value.
         if (View* v = frag->view()) {
-            if (auto* vif = dynamic_cast<AccessibilityValueInterface*>(v)) {
+            const std::string value = accessibility_value_string(*v);
+            if (!value.empty()) {
                 new_v.vt = VT_BSTR;
-                new_v.bstrVal = make_bstr(vif->get_value_string());
-            } else if (!v->access_value().empty()) {
-                new_v.vt = VT_BSTR;
-                new_v.bstrVal = make_bstr(v->access_value());
+                new_v.bstrVal = make_bstr(value);
             }
         }
         UiaRaiseAutomationPropertyChangedEvent(
