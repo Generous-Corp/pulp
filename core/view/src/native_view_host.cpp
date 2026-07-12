@@ -198,6 +198,7 @@ bool NativeViewHost::try_attach() {
             attached_ = true;
             attached_kind_ = HostKind::plugin;
             attached_plugin_ = p;
+            p->register_native_view(this);   // so the host can null us if it dies first
         }
     } else if (WindowHost* w = window_host()) {
         if (w->attach_native_child_view(handle_, frame.x, frame.y,
@@ -205,6 +206,7 @@ bool NativeViewHost::try_attach() {
             attached_ = true;
             attached_kind_ = HostKind::window;
             attached_window_ = w;
+            w->register_native_view(this);   // so the host can null us if it dies first
         }
     }
 
@@ -217,15 +219,75 @@ bool NativeViewHost::try_attach() {
 
 void NativeViewHost::detach_from_host() {
     if (!attached_) return;
-    if (attached_kind_ == HostKind::plugin && attached_plugin_)
+    if (attached_kind_ == HostKind::plugin && attached_plugin_) {
+        attached_plugin_->unregister_native_view(this);
         attached_plugin_->detach_native_child_view(handle_);
-    else if (attached_kind_ == HostKind::window && attached_window_)
+    } else if (attached_kind_ == HostKind::window && attached_window_) {
+        attached_window_->unregister_native_view(this);
         attached_window_->detach_native_child_view(handle_);
+    }
     attached_ = false;
     attached_kind_ = HostKind::none;
     attached_plugin_ = nullptr;
     attached_window_ = nullptr;
     have_pushed_ = false;
+}
+
+// The host is being destroyed while we are still attached. Drop the back-pointer
+// and nothing else: the derived host is already gone, so calling ANY method on it
+// -- including a virtual -- would be the very use-after-free this exists to stop.
+// The derived destructor already did the real OS detach through its live vtable.
+void NativeViewHost::on_host_destroyed() {
+    attached_ = false;
+    attached_kind_ = HostKind::none;
+    attached_plugin_ = nullptr;
+    attached_window_ = nullptr;
+    have_pushed_ = false;
+}
+
+// ── Host-side attached-view registry ────────────────────────────────────────
+//
+// Defined here, next to the only code that populates it, and in a TU compiled
+// unconditionally (the plugin_view_host / window_host stubs are platform-gated).
+
+void PluginViewHost::register_native_view(NativeViewHost* view) {
+    if (!view) return;
+    if (std::find(attached_native_views_.begin(), attached_native_views_.end(), view)
+        == attached_native_views_.end())
+        attached_native_views_.push_back(view);
+}
+
+void PluginViewHost::unregister_native_view(NativeViewHost* view) {
+    attached_native_views_.erase(
+        std::remove(attached_native_views_.begin(), attached_native_views_.end(), view),
+        attached_native_views_.end());
+}
+
+PluginViewHost::~PluginViewHost() {
+    const auto views = attached_native_views_;
+    for (NativeViewHost* v : views)
+        if (v) v->on_host_destroyed();
+    attached_native_views_.clear();
+}
+
+void WindowHost::register_native_view(NativeViewHost* view) {
+    if (!view) return;
+    if (std::find(attached_native_views_.begin(), attached_native_views_.end(), view)
+        == attached_native_views_.end())
+        attached_native_views_.push_back(view);
+}
+
+void WindowHost::unregister_native_view(NativeViewHost* view) {
+    attached_native_views_.erase(
+        std::remove(attached_native_views_.begin(), attached_native_views_.end(), view),
+        attached_native_views_.end());
+}
+
+WindowHost::~WindowHost() {
+    const auto views = attached_native_views_;
+    for (NativeViewHost* v : views)
+        if (v) v->on_host_destroyed();
+    attached_native_views_.clear();
 }
 
 void NativeViewHost::reconcile_host() {

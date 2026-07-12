@@ -678,3 +678,72 @@ TEST_CASE("NativeViewHost re-pushes on host resize with unchanged design layout"
     REQUIRE(nvh->computed_child_frame() == Rect{40, 30, 120, 80});  // design unchanged
     REQUIRE(host.rec().bounds == Rect{120, 75, 60, 40});  // 40*.5+100, 30*.5+60, 120*.5, 80*.5
 }
+
+// ── The host outliving nothing: a host destroyed BEFORE its view tree ────────
+//
+// A NativeViewHost keeps a RAW, non-owning pointer to the host it attached to and
+// dereferences it in its destructor to detach. Nothing made that safe. Every
+// built-in Apple host nulls the back-reference in its own destructor, so no
+// shipped host dangles today — but that is a per-subclass convention, and
+// PluginViewHost::set_factory / WindowHost::set_factory are PUBLIC API. A
+// downstream host that embeds native children and forgets that one line got a
+// use-after-free on editor close.
+//
+// The base host destructor now clears every still-attached view's back-pointer,
+// which makes the invariant structural. These two cases are the proof: destroy
+// the host first, with the view tree still alive, and the view must survive it —
+// reporting itself detached rather than dereferencing a dead host.
+//
+// Under ASan (the sanitizer lane) a regression here is a hard stack-use-after-scope
+// abort, not a soft assertion failure — which is exactly what it was doing before.
+
+TEST_CASE("NativeViewHost survives a plugin host destroyed before the view tree",
+          "[view][native-view-host][lifetime]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto owned = std::make_unique<NativeViewHost>();
+    auto* nvh = owned.get();
+    nvh->set_native_child(reinterpret_cast<NativeViewHandle>(0x1234));
+    nvh->set_bounds({10, 10, 100, 50});
+    root.add_child(std::move(owned));
+
+    {
+        RecordingPluginHost host;
+        root.set_plugin_view_host(&host);
+        nvh->update_native_layout();
+        REQUIRE(nvh->is_native_attached());
+    }   // host dies HERE, while root (and nvh) are still very much alive
+
+    // The base destructor cleared our back-pointer, so we are no longer attached
+    // and hold nothing to dereference.
+    REQUIRE_FALSE(nvh->is_native_attached());
+
+    // And a detach now is a no-op rather than a deref of a dead host. Before the
+    // fix this line — reached via ~NativeViewHost at scope end — is the crash.
+    root.set_plugin_view_host(nullptr);
+    REQUIRE_FALSE(nvh->is_native_attached());
+}
+
+TEST_CASE("NativeViewHost survives a window host destroyed before the view tree",
+          "[view][native-view-host][lifetime]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto owned = std::make_unique<NativeViewHost>();
+    auto* nvh = owned.get();
+    nvh->set_native_child(reinterpret_cast<NativeViewHandle>(0x5678));
+    nvh->set_bounds({20, 20, 80, 40});
+    root.add_child(std::move(owned));
+
+    {
+        RecordingWindowHost host;
+        root.set_window_host(&host);
+        nvh->update_native_layout();
+        REQUIRE(nvh->is_native_attached());
+    }   // host dies first
+
+    REQUIRE_FALSE(nvh->is_native_attached());
+    root.set_window_host(nullptr);
+    REQUIRE_FALSE(nvh->is_native_attached());
+}
