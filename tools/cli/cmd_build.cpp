@@ -67,6 +67,7 @@ int cmd_build(const std::vector<std::string>& args) {
 
     // Extract flags before passing args through
     std::string js_engine;
+    std::string macos_arch;  // --arch: host|universal|arm64|x86_64 (macOS only)
     bool watch_mode = false;
     bool watch_test = false;
     bool watch_validate = false;
@@ -117,6 +118,18 @@ int cmd_build(const std::vector<std::string>& args) {
                 return 1;
             }
             needs_configure = true;  // Engine change requires reconfigure
+        } else if (arg == "--arch") {
+            std::cerr << "Error: --arch requires a value "
+                         "(host, universal, arm64, or x86_64)\n";
+            return 2;
+        } else if (arg.rfind("--arch=", 0) == 0) {
+            macos_arch = arg.substr(7);
+            if (macos_arch != "host" && macos_arch != "universal"
+                && macos_arch != "arm64" && macos_arch != "x86_64") {
+                std::cerr << "Error: --arch must be host, universal, arm64, or x86_64\n";
+                return 1;
+            }
+            needs_configure = true;  // Arch change requires reconfigure
         } else {
             passthrough_args.push_back(arg);
         }
@@ -177,6 +190,14 @@ int cmd_build(const std::vector<std::string>& args) {
         // JS engine selection
         if (!js_engine.empty()) {
             configure_cmd += " -DPULP_JS_ENGINE=" + js_engine;
+        }
+
+        // macOS target arch (host|universal|arm64|x86_64). `pulp build` defaults
+        // to host for fast local iteration; a plugin author passes
+        // `--arch universal` for a fat binary that runs on every Mac, or a single
+        // thin arch. Maps to the PULP_MACOS_ARCH CMake option.
+        if (!macos_arch.empty()) {
+            configure_cmd += " -DPULP_MACOS_ARCH=" + macos_arch;
         }
 
         pulp_debug("cmd_build: run configure (cmake)");

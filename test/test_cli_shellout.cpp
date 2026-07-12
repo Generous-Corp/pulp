@@ -123,6 +123,24 @@ TEST_CASE("pulp <unknown-command> exits non-zero with a diagnostic",
     REQUIRE(mentioned);
 }
 
+TEST_CASE("pulp build --arch rejects an invalid macOS architecture",
+          "[cli][shellout][build][arch]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    // Must run inside a resolvable Pulp project so arg-parsing (which validates
+    // --arch) is reached before any configure/build work.
+    auto project = write_version_project_fixture("pulp-arch-bad", "1.0.0");
+
+    auto bad = run_pulp_in_directory(project, {"build", "--arch=ppc64"});
+    REQUIRE(bad.exit_code != 0);
+    REQUIRE_FALSE(bad.timed_out);
+    REQUIRE((bad.stdout_output + bad.stderr_output).find("arch") != std::string::npos);
+
+    // A valueless --arch is a usage error (exit 2), not a silent no-op.
+    auto missing = run_pulp_in_directory(project, {"build", "--arch"});
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE((missing.stdout_output + missing.stderr_output).find("arch") != std::string::npos);
+}
+
 TEST_CASE("pulp host derives AU ids from bundle Info.plist before loading",
           "[cli][shellout][host][au]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
