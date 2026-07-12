@@ -36,6 +36,22 @@ bool find_input_device(AudioSystem& sys, DeviceInfo& out) {
     return false;
 }
 
+// A PURE-INPUT device: input channels, and NO output channels at all — a plain
+// USB microphone, an interface input, an aggregate capture device.
+//
+// This is the case that actually breaks, and it is why the bug shipped: AUHAL
+// starts with output element 0 enabled, so binding CurrentDevice before EnableIO
+// hands an output-enabled unit to a device with no output streams, and CoreAudio
+// rejects it (-10851). A duplex device has output streams, so the premature bind
+// happens to succeed — and `find_input_device` above prefers the system DEFAULT
+// input, which on most dev Macs is duplex. The suite therefore passed locally
+// while input-only capture was broken for every real microphone.
+bool find_pure_input_device(AudioSystem& sys, DeviceInfo& out) {
+    for (const auto& d : sys.enumerate_devices())
+        if (d.max_input_channels > 0 && d.max_output_channels == 0) { out = d; return true; }
+    return false;
+}
+
 // Every stereo-capable output device that is NOT the system default.
 //
 // A test has no business grabbing whatever the developer is listening through,
@@ -126,6 +142,35 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
     if (!find_input_device(*sys, in_dev)) {
         SUCCEED("no input-capable audio device present — cannot exercise input-only open");
         return;
+    }
+
+    // The regression guard for the AUHAL EnableIO/CurrentDevice ordering bug.
+    // The section above can pass on a duplex default input even when this is
+    // broken; only a device with ZERO output streams exercises the failure.
+    SECTION("input-only open succeeds on a device with NO output channels") {
+        DeviceInfo pure;
+        if (!find_pure_input_device(*sys, pure)) {
+            SUCCEED("no pure-input device present (every input here is duplex) — "
+                    "cannot exercise the zero-output-stream open");
+            return;
+        }
+
+        auto dev = sys->create_device(pure.id);
+        REQUIRE(dev);
+        DeviceConfig cfg;
+        cfg.device_id = pure.id;
+        cfg.sample_rate = kAdoptCurrentRate;
+        cfg.buffer_size = 256;
+        cfg.input_channels = 1;
+        cfg.output_channels = 0;
+
+        INFO("device '" << pure.name << "' in=" << pure.max_input_channels
+             << " out=" << pure.max_output_channels);
+        // Before the fix this returned false with
+        // "CoreAudio: could not set device (-10851)".
+        REQUIRE(dev->open(cfg));
+        REQUIRE(dev->is_open());
+        dev->close();
     }
 
     SECTION("input-only open succeeds and captures") {
