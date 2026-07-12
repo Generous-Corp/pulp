@@ -110,8 +110,13 @@ pulp_add_test_suite(pulp-test-format-hardening LIBRARIES pulp::format)
 # pthread overrides) so an allocation / blocking lock on the render path ABORTS
 # the test. Mirrors the CLAP/AU-v2 RT-trap targets.
 add_executable(pulp-test-standalone-rt test_standalone_rt.cpp)
+# The RT-trap interception is UNIX-only, but the test still constructs an
+# RtAllocationProbe on every platform — so non-UNIX needs the probe's definition
+# or the link fails with an unresolved external. Same pairing as
+# pulp-test-host-signal-graph.
 target_sources(pulp-test-standalone-rt PRIVATE
-    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
 target_link_libraries(pulp-test-standalone-rt PRIVATE
     pulp::standalone Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
 target_compile_definitions(pulp-test-standalone-rt PRIVATE
@@ -296,8 +301,11 @@ if(PULP_HAS_LV2)
     add_executable(pulp-test-lv2-rt test_lv2_rt.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/lv2_adapter.cpp
     )
+    # See pulp-test-standalone-rt: the RT trap is UNIX-only, but RtAllocationProbe
+    # is constructed on every platform and needs its definition linked in.
     target_sources(pulp-test-lv2-rt PRIVATE
-        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
     target_link_libraries(pulp-test-lv2-rt PRIVATE
         pulp::format lv2-headers Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
     target_compile_definitions(pulp-test-lv2-rt PRIVATE
