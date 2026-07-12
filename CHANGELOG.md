@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06570"></a>
+## [0.657.0] - 2026-07-12
+
+- fix(format): keep semantic kind independent of quantization ([#6040](https://github.com/danielraffel/pulp/pull/6040))
+- feat(build): PULP_MACOS_ARCH + `pulp build --arch` for universal/thin macOS builds ([#6036](https://github.com/danielraffel/pulp/pull/6036))
+
 <a id="v06550"></a>
 ## [0.655.0] - 2026-07-12
 
@@ -250,6 +256,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
 - feat(view): VirtualGrid recycling 2D grid widget ([#5700](https://github.com/danielraffel/pulp/pull/5700))
 - feat(release): tier release-note weight by semver bump level ([#5697](https://github.com/danielraffel/pulp/pull/5697))
+- docs: acknowledge Truce inspiration ([#5698](https://github.com/danielraffel/pulp/pull/5698))
 
 <a id="v06060"></a>
 ## [0.606.0] - 2026-07-07
@@ -6295,6 +6302,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.657.0]: https://github.com/danielraffel/pulp/releases/tag/v0.657.0
 [0.655.0]: https://github.com/danielraffel/pulp/releases/tag/v0.655.0
 [0.654.0]: https://github.com/danielraffel/pulp/releases/tag/v0.654.0
 [0.653.0]: https://github.com/danielraffel/pulp/releases/tag/v0.653.0
