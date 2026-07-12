@@ -23,6 +23,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 #include <clap/clap.h>
+#include <clap/ext/audio-ports-config.h>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -90,9 +91,18 @@ inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
     if (index >= buses.size()) return false;
     auto& bus = buses[index];
 
+    int channel_count = bus.default_channels;
+    if (!desc.supported_bus_layouts.empty()) {
+        const auto selected = std::min<std::size_t>(
+            self->selected_bus_layout, desc.supported_bus_layouts.size() - 1);
+        const auto& layout = desc.supported_bus_layouts[selected];
+        const auto& widths = is_input ? layout.inputs : layout.outputs;
+        if (index < widths.size()) channel_count = widths[index];
+    }
+
     info->id = static_cast<clap_id>((is_input ? 0 : 100) + index);
     runtime::copy_c_string(info->name, bus.name);
-    info->channel_count = bus.default_channels;
+    info->channel_count = static_cast<uint32_t>(std::max(0, channel_count));
     // Every Pulp port accepts 64-bit buffers: clap_process() converts f64 at
     // the adapter boundary for f32-internal processors and dispatches
     // process_f64() natively when the descriptor opts in — the same posture as
@@ -109,13 +119,68 @@ inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
     if (desc.effective_capabilities().supports_f64_audio) {
         info->flags |= CLAP_AUDIO_PORT_PREFERS_64BITS;
     }
-    info->port_type = bus.default_channels == 1 ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
+    info->port_type = channel_count == 1 ? CLAP_PORT_MONO
+                    : channel_count == 2 ? CLAP_PORT_STEREO : nullptr;
     info->in_place_pair = CLAP_INVALID_ID;
     return true;
 }
 
 inline const clap_plugin_audio_ports_t audio_ports_ext = {
     .count = audio_ports_count, .get = audio_ports_get,
+};
+
+inline uint32_t audio_ports_config_count(const clap_plugin_t* plugin) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!self || !self->processor) return 0;
+    return static_cast<uint32_t>(
+        self->processor->descriptor().supported_bus_layouts.size());
+}
+
+inline bool audio_ports_config_get(const clap_plugin_t* plugin, uint32_t index,
+                                   clap_audio_ports_config_t* config) {
+    if (!config) return false;
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!self || !self->processor) return false;
+    const auto desc = self->processor->descriptor();
+    if (index >= desc.supported_bus_layouts.size()) return false;
+    const auto& layout = desc.supported_bus_layouts[index];
+    std::memset(config, 0, sizeof(*config));
+    config->id = index;
+    runtime::copy_c_string(config->name,
+        layout.name.empty() ? std::string("Layout ") + std::to_string(index + 1)
+                            : layout.name);
+    config->input_port_count = static_cast<uint32_t>(layout.inputs.size());
+    config->output_port_count = static_cast<uint32_t>(layout.outputs.size());
+    config->has_main_input = !layout.inputs.empty() && layout.inputs.front() > 0;
+    config->main_input_channel_count = config->has_main_input
+        ? static_cast<uint32_t>(layout.inputs.front()) : 0;
+    config->main_input_port_type = layout.inputs.empty() ? nullptr
+        : layout.inputs.front() == 1 ? CLAP_PORT_MONO
+        : layout.inputs.front() == 2 ? CLAP_PORT_STEREO : nullptr;
+    config->has_main_output = !layout.outputs.empty() && layout.outputs.front() > 0;
+    config->main_output_channel_count = config->has_main_output
+        ? static_cast<uint32_t>(layout.outputs.front()) : 0;
+    config->main_output_port_type = layout.outputs.empty() ? nullptr
+        : layout.outputs.front() == 1 ? CLAP_PORT_MONO
+        : layout.outputs.front() == 2 ? CLAP_PORT_STEREO : nullptr;
+    return true;
+}
+
+inline bool audio_ports_config_select(const clap_plugin_t* plugin, clap_id config_id) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!self || !self->processor) return false;
+    const auto desc = self->processor->descriptor();
+    if (config_id >= desc.supported_bus_layouts.size()) return false;
+    if (!self->processor->is_bus_layout_supported(
+            desc.supported_bus_layouts[config_id])) return false;
+    self->selected_bus_layout = config_id;
+    return true;
+}
+
+inline const clap_plugin_audio_ports_config_t audio_ports_config_ext = {
+    .count = audio_ports_config_count,
+    .get = audio_ports_config_get,
+    .select = audio_ports_config_select,
 };
 
 // ── State extension ────────────────────────────────────────────────────
@@ -630,7 +695,7 @@ inline const clap_plugin_gui_t gui_ext = {
 #endif // PULP_CLAP_GUI
 
 // ── Extension dispatch ─────────────────────────────────────────────────
-inline const void* get_static_extension(const clap_plugin_t*, const char* id) {
+inline const void* get_static_extension(const clap_plugin_t* plugin, const char* id) {
     if (!id) return nullptr;
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     if (strcmp(id, CLAP_EXT_GUI) == 0) {
@@ -639,6 +704,8 @@ inline const void* get_static_extension(const clap_plugin_t*, const char* id) {
     }
 #endif
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &audio_ports_ext;
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0)
+        return audio_ports_config_count(plugin) > 0 ? &audio_ports_config_ext : nullptr;
     if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &note_ports_ext;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &state_ext;

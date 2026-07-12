@@ -261,16 +261,59 @@ DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginC
         definition.parameters.push_back(std::move(binding));
     }
 
-    ComponentLayout component;
-    component.input_stem = input_stem;
-    component.output_stem = output_stem;
-    component.main_input_channels = main_input_channels;
-    component.main_output_channels = main_output_bus.default_channels;
-    component.sidechain_channels = sidechain_channels;
-    component.native_plugin_id = derive_native_plugin_id(codes.native_id_base, 0);
-    component.short_name = truncate_copy(definition.descriptor.name, 31);
-    component.description = component_label(definition.descriptor, input_stem, output_stem, sidechain_channels);
-    definition.components.push_back(std::move(component));
+    std::vector<BusLayoutConfiguration> layouts =
+        definition.descriptor.supported_bus_layouts;
+    if (layouts.empty()) {
+        layouts.push_back({
+            .inputs = definition.descriptor.input_buses.empty()
+                ? std::vector<int>{}
+                : (definition.descriptor.input_buses.size() == 1
+                    ? std::vector<int>{main_input_channels}
+                    : std::vector<int>{main_input_channels, sidechain_channels}),
+            .outputs = {main_output_bus.default_channels},
+            .name = "",
+        });
+    }
+
+    for (std::size_t index = 0; index < layouts.size(); ++index) {
+        const auto& layout = layouts[index];
+        if (layout.inputs.size() != definition.descriptor.input_buses.size() ||
+            layout.outputs.size() != definition.descriptor.output_buses.size()) {
+            result.error = "AAX bus layout count does not match the declared bus topology";
+            return result;
+        }
+        const int layout_main_in = layout.inputs.empty() ? 0 : layout.inputs.front();
+        const int layout_sidechain = layout.inputs.size() > 1 ? layout.inputs[1] : 0;
+        const int layout_main_out = layout.outputs.front();
+        const auto layout_input_stem = stem_kind_for_channels(layout_main_in);
+        const auto layout_output_stem = stem_kind_for_channels(layout_main_out);
+        if ((layout_main_in > 0 && layout_input_stem == StemKind::none) ||
+            layout_output_stem == StemKind::none) {
+            result.error = "AAX does not support a declared bus-layout channel count";
+            return result;
+        }
+        if (layout_sidechain != sidechain_channels) {
+            result.error = "AAX declared layouts must preserve the mono sidechain width";
+            return result;
+        }
+
+        ComponentLayout component;
+        component.input_stem = layout_input_stem;
+        component.output_stem = layout_output_stem;
+        component.main_input_channels = layout_main_in;
+        component.main_output_channels = layout_main_out;
+        component.sidechain_channels = layout_sidechain;
+        component.native_plugin_id = derive_native_plugin_id(
+            codes.native_id_base, static_cast<uint32_t>(index));
+        component.short_name = truncate_copy(
+            layout.name.empty() ? definition.descriptor.name
+                                : definition.descriptor.name + " " + layout.name,
+            31);
+        component.description = component_label(
+            definition.descriptor, layout_input_stem, layout_output_stem,
+            layout_sidechain);
+        definition.components.push_back(std::move(component));
+    }
     definition.packet_float_count = definition.parameters.size() + 1u;
 
     result.ok = true;

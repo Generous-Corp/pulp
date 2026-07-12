@@ -24,6 +24,7 @@
 #include <atomic>
 #include <cstdint>
 #include <limits>
+#include <limits>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -170,7 +171,7 @@ inline Float64 tail_samples_to_seconds(int tail_samples,
 /// (`validate_channel_layout` constrains every count to {1, 2}), so the worst
 /// case is two pairs (mono and stereo). Sized as a small constant so callers can
 /// back the array with fixed storage and avoid heap allocation.
-inline constexpr std::size_t kMaxChannelInfoPairs = 2;
+inline constexpr std::size_t kMaxChannelInfoPairs = 16;
 
 /// Derive the AU `kAudioUnitProperty_SupportedNumChannels` table from a Pulp
 /// `PluginDescriptor`. Surfaces which (input, output) channel-count pairs the
@@ -198,6 +199,23 @@ inline constexpr std::size_t kMaxChannelInfoPairs = 2;
 /// fill caller-owned storage.
 inline UInt32 build_channel_info(const PluginDescriptor& desc,
                                  AUChannelInfo* out) noexcept {
+    if (!desc.supported_bus_layouts.empty()) {
+        UInt32 count = 0;
+        for (const auto& layout : desc.supported_bus_layouts) {
+            const int in_w = layout.inputs.empty() ? 0 : layout.inputs.front();
+            const int out_w = layout.outputs.empty() ? 0 : layout.outputs.front();
+            if (in_w < 0 || out_w <= 0 || in_w > std::numeric_limits<SInt16>::max() ||
+                out_w > std::numeric_limits<SInt16>::max()) continue;
+            bool duplicate = false;
+            for (UInt32 i = 0; i < count; ++i) {
+                duplicate |= out[i].inChannels == in_w && out[i].outChannels == out_w;
+            }
+            if (duplicate) continue;
+            if (count == kMaxChannelInfoPairs) break;
+            out[count++] = {static_cast<SInt16>(in_w), static_cast<SInt16>(out_w)};
+        }
+        return count;
+    }
     // Clamp the declared widths into the supported {1, 2} flex range; a declared
     // width of 0 means "no bus" (instrument input) and stays 0.
     auto clamp_width = [](int n) -> int {

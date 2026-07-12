@@ -42,6 +42,10 @@ public:
             .accepts_midi = true,
             .produces_midi = true,
             .tail_samples = -1,
+            .supported_bus_layouts = {
+                {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+                {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+            },
         };
     }
     void define_parameters(pulp::state::StateStore& store) override {
@@ -355,10 +359,13 @@ TEST_CASE("CLAP entry exposes port, note, latency and tail extensions",
         plugin->get_extension(plugin, CLAP_EXT_LATENCY));
     auto* tail = static_cast<const clap_plugin_tail_t*>(
         plugin->get_extension(plugin, CLAP_EXT_TAIL));
+    auto* port_configs = static_cast<const clap_plugin_audio_ports_config_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_AUDIO_PORTS_CONFIG));
     REQUIRE(audio_ports != nullptr);
     REQUIRE(note_ports != nullptr);
     REQUIRE(latency != nullptr);
     REQUIRE(tail != nullptr);
+    REQUIRE(port_configs != nullptr);
     REQUIRE(plugin->get_extension(plugin, "pulp.unsupported") == nullptr);
 
     REQUIRE(audio_ports->count(plugin, true) == 1);
@@ -383,6 +390,23 @@ TEST_CASE("CLAP entry exposes port, note, latency and tail extensions",
     REQUIRE(output.flags ==
             (CLAP_AUDIO_PORT_IS_MAIN | CLAP_AUDIO_PORT_SUPPORTS_64BITS));
     REQUIRE_FALSE(audio_ports->get(plugin, 1, true, &input));
+
+    REQUIRE(port_configs->count(plugin) == 2);
+    clap_audio_ports_config_t config{};
+    REQUIRE(port_configs->get(plugin, 0, &config));
+    REQUIRE(std::string(config.name) == "Stereo");
+    REQUIRE(config.main_input_channel_count == 2);
+    REQUIRE(config.main_output_channel_count == 2);
+    REQUIRE(port_configs->get(plugin, 1, &config));
+    REQUIRE(std::string(config.name) == "Mono");
+    REQUIRE(config.main_input_channel_count == 1);
+    REQUIRE(config.main_output_channel_count == 1);
+    REQUIRE(port_configs->select(plugin, 1));
+    REQUIRE(audio_ports->get(plugin, 0, true, &input));
+    REQUIRE(input.channel_count == 1);
+    REQUIRE(std::string(input.port_type) == CLAP_PORT_MONO);
+    REQUIRE_FALSE(port_configs->select(plugin, 99));
+    REQUIRE(port_configs->select(plugin, 0));
 
     REQUIRE(note_ports->count(plugin, true) == 1);
     REQUIRE(note_ports->count(plugin, false) == 1);

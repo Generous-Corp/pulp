@@ -169,6 +169,26 @@ TEST_CASE("Processor::is_bus_layout_supported default policy rejects "
     REQUIRE(p.is_bus_layout_supported(empty_out));
 }
 
+TEST_CASE("Processor::is_bus_layout_supported honors an explicit layout set",
+          "[processor][bus-layout]") {
+    class ExplicitLayouts final : public StereoEffect {
+    public:
+        PluginDescriptor descriptor() const override {
+            auto d = StereoEffect::descriptor();
+            d.supported_bus_layouts = {
+                {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+                {.inputs = {6}, .outputs = {6}, .name = "5.1"},
+            };
+            return d;
+        }
+    } p;
+
+    REQUIRE(p.is_bus_layout_supported({.inputs = {1}, .outputs = {1}}));
+    REQUIRE(p.is_bus_layout_supported({.inputs = {6}, .outputs = {6}}));
+    REQUIRE_FALSE(p.is_bus_layout_supported({.inputs = {2}, .outputs = {2}}));
+    REQUIRE_FALSE(p.is_bus_layout_supported({.inputs = {6}, .outputs = {2}}));
+}
+
 TEST_CASE("Processor::is_bus_layout_supported override can enforce a "
           "linked-sidechain contract",
           "[processor][bus-layout]") {

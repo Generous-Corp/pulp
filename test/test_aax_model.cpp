@@ -256,6 +256,29 @@ TEST_CASE("AAX model preserves mono sidechain layouts", "[aax][model]") {
     REQUIRE(result.definition.components[0].sidechain_channels == 1);
 }
 
+TEST_CASE("AAX model emits one component per declared bus layout", "[aax][model]") {
+    auto descriptor = descriptor_with_buses({{"Input", 2}}, {{"Output", 2}});
+    descriptor.supported_bus_layouts = {
+        {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+    };
+    ConfigurableProcessor::configure(std::move(descriptor));
+    pulp::format::aax::PluginCodes codes{
+        .manufacturer_id = pulp::format::aax::fourcc("Pulp"),
+        .product_id = pulp::format::aax::fourcc("Lays"),
+        .native_id_base = pulp::format::aax::fourcc("PLay"),
+    };
+
+    const auto result = pulp::format::aax::build_plugin_definition(
+        make_configured_processor, codes);
+    REQUIRE(result.ok);
+    REQUIRE(result.definition.components.size() == 2);
+    REQUIRE(result.definition.components[0].main_input_channels == 1);
+    REQUIRE(result.definition.components[1].main_input_channels == 2);
+    REQUIRE(result.definition.components[0].native_plugin_id !=
+            result.definition.components[1].native_plugin_id);
+}
+
 TEST_CASE("AAX model allows MIDI instruments with no audio input bus", "[aax][model]") {
     pulp::format::aax::PluginCodes codes{
         .manufacturer_id = pulp::format::aax::fourcc("Pulp"),

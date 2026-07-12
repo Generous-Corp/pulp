@@ -92,6 +92,16 @@ struct BusInfo {
     bool optional = false;  ///< true for sidechain buses that can be deactivated
 };
 
+/// One complete host-selectable channel configuration. Entry indices match
+/// PluginDescriptor::input_buses/output_buses. A descriptor may list multiple
+/// configurations with identical bus topology but different widths (for
+/// example mono, stereo, and 5.1 variants of the same effect).
+struct BusLayoutConfiguration {
+    std::vector<int> inputs;
+    std::vector<int> outputs;
+    std::string name;
+};
+
 /// Capability sidecar for the node ABI. New capability bits should be
 /// appended here with false defaults so descriptor aggregate initializers
 /// remain source-compatible.
@@ -176,6 +186,10 @@ struct PluginDescriptor {
     /// model; legacy supports_mpe/supports_ump/supports_f64_audio remain accepted and are OR'd
     /// into effective_capabilities().
     NodeCapabilities node_capabilities;
+
+    /// Explicit host-selectable layouts. Empty preserves the legacy flexible
+    /// mono/stereo negotiation derived from the default bus declarations.
+    std::vector<BusLayoutConfiguration> supported_bus_layouts;
 
     /// Opt in to native double-precision audio processing. Appended after
     /// the original descriptor fields so positional aggregate initializers
@@ -743,10 +757,7 @@ public:
     /// Format adapters call this on the host thread before applying the
     /// layout. Returning false rejects the proposal and the adapter is
     /// expected to refuse the host's `setBusArrangements` / equivalent call.
-    struct BusesLayout {
-        std::vector<int> inputs;
-        std::vector<int> outputs;
-    };
+    using BusesLayout = BusLayoutConfiguration;
 
     /// Validate a proposed bus layout. Default acceptance policy:
     ///
@@ -764,6 +775,14 @@ public:
     /// which preserves the prior default-acceptance behaviour exactly.
     virtual bool is_bus_layout_supported(const BusesLayout& layout) const {
         const auto desc = descriptor();
+        if (!desc.supported_bus_layouts.empty()) {
+            return std::any_of(desc.supported_bus_layouts.begin(),
+                               desc.supported_bus_layouts.end(),
+                               [&](const auto& declared) {
+                                   return declared.inputs == layout.inputs &&
+                                          declared.outputs == layout.outputs;
+                               });
+        }
         if (!layout.inputs.empty() &&
             layout.inputs.size() != desc.input_buses.size())
             return false;

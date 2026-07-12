@@ -139,6 +139,19 @@ bool HeadlessHost::try_prepare(double sample_rate, int max_buffer_size,
     return true;
 }
 
+bool HeadlessHost::try_prepare_bus_layout(
+    std::size_t layout_index, double sample_rate, int max_buffer_size,
+    PrepareResourceLimits resource_limits) {
+    if (!processor_ || layout_index >= descriptor_.supported_bus_layouts.size())
+        return false;
+    const auto& layout = descriptor_.supported_bus_layouts[layout_index];
+    if (!processor_->is_bus_layout_supported(layout)) return false;
+    const int input_channels = layout.inputs.empty() ? 0 : layout.inputs.front();
+    const int output_channels = layout.outputs.empty() ? 0 : layout.outputs.front();
+    return try_prepare(sample_rate, max_buffer_size, input_channels,
+                       output_channels, resource_limits);
+}
+
 void HeadlessHost::process(audio::BufferView<float>& output,
                             const audio::BufferView<const float>& input) {
     midi::MidiBuffer midi_in, midi_out;

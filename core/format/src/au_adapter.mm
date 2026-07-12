@@ -419,6 +419,20 @@ struct ScopedAuV3HostWriting {
 - (AUAudioUnitBusArray *)outputBusses { return _outputBusArray; }
 - (AUAudioUnitBusArray *)inputBusses { return _inputBusArray; }
 
+- (NSArray<NSNumber *> *)channelCapabilities {
+    if (!_bridge.processor) return nil;
+    const auto desc = _bridge.processor->descriptor();
+    if (desc.supported_bus_layouts.empty()) return nil;
+    NSMutableArray<NSNumber *> *result = [NSMutableArray array];
+    for (const auto& layout : desc.supported_bus_layouts) {
+        const int inputs = layout.inputs.empty() ? 0 : layout.inputs.front();
+        const int outputs = layout.outputs.empty() ? 0 : layout.outputs.front();
+        [result addObject:@(inputs)];
+        [result addObject:@(outputs)];
+    }
+    return result;
+}
+
 // ── Required property overrides ────────────────────────────────────────────
 
 - (NSTimeInterval)latency {

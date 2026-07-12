@@ -50,6 +50,13 @@ public:
         int input_channels = 2, int output_channels = 2,
         PrepareResourceLimits resource_limits = {});
 
+    /// Prepare one of PluginDescriptor::supported_bus_layouts by index.
+    /// Returns false for an undeclared/invalid layout or when resource limits
+    /// reject the derived main-bus widths.
+    [[nodiscard]] bool try_prepare_bus_layout(
+        std::size_t layout_index, double sample_rate, int max_buffer_size,
+        PrepareResourceLimits resource_limits = {});
+
     /// Last prepare-limit failure from try_prepare(). None means the last
     /// checked prepare either fit the limits or no processor exists.
     PrepareResourceLimit last_prepare_limit_failure() const {

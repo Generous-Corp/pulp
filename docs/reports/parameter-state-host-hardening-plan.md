@@ -78,7 +78,7 @@ Adopt a hybrid:
 | Parameter semantics and canonical text conversion | Core adapter work complete; broader validation pending | All adapters consume the shared model; enum/toggle/stepped/text tests pass |
 | Published custom-state snapshots | Complete | Host saves copy immutable published bytes; large-state test does no serialization in save callback |
 | Standalone/headless sidechain injection | Complete | Independent main/sidechain files and harness buffers; unconnected bus is silence |
-| Declarative supported bus layouts | Pending | Multiple layouts reach VST3, AU, CLAP, AAX model, standalone selection |
+| Declarative supported bus layouts | Complete | Multiple layouts reach VST3, AU, CLAP, AAX model, standalone selection |
 | Process mode | Already present on baseline; verification pending | `ProcessMode`, render-speed hint, and offline-quality helper are propagated and tested |
 | Background tasks and AudioTap | Pending | Bounded, pre-warmed, lifetime-safe task lanes and whole-frame tap behavior |
 | ABI exception shields | Pending | Author callbacks cannot unwind across format C/Objective-C boundaries |
@@ -125,6 +125,16 @@ Adopt a hybrid:
   rendering accepts a separate sidechain `AudioFileData`, preserves independent
   widths and block schedules, rejects mismatched sample rates/frame counts, and
   supplies silence beyond sidechain data during a rendered tail.
+- Declarative `supported_bus_layouts` now constrains the shared Processor
+  validator, drives CLAP `audio-ports-config`, AUv2/AUv3 capability reporting,
+  AAX component expansion, VST3's existing arrangement negotiation, and
+  headless selection. The layout type preserves the existing two-vector
+  aggregate field order for source compatibility.
+- Layout validation: `pulp-test-clap-entry` focused port suite PASS (54
+  assertions/2 cases), `pulp-test-aax-model` PASS (142/17),
+  `pulp-test-processor-layout-latency` focused suite PASS (15/4), and
+  `pulp-test-headless` focused suite PASS (222/26). `PulpGain_AUv3` Release
+  build also passes with AU channel-capability integration.
 
 ## Review log
 
