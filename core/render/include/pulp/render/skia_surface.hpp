@@ -38,6 +38,32 @@ public:
     /// for the current swapchain texture when on-screen presentation is active.
     static std::unique_ptr<SkiaSurface> create(GpuSurface& gpu, const Config& config);
 
+#if defined(__EMSCRIPTEN__)
+    /// Browser (WebGL2) surface configuration.
+    ///
+    /// `canvas_selector` is a CSS selector for the target `<canvas>` element,
+    /// resolved by Emscripten's HTML5 WebGL API.
+    struct WebGlConfig {
+        const char* canvas_selector = "#pulp";
+        uint32_t width = 0;
+        uint32_t height = 0;
+        float scale_factor = 1.0f;  // devicePixelRatio
+    };
+
+    /// Create a Skia surface backed by Ganesh on a WebGL2 context.
+    ///
+    /// There is no GpuSurface: GpuSurface is a Dawn abstraction and has no
+    /// WebGL analogue, so a browser host reports `gpu_surface() == nullptr`
+    /// and the JS GPU bridge degrades accordingly. Presentation is implicit —
+    /// the browser composites the canvas element, so `end_frame()` submits and
+    /// there is nothing to present.
+    ///
+    /// The returned surface's `graphite_context()` is always `nullptr`: this
+    /// backend is Ganesh, not Graphite. Callers that need a Graphite `Context`
+    /// (e.g. `SkpFrameCapture` GPU-image readback) must handle the null.
+    static std::unique_ptr<SkiaSurface> create_webgl(const WebGlConfig& config);
+#endif
+
     virtual ~SkiaSurface() = default;
 
     /// Begin a frame: returns a Canvas to draw into.
@@ -65,7 +91,8 @@ public:
     virtual bool is_available() const = 0;
 
     /// The live Graphite `Context` backing this surface, or `nullptr`
-    /// when Skia/Graphite is unavailable. Hand this to a `SkpFrameCapture`
+    /// when Skia/Graphite is unavailable — including on the Ganesh/WebGL2
+    /// backend, which has no Graphite context at all. Hand this to a `SkpFrameCapture`
     /// (or `capture_skp_to_file`) so a `.skp` of this surface's frame can
     /// read back any GPU-texture-backed embedded images instead of
     /// silently dropping them. The pointer is owned by the SkiaSurface.

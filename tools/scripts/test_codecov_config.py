@@ -35,8 +35,12 @@ PULP_REACT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pulp-react-build.ym
 
 
 EXPECTED_NON_CORE_COMPONENT_IDS = {
-    # platforms
-    "android", "apple", "linux", "windows",
+    # platforms. `web` is the browser/wasm platform slice — it owns
+    # core/**/platform/web/** (the Skia-Ganesh/WebGL2 BrowserWindowHost and
+    # its DOM event translation). It is deliberately NOT `core/**/web/**`,
+    # which would double-count the WAM/WebCLAP adapter headers the `format`
+    # component already owns.
+    "android", "apple", "linux", "windows", "web",
     # surfaces
     "cli", "inspect", "ship", "tools",
 }

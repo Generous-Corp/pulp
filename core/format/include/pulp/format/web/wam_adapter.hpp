@@ -157,9 +157,46 @@ public:
     const midi::MidiBuffer& midi_out() const { return midi_out_; }
 
     // Parameters, addressed by the plugin's own numeric ParamID within a stage.
-    void set_param(state::ParamID id, float value) { store_.set_value(id, value); }
+    //
+    // Writing the value only MARKS the stage's derived state dirty; the non-RT
+    // pass runs later, in service_non_realtime(). See that method for why the
+    // work is not done inline here.
+    void set_param(state::ParamID id, float value) {
+        store_.set_value(id, value);
+        tick_pending_ = true;
+    }
     float get_param(state::ParamID id) const { return store_.get_value(id); }
     const state::StateStore& store() const { return store_; }
+
+    // Mark this stage's derived state dirty without touching a parameter (a
+    // state restore names a different IR / sample / wavetable than the live one).
+    void mark_non_realtime_dirty() { tick_pending_ = true; }
+
+    // COALESCED non-realtime pass — at most ONE per render turn.
+    //
+    // A wasm module has no worker thread, so a processor that derives heavy
+    // state from a control change (SuperConvolver rebuilds its impulse response
+    // when `Size` moves: decode, resample, window, FFT re-partition) can only do
+    // it on the render thread. The worklet dispatches port.onmessage on THAT
+    // thread, and a single knob drag delivers a burst of param messages in one
+    // turn — so ticking inline per message did the whole rebuild once per
+    // message, N× the work with only the last result ever audible. That is an
+    // underrun while the user drags a knob.
+    //
+    // Instead the setters mark dirty and the bridge calls this ONCE per block,
+    // AFTER the render call, so the burst collapses into a single rebuild of the
+    // LATEST value. That is exactly the coalescing the native background worker
+    // gets for free from its poll loop. The cost is one block of latency before
+    // a control change is audible (~2.7 ms at 128 frames / 48 kHz).
+    //
+    // Also honours the processor's own `non_realtime_tick_pending()` so work a
+    // processor discovers for itself still gets serviced.
+    void service_non_realtime() {
+        if (!processor_) return;
+        if (!tick_pending_ && !processor_->non_realtime_tick_pending()) return;
+        tick_pending_ = false;
+        processor_->on_non_realtime_tick();
+    }
 
     // Bumped by an audio-thread listener on every parameter change in this
     // stage, the plugin's own writes from inside process() included. See
@@ -205,6 +242,11 @@ private:
     std::vector<float> output_planar_;
     std::vector<float*> output_ptrs_;
     midi::MidiBuffer midi_out_;
+
+    // Set by a control write, cleared by service_non_realtime(). Plain bool: the
+    // worklet is single-threaded — the render call and port.onmessage run on the
+    // same thread.
+    bool tick_pending_ = false;
 
     int num_channels_ = 2;
     int block_size_ = 128;
@@ -369,6 +411,12 @@ private:
     // Set by request_reset(); consumed (and cleared) by the next process(), so
     // exactly one block sees ctx.reset_requested = true. One bool: RT-safe.
     bool reset_pending_ = false;
+
+    // Set by a control write (parameter / state restore), cleared by
+    // service_non_realtime() once per block. See WamStage::service_non_realtime
+    // for why the non-RT pass is coalesced instead of run inline per message.
+    bool tick_pending_ = false;
+    void service_non_realtime();
 
     // Host-supplied transport, copied into ProcessContext every block. The same
     // WamTransport POD the rack uses (was a byte-identical private twin) so

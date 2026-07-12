@@ -192,6 +192,29 @@ Same rule for Skia *modules* (e.g. `skottie`/`sksg`, linked only when the opt-in
 prebuilt under the same Skia BSD-3-Clause entry — clarify their use in the Skia
 row of `DEPENDENCIES.md`, do **not** add a separate dependency/NOTICE entry.
 
+### A prebuilt's *slices* are not interchangeable — record what differs
+
+One manifest row can cover several published binaries of the same dependency,
+and they are not required to have the same contents. The Skia `wasm` slice is
+the live example: it is **Ganesh on WebGL2** (no Dawn, no Graphite) and it
+**excludes skottie/sksg**, so Lottie is simply unavailable there even though the
+same `DEPENDENCIES.md` row says the modules exist. Note per-slice divergences in
+the row rather than letting a reader generalize from the native slice — the
+alternative is someone enabling `PULP_LOTTIE` for wasm and getting an
+undefined-`skjson` link failure with no explanation.
+
+### Toolchains that *consume* a prebuilt are pins too
+
+A prebuilt binary is only reproducible against the toolchain it was validated
+with. The Skia wasm slice is verified against a specific Emscripten and wasi-sdk
+version, recorded as `determinism.web_toolchain` in `tools/deps/manifest.json`
+and mirrored in the Skia row of `DEPENDENCIES.md`. This is not bookkeeping:
+`.github/workflows/web-plugins.yml` **reads the slice's URL + sha256 out of the
+manifest** and keys its cache on the manifest hash, so the audit and the CI lane
+physically cannot disagree about which binary is in use — and a pin bump
+self-invalidates the cache. When you bump either the slice or the toolchain,
+bump them in the manifest, never by editing a URL into a workflow.
+
 The Skia toolchain itself is pinned at `chrome/m151` via the
 `danielraffel/skia-builder` fork (see `tools/deps/manifest.json` →
 `determinism.skia_builder_fork`). The fork tracks upstream

@@ -46,8 +46,37 @@ export function makeWasmImports(getMemory) {
     env: {
       _abort_js: () => { throw new Error("wasm called abort_js"); },
       _tzset_js: () => {},
-      // Headless DSP buffers are tiny; the module's initial heap is sufficient.
-      emscripten_resize_heap: () => false,
+      // Real heap growth. The modules are linked with -sALLOW_MEMORY_GROWTH=1,
+      // which lowers every out-of-heap malloc to this import; returning false
+      // unconditionally (as this did) turns the FIRST allocation past the
+      // initial 16 MB heap into `operator new` -> abort() -> "wasm called
+      // abort_js", with no diagnostic. Harmless while every WAM demo's DSP was
+      // a few KB; fatal the moment one is not — SuperConvolver's impulse
+      // response is up to 10 s at 48 kHz plus its FFT partition tables.
+      //
+      // Contract (emscripten): argument is the requested heap size in BYTES,
+      // return 1 on success and 0 on failure. Grow geometrically so a run of
+      // increasing allocations doesn't call memory.grow() once per malloc, and
+      // cap at the wasm32 ceiling. Every heap view in this file is rebuilt per
+      // access (see `mem()` / `dv()`), so a grow cannot leave a stale view
+      // behind.
+      emscripten_resize_heap: (requested) => {
+        const mem = getMemory();
+        const want = requested >>> 0;
+        const kPage = 65536;
+        const kMaxBytes = 2147483648;  // 2 GiB — the wasm32 address-space limit
+        const current = mem.buffer.byteLength;
+        if (want <= current) return 1;
+        if (want > kMaxBytes) return 0;
+        let target = Math.max(want, Math.min(current * 2, kMaxBytes));
+        target = Math.min(kMaxBytes, Math.ceil(target / kPage) * kPage);
+        try {
+          mem.grow((target - current) / kPage);
+          return 1;
+        } catch {
+          return 0;
+        }
+      },
     },
     wasi_snapshot_preview1: {
       environ_get: () => 0,

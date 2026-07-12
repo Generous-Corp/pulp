@@ -648,6 +648,39 @@ at 23 bytes.
 Symmetric note: `state_load`'s `stream->read` loop was already
 correct; the bug was only on the write side.
 
+### `on_non_realtime_tick()` fires in **native** CLAP, not just WebCLAP
+
+`Processor::on_non_realtime_tick()` / `non_realtime_tick_pending()` exist so a
+processor with **no worker thread of its own** can get expensive control-driven
+work (decode, resample, FFT-plan, allocate) off the audio thread. The motivating
+host is the browser — a WAM lives entirely inside an AudioWorklet and a WebCLAP
+module has no `std::thread` — but the CLAP adapter calls the hook
+**unconditionally**, so a *native* CLAP plugin gets it too:
+
+- `clap_on_main_thread()` calls `on_non_realtime_tick()` every time.
+- `state_load()` calls it after `deserialize()` — a restored state can name a
+  different derived source than the live one, and a worker-less processor has no
+  thread to notice; without this the audio thread renders the OLD derived state
+  for the rest of the session.
+- `clap_process()` **peeks** `non_realtime_tick_pending()` each block and calls
+  `host->request_callback()` when set — the same mechanism already used for
+  latency/tail changes. This is the only way out of the audio thread in CLAP,
+  because CLAP delivers parameter changes as events *inside* `process()`.
+
+Two things follow that are easy to get wrong:
+
+1. **Do not write `on_non_realtime_tick()` assuming "this only runs in a
+   browser."** It runs in Bitwig and Reaper. A processor that already has a real
+   worker thread should do **nothing** here, or the worker and the host race.
+2. **`non_realtime_tick_pending()` must be realtime-safe** — it is called from
+   `process()` every block. Read atomics and compare. No locks, no allocation.
+
+VST3, AU, and the standalone host do **not** call the hook at all. A processor
+that depends on it for correctness must *also* have a worker (or do the work in
+`prepare()`), or it will never reconcile in those formats. Both methods are
+appended at the **end** of the `Processor` vtable to keep vtable ordering
+additive-only (`node_abi_gate`) — keep it that way when adding more.
+
 ## Validation recipes
 
 Build and smoke a CLAP bundle with the Pulp CLI:

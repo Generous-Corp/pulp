@@ -9,7 +9,14 @@
 #   SKIA_FOUND         - True if Skia was found
 #   SKIA_INCLUDE_DIRS  - Include directories
 #   SKIA_LIBRARIES     - Libraries to link
+#   SKIA_ICUDTL_FILE   - Path to icudtl.dat when the slice ships one
 #   skia::skia         - Imported target
+#
+# Backends by platform:
+#   native (mac/win/linux/android/ios) - Skia Graphite on Dawn (SK_GRAPHITE + SK_DAWN)
+#   Emscripten/wasm                    - Skia Ganesh on WebGL2 (SK_GANESH + SK_GL)
+# The wasm slice published by skia-builder contains NO Dawn/wgpu symbols and
+# exactly one Graphite object, so SK_GRAPHITE/SK_DAWN must not be defined there.
 
 if(NOT SKIA_DIR)
     # Default: look in external/skia-build or SKIA_DIR env var
@@ -119,6 +126,12 @@ elseif(ANDROID)
     else()
         set(_skia_platform "android")
     endif()
+elseif(EMSCRIPTEN)
+    # Emscripten also sets UNIX=1, so this arm MUST precede the UNIX arm or
+    # the probe below looks for build/linux-gpu/ and Skia is reported missing.
+    # The wasm zip ships libs flat under build/wasm-gpu/lib/Release/ (no arch
+    # subdir).
+    set(_skia_platform "wasm")
 elseif(UNIX)
     set(_skia_platform "linux")
 else()
@@ -169,7 +182,12 @@ set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
 if(NOT EXISTS "${SKIA_LIBRARY}")
     set(SKIA_LIBRARY "SKIA_LIBRARY-NOTFOUND")
 endif()
-if(NOT EXISTS "${DAWN_LIBRARY}")
+# The wasm slice is Ganesh/WebGL2 and ships no Dawn archive. A missing Dawn
+# library there is expected, not a failure — nothing consumes DAWN_LIBRARY on
+# that backend.
+if(EMSCRIPTEN)
+    set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
+elseif(NOT EXISTS "${DAWN_LIBRARY}")
     set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
 endif()
 
@@ -278,8 +296,45 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     if(EXISTS "${_skia_include_dir}/dawn")
         list(APPEND SKIA_INCLUDE_DIRS "${_skia_include_dir}")
     endif()
+    # icudtl.dat — SkUnicode's ICU data file. Ships under build/share/ in the
+    # skia-builder zips. Emscripten targets must --preload-file it (there is no
+    # host filesystem in the browser), so export the path for consumers.
+    set(SKIA_ICUDTL_FILE "")
+    foreach(_icu_candidate
+            "${SKIA_DIR}/build/share/icudtl.dat"
+            "${SKIA_DIR}/share/icudtl.dat")
+        if(EXISTS "${_icu_candidate}")
+            set(SKIA_ICUDTL_FILE "${_icu_candidate}")
+            break()
+        endif()
+    endforeach()
+
     # Collect ALL static libraries in the lib dir
     file(GLOB _skia_all_libs "${_skia_lib_dir}/*.a" "${_skia_lib_dir}/*.lib")
+
+    # The wasm slice's libskottie.a has ~360 UNDEFINED skjson::* symbols and the
+    # zip packages no libjsonreader.a / libskresources.a to satisfy them, so
+    # linking skottie (and its libsksg.a dependency) is a hard link failure.
+    # Lottie/skottie is therefore unavailable on wasm until skia-builder
+    # packages those archives; tools/scripts/verify_wasm_skia_slice.py asserts
+    # the undefined symbols still exist so this exclusion is removed the day
+    # upstream fixes it.
+    if(EMSCRIPTEN)
+        set(_skia_kept_libs "")
+        foreach(_lib IN LISTS _skia_all_libs)
+            get_filename_component(_lib_name "${_lib}" NAME)
+            if(_lib_name STREQUAL "libskottie.a" OR _lib_name STREQUAL "libsksg.a")
+                continue()
+            endif()
+            list(APPEND _skia_kept_libs "${_lib}")
+        endforeach()
+        set(_skia_all_libs ${_skia_kept_libs})
+        message(STATUS
+            "Skia (wasm): excluding libskottie.a/libsksg.a — the published slice "
+            "leaves skjson::* undefined and ships no jsonreader/skresources "
+            "archive, so Lottie is unavailable on this backend")
+    endif()
+
     set(SKIA_LIBRARIES ${_skia_all_libs})
 
     # Skia m151 Linux prebuilts can reference Chromium BackupRefPtr /
@@ -366,12 +421,31 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
         list(APPEND SKIA_LIBRARIES ${_pulp_skia_support_libraries})
     endif()
 
+    # Backend macros. Graphite+Dawn on native; Ganesh+GL on wasm, where the
+    # published slice defines zero wgpu/Dawn symbols and SK_GRAPHITE would drag
+    # include/gpu/graphite/** and Dawn BackendTextures into core/canvas.
+    if(EMSCRIPTEN)
+        # SK_TRIVIAL_ABI is NOT optional on this slice. The wasm archive is
+        # built with gn `is_trivial_abi = true`, so sk_sp inside libskia.a is
+        # [[clang::trivial_abi]] (returned in a register) while a consumer
+        # compiled without the macro returns it via sret. wasm-ld does not
+        # reject the mismatch — it links a TRAPPING STUB, and the first
+        # cross-boundary sk_sp call dies with a bare "RuntimeError:
+        # unreachable" (GrGLInterfaces::MakeWebGL, on the very first frame).
+        # The native slices do not set is_trivial_abi, which is why this only
+        # bites the browser backend. It lives on the INTERFACE so EVERY wasm
+        # target that links this slice gets it, not just the one demo.
+        set(_skia_backend_defs "SK_GANESH;SK_GL;SK_TRIVIAL_ABI=[[clang::trivial_abi]]")
+    else()
+        set(_skia_backend_defs "SK_GRAPHITE;SK_DAWN")
+    endif()
+
     # Create imported interface target that links everything
     if(NOT TARGET skia::skia)
         add_library(skia::skia INTERFACE IMPORTED)
         set_target_properties(skia::skia PROPERTIES
             INTERFACE_INCLUDE_DIRECTORIES "${SKIA_INCLUDE_DIRS}"
-            INTERFACE_COMPILE_DEFINITIONS "SK_GRAPHITE;SK_DAWN"
+            INTERFACE_COMPILE_DEFINITIONS "${_skia_backend_defs}"
             INTERFACE_LINK_LIBRARIES "${SKIA_LIBRARIES}"
         )
 

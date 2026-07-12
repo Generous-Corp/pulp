@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 46 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 47 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -60,6 +60,7 @@ for its complete, authoritative guidance.
 | `video-proof` | Record, compose, publish, serve, and review short desktop validation video proofs for Pulp UX/test-harness work. |
 | `view-bridge` | Editor lifecycle and multi-view attach for Pulp plugins — when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles. |
 | `vst3` | VST3 format adapter for Pulp — SingleComponentEffect wiring, bus arrangement negotiation, parameter / MIDI event routing, state round-trip, and the pitfalls discovered while wiring the adapter against Steinberg's SDK. |
+| `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, and the Skia/WebGL2 browser window host. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
 ---

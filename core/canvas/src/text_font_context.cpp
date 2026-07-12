@@ -16,41 +16,12 @@
 #include "modules/skparagraph/include/FontCollection.h"
 #include "modules/skparagraph/include/TypefaceFontProvider.h"
 
-#if defined(__APPLE__)
-#include "include/ports/SkFontMgr_mac_ct.h"
-#elif defined(_WIN32)
-#include "include/ports/SkTypeface_win.h"
-#elif defined(__ANDROID__)
-#include "include/ports/SkFontMgr_android.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#elif defined(__linux__)
-#include "include/ports/SkFontMgr_fontconfig.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#endif
-
 #include <mutex>
 #include <vector>
 
 namespace pulp::canvas {
 
 namespace {
-
-// Same platform-mgr matrix as `bundled_fonts.cpp::registration_font_manager`
-// and `skia_canvas.cpp::get_font_manager`. We can't reach in to either TU's
-// statics directly without leaking implementation, so it's mirrored here.
-sk_sp<SkFontMgr> make_platform_font_mgr() {
-#if defined(__APPLE__)
-    return SkFontMgr_New_CoreText(nullptr);
-#elif defined(_WIN32)
-    return SkFontMgr_New_DirectWrite();
-#elif defined(__ANDROID__)
-    return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
-#elif defined(__linux__)
-    return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
-#else
-    return nullptr;
-#endif
-}
 
 // Platform-default color-emoji family for `register_platform_emoji_fallback`.
 // Returns the family name to ask the platform font manager for.
@@ -70,8 +41,13 @@ const char* platform_emoji_family() {
 
 // ── TextFontContext ─────────────────────────────────────────────────────
 
+// The OS switch that used to live here was a fifth copy of the one in
+// `bundled_fonts.cpp`. It is now delegated to `platform_font_manager()` — the
+// single canonical switch — so a new platform arm (Emscripten's custom-empty
+// manager, added for the browser backend) cannot be added in four places and
+// forgotten in the fifth.
 TextFontContext::TextFontContext()
-    : font_mgr_(make_platform_font_mgr()) {}
+    : font_mgr_(platform_font_manager()) {}
 
 TextFontContext::~TextFontContext() = default;
 
@@ -141,6 +117,31 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
         }
     }
 
+    // Bridge the BUNDLED faces (Inter, JetBrains Mono) into the collection when
+    // the platform has NO system font database of its own — i.e. a browser
+    // build, where `SkFontMgr_New_Custom_Empty()` enumerates no families and
+    // hands SkParagraph a glyph-less default face. Without this bridge every
+    // Label in the browser lays out at zero width and paints nothing at all.
+    // They are registered BEFORE the user-registered faces below, so a user
+    // face with the same family name still wins.
+    //
+    // Deliberately NOT registered when a real platform font DB exists. Doing so
+    // unconditionally is arguably more correct — a Label asking for "Inter"
+    // should get the Inter that Pulp ships, and the FontResolver / TextShaper
+    // cascades already prefer the bundled face — but it CHANGES NATIVE PIXELS
+    // (test_font_rendering_goldens' "Inter 14px Hello" digest moves from 244 to
+    // 210 opaque px on macOS, because the paragraph path was resolving "Inter"
+    // through CoreText to a system fallback, not to the bundled face). That
+    // native measure-vs-paint divergence is a real bug, but fixing it means
+    // regenerating the committed golden digests and belongs in its own change,
+    // not smuggled in behind a browser port.
+    if (!platform_font_db_usable()) {
+        for (const auto& b : bundled_typefaces_snapshot()) {
+            if (!b.typeface || b.family.empty()) continue;
+            provider->registerTypeface(b.typeface, SkString(b.family.c_str()));
+        }
+    }
+
     // Bridge user-registered fonts into the SkParagraph font collection.
     // Without this, fonts registered via `register_font` /
     // `register_font_file` (e.g. an imported Figma design's
@@ -203,21 +204,31 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
 
     auto collection = sk_make_sp<skia::textlayout::FontCollection>();
     collection->setAssetFontManager(provider);
-    if (font_mgr_) {
-        // Tell SkParagraph what default families to consult for emoji
-        // codepoints. The list is searched in order; we put the emoji
-        // family first so `defaultEmojiFallback` picks our registered
-        // typeface even when the platform mgr would have something.
-        std::vector<SkString> defaults;
-        if (!emoji_family_name_.empty()) {
-            defaults.emplace_back(emoji_family_name_.c_str());
-            defaults.emplace_back("Pulp Emoji");
-        }
+
+    // Tell SkParagraph what default families to consult for emoji
+    // codepoints. The list is searched in order; we put the emoji
+    // family first so `defaultEmojiFallback` picks our registered
+    // typeface even when the platform mgr would have something.
+    std::vector<SkString> defaults;
+    if (!emoji_family_name_.empty()) {
+        defaults.emplace_back(emoji_family_name_.c_str());
+        defaults.emplace_back("Pulp Emoji");
+    }
+
+    if (font_mgr_ && platform_font_db_usable()) {
         if (defaults.empty()) {
             collection->setDefaultFontManager(font_mgr_);
         } else {
             collection->setDefaultFontManager(font_mgr_, defaults);
         }
+    } else {
+        // No system font database (browser: SkFontMgr_New_Custom_Empty). The
+        // platform manager would hand SkParagraph a non-null but GLYPH-LESS
+        // default face, so a Label with no explicit font-family would lay out
+        // at zero width and paint nothing. Make the bundled provider the
+        // default manager and name a bundled family as the default.
+        defaults.emplace_back("Inter");
+        collection->setDefaultFontManager(provider, defaults);
     }
     collection->enableFontFallback();
 

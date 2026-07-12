@@ -41,19 +41,22 @@
 #include "include/core/SkTileMode.h"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
-// WebGPU/Graphite native-texture wrapping needs these Graphite/Dawn includes.
-#include "include/gpu/GpuTypes.h"                  // skgpu::Origin
-#include "include/gpu/graphite/BackendTexture.h"
-#include "include/gpu/graphite/Image.h"            // SkImages::WrapTexture
-#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"  // BackendTextures::MakeDawn(WGPUTexture)
-#include "webgpu/webgpu_cpp.h"
-
 #endif  // PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
 #ifdef PULP_HAS_SKIA
 #include "skia_canvas_internal.hpp"  // to_sk_color4f, webgpu-format helpers
 #include "runtime_effect_cache.hpp"  // RuntimeEffectCache (sibling header)
+#if PULP_CANVAS_GRAPHITE
+// WebGPU/Graphite native-texture wrapping needs these Graphite/Dawn includes.
+// They do not exist in a Ganesh-only Skia (the Emscripten slice), which is why
+// draw_native_dawn_texture has no meaning there.
+#include "include/gpu/GpuTypes.h"                  // skgpu::Origin
+#include "include/gpu/graphite/BackendTexture.h"
+#include "include/gpu/graphite/Image.h"            // SkImages::WrapTexture
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"  // BackendTextures::MakeDawn(WGPUTexture)
+#include "webgpu/webgpu_cpp.h"
+#endif
 #endif
 
 #ifdef PULP_HAS_SKIA
@@ -334,6 +337,14 @@ bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle,
                                           float y,
                                           float w,
                                           float h) {
+#if !PULP_CANVAS_GRAPHITE
+    // Ganesh-only build (Emscripten / WebGL2): there is no Dawn texture to
+    // wrap and no Graphite recorder to wrap it with. Report the draw as
+    // unhandled so the widget paint path takes its non-GPU branch.
+    (void)texture_handle; (void)width; (void)height; (void)format;
+    (void)x; (void)y; (void)w; (void)h;
+    return false;
+#else
     // WebGPU canvas widgets provide a `wgpu::Texture*` that must be wrapped
     // as a Graphite backend texture, materialized as an SkImage, and drawn
     // into the current Skia canvas. Returning true tells the widget paint path
@@ -369,6 +380,7 @@ bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle,
                            SkRect::MakeXYWH(x, y, w, h),
                            sampling_options_for_image_smoothing());
     return true;
+#endif
 }
 
 // ── Blur backdrop ────────────────────────────────────────────────────────────

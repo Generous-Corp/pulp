@@ -982,7 +982,16 @@
           "mac-x86_64": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-minos13/skia-build-mac-x86_64-gpu-release.zip",
             "sha256": "f1734e9f41c0d01700d446282550725a7b6b42ebc906ba295f1f563112831f17"
+          },
+          "wasm-wasm32": {
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-wasm-wasm32-gpu-release.zip",
+            "sha256": "8a5a24368866d210fe47bac2ea03b67e63c429d1c9ea5ee11dc06d9db831def9"
           }
+        },
+        "web_toolchain": {
+          "emscripten": "6.0.2",
+          "wasi_sdk": "25.0",
+          "note": "Skia's C++ headers and Emscripten's webgpu_cpp.h are not stable APIs. The wasm slice is only validated against this toolchain tuple; bump the tuple and the Skia pin together."
         },
         "rebuild_triggers": [
           "Skia branch or commit changes",

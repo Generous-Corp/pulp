@@ -1081,6 +1081,64 @@ public:
         midi::MidiBuffer& midi_out,
         const ProcessContext& context);
 
+    /// Non-realtime maintenance tick. Default: no-op.
+    ///
+    /// A processor whose control changes need work that process() must never do
+    /// — decode, resample, FFT-plan, allocate — normally does it on its own
+    /// background thread. Some hosts give it no thread to run on:
+    ///
+    ///   * WAM v2 in the browser. The entire module lives inside an
+    ///     AudioWorklet; there is no second thread and no `std::thread`.
+    ///   * WebCLAP in the browser, likewise (its `on_main_thread` callback is
+    ///     the closest thing to a control thread).
+    ///
+    /// Those adapters call this hook from a NON-RENDER context after anything
+    /// that could have dirtied the processor's derived state — a parameter
+    /// write, a state restore, a re-prepare. A processor that has a real worker
+    /// thread should do nothing here, or the worker and the host would race.
+    ///
+    /// WHO ACTUALLY CALLS IT (the contract is narrower than "any host"):
+    ///
+    ///   * WAM: the adapter marks the processor dirty on a control write and
+    ///     calls this ONCE per block, right after the render call — so a burst
+    ///     of control messages (a knob drag delivers many in one turn) collapses
+    ///     into a single pass over the LATEST values. Do not rely on one tick
+    ///     per parameter write; rely on "eventually, with the latest values".
+    ///   * CLAP — including, but NOT limited to, WebCLAP: `clap_on_main_thread`
+    ///     and `state.load` call it unconditionally. So a NATIVE CLAP plugin
+    ///     gets this hook too (harmlessly: a processor with a worker returns
+    ///     immediately). Do not assume "this only fires in a browser".
+    ///   * VST3, AU, and the standalone host do NOT call it at all. A processor
+    ///     that relies on it for correctness must ALSO have a worker (or do the
+    ///     work in prepare()), or it will never reconcile in those formats.
+    ///
+    /// It is NOT an audio-thread callback and is never called from inside
+    /// process(). In a worklet-only host it does run on the same OS thread as
+    /// the render callback (just not inside it), so a long tick can still make
+    /// the next quantum late — keep the work bounded, and prefer work that is
+    /// proportional to what actually changed.
+    ///
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual void on_non_realtime_tick() {}
+
+    /// RT-safe query: "I have non-realtime work waiting". Default false.
+    ///
+    /// Called from process() by adapters that can only reach the control thread
+    /// by ASKING for it — CLAP (and therefore WebCLAP) delivers parameter
+    /// changes as events inside process(), and the only way out is
+    /// `clap_host->request_callback()` followed by `on_main_thread()`. The CLAP
+    /// adapter peeks this flag each block, exactly as it already does for
+    /// latency/tail changes, and requests the callback when it is set.
+    ///
+    /// MUST be realtime-safe: no locks, no allocation. Read atomics and compare.
+    ///
+    /// The WAM adapter also consults it once per block, so work a processor
+    /// discovers for ITSELF (not just work a control write announced) still gets
+    /// serviced there.
+    ///
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual bool non_realtime_tick_pending() const { return false; }
+
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
     ///

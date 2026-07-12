@@ -134,28 +134,36 @@ inline void verify_state_round_trip(format::ProcessorFactory factory) {
     format::HeadlessHost host(factory);
     host.prepare(44100, 512);
 
-    // Set all params to non-default values
+    // Nudge every param off its default. The midpoint is a convenient nudge, but
+    // it is NOT necessarily a value the parameter can hold: a Toggle/Integer/Enum
+    // quantizes, so a 0..1 bypass asked for 0.5 legitimately stores 0 or 1. Assert
+    // the round-trip against what the store ACTUALLY holds after the write, not
+    // against the value we asked for — otherwise this generic helper is really
+    // testing "every parameter is continuous", and it fails the moment a plugin
+    // declares a discrete one truthfully.
     auto params = host.state().all_params();
+    std::vector<std::pair<state::ParamID, float>> expected;
+    expected.reserve(params.size());
+    bool any_moved = false;
     for (const auto& p : params) {
-        float mid = (p.range.min + p.range.max) / 2.0f;
+        const float mid = (p.range.min + p.range.max) / 2.0f;
         host.state().set_value(p.id, mid);
+        const float held = host.state().get_value(p.id);
+        expected.emplace_back(p.id, held);
+        if (std::abs(held - p.range.default_value) > 1e-6f) any_moved = true;
     }
+    // At least one parameter must have MOVED off its default, or a "restore"
+    // that did nothing at all would still pass.
+    REQUIRE(any_moved);
 
-    // Save state
     auto saved = host.save_state();
     REQUIRE_FALSE(saved.empty());
 
-    // Reset to defaults
     host.state().reset_all_to_defaults();
-
-    // Restore state
     REQUIRE(host.load_state(saved));
 
-    // Verify values restored
-    for (const auto& p : params) {
-        float mid = (p.range.min + p.range.max) / 2.0f;
-        float restored = host.state().get_value(p.id);
-        REQUIRE(std::abs(restored - mid) < 0.01f);
+    for (const auto& [id, want] : expected) {
+        REQUIRE(std::abs(host.state().get_value(id) - want) < 0.01f);
     }
 
     host.release();

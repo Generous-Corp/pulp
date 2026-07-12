@@ -183,15 +183,18 @@ TEST_CASE("RenderLoop explicit timer factory is deterministic",
 
 TEST_CASE("render_loop_backend_is_vsync distinguishes real vblank sources",
           "[render][loop][vblank]") {
-    // The four native backends are real vblank sources; only the timer
+    // The five native backends are real vblank sources; only the timer
     // fallback is not. constexpr so the classification is compile-checked.
     static_assert(render_loop_backend_is_vsync(RenderLoopBackend::cv_display_link));
     static_assert(render_loop_backend_is_vsync(RenderLoopBackend::ca_display_link));
     static_assert(render_loop_backend_is_vsync(RenderLoopBackend::choreographer));
     static_assert(render_loop_backend_is_vsync(RenderLoopBackend::dwm_flush));
+    // requestAnimationFrame is the browser compositor's vblank, not a timer.
+    static_assert(render_loop_backend_is_vsync(RenderLoopBackend::raf));
     static_assert(!render_loop_backend_is_vsync(RenderLoopBackend::timer));
 
     REQUIRE(render_loop_backend_is_vsync(RenderLoopBackend::dwm_flush));
+    REQUIRE(render_loop_backend_is_vsync(RenderLoopBackend::raf));
     REQUIRE_FALSE(render_loop_backend_is_vsync(RenderLoopBackend::timer));
 }
 
@@ -205,8 +208,67 @@ TEST_CASE("render_loop_backend_name covers every backend",
           == "AChoreographer");
     CHECK(std::string(render_loop_backend_name(RenderLoopBackend::dwm_flush))
           == "DwmFlush");
+    CHECK(std::string(render_loop_backend_name(RenderLoopBackend::raf))
+          == "requestAnimationFrame");
     CHECK(std::string(render_loop_backend_name(RenderLoopBackend::timer))
           == "timer");
+
+    // Every enumerator names itself — an unnamed backend would fall through to
+    // "unknown" and quietly degrade every log line that reports it.
+    CHECK_FALSE(std::string(render_loop_backend_name(RenderLoopBackend::raf)).empty());
+    CHECK(std::string(render_loop_backend_name(RenderLoopBackend::raf)) != "unknown");
+}
+
+// ── Browser (requestAnimationFrame) backend ────────────────────────────
+
+TEST_CASE("RenderLoopState drives the exact rAF callback contract",
+          "[render][loop][raf]") {
+    // The browser loop's animation-frame callback is
+    //   if (consume_frame_request() && is_running()) callback();
+    // so its whole behavior is RenderLoopState's. Exercising that here is a
+    // real test of the rAF loop's semantics, not a proxy: the burst-coalescing
+    // and stop-suppression the browser path depends on live entirely in the
+    // state machine, which is portable and testable natively.
+    RenderLoopState state;
+    REQUIRE(state.start());
+    REQUIRE(state.consume_frame_request());  // start() arms the first frame
+
+    // A burst between two animation frames collapses to one callback.
+    state.request_frame();
+    state.request_frame();
+    REQUIRE(state.consume_frame_request());
+    REQUIRE_FALSE(state.consume_frame_request());
+
+    // An idle loop does no work on the following frames.
+    REQUIRE_FALSE(state.consume_frame_request());
+
+    // After stop() the next animation frame must not fire the callback — this
+    // is what lets on_raf() retire by returning EM_FALSE without racing a
+    // final callback into a torn-down host.
+    state.request_frame();
+    REQUIRE(state.stop());
+    REQUIRE_FALSE(state.consume_frame_request());
+    REQUIRE_FALSE(state.is_running());
+}
+
+TEST_CASE("RenderLoop browser factories select the rAF backend",
+          "[render][loop][raf]") {
+#if defined(__EMSCRIPTEN__)
+    // TimerRenderLoop is not compiled for wasm — it spawns a std::thread,
+    // which throws std::system_error in a non-pthread build. Both factories
+    // must therefore hand back the rAF loop, which is a real vblank source.
+    auto loop = RenderLoop::create();
+    REQUIRE(loop != nullptr);
+    REQUIRE(loop->backend() == RenderLoopBackend::raf);
+    REQUIRE(render_loop_backend_is_vsync(loop->backend()));
+
+    auto timer_loop = RenderLoop::create_timer_loop();
+    REQUIRE(timer_loop != nullptr);
+    REQUIRE(timer_loop->backend() == RenderLoopBackend::raf);
+    REQUIRE(timer_loop->backend() != RenderLoopBackend::timer);
+#else
+    SKIP("rAF factory selection only applies to an Emscripten build");
+#endif
 }
 
 TEST_CASE("DwmBackendTracker latches to the timer fallback once a vblank wait fails",

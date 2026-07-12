@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <numeric>
@@ -932,6 +933,13 @@ static double now_us() {
 class DawnGpuCompute : public GpuCompute {
 public:
     ~DawnGpuCompute() override {
+        // Outstanding async readbacks complete exactly once — the caller may be
+        // waiting on that completion to route a block, so it fires here rather
+        // than being silently dropped. Draining first also marks each request
+        // abandoned, so a map callback that lands during teardown neither writes
+        // the caller's `dest` nor touches the pool.
+        drain_readbacks(ReadbackStatus::Failed);
+
         // Release pool buffers before the device is torn down — their
         // destructors call into Dawn internals and need a live device.
         pool_.reset();
@@ -988,14 +996,7 @@ public:
     }
 
     bool initialize_standalone() override {
-        const DawnProcTable& procs = dawn::native::GetProcs();
-        dawnProcSetProcs(&procs);
-
-        wgpu::InstanceDescriptor inst_desc{};
-        native_instance_ = std::make_unique<dawn::native::Instance>(
-            reinterpret_cast<const WGPUInstanceDescriptor*>(&inst_desc));
-        instance_ = wgpu::Instance(native_instance_->Get());
-        if (!instance_) return false;
+        if (!create_instance()) return false;
 
         wgpu::RequestAdapterOptions opts{};
         opts.powerPreference = wgpu::PowerPreference::HighPerformance;
@@ -1006,7 +1007,7 @@ public:
                 if (status == wgpu::RequestAdapterStatus::Success)
                     adapter_ = std::move(result);
             });
-        instance_.ProcessEvents();
+        pump_events();
         if (!adapter_) return false;
 
         wgpu::DeviceDescriptor dev_desc{};
@@ -1032,7 +1033,7 @@ public:
                 if (status == wgpu::RequestDeviceStatus::Success)
                     device_ = std::move(result);
             });
-        instance_.ProcessEvents();
+        pump_events();
         if (!device_) return false;
 
         queue_ = device_.GetQueue();
@@ -2910,6 +2911,101 @@ public:
         return results;
     }
 
+    // ── Asynchronous readback ───────────────────────────────────────────
+
+    uint64_t compute_magnitude_async(const float* complex_pairs, float* magnitudes,
+                                     uint32_t num_bins,
+                                     std::chrono::microseconds deadline,
+                                     ReadbackCallback on_complete) override {
+        if (!initialized_ || !complex_pairs || !magnitudes || num_bins == 0
+            || !on_complete) {
+            return 0;
+        }
+
+        const uint32_t input_bytes = num_bins * 2 * sizeof(float);
+        const uint32_t output_bytes = num_bins * sizeof(float);
+
+        auto input_buf = acquire_storage_buffer(input_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        auto output_buf = acquire_storage_buffer(output_bytes,
+            wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
+        auto readback_buf = acquire_readback_buffer(output_bytes);
+        if (!input_buf || !output_buf || !readback_buf) return 0;
+
+        queue_.WriteBuffer(input_buf, 0, complex_pairs, input_bytes);
+
+        auto bind_group = create_bind_group(magnitude_pipeline_, {input_buf, output_buf});
+        dispatch(magnitude_pipeline_, bind_group, (num_bins + 255) / 256);
+        copy_buffer(output_buf, readback_buf, output_bytes);
+
+        // The storage buffers are done with once the GPU confirms the submit;
+        // the readback buffer stays pinned until its map resolves, so it is
+        // recycled (or discarded) by the readback bookkeeping instead.
+        schedule_pool_release({input_buf, output_buf});
+
+        return read_back_async(readback_buf, magnitudes, output_bytes, deadline,
+                               std::move(on_complete));
+    }
+
+    std::size_t poll_readbacks() override {
+        // A completion callback that polls again would re-enter the queue while
+        // it is being drained; the outer poll is already draining everything
+        // that is ready, so the inner call has nothing to do.
+        if (polling_ || async_readbacks_.empty()) return async_readbacks_.size();
+
+        polling_ = true;
+
+        // The deadline is judged against the poll's ENTRY time, before the event
+        // queue is pumped: a result is on time only if it was already delivered
+        // by the deadline, not if it happens to land in this pump. That keeps
+        // expiry a pure function of the clock — the caller's block deadline has
+        // passed either way, and the substitute has already gone out.
+        const auto now = std::chrono::steady_clock::now();
+        pump_events();
+
+        while (!async_readbacks_.empty()) {
+            auto req = async_readbacks_.front();
+
+            if (!req->resolved && now < req->deadline) {
+                // In-order delivery: a request whose map has not landed holds the
+                // queue until it resolves or its deadline passes. The deadline is
+                // what makes that bounded — the queue can never wedge.
+                break;
+            }
+            async_readbacks_.pop_front();
+
+            if (now >= req->deadline) {
+                // Late. `dest` is never written; a map that is still pending must
+                // not go back on the free list where a later acquire() could hand
+                // it out mid-map, so the pool drops its reference instead.
+                req->abandoned = true;
+                if (req->resolved && req->ok) req->buffer.Unmap();
+                if (pool_) pool_->discard(req->buffer);
+                complete(*req, ReadbackStatus::Expired, 0);
+                continue;
+            }
+
+            const void* data = req->ok
+                ? req->buffer.GetConstMappedRange(0, req->size)
+                : nullptr;
+            if (!data) {
+                if (pool_) pool_->discard(req->buffer);
+                complete(*req, ReadbackStatus::Failed, 0);
+                continue;
+            }
+
+            std::memcpy(req->dest, data, req->size);
+            req->buffer.Unmap();
+            if (pool_) pool_->release(req->buffer);
+            complete(*req, ReadbackStatus::Success, req->size);
+        }
+
+        polling_ = false;
+        return async_readbacks_.size();
+    }
+
+    std::size_t readbacks_in_flight() const override { return async_readbacks_.size(); }
+
 #ifdef PULP_BENCHMARK
     void set_bench_counters(bench::PerfCounters* counters) override {
         bench_counters_ = counters;
@@ -3590,6 +3686,102 @@ private:
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
     }
+
+    // ── Backend seam ────────────────────────────────────────────────────
+    //
+    // The only two places this class reaches for a Dawn *implementation* rather
+    // than the webgpu.h/webgpu_cpp.h API: creating the instance (which on native
+    // needs dawn::native::Instance plus a proc-table registration) and driving
+    // the event queue. Emscripten's emdawnwebgpu port provides neither — the
+    // browser constructs the instance via wgpu::CreateInstance() and owns the
+    // event loop. Keeping both behind these two functions means a browser
+    // carve-out replaces exactly them; every other call in this file is already
+    // plain webgpu_cpp.
+    bool create_instance() {
+        const DawnProcTable& procs = dawn::native::GetProcs();
+        dawnProcSetProcs(&procs);
+
+        wgpu::InstanceDescriptor inst_desc{};
+        native_instance_ = std::make_unique<dawn::native::Instance>(
+            reinterpret_cast<const WGPUInstanceDescriptor*>(&inst_desc));
+        instance_ = wgpu::Instance(native_instance_->Get());
+        return instance_ != nullptr;
+    }
+
+    void pump_events() {
+        if (instance_) instance_.ProcessEvents();
+    }
+
+    // ── Asynchronous readback bookkeeping ───────────────────────────────
+
+    struct AsyncReadback {
+        uint64_t id = 0;
+        void* dest = nullptr;
+        uint32_t size = 0;
+        wgpu::Buffer buffer;
+        std::chrono::steady_clock::time_point deadline;
+        ReadbackCallback on_complete;
+        bool resolved = false;    // the map callback has fired
+        bool ok = false;          // ... and reported Success
+        bool abandoned = false;   // completed without the map: a late map must
+                                  // not write `dest` or touch the pool
+    };
+
+    static void complete(AsyncReadback& req, ReadbackStatus status, uint32_t bytes) {
+        if (!req.on_complete) return;
+        // Move the callback out first: a completion fires exactly once even if
+        // it re-enters this object.
+        auto cb = std::move(req.on_complete);
+        req.on_complete = nullptr;
+        cb(ReadbackResult{req.id, status, bytes});
+    }
+
+    void drain_readbacks(ReadbackStatus status) {
+        while (!async_readbacks_.empty()) {
+            auto req = async_readbacks_.front();
+            async_readbacks_.pop_front();
+            req->abandoned = true;
+            if (pool_) pool_->discard(req->buffer);
+            complete(*req, status, 0);
+        }
+    }
+
+    // Map `buffer` without blocking. Each in-flight request owns its own staging
+    // buffer (the pool hands out a distinct one per acquire), so N requests can
+    // be in flight at once; poll_readbacks() delivers them in submission order.
+    uint64_t read_back_async(wgpu::Buffer buffer, void* dest, uint32_t size,
+                             std::chrono::microseconds deadline,
+                             ReadbackCallback on_complete) {
+        auto req = std::make_shared<AsyncReadback>();
+        req->id = ++next_readback_id_;
+        req->dest = dest;
+        req->size = size;
+        req->buffer = buffer;
+        req->deadline = std::chrono::steady_clock::now() + deadline;
+        req->on_complete = std::move(on_complete);
+        async_readbacks_.push_back(req);
+
+        // The callback is intentionally non-`mutable` (see schedule_pool_release
+        // for why m150's webgpu_cpp.h requires that). It mutates the request
+        // through the captured shared_ptr, which a const operator() permits.
+        buffer.MapAsync(wgpu::MapMode::Read, 0, size,
+            wgpu::CallbackMode::AllowProcessEvents,
+            [req](wgpu::MapAsyncStatus status, wgpu::StringView) {
+                req->resolved = true;
+                req->ok = (status == wgpu::MapAsyncStatus::Success);
+                if (!req->abandoned) return;
+                // The deadline already fired: poll_readbacks() has delivered the
+                // completion and discarded the buffer from the pool. Release the
+                // map so the handle can be torn down cleanly.
+                if (req->ok) req->buffer.Unmap();
+            });
+
+        return req->id;
+    }
+
+    uint64_t next_readback_id_ = 0;
+    bool polling_ = false;
+    std::deque<std::shared_ptr<AsyncReadback>> async_readbacks_;
 
     bool read_back(wgpu::Buffer& buffer, void* dest, uint32_t size) {
         bool mapped = false;

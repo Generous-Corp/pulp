@@ -84,6 +84,23 @@ jobs:
         run: |
           node assemble.mjs                 # single-plugin isolation proof (/)
           node assemble-player.mjs          # shared-player WebCLAP demo (/player/)
+          node assemble-gallery.mjs         # the demo galleries + super-convolver (both ABIs)
+
+      # OG previews are rendered from the ASSEMBLED pages, on every deploy, so a
+      # change to a plugin's UI cannot leave a stale unfurl image behind: the
+      # screenshot is always taken from the page being shipped. Each plugin page
+      # is shot STARTED, so the image is the plugin actually running. The second
+      # assemble-gallery pass is required — it bakes the og:image/twitter tags in
+      # only for pages whose og.png now exists.
+      - name: Render OG preview images (per page, from the started plugin)
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: |
+          node gen-og-images.mjs
+          node assemble-gallery.mjs
+
+      - name: Guard — every demo page has a fresh OG image
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: node check-og-images.mjs
 
       - name: Prove @danielraffel/web-player adapter unit tests
         working-directory: packages/pulp-web-player
@@ -126,4 +143,16 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: examples/web-demos/wclap-build/cloudflare
-          command: pages deploy public --project-name pulp-wclap-demos
+          # --branch main is REQUIRED, not cosmetic. Without it wrangler picks up the
+          # current git branch and publishes a PREVIEW alias, while og:image is an
+          # absolute production URL — so the card points at a host that has no images
+          # and every shared link unfurls blank. Cloudflare serves a missing asset as
+          # its 404 page with a 200 status, so a status-code check does not catch it.
+          command: pages deploy public --project-name pulp-wclap-demos --branch main
+
+      # The local guard checks the files on disk; only this checks the HOST. Fetch each
+      # page as a crawler does, follow its og:image, and assert the bytes are a PNG.
+      - name: Guard — the live site actually unfurls
+        if: ${{ github.event_name != 'pull_request' && env.HAS_CF_TOKEN == 'true' }}
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: node check-unfurl.mjs --base https://pulp-wclap-demos.pages.dev

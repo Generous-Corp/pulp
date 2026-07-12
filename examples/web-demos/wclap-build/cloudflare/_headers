@@ -23,6 +23,18 @@
 /*.wasm
   Content-Type: application/wasm
 
+# Emscripten's MEMFS image (the Pulp UI module's icudtl.dat — SkUnicode's Unicode
+# tables). Cloudflare only auto-compresses an allowlist of content types, and
+# application/octet-stream is not on it, so this file — the single LARGEST asset
+# on the site — was shipping 10.4 MB completely UNCOMPRESSED while the 8.5 MB wasm
+# beside it arrived brotli'd at 3.3 MB. It is pre-compressed at assemble time and
+# served with the encoding declared, which is the standard static-precompression
+# mechanism: the browser transparently inflates it and the loader still reads the
+# same bytes. 10.4 MB -> 3.3 MB over the wire.
+/*.data
+  Content-Type: application/octet-stream
+  Content-Encoding: br
+
 /*.mjs
   Content-Type: text/javascript; charset=utf-8
 

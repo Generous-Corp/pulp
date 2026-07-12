@@ -35,10 +35,6 @@
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
 #include "include/effects/SkImageFilters.h"
-#include "include/gpu/graphite/Image.h"
-#include "include/gpu/graphite/BackendTexture.h"
-#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
-#include "webgpu/webgpu_cpp.h"
 #endif  // PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
@@ -61,10 +57,12 @@
 #include "skia_canvas_filter.hpp"  // parse_filter_chain — CSS `filter` parser
 #include "include/effects/SkImageFilters.h"
 #include "include/core/SkColorFilter.h"
+#if PULP_CANVAS_GRAPHITE
 #include "include/gpu/graphite/Image.h"
-#include "include/gpu/graphite/BackendTexture.h"
-#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
-#include "webgpu/webgpu_cpp.h"
+#endif
+#if PULP_CANVAS_GANESH
+#include "include/gpu/ganesh/SkImageGanesh.h"
+#endif
 
 namespace pulp::canvas {
 
@@ -245,13 +243,17 @@ SkFont make_font(const std::string& family, float size,
         // headless context missing the JS-side ctx.font sync), fall back to the
         // SkFontMgr default rather than letting fill_text no-op.
         auto mgr = get_font_manager();
-        if (mgr) {
+        if (mgr && platform_font_db_usable()) {
             SkFontStyle sk_style{
                 weight, SkFontStyle::kNormal_Width,
                 slant ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant
             };
             typeface = mgr->matchFamilyStyle(nullptr, sk_style);
         }
+        // No system font database (browser): matchFamilyStyle(nullptr) hands
+        // back a non-null but GLYPH-LESS default from the custom-empty manager,
+        // which draws nothing. A bundled face is the only real default here.
+        if (!typeface) typeface = bundled_fallback_typeface();
     }
     if (typeface) font.setTypeface(std::move(typeface));
 
@@ -272,6 +274,10 @@ static sk_sp<SkColorSpace> sk_color_space_from_webgpu_format(const std::string& 
 SkiaCanvas::SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder)
     : canvas_(canvas), recorder_(recorder) {}
 SkiaCanvas::~SkiaCanvas() = default;
+
+void SkiaCanvas::set_gpu_upload_context(GrDirectContext* context) {
+    gr_context_ = context;
+}
 
 // Null-safe: canvas_ can be null when swapchain texture wrap fails on Android
 #define GUARD_CANVAS if (!canvas_) return
@@ -802,18 +808,28 @@ void SkiaCanvas::clear_font_features() {
 
 // ── Images ──────────────────────────────────────────────────────────────────
 
-// Upload a raster-decoded SkImage to a Graphite GPU texture when a
-// recorder is attached (live GPU canvas). Without this step the GPU
-// path silently drops draws of raster-backed SkImages with the warning
-// "Couldn't convert SkImage to a Graphite-backed representation".
-// CPU raster canvas (pulp-screenshot) passes recorder_=nullptr and
-// returns the raster image unchanged.
+// Upload a raster-decoded SkImage to a GPU texture when this canvas draws into
+// a GPU surface (Graphite via the recorder, Ganesh via the upload context).
+// Without this step the GPU path silently drops draws of raster-backed
+// SkImages — Graphite logs "Couldn't convert SkImage to a Graphite-backed
+// representation" and Ganesh drops them just as quietly. CPU raster canvases
+// (pulp-screenshot) attach neither and get the raster image back unchanged.
 sk_sp<SkImage> SkiaCanvas::ensure_gpu_image(sk_sp<SkImage> image) const {
-    if (recorder_ && image) {
+    if (!image) return image;
+#if PULP_CANVAS_GRAPHITE
+    if (recorder_) {
         if (auto gpu = SkImages::TextureFromImage(recorder_, image.get())) {
             return gpu;
         }
     }
+#endif
+#if PULP_CANVAS_GANESH
+    if (gr_context_) {
+        if (auto gpu = SkImages::TextureFromImage(gr_context_, image.get())) {
+            return gpu;
+        }
+    }
+#endif
     return image;
 }
 

@@ -73,6 +73,7 @@ const FACTORY = { count: 0, descriptor: 4, create: 8 };
 const ENTRY = { init: 12, get_factory: 20 };
 const DESC = { id: 12, name: 16 };
 const PARAM_INFO = { size: 1320, id: 0, flags: 4, name: 12, min: 1296, max: 1304, def: 1312 };
+const PARAMS_EXT = { count: 0, get_info: 4, get_value: 8, value_to_text: 12, text_to_value: 16, flush: 20 };
 const EVENT_HEADER = { size: 0, time: 4, space_id: 8, type: 10, flags: 12 };
 const PARAM_EVENT = { size: 48, param_id: 16, cookie: 20, note_id: 24, port: 28, channel: 30, key: 32, value: 40 };
 const NOTE_EVENT = { size: 40, note_id: 16, port: 20, channel: 22, key: 24, velocity: 32 };
@@ -363,23 +364,46 @@ class RealtimeWclapPlugin {
     return { hasAudioInput, hasAudioOutput, hasMidiInput, hasMidiOutput, isInstrument };
   }
 
+  // Render a parameter value the way a CLAP host displays it, via the plugin's
+  // clap_plugin_params.value_to_text ("35.00 %"). This is the ONLY display source
+  // the CLAP ABI defines — clap_param_info has no unit field. Main-thread op (it
+  // runs in the worklet's message loop, never inside process()); the scratch
+  // buffer is allocated once and reused so a later on-demand call stays cheap.
+  valueToText(id, value) {
+    const h = this.host;
+    if (!this._paramsExt) return null;
+    const fn = h.u32(this._paramsExt + PARAMS_EXT.value_to_text);
+    if (!fn) return null;
+    if (!this._textBuf) this._textBuf = h.ex.malloc(256);
+    if (!h.call(fn, this.ptr, id, value, this._textBuf, 256)) return null;
+    return h.readCstr(this._textBuf, 256);
+  }
+
   params() {
     const h = this.host;
     const ext = this._paramsExt = this._ext(CLAP_EXT_PARAMS);
     if (!ext) return (this._paramIds = []);
-    const count = h.call(h.u32(ext + 0), this.ptr);   // .count @0
+    const count = h.call(h.u32(ext + PARAMS_EXT.count), this.ptr);
     const buf = h.ex.malloc(PARAM_INFO.size);
     const out = [];
     for (let i = 0; i < count; i++) {
-      if (!h.call(h.u32(ext + 4), this.ptr, i, buf)) continue;  // .get_info @4
+      if (!h.call(h.u32(ext + PARAMS_EXT.get_info), this.ptr, i, buf)) continue;
       const min = h.f64(buf + PARAM_INFO.min), max = h.f64(buf + PARAM_INFO.max);
       const flags = h.u32(buf + PARAM_INFO.flags);
       const stepped = (flags & CLAP_PARAM_IS_STEPPED) !== 0;
+      const id = h.u32(buf + PARAM_INFO.id);
+      const def = h.f64(buf + PARAM_INFO.def);
+      // Two value_to_text probes at DISTINCT values; the adapter recovers the
+      // display unit from them (deriveDisplayUnit in wclap-abi.mjs), because
+      // clap_param_info carries no unit and the UI formats numbers itself.
+      const other = max !== def ? max : min;
       out.push({
-        id: h.u32(buf + PARAM_INFO.id),
+        id,
         name: h.readCstr(buf + PARAM_INFO.name, 256),
-        min, max, default: h.f64(buf + PARAM_INFO.def),
+        min, max, default: def,
         stepped, boolean: stepped && (max - min) === 1,
+        textProbes: [{ value: def, text: this.valueToText(id, def) },
+                     { value: other, text: this.valueToText(id, other) }],
       });
     }
     h.ex.free(buf);
@@ -396,7 +420,7 @@ class RealtimeWclapPlugin {
     if (!this._pvBuf) this._pvBuf = h.ex.malloc(8); // reusable double scratch
     const out = [];
     for (const id of this._paramIds) {
-      if (h.call(h.u32(this._paramsExt + 8), this.ptr, id, this._pvBuf)) {
+      if (h.call(h.u32(this._paramsExt + PARAMS_EXT.get_value), this.ptr, id, this._pvBuf)) {
         out.push({ id, value: h.f64(this._pvBuf) });
       }
     }

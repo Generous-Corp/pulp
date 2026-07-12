@@ -1,5 +1,6 @@
 # WebCLAP build for Pulp web demo plugins.
-# Compiles PulpGain to a WebAssembly CLAP (.wasm) with wasi-sdk.
+# Compiles PulpGain + SuperConvolver to a WebAssembly CLAP (.wasm) with wasi-sdk,
+# plus the 1:1 demo gallery when its external plugin sources are checked out.
 #
 # Build:
 #   cd examples/web-demos/wclap-build
@@ -43,6 +44,16 @@ include(${PULP_ROOT}/tools/cmake/PulpWclap.cmake)
 pulp_add_wclap(PulpGain
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_gain_wclap.cpp
     INCLUDES ${PULP_ROOT}/examples/pulp-gain)
+
+# SuperConvolver — the same headless convolution reverb the WAM lane builds
+# (examples/web-demos/wasm-build), through the other ABI. pulp_add_wclap already
+# defines PULP_WASM/PULP_HEADLESS, which compile out the GPU engine, the
+# file-backed IR loader, and the native editor; what is left is the CPU
+# PartitionedConvolver against the built-in synthetic IR. Its sources are IN this
+# repo (unlike the gallery plugins below), so it always builds — including in CI.
+pulp_add_wclap(SuperConvolver
+    ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/super_convolver_wclap.cpp
+    INCLUDES ${PULP_ROOT}/examples/super-convolver)
 
 # ── WebCLAP 1:1 demo gallery ────────────────────────────────────────────────
 # A WebCLAP module for EVERY plugin that already has a WAM demo, so the WebCLAP

@@ -38,10 +38,19 @@ const HOST_STATE = { size: 4, mark_dirty: 0 };
 const HOST_PARAMS = { size: 12, rescan: 0, clear: 4, request_flush: 8 };
 const PLUGIN_LATENCY = { get: 0 };
 const PLUGIN_TAIL = { get: 0 };
+// clap_plugin_state_t vtable + the two stream structs it is driven with (wasm32).
+// int64 sizes/returns, hence the "iiI->I" trampoline.
+const STATE_EXT = { save: 0, load: 4 };
+const OSTREAM = { size: 8, ctx: 0, write: 4 };
+const ISTREAM = { size: 8, ctx: 0, read: 4 };
 
 // clap_param_info_t (wasm32): id@0, flags@4, cookie@8, name[256]@12,
 // module[1024]@268, min@1296, max@1304, default@1312.  Size 1320.
 const PARAM_INFO = { size: 1320, id: 0, name: 12, min: 1296, max: 1304, def: 1312 };
+// clap_plugin_params_t vtable: count@0, get_info@4, get_value@8, value_to_text@12,
+// text_to_value@16, flush@20. value_to_text is CLAP's ONLY display source — the
+// param info struct has no unit field (see deriveDisplayUnit in wclap-abi.mjs).
+const PARAMS_EXT = { count: 0, get_info: 4, get_value: 8, value_to_text: 12, text_to_value: 16, flush: 20 };
 // clap_event_param_value (wasm32): header(16) + param_id@16 + cookie@20 +
 // note_id@24 + port_index@28 + channel@30 + key@32 + (pad) + value@40.  Size 48.
 const PARAM_EVENT_SIZE = 48;
@@ -53,13 +62,15 @@ const PARAM_EVENT_SIZE = 48;
 //   (module (import "h" "f" (func $f (param i32 i32) (result i32)))
 //           (func (export "fn") (param i32 i32) (result i32)
 //             (call $f (local.get 0) (local.get 1))))
-// Keys: "<params>-><result>" where params is "i"/"ii" and result is ""/"i".
+// Keys: "<params>-><result>" where "i" is i32 and "I" is i64. "iiI->I" is the
+// clap_ostream.write / clap_istream.read signature (uint64 size, int64 result).
 const TRAMPOLINES = {
   "ii->i": "AGFzbQEAAAABBwFgAn9/AX8CBwEBaAFmAAADAgEABwYBAmZuAAEKCgEIACAAIAEQAAs=",
   "i->i": "AGFzbQEAAAABBgFgAX8BfwIHAQFoAWYAAAMCAQAHBgECZm4AAQoIAQYAIAAQAAs=",
   "i->": "AGFzbQEAAAABBQFgAX8AAgcBAWgBZgAAAwIBAAcGAQJmbgABCggBBgAgABAACw==",
   "ii->": "AGFzbQEAAAABBgFgAn9/AAIHAQFoAWYAAAMCAQAHBgECZm4AAQoKAQgAIAAgARAACw==",
   "iii->": "AGFzbQEAAAABBwFgA39/fwACBwEBaAFmAAADAgEABwYBAmZuAAEKDAEKACAAIAEgAhAACw==",
+  "iiI->I": "AGFzbQEAAAABCAFgA39/fgF+AgcBAWgBZgAAAwIBAAcGAQJmbgABCgwBCgAgACABIAIQAAs=",
 };
 
 export class WebClapHost {
@@ -145,8 +156,12 @@ export class WebClapHost {
   // is a real funcref that works in EVERY engine — no experimental flag, in the
   // browser and in Node alike. The trampoline is instantiated per callback so
   // each table slot wraps its own JS closure.
+  // `sig` is either a trampoline key ("iiI->I") or the {parameters, results}
+  // shape, which is all-i32 by construction.
   _addFn(sig, fn) {
-    const key = `${"i".repeat(sig.parameters.length)}->${sig.results.length ? "i" : ""}`;
+    const key = typeof sig === "string"
+      ? sig
+      : `${"i".repeat(sig.parameters.length)}->${sig.results.length ? "i" : ""}`;
     const mod = WebClapHost._trampolineModule(key);
     const inst = new WebAssembly.Instance(mod, { h: { f: fn } });
     const tbl = this.instance.exports.__indirect_function_table;
@@ -306,24 +321,126 @@ export class WebClapPlugin {
     return h.call(h.u32(this._tailExt + PLUGIN_TAIL.get), this.ptr) >>> 0;
   }
 
-  // Query the clap.params extension; returns [{id, name, min, max, default}].
+  // Render a parameter value as a CLAP host displays it — clap_plugin_params
+  // .value_to_text(plugin, id, value, buf, size) → "35.00 %". CLAP defines no
+  // unit field on clap_param_info, so this is the only display source; a caller
+  // that needs the bare unit feeds two probes to deriveDisplayUnit (wclap-abi.mjs).
+  // Returns null when the plugin exposes no clap.params / declines the call.
+  valueToText(id, value) {
+    const h = this.host;
+    if (this._paramsExt === undefined) this._paramsExt = this._ext(CLAP_EXT_PARAMS) || 0;
+    if (!this._paramsExt) return null;
+    const fn = h.u32(this._paramsExt + PARAMS_EXT.value_to_text);
+    if (!fn) return null;
+    if (!this._textBuf) this._textBuf = h.ex.malloc(256);
+    if (!h.call(fn, this.ptr, id, value, this._textBuf, 256)) return null;
+    return h.readCstr(this._textBuf, 256);
+  }
+
+  // The plugin's CURRENT value for a parameter — clap_plugin_params.get_value().
+  // A host cannot mirror this in its own map: the plugin rewrites its OWN
+  // parameters on a state load (and on a preset change), and get_value is the only
+  // way to learn what they became. Returns null when the plugin exposes no
+  // clap.params. Main thread.
+  paramValue(id) {
+    const h = this.host;
+    if (this._paramsExt === undefined) this._paramsExt = this._ext(CLAP_EXT_PARAMS) || 0;
+    if (!this._paramsExt) return null;
+    const fn = h.u32(this._paramsExt + PARAMS_EXT.get_value);
+    if (!fn) return null;
+    if (!this._valueBuf) this._valueBuf = h.ex.malloc(8);   // double out-param
+    if (!h.call(fn, this.ptr, id, this._valueBuf)) return null;
+    return h.f64(this._valueBuf);
+  }
+
+  // Query the clap.params extension; returns
+  // [{id, name, min, max, default, textProbes}]. `textProbes` are two
+  // {value, text} value_to_text renderings the caller turns into a display unit
+  // (deriveDisplayUnit) — the same seam the worklet host hands the browser adapter.
   params() {
-    const ext = this.host.call(this._fn(40), this.ptr, this.host.cstr(CLAP_EXT_PARAMS));
+    const ext = this._paramsExt = this._ext(CLAP_EXT_PARAMS) || 0;
     if (!ext) return [];
-    const count = this.host.call(this.host.u32(ext + 0), this.ptr);
+    const count = this.host.call(this.host.u32(ext + PARAMS_EXT.count), this.ptr);
     const infoBuf = this.host.ex.malloc(PARAM_INFO.size);
     const out = [];
     for (let i = 0; i < count; i++) {
-      if (!this.host.call(this.host.u32(ext + 4), this.ptr, i, infoBuf)) continue;
+      if (!this.host.call(this.host.u32(ext + PARAMS_EXT.get_info), this.ptr, i, infoBuf)) continue;
+      const id = this.host.u32(infoBuf + PARAM_INFO.id);
+      const def = this.host.f64(infoBuf + PARAM_INFO.def);
+      const max = this.host.f64(infoBuf + PARAM_INFO.max);
+      const min = this.host.f64(infoBuf + PARAM_INFO.min);
+      const other = max !== def ? max : min;
       out.push({
-        id: this.host.u32(infoBuf + PARAM_INFO.id),
+        id,
         name: this.host.readCstr(infoBuf + PARAM_INFO.name, 256),
-        min: this.host.f64(infoBuf + PARAM_INFO.min),
-        max: this.host.f64(infoBuf + PARAM_INFO.max),
-        default: this.host.f64(infoBuf + PARAM_INFO.def),
+        min, max, default: def,
+        textProbes: [{ value: def, text: this.valueToText(id, def) },
+                     { value: other, text: this.valueToText(id, other) }],
       });
     }
+    this.host.ex.free(infoBuf);
     return out;
+  }
+
+  // ── clap.state ────────────────────────────────────────────────────────────
+  // The plugin's opaque save/load, driven with the clap_ostream_t / clap_istream_t
+  // structs a real CLAP host hands it. What comes out is the SAME versioned,
+  // CRC-checked "PLST" blob the native VST3/AU/CLAP builds write — and the same
+  // one the WAM lane returns from wam_state_size/wam_read_state, which is why a
+  // caller (the page's IR loader, the dual-ABI runner) can speak ONE state format
+  // to both ABIs. Main-thread op; never call it concurrently with process().
+  _ensureState() {
+    if (this._stateReady) return this._stateExt;
+    const h = this.host;
+    this._stateExt = this._ext(CLAP_EXT_STATE) || 0;
+    if (this._stateExt) {
+      this._ostream = h.ex.malloc(OSTREAM.size);
+      h.setU32(this._ostream + OSTREAM.ctx, 0);
+      h.setU32(this._ostream + OSTREAM.write, h._addFn("iiI->I", (_s, bufPtr, size) => {
+        const n = Number(size);
+        this._saveChunks.push(new Uint8Array(h.memory.buffer, bufPtr, n).slice());
+        return BigInt(n);
+      }));
+      this._istream = h.ex.malloc(ISTREAM.size);
+      h.setU32(this._istream + ISTREAM.ctx, 0);
+      h.setU32(this._istream + ISTREAM.read, h._addFn("iiI->I", (_s, bufPtr, size) => {
+        const remaining = this._loadBuf.length - this._loadPos;
+        const n = Math.min(remaining, Number(size));
+        if (n > 0) {
+          new Uint8Array(h.memory.buffer, bufPtr, n)
+            .set(this._loadBuf.subarray(this._loadPos, this._loadPos + n));
+          this._loadPos += n;
+        }
+        return BigInt(n);
+      }));
+    }
+    this._stateReady = true;
+    return this._stateExt;
+  }
+
+  /** The plugin's state blob, or null when the wasm exposes no clap.state. */
+  getState() {
+    const h = this.host;
+    if (!this._ensureState()) return null;
+    this._saveChunks = [];
+    const ok = h.call(h.u32(this._stateExt + STATE_EXT.save), this.ptr, this._ostream);
+    if (!ok) return new Uint8Array(0);
+    let total = 0;
+    for (const c of this._saveChunks) total += c.length;
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const c of this._saveChunks) { out.set(c, o); o += c.length; }
+    this._saveChunks = null;
+    return out;
+  }
+
+  /** Restore a state blob. Returns false when the plugin rejects it (or has no clap.state). */
+  setState(bytes) {
+    const h = this.host;
+    if (!this._ensureState()) return false;
+    this._loadBuf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    this._loadPos = 0;
+    return !!h.call(h.u32(this._stateExt + STATE_EXT.load), this.ptr, this._istream);
   }
 
   // Build the reusable in/out event lists ONCE per plugin. The callbacks read

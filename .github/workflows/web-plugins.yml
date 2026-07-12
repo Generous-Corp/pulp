@@ -12,8 +12,11 @@ on:
       - "core/format/include/pulp/format/web/**"
       - "examples/web-demos/**"
       - "examples/pulp-gain/**"
+      - "examples/super-convolver/**"
+      - "packages/pulp-web-player/**"
       - "tools/cmake/PulpWam.cmake"
       - "tools/cmake/PulpWclap.cmake"
+      - "tools/cmake/PulpWebUi.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/web-plugins.yml"
   # Run the required `WAMv2 + WebCLAP (Linux, headless Chrome)` check on queued
@@ -37,10 +40,16 @@ jobs:
         with:
           node-version: "22"
 
+      # PINNED, deliberately. emsdk is a floating toolchain: `latest` has already
+      # shipped two breaking WebGPU API changes and a change to how SINGLE_FILE
+      # embeds the wasm, either of which lands here as a mystery failure on a PR
+      # that touched nothing. 6.0.2 is the version the WAM/WebCLAP lanes are
+      # verified against; 4.0.10 is the floor for the emdawnwebgpu port, so any
+      # future bump stays at or above it.
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: latest
+          version: 6.0.2
 
       - name: Set up wasi-sdk
         run: |
@@ -68,6 +77,58 @@ jobs:
       - name: Install playwright-core
         run: npm install --no-save playwright-core
 
+      # ── Skia wasm slice (Ganesh/WebGL2) — the Pulp UI module's one binary
+      #    dependency. URL + sha256 come from tools/deps/manifest.json, so the
+      #    lane and the dependency audit can never disagree about which slice is
+      #    in use; the cache is keyed on that manifest.
+      - name: Cache the Skia wasm slice
+        id: skia-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/skia-wasm
+          key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
+
+      - name: Fetch the Skia wasm slice
+        if: steps.skia-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          read -r url sha < <(python3 - <<'PY'
+          import json
+          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
+                     if d["name"] == "Skia")
+          # Key matches the release asset's platform segment
+          # (skia-build-<platform>-gpu-release.zip), the convention every other
+          # slice follows and the one check_manifest_mirrors.py enforces against
+          # external/skia-build/VERSION.md.
+          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
+          print(a["url"], a["sha256"])
+          PY
+          )
+          curl -fsSL "$url" -o /tmp/skia-wasm.zip
+          echo "$sha  /tmp/skia-wasm.zip" | sha256sum -c -
+          mkdir -p "$HOME/skia-wasm"
+          unzip -q /tmp/skia-wasm.zip -d "$HOME/skia-wasm"
+
+      - name: Locate + verify the Skia wasm slice
+        run: |
+          set -euo pipefail
+          lib="$(find "$HOME/skia-wasm" -path '*build/wasm-gpu/lib/Release/libskia.a' | head -1)"
+          [ -n "$lib" ] || { echo "no wasm-gpu libskia.a in the fetched slice"; exit 1; }
+          root="${lib%/build/wasm-gpu/lib/Release/libskia.a}"
+          echo "SKIA_DIR=$root" >> "$GITHUB_ENV"
+          # Asserts the slice really is Ganesh/WebGL2 (no Dawn, no Graphite) —
+          # the invariant FindSkia.cmake's Emscripten arm is built on.
+          #
+          # The verifier needs llvm-nm to read the archive's symbols and returns 77
+          # (CTest's SKIP code) when it cannot find it. Under `set -e` that skip is
+          # indistinguishable from a failure and kills the job — and silently
+          # skipping the check would be worse, since this is the invariant the whole
+          # Emscripten render arm rests on. emsdk ships llvm-nm, so put it on PATH
+          # and let the check actually run.
+          nm_dir="$(dirname "$(find "$EMSDK" -name llvm-nm -type f 2>/dev/null | head -1)")"
+          [ -n "$nm_dir" ] && [ "$nm_dir" != "." ] || { echo "llvm-nm not found in emsdk — cannot verify the slice"; exit 1; }
+          PATH="$nm_dir:$PATH" python3 tools/scripts/verify_wasm_skia_slice.py "$root"
+
       # ── WAMv2 (Emscripten) ────────────────────────────────────────────────
       - name: Build WAMv2 plugins
         working-directory: examples/web-demos/wasm-build
@@ -92,6 +153,13 @@ jobs:
           node wam_rack_runner.mjs build/PulpPluckGainRack.wasm
           # Web-build report (UI strategy + parameter binding targets, both modes).
           node ../../../core/format/src/wasm/wam_build_report.test.mjs --wasm build/PulpGain.wasm
+          # SuperConvolver: the headless convolution reverb (GPU engine + file IR
+          # loader + native editor compiled out). Asserts wet sound from the
+          # built-in IR with zero file I/O, Size/Mix audibly changing the output,
+          # the fixed 512-sample PDC latency, and the state round-trip. The SAME
+          # runner drives the WebCLAP module below, so the two ABIs are held to
+          # one set of assertions.
+          node superconvolver_runner.mjs build/SuperConvolver.wasm
 
       - name: WAMv2 browser fixture (headless Chrome)
         working-directory: examples/web-demos/wasm-build
@@ -121,6 +189,12 @@ jobs:
           set -euo pipefail
           node core/format/src/wasm/wclap_probe.mjs        examples/web-demos/wclap-build/build/PulpGain.wasm
           node core/format/src/wasm/wclap_host_runner.mjs  examples/web-demos/wclap-build/build/PulpGain.wasm --gain-db 6
+          # SuperConvolver through the OTHER ABI, driven by the same runner as the
+          # WAM module: same audio/parameter/latency assertions, so a divergence
+          # between the two ABIs fails here instead of in a demo page.
+          node core/format/src/wasm/wclap_probe.mjs        examples/web-demos/wclap-build/build/SuperConvolver.wasm
+          node examples/web-demos/wasm-build/superconvolver_runner.mjs \
+            examples/web-demos/wclap-build/build/SuperConvolver.wasm
           node core/format/src/wasm/pack-wclap.test.mjs
           # Host-provided CLAP extensions (log/thread-check/latency/tail/state/
           # params) driven through the real host-vtable trampolines — no wasm.
@@ -138,6 +212,30 @@ jobs:
           set -euo pipefail
           ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/wclap-build/browser-host/node_modules
           node examples/web-demos/wclap-build/browser-host/validate.mjs --screenshot /tmp/wclap-browser.png
+
+      # ── Pulp UI in the browser (Skia Ganesh on WebGL2) ────────────────────
+      # DSP-free: the same module mounts against the WAM demo and the WebCLAP
+      # demo through the web-player HostAdapter seam, so it is built and proven
+      # once. The fixture asserts on real pixels and a real pointer gesture —
+      # nothing a native unit test can reach.
+      - name: Build the Pulp UI wasm module
+        run: |
+          set -euo pipefail
+          emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSKIA_DIR="$SKIA_DIR" \
+            -DPULP_WEBUI_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
+          cmake --build build-webui -j"$(nproc)"
+
+      - name: Pulp UI browser fixture (headless Chrome)
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/super-convolver-ui/browser-test/node_modules
+          node examples/web-demos/super-convolver-ui/browser-test/validate.mjs \
+            --build "$GITHUB_WORKSPACE/build-webui" \
+            --artifact /tmp/pulp-ui-browser.png
 
       - name: Upload browser screenshots
         if: always()

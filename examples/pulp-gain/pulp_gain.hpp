@@ -51,7 +51,12 @@ public:
             .id = kBypass,
             .name = "Bypass",
             .unit = "",
-            .range = {0.0f, 1.0f, 0.0f, 1.0f}, // step=1 makes it boolean
+            // A step of 1 quantizes the value; it does NOT declare the semantic
+            // role. Adapters derive "stepped" from `kind` (see
+            // state::is_discrete_param), so a Toggle must say so — otherwise a
+            // CLAP/VST3 host renders bypass as a continuous knob.
+            .kind = state::ParamKind::Toggle,
+            .range = {0.0f, 1.0f, 0.0f, 1.0f},
         });
     }
 

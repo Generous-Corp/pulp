@@ -9,10 +9,17 @@
 //   iOS     — IOSRenderLoop      : CADisplayLink           (render_loop_apple.mm)
 //   Android — AndroidRenderLoop  : AChoreographer          (render_loop_android.cpp)
 //   Windows — WindowsRenderLoop  : DwmFlush vblank wait    (this file)
+//   Browser — EmscriptenRenderLoop : requestAnimationFrame (render_loop_emscripten.cpp)
 //   Linux   — TimerRenderLoop    : conscious timer fallback (this file)
 //
 // RenderLoopState owns the shared coalescing behavior; native subclasses only
 // provide the pacing source.
+//
+// TimerRenderLoop is compiled on every platform EXCEPT Emscripten: it drives
+// its callback from a std::thread, and constructing one in a wasm build
+// without pthreads throws std::system_error. The browser has a real vblank
+// source (rAF), so it needs no timer fallback and must not carry a class that
+// cannot be instantiated there.
 
 #include <pulp/render/render_loop.hpp>
 #include <pulp/runtime/log.hpp>
@@ -41,6 +48,7 @@ const char* render_loop_backend_name(RenderLoopBackend backend) {
         case RenderLoopBackend::ca_display_link: return "CADisplayLink";
         case RenderLoopBackend::choreographer:   return "AChoreographer";
         case RenderLoopBackend::dwm_flush:       return "DwmFlush";
+        case RenderLoopBackend::raf:             return "requestAnimationFrame";
         case RenderLoopBackend::timer:           return "timer";
     }
     return "unknown";
@@ -182,6 +190,8 @@ private:
 // factory seam below is the single point where a real LinuxRenderLoop
 // drops in once that surface exists — no consumer code changes.
 
+#if !defined(__EMSCRIPTEN__)
+
 class TimerRenderLoop : public RenderLoop {
 public:
     ~TimerRenderLoop() override { stop(); }
@@ -230,6 +240,8 @@ private:
     RenderLoopState state_;
 };
 
+#endif // !__EMSCRIPTEN__
+
 // ── Factory ─────────────────────────────────────────────────────────────
 //
 // Single seam for backend selection. Platform subclasses defined in their
@@ -246,9 +258,18 @@ std::unique_ptr<RenderLoop> make_ios_render_loop();
 std::unique_ptr<RenderLoop> make_android_render_loop();
 #endif
 
+#if defined(__EMSCRIPTEN__)
+// Defined in render_loop_emscripten.cpp — owns a requestAnimationFrame loop.
+std::unique_ptr<RenderLoop> make_emscripten_render_loop();
+#endif
+
 std::unique_ptr<RenderLoop> RenderLoop::create(void* native_handle) {
     (void)native_handle;
-#if defined(PULP_RENDER_LOOP_FORCE_TIMER)
+    // The browser arm precedes PULP_RENDER_LOOP_FORCE_TIMER because there is
+    // no timer loop to force there — see the TimerRenderLoop guard above.
+#if defined(__EMSCRIPTEN__)
+    return make_emscripten_render_loop();
+#elif defined(PULP_RENDER_LOOP_FORCE_TIMER)
     return std::make_unique<TimerRenderLoop>();
 #elif defined(__APPLE__) && TARGET_OS_OSX
     return std::make_unique<MacRenderLoop>();
@@ -265,9 +286,15 @@ std::unique_ptr<RenderLoop> RenderLoop::create(void* native_handle) {
 }
 
 std::unique_ptr<RenderLoop> RenderLoop::create_timer_loop() {
-    // TimerRenderLoop is compiled on every platform — no native run loop
+#if defined(__EMSCRIPTEN__)
+    // No thread-backed loop exists in a wasm build; rAF is the only pacing
+    // source. Callers get a working loop rather than a std::system_error.
+    return make_emscripten_render_loop();
+#else
+    // TimerRenderLoop is compiled on every other platform — no native run loop
     // needed, so this is the deterministic choice for headless tests.
     return std::make_unique<TimerRenderLoop>();
+#endif
 }
 
 } // namespace pulp::render

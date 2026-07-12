@@ -17,6 +17,11 @@
 //   • hasMidiOutput && !hasAudioOutput       → a per-plugin MIDI visualiser
 //   • always                                 → auto-generated parameter controls
 //
+// mountDemo({ customUi }) swaps ONLY that generated parameter grid for a
+// consumer-supplied renderer (ui/custom-ui.js). Everything else above — overlay,
+// touch hygiene, keyboard, scope, meter, limiter, PLST state — is shell-owned
+// and unaffected, and a customUi that fails degrades back to the grid.
+//
 // Everything the reference solved is preserved here: synchronous AudioContext
 // unlock inside the gesture, silent-buffer + audioSession unlock, secure-context
 // guard, re-entrancy guard, idempotent handler install, waitForParams(),
@@ -34,6 +39,8 @@
 
 import { createWidget, kindFor, formatValue } from "./widgets/index.js";
 import { initModality } from "./widgets/base.js";
+import { mountCustomUi, reserveCustomUiSlot } from "./ui/custom-ui.js";
+import { parseContainer, buildContainer } from "./state/plugin-state.js";
 // The oscilloscope trigger is pure DSP math (finds the rising zero-crossing so a
 // periodic waveform stands still) — host-agnostic, vendored from the Pulp SDK.
 import { triggeredView } from "./vendor/pulp-wasm/wam-scope.mjs";
@@ -365,55 +372,11 @@ function synthLoop(ctx) {
 }
 
 // ——————————————————————————————————————————— plugin_state_io "PLST" envelope
-// The SDK composes host-facing plugin state with the SAME format the native
-// VST3/AU/CLAP builds use (core/format/src/plugin_state_io.cpp):
-//   [ "PLST" ][u32 version=1][u32 store_len][u32 plugin_len]  (16-byte header)
-//   [ store bytes (starts "PULP") ][ plugin bytes ]
-//   [u32 crc32 over everything above]                          (4-byte footer)
-// When the plugin owns no extra state, serialize() returns the BARE store blob
-// (no envelope), so a container we read may be either shape.
+// The container itself lives in state/plugin-state.js — ONE implementation, so a
+// consumer page (the SuperConvolver demo swaps a decoded impulse response into
+// the plugin blob) and the shell's own state-memo section cannot drift apart, and
+// neither can the two ABIs.
 // state-memo plugin blob: [u32 version=1][u32 memo_len][memo bytes]
-const ENV_MAGIC = [0x50, 0x4c, 0x53, 0x54]; // "PLST"
-const STORE_MAGIC = [0x50, 0x55, 0x4c, 0x50]; // "PULP"
-const ENV_VERSION = 1, ENV_HEADER = 16, ENV_FOOTER = 4;
-
-// zlib CRC-32 — byte-identical to crc32_simple in core/state/src/store.cpp.
-function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) {
-    crc ^= bytes[i];
-    for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (~crc) >>> 0;
-}
-const has4 = (b, m, o = 0) => b.length >= o + 4 && b[o] === m[0] && b[o+1] === m[1] && b[o+2] === m[2] && b[o+3] === m[3];
-
-function parseContainer(bytes) {
-  // Bare StateStore blob (plugin owned no extra state): all params, no plugin.
-  if (has4(bytes, STORE_MAGIC)) return { params: bytes.slice(), plugin: new Uint8Array(0) };
-  if (!has4(bytes, ENV_MAGIC)) throw new Error("not a PLST envelope");
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const storeLen = dv.getUint32(8, true);
-  const pluginLen = dv.getUint32(12, true);
-  const params = bytes.slice(ENV_HEADER, ENV_HEADER + storeLen);
-  const plugin = bytes.slice(ENV_HEADER + storeLen, ENV_HEADER + storeLen + pluginLen);
-  return { params, plugin };
-}
-function buildContainer(params, plugin) {
-  // Mirror plugin_state_io::serialize: a bare store blob when there is no plugin
-  // payload, else the versioned + CRC'd PLST envelope.
-  if (!plugin || plugin.length === 0) return params.slice();
-  const out = new Uint8Array(ENV_HEADER + params.length + plugin.length + ENV_FOOTER);
-  const dv = new DataView(out.buffer);
-  out.set(ENV_MAGIC, 0);
-  dv.setUint32(4, ENV_VERSION, true);
-  dv.setUint32(8, params.length, true);
-  dv.setUint32(12, plugin.length, true);
-  out.set(params, ENV_HEADER);
-  out.set(plugin, ENV_HEADER + params.length);
-  dv.setUint32(out.length - ENV_FOOTER, crc32(out.subarray(0, out.length - ENV_FOOTER)), true);
-  return out;
-}
 function readMemoFromPlugin(plugin) {
   if (plugin.length < 8) return "";
   const dv = new DataView(plugin.buffer, plugin.byteOffset, plugin.byteLength);
@@ -526,7 +489,7 @@ export async function mountDemo(opts) {
     // the plugin emits (MPE Spreader gives every held note its own channel)
     // needs its own voice to sound at the same time.
     pool: [], voiceByChan: new Map(), voiceClock: 0,
-    descriptor: null, params: null, mode: null,
+    descriptor: null, params: null, mode: null, customUi: null, onReady: null,
   };
 
   // Test seam / inspectable state.
@@ -541,9 +504,47 @@ export async function mountDemo(opts) {
   // editor: canvas widgets (knob/fader/toggle/combo) on the kCell/kGap/kRowH
   // grid, each with its caption below. A per-demo opts.widgets map (keyed by
   // param id or label) can force a widget kind, e.g. { "gain": "fader" }.
+  //
+  // opts.customUi replaces THIS grid (and only this grid) with a consumer
+  // renderer; it is handed the same adapter and the same slot. A customUi that
+  // throws, yields no handle, or fails ASYNCHRONOUSLY (its `ready` promise
+  // rejects — e.g. a browser with no WebGL2) falls back to the generated grid, so
+  // a broken UI module can never take the audio demo down and never leaves an
+  // empty panel behind.
   function buildParams(params) {
     const host = $("#params");
     host.innerHTML = "";
+    S.customUi?.destroy();
+    S.customUi = null;
+    window.__widgets = {};
+
+    if (opts.customUi) {
+      // Seed each parameter's declared default so the plugin starts in the same
+      // place whichever UI renders it (parity with the grid path below).
+      for (const p of params) S.wam?.setParameterValue(p.id, p.defaultValue);
+      S.customUi = mountCustomUi({
+        host,
+        adapter: S.wam,
+        factory: opts.customUi,
+        params,
+        // Async mount failed after we had already returned. mountCustomUi has
+        // unmounted it; build the grid we would have built had it failed up front.
+        onFailed: () => {
+          S.customUi = null;
+          host.innerHTML = "";
+          buildGeneratedGrid(params, host);
+        },
+      });
+      if (S.customUi) return;
+      host.innerHTML = "";
+    }
+
+    buildGeneratedGrid(params, host);
+  }
+
+  // The auto-generated parameter grid — the fallback whenever no custom UI is
+  // configured or a custom UI failed (synchronously or asynchronously).
+  function buildGeneratedGrid(params, host) {
     const registry = (window.__widgets = {});
     for (const raw of params) {
       // Some plugins expose a stepped choice as a plain int with no labels
@@ -601,6 +602,10 @@ export async function mountDemo(opts) {
   // onChange), so this cannot feed back into the plugin.
   function startParamSync() {
     S.wam.onParamsChanged = (values, params) => {
+      demo.paramEpochUpdates = (demo.paramEpochUpdates || 0) + 1;   // test seam
+      // A custom UI owns the parameter surface; forward the push to it instead
+      // of repainting a grid that isn't there.
+      if (S.customUi) { S.customUi.paramsChanged(values, params); return; }
       const reg = window.__widgets || {};
       params.forEach((param, i) => {
         const e = reg[param.id];
@@ -612,7 +617,6 @@ export async function mountDemo(opts) {
         e.el.setValue(v);
         if (e.valEl) e.valEl.textContent = formatValue(e.param, v);
       });
-      demo.paramEpochUpdates = (demo.paramEpochUpdates || 0) + 1;   // test seam
     };
   }
 
@@ -1329,6 +1333,12 @@ function connectOutput(S) {
     }
     $("#overlay").style.display = "none";
 
+    // Two long awaits follow (the DSP wasm, then a multi-megabyte UI wasm). Claim
+    // the editor's box NOW, with a placeholder in it, so the panel is whole from
+    // the first frame after the click instead of showing an empty gap and then
+    // slamming the editor in on top of the scope.
+    if (opts.customUi) reserveCustomUiSlot($("#params"));
+
     S.ctx = new AC();
     S.ctx.resume();
     const unlock = S.ctx.createBufferSource();
@@ -1378,6 +1388,25 @@ function connectOutput(S) {
     if (S.mode === "instrument" || (S.mode === "midi-effect" && opts.midiViz !== "sysex")) connectWebMidi(khz);
     meter();
     startParamSync();
+
+    // opt-in seam: the demo is live, the plugin is loaded and its audio graph is
+    // wired. A page hangs PLUGIN-SPECIFIC chrome off this — chrome that needs the
+    // live HostAdapter and/or the demo's AudioContext, neither of which exists at
+    // module scope. The SuperConvolver page mounts its "load an impulse response"
+    // drop-zone here: it decodes with `ctx` (so the PCM arrives at the session rate)
+    // and writes through `adapter.setState()`, which is the same call on WAM and on
+    // WebCLAP — the reason this seam is ABI-agnostic and cannot drift between them.
+    //
+    // Distinct from `customUi`: that REPLACES the parameter grid (and falls back to
+    // it on failure). This ADDS to the page and never gates the audio demo — a
+    // throwing onReady is logged and the demo keeps running.
+    try {
+      S.onReady = opts.onReady?.({
+        adapter: S.wam, ctx: S.ctx, params, mode: S.mode, root,
+      }) || null;
+    } catch (err) {
+      console.warn("onReady failed:", err);
+    }
   }
 
   // Arm the start overlay. The whole overlay is clickable (large target); the
@@ -1405,6 +1434,14 @@ function connectOutput(S) {
     stopSource();
     S.meterToken++;                    // stop the meter/scope loop
     S.meterWidget?.reset();
+    // A custom UI can hold a render loop and a GPU canvas — release it with the
+    // context that feeds it. buildParams() re-mounts a fresh one on restart.
+    S.customUi?.destroy();
+    S.customUi = null;
+    // Same for whatever the page hung off onReady: it holds the adapter and the
+    // AudioContext we are about to close. start() calls onReady again on restart.
+    S.onReady?.destroy?.();
+    S.onReady = null;
     await S.ctx.close();
     if (S.synthCtx) { try { await S.synthCtx.close(); } catch {} }
     S.ctx = null; S.wam = null; S.synth = null; S.synthCtx = null; S.analyser = null;

@@ -16,6 +16,13 @@ pulp_add_test_suite(pulp-test-offline-tracing
 
 pulp_add_test_suite(pulp-test-ogg-reader LIBRARIES pulp::audio)
 
+# Impulse-response loading. The PCM entry point is fed by UNTRUSTED, already-
+# decoded input (a browser hands over an AudioBuffer it just decoded, since a wasm
+# build has no FormatRegistry), so its fail-closed guards — implausible rate,
+# absurd duration, non-finite content — carry the same weight as a decoder's.
+# Header-only over pulp::audio + pulp::signal (the resampler).
+pulp_add_test_suite(pulp-test-impulse-response LIBRARIES pulp::audio pulp::signal)
+
 # Audio tests
 # PROCESSORS reservation for suites that open the REAL CoreAudio output device.
 # CoreAudioDevice::stop()/close() call AudioOutputUnitStop / AudioUnitUninitialize

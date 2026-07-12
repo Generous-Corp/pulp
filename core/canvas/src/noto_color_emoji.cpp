@@ -25,39 +25,9 @@
 
 #include "pulp-bundled-noto-color-emoji_data.hpp"
 
-#if defined(__APPLE__)
-#include "include/ports/SkFontMgr_mac_ct.h"
-#elif defined(_WIN32)
-#include "include/ports/SkTypeface_win.h"
-#elif defined(__ANDROID__)
-#include "include/ports/SkFontMgr_android.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#elif defined(__linux__)
-#include "include/ports/SkFontMgr_fontconfig.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#endif
-
 #include <mutex>
 
 namespace pulp::canvas {
-
-namespace {
-
-sk_sp<SkFontMgr> noto_font_mgr() {
-#if defined(__APPLE__)
-    return SkFontMgr_New_CoreText(nullptr);
-#elif defined(_WIN32)
-    return SkFontMgr_New_DirectWrite();
-#elif defined(__ANDROID__)
-    return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
-#elif defined(__linux__)
-    return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
-#else
-    return nullptr;
-#endif
-}
-
-} // namespace
 
 bool register_bundled_noto_color_emoji() {
     static std::mutex once_mutex;
@@ -72,7 +42,10 @@ bool register_bundled_noto_color_emoji() {
     std::size_t data_size = pulp_bundled_noto_color_emoji::NotoColorEmoji_ttf_size;
     if (!data_ptr || data_size == 0) return false;
 
-    auto mgr = noto_font_mgr();
+    // The emoji face is materialised through the same process-wide manager the
+    // rest of the canvas resolves against — `makeFromData` is all this needs,
+    // and sharing the manager keeps the OS switch in one place.
+    auto mgr = platform_font_manager();
     if (!mgr) return false;
 
     auto sk_data = SkData::MakeWithoutCopy(data_ptr, data_size);

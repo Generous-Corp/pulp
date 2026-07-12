@@ -51,6 +51,8 @@ the Python smoke is an optional fallback when libskia.a is absent in
 a fresh worktree.
 
 ## Build Configuration
+
+Native slices (mac / win / linux / ios / visionos):
 - Graphite GPU backend: enabled
 - Dawn (WebGPU): enabled
 - Metal: enabled (macOS/iOS)
@@ -59,6 +61,22 @@ a fresh worktree.
 - Skottie (Lottie): enabled
 - Paragraph/text shaping: enabled
 - Build type: Release (optimized)
+
+The **`wasm-gpu`** slice is the exception, and the difference is load-bearing:
+- GPU backend: **Ganesh on WebGL2** (`SK_GANESH` + `SK_GL`) — **not** Graphite.
+- Dawn (WebGPU): **absent**. The zip ships no `libdawn_combined.a` and zero
+  `wgpu` symbols, so `SK_GRAPHITE` / `SK_DAWN` must not be defined for
+  Emscripten. `FindSkia.cmake`'s Emscripten arm encodes this, and
+  `tools/scripts/verify_wasm_skia_slice.py` asserts it in CI.
+- Skottie / sksg: **absent in practice** — `libskottie.a` leaves `skjson::*`
+  undefined and the zip ships no jsonreader/skresources archive, so
+  `PULP_LOTTIE` cannot be enabled on wasm.
+- Built with `is_trivial_abi=true`, so consumers **must** define
+  `SK_TRIVIAL_ABI` or `wasm-ld` links a trapping stub for cross-boundary
+  `sk_sp` calls (the failure is a bare `RuntimeError: unreachable` on the
+  first frame).
+- Validated against the Emscripten / wasi-sdk versions pinned in
+  `tools/deps/manifest.json` → `determinism.web_toolchain`.
 
 ## Platforms Included
 
@@ -105,10 +123,13 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-mac-arm64-gpu-release.zip` | `648250f9ee625f0c6c73c521b5a2de7cf46812b06aa2300e4bec8b2bb6d4081b` |
 | `skia-build-mac-universal-gpu-release.zip` | `284964fda380a2cc5ff4f885ae557ef04dab5987ebd94fc01354b95878ad85cf` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `f1734e9f41c0d01700d446282550725a7b6b42ebc906ba295f1f563112831f17` |
+| `skia-build-wasm-wasm32-gpu-release.zip` | `8a5a24368866d210fe47bac2ea03b67e63c429d1c9ea5ee11dc06d9db831def9` |
 
 ## Libraries Per Platform
 
-Each platform includes:
+Each platform includes the following (see the wasm carve-out under **Build
+Configuration** — the `wasm-gpu` slice ships no `libdawn_combined.a`, and its
+`libskia.a` is Ganesh/WebGL2 rather than Graphite):
 - `libskia.a` — Core Skia + Graphite GPU backend
 - `libdawn_combined.a` — Dawn WebGPU implementation
 - `libskshaper.a` — Text shaping (HarfBuzz)

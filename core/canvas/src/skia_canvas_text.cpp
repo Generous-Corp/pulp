@@ -48,10 +48,6 @@
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
 #include "include/effects/SkImageFilters.h"
-#include "include/gpu/graphite/Image.h"
-#include "include/gpu/graphite/BackendTexture.h"
-#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
-#include "webgpu/webgpu_cpp.h"
 #endif  // PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
@@ -74,24 +70,10 @@
 #include "runtime_effect_cache.hpp"
 #include "include/effects/SkImageFilters.h"
 #include "include/core/SkColorFilter.h"
-#include "include/gpu/graphite/Image.h"
-#include "include/gpu/graphite/BackendTexture.h"
-#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
-#include "webgpu/webgpu_cpp.h"
 
-// Platform font manager
-#ifdef __APPLE__
-#include "include/ports/SkFontMgr_mac_ct.h"
-#elif defined(_WIN32)
-#include "include/ports/SkTypeface_win.h"
-#elif defined(__ANDROID__)
-// Android: use the built-in Android font manager with FreeType scanner
-#include "include/ports/SkFontMgr_android.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#elif defined(__linux__)
-#include "include/ports/SkFontMgr_fontconfig.h"
-#include "include/ports/SkFontScanner_FreeType.h"
-#endif
+// Font managers are never constructed here: text paths take the process-wide
+// manager from `platform_font_manager()` (bundled_fonts.hpp), which owns the
+// canvas's single OS switch.
 
 #include "skia_canvas_internal.hpp"
 

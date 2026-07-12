@@ -171,7 +171,14 @@ ResolvedFont resolve_one_family(const std::string& family,
     }
 
     // 3) Platform.
-    if (mgr) {
+    //
+    // Skipped entirely when the platform font manager exposes no real font
+    // database (browser builds use SkFontMgr_New_Custom_Empty). That manager
+    // still returns a NON-NULL default typeface from `matchFamilyStyle` — but
+    // one with no glyphs, which measures every string at 0.0 advance and paints
+    // nothing. Trusting it here is what made every Label in the browser demo
+    // invisible; the miss must fall through to the bundled last-resort below.
+    if (mgr && platform_font_db_usable()) {
         if (auto tf = mgr->matchFamilyStyle(family.c_str(), sk_style)) {
             SkString actual;
             tf->getFamilyName(&actual);
@@ -352,7 +359,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     }
 
     // Empty stack or nothing matched: last-resort platform default.
-    if (mgr) {
+    if (mgr && platform_font_db_usable()) {
         if (auto tf = mgr->matchFamilyStyle(nullptr, sk_style)) {
             SkString actual;
             tf->getFamilyName(&actual);
@@ -361,6 +368,24 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
             resolved.origin = FallbackOrigin::Platform;
             trace.push_back({"<default>", FallbackOrigin::Platform, true,
                              resolved.actual_family, "last-resort default"});
+        }
+    }
+
+    // No system font database (browser): the default cascade — an empty family
+    // stack, or a generic family like `sans-serif` that nothing in the bundle
+    // advertises — has nowhere left to go. Fall back to a BUNDLED face rather
+    // than to the empty manager's glyph-less default, which would silently
+    // measure every string at zero width and draw nothing at all.
+    if (!resolved.has_typeface()) {
+        if (auto tf = bundled_fallback_typeface()) {
+            SkString actual;
+            tf->getFamilyName(&actual);
+            resolved.typeface = apply_variation_axes(std::move(tf));
+            resolved.actual_family = std::string(actual.c_str(), actual.size());
+            resolved.origin = FallbackOrigin::Bundled;
+            trace.push_back({"<default>", FallbackOrigin::Bundled, true,
+                             resolved.actual_family,
+                             "last-resort bundled default (no platform font db)"});
         }
     }
 

@@ -46,6 +46,13 @@ export { createWamAdapter };
 // (crossOriginIsolated) because the module imports a shared WebAssembly.Memory.
 export { createWclapAdapter } from "./adapters/wclap.js";
 
+// The host-facing plugin-state container ("PLST"), for consumers that need to
+// read or replace a plugin's OWN opaque blob without disturbing its parameters —
+// e.g. handing a convolution reverb a decoded impulse response. ABI-agnostic:
+// getState/setState are identical on WAM and WebCLAP, so this works on both.
+export { parseContainer, buildContainer, crc32, setPluginBlob, getPluginBlob }
+  from "./state/plugin-state.js";
+
 // The canvas widget set, for consumers who want to build custom UI from the same
 // native-styled knob/fader/toggle/combo/meter primitives.
 export { createWidget, kindFor, formatValue } from "./widgets/index.js";

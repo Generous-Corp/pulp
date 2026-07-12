@@ -420,6 +420,14 @@ void WamProcessorBridge::process(const float* const* inputs,
     pending_midi_.clear_sysex();
 
     // Output is already in the host's planar buffers — nothing to interleave.
+
+    // COALESCED non-realtime pass, AFTER this block's audio is produced. Every
+    // control message that arrived since the last block collapses into at most
+    // ONE reconcile of the latest values (see service_non_realtime /
+    // WamStage::service_non_realtime). It runs outside Processor::process() but
+    // on the same OS thread — the worklet has no other — so a processor's tick
+    // still has to keep its work bounded, it just is not asked to do it N times.
+    service_non_realtime();
 }
 
 int WamStage::read_param_values(float* dst, int capacity) const {
@@ -471,6 +479,22 @@ void WamProcessorBridge::set_parameter_value(const std::string& id, float value)
     auto param_id = parse_param_id(id);
     if (!param_id) return;
     store_.set_value(*param_id, value);
+
+    // Only MARK the derived state dirty. `wam_set_param` reaches us from the
+    // worklet's port.onmessage — which is dispatched on the RENDER THREAD
+    // between quanta — and a knob drag delivers a burst of writes in one turn.
+    // A processor that derives heavy state from a parameter (SuperConvolver
+    // rebuilds its impulse response when `Size` moves) would then do the whole
+    // rebuild once per message, with only the last result ever audible. The
+    // rebuild is coalesced into ONE pass per block in service_non_realtime().
+    tick_pending_ = true;
+}
+
+void WamProcessorBridge::service_non_realtime() {
+    if (!processor_) return;
+    if (!tick_pending_ && !processor_->non_realtime_tick_pending()) return;
+    tick_pending_ = false;
+    processor_->on_non_realtime_tick();
 }
 
 void WamProcessorBridge::schedule_midi(uint8_t status, uint8_t data1,
@@ -557,7 +581,14 @@ std::vector<uint8_t> WamProcessorBridge::get_state() const {
 }
 
 bool WamProcessorBridge::set_state(const uint8_t* data, size_t size) {
-    return decode_stage_state(store_, processor_.get(), data, size);
+    const bool ok = decode_stage_state(store_, processor_.get(), data, size);
+    // A restored state can name a different IR / wavetable / sample source than
+    // the live one. Mark it dirty; the next block's service_non_realtime()
+    // reconciles it (one pass, coalesced with whatever parameter writes a host
+    // sends alongside a project load) — without that, the audio thread would
+    // keep rendering the OLD derived state for the rest of the session.
+    tick_pending_ = true;
+    return ok;
 }
 
 WamDescriptorData WamProcessorBridge::descriptor() const {
@@ -594,6 +625,10 @@ void WamProcessorBridge::prepare(double sample_rate, int block_size) {
     // num_frames to it. No planar scratch to resize — the JS side owns the
     // channel buffers now.
     if (block_size > block_size_) block_size_ = block_size;
+
+    // prepare() may have invalidated derived state (a new sample rate re-decodes
+    // and re-resamples an IR). Same non-render context as above.
+    processor_->on_non_realtime_tick();
 }
 
 void WamProcessorBridge::set_transport(bool is_playing, double bpm,
@@ -658,6 +693,7 @@ void WamStage::prepare(double sample_rate, int block_size) {
     ctx.input_channels = desc.default_input_channels();
     ctx.output_channels = desc.default_output_channels();
     processor_->prepare(ctx);
+    processor_->on_non_realtime_tick();   // see WamProcessorBridge::prepare
 
     // Grow only when the block size actually increased.
     if (block_size > block_size_) {
@@ -713,7 +749,13 @@ std::vector<uint8_t> WamStage::get_state() const {
 }
 
 bool WamStage::set_state(const uint8_t* data, size_t size) {
-    return decode_stage_state(store_, processor_.get(), data, size);
+    const bool ok = decode_stage_state(store_, processor_.get(), data, size);
+    // Same contract as WamProcessorBridge::set_state: a restored state can name
+    // a different derived source than the live one, and a wasm module has no
+    // worker thread to notice. Mark dirty; the rack services it after the next
+    // block (see WamStage::service_non_realtime).
+    mark_non_realtime_dirty();
+    return ok;
 }
 
 // ── WamChainBridge ──────────────────────────────────────────────────────
@@ -867,6 +909,11 @@ void WamChainBridge::process(const float* const* inputs, float* const* outputs,
 
     // The last stage's planar audio is copied into the host's planar output.
     last.copy_output_into(outputs, num_channels, num_frames);
+
+    // COALESCED non-realtime pass for every stage, AFTER the audio is produced —
+    // at most one reconcile per stage per block, however many control messages
+    // arrived (see WamStage::service_non_realtime).
+    for (auto& stage : stages_) stage->service_non_realtime();
 }
 
 std::string WamChainBridge::parameters_json() const {

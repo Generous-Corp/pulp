@@ -291,6 +291,13 @@ flags:
       - core/**/windows/
       - core/**/wasapi/
     carryforward: true
+  # Browser/wasm. Scoped to `platform/web` for the same reason as the `web`
+  # component: `core/**/web/` would also swallow the WAM/WebCLAP adapter
+  # headers under core/format/include/pulp/format/web/.
+  web:
+    paths:
+      - core/**/platform/web/
+    carryforward: true
 
   # Surface flags (4) - non-core but first-party:
   cli:
@@ -443,7 +450,7 @@ component_management:
       paths:
         - "core/view/**"
         - "!core/view/platform/**"
-    # Platform (4) - cross-cut the subsystems. Patterns within each
+    # Platform (5) - cross-cut the subsystems. Patterns within each
     # platform component must not overlap each other (Codecov double-
     # counts files matched twice within the same component, inflating
     # the line totals - caught on #1055 as `platform,android,android`
@@ -471,6 +478,18 @@ component_management:
         - "core/**/win/**"
         - "core/**/windows/**"
         - "core/**/wasapi/**"
+    # Scoped to `platform/web` deliberately, NOT `core/**/web/**`: the
+    # broader glob would also match the WAM/WebCLAP adapter headers under
+    # `core/format/include/pulp/format/web/**`, which the `format`
+    # component already owns - and a file matching two components is
+    # double-counted (the exactly-one-component rule this file is tested
+    # against). The wasm render sources (`skia_surface_ganesh.cpp`,
+    # `render_loop_emscripten.cpp`) likewise stay with `render`; only the
+    # browser window host lives under a platform dir.
+    - component_id: web
+      name: web
+      paths:
+        - "core/**/platform/web/**"
     # Surface (4) - `tools` excludes `tools/cli/**` so the more specific
     # `cli` component owns those files; otherwise every CLI file is
     # double-counted (#1055).

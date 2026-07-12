@@ -39,7 +39,24 @@ platforms:
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
   web:
     status: experimental
-    notes: WAMv2 builds a Pulp Processor to a browser AudioWorklet plugin via pulp_add_wam_plugin — the PulpGain canary loads, renders audio, and exposes generated parameter controls in Chrome (verified via an OfflineAudioContext fixture and a Node runner). WebCLAP builds a Pulp Processor to a CLAP-in-WebAssembly module via pulp_add_wclap (wasi-sdk); the PulpGain WebCLAP is hosted in Node through the full CLAP lifecycle with audio and parameter control proven, but is not yet hosted in-browser. Browser validation is fixture-based, not yet a CI lane.
+    notes: >-
+      WAMv2 builds a Pulp Processor to a browser AudioWorklet plugin via
+      pulp_add_wam_plugin; WebCLAP builds one to a CLAP-in-WebAssembly module via
+      pulp_add_wclap (wasi-sdk). Both are exercised in a headless-Chrome CI lane
+      (.github/workflows/web-plugins.yml). Pulp's own UI also runs in the browser:
+      core/view widgets, flex layout, text shaping and the Ink & Signal theme
+      compile to wasm and paint into a canvas through Skia Ganesh on WebGL2
+      (core/view/platform/web/ + core/render/src/skia_surface_ganesh.cpp), driven by
+      a requestAnimationFrame render loop, with DOM pointer/key events translated
+      into the View tree. The UI module is DSP-free and mounts against BOTH ABIs
+      through the web player's HostAdapter seam. DSP on the web is CPU-only TODAY:
+      no GPU-compute code compiles to wasm yet. That is a gap, not a browser limit —
+      the RENDER path uses WebGL2 (the Skia wasm slice is Ganesh), which has no
+      compute shaders, but browser WebGPU does, and GPU DSP is reachable by running
+      the compute in a Worker (WebGPU is unavailable in an AudioWorkletGlobalScope)
+      and handing blocks to the audio callback over a SharedArrayBuffer ring. The
+      audio callback itself stays on the CPU either way. File-backed loaders and
+      native editors are compiled out (PULP_WASM / PULP_HEADLESS).
 
 # macOS CPU-architecture tiers. macOS as a platform is `usable` (see
 # platforms.macos), but that maturity is the arm64 (Apple Silicon) primary
@@ -119,10 +136,10 @@ formats:
     linux: experimental
   wam_v2:
     web: partial
-    notes: A Pulp Processor builds to a WAMv2 AudioWorklet plugin via pulp_add_wam_plugin. Coverage spans an effect (PulpGain — loads, renders, generated controls in Chrome; dB-accurate gain, interleaved stereo, bypass), a richer effect (PulpChorus — input transformed), and an instrument (PulpPluck — MIDI note-on produces sound and decays after note-off). Verified by a deterministic Node feature runner plus native bridge tests (param/state round-trip, MIDI delivery). Stereo, single-instance canary — not full WamEnv/WamGroup host conformance, and browser validation is a fixture, not yet a CI lane.
+    notes: A Pulp Processor builds to a WAMv2 AudioWorklet plugin via pulp_add_wam_plugin. Coverage spans an effect (PulpGain — loads, renders, generated controls in Chrome; dB-accurate gain, interleaved stereo, bypass), a richer effect (PulpChorus — input transformed), an instrument (PulpPluck — MIDI note-on produces sound and decays after note-off), and a convolution reverb (SuperConvolver — CPU PartitionedConvolver against a built-in synthetic IR; the GPU engine, file-backed IR loader and native editor are compiled out on web, and latency stays the fixed 512-sample internal block). Verified by deterministic Node runners plus native bridge tests (param/state round-trip, MIDI delivery), and by a headless-Chrome browser fixture in the web-plugins CI lane. A worklet has no second thread, so control work that must stay off the render call goes through Processor::on_non_realtime_tick(), which the adapter coalesces to once per render turn. Stereo, single-instance canary — not full WamEnv/WamGroup host conformance.
   webclap:
     web: experimental
-    notes: A Pulp Processor builds to a CLAP-in-WebAssembly module via pulp_add_wclap (wasi-sdk, wasm32-wasi-threads, -fno-exceptions). The checked-in PulpGain WebCLAP (examples/web-demos/wclap-build) exports the WebCLAP host contract (clap_entry, malloc/free/cabi_realloc, growable table, shared imported memory). wclap_probe.mjs verifies the module is live; wclap_host_runner.mjs (Node) and examples/web-demos/wclap-build/browser-host (in-browser, headless-validated against Chrome/Canary) both drive the full CLAP lifecycle — create_plugin, init, activate, process — rendering audio and controlling parameters (Input Gain +6 dB raises output exactly +6 dB), with host callbacks synthesized via wasm trampoline modules (no WebAssembly.Function, no C++ host shim). Remaining: real-time AudioWorklet streaming, a .wclap bundle layout, and a CI lane (needs wasi-sdk + a browser on runners).
+    notes: A Pulp Processor builds to a CLAP-in-WebAssembly module via pulp_add_wclap (wasi-sdk, wasm32-wasi-threads, -fno-exceptions). The checked-in PulpGain WebCLAP (examples/web-demos/wclap-build) exports the WebCLAP host contract (clap_entry, malloc/free/cabi_realloc, growable table, shared imported memory). wclap_probe.mjs verifies the module is live; wclap_host_runner.mjs (Node) and examples/web-demos/wclap-build/browser-host (in-browser, headless-validated against Chrome/Canary) both drive the full CLAP lifecycle — create_plugin, init, activate, process — rendering audio and controlling parameters (Input Gain +6 dB raises output exactly +6 dB), with host callbacks synthesized via wasm trampoline modules (no WebAssembly.Function, no C++ host shim). SuperConvolver ships through this ABI as well as WAM, and both are driven by the SAME assertions in the web-plugins CI lane so the two ABIs cannot diverge. Pages need cross-origin isolation (COOP/COEP) for the threaded-wasm shared memory. Remaining: real-time AudioWorklet streaming and a .wclap bundle layout.
   aax:
     macos: experimental
     windows: experimental
@@ -191,11 +208,12 @@ format_limitations:
     - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
   wam_v2:
     - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
-    - "WAMv2 load/render is proven via an OfflineAudioContext browser fixture (examples/web-demos/wasm-build/browser-test), not yet wired into a Playwright CI lane."
     - "Stereo, single-instance per node; no WamEnv/WamGroup host conformance or sample-accurate automation coverage yet."
+    - "DSP is CPU-only. No GPU-compute code compiles to wasm — the Skia wasm slice is Ganesh/WebGL2, which has no compute shaders — so a plugin with a GPU engine runs its CPU engine on the web."
   webclap:
     - "Same browser-sandbox-only constraint as wam_v2."
     - "Pulp Browser Host recognizes WCLAP URLs/files, but .wclap.tar.gz unpack/instantiate via wclap-host-js is still placeholder work."
+    - "Same CPU-only DSP constraint as wam_v2."
 
 scripted_ui:
   ui_script_target_wiring:

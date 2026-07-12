@@ -64,6 +64,22 @@ if (!CHROME) {
 // dirs straight from it (single source of truth, mirrors WAM's gen-og-images).
 const SECTIONS = ["example-plugins", "classic-effects"];
 
+// super-convolver is not a plugins-array gallery — it is ONE plugin presented in
+// two ABIs, so its dirs are fixed rather than parsed. Same convention as the
+// sections above: each demo page is shot STARTED (`#panel` only exists once the
+// player has mounted, so the image is the plugin actually running, not a
+// click-to-start overlay), and the index is shot as its card grid.
+const SUPER_CONVOLVER = { slug: "super-convolver", dirs: ["wam", "wclap"] };
+
+// The two standalone pages assemble.mjs / assemble-player.mjs write. They are not
+// galleries and have no plugins array, but they are shareable URLs like any other
+// — a bare unfurl is a bare unfurl — so they get previews too. `/player/` mounts
+// the shared player, so it is shot started; `/` is the isolation proof card.
+const STANDALONE = [
+  { url: "/player/", selector: "#panel", out: ["player", "og.png"], label: "player", start: true },
+  { url: "/", selector: ".card", out: ["og.png"], label: "root (isolation proof)", start: false },
+];
+
 // Serve the deploy dir under its own _headers (COOP/COEP/CORP + MIME) so the
 // threaded-wasm module instantiates exactly as it will on Cloudflare.
 const server = spawn(process.execPath,
@@ -80,11 +96,20 @@ const browser = await chromium.launch({
   args: ["--mute-audio", "--autoplay-policy=no-user-gesture-required"],
 });
 
+// The shape every unfurler is tuned for (1200x630). We do not render AT that size —
+// we crop a window of this RATIO out of the page at native resolution, so the card is
+// a tight, unscaled view of the plugin rather than a shrunken one.
+const OG_RATIO = 1200 / 630;   // 1.905
+
 let failed = 0;
 async function attempt(pageUrl, selector, outPath, label, start) {
   const context = await browser.newContext({
     viewport: { width: 960, height: 1200 },
-    deviceScaleFactor: 2,   // crisp @2x preview cards, matching the WAM sites
+    // 3x: a ~660px-wide crop lands near 2000px, comfortably above the 1200px
+    // unfurlers want, with no upscaling. It also makes Pulp's canvas render its
+    // backing store at 3x (it sizes from devicePixelRatio), so the knobs are crisp —
+    // CSS-scaling the canvas instead would just resample a 1x bitmap.
+    deviceScaleFactor: 3,
   });
   const page = await context.newPage();
   page.on("pageerror", (e) => console.log(`  [pageerror ${label}]`, e.message));
@@ -99,9 +124,44 @@ async function attempt(pageUrl, selector, outPath, label, start) {
     }
     const el = await page.$(selector);
     if (!el) throw new Error(`selector ${selector} not found`);
-    await el.screenshot({ path: outPath });
+
+    // TIGHT CROP, not fit-and-letterbox. Plugin panels are PORTRAIT (a 640x682 panel
+    // is typical) and an OG card is LANDSCAPE, so scaling the whole panel to fit
+    // strands ~600px of dead margin either side and the plugin reads tiny — the
+    // opposite of what a preview card is for. Instead crop a card-shaped window from
+    // the panel itself: full width, anchored at the TOP, where the plugin's identity
+    // lives (title, knobs, live values). Nothing is scaled, so the canvas bitmap is
+    // never resampled — CSS-scaling a <canvas> just blurs it.
+    await page.evaluate((sel) => {
+      const node = document.querySelector(sel);
+      node.scrollIntoView({ block: "start", inline: "nearest" });
+    }, selector);
+    await sleep(150);
+
     const box = await el.boundingBox();
-    console.log(`  ok   ${label} -> ${outPath} (${Math.round(box.width * 2)}x${Math.round(box.height * 2)})`);
+    if (!box) throw new Error("element has no box");
+
+    // A hair of padding so the panel's rounded border is not shaved off. The crop
+    // height is ALWAYS width/ratio — never clamped to the panel — so the card keeps an
+    // exact 1.91:1 even for a short panel (the remainder is the page's own background,
+    // which is preferable to a ratio the unfurler will thumbnail).
+    const PAD = 10;
+    const cw = box.width + PAD * 2;
+    const ch = cw / OG_RATIO;
+    const x = Math.max(0, box.x - PAD);
+    let y = Math.max(0, box.y - PAD);
+
+    // Keep the window inside the page, growing the document if the panel sits near the
+    // bottom — clipping past the end of the page is an error in Playwright.
+    await page.evaluate((need) => {
+      document.body.style.minHeight = `${need}px`;
+    }, Math.ceil(y + ch + 40));
+    await sleep(80);
+
+    await page.screenshot({ path: outPath, clip: { x, y, width: cw, height: ch } });
+    const dsf = await page.evaluate(() => window.devicePixelRatio);
+    console.log(`  ok   ${label} -> ${outPath} (${Math.round(cw * dsf)}x${Math.round(ch * dsf)}` +
+                `, tight crop of a ${Math.round(box.width)}x${Math.round(box.height)} panel)`);
   } finally {
     await context.close();
   }
@@ -135,6 +195,23 @@ try {
     }
     // Gallery card: the card grid itself.
     await shoot(`${BASE}/${slug}/`, ".wrap", join(OUT, slug, "og.png"), `${slug} gallery`, false);
+  }
+
+  if (existsSync(join(OUT, SUPER_CONVOLVER.slug, "index.html"))) {
+    const { slug, dirs } = SUPER_CONVOLVER;
+    for (const dir of dirs) {
+      await shoot(`${BASE}/${slug}/${dir}/`, "#panel",
+                  join(OUT, slug, dir, "og.png"), `${slug}/${dir}`, true);
+    }
+    await shoot(`${BASE}/${slug}/`, ".wrap", join(OUT, slug, "og.png"), `${slug} gallery`, false);
+  } else {
+    console.log(`  skip ${SUPER_CONVOLVER.slug} (not assembled)`);
+  }
+
+  for (const s of STANDALONE) {
+    const page = join(OUT, ...s.out.slice(0, -1), "index.html");
+    if (!existsSync(page)) { console.log(`  skip ${s.label} (not assembled)`); continue; }
+    await shoot(`${BASE}${s.url}`, s.selector, join(OUT, ...s.out), s.label, s.start);
   }
 } finally {
   await browser.close();

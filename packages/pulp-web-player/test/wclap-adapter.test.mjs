@@ -107,5 +107,36 @@ try {
   ok(false, "iiI->I trampoline compiles + runs: " + (e && e.message));
 }
 
+// ——— 5. Parameter DISPLAY UNITS reach the adapter (WAM/WebCLAP text parity).
+// The WAM ABI reports a unit in its descriptor JSON; CLAP has no unit field on
+// clap_param_info, so the worklet host probes clap_plugin_params.value_to_text
+// and the adapter recovers the suffix. Before this the adapter hardcoded
+// `unit: ""` and the WebCLAP page rendered "1.50" where the WAM page — same
+// plugin, same shared player — rendered "1.50 s".
+ok(!/unit:\s*""/.test(wclap), "wclap adapter no longer hardcodes an empty unit");
+ok(/deriveDisplayUnit\(p\.textProbes\)/.test(wclap),
+   "wclap adapter derives each parameter's display unit from the value_to_text probes");
+ok(/PARAMS_EXT\.value_to_text/.test(worklet) && /valueToText\(/.test(worklet),
+   "worklet host calls clap_plugin_params.value_to_text");
+ok(/textProbes:\s*\[/.test(worklet),
+   "worklet reports two value_to_text probes per parameter");
+
+// deriveDisplayUnit itself, on the shapes a Pulp CLAP entry actually renders
+// (two fixed decimals + " " + unit) and on the shapes that must NOT yield a unit.
+const DERIVE_CASES = [
+  [[{ value: 35, text: "35.00 %" }, { value: 100, text: "100.00 %" }], "%", "percent"],
+  [[{ value: 1.5, text: "1.50 s" }, { value: 4, text: "4.00 s" }], "s", "seconds"],
+  [[{ value: 0, text: "0.00 dB" }, { value: 24, text: "24.00 dB" }], "dB", "decibels (negative range)"],
+  [[{ value: 0, text: "0.00" }, { value: 1, text: "1.00" }], "", "unitless param stays unitless"],
+  [[{ value: 0, text: "off" }, { value: 1, text: "on" }], "", "custom to_string (enum labels) → no invented unit"],
+  [[{ value: 0.5, text: "12 o'clock" }], "", "custom to_string whose number is not the value → no unit"],
+  [[{ value: 1, text: "1.00 s" }, { value: 2, text: "2.00 ms" }], "", "suffix that varies with value is not a unit"],
+  [[{ value: 0, text: null }], "", "value_to_text declined → no unit"],
+];
+for (const [probes, expected, why] of DERIVE_CASES) {
+  const got = ABI.deriveDisplayUnit(probes);
+  ok(got === expected, `deriveDisplayUnit: ${why} → "${expected}" (got "${got}")`);
+}
+
 console.log(failed ? `\n${failed} check(s) FAILED` : "\nAll WebCLAP adapter checks passed.");
 process.exit(failed ? 1 : 0);

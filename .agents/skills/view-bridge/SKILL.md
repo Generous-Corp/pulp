@@ -921,6 +921,49 @@ Rules when touching an adapter's editor-attach path:
 
 See `planning/2026-05-22-gpu-view-host-in-plugins.md` and its `qa/` doc.
 
+## The browser host — a fourth host, and the one with no plugin ABI
+
+`core/view/platform/web/` adds `pulp::view::web::BrowserWindowHost`: the same
+`core/view` widget tree, flex layout, text shaping, and Ink & Signal theme,
+compiled to wasm and painted into a `<canvas>` by **Skia Ganesh on WebGL2**
+(*not* Graphite/Dawn — see the `skia-gpu-build` skill's wasm section), driven by
+a `requestAnimationFrame` render loop (`render_loop_emscripten.cpp`). DOM
+pointer/key events are translated into View events by
+`core/view/include/pulp/view/web/web_event_translate.hpp`.
+
+What is different about it, and what to keep true:
+
+- **There is no `ViewBridge` and no format adapter here.** The browser UI module
+  is DSP-free and talks to the audio side only through the web player's
+  `HostAdapter` seam, which is why the *same* wasm UI module mounts against both
+  the WAM and the WebCLAP demo. Don't reach for the plugin editor lifecycle in
+  web code; there is no `create_view()` → `open` → `notify_attached` protocol to
+  participate in.
+- **Probe, don't assume, GPU.** `pulp::view::web::browser_host_gpu_available()`
+  is the web analogue of `decide_gpu_host` — a browser with no WebGL2 context is
+  a real, shipping configuration. The mount path must **fail loudly and
+  asynchronously** so the host page can fall back (the demo pages fall back to
+  the player's generated parameter grid). A UI module that only fails
+  asynchronously and reports nothing leaves an empty panel, which reads as a
+  render bug.
+- **Context loss is a normal event, not a crash.** WebGL contexts are lost and
+  restored by the browser at will (tab backgrounding, GPU reset). The surface
+  reports unavailable on loss, the rAF loop keeps pumping, and Ganesh is rebuilt
+  and repaints on restore. Any new GPU resource cached above the surface must
+  survive that cycle.
+
+## `Processor` vtable growth is append-only
+
+`Processor` is an ABI surface (`node_abi_gate`). New virtuals — most recently
+`on_non_realtime_tick()` / `non_realtime_tick_pending()` — go at the **end** of
+the class with a default implementation, never inserted between existing
+virtuals, or every prebuilt SDK consumer's vtable offsets shift and you get the
+silent-garbage failure mode the "Stale-Header ABI Mismatch" section above
+describes. Both hooks default to no-ops precisely so that adding them changes
+nothing for processors that don't opt in. (What the hooks *do*, and which formats
+actually call them — CLAP does, including native CLAP; VST3/AU/standalone do
+not — is documented in the `clap` skill.)
+
 ## Proportional resize with aspect lock — design viewport (2026-05)
 
 `PluginViewHost` now mirrors `WindowHost`'s design-viewport contract
