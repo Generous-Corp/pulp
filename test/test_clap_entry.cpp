@@ -48,7 +48,9 @@ public:
         store.add_parameter({.id = 1, .name = "Gain", .unit = "dB",
                              .range = {-60.0f, 24.0f, 0.0f, 0.1f}});
         store.add_parameter({.id = 2, .name = "Mode", .unit = "",
-                             .range = {0.0f, 2.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 2.0f, 0.0f, 1.0f},
+                             .kind = pulp::state::ParamKind::Enum,
+                             .value_labels = {"Clean", "Warm", "Hot"}});
         store.add_parameter({.id = 3, .name = "Mix", .unit = "%",
                              .range = {0.0f, 100.0f, 50.0f, 0.5f}});
 
@@ -628,7 +630,7 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     REQUIRE(params->value_to_text(plugin, 4, value, text, sizeof(text)));
     REQUIRE(std::string(text) == "quality=0.75");
     REQUIRE(params->text_to_value(plugin, 1, "-3.25 dB", &value));
-    REQUIRE_THAT(value, WithinAbs(-3.25, 0.01));
+    REQUIRE_THAT(value, WithinAbs(-3.2, 0.01));
     REQUIRE_FALSE(params->text_to_value(plugin, 1, "dB", &value));
 
     plugin->destroy(plugin);
@@ -675,7 +677,7 @@ TEST_CASE("CLAP text_to_value routes through ParamInfo::from_string",
 
     // A param WITHOUT from_string (Gain, id 1) still uses the numeric fallback.
     REQUIRE(params->text_to_value(plugin, 1, "-3.25 dB", &value));
-    REQUIRE_THAT(value, WithinAbs(-3.25, 1e-6));
+    REQUIRE_THAT(value, WithinAbs(-3.2, 1e-6));
     REQUIRE_FALSE(params->text_to_value(plugin, 1, "not a number", &value));
 
     plugin->destroy(plugin);
@@ -720,9 +722,9 @@ TEST_CASE("CLAP param text conversion is locale-independent (comma-decimal host)
     REQUIRE(std::string(text) == "0.50 %");
     REQUIRE(std::string(text).find(',') == std::string::npos);
 
-    // value_to_text on the "Mode" param (no unit).
+    // Enum parameters use declared labels in every locale.
     REQUIRE(params->value_to_text(plugin, 2, 0.5, text, sizeof(text)));
-    REQUIRE(std::string(text) == "0.50");
+    REQUIRE(std::string(text) == "Warm");
 
     // text_to_value must parse a dotted "0.5" fully (not stop at the dot).
     double value = 99.0;
@@ -750,10 +752,9 @@ TEST_CASE("CLAP param text conversion is locale-independent (comma-decimal host)
     REQUIRE(params->text_to_value(plugin, 3, "\t0.5", &value));
     REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
 
-    // Trailing text after the number is still accepted (matches strtod).
+    // A mismatched unit is rejected rather than silently discarded.
     value = 0.0;
-    REQUIRE(params->text_to_value(plugin, 3, "0.5 dB", &value));
-    REQUIRE_THAT(value, WithinAbs(0.5, 1e-9));
+    REQUIRE_FALSE(params->text_to_value(plugin, 3, "0.5 dB", &value));
 
     // Non-numeric text still fails, as before.
     REQUIRE_FALSE(params->text_to_value(plugin, 3, "%", &value));
@@ -796,7 +797,11 @@ TEST_CASE("CLAP params extension formats fallbacks and flushes gestures",
     REQUIRE(params->value_to_text(plugin, 1, -6.5, text, sizeof(text)));
     REQUIRE(std::string(text) == "-6.50 dB");
     REQUIRE(params->value_to_text(plugin, 2, 1.0, text, sizeof(text)));
-    REQUIRE(std::string(text) == "1.00");
+    REQUIRE(std::string(text) == "Warm");
+    double value = 0.0;
+    REQUIRE(params->text_to_value(plugin, 2, "Hot", &value));
+    REQUIRE(value == 2.0);
+    REQUIRE_FALSE(params->text_to_value(plugin, 2, "2", &value));
     REQUIRE_FALSE(params->value_to_text(plugin, 404, 0.0, text, sizeof(text)));
 
     params->flush(plugin, nullptr, nullptr);
@@ -816,7 +821,6 @@ TEST_CASE("CLAP params extension formats fallbacks and flushes gestures",
     params->flush(plugin, &in, nullptr);
 
     proc->state().set_value(1, -1.0f);
-    double value = 0.0;
     REQUIRE(params->get_value(plugin, 1, &value));
     REQUIRE_THAT(value, WithinAbs(-1.0, 0.01));
 

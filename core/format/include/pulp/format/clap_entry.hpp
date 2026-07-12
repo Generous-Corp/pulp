@@ -13,6 +13,7 @@
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/parameter_text.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
@@ -171,8 +172,9 @@ inline bool params_get_info(const clap_plugin_t* plugin, uint32_t index, clap_pa
     info->max_value = p.range.max;
     info->default_value = p.range.default_value;
     info->flags = CLAP_PARAM_IS_AUTOMATABLE;
-    if (p.range.step >= 1.0f && (p.range.max - p.range.min) < 10.0f)
+    if (state::is_discrete_param(p))
         info->flags |= CLAP_PARAM_IS_STEPPED;
+    if (state::is_bypass_param(p)) info->flags |= CLAP_PARAM_IS_BYPASS;
     return true;
 }
 
@@ -187,28 +189,8 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     auto* info = self->store.info(static_cast<state::ParamID>(param_id));
     if (!info) return false;
-    if (info->to_string) {
-        auto str = info->to_string(static_cast<float>(value));
-        snprintf(display, size, "%s", str.c_str());
-        return true;
-    }
-
-    // Format the numeric value with locale-independent std::to_chars so a
-    // comma-decimal host locale (de_DE, fr_FR, …) can never turn "0.50" into
-    // "0,50". This matches the previous "%.2f": fixed notation, two fractional
-    // digits. The CLAP-supplied `size` is the byte cap of the `display` buffer.
-    // The buffer is sized generously because chars_format::fixed for a very
-    // large-magnitude double needs hundreds of integer digits; if it still
-    // overflows we return false rather than emit a host-visible lie.
-    char number[512];
-    auto conv = std::to_chars(number, number + sizeof(number), value,
-                              std::chars_format::fixed, 2);
-    if (conv.ec != std::errc{}) return false;
-    std::string out(number, conv.ptr);
-    if (!info->unit.empty()) {
-        out += ' ';
-        out += info->unit;
-    }
+    const auto out = format_parameter_text(*info, static_cast<float>(value));
+    if (out.empty()) return false;
     snprintf(display, size, "%s", out.c_str());
     return true;
 }
@@ -217,37 +199,13 @@ inline bool params_text_to_value(const clap_plugin_t* plugin, clap_id param_id,
                                  const char* text, double* value) {
     if (!text) return false;
 
-    // Prefer the author-supplied from_string parser: it is the inverse of the
-    // to_string used by params_value_to_text, so a fully custom rendering
-    // ("quality=0.75", "12 o'clock", an enum label) round-trips even though a
-    // bare numeric parse would reject it. CLAP values are plain (min..max),
-    // the same domain from_string returns, so no normalization step is needed.
-    if (plugin) {
-        auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-        auto* info = self->store.info(static_cast<state::ParamID>(param_id));
-        if (info && info->from_string) {
-            const float parsed = info->from_string(text);
-            // Reject a non-finite parse rather than writing garbage; fall
-            // through to the generic numeric parse so a partly-numeric string
-            // still has a chance (author from_string is best-effort).
-            if (std::isfinite(parsed)) {
-                *value = parsed;
-                return true;
-            }
-        }
-    }
-
-    // Locale-independent parse via a C-locale strtod. std::from_chars' float
-    // overload is =deleted on some toolchains (see locale_independent_float.hpp),
-    // so we cannot use it for the value. strtod skips leading whitespace and
-    // accepts a leading '+'/'-', and trailing text (e.g. a unit suffix) is
-    // allowed — matching the historical strtod leniency this path documents.
-    // Reject when nothing was consumed ("%", "", "   ") or the magnitude was
-    // out of range ("1e999999") rather than writing a garbage 0.
-    double parsed = 0.0;
-    const auto result = detail::parse_double_c_locale(std::string_view(text), parsed);
-    if (result.consumed == 0 || result.range_error) return false;
-    *value = parsed;
+    if (!plugin) return false;
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    const auto* info = self->store.info(static_cast<state::ParamID>(param_id));
+    if (!info) return false;
+    const auto parsed = parse_parameter_text(*info, text);
+    if (!parsed) return false;
+    *value = *parsed;
     return true;
 }
 
