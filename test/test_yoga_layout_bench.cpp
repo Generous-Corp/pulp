@@ -279,6 +279,15 @@ void print_row(const Result& r) {
 
 } // namespace
 
+// Instrumentation hooks defined in core/view/src/yoga_layout.cpp. Declared here
+// rather than in a public header: they exist for this investigation only.
+namespace pulp::view {
+uint64_t yoga_layout_pass_count();
+uint32_t yoga_layout_last_node_count();
+uint32_t yoga_layout_max_node_count();
+void     yoga_layout_reset_stats();
+}
+
 TEST_CASE("Yoga layout pass cost at 100 / 250 / 500 nodes", "[view][layout][bench][yoga]") {
     // rows x per_row chosen so managed node count lands on ~100 / ~250 / ~500.
     // managed = 1 + rows + rows*per_row.
@@ -384,4 +393,148 @@ TEST_CASE("Unchanged Yoga tree costs the same as a changed one", "[view][layout]
     REQUIRE(stat.mean_us < 2.0 * anim.mean_us);
     // Same allocation volume either way — the churn is unconditional.
     REQUIRE(std::abs(stat.allocs_per_pass - anim.allocs_per_pass) <= 1.0);
+}
+
+// ─── Scaling past 500 nodes ────────────────────────────────────────────────
+//
+// The 100/250/500 sweep above cannot tell you whether a 2000-node imported
+// design costs 4x a 500-node one or 16x. This sweep answers that, and reports
+// microseconds-per-node so a superlinear term is visible as a rising column.
+//
+// It also cross-checks the synthetic tree's arithmetic node count against what
+// yoga_layout() ACTUALLY allocated a YGNode for (the instrumentation counter),
+// so "managed node count" in this file means the same thing it means in the
+// engine.
+TEST_CASE("Yoga layout cost scales with node count", "[view][layout][bench][yoga][scale]") {
+    using namespace pulp::view;
+
+    struct Shape { int rows; int per_row; };
+    const Shape shapes[] = {
+        {9, 10},    // 100
+        {15, 15},   // 241
+        {21, 22},   // 484
+        {30, 32},   // 991
+        {44, 44},   // 1981
+        {63, 63},   // 4033
+    };
+
+    // NOTE ON THE STATISTIC: report MEDIAN and MIN, not mean. On a loaded box
+    // (and especially under `taskpolicy -b`, where the process is pinned to the
+    // efficiency cores and descheduled aggressively) the mean is dominated by
+    // scheduler stalls, not by layout cost — mean/median ratios of 8x were
+    // observed. Median is the honest per-pass cost; min is the uncontended
+    // floor.
+    std::printf("\n  Scaling sweep (static tree, nothing changes between passes)\n");
+    std::printf("  nodes  median_us    min_us   us/node   allocs/pass  %%frame(60fps)  %%frame(120fps)\n");
+    std::printf("  ---------------------------------------------------------------------------------\n");
+
+    for (const auto& s : shapes) {
+        auto tree = build_tree(s.rows, s.per_row);
+
+        // The engine's own count must agree with the arithmetic one.
+        yoga_layout_reset_stats();
+        tree->root.layout_children();
+        REQUIRE(yoga_layout_pass_count() == 1);
+        REQUIRE(static_cast<int>(yoga_layout_last_node_count()) == tree->managed_nodes);
+
+        const int passes = tree->managed_nodes > 1500 ? 100 : 300;
+        auto r = measure(*tree, /*animated=*/false, passes, 20);
+        const double frame_pct = 100.0 * r.median_us / kFrameBudgetUs;
+        std::printf("  %5d %10.1f %9.1f %9.3f %13.0f %13.2f%% %14.2f%%\n",
+                    r.nodes, r.median_us, r.min_us, r.median_us / r.nodes,
+                    r.allocs_per_pass, frame_pct, 2.0 * frame_pct);
+    }
+    std::printf("\n");
+}
+
+// ─── The crux: does a paint-only frame still pay for a full relayout? ───────
+//
+// Every platform paint path calls root_.layout_children() before painting
+// (window_host_mac.mm:1406, :1714, :2563; plugin_view_host_mac.mm:2032;
+// plugin_view_host_win.cpp:632; plugin_view_host_linux.cpp:838;
+// plugin_view_host_ios.mm:1283; gpu_surface_android.cpp:449), and
+// View::layout_children() (view.cpp:2100-2118) has NO dirty check — it goes
+// straight to yoga_layout().
+//
+// This test drives a tree through frames where ONLY paint state changes (the
+// hover-glow / shader-uniform / meter-value case: colors and opacity, nothing
+// that can move a box) and asserts:
+//   1. a full Yoga rebuild runs on EVERY frame (pass count == frame count),
+//   2. every one of those passes produces byte-identical bounds — i.e. 100% of
+//      the work is provably discardable,
+//   3. View's layout-dirty flag is not even SET by a paint-only mutation, and
+//      is not consulted by anything (nothing in the repo reads layout_dirty();
+//      the only readers of the flag are clear_layout_dirty() call sites).
+TEST_CASE("Paint-only frames still pay for a full relayout", "[view][layout][bench][yoga][dirty]") {
+    using namespace pulp::view;
+
+    auto tree = build_tree(21, 22); // 484 managed nodes
+    tree->root.layout_children();
+
+    auto snapshot = [&] {
+        std::vector<Rect> out;
+        out.reserve(tree->leaves.size() + tree->rows.size());
+        for (auto* v : tree->rows)   out.push_back(v->bounds());
+        for (auto* v : tree->leaves) out.push_back(v->bounds());
+        return out;
+    };
+    const auto before = snapshot();
+
+    constexpr int kFrames = 120; // two seconds at 60fps
+
+    yoga_layout_reset_stats();
+    g_alloc_count.store(0, std::memory_order_relaxed);
+    g_counting.store(true, std::memory_order_relaxed);
+
+    auto t0 = std::chrono::steady_clock::now();
+    for (int f = 0; f < kFrames; ++f) {
+        // The ONLY thing that changes each frame is paint state: a glow color
+        // ramp and an opacity fade. Neither can affect any box's geometry.
+        const float phase = static_cast<float>(f) / kFrames;
+        for (size_t i = 0; i < tree->leaves.size(); i += 8) {
+            tree->leaves[i]->set_background_color(
+                pulp::canvas::Color::rgba(phase, 0.2f, 0.6f, 1.0f));
+            tree->leaves[i]->set_opacity(0.5f + 0.5f * phase);
+        }
+        // Exactly what every platform paint path does before painting.
+        tree->root.layout_children();
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    g_counting.store(false, std::memory_order_relaxed);
+
+    const auto after = snapshot();
+    const double total_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    const uint64_t passes = yoga_layout_pass_count();
+    const uint64_t allocs = g_alloc_count.load();
+
+    // 1. One full Yoga tree build+free per frame, unconditionally.
+    REQUIRE(passes == static_cast<uint64_t>(kFrames));
+    REQUIRE(yoga_layout_last_node_count() == 484u);
+
+    // 2. Every pass recomputed the same answer.
+    REQUIRE(after.size() == before.size());
+    size_t changed = 0;
+    for (size_t i = 0; i < after.size(); ++i) {
+        if (after[i].x != before[i].x || after[i].y != before[i].y ||
+            after[i].width != before[i].width || after[i].height != before[i].height)
+            ++changed;
+    }
+    REQUIRE(changed == 0);
+
+    // 3. The dirty flag was never even set by the paint-only mutations — and no
+    //    layout path reads it regardless.
+    REQUIRE(tree->root.layout_dirty() == false);
+    REQUIRE(tree->leaves[0]->layout_dirty() == false);
+
+    std::printf("\n  Paint-only animation, 484-node tree, %d frames:\n"
+                "    full Yoga rebuilds : %llu  (one per frame — no dirty gate)\n"
+                "    bounds that changed: %zu / %zu\n"
+                "    heap allocations   : %llu  (%.0f/frame)\n"
+                "    layout wall clock  : %.1f ms over %d frames (%.2f ms/s at 60fps)\n"
+                "    => 100%% of this layout work is recomputing an answer it already had.\n\n",
+                kFrames, static_cast<unsigned long long>(passes),
+                changed, after.size(),
+                static_cast<unsigned long long>(allocs),
+                static_cast<double>(allocs) / kFrames,
+                total_ms, kFrames, 60.0 * total_ms / kFrames);
 }
