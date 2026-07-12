@@ -20,10 +20,9 @@
 /// written from first principles against those references — no
 /// libsamplerate / SoX / SRC source code consulted.
 ///
-/// The Kaiser-window helpers (`kaiser_beta_for_stopband`,
-/// `kaiser_length_for_transition`, `kaiser_window`,
-/// `bessel_i0`) are intentionally inlined here so this header stays
-/// header-only and the test surface can exercise the math directly.
+/// The Kaiser-window helpers live in `windowed_sinc_design.hpp` so the
+/// arbitrary-ratio resampler and integer-factor oversampler share one design
+/// implementation.
 ///
 /// Streaming contract:
 /// - `prepare(input_rate, output_rate, channels, max_block_size)`
@@ -45,115 +44,14 @@
 /// - Allocation-free `process_block()` after `prepare()`.
 /// - Streaming state survives buffer-size changes without click.
 
+#include <pulp/signal/windowed_sinc_design.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <vector>
 
 namespace pulp::signal {
-
-// ────────────────────────────────────────────────────────────────────────────
-// Kaiser-window math (header-inline so tests can hit it directly).
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Modified Bessel function of the first kind, order 0 — series
-/// expansion sufficient for `|x|` in the regime used by Kaiser-window
-/// design (β rarely exceeds ~20 for any audio-grade stopband target).
-inline double bessel_i0(double x) {
-    // I0(x) = sum_{k=0..∞} ((x/2)^(2k) / (k!)^2)
-    // Converges fast for moderate x; cap the series at a generous
-    // iteration count and break early when the term falls below
-    // machine epsilon × the running sum.
-    const double half_x = 0.5 * x;
-    double sum = 1.0;
-    double term = 1.0;
-    for (int k = 1; k < 64; ++k) {
-        term *= (half_x / static_cast<double>(k));
-        const double t2 = term * term;
-        sum += t2;
-        if (t2 < 1e-20 * sum) break;
-    }
-    return sum;
-}
-
-/// Kaiser β from a desired stopband attenuation in dB. Standard
-/// closed form from Oppenheim & Schafer §7.5.3.
-inline double kaiser_beta_for_stopband(double stopband_db) {
-    if (stopband_db > 50.0) {
-        return 0.1102 * (stopband_db - 8.7);
-    } else if (stopband_db >= 21.0) {
-        return 0.5842 * std::pow(stopband_db - 21.0, 0.4)
-             + 0.07886 * (stopband_db - 21.0);
-    } else {
-        return 0.0;
-    }
-}
-
-/// Number of FIR taps needed for a given normalized transition band
-/// `df_norm` (transition width / sample-rate of the filter) at a
-/// given stopband attenuation. Rounded up to odd so the filter has a
-/// well-defined center tap.
-inline std::size_t kaiser_length_for_transition(double stopband_db,
-                                                double df_norm) {
-    if (df_norm <= 0.0) df_norm = 1e-6;
-    const double n = (stopband_db - 7.95) / (14.36 * df_norm);
-    std::size_t taps = static_cast<std::size_t>(std::ceil(n)) + 1;
-    if ((taps & 1u) == 0u) ++taps;        // force odd → symmetric
-    if (taps < 3u) taps = 3u;
-    return taps;
-}
-
-/// Sample the symmetric Kaiser window of length `n` (odd recommended)
-/// into `out`. `out` must be pre-sized to `n`.
-inline void kaiser_window(std::vector<double>& out, double beta) {
-    const std::size_t n = out.size();
-    if (n == 0) return;
-    const double denom = bessel_i0(beta);
-    const double half = 0.5 * static_cast<double>(n - 1);
-    for (std::size_t i = 0; i < n; ++i) {
-        const double x = (static_cast<double>(i) - half) / half;  // x ∈ [-1, +1]
-        const double arg = beta * std::sqrt(std::max(0.0, 1.0 - x * x));
-        out[i] = bessel_i0(arg) / denom;
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Windowed-sinc low-pass design.
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Build a Kaiser-windowed-sinc low-pass FIR with `n_taps` coefficients
-/// (odd recommended), normalized cutoff `fc` in cycles/sample (i.e.
-/// fraction of the operating sample rate; 0.5 = Nyquist), and Kaiser
-/// `beta`. Coefficients are normalized so DC gain is exactly 1.0.
-inline std::vector<double> design_windowed_sinc(std::size_t n_taps,
-                                                double fc,
-                                                double beta) {
-    std::vector<double> h(n_taps, 0.0);
-    std::vector<double> win(n_taps, 0.0);
-    kaiser_window(win, beta);
-    const double half = 0.5 * static_cast<double>(n_taps - 1);
-    constexpr double kPi = 3.14159265358979323846;
-    const double two_fc = 2.0 * fc;
-    for (std::size_t i = 0; i < n_taps; ++i) {
-        const double m = static_cast<double>(i) - half;
-        double sinc;
-        if (std::abs(m) < 1e-12) {
-            sinc = two_fc;
-        } else {
-            const double a = kPi * two_fc * m;
-            sinc = std::sin(a) / (kPi * m);
-        }
-        h[i] = sinc * win[i];
-    }
-    // Normalize DC gain to 1.
-    double sum = 0.0;
-    for (double v : h) sum += v;
-    if (std::abs(sum) > 1e-18) {
-        const double inv = 1.0 / sum;
-        for (double& v : h) v *= inv;
-    }
-    return h;
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Polyphase-FIR resampler with arbitrary ratio.

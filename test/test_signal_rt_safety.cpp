@@ -121,6 +121,18 @@ TEST_CASE("Oversampler process is allocation-free after configuration",
                                         Oversampler::Factor::x2);
     require_process_allocates_no_memory(Oversampler::Kind::polyphase_iir,
                                         Oversampler::Factor::x4);
+    require_process_allocates_no_memory(Oversampler::Kind::polyphase_iir,
+                                        Oversampler::Factor::x8);
+    require_process_allocates_no_memory(Oversampler::Kind::polyphase_iir,
+                                        Oversampler::Factor::x16);
+    require_process_allocates_no_memory(Oversampler::Kind::linear_phase_fir,
+                                        Oversampler::Factor::x2);
+    require_process_allocates_no_memory(Oversampler::Kind::linear_phase_fir,
+                                        Oversampler::Factor::x4);
+    require_process_allocates_no_memory(Oversampler::Kind::linear_phase_fir,
+                                        Oversampler::Factor::x8);
+    require_process_allocates_no_memory(Oversampler::Kind::linear_phase_fir,
+                                        Oversampler::Factor::x16);
 }
 
 TEST_CASE("Oversampler process_block is allocation-free after configuration",

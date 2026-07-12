@@ -667,12 +667,14 @@ Default: `tanh_clip`, drive = 1.0.
 
 ### Oversampler
 
-Runs a processing callback at 2x or 4x sample rate with anti-aliasing filters on input and output.
+Runs a processing callback at 2x, 4x, 8x, or 16x sample rate with anti-aliasing filters on input and output.
 
 ```cpp
 signal::Oversampler os;
 os.set_factor(signal::Oversampler::Factor::x2);
 os.set_sample_rate(sample_rate);
+os.set_kind(signal::Oversampler::Kind::linear_phase_fir);
+os.set_quality(signal::Oversampler::Quality::pristine);
 
 signal::WaveShaper shaper;
 shaper.set_drive(4.0f);
@@ -691,17 +693,32 @@ os.process_block(input, output, num_samples, [&](float s) {
 
 | Method | Description |
 |---|---|
-| `set_factor(Factor)` | `Factor::x2` or `Factor::x4`. |
+| `set_factor(Factor)` | `Factor::x2`, `Factor::x4`, `Factor::x8`, or `Factor::x16`. |
 | `set_sample_rate(float)` | Set base sample rate. Configures anti-aliasing filters. |
+| `set_kind(Kind)` | Select the legacy Biquad, minimum-phase polyphase IIR, or linear-phase FIR lane. |
+| `set_quality(Quality)` | Select `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist) for the linear-phase lane. |
+| `latency()` | Return host-rounded and exact base-rate latency plus whether the delay is constant. |
+| `latency_samples()` | Return the integer base-rate delay for `Processor::latency_samples()`. |
 | `process(float, callback)` | Upsample, process via callback, downsample. |
 | `process_block(const float*, float*, size_t, callback)` | Process a contiguous block; input and output may alias. |
 | `reset()` | Clear filter states. |
 
-The default anti-aliasing lane uses lowpass Biquads set to `0.4 * base_sample_rate` at the oversampled rate. `Kind::polyphase_iir` uses half-band IIR stages and cascades two stages for 4x oversampling. Energy is preserved by scaling the upsampled signal by the oversampling factor.
+The default anti-aliasing lane uses lowpass Biquads set to `0.4 * base_sample_rate` at the oversampled rate. `Kind::polyphase_iir` uses cascaded half-band allpass stages. Both are low-latency minimum-phase choices, but their group delay varies with frequency and therefore cannot truthfully expose one exact compensation value.
+
+`Kind::linear_phase_fir` is the host-compensated quality lane. Its final decimation stage has a transition band ending at the base-rate Nyquist; `Quality::standard` uses a 96 dB prototype with a passband edge at 80% of Nyquist, while `Quality::pristine` uses a 140 dB prototype with a passband edge at 90%. The realized numeric floor also depends on `SampleType`: the regression suite requires at least 120 dB rejection from the default float alias and 130 dB from `Oversampler64` (measured on the reference stopband tone at about 141 dB and 161 dB respectively). Higher-rate filters preserve only the base band that can reach the final output, which keeps ×8/×16 practical without weakening the final decimator's measured rejection. The fixed tap counts make the exact delay integral at every supported factor:
+
+| Factor | `standard` latency | `pristine` latency |
+|---|---:|---:|
+| 2x | 64 samples | 192 samples |
+| 4x | 76 samples | 209 samples |
+| 8x | 80 samples | 216 samples |
+| 16x | 82 samples | 219 samples |
+
+These values are base-rate samples and do not depend on sample rate or host block size. A processor using the linear-phase lane should return `os.latency_samples()` from its own `Processor::latency_samples()`. Factor, kind, and quality changes reconfigure and reset filter state; perform them in `prepare()` or while rendering is stopped, then use the framework's latency-change notification if a live control changes the reported value.
 
 `process()` and `process_block()` use a templated callback and fixed internal scratch storage. After construction/configuration, they do not allocate on the audio thread as long as the callback does not allocate. Configure factor, sample rate, and kind from `prepare()` or a control thread; those setters reset or reconfigure filter state.
 
-The oversampler does not latency-compensate its output. The Biquad lane has stateful IIR phase delay, and the polyphase lane inherits the half-band stage delay (about six samples per 2x half-band stage at that stage's input rate with the default coefficients). Compensate at the processor/plugin level when exact dry/wet alignment is required.
+The oversampler reports but does not remove its delay. For linear-phase processing, report that delay to the host and align any internal dry path. Pulp's latency-proof harness renders an identity path through every factor and quality, proves the measured delay matches the report, and pins the intended values so a tap-count refactor cannot silently add latency. Minimum-phase modes deliberately do not claim a constant delay; use a frequency-aware phase strategy when parallel alignment is required.
 
 **Sample rate dependency:** `set_sample_rate()` required.
 
