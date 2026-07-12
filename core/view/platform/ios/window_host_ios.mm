@@ -433,10 +433,11 @@ public:
     }
 
 private:
+    // No FrameClock / HostFramePump here: this CPU host owns no CADisplayLink,
+    // so it has nothing to pump. The GPU host (IOSGpuWindowHost) is the one that
+    // drives a frame clock. Advancing animations on this host would need a frame
+    // source first — see the iOS gap noted in docs/guides/animation.md.
     View& root_;
-    FrameClock frame_clock_;
-    // Measured-dt source, fed by the CADisplayLink's targetTimestamp.
-    HostFramePump frame_pump_;
     UIWindow* window_ = nil;
     PulpRootView* root_view_ = nil;
     std::function<void()> close_callback_;
@@ -685,6 +686,9 @@ public:
 
 private:
     View& root_;
+    FrameClock frame_clock_;
+    // Measured-dt source, fed by the CADisplayLink's targetTimestamp.
+    HostFramePump frame_pump_;
     UIWindow* window_ = nil;
     PulpMetalWindowView* metal_view_ = nil;
     std::unique_ptr<render::GpuSurface> gpu_surface_;
