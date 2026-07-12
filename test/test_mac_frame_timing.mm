@@ -190,7 +190,10 @@ TEST_CASE("a STATIC CPU plugin editor dispatches no frames to the main thread",
     }
 }
 
-TEST_CASE("-[PulpView prepareForTeardown] drops EVERY pointer into the freed host",
+// Name deliberately avoids a leading '-' and square brackets: Catch2 reads a
+// leading dash as a CLI flag and brackets as tags, so ctest cannot invoke a
+// case named after an ObjC selector ("Unrecognised token: -[PulpView").
+TEST_CASE("PulpView prepareForTeardown drops every pointer into the freed host",
           "[view][mac][frame-pump][teardown]") {
     // The animation timer block dereferences BOTH the clock and the pump
     // (`*self.frameClock, *self.framePump`). prepareForTeardown cleared the clock
