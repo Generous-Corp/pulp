@@ -103,3 +103,14 @@ TEST_CASE("pulp audio render: latency flags must agree with each other",
                                          "/dev/null", "--latency-policy", "correlate"});
     REQUIRE(bad_policy.exit_code == 2);
 }
+
+TEST_CASE("pulp audio render: --latency-expect needs a proof to pin",
+          "[cli][audio-render][latency]") {
+    if (!binary_exists()) return;
+
+    // Pinning an intended latency is meaningless without a measurement to pin.
+    const auto orphan = render_with({"--input-signal", "noise",
+                                     "--latency-expect", "512"});
+    REQUIRE(orphan.exit_code == 2);
+    REQUIRE(orphan.stderr_output.find("--latency-report") != std::string::npos);
+}

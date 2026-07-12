@@ -265,6 +265,11 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
             const auto v = parse_u64(*value);
             if (!v) return usage_error("--latency-tolerance must be a nonnegative integer");
             r.latency_tolerance = static_cast<std::int64_t>(*v);
+        } else if (key == "--latency-expect") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            const auto v = parse_u64(*value);
+            if (!v) return usage_error("--latency-expect must be a nonnegative integer");
+            r.latency_expect = static_cast<int>(*v);
         } else if (key == "--latency-intrinsic") {
             if (!take_value(value)) return usage_error(key + " requires a value");
             const auto v = parse_u64(*value);
@@ -334,6 +339,8 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
     }
     if (r.latency_intrinsic != 0 && r.latency_policy != AudioRenderLatencyPolicy::Marker)
         return usage_error("--latency-intrinsic applies only to --latency-policy marker");
+    if (r.latency_expect.has_value() && r.latency_report_path.empty())
+        return usage_error("--latency-expect requires --latency-report <file.json>");
     if (has_ms && has_frames)
         return usage_error("--duration-ms and --duration-frames are mutually exclusive");
     if (!has_ms && !has_frames)
