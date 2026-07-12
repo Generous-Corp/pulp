@@ -96,7 +96,11 @@ jobs:
           import json
           dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
                      if d["name"] == "Skia")
-          a = dep["determinism"]["release_assets"]["wasm"]
+          # Key matches the release asset's platform segment
+          # (skia-build-<platform>-gpu-release.zip), the convention every other
+          # slice follows and the one check_manifest_mirrors.py enforces against
+          # external/skia-build/VERSION.md.
+          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
           print(a["url"], a["sha256"])
           PY
           )
