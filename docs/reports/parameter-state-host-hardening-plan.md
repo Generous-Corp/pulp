@@ -3,8 +3,8 @@
 ## Goal
 
 Close seven host-facing and real-time-safety gaps identified by comparing Pulp
-with Truce 6.1, JUCE, and iPlug2, without replacing Pulp's `Processor` model or
-copying framework-specific authoring abstractions.
+with JUCE and iPlug2, without replacing Pulp's `Processor` model or copying
+framework-specific authoring abstractions.
 
 This is a living implementation ledger. Status, validation evidence, and review
 findings are updated as the work progresses.
@@ -15,21 +15,10 @@ findings are updated as the work progresses.
 - Branch: `feature/parameter-state-hardening`
 - Original base: `origin/main` at `8efe1f9865ff792e53b7436f55e6a142eb1d9d5f`
 - Pre-merge rebase: `origin/main` at `26b27de44c5257c7f8488e08699ddf10740cac59`
-- Reference trees: `/Users/danielraffel/Code/truce`,
-  `/Users/danielraffel/Code/JUCE`, `/Users/danielraffel/Code/iPlug2`
+- Reference trees: `/Users/danielraffel/Code/JUCE`,
+  `/Users/danielraffel/Code/iPlug2`
 
 ## Comparative parameter findings
-
-### Truce
-
-Truce records `Float`, `Int`, `Bool`, or `Enum` independently from the numeric
-range. This prevents a stepped float from accidentally becoming an integer and
-lets every adapter advertise the original author intent. Enum variant names are
-owned by the enum type, and all adapters route text parsing back through the
-parameter implementation.
-
-Useful invariant: semantic type is primary metadata; range and step are not a
-substitute for type.
 
 ### JUCE
 
