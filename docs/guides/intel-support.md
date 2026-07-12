@@ -22,7 +22,7 @@ Intel/AMD GPU.
 | 0 | Intel **canary**: static lint + `-DPULP_ENABLE_GPU=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64` compile of `pulp-runtime pulp-signal pulp-platform pulp-state pulp-format` | inside the existing ARM macOS job (`build.yml`), gated on the `PULP_INTEL_CANARY` repo variable | every PR (opt-in; forks pay nothing) | yes, on `danielraffel/pulp` |
 | 1 | Path-triggered **advisory** x86_64 build + full ctest under Rosetta | `intel-portability.yml`, **stable** `macos-15` (arm64+Rosetta) | PRs that touch arch-sensitive paths | no (advisory) |
 | 2 | **Nightly** native Intel (job A) + universal cross-check (job B) | `nightly-intel.yml`: job A on `macos-15-intel`, job B on `macos-15` | cron, off-peak | no (opens a watchdog issue) |
-| 3 | **Release gate**: universal build + `lipo -archs` + `codesign --verify` + dual-arch `auval` | `release-cli.yml` `universal-arch-gate` | on tag / release dispatch | advisory as of 2026-07-11 (see note) |
+| 3 | **Universal cross-check**: universal build + `lipo -archs` + `codesign --verify` + dual-arch `auval` | `nightly-intel.yml` `universal-crosscheck` | nightly | advisory |
 
 The Tier-3 gate was blocking, but as of 2026-07-11 it is **advisory**
 (`continue-on-error`, dropped from the `release` job's required `if:`): a known

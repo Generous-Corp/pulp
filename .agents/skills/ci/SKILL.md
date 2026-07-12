@@ -478,7 +478,7 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   (release-cli is the sole creator of the GitHub release; sign-and-release only
   attaches `appcast.xml` on top), sign-and-release polls `gh release view "$TAG"`
   until the release exists. release-cli creates it only after its whole chain
-  (`build-cli → smoke-cli → universal-arch-gate`), which includes a self-hosted
+  (`build-cli → smoke-cli`), which includes a self-hosted
   darwin-arm64 leg that can queue behind a busy runner — routinely far longer
   than 10 minutes. A too-short poll loses that race on every tag and leaves the
   published release without its Sparkle feed (the watchdog flags it as a broken
@@ -887,15 +887,15 @@ in `tools/shipyard.toml`). It:
    → sign + notarize → 11-asset publish) is documented end-to-end in
    [docs/guides/release-pipeline.md](../../../docs/guides/release-pipeline.md).
    **Keep that doc in sync when you touch any release workflow.**
-   **Auto-supersede behavior**: when a new SDK tag is created, the workflow
-   cancels any in-flight `release-cli.yml` / `sign-and-release.yml` runs for
-   strictly-older SemVer tags and deletes their draft releases. This prevents
-   the 2026-05-15 v0.101.x saga from recurring (5 bumps each queueing a full
-   macos-15 darwin-arm64 build, latest waiting hours behind already-obsolete
-   builds). Opt out via `vars.PULP_RELEASE_MODE=land-all` (repo-wide) or
-   `Release-Supersede: skip reason="..."` trailer on the merging commit
-   (per-release). See #2076 + the `release-draft-stuck-check.yml` newest-SemVer
-   skip for the watchdog side of the cleanup.
+   **There is NO supersede reaper, and you must not add one back.**
+   `auto-release.yml` used to cancel in-flight `release-cli` / `sign-and-release`
+   runs and DELETE the draft releases of any tag older than the latest published
+   one, on the theory that an older SemVer is obsolete. Releases complete OUT OF
+   ORDER here — the pipeline (70-165+ min) outlasts the gap between tags (~100
+   min) — so that theory is false, and the reaper destroyed healthy releases whose
+   binaries had all built green. It is why only 7% of tags published first-try in
+   July 2026. `auto-release.yml` now has no `actions` scope, so it *cannot* cancel
+   a run. Saving runner minutes is never worth losing a release.
 
 Never run `gh pr create` + `shipyard ship` separately for a normal ship
 cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
@@ -3056,7 +3056,21 @@ canonical subject `chore: bump versions`.
 
 **Shared-source priming is retry-wrapped (#1375):** every `ensure_shared_git_source` call in `setup.sh` runs through `ensure_shared_git_source_with_retry` (3 attempts, 5s/10s/20s backoff, scrubs the partial cache target between attempts). Motivated by v0.74.0 + v0.74.1 release-cli runs both dying on `windows-arm64` mid-`Priming shared Yoga source cache` with exit 127 — a transient command-not-found on a Windows shell wrapper. The retry happens at the WRAPPER level, not inside `ensure_shared_git_source`, because that function uses a `set -e` subshell which a 127 tears down before any inner retry can engage. Override attempts via `PULP_PRIMING_RETRY_ATTEMPTS=N`.
 
-**Per-tag release-cli watchdog (#1375):** `.github/workflows/release-cli-watchdog.yml` triggers on `workflow_run` for `release-cli.yml`. It resolves the tag from `head_branch`, queries the GitHub release for `pulp-sdk-*` and `pulp-{darwin,linux,windows}-*` assets via `gh release view`, and opens a per-tag tracker on three failure shapes: `run_failure`, `success_with_missing_assets` (the v0.74.0 pattern — release exists with only plugin .pkg files from `sign-and-release.yml`), `no_release` (the v0.74.1 pattern — `release-cli`'s `release` job never ran because `build-cli`/`smoke-cli` failed). The tracker's body suggests `gh workflow run release-cli.yml --ref vX.Y.Z -f version=vX.Y.Z` to backfill, and auto-closes when the SDK assets land. This is documented as Layer 2b in `docs/guides/release-watchdog.md`.
+**Release health is ONE reconciler that repairs, not watchdogs that report.**
+`.github/workflows/release-reconcile.yml` (+ `tools/scripts/release_reconcile.py`)
+runs every 30 min: for each recent SDK tag it compares desired state (a published
+release) against actual, and RE-DISPATCHES `release-cli.yml` for anything stuck
+(max 3 attempts), so a transient failure no longer needs a human backfill. Rules
+that matter: a tag with a LIVE run is left alone at ANY age (slow is not broken); a
+tag already superseded by a newer published release is not rebuilt (don't burn a
+2h matrix on a release nobody installs); it NEVER cancels or deletes anything; and
+it keeps exactly ONE incident issue, updated in place. It replaced four report-only
+watchdogs (`release-guard`, `release-health`, `release-cli-watchdog`,
+`release-draft-stuck-check`) that filed 413 issues in two weeks and fixed nothing —
+their grace windows (15/30/45/60 min) were all shorter than the real pipeline, so
+they alarmed on healthy releases. If you add a watchdog, it MUST know whether the
+thing it is judging is still running, and MUST be able to find its own previous
+issue, or it becomes a firehose.
 
 **Linux release-cli requires libfontconfig1-dev (#1970):** chrome/m144 Skia exposes fontconfig symbols that the previous release kept private. Without `libfontconfig1-dev` in the apt-install step, the Linux link fails on `undefined reference to FcInitLoadConfigAndFonts` et al. Both `release-cli.yml` and `build.yml` Linux deps steps install it. When bumping `tools/deps/manifest.json` Skia pin, run `nm -D` over the new `libskia.a` and grep for unfamiliar prefixes (`Fc`, `Hb`, `FT_`, etc.) — any new symbol class means a matching system package needs to be added.
 
@@ -3067,7 +3081,7 @@ gh workflow run release-cli.yml --ref main \
     -f version=v0.97.0
 ```
 
-The workflow file comes from main (fixed), the source tree comes from the tag (correct content), and the overlay step picks up post-tag script fixes automatically. `release-guard.yml` and `release-cli-watchdog.yml` will auto-close their trackers when the SDK assets land. This was the fix for the four-day stall on v0.95.0..v0.97.0 caused by a skia-builder chrome/m144 zip layout drift (`Release/<arch>/libskia.a` instead of `Release/libskia.a`). The fetch script flattens the arch subdir; regression coverage lives in `tools/scripts/test_fetch_skia_for_release.py`, with workflow-condition coverage in `tools/scripts/test_release_workflow_test_step.py`.
+The workflow file comes from main (fixed), the source tree comes from the tag (correct content), and the overlay step picks up post-tag script fixes automatically. `release-reconcile.yml` will also do this for you automatically within 30 minutes, and closes its incident once the assets land. This was the fix for the four-day stall on v0.95.0..v0.97.0 caused by a skia-builder chrome/m144 zip layout drift (`Release/<arch>/libskia.a` instead of `Release/libskia.a`). The fetch script flattens the arch subdir; regression coverage lives in `tools/scripts/test_fetch_skia_for_release.py`, with workflow-condition coverage in `tools/scripts/test_release_workflow_test_step.py`.
 
 **Nightly cross-platform check (`.github/workflows/cross-platform-check.yml`):** Pulp's team develops and tests on macOS; Linux, Windows, and Android are advisory "tell us if it breaks" signal, and per-PR CI has been slimmed so those legs no longer run on every PR. This scheduled workflow is the backstop. It runs nightly (`cron: '17 7 * * *'` — odd minute, off-peak; also `workflow_dispatch` for manual bisect) and builds + tests **Linux** (`ubuntu-latest`), **Windows** (`windows-latest`), and **Android** (NDK build on `ubuntu-latest`) as three independent jobs with `fail-fast: false` so one platform breaking never masks the others — catching ALL cross-platform breakage in one pass is the point. GitHub-hosted runners only: it must never consume the scarce self-hosted macOS capacity. A final `tracking-issues` job (`needs:` all three, `if: always()`) maintains **one tracking issue PER platform**, keyed by the EXACT titles `Cross-platform Linux check is broken` / `Cross-platform Windows check is broken` / `Cross-platform Android check is broken`. It reuses `auto-release-watchdog.yml`'s find-or-create / edit / reopen / close gh-api pattern: a failed platform job opens (or reopens + edits) its issue; a passing one closes its open issue. De-dup is by `gh issue list --search "in:title <title>" --state all` matching the exact title — never a fresh issue per night. Created issues carry `bug`, `ci`, `cross-platform`, and `platform:linux`/`platform:windows`/`platform:android` labels, and the body includes the run URL, tip SHA, per-job results, artifact name, and the commit range since the last green run (derived from the Actions API) so a regression can be bisected within a night's batch. Distinct from `nightly-full-build.yml`, which does the full macOS `make all` to catch test targets PR CI never compiles; this workflow is the *non-macOS* coverage PR CI no longer provides. If you slim or restore a per-PR advisory platform leg, keep this nightly in sync — it is the only thing keeping cross-platform debt visible.
 
@@ -3782,7 +3796,7 @@ full design in `docs/guides/intel-support.md`). CI-relevant facts:
   (quarantined here, `timeout-minutes: 120`, infra-vs-product watchdog), job B a
   universal cross-check on `macos-15`. Opens/auto-closes one dedup watchdog
   issue.
-- **Tier 3** is the **blocking** `universal-arch-gate` job in `release-cli.yml`.
+- **Tier 3** is the `universal-crosscheck` job in `nightly-intel.yml` (nightly, advisory). It is deliberately NOT on the release path: an advisory gate must never compete with the release for the hosted macOS pool.
 
 Hard rule: **no Intel work ever routes to the self-hosted Studios** (they host
 the required `macos` gate) and **Namespace is never used**. All Intel lanes run

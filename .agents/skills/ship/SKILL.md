@@ -23,7 +23,7 @@ The `pulp ship` command handles the full distribution pipeline: code signing, Ap
 
 For the end-to-end release pipeline that turns a merged PR into a published GitHub Release (auto-release.yml → sign-and-release.yml → release-cli.yml, the 11 published assets, and the failure-mode triage by which asset is missing), see [`docs/guides/release-pipeline.md`](../../../docs/guides/release-pipeline.md). Cross-reference comments at the top of `release-cli.yml` and `sign-and-release.yml` point back to that doc — keep them in sync when either workflow changes ownership of appcast generation, draft creation, or the matrix-tarball upload.
 
-`release-cli.yml` also carries the **Tier-3 Intel gate** (`universal-arch-gate`, owned by the `intel-canary` skill): before the `release` job publishes, it builds the PulpGain example universal (`arm64;x86_64`), asserts `lipo -archs` + `codesign --verify` on every shipped bundle and embedded dylib via `tools/scripts/check_bundle_architectures.py --strict` (a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is killed at load — always re-sign after lipo), and runs `auval` both natively and under `arch -x86_64`. **This gate is BLOCKING.** It was briefly advisory when it wedged the release pipeline — misdiagnosed as an AU-adapter "Bad Max Frames" issue. The real cause was a shell bug: `auval 2>&1 | tee /dev/stderr | grep -q 'PASS'` under `set -o pipefail` — `grep -q` exits on the first match and SIGPIPEs `tee` ("tee: stdout: Broken pipe" in the log), failing the step even though auval printed "AU VALIDATION SUCCEEDED". auval itself passes both arches (Bad Max Frames is already rejected by `AUBase::DoRender`). Fix: capture auval output to a file and grep it for the authoritative `AU VALIDATION SUCCEEDED` verdict, with `|| true` so auval's exit code can't fail the pipeline — NEVER pipe `auval | tee | grep -q` under pipefail. See `docs/guides/intel-support.md`.
+**There is no Intel/universal gate on the release path.** A `universal-arch-gate` job used to build PulpGain universal and run dual-arch `auval` on every tag. It was removed: it is redundant with `nightly-intel.yml`'s `universal-crosscheck` (same check) and `intel-portability.yml` (Intel at PR time), and — worse — it pinned itself to the GitHub-hosted `macos-15` pool for ~2h per tag, which is the SAME scarce pool the release's own required `darwin-x64` legs need. At ~14 tags/day it queued ~28 macOS-hours/day of hosted work ahead of the leg that actually gates publication, while the self-hosted Studios sat idle. Never put an advisory check in front of the release on a pool the release itself competes for. (Universal-build gotcha worth keeping: a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is SIGKILL'd at load — always re-sign after lipo.) See `docs/guides/intel-support.md`.
 
 **Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI), and route through `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default `["macos-15"]`), NOT `resolve-macos-runner` (keeps Intel off the Studios). The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
 - `continue-on-error` on a matrix leg masks a clean **failure** (leg finishes non-zero) but NOT a **cancellation** (timeout / stuck-queued / run-cancel). A cancelled advisory leg still turns the aggregate `cancelled`. If you ever reintroduce an advisory leg, wrap its long steps in a shell `timeout` so they exit non-zero (clean fail) *before* the job `timeout-minutes` cancels them.
@@ -1063,28 +1063,65 @@ from the tag's source. Two safe options:
 - Java version (17+ required for AGP 8+)
 - Build-tools availability (apksigner, zipalign)
 
-## Release publishing is coordinated across two workflows (immutable releases)
+## ONE job publishes the release, end to end
 
-A full Pulp release = CLI binaries (`release-cli.yml`) + macOS sign/notarize &
-Sparkle appcast (`sign-and-release.yml`), built in parallel on a tag. Because
-GitHub published releases are now immutable, both legs create the release as a
-DRAFT and `release-publish.yml` publishes it once BOTH succeed. So a release only
-appears once the macOS sign/notarize leg is green too; a red sign-and-release leg
-leaves the release a draft. See the `ci` skill's coordinator note for the full
-mechanism and debugging steps.
+`release-cli.yml`'s `release` job is the **sole writer** of the GitHub Release. It
+downloads the 6 platform pairs, writes `appcast.xml` itself, attaches all 13
+assets, verifies the EXACT required asset set, generates `SHA256SUMS`, and
+publishes — all inside one job. It sets the title (the bare tag, e.g. `v0.659.0`)
+and the body (humanized highlights from `compose_release_notes.py --footer`).
+
+`sign-and-release.yml` signs and notarizes the example-plugin `.pkg` bundles and
+keeps them as workflow artifacts. It holds `contents: read` and **cannot touch a
+release**. It may fail, hang, or be cancelled without affecting whether the SDK
+ships.
+
+**Do not re-couple publication to the signing leg.** It used to be a handshake
+across three workflows (release-cli drafted → sign-and-release polled for that
+draft to attach `appcast.xml` → a coordinator flipped the draft once BOTH legs
+succeeded). That made the release only as reliable as its worst leg and produced a
+**7% first-attempt success rate** — 11 of 18 consecutive tags never published,
+several with all six platform binaries built green. The poll was the killer: it
+waited a fixed window for a draft that does not appear until the full build matrix
+finishes (70-165+ min, because the macOS legs queue for hours on the shared hosted
+pool), so every slow release timed it out.
+
+If you find yourself widening that timeout, stop — that is treating the symptom,
+and it burns a macOS runner doing nothing but waiting. `appcast.xml` is a pure
+function of the tag name and the date (no enclosure, no signature, no dependency
+on a notarized artifact), which is why it can be, and is, written by the release
+job itself.
+
+Guarantees are structural so they cannot quietly regress, and each is pinned by a
+test in `tools/scripts/test_release_workflow_test_step.py`:
+
+| Invariant | Enforced by |
+|---|---|
+| sign-and-release cannot write a release | it holds `contents: read` |
+| auto-release cannot cancel a release run | it has no `actions` scope |
+| the advisory universal gate cannot block a release | it is not in `release`'s `needs` |
+| recovery can only drive a release forward | `release_reconcile.py` has no cancel/delete path |
+
+**A published GitHub release is IMMUTABLE.** Assets can only be attached while it
+is still a draft, which is why the release job creates a draft and publishes it in
+the same job (the draft lives for seconds and is never observable from outside).
+It also means a release that publishes with a missing asset cannot be repaired —
+it needs a new patch tag.
+
+**Slow is survivable; racy is not.** A three-hour release still publishes. Never
+add automation that cancels or deletes an in-flight release because a newer tag
+appeared: releases legitimately complete OUT OF ORDER now (the pipeline outlasts
+the ~100-min gap between tags), and the "supersede reaper" that assumed otherwise
+is what destroyed most of July 2026's releases.
+
+A stuck release repairs itself: `release-reconcile.yml` re-dispatches any recent
+tag that never published (max 3 attempts), leaves any tag with a LIVE run alone at
+any age, and keeps exactly one incident issue. Don't hand-backfill unless it
+escalates.
 
 Both macOS legs prefer `PULP_RELEASE_MACOS_RUNS_ON_JSON`. The signing leg then
-uses optional Namespace or GitHub-hosted `macos-15`; it deliberately does not
-fall back to the shared local PR pool because it imports a Developer ID private
-key. Do not route signing directly to the hosted pool while an isolated release
-runner is configured; that split can leave a complete 10-asset draft waiting
-hours for `appcast.xml`.
-
-`release-cli.yml` also owns the Release body: it prepends grouped Highlights
-from `tools/scripts/compose_release_notes.py` to GitHub's generated "What's
-Changed" / "Full Changelog" block, then appends the Install section. Do not route
-that user-facing body through the deleted in-tree changelog generator; Shipyard's
-`shipyard changelog regenerate` path is only for `CHANGELOG.md`.
+uses optional Namespace or GitHub-hosted `macos-15`; it deliberately does not fall
+back to the shared local PR pool because it imports a Developer ID private key.
 
 ## One installer for a plugin: standalone + plugins + diagnostics (don't ship them separately)
 
@@ -1136,20 +1173,3 @@ doctor` provisions). If neither `pulp-cpp` nor a notary key is available the ste
 **fails loudly** (never ships a signed-but-unnotarized `.pkg`); pass
 `--no-notarize` to opt out deliberately. Always `stapler validate` +
 `spctl --assess --type install` the finished `.pkg` regardless of path.
-
-## Release page: ONE workflow owns the GitHub Release
-
-`release-cli.yml` is the **sole creator** of the GitHub Release for a `v*` tag:
-it sets the title (the **bare tag**, e.g. `v0.645.0` — no "Pulp CLI" prefix),
-the body (humanized highlights from `tools/scripts/compose_release_notes.py
---footer`, which appends the `**Full changelog:** CHANGELOG.md § X` +
-`**Previous release:** vA.B.C` footer), and uploads the CLI/SDK binaries.
-`sign-and-release.yml` must **only** `gh release upload` `appcast.xml` onto that
-release — it must NOT create/name/draft it. Both fire on the same `v*` tag, so if
-sign-and-release creates/renames/drafts a release it RACES release-cli and
-last-writer-wins produces inconsistent titles (`Pulp CLI vX` vs `vX`),
-draft/published flips, stray `release-untagged-*` entries, and GitHub's
-`Full Changelog: A...B` compare footer instead of the CHANGELOG-§ one. Release
-notes link a PR (`#N`) for every entry via `compose_release_notes.py`'s
-`pr_for_commit` GitHub commit→PR lookup; only genuine direct-to-main commits show
-a short SHA. See `planning/2026-07-10-release-page-hygiene.md`.

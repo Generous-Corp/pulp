@@ -35,8 +35,10 @@ concurrency:
 permissions:
   contents: write   # tag push
   issues: write     # open the "stranded fix/feat" tracker (issue #1009)
-  actions: write    # cancel superseded release-cli / sign-and-release runs
-                    # (see "Supersede older in-flight builds" step below)
+  # NO `actions: write`. This workflow must not be able to cancel a workflow
+  # run. It held that scope to cancel "superseded" release builds, which is how
+  # healthy in-flight releases were destroyed. Withholding the scope is what
+  # makes the removal structural rather than a convention.
 
 jobs:
   tag:
@@ -394,179 +396,36 @@ jobs:
               create_tag "plugin-v${PLUGIN_AFTER}"
           fi
 
-          # Expose the SDK tag we just created so downstream steps can
-          # supersede older in-flight builds. (Plugin tags don't go
-          # through release-cli, so they don't need supersede.)
+          # Expose the SDK tag we just created. The tag push is what drives
+          # release-cli.yml; nothing here acts on other tags' builds.
           if [ "$SDK_SHOULD_TAG" = "1" ] && [ -n "$SDK_AFTER" ]; then
               echo "sdk_tag=v${SDK_AFTER}" >> "$GITHUB_OUTPUT"
           fi
         id: tag
 
-      # ── Supersede older in-flight release-cli + sign-and-release runs ─
+      # ── No supersede reaper. This is load-bearing. ─────────────────────
       #
-      # Cancels release-cli.yml and sign-and-release.yml runs for any
-      # strictly-older SDK tag, then deletes the corresponding draft
-      # release. The intent: if v0.101.7 is mid-build and we just tagged
-      # v0.102.0, v0.101.7's artifacts are obsolete — users will only
-      # ever install v0.102.0. Saves github-hosted macos-15 minutes and
-      # gets the latest release to users faster.
+      # The "supersede reaper" that used to live here has been REMOVED.
       #
-      # Two opt-outs:
-      #   1. vars.PULP_RELEASE_MODE=land-all — repo-wide disable
-      #   2. `Release-Supersede: skip reason="..."` trailer on the tip
-      #      commit — per-release disable
+      # It cancelled any in-flight release-cli / sign-and-release run, and
+      # DELETED any draft release, whose tag was older than the latest published
+      # release. The premise was "an older SemVer is obsolete". That premise is
+      # false whenever releases complete OUT OF ORDER, which is the normal case
+      # here: the release pipeline takes 70-165+ minutes (its macOS legs queue on
+      # a shared hosted pool) while main tags roughly every 100 minutes. So a
+      # newer tag routinely published while an older tag was still legitimately
+      # building — and the reaper then destroyed that older, healthy release.
       #
-      # Cancelling sign-and-release.yml is important: it runs on the same
-      # tag push and can resurrect a draft release after release-cli is
-      # cancelled.
+      # It is the direct cause of releases whose binaries all built green but
+      # which never shipped: the reaper cancelled the leg they were waiting on,
+      # then garbage-collected the finished draft as "stale".
       #
-      # Semver via stdlib regex, not packaging.version (PEP 440 ≠ SemVer)
-      # and not `sort -V` (Pulp pre-release suffixes would be a future
-      # extension, but `sort -V` mis-orders them today).
-      - name: Supersede older in-flight release builds
-        if: steps.tag.outputs.sdk_tag != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_TAG: ${{ steps.tag.outputs.sdk_tag }}
-          RELEASE_MODE: ${{ vars.PULP_RELEASE_MODE || 'supersede-older' }}
-          REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          if [ "$RELEASE_MODE" = "land-all" ]; then
-            echo "RELEASE_MODE=land-all → skipping supersede"
-            exit 0
-          fi
-
-          # Per-release opt-out via commit trailer.
-          if git log -1 --format=%B HEAD | \
-               git interpret-trailers --parse | \
-               grep -qE '^Release-Supersede:\s*skip\b'; then
-            echo "Release-Supersede: skip trailer found → skipping supersede"
-            exit 0
-          fi
-
-          echo "Supersede check: new tag = $NEW_TAG"
-
-          python3 <<'PYEOF'
-          import json, os, re, subprocess, sys
-
-          NEW_TAG = os.environ["NEW_TAG"]
-          REPO = os.environ["REPO"]
-          SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-.+)?$")
-
-          def parse(tag):
-              m = SEMVER.match(tag)
-              if not m:
-                  return None
-              return tuple(int(g) for g in m.groups())
-
-          new_ver = parse(NEW_TAG)
-          if not new_ver:
-              print(f"NEW_TAG={NEW_TAG} is not a SemVer tag; skipping supersede")
-              sys.exit(0)
-
-          def gh(args, check=True):
-              r = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
-              if check and r.returncode != 0:
-                  print(f"gh api failed: {r.stderr}", file=sys.stderr)
-                  return None
-              return r.stdout
-
-          # The original supersede policy "cancel any tag strictly older
-          # than NEW_TAG" cascaded when main moved faster than
-          # release-cli.yml could finish. Every new tag cancelled the
-          # previous tag's release-cli, and itself got cancelled by the
-          # next tag, leaving SDK versions tagged-but-never-published.
-          # No watchdog caught it because release-cli was `cancelled`
-          # (not `failure`), the draft was deleted before the draft-stuck
-          # watchdog could fire, and the tag existed so cadence-check was
-          # satisfied.
-          #
-          # New policy: never cancel any tag ≥ the LATEST PUBLISHED
-          # release. We only supersede builds that we already know are
-          # obsolete (the published `latest` link has moved past them).
-          # Until a newer release actually publishes, every in-flight
-          # build is a candidate to be the next published release —
-          # cancelling them is what creates the starvation.
-          raw = gh([
-              f"/repos/{REPO}/releases?per_page=100",
-              "--jq", ".[] | select(.draft == false) | .tag_name",
-          ])
-          latest_published = None
-          if raw:
-              for line in raw.strip().splitlines():
-                  v = parse(line.strip())
-                  if v and (latest_published is None or v > latest_published):
-                      latest_published = v
-
-          if latest_published is None:
-              print("No published release yet; skipping supersede entirely (cannot establish threshold).")
-              sys.exit(0)
-
-          print(f"Supersede threshold = latest published {latest_published} "
-                f"(new tag {new_ver} > threshold; will cancel runs < threshold only)")
-
-          # Workflow IDs to scan. release-cli.yml + sign-and-release.yml.
-          workflows = [
-              ("release-cli.yml", "release-cli"),
-              ("sign-and-release.yml", "sign-and-release"),
-          ]
-
-          # Sweep ALL non-completed run states (codex P2 on #2076): the
-          # ?status= filter splits queued / in_progress / requested /
-          # waiting / pending into separate buckets, and a run may sit
-          # in any of them at the moment we read. Listing the full
-          # workflow runs page and filtering client-side by status is
-          # more robust than querying each named status separately.
-          NON_COMPLETED = {
-              "queued", "in_progress", "requested", "waiting", "pending",
-          }
-          for wf_file, wf_label in workflows:
-              raw = gh([
-                  f"/repos/{REPO}/actions/workflows/{wf_file}/runs?per_page=100",
-                  "--jq", ".workflow_runs[] | {id, head_branch, status}",
-              ])
-              if not raw:
-                  continue
-              for line in raw.strip().splitlines():
-                  run = json.loads(line)
-                  if run.get("status") not in NON_COMPLETED:
-                      continue
-                  tag = run["head_branch"]
-                  old_ver = parse(tag)
-                  if not old_ver:
-                      continue
-                  # Never cancel anything ≥ latest published. That tag
-                  # might be the next release; cancelling it can strand
-                  # consecutive unpublished versions.
-                  if old_ver >= latest_published:
-                      continue
-                  print(f"  superseding {wf_label} run {run['id']} (tag {tag} < latest published {latest_published}, status={run.get('status')})")
-                  subprocess.run([
-                      "gh", "api", "-X", "POST",
-                      f"/repos/{REPO}/actions/runs/{run['id']}/cancel",
-                  ], capture_output=True)
-
-          # Delete drafts strictly older than the latest PUBLISHED release.
-          # Never touch published. Never delete drafts ≥ latest published
-          # (those drafts might still publish — deleting them can strand
-          # consecutive unpublished versions).
-          raw = gh([
-              f"/repos/{REPO}/releases?per_page=50",
-              "--jq", ".[] | select(.draft) | {id, tag: .tag_name}",
-          ])
-          if raw:
-              for line in raw.strip().splitlines():
-                  rel = json.loads(line)
-                  old_ver = parse(rel["tag"])
-                  if not old_ver or old_ver >= latest_published:
-                      continue
-                  print(f"  deleting draft release {rel['tag']} (id {rel['id']}; < latest published {latest_published})")
-                  subprocess.run([
-                      "gh", "api", "-X", "DELETE",
-                      f"/repos/{REPO}/releases/{rel['id']}",
-                  ], capture_output=True)
-          PYEOF
+      # There is deliberately NO replacement, and in particular no age-based
+      # variant: elapsed time does not establish abandonment either. Cleanup of
+      # genuinely stuck releases now belongs to release-reconcile.yml, which acts
+      # on TERMINAL state (a completed-but-failed run) and prefers re-driving a
+      # release to completion over destroying it. Nothing in the release path may
+      # cancel or delete work that is still in flight.
 
       # CHANGELOG regeneration moved to .github/workflows/post-tag-sync.yml
       # (installed by `shipyard release-bot hook install`). Firing on the
