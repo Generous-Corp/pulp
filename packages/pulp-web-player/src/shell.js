@@ -39,7 +39,7 @@
 
 import { createWidget, kindFor, formatValue } from "./widgets/index.js";
 import { initModality } from "./widgets/base.js";
-import { mountCustomUi } from "./ui/custom-ui.js";
+import { mountCustomUi, reserveCustomUiSlot } from "./ui/custom-ui.js";
 import { parseContainer, buildContainer } from "./state/plugin-state.js";
 // The oscilloscope trigger is pure DSP math (finds the rising zero-crossing so a
 // periodic waveform stands still) — host-agnostic, vendored from the Pulp SDK.
@@ -1332,6 +1332,12 @@ function connectOutput(S) {
       return;
     }
     $("#overlay").style.display = "none";
+
+    // Two long awaits follow (the DSP wasm, then a multi-megabyte UI wasm). Claim
+    // the editor's box NOW, with a placeholder in it, so the panel is whole from
+    // the first frame after the click instead of showing an empty gap and then
+    // slamming the editor in on top of the scope.
+    if (opts.customUi) reserveCustomUiSlot($("#params"));
 
     S.ctx = new AC();
     S.ctx.resume();

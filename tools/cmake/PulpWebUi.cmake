@@ -220,6 +220,13 @@ set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/screenshot_compare.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/window_host_stub.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/ui_components.cpp
+    # WindowHost's KEY FUNCTION. Its out-of-line destructor lives here, so this TU
+    # is where the compiler emits WindowHost's vtable and typeinfo — without it the
+    # browser host fails to link with `undefined symbol: typeinfo for
+    # pulp::view::WindowHost`, which reads like an RTTI flag problem and is not one.
+    # The file is otherwise about NativeViewHost, which the browser does not use;
+    # it is here for the base-class symbols alone.
+    ${_PULP_WEBUI_ROOT}/core/view/src/native_view_host.cpp
 )
 
 # Render: the Ganesh surface + the rAF render loop. render_loop.cpp carries the

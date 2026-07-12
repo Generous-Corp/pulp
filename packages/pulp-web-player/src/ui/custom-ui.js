@@ -26,6 +26,46 @@
 // WebGL2 was left staring at an EMPTY panel while the docs promised a grid.
 
 const CONTAINER_ID = "custom-ui";
+const LOADING_CLASS = "pw-customui-loading";
+
+// Reserve the editor's box the moment the overlay drops — NOT when the module
+// finally mounts. Between the click and a mounted Pulp UI there are two long
+// awaits (the DSP wasm, then a multi-megabyte UI wasm), and without this the
+// panel sits there with an empty gap where the controls belong and then the
+// editor slams in: the page visibly assembles in stages, which is exactly what a
+// first-time visitor reports as "it loads weird". Called by the shell before it
+// awaits the adapter; mountCustomUi() later takes the same box over.
+export function reserveCustomUiSlot(host) {
+  if (!host || host.querySelector("." + LOADING_CLASS)) return;
+  host.style.display = "block";
+  host.style.minHeight = "var(--pw-customui-h, 380px)";
+  host.style.position = "relative";
+  host.appendChild(makeLoadingPlaceholder());
+}
+
+function makeLoadingPlaceholder() {
+  const el = document.createElement("div");
+  el.className = LOADING_CLASS;
+  el.setAttribute("aria-live", "polite");
+  el.textContent = "Loading editor…";
+  Object.assign(el.style, {
+    position: "absolute", inset: "0", display: "flex",
+    alignItems: "center", justifyContent: "center",
+    font: "500 13px/1.4 system-ui, sans-serif",
+    color: "var(--text-secondary, #8b949e)",
+    // A slow pulse, not a spinner: a spinner beside an otherwise idle page reads
+    // as "stuck", a pulse reads as "arriving".
+    animation: "pw-customui-pulse 1.6s ease-in-out infinite",
+    pointerEvents: "none",
+  });
+  if (!document.getElementById("pw-customui-css")) {
+    const css = document.createElement("style");
+    css.id = "pw-customui-css";
+    css.textContent = "@keyframes pw-customui-pulse{0%,100%{opacity:.45}50%{opacity:.85}}";
+    document.head.appendChild(css);
+  }
+  return el;
+}
 
 // factory(container, adapter, { params })
 //   → { destroy(), onParamsChanged?(values, params), ready?: Promise }
@@ -48,10 +88,30 @@ export function mountCustomUi({ host, adapter, factory, params = [], onFailed = 
   container.id = CONTAINER_ID;
   container.className = "pw-customui";
   host.style.display = "block";
+
+  // The slot was already reserved (and is showing "Loading editor…") if the shell
+  // called reserveCustomUiSlot() at start — which it does. Adopt that box rather
+  // than making a second one, or the placeholder would be orphaned behind the
+  // editor. If nothing reserved it, reserve it now (a consumer driving
+  // mountCustomUi directly).
+  if (!host.querySelector("." + LOADING_CLASS)) reserveCustomUiSlot(host);
+  const placeholder = host.querySelector("." + LOADING_CLASS);
+
+  // The editor itself fades in over the placeholder; the box never changes size.
+  container.style.opacity = "0";
+  container.style.transition = "opacity 180ms ease-out";
   host.appendChild(container);
+
+  const settle = () => {
+    placeholder?.remove();
+    host.style.minHeight = "";        // the real editor now dictates the height
+    container.style.opacity = "1";
+  };
 
   const unmount = () => {
     container.remove();
+    placeholder?.remove();
+    host.style.minHeight = "";
     host.style.display = gridDisplay;
   };
 
@@ -76,15 +136,21 @@ export function mountCustomUi({ host, adapter, factory, params = [], onFailed = 
 
   // The async half of the degradation contract (see the header).
   if (handle.ready && typeof handle.ready.then === "function") {
-    handle.ready.catch((err) => {
-      if (destroyed) return;
-      destroyed = true;
-      console.warn("customUi failed to mount asynchronously — falling back to the generated parameter grid:", err);
-      try { handle.destroy?.(); }
-      catch (e) { console.warn("customUi destroy() threw during async-failure cleanup:", e); }
-      unmount();
-      onFailed?.();
-    });
+    handle.ready.then(
+      () => { if (!destroyed) settle(); },
+      (err) => {
+        if (destroyed) return;
+        destroyed = true;
+        console.warn("customUi failed to mount asynchronously — falling back to the generated parameter grid:", err);
+        try { handle.destroy?.(); }
+        catch (e) { console.warn("customUi destroy() threw during async-failure cleanup:", e); }
+        unmount();
+        onFailed?.();
+      });
+  } else {
+    // A synchronous custom UI is already on screen, so the placeholder must go
+    // now — otherwise it would sit on top of the editor forever.
+    settle();
   }
 
   return {
