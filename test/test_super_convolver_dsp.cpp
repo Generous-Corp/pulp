@@ -24,7 +24,9 @@
 #include <pulp/state/store.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/gpu_audio/flow_pans.hpp>
+#include <pulp/signal/convolver.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
 #include "super_convolver.hpp"
 
 #include <algorithm>
@@ -97,6 +99,22 @@ void configure(SuperConvolverProcessor& proc, pulp::state::StateStore& store,
     store.set_value(kBypass, 0.0f);
     store.set_value(kEngine, static_cast<float>(engine));
     store.set_value(kRooms, static_cast<float>(rooms));
+}
+
+// Pump the host-driven non-realtime tick until the processor says it has no work
+// left, and return how many ticks that took. On the worker-less (web) lane the
+// rebuild is BOUNDED per tick, so a host has to keep pumping — which is what both
+// web adapters do (WAM at the end of every render turn; WebCLAP once per
+// clap_host.request_callback). The cap is a test-only guard against a job that
+// never converges; it must never be reached.
+int pump_ticks(SuperConvolverProcessor& proc, int cap = 5000) {
+    int n = 0;
+    while (proc.non_realtime_tick_pending() && n < cap) {
+        proc.on_non_realtime_tick();
+        ++n;
+    }
+    REQUIRE(n < cap);
+    return n;
 }
 
 pulp::format::PrepareContext prep_ctx(double sr, std::size_t block) {
@@ -210,9 +228,21 @@ std::vector<float> render_mono(SuperConvolverProcessor& proc, std::size_t block,
 
 // The plugin's wet impulse response as the audio path actually renders it: drive
 // a unit impulse and read back from the reported latency.
+//
+// The silence pass first is not padding: an IR swap is picked up by the audio
+// thread at the next block boundary and then CROSSFADED in over kInternalBlock
+// samples (PartitionedConvolver::set_crossfade — what makes dragging Size sound
+// like the room changing rather than a switch being thrown). Driving the impulse
+// straight into a pending swap would therefore measure a BLEND of the old and new
+// IRs, not the new one. Silence costs nothing to convolve and leaves the input
+// history zeroed, so the impulse that follows still measures a clean IR.
 std::vector<float> measured_ir(SuperConvolverProcessor& proc, std::size_t block,
                                double sr, std::size_t want) {
     const std::size_t lat = static_cast<std::size_t>(proc.latency_samples());
+    const int settle = static_cast<int>((lat + 2 * SuperConvolverProcessor::kInternalBlock)
+                                        / block) + 2;
+    render_mono(proc, block, sr, settle, [](std::size_t) { return 0.0f; });
+
     const int nblocks = static_cast<int>((lat + want) / block) + 2;
     const auto out = render_mono(proc, block, sr, nblocks,
                                  [](std::size_t i) { return i == 0 ? 1.0f : 0.0f; });
@@ -987,6 +1017,99 @@ TEST_CASE("SuperConvolver SCv2 state round-trips every IR source kind",
 }
 
 // ---------------------------------------------------------------------------
+// Loading your own IR in the browser. The native plugin opens a file dialog; the
+// web pages have no filesystem, so they DECODE the file with the Web Audio API
+// and write the samples into the plugin's state as an SCv2 "Pcm" record — the
+// exact bytes examples/web-demos/super-convolver-ui/ir-source.js builds. Both web
+// ABIs expose setState (WAM: wam_write_state; WebCLAP: the clap.state extension),
+// so it is ONE path on both, the loaded IR survives a save/restore because it IS
+// the state, and reverting is the same call with the "Synthetic" kind.
+//
+// This test is the C++ half of that contract: state in -> tick -> the live IR is
+// the uploaded one; revert -> the live IR is the built-in one again.
+// ---------------------------------------------------------------------------
+TEST_CASE("SuperConvolver takes an uploaded IR through state, and reverts",
+          "[superconvolver][dsp][state][web]") {
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = SuperConvolverProcessor::kInternalBlock;
+    const std::size_t frames = 4800;   // 0.1 s
+    const auto pcm = make_pcm_ir(frames, 0x5150u);
+
+    // The SCv2 "Pcm" record, byte for byte as ir-source.js buildPcmIrBlob() writes it:
+    // magic, version, kind, u32 frames, u32 rate, frames x f32 LE (mono).
+    std::vector<std::uint8_t> uploaded = {'S', 'C', 'v', '2', 2,
+        static_cast<std::uint8_t>(SuperConvolverProcessor::IrStateKind::Pcm)};
+    auto put_u32 = [&uploaded](std::uint32_t v) {
+        for (int i = 0; i < 4; ++i)
+            uploaded.push_back(static_cast<std::uint8_t>((v >> (8 * i)) & 0xFF));
+    };
+    put_u32(static_cast<std::uint32_t>(frames));
+    put_u32(48000u);
+    for (float v : pcm) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof(bits));
+        put_u32(bits);
+    }
+    // And the revert record — buildSyntheticIrBlob().
+    const std::vector<std::uint8_t> synthetic = {'S', 'C', 'v', '2', 2,
+        static_cast<std::uint8_t>(SuperConvolverProcessor::IrStateKind::Synthetic)};
+
+    pulp::state::StateStore store;
+    SuperConvolverProcessor proc;
+    // Size longer than the uploaded IR: window_ir_to_length leaves a shorter loaded
+    // base alone, so what we should hear back is the file itself, not a window of it.
+    configure(proc, store, /*size=*/1.0f, /*mix=*/100.0f, /*engine=*/0, /*rooms=*/1);
+    proc.set_background_worker_enabled(false);   // the web lane
+    proc.prepare(prep_ctx(SR, BLOCK));
+
+    const auto built_in = proc.impulse_response_snapshot();
+    REQUIRE(built_in.size() == static_cast<std::size_t>(1.0 * SR));
+
+    // ── upload. This is what adapter.setState() reaches, on either ABI.
+    REQUIRE(proc.deserialize_plugin_state(std::span<const std::uint8_t>(uploaded)));
+    CHECK(proc.ir_pcm_frames() == frames);
+    CHECK(proc.non_realtime_tick_pending());     // the host is told to pump
+    pump_ticks(proc);
+
+    const auto live = proc.impulse_response_snapshot();
+    INFO("uploaded frames=" << frames << " live IR size=" << live.size());
+    REQUIRE(live.size() == frames);              // the uploaded IR, at its own length
+    CHECK(correlation(pcm, live) > 0.999);       // and it IS that audio
+
+    // And the audio thread is actually rendering it.
+    const auto rendered = measured_ir(proc, BLOCK, SR, frames);
+    CHECK(max_abs_diff(rendered, live) < 1e-4);
+
+    // ── it survives a save/restore, because the IR *is* the state.
+    const auto saved = proc.serialize_plugin_state();
+    CHECK(static_cast<SuperConvolverProcessor::IrStateKind>(
+              saved[SuperConvolverProcessor::kStateHeaderSize])
+          == SuperConvolverProcessor::IrStateKind::Pcm);
+
+    pulp::state::StateStore store2;
+    SuperConvolverProcessor restored;
+    configure(restored, store2, 1.0f, 100.0f, 0, 1);
+    restored.set_background_worker_enabled(false);
+    REQUIRE(restored.deserialize_plugin_state(std::span<const std::uint8_t>(saved)));
+    restored.prepare(prep_ctx(SR, BLOCK));
+    const auto after = restored.impulse_response_snapshot();
+    REQUIRE(after.size() == live.size());
+    CHECK(max_abs_diff(after, live) == 0.0);
+    restored.release();
+
+    // ── revert to the built-in synthetic reverb.
+    REQUIRE(proc.deserialize_plugin_state(std::span<const std::uint8_t>(synthetic)));
+    CHECK(proc.ir_pcm_frames() == 0);
+    CHECK(proc.non_realtime_tick_pending());
+    pump_ticks(proc);
+
+    const auto reverted = proc.impulse_response_snapshot();
+    REQUIRE(reverted.size() == built_in.size());
+    CHECK(max_abs_diff(reverted, built_in) < 1e-5 * peak_of(built_in));
+    proc.release();
+}
+
+// ---------------------------------------------------------------------------
 // The thread-less (web) rebuild contract. Neither web lane can spawn a thread —
 // the WAM link has no pthreads and the WCLAP hosts import no wasi.thread_spawn —
 // so the background worker is disabled and the CONTROL thread pumps
@@ -1081,13 +1204,18 @@ TEST_CASE("SuperConvolver rebuilds from a host tick with no process() in between
     // the host for a main-thread callback.
     CHECK(proc.non_realtime_tick_pending());
 
-    // One tick, straight from the control thread, with no process() call ever
-    // having observed the new value. This is the literal browser sequence
-    // (wam_set_param -> on_non_realtime_tick).
-    proc.on_non_realtime_tick();
+    // Ticks straight from the control thread, with no process() call ever having
+    // observed the new value. This is the literal browser sequence (wam_set_param
+    // -> on_non_realtime_tick). The tick is BOUNDED, so the rebuild takes several
+    // of them — a host pumps until non_realtime_tick_pending() goes false, which is
+    // exactly what both web adapters do (WAM: once per render turn; WebCLAP: once
+    // per request_callback).
+    const int ticks = pump_ticks(proc);
+    CHECK(ticks > 1);   // it really is sliced, not one blocking pass in disguise
 
     const std::size_t len_after = proc.impulse_response_snapshot().size();
-    INFO("len_before=" << len_before << " len_after=" << len_after);
+    INFO("len_before=" << len_before << " len_after=" << len_after
+                       << " ticks=" << ticks);
     CHECK(len_after == static_cast<std::size_t>(0.5 * SR));   // NOT the old 2.0 s
     CHECK_FALSE(proc.non_realtime_tick_pending());            // and the work is done
 
@@ -1099,9 +1227,253 @@ TEST_CASE("SuperConvolver rebuilds from a host tick with no process() in between
     // A restored/parameter-driven source change is picked up by the same tick.
     proc.set_built_in_ir(2);
     CHECK(proc.non_realtime_tick_pending());
-    proc.on_non_realtime_tick();
+    pump_ticks(proc);
     CHECK(proc.ir_generation() != gen);
     CHECK_FALSE(proc.non_realtime_tick_pending());
+    proc.release();
+}
+
+// ---------------------------------------------------------------------------
+// The BOUND on that tick. This is the browser bug the slicing exists for: with
+// no worker thread, on_non_realtime_tick() runs between render quanta ON the
+// render thread (an AudioWorklet has no other), so a blocking rebuild there is a
+// dropout. Turning the Size knob used to cost 15.0 ms in a single render callback
+// against a 2.667 ms quantum budget — audible every single time.
+//
+// Three properties, and they are the whole contract:
+//   (a) no tick may exceed the slice budget's worth of work,
+//   (b) the sliced rebuild converges to the SAME IR a one-shot rebuild produces,
+//   (c) a Size change mid-rebuild SUPERSEDES the job in flight — a knob DRAG must
+//       not queue N rebuilds and pay for every intermediate value.
+// ---------------------------------------------------------------------------
+TEST_CASE("SuperConvolver's web-lane IR rebuild is bounded per tick",
+          "[superconvolver][dsp][rt][web]") {
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = SuperConvolverProcessor::kInternalBlock;
+
+    pulp::state::StateStore store;
+    SuperConvolverProcessor proc;
+    configure(proc, store, /*size=*/0.5f, /*mix=*/100.0f, /*engine=*/0, /*rooms=*/1);
+    proc.set_background_worker_enabled(false);   // the web lane
+    proc.prepare(prep_ctx(SR, BLOCK));
+
+    // The worst case: the longest IR the knob reaches.
+    store.set_value(kSize, 4.0f);
+    REQUIRE(proc.non_realtime_tick_pending());
+
+    // (a) EVERY tick is bounded. Wall clock is a proxy that varies with the
+    // machine, so the primary assertion is structural — the job needs many ticks,
+    // i.e. no single one did it all — and the timing check is a loose backstop
+    // against a regression to the 15 ms blocking pass.
+    int ticks = 0;
+    double worst_ms = 0.0;
+    while (proc.non_realtime_tick_pending() && ticks < 5000) {
+        const auto t0 = std::chrono::steady_clock::now();
+        proc.on_non_realtime_tick();
+        const auto t1 = std::chrono::steady_clock::now();
+        worst_ms = std::max(
+            worst_ms, std::chrono::duration<double, std::milli>(t1 - t0).count());
+        ++ticks;
+    }
+    INFO("ticks=" << ticks << " worst tick=" << worst_ms << " ms");
+    CHECK_FALSE(proc.non_realtime_tick_pending());
+    CHECK(ticks > 20);          // a 4 s IR is many slices, never one
+    CHECK(worst_ms < 5.0);      // was 15.0 ms in ONE callback before slicing
+
+    // (b) …and it lands on the same IR the one-shot path builds. Same generator,
+    // same peak-response normalization — the sliced peak scan is a different
+    // association of the same butterflies, so it agrees to float precision, not
+    // bit-for-bit.
+    const auto sliced = proc.impulse_response_snapshot();
+    const auto one_shot = make_builtin_ir(0, static_cast<std::size_t>(4.0 * SR));
+    REQUIRE(sliced.size() == one_shot.size());
+    double worst_diff = 0.0, peak = 0.0;
+    for (std::size_t i = 0; i < sliced.size(); ++i) {
+        worst_diff = std::max(worst_diff,
+                              std::abs(static_cast<double>(sliced[i]) - one_shot[i]));
+        peak = std::max(peak, std::abs(static_cast<double>(one_shot[i])));
+    }
+    INFO("worst |sliced - one_shot| = " << worst_diff << " (IR peak " << peak << ")");
+    CHECK(worst_diff < 1e-5 * peak);
+
+    proc.release();
+}
+
+TEST_CASE("SuperConvolver's Size knob supersedes a rebuild in flight",
+          "[superconvolver][dsp][rt][web]") {
+    // A knob DRAG delivers a stream of Size values. Each one must REPLACE the job
+    // in flight, not queue behind it: otherwise the user pays for every value they
+    // dragged through and the IR they finally hear is many seconds late.
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = SuperConvolverProcessor::kInternalBlock;
+
+    pulp::state::StateStore store;
+    SuperConvolverProcessor proc;
+    configure(proc, store, /*size=*/0.5f, /*mix=*/100.0f, /*engine=*/0, /*rooms=*/1);
+    proc.set_background_worker_enabled(false);
+    proc.prepare(prep_ctx(SR, BLOCK));
+
+    // Cost of ONE settled rebuild, as the baseline.
+    store.set_value(kSize, 4.0f);
+    const int ticks_one = pump_ticks(proc);
+    REQUIRE(ticks_one > 20);
+
+    // Now DRAG: 20 intermediate Size values, one tick of work each — every one
+    // lands mid-rebuild — then settle on the last. If the intermediate values
+    // queued, settling would cost ~20 rebuilds; superseding costs ~1.
+    store.set_value(kSize, 0.5f);
+    pump_ticks(proc);
+    for (int i = 1; i <= 20; ++i) {
+        store.set_value(kSize, 0.5f + 3.5f * static_cast<float>(i) / 20.0f);
+        proc.on_non_realtime_tick();          // one slice, then the value moves again
+    }
+    const int ticks_drag = pump_ticks(proc);
+    INFO("settled rebuild = " << ticks_one << " ticks; settling after a 20-step drag = "
+                              << ticks_drag << " ticks");
+    CHECK(ticks_drag < ticks_one * 2);        // ~one rebuild's worth, not twenty
+
+    // And the IR that actually landed is the one the knob ENDED on (4.0 s), not
+    // some value from the middle of the drag.
+    CHECK(proc.impulse_response_snapshot().size() == static_cast<std::size_t>(4.0 * SR));
+    proc.release();
+}
+
+TEST_CASE("SuperConvolver's audio thread never allocates during a Size sweep",
+          "[superconvolver][dsp][rt][web]") {
+    // The rebuild is off the audio path by construction — the audio thread's only
+    // part in it is try_swap_ir(), which is two atomic pointer ops. Sweep Size
+    // while rendering, with an allocation probe armed around ONLY the process()
+    // calls, and nothing may allocate.
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = SuperConvolverProcessor::kInternalBlock;
+
+    pulp::state::StateStore store;
+    SuperConvolverProcessor proc;
+    configure(proc, store, /*size=*/0.5f, /*mix=*/100.0f, /*engine=*/0, /*rooms=*/1);
+    proc.set_background_worker_enabled(false);
+    proc.prepare(prep_ctx(SR, BLOCK));
+
+    Driver d(proc, BLOCK, SR);
+    std::vector<float> l(BLOCK, 0.0f), r(BLOCK, 0.0f);
+    auto noise = [](std::size_t i) {
+        std::uint32_t s = static_cast<std::uint32_t>(i) * 1664525u + 1013904223u;
+        return static_cast<float>(s >> 8) / 8388608.0f - 1.0f;
+    };
+    // Warm the harness's own output vectors OUTSIDE the probe: Driver::block_io
+    // assigns into them, and a first-touch grow would be counted as a processor
+    // allocation. Pre-sized above, this call leaves them at capacity.
+    d.block_io(0, noise, pulp::format::ProcessMode::Realtime, 0, l, r);
+
+    std::size_t allocations = 0;
+    for (int step = 0; step < 40; ++step) {
+        store.set_value(kSize, 0.5f + 3.5f * static_cast<float>(step) / 39.0f);
+        for (int b = 0; b < 8; ++b) {
+            {
+                // Armed ONLY around the render call — the tick below is explicitly
+                // allowed to allocate, it is the non-realtime half.
+                pulp::test::RtAllocationProbe probe;
+                d.block_io(static_cast<std::size_t>(step * 8 + b) * BLOCK, noise,
+                           pulp::format::ProcessMode::Realtime, 0, l, r);
+                allocations += probe.allocation_count();
+            }
+            proc.on_non_realtime_tick();
+        }
+    }
+    CHECK(allocations == 0);
+    proc.release();
+}
+
+// ---------------------------------------------------------------------------
+// "You hear the dry signal, then the reverb kicks in." The plugin must be ready
+// to convolve on its FIRST block: the default IR is built synchronously in
+// prepare() — which is not the audio thread — and loaded straight into both
+// convolvers, so no block is ever rendered dry while an IR is still being made.
+//
+// The only silence at the head is the re-block FIFO's priming, which is exactly
+// latency_samples() long and is what the host's PDC compensates. After it, the
+// output IS the convolution — asserted against an independent PartitionedConvolver
+// fed the same input and the same IR.
+// ---------------------------------------------------------------------------
+TEST_CASE("SuperConvolver convolves from its first block after prepare",
+          "[superconvolver][dsp][web]") {
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = 128;   // a Web Audio render quantum
+
+    pulp::state::StateStore store;
+    SuperConvolverProcessor proc;
+    configure(proc, store, /*size=*/1.5f, /*mix=*/100.0f, /*engine=*/0, /*rooms=*/1);
+    proc.set_background_worker_enabled(false);   // the web lane
+    proc.prepare(prep_ctx(SR, BLOCK));
+
+    // The reported latency is the re-block FIFO plus, on a machine that HAS a GPU
+    // device, the GPU transport's fixed delay (which the CPU wet path is delayed by
+    // too, so both engines report the same figure). In a browser there is no device
+    // and this is exactly kInternalBlock; here it is whatever the host would
+    // compensate, and the priming window below is measured against it either way.
+    const int latency = proc.latency_samples();
+    REQUIRE(latency >= static_cast<int>(SuperConvolverProcessor::kInternalBlock));
+
+    // The IR exists BEFORE a single sample has been rendered. That is the fix.
+    const auto ir = proc.impulse_response_snapshot();
+    REQUIRE(ir.size() == static_cast<std::size_t>(1.5 * SR));
+    REQUIRE(peak_of(ir) > 1e-3);
+
+    auto tone = [](std::size_t i) {
+        return 0.5f * std::sin(2.0f * 3.14159265f * 220.0f
+                               * static_cast<float>(i) / 48000.0f);
+    };
+
+    // Enough blocks to leave a healthy window of real convolution past the priming.
+    const int kBlocks = static_cast<int>((static_cast<std::size_t>(latency) + 2048)
+                                         / BLOCK) + 1;
+    std::vector<float> got, in;
+    Driver d(proc, BLOCK, SR);
+    std::vector<float> l, r;
+    for (int b = 0; b < kBlocks; ++b) {
+        // NO on_non_realtime_tick() anywhere in this loop: if the plugin needed a
+        // tick to produce its first wet sample, it would render dry here — which
+        // is precisely the bug.
+        d.block_io(static_cast<std::size_t>(b) * BLOCK, tone,
+                   pulp::format::ProcessMode::Realtime, 0, l, r);
+        for (std::size_t i = 0; i < BLOCK; ++i) {
+            in.push_back(tone(static_cast<std::size_t>(b) * BLOCK + i));
+            got.push_back(l[i]);
+        }
+    }
+
+    // The priming window is silent (dry is delayed by the same latency, and its
+    // ring starts zeroed) — NOT a dry passthrough.
+    for (int i = 0; i < latency; ++i) {
+        INFO("primed sample " << i << " = " << got[static_cast<std::size_t>(i)]);
+        REQUIRE(std::abs(got[static_cast<std::size_t>(i)]) < 1e-6f);
+    }
+
+    // After it: the real convolution, from the very first non-primed sample.
+    // Reference = the same engine, same IR, driven directly.
+    pulp::signal::PartitionedConvolver ref;
+    ref.load_ir(ir.data(), ir.size(), SuperConvolverProcessor::kInternalBlock);
+    std::vector<float> want;
+    std::vector<float> wet(SuperConvolverProcessor::kInternalBlock);
+    for (std::size_t off = 0;
+         off + SuperConvolverProcessor::kInternalBlock <= in.size();
+         off += SuperConvolverProcessor::kInternalBlock) {
+        ref.process(in.data() + off, wet.data(), SuperConvolverProcessor::kInternalBlock);
+        want.insert(want.end(), wet.begin(), wet.end());
+    }
+
+    double worst = 0.0, energy = 0.0;
+    const std::size_t compare = want.size() - static_cast<std::size_t>(latency);
+    for (std::size_t i = 0; i < compare; ++i) {
+        const double a = got[i + static_cast<std::size_t>(latency)];
+        const double b = want[i];
+        worst = std::max(worst, std::abs(a - b));
+        energy += b * b;
+    }
+    INFO("worst |plugin - reference convolution| = " << worst
+         << ", reference rms = " << std::sqrt(energy / static_cast<double>(compare)));
+    CHECK(std::sqrt(energy / static_cast<double>(compare)) > 1e-3);   // it IS wet
+    CHECK(worst < 1e-4);                                              // and it is THE convolution
+
     proc.release();
 }
 

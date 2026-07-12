@@ -56,6 +56,44 @@ it — which is what `Processor::on_non_realtime_tick()` /
 - CLAP reaches the same hook a different way (`request_callback` →
   `on_main_thread`), and **native** CLAP gets it too. See the `clap` skill.
 
+### "Keep the work bounded" is a hard requirement, not advice
+
+Coalescing an expensive rebuild to once-per-render-turn lowers how *often* it
+fires; it does **not** make it safe. SuperConvolver's IR rebuild (synthesis +
+a peak-response FFT over the whole IR + a partitioned FFT re-plan for both
+channels) measured **15.0 ms in one render callback against a 2.667 ms quantum
+budget** (128 frames @ 48 kHz) — a dropout on every Size change, even coalesced.
+
+The fix is to **time-slice** the work, not to shrink it. The pattern
+(`examples/super-convolver/sliced_ir_rebuild.hpp`) generalizes:
+
+- Express each phase as a **stream of fixed-cost items**; the tick consumes at
+  most `budget` of them and returns. Budget is a **constant**, never a function
+  of the input size — that is the whole point.
+- Keep the OLD state rendering audio until the new one is complete, then publish
+  it through the existing lock-free handoff (`signal::ConvolverIrSwapper` /
+  `runtime::Handoff`). The audio thread's only job stays `try_swap_ir()`.
+- A new request mid-job must **supersede** (restart) it, not queue behind it — a
+  knob drag delivers a stream of values and only the last one is ever heard.
+- **`non_realtime_tick_pending()` must stay `true` while a job is in flight**, not
+  just when one is *needed*. Both web hosts stop pumping the tick the moment it
+  says false — WAM skips `service_non_realtime`, and WebCLAP stops calling
+  `request_callback` — so a job that only advertises "work needed" strands itself
+  half-built.
+- Pick the budget by **measuring the slowest phase on the scalar path the browser
+  actually runs** (no vDSP/Accelerate — that is Apple-native only, and it makes a
+  large FFT ~3× faster than what wasm will do). SuperConvolver uses 32768 items ⇒
+  worst render callback 0.78 ms across a full Size drag, vs 15.0 ms before.
+- The cost you pay is **latency, not glitches**: a 4 s IR needs ~120 render turns
+  (~300 ms) to rebuild. Crossfade the swap (`PartitionedConvolver::set_crossfade`)
+  so the change is heard as continuous rather than as a switch being thrown, and
+  remember that any test which measures an IR right after a swap will otherwise
+  measure the *blend*.
+- An FFT over the whole input is the one thing that will not chunk. Decompose it:
+  a truncated Gentleman–Sande (DIF) split down to 1024-point leaves turns one
+  indivisible N-point transform into a stream of butterflies plus a stream of leaf
+  FFTs, exact to float precision. See `superconvolver::PeakResponseScan`.
+
 ## Landmine: `emscripten_resize_heap` stubbed to `false` = a bare abort past 16 MB
 
 The WAM runtime used to hard-stub `emscripten_resize_heap` to return `false`
@@ -115,6 +153,42 @@ suffix (and returns `""` rather than inventing one when a plugin uses a custom
 `to_string`, e.g. enum labels). If you add a field the Pulp web UI needs and
 CLAP has no struct slot for it, this is the pattern — go through the plugin's
 own display call, don't hardcode a default in the adapter.
+
+## Handing a plugin BINARY data from the page (samples, IRs, wavetables)
+
+A browser has no filesystem, so a plugin whose native build loads a file
+(`vw::FileChooser` → `set_ir_path`) needs a web equivalent. **Do not add a
+per-ABI entry point for it.** Go through the plugin's own state:
+
+- Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
+  call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
+  through the `clap.state` extension — and both produce the *same* `PLST` blob the
+  native VST3/AU/CLAP builds write.
+- So: read the live state, swap its **plugin-owned blob** for a record carrying the
+  payload, write it back (`packages/pulp-web-player/src/state/plugin-state.js` —
+  `parseContainer` / `buildContainer`, exported from the package). The plugin's
+  `deserialize_plugin_state()` is the receiver. Preserving the `params` half of
+  the container is what stops a load from resetting the user's knobs.
+- Three things fall out for free, which is why this is the seam: it is **identical
+  on WAM and WebCLAP** (nothing to keep in sync), the payload **survives a state
+  save/restore** because it *is* the state, and "revert to the built-in" is the
+  same call with a different tag.
+- Decode with the demo's **own `AudioContext`** (`decodeAudioData` resamples to the
+  context rate), so the PCM arrives at the session rate and the plugin's resampler
+  — which is not chunkable, unlike everything else in the rebuild — is skipped.
+- Worked example: `examples/web-demos/super-convolver-ui/ir-source.js` (the SCv2
+  record + the drop-zone) and the `onReady` seam in the shared shell, which is the
+  hook for **plugin-specific page chrome** that needs the live adapter and the
+  AudioContext. `customUi` is the wrong hook for this: it *replaces* the parameter
+  grid and falls back to it on failure.
+
+## Landmine: a WebCLAP host must READ parameters back, not mirror them
+
+A host that remembers what it last *sent* (`values.set(id, v)`) goes stale the
+moment the plugin rewrites its own parameters — which it does on every state load
+and preset change. `WebClapPlugin.paramValue()` calls
+`clap_plugin_params.get_value()`; use it. The WAM lane has the same trap and
+solves it with `wam_param_epoch` + `wam_read_param_values`.
 
 ## Testing — the assertions a native test cannot reach
 

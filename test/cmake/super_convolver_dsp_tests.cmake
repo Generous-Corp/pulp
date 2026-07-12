@@ -7,6 +7,7 @@
 if(PULP_BUILD_TESTS AND TARGET pulp::gpu-audio AND TARGET pulp::render)
     pulp_add_test_suite(pulp-test-super-convolver-dsp
         SOURCES test_super_convolver_dsp.cpp
+                harness/rt_allocation_probe.cpp
                 ${CMAKE_SOURCE_DIR}/examples/super-convolver/super_convolver_view.cpp
         LIBRARIES pulp::format pulp::signal pulp::gpu-audio pulp::render
                   pulp::view pulp::canvas

@@ -60,6 +60,34 @@ the edit so the host can group it for undo), and `adapter.onParamsChanged` back
 in through `_pulp_ui_set_param`. A `ResizeObserver` drives `_pulp_ui_resize` with
 the live `devicePixelRatio`.
 
+## Loading your own impulse response — `ir-source.js`
+
+The native plugin picks an IR with a file dialog. A browser has no filesystem, so
+the page decodes the file itself and hands the plugin the samples:
+
+```js
+import { mountIrLoader } from "./ir-source.js";
+import * as pluginState from "@danielraffel/web-player/state";
+// from the shell's onReady seam, which supplies the live adapter + AudioContext:
+mountIrLoader(document.getElementById("ir"), adapter, ctx, pluginState);
+```
+
+It decodes with `ctx.decodeAudioData` (which resamples to the session rate), sums
+to mono, caps at `kMaxIrSeconds`, and writes an **SCv2 `Pcm` record** into the
+plugin's own state blob — spliced into the live `PLST` container so the user's
+knob positions survive. `SuperConvolverProcessor::deserialize_plugin_state()` is
+the receiver; it calls `set_ir_pcm()`, and the rebuild happens off the audio path.
+
+There is deliberately **no new wasm entry point** for this. `getState`/`setState`
+are already identical on WAM and WebCLAP, so one code path serves both ABIs, the
+loaded IR survives a save/restore because it *is* the state, and "revert to the
+built-in reverb" is the same call with the `Synthetic` kind. The blob writers are
+DOM-free, so `superconvolver_runner.mjs` drives the exact page bytes through both
+modules in Node.
+
+This module is independent of the Pulp UI wasm — it mounts on the generated
+parameter grid too.
+
 ## The C ABI
 
 | Export | Direction | Purpose |

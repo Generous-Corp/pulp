@@ -19,6 +19,13 @@
 import { readFileSync } from "node:fs";
 import { makeWasmImports, makeBridge, makeWamAudioPorts } from "../../../core/format/src/wasm/wam-runtime.mjs";
 import { WebClapHost } from "../../../core/format/src/wasm/wclap-host.mjs";
+// The SAME modules the demo page uses to load an impulse response: the SDK's
+// plugin-state container, and SuperConvolver's own SCv2 IR record. Asserting the
+// upload path here means asserting the page's actual bytes, not a paraphrase.
+import { parseContainer, buildContainer }
+  from "../../../packages/pulp-web-player/src/state/plugin-state.js";
+import { buildPcmIrBlob, buildSyntheticIrBlob, readIrBlobKind }
+  from "../super-convolver-ui/ir-source.js";
 // The SAME helper the browser's WebCLAP adapter uses to recover a display unit
 // from clap_plugin_params.value_to_text (CLAP has no unit field), so the text
 // asserted here is the text the demo page renders.
@@ -107,7 +114,14 @@ async function openWclap() {
     })),
     paramText: (id, value) => plugin.valueToText(id, value),
     setParam: (id, v) => { pending.push({ id, value: v }); values.set(id, v); },
-    getParam: (id) => values.get(id),
+    // Read the value back OUT OF THE PLUGIN (clap_plugin_params.get_value), not out
+    // of the host's own mirror of what it last sent. The plugin rewrites its own
+    // parameters on a state load, and a mirror cannot see that — which is exactly
+    // what the "restored Mix / restored Size" checks below are testing.
+    getParam: (id) => {
+      const v = plugin.paramValue(id);
+      return v === null ? values.get(id) : v;
+    },
     latency: () => plugin.currentLatency(),
     reprepare: () => {},   // re-activation is a host-lifecycle op, not a render one
     process(inL, inR) {
@@ -115,8 +129,12 @@ async function openWclap() {
       pending = [];
       return o;
     },
-    readState: () => null,   // no state helper on WebClapPlugin yet (see caveats)
-    writeState: () => false,
+    // clap.state, driven with the ostream/istream a real CLAP host hands the
+    // plugin. It yields the SAME "PLST" blob wam_read_state does, which is what
+    // lets the checks below speak ONE state format to both ABIs — and is how the
+    // demo page loads an impulse response without a per-ABI entry point.
+    readState: () => plugin.getState(),
+    writeState: (b) => plugin.setState(b),
   };
 }
 
@@ -173,9 +191,15 @@ function run(driveFrames, gapFrames, tailFrames) {
   };
 }
 
-// Settle a parameter change: the IR is rebuilt off the audio path, so give the
-// processor idle blocks to pick the new IR up before measuring.
-const settle = (blocks = 64) => {
+// Settle a parameter change: the IR is rebuilt off the audio path — and, on these
+// worker-less lanes, in BOUNDED SLICES driven by the host's non-realtime tick, one
+// per render turn. So "settling" is not one block; the longest IR the Size knob
+// reaches (4 s) takes ~120 render turns to rebuild, and the OLD IR keeps playing
+// until it lands. 300 blocks is comfortably past that. This is the price of never
+// glitching: the reverb follows the knob with ~300 ms of lag instead of stalling
+// the render thread for 15 ms. (See SuperConvolverProcessor::kRebuildSliceItems —
+// it is the knob that trades this lag against per-quantum headroom.)
+const settle = (blocks = 300) => {
   inL.fill(0); inR.fill(0);
   for (let b = 0; b < blocks; b++) eng.process(inL, inR);
 };
@@ -273,9 +297,54 @@ eng.reprepare(256);
 check("latency stable across re-prepare (block-size change)", eng.latency() === lat, "got " + eng.latency());
 eng.reprepare(FR);
 
+// ── (c2) THE SIZE KNOB IS GLITCH-FREE. ──────────────────────────────────────
+// The web lanes have no worker thread, so the IR rebuild that a Size change
+// triggers runs inside the host's non-realtime tick — which an AudioWorklet
+// dispatches between render quanta ON THE RENDER THREAD. It used to be a blocking
+// pass: 15.0 ms of IR synthesis + FFT re-partition in ONE render callback against
+// a 2.667 ms quantum budget, i.e. a dropout every time the knob moved. It is now
+// sliced (SlicedIrRebuild), so no single render call may run long.
+//
+// The primary assertion is BEHAVIOURAL and machine-independent — audio must keep
+// coming out, at a steady level, through the whole sweep, with no silent block
+// (which is what a dropout would be). The wall-clock check is a loose backstop
+// that would still catch a regression to the blocking rebuild; it is deliberately
+// generous, because a CI box's scheduler is not a real-time audio thread.
+{
+  const QUANTUM_MS = (FR / SR) * 1000;   // 2.667 ms at 48 kHz / 128 frames
+  eng.setParam(MIX, 100);
+  eng.setParam(SIZE, 0.05);
+  settle();
+
+  let worstMs = 0, silentBlocks = 0, measured = 0;
+  const steps = 40;
+  for (let s = 0; s <= steps; s++) {
+    eng.setParam(SIZE, 0.05 + (3.95 * s) / steps);   // the drag
+    for (let b = 0; b < 24; b++) {
+      for (let f = 0; f < FR; f++) { const v = noise() * 0.5; inL[f] = v; inR[f] = v; }
+      const t0 = process.hrtime.bigint();
+      const out = eng.process(inL, inR);
+      worstMs = Math.max(worstMs, Number(process.hrtime.bigint() - t0) / 1e6);
+      let sq = 0;
+      for (let f = 0; f < FR; f++) sq += out[0][f] * out[0][f];
+      // Skip the first few blocks of the sweep (the reverb is still filling); after
+      // that, EVERY block must carry audio. A rebuild that stalled the render
+      // thread would show up as a block the host had to fill with silence.
+      if (measured++ > 8 && Math.sqrt(sq / FR) < 1e-4) silentBlocks++;
+    }
+  }
+  check("audio never drops out across a full Size sweep",
+        silentBlocks === 0, `${silentBlocks} silent block(s) of ${measured}`);
+  check("no render call runs long during a Size sweep (the rebuild is sliced)",
+        worstMs < QUANTUM_MS,
+        `worst=${worstMs.toFixed(3)} ms, quantum budget=${QUANTUM_MS.toFixed(3)} ms ` +
+        `(was 15.0 ms with the blocking rebuild)`);
+}
+
 // ── (d) state round-trip: parameters + the plugin's own IR-source blob. ──────
-// WAM only: WebClapPlugin has no clap.state helper yet, so the WebCLAP lane
-// proves audio + parameters + latency and the WAM lane proves state.
+// Both ABIs now: WAM through wam_read_state/wam_write_state, WebCLAP through the
+// clap.state extension. Same "PLST" bytes either way — which is the whole reason
+// the IR upload in (e) needs no per-ABI entry point.
 eng.setParam(MIX, 100);
 eng.setParam(SIZE, 2.0);
 settle();
@@ -308,6 +377,86 @@ if (saved) {
         `before=${wet.tailRms.toFixed(6)} after=${restored.tailRms.toFixed(6)} rel=${rel.toFixed(4)}`);
 } else {
   console.log("  skip state round-trip (no state helper on this ABI's host)");
+}
+
+// ── (e) LOAD YOUR OWN IMPULSE RESPONSE — the browser equivalent of the native
+//    plugin's file dialog, on BOTH ABIs from ONE code path. ────────────────────
+// The page decodes an audio file with the Web Audio API and writes the samples
+// into the plugin's state as an SCv2 "Pcm" record (ir-source.js), spliced into the
+// live state's plugin slot so the user's knob positions survive (plugin-state.js).
+// Neither module is web-only — they are imported here and driven straight through
+// both hosts, so the exact bytes the demo page sends are the bytes under test.
+//
+// The reverb must then BE that IR: a synthetic "space" whose energy is a single
+// late echo produces a tail with an obvious gap the built-in IR does not have.
+if (saved) {
+  const IR_SR = SR, IR_FRAMES = 12000;   // 0.25 s
+  // A deliberately un-reverb-like IR: a direct hit, then ONE discrete echo at
+  // 0.2 s and nothing else. Convolving with it must reproduce that echo.
+  const custom = new Float32Array(IR_FRAMES);
+  custom[0] = 1.0;
+  custom[Math.floor(0.2 * IR_SR)] = 0.9;
+
+  const blob = buildPcmIrBlob(custom, IR_SR);
+  check("the page's IR record is a valid SCv2 Pcm blob", readIrBlobKind(blob) === 2,
+        "kind=" + readIrBlobKind(blob));
+
+  // Splice it into the live state — parameters preserved — and write it back. This
+  // IS adapter.setState(); the shell's HostAdapter makes the call identical on WAM
+  // and WebCLAP.
+  const before = eng.readState();
+  const params = parseContainer(before).params;
+  eng.setParam(MIX, 100);
+  eng.setParam(SIZE, 4.0);   // longer than the IR: a shorter loaded base is left whole
+  check("IR upload accepted (setState)", eng.writeState(buildContainer(params, blob)));
+  settle(600);               // the rebuild is sliced — give the host its ticks
+
+  // The uploaded IR is live: drive an impulse and look for the echo it defines.
+  const impulse = () => {
+    const acc = [];
+    for (let b = 0; b < 200; b++) {
+      for (let f = 0; f < FR; f++) {
+        const v = (b === 0 && f === 0) ? 1.0 : 0.0;
+        inL[f] = v; inR[f] = v;
+      }
+      const out = eng.process(inL, inR);
+      for (let f = 0; f < FR; f++) acc.push(out[0][f]);
+    }
+    return acc.slice(eng.latency());   // read back from the reported latency
+  };
+  const resp = impulse();
+  const at = Math.floor(0.2 * IR_SR);
+  const echo = Math.max(...resp.slice(at - 8, at + 8).map(Math.abs));
+  const between = Math.max(...resp.slice(2000, at - 2000).map(Math.abs));
+  check("the uploaded IR is what the plugin convolves with",
+        echo > 0.2 && echo > between * 8,
+        `echo at 0.2 s = ${echo.toFixed(4)}, quiet zone before it = ${between.toFixed(4)}`);
+
+  // It survives a save/restore, because the IR IS the state.
+  const withIr = eng.readState();
+  check("the uploaded IR is carried in the saved state",
+        withIr.length > 4 * IR_FRAMES, `${withIr.length} bytes`);
+  eng.writeState(buildContainer(parseContainer(withIr).params, buildSyntheticIrBlob()));
+  settle(600);
+  check("state restore brings the uploaded IR back", eng.writeState(withIr));
+  settle(600);
+  const restoredResp = impulse();
+  const echo2 = Math.max(...restoredResp.slice(at - 8, at + 8).map(Math.abs));
+  check("…and the restored plugin convolves with it again",
+        Math.abs(echo2 - echo) < 0.05 * echo,
+        `echo before=${echo.toFixed(4)} after=${echo2.toFixed(4)}`);
+
+  // Reverting to the built-in synthetic reverb is the same call, "Synthetic" kind.
+  eng.writeState(buildContainer(parseContainer(withIr).params, buildSyntheticIrBlob()));
+  settle(1200);
+  const back = impulse();
+  const echo3 = Math.max(...back.slice(at - 8, at + 8).map(Math.abs));
+  const dense = Math.max(...back.slice(2000, at - 2000).map(Math.abs));
+  check("revert to the built-in reverb (a dense tail, not the uploaded echo)",
+        dense > 1e-3 && echo3 < echo * 0.5,
+        `built-in tail=${dense.toFixed(4)}, echo now=${echo3.toFixed(4)}`);
+} else {
+  console.log("  skip IR upload (no state helper on this ABI's host)");
 }
 
 console.log(fails.length ? `\nFAILURES (${fails.length}): ${fails.join(", ")}` : "\nALL CHECKS PASSED");

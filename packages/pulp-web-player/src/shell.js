@@ -40,6 +40,7 @@
 import { createWidget, kindFor, formatValue } from "./widgets/index.js";
 import { initModality } from "./widgets/base.js";
 import { mountCustomUi } from "./ui/custom-ui.js";
+import { parseContainer, buildContainer } from "./state/plugin-state.js";
 // The oscilloscope trigger is pure DSP math (finds the rising zero-crossing so a
 // periodic waveform stands still) — host-agnostic, vendored from the Pulp SDK.
 import { triggeredView } from "./vendor/pulp-wasm/wam-scope.mjs";
@@ -371,55 +372,11 @@ function synthLoop(ctx) {
 }
 
 // ——————————————————————————————————————————— plugin_state_io "PLST" envelope
-// The SDK composes host-facing plugin state with the SAME format the native
-// VST3/AU/CLAP builds use (core/format/src/plugin_state_io.cpp):
-//   [ "PLST" ][u32 version=1][u32 store_len][u32 plugin_len]  (16-byte header)
-//   [ store bytes (starts "PULP") ][ plugin bytes ]
-//   [u32 crc32 over everything above]                          (4-byte footer)
-// When the plugin owns no extra state, serialize() returns the BARE store blob
-// (no envelope), so a container we read may be either shape.
+// The container itself lives in state/plugin-state.js — ONE implementation, so a
+// consumer page (the SuperConvolver demo swaps a decoded impulse response into
+// the plugin blob) and the shell's own state-memo section cannot drift apart, and
+// neither can the two ABIs.
 // state-memo plugin blob: [u32 version=1][u32 memo_len][memo bytes]
-const ENV_MAGIC = [0x50, 0x4c, 0x53, 0x54]; // "PLST"
-const STORE_MAGIC = [0x50, 0x55, 0x4c, 0x50]; // "PULP"
-const ENV_VERSION = 1, ENV_HEADER = 16, ENV_FOOTER = 4;
-
-// zlib CRC-32 — byte-identical to crc32_simple in core/state/src/store.cpp.
-function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) {
-    crc ^= bytes[i];
-    for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (~crc) >>> 0;
-}
-const has4 = (b, m, o = 0) => b.length >= o + 4 && b[o] === m[0] && b[o+1] === m[1] && b[o+2] === m[2] && b[o+3] === m[3];
-
-function parseContainer(bytes) {
-  // Bare StateStore blob (plugin owned no extra state): all params, no plugin.
-  if (has4(bytes, STORE_MAGIC)) return { params: bytes.slice(), plugin: new Uint8Array(0) };
-  if (!has4(bytes, ENV_MAGIC)) throw new Error("not a PLST envelope");
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const storeLen = dv.getUint32(8, true);
-  const pluginLen = dv.getUint32(12, true);
-  const params = bytes.slice(ENV_HEADER, ENV_HEADER + storeLen);
-  const plugin = bytes.slice(ENV_HEADER + storeLen, ENV_HEADER + storeLen + pluginLen);
-  return { params, plugin };
-}
-function buildContainer(params, plugin) {
-  // Mirror plugin_state_io::serialize: a bare store blob when there is no plugin
-  // payload, else the versioned + CRC'd PLST envelope.
-  if (!plugin || plugin.length === 0) return params.slice();
-  const out = new Uint8Array(ENV_HEADER + params.length + plugin.length + ENV_FOOTER);
-  const dv = new DataView(out.buffer);
-  out.set(ENV_MAGIC, 0);
-  dv.setUint32(4, ENV_VERSION, true);
-  dv.setUint32(8, params.length, true);
-  dv.setUint32(12, plugin.length, true);
-  out.set(params, ENV_HEADER);
-  out.set(plugin, ENV_HEADER + params.length);
-  dv.setUint32(out.length - ENV_FOOTER, crc32(out.subarray(0, out.length - ENV_FOOTER)), true);
-  return out;
-}
 function readMemoFromPlugin(plugin) {
   if (plugin.length < 8) return "";
   const dv = new DataView(plugin.buffer, plugin.byteOffset, plugin.byteLength);
@@ -532,7 +489,7 @@ export async function mountDemo(opts) {
     // the plugin emits (MPE Spreader gives every held note its own channel)
     // needs its own voice to sound at the same time.
     pool: [], voiceByChan: new Map(), voiceClock: 0,
-    descriptor: null, params: null, mode: null, customUi: null,
+    descriptor: null, params: null, mode: null, customUi: null, onReady: null,
   };
 
   // Test seam / inspectable state.
@@ -1425,6 +1382,25 @@ function connectOutput(S) {
     if (S.mode === "instrument" || (S.mode === "midi-effect" && opts.midiViz !== "sysex")) connectWebMidi(khz);
     meter();
     startParamSync();
+
+    // opt-in seam: the demo is live, the plugin is loaded and its audio graph is
+    // wired. A page hangs PLUGIN-SPECIFIC chrome off this — chrome that needs the
+    // live HostAdapter and/or the demo's AudioContext, neither of which exists at
+    // module scope. The SuperConvolver page mounts its "load an impulse response"
+    // drop-zone here: it decodes with `ctx` (so the PCM arrives at the session rate)
+    // and writes through `adapter.setState()`, which is the same call on WAM and on
+    // WebCLAP — the reason this seam is ABI-agnostic and cannot drift between them.
+    //
+    // Distinct from `customUi`: that REPLACES the parameter grid (and falls back to
+    // it on failure). This ADDS to the page and never gates the audio demo — a
+    // throwing onReady is logged and the demo keeps running.
+    try {
+      S.onReady = opts.onReady?.({
+        adapter: S.wam, ctx: S.ctx, params, mode: S.mode, root,
+      }) || null;
+    } catch (err) {
+      console.warn("onReady failed:", err);
+    }
   }
 
   // Arm the start overlay. The whole overlay is clickable (large target); the
@@ -1456,6 +1432,10 @@ function connectOutput(S) {
     // context that feeds it. buildParams() re-mounts a fresh one on restart.
     S.customUi?.destroy();
     S.customUi = null;
+    // Same for whatever the page hung off onReady: it holds the adapter and the
+    // AudioContext we are about to close. start() calls onReady again on restart.
+    S.onReady?.destroy?.();
+    S.onReady = null;
     await S.ctx.close();
     if (S.synthCtx) { try { await S.synthCtx.close(); } catch {} }
     S.ctx = null; S.wam = null; S.synth = null; S.synthCtx = null; S.analyser = null;

@@ -73,6 +73,17 @@ requires it. Serve `.js`/`.mjs` with a JavaScript MIME type.
 | **`theme`** | `"dark"` \| `"light"` \| `"auto"` (default: auto — follows `prefers-color-scheme`) |
 | `hostLabel`, `hostDocsHref` | header ABI label + link (default `WAM`) |
 | `createAdapter` | inject a non-WAM backend factory (see interface) |
+| `customUi` | **replace** the parameter grid with your own renderer (falls back to the grid on failure) |
+| `onReady` | **add** plugin-specific page chrome once the demo is live — `({ adapter, ctx, params, mode, root }) => handle?` |
+
+`onReady` is the seam for chrome that needs the live `HostAdapter` and/or the
+demo's `AudioContext`, neither of which exists at module scope: the SuperConvolver
+demo mounts its "load an impulse response" drop-zone there, decoding the file with
+`ctx` and writing the samples into the plugin through `adapter.setState()` (see
+`./state` below). It runs after the audio graph is wired, never gates the demo (a
+throwing `onReady` is logged and the demo keeps running), and its returned handle's
+`destroy()` is called on Stop. It is **not** `customUi`: that one *replaces* the
+parameter grid.
 
 ---
 
@@ -189,6 +200,8 @@ src/
     wam.js              # default WAM adapter
     wclap.js            # WebCLAP adapter (worklet-resident CLAP host)
     adapter.d.ts        # the host-adapter interface (typed contract)
+  state/
+    plugin-state.js     # the SDK's "PLST" plugin-state container (parse/build/splice)
   widgets/              # canvas knob/fader/toggle/combo/meter + base
   theme/                # default Ink & Signal skin: tokens.css, fonts.css, Inter
   vendor/pulp-wasm/     # vendored SDK WAM runtime + WebCLAP host (see Provenance)
@@ -201,6 +214,7 @@ src/
 | `.` | `./src/index.js` |
 | `./shell` | `./src/shell.js` (host-agnostic; you always pass `createAdapter`) |
 | `./adapters/wam` | `./src/adapters/wam.js` |
+| `./state` | `./src/state/plugin-state.js` — read/replace a plugin's OWN opaque blob without disturbing its parameters. ABI-agnostic (`getState`/`setState` are identical on WAM and WebCLAP), so a page can hand a plugin binary data — a sample, an impulse response, a wavetable — with no per-ABI entry point, and it survives a save/restore because it *is* the state. |
 | `./widgets` | `./src/widgets/index.js` |
 | `./theme/tokens.css`, `./theme/fonts.css` | the default skin |
 

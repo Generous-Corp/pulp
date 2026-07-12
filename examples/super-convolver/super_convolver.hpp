@@ -56,11 +56,18 @@
 // project and presets.
 //
 // The IR rebuild (decode, resample, window, FFT plan) runs off the audio thread.
-// On a host with threads a background worker owns it; a host without threads (a
-// wasm build — neither web lane can spawn a thread) compiles the worker out and
-// the CONTROL thread drives the same body through service_ir_rebuild(). Either
-// way the audio thread only ever picks the finished IR up through the lock-free
-// signal::ConvolverIrSwapper, so process() stays allocation-free.
+// On a host with threads a background worker owns it and runs it as one blocking
+// pass. A host without threads (a wasm build — neither web lane can spawn a
+// thread) compiles the worker out, and the only non-render context it has is the
+// host-driven on_non_realtime_tick(), which an AudioWorklet dispatches BETWEEN
+// RENDER QUANTA ON THE RENDER THREAD. A blocking rebuild there is a dropout (it
+// measured 15.0 ms against a 2.667 ms quantum budget), so that lane runs the
+// rebuild TIME-SLICED instead — superconvolver::SlicedIrRebuild, a bounded,
+// resumable job the tick pumps a fixed budget of work into per quantum while the
+// OLD IR keeps producing audio. Either way the audio thread only ever picks the
+// finished IR up through the lock-free signal::ConvolverIrSwapper, so process()
+// stays allocation-free — and the pickup CROSSFADES (PartitionedConvolver's
+// set_crossfade) so a Size change is audibly continuous rather than a hard cut.
 //
 // The native GPU front-end (live IR waveform + frequency display + controls,
 // rendered through canvas/Skia/Dawn) is in super_convolver_ui.hpp. The GPU
@@ -75,6 +82,8 @@
 #include <pulp/audio/impulse_response.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/log.hpp>
+
+#include "sliced_ir_rebuild.hpp"
 
 #if !defined(PULP_WASM)
 #include <pulp/audio/format_registry.hpp>
@@ -172,6 +181,12 @@ inline std::vector<float> make_reverb_ir_shaped(std::size_t length, float decay_
                                                 float density, std::uint32_t seed) {
     std::vector<float> ir(length, 0.0f);
     if (length == 0) return ir;
+    // The generator body is duplicated, deliberately and identically, in
+    // superconvolver::SlicedIrRebuild::generate() so the web lane can produce the
+    // SAME samples a chunk at a time (the LCG is sequential, so a resumable
+    // version must carry its state rather than re-derive it). Any change to the
+    // recurrence must be made in both, and the "sliced rebuild converges to the
+    // one-shot IR" test is what holds them together.
     std::uint32_t s = seed;
     const float decay = decay_norm / static_cast<float>(length);
     for (std::size_t i = 0; i < length; ++i) {
@@ -512,6 +527,22 @@ public:
         for (auto& sw : swapper_) sw.drain_old();
     }
 
+    /// Work items one non-realtime tick may spend on the IR rebuild.
+    ///
+    /// THE tuning knob for the web lanes. The tick runs between render quanta on
+    /// the render thread, so the whole rebuild has to fit inside the slack of a
+    /// 128-frame quantum — 2.667 ms at 48 kHz, of which the convolution itself
+    /// already takes a share. 32768 items was chosen by measuring the slowest
+    /// phase at this budget on the scalar radix-2 FFT path the browser actually
+    /// runs (no vDSP): ~0.25 ms, i.e. under 10% of a quantum, against a
+    /// pre-existing worst case of 15.0 ms. The cost of the choice is latency, not
+    /// glitches: a full 4 s IR needs ~90 ticks (~240 ms of wall clock) to finish
+    /// rebuilding, during which the OLD IR keeps playing. Raising the budget
+    /// tightens that lag and eats quantum headroom; lowering it does the reverse.
+    /// It is a constant, and deliberately NOT a function of IR length — that is
+    /// the whole point.
+    static constexpr std::size_t kRebuildSliceItems = 32768;
+
     /// Host-driven pump for hosts with no thread facility (the browser: a WAM
     /// module lives entirely inside an AudioWorklet, and WebCLAP's only control
     /// context is `on_main_thread`). The format adapter calls this from a
@@ -519,6 +550,12 @@ public:
     /// without it, `Size` and a restored IR source would never reach the audio
     /// thread on the web lanes, because nothing rebuilds from process() by
     /// design.
+    ///
+    /// "Non-render" is NOT "not the render thread": an AudioWorklet has no other
+    /// thread, so this runs BETWEEN quanta ON the render thread. It therefore does
+    /// a BOUNDED SLICE of the rebuild and returns — see kRebuildSliceItems and
+    /// SlicedIrRebuild. A Size change that lands mid-rebuild SUPERSEDES the job in
+    /// flight (start_rebuild_job restarts it) rather than queueing a second one.
     ///
     /// A no-op whenever the background worker owns the reconcile pass — the
     /// worker and the host must never run it concurrently.
@@ -535,25 +572,80 @@ public:
         // relaxed atomic load, and process() writing the same derived value
         // concurrently is benign (both write what the store already says).
         requested_size_.store(current_size(), std::memory_order_relaxed);
-        service_ir_rebuild();
+        service_ir_rebuild_sliced(kRebuildSliceItems);
     }
 
     /// RT-safe: two atomic loads and a compare against what the last reconcile
-    /// pass built. CLAP (and therefore WebCLAP) only reaches the control thread
-    /// by requesting a host callback from process(), so the adapter needs to know
-    /// an IR rebuild is outstanding without doing any of the work. Reads the
-    /// parameter store (not `requested_size_`) for the same reason the tick does:
-    /// the store is the truth, the mirror lags.
+    /// pass built, plus "is a sliced job still in flight". CLAP (and therefore
+    /// WebCLAP) only reaches the control thread by requesting a host callback from
+    /// process(), so the adapter needs to know an IR rebuild is outstanding
+    /// without doing any of the work — and a job that has STARTED but not finished
+    /// is exactly as outstanding as one that has not started, or the CLAP host
+    /// would stop calling the tick and strand it half-built. Reads the parameter
+    /// store (not `requested_size_`) for the same reason the tick does: the store
+    /// is the truth, the mirror lags.
     bool non_realtime_tick_pending() const override {
 #if !defined(PULP_WASM)
         if (worker_enabled_) return false;   // the worker owns the reconcile
 #endif
+        if (rebuild_job_.active()) return true;
         return base_needs_rebuild(ir_path_gen_.load(std::memory_order_acquire),
                                   current_size());
     }
 
+    /// One BOUNDED slice of the off-audio-thread reconcile: at most `budget` work
+    /// items of IR synthesis / normalization / FFT re-partition, then return. The
+    /// audio thread is untouched by any of it — when the job completes, the
+    /// finished per-channel state is handed over through the lock-free
+    /// signal::ConvolverIrSwapper exactly as the native worker's one-shot pass
+    /// does, and the audio thread's only job stays try_swap_ir().
+    ///
+    /// Public so a test (and a host that wants a smaller/larger slice) can drive
+    /// it directly. Never call it from process().
+    void service_ir_rebuild_sliced(std::size_t budget) {
+        const float want_size = requested_size_.load(std::memory_order_relaxed);
+        const std::uint32_t want_gen = ir_path_gen_.load(std::memory_order_acquire);
+
+        if (base_needs_rebuild(want_gen, want_size)) {
+            // SUPERSEDE, don't queue: a knob drag delivers a stream of Size values,
+            // and only the latest one is ever going to be heard. A job already
+            // building exactly what is wanted keeps going; anything else restarts.
+            if (!rebuild_job_.active() || job_size_ != want_size || job_gen_ != want_gen)
+                start_rebuild_job(want_size, want_gen);
+        } else if (!rebuild_job_.active()) {
+            for (auto& sw : swapper_) sw.drain_old();
+            return;
+        }
+
+        if (rebuild_job_.active() && rebuild_job_.step(budget)) {
+            worker_base_ir_ = rebuild_job_.take_ir();
+            worker_base_gen_ = job_gen_;
+            worker_base_size_ = job_size_;
+            for (std::size_t ch = 0; ch < kChannels; ++ch)
+                swapper_[ch].stage_ir(rebuild_job_.take_state(ch));
+            publish_display_ir(worker_base_ir_);
+            rebuild_job_.cancel();
+#if !defined(PULP_WASM)
+            gpu_base_dirty_ = true;
+#endif
+        }
+
+#if !defined(PULP_WASM)
+        // The GPU half of the reconcile, exactly as the one-shot pass runs it. It
+        // is unreachable on the lanes this sliced path exists for (a wasm build
+        // compiles the whole GPU stack out), and is here so that turning the worker
+        // off on a NATIVE host — which is how the tests reproduce the web lane —
+        // does not silently lose the live Engine/Rooms switch.
+        service_gpu();
+#endif
+
+        for (auto& sw : swapper_) sw.drain_old();
+    }
+
     void prepare(const format::PrepareContext& ctx) override {
         stop_worker();
+        rebuild_job_.cancel();   // worker stopped: nothing else can be mid-rebuild
+        job_size_ = -1.0f;
 #if !defined(PULP_WASM)
         // Tear down any previous GPU stacks (the worker is stopped, so the audio
         // thread is no longer running — safe to free directly here).
@@ -591,7 +683,24 @@ public:
         worker_file_raw_.clear();
         worker_file_raw_gen_ = 0;
 
+        // The first IR is built SYNCHRONOUSLY, here in prepare() — which is not the
+        // audio thread — and loaded straight into both convolvers. That is what
+        // makes the plugin ready to convolve on its very first block: it never
+        // renders a dry block while it waits for an IR to appear, on any lane. (The
+        // first `latency_samples()` of output are the re-block FIFO's priming
+        // silence, which the host's PDC accounts for; after that, wet.)
         rebuild_ir_inline(current_size());   // first IR loaded synchronously (CPU)
+
+        // Crossfade every LIVE IR swap. Without this a Size change is a hard cut
+        // between two IRs: the old tail stops mid-flight and the new one starts
+        // from the carried history, which clicks. With it, the displaced IR keeps
+        // rendering from its own history in parallel and the two are blended, so
+        // dragging Size sounds like the room changing size rather than like a
+        // switch being thrown. kInternalBlock (512 ≈ 11 ms at 48 kHz) is two
+        // internal blocks of blend — long enough to be inaudible as a transition,
+        // short enough that the doubled render cost is a blip. Applies to BOTH
+        // lanes: the native worker's swaps go through the same try_swap_ir().
+        for (auto& c : conv_) c.set_crossfade(kInternalBlock);
 
         const float init_size = current_size();
         gpu_extra_ = 0;
@@ -652,6 +761,8 @@ public:
 
     void release() override {
         stop_worker();   // worker stopped → audio thread stopped → safe to free
+        rebuild_job_.cancel();
+        job_size_ = -1.0f;
 #if !defined(PULP_WASM)
         gpu_active_.store(nullptr, std::memory_order_release);
         gpu_engine_active_.store(false, std::memory_order_release);
@@ -1442,48 +1553,12 @@ private:
         }
 
         if (has_pcm) {
-            if (stale) {
-                auto loaded = audio::read_impulse_response_pcm(
-                    pcm.samples.data(), pcm.frames, pcm.channels, pcm.rate,
-                    sample_rate_,
-                    {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
-                source_decodes_.fetch_add(1, std::memory_order_relaxed);
-                if (loaded && !loaded->empty()) {
-                    worker_file_raw_ = std::move(*loaded);
-                    worker_file_raw_gen_ = gen;
-                } else {
-                    worker_file_raw_.clear();
-                    runtime::log_warn(
-                        "SuperConvolver: the supplied IR PCM is unusable (silent, "
-                        "non-finite, or an implausible rate); falling back to the "
-                        "built-in synthetic IR.");
-                }
-            }
+            if (stale) decode_pcm_base(pcm, gen);
             if (!worker_file_raw_.empty()) return window_loaded_base(seconds);
         }
 #if !defined(PULP_WASM)
         else if (!path.empty()) {
-            if (stale) {
-                // Any exception during decode/resample (e.g. bad_alloc on a huge
-                // or corrupt file) must never escape onto the worker or prepare
-                // thread — fall back to the synthetic IR rather than crash.
-                std::optional<std::vector<float>> loaded;
-                try {
-                    loaded = load_ir_file(path);
-                } catch (...) {
-                    loaded = std::nullopt;
-                }
-                source_decodes_.fetch_add(1, std::memory_order_relaxed);
-                if (loaded && !loaded->empty()) {
-                    worker_file_raw_ = std::move(*loaded);
-                    worker_file_raw_gen_ = gen;
-                } else {
-                    worker_file_raw_.clear();
-                    runtime::log_warn(
-                        "SuperConvolver: IR file '{}' is unreadable, too large, or "
-                        "empty; falling back to the built-in synthetic IR.", path);
-                }
-            }
+            if (stale) decode_file_base(path, gen);
             if (!worker_file_raw_.empty()) return window_loaded_base(seconds);
         }
 #endif
@@ -1494,6 +1569,109 @@ private:
         worker_file_raw_gen_ = 0;
         return make_builtin_ir(built_in, ir_length_for(seconds));
     }
+
+    // Start (or RESTART, superseding whatever was in flight) a bounded rebuild of
+    // the base IR + both channels' convolver states for `seconds` / `gen`.
+    //
+    // The source is resolved here, exactly as build_base_ir() resolves it: decoded
+    // PCM first, then a readable file (native only), then the selected built-in.
+    // The DECODE itself (resample + mono-sum + unit-energy normalize, inside
+    // audio::read_impulse_response_pcm) is the one step that is NOT sliced — but
+    // it is cached per SOURCE, not per Size, so it runs once when a user loads an
+    // IR and never again while they work the Size knob. Since a browser page
+    // decodes with AudioContext.decodeAudioData, its PCM already arrives at the
+    // session rate and the resampler is skipped, leaving an O(n) pass. The Size
+    // knob — the actual reported defect — is bounded end to end.
+    void start_rebuild_job(float seconds, std::uint32_t gen) {
+        rebuild_job_.cancel();
+        job_size_ = seconds;
+        job_gen_ = gen;
+
+        const bool stale = worker_file_raw_.empty() || worker_file_raw_gen_ != gen;
+        std::string path;
+        std::uint8_t built_in = 0;
+        IrPcm pcm;
+        bool has_pcm = false;
+        {
+            std::lock_guard<std::mutex> lock(ir_path_mutex_);
+            path = active_ir_path_;
+            built_in = built_in_id_;
+            has_pcm = !pcm_.samples.empty();
+            if (has_pcm && stale) pcm = pcm_;
+        }
+
+        if (has_pcm) {
+            if (stale) decode_pcm_base(pcm, gen);
+            if (!worker_file_raw_.empty()) { start_windowed_job(seconds); return; }
+        }
+#if !defined(PULP_WASM)
+        else if (!path.empty()) {
+            if (stale) decode_file_base(path, gen);
+            if (!worker_file_raw_.empty()) { start_windowed_job(seconds); return; }
+        }
+#endif
+        (void)path;
+
+        worker_has_file_ = false;
+        worker_file_raw_.clear();
+        worker_file_raw_gen_ = 0;
+        const BuiltInIr& b = kBuiltInIrs[built_in < kBuiltInIrCount ? built_in : 0];
+        rebuild_job_.start_synthetic(ir_length_for(seconds), b.decay_norm, b.density,
+                                     b.seed, kInternalBlock, kChannels);
+    }
+
+    void start_windowed_job(float seconds) {
+        worker_has_file_ = true;
+        std::size_t target = ir_length_for(seconds);
+        const std::size_t cap = static_cast<std::size_t>(kMaxIrSeconds * sample_rate_);
+        if (target > cap) target = cap;
+        const std::size_t fade = static_cast<std::size_t>(0.030 * sample_rate_);
+        rebuild_job_.start_windowed(worker_file_raw_, target, fade, kInternalBlock,
+                                    kChannels);
+    }
+
+    // Decode + resample + normalize supplied PCM into the cached base. Shared by
+    // the one-shot build_base_ir() and the sliced job's source resolution.
+    void decode_pcm_base(const IrPcm& pcm, std::uint32_t gen) {
+        auto loaded = audio::read_impulse_response_pcm(
+            pcm.samples.data(), pcm.frames, pcm.channels, pcm.rate, sample_rate_,
+            {.max_seconds = kMaxIrSeconds, .normalize_unit_energy = true});
+        source_decodes_.fetch_add(1, std::memory_order_relaxed);
+        if (loaded && !loaded->empty()) {
+            worker_file_raw_ = std::move(*loaded);
+            worker_file_raw_gen_ = gen;
+        } else {
+            worker_file_raw_.clear();
+            runtime::log_warn(
+                "SuperConvolver: the supplied IR PCM is unusable (silent, "
+                "non-finite, or an implausible rate); falling back to the "
+                "built-in synthetic IR.");
+        }
+    }
+
+#if !defined(PULP_WASM)
+    void decode_file_base(const std::string& path, std::uint32_t gen) {
+        // Any exception during decode/resample (e.g. bad_alloc on a huge or
+        // corrupt file) must never escape onto the worker or prepare thread — fall
+        // back to the synthetic IR rather than crash.
+        std::optional<std::vector<float>> loaded;
+        try {
+            loaded = load_ir_file(path);
+        } catch (...) {
+            loaded = std::nullopt;
+        }
+        source_decodes_.fetch_add(1, std::memory_order_relaxed);
+        if (loaded && !loaded->empty()) {
+            worker_file_raw_ = std::move(*loaded);
+            worker_file_raw_gen_ = gen;
+        } else {
+            worker_file_raw_.clear();
+            runtime::log_warn(
+                "SuperConvolver: IR file '{}' is unreadable, too large, or "
+                "empty; falling back to the built-in synthetic IR.", path);
+        }
+    }
+#endif
 
     // Window the cached decoded base (PCM or file) to the Size knob. Size truncates
     // the loaded space's tail (bounded by kMaxIrSeconds, which the loader already
@@ -1790,6 +1968,15 @@ private:
     // new source (generation moves) forces a fresh decode.
     std::vector<float> worker_file_raw_;
     std::uint32_t worker_file_raw_gen_ = 0;
+
+    // The bounded, resumable rebuild the WORKER-LESS lanes (both web ABIs, and any
+    // test that turns the worker off) run instead of a blocking pass. job_size_ /
+    // job_gen_ are what the in-flight job is BUILDING, so a request that differs
+    // from them supersedes it. Rebuild-thread-local; never touched by the audio
+    // thread, which only ever calls try_swap_ir().
+    superconvolver::SlicedIrRebuild rebuild_job_;
+    float job_size_ = -1.0f;
+    std::uint32_t job_gen_ = 0;
 
     // UI display snapshot (UI + worker thread only; never audio thread).
     mutable std::mutex ir_display_mutex_;

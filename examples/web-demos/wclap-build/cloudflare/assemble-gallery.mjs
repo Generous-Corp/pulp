@@ -421,9 +421,11 @@ const SC_CFG = { mode: "audio-effect", paramRows: 2 };
 async function playerVersion() {
   const { createHash } = await import("node:crypto");
   const h = createHash("sha256");
-  for (const f of ["shell.js", "widgets/index.js", "adapters/wam.js", "adapters/wclap.js"])
+  for (const f of ["shell.js", "widgets/index.js", "adapters/wam.js", "adapters/wclap.js",
+                   "state/plugin-state.js"])
     h.update(await readFile(join(PKG_SRC, f)));
-  h.update(await readFile(join(UI_SRC, "pulp-ui.js")));
+  for (const f of ["pulp-ui.js", "ir-source.js"])
+    h.update(await readFile(join(UI_SRC, f)));
   return h.digest("hex").slice(0, 8);
 }
 
@@ -455,7 +457,17 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
   // panel. Both ABI pages get this block verbatim — the module is DSP-free and
   // talks only to the HostAdapter, so any visible difference between the two pages
   // is a shared-player bug.
-  const uiImport = withUi ? `\n  import { mountPulpUi } from "./pulp-ui.js?v=${v}";` : "";
+  // "Load impulse response…" — the browser equivalent of the desktop plugin's file
+  // dialog. It decodes with the demo's own AudioContext (so the PCM already arrives
+  // at the session rate) and hands the plugin the samples through the SDK's
+  // plugin-state container: getState -> swap the plugin-owned blob for an SCv2 "Pcm"
+  // record -> setState. That path is IDENTICAL on both ABIs — no per-ABI entry
+  // point to keep in sync — and the loaded IR survives a state save/restore because
+  // it IS the state. It hangs off the shell's onReady seam rather than customUi, so
+  // it is present on the Pulp-UI page AND on the generated-grid fallback.
+  const irImport = `\n  import { mountIrLoader } from "./ir-source.js?v=${v}";` +
+                   `\n  import * as pluginState from "../../vendor-player/state/plugin-state.js?v=${v}";`;
+  const uiImport = (withUi ? `\n  import { mountPulpUi } from "./pulp-ui.js?v=${v}";` : "") + irImport;
   const uiProp = withUi ? `
     customUi: (container, adapter) => {
       const canvas = document.createElement("canvas");
@@ -506,8 +518,11 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
     processorUrl: "${processorUrl}",
 ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).join("\n")}${uiProp}
     createAdapter: (ctx, urls) => ${adapterFn}(ctx, urls),
+    onReady: ({ adapter, ctx }) =>
+      mountIrLoader(document.getElementById("ir"), adapter, ctx, pluginState),
   });
 </script>
+<div id="ir" style="max-width:860px;margin:0 auto;padding:0 20px"></div>
 <p style="max-width:860px;margin:0 auto;padding:0 20px 40px;
           font:13px/1.6 system-ui;color:#8b96a3">
   This is the <b>${hostLabel}</b> build. The same plugin also runs as
@@ -624,6 +639,10 @@ async function emitSuperConvolver() {
     await writeFile(join(pdir, "index.html"),
                     superConvolverPage(abi, `${SITE_BASE}/super-convolver/${abi}/`,
                                        existsSync(join(pdir, "og.png")), v, withUi));
+    // The IR loader is imported by BOTH page variants (it hangs off the shell's
+    // onReady seam, not customUi), so it ships whether or not the Pulp UI module
+    // built — unlike pulp-ui.js, which is only imported when the module is there.
+    await copyFile(join(UI_SRC, "ir-source.js"), join(pdir, "ir-source.js"));
     if (withUi) {
       for (const f of uiFiles) await copyFile(join(UI_BUILD, f), join(pdir, f));
       await copyFile(join(UI_SRC, "pulp-ui.js"), join(pdir, "pulp-ui.js"));

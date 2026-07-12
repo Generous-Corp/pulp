@@ -12,6 +12,7 @@
     "./adapters/wam": "./src/adapters/wam.js",
     "./adapters/wclap": "./src/adapters/wclap.js",
     "./wclap-processor.js": "./src/vendor/pulp-wasm/wclap-processor.js",
+    "./state": "./src/state/plugin-state.js",
     "./widgets": "./src/widgets/index.js",
     "./theme/tokens.css": "./src/theme/tokens.css",
     "./theme/fonts.css": "./src/theme/fonts.css",
