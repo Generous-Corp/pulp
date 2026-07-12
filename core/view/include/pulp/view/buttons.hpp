@@ -21,14 +21,19 @@ public:
     // is transparent with accent text.
     enum class Style { primary, secondary, ghost };
 
-    TextButton() { set_access_role(AccessRole::toggle); set_focusable(true); }
+    // A TextButton is a push button, not a checkbox: it fires on_click and
+    // carries no checked state. It announced itself as AccessRole::toggle
+    // (NSAccessibilityCheckBoxRole / AT-SPI TOGGLE_BUTTON) until the role
+    // vocabulary grew a `button` literal, so every screen reader told the user
+    // "checkbox" and offered a state it does not have.
+    TextButton() { set_access_role(AccessRole::button); set_focusable(true); }
     explicit TextButton(std::string label) : label_(std::move(label)) {
-        set_access_role(AccessRole::toggle);
-        set_access_label(label_);
+        set_access_role(AccessRole::button);
+        set_derived_access_label(label_);
         set_focusable(true);
     }
 
-    void set_label(std::string text) { label_ = std::move(text); set_access_label(label_); }
+    void set_label(std::string text) { label_ = std::move(text); set_derived_access_label(label_); }
     const std::string& label() const { return label_; }
 
     void set_style(Style s) { style_ = s; }
@@ -61,13 +66,15 @@ private:
 
 class HyperlinkButton : public View {
 public:
-    HyperlinkButton() { set_focusable(true); }
+    HyperlinkButton() { set_access_role(AccessRole::link); set_focusable(true); }
     HyperlinkButton(std::string text, std::string url)
         : text_(std::move(text)), url_(std::move(url)) {
+        set_access_role(AccessRole::link);
+        set_derived_access_label(text_);
         set_focusable(true);
     }
 
-    void set_text(std::string text) { text_ = std::move(text); }
+    void set_text(std::string text) { text_ = std::move(text); set_derived_access_label(text_); }
     const std::string& text() const { return text_; }
 
     void set_url(std::string url) { url_ = std::move(url); }
@@ -90,10 +97,21 @@ private:
 
 enum class ArrowDirection { up, down, left, right };
 
+// ArrowButton / ShapeButton / ImageButton carry no text, so nothing can be
+// derived as an accessible name. They claim AccessRole::button — which is what
+// they ARE — but the shared exposure gate (is_accessibility_element, in
+// accessibility.hpp) keeps a nameless button OUT of the tree: announcing an unnamed
+// "button" for every transport arrow and icon in a UI is a WCAG 4.1.2 failure,
+// not an improvement. Call set_access_label("Play") and the button appears,
+// correctly roled, on every platform. No name is invented for you: "Down" or
+// "star.png" would be a plausible-sounding lie about what the control does.
 class ArrowButton : public View {
 public:
-    ArrowButton() { set_focusable(true); }
-    explicit ArrowButton(ArrowDirection dir) : direction_(dir) { set_focusable(true); }
+    ArrowButton() { set_access_role(AccessRole::button); set_focusable(true); }
+    explicit ArrowButton(ArrowDirection dir) : direction_(dir) {
+        set_access_role(AccessRole::button);
+        set_focusable(true);
+    }
 
     void set_direction(ArrowDirection dir) { direction_ = dir; }
     ArrowDirection direction() const { return direction_; }
@@ -113,7 +131,7 @@ private:
 
 class ShapeButton : public View {
 public:
-    ShapeButton() { set_focusable(true); }
+    ShapeButton() { set_access_role(AccessRole::button); set_focusable(true); }
 
     /// Set the shape drawing function. Called during paint with the button's bounds.
     using ShapeDrawFn = std::function<void(canvas::Canvas&, float width, float height, bool hovered, bool pressed)>;
@@ -138,7 +156,7 @@ private:
 
 class ImageButton : public View {
 public:
-    ImageButton() { set_focusable(true); }
+    ImageButton() { set_access_role(AccessRole::button); set_focusable(true); }
 
     void set_image(std::string path) { normal_path_ = std::move(path); }
     void set_hover_image(std::string path) { hover_path_ = std::move(path); }

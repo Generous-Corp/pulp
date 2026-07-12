@@ -392,6 +392,10 @@ void Toggle::set_on(bool v, bool animate) {
         return;
     }
     on_ = v;
+    // Keep the ARIA state slot in lockstep with the logical state — it is what
+    // NSAccessibility (accessibilityValue), UIA (ToggleState) and AT-SPI
+    // (CHECKED) read for a `toggle`/switch. Header ctor seeds "false".
+    set_access_checked(v ? "true" : "false");
     if (animate) {
         float dur = resolve_dimension("motion.duration.normal", 0.15f);
         thumb_position_.animate_to(v ? 1.0f : 0.0f, dur, easing::ease_out_cubic);

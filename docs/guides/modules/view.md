@@ -165,7 +165,119 @@ knob.set_access_label("Gain");
 knob.set_access_value("-6.0 dB");
 ```
 
-On macOS, `PulpAccessibilityElement` maps these to `NSAccessibilityRole` for VoiceOver support.
+`AccessRole` covers the widget kinds Pulp ships: `slider`, `toggle` (switch),
+`checkbox`, `radio`, `button`, `link`, `text_field`, `combo_box`, `list` /
+`list_item`, `table` / `row` / `cell`, `tab` / `tab_list`, `menu` /
+`menu_item`, `progress_bar`, `meter`, `dialog`, `heading`, `image`,
+`scroll_bar`, `label`, `group`. Built-in widgets set the right one in their
+constructor, so a `TextButton` announces as a button and a `ComboBox` as a
+combo box without any extra code. `AccessRole::none` removes the view from the
+accessibility tree entirely.
+
+### A role is not enough — name it, or it is not exposed
+
+`pulp::view::is_accessibility_element()` (in `pulp/view/accessibility.hpp`) is
+the single gate every platform bridge calls. A view enters the tree only when
+it has a role AND something to say with it:
+
+- a **structural role** (`group`, `list`, `table`, `row`, `menu`, `tab_list`,
+  `dialog`) — it announces the children underneath it; or
+- an **accessible name** — either author-set (`set_access_label`, what the JS
+  bridge's `aria-label` maps to) or content-derived (a `Label`'s text, a
+  `Knob`/`Fader`/`Toggle`/`TextButton`'s visible label, which land on
+  `set_derived_access_label`). An author-set name WINS over content, per ARIA's
+  accessible-name computation — so `set_access_label("Gain in decibels")` is not
+  clobbered when the label's text is later set to `"dB"` (and React re-renders
+  rewrite that text on every render); or
+- a **value source** — `AccessibilityValueInterface` (`Knob`, `Fader`,
+  `RangeSlider`, `ScrollBar`, `Meter`, `ProgressBar`),
+  `AccessibilityTextInterface` (`TextEditor`), or a non-empty
+  `access_value` (`ComboBox` publishes its selected item); or
+- an **ARIA state** — `aria-checked` / `aria-pressed` (`Checkbox`, `Toggle`,
+  `ToggleButton` keep theirs in sync automatically).
+
+### One resolver, one interface set
+
+`accessibility_value_string()` is what every bridge announces as the VALUE:
+value interface → text interface → `access_value` → check/press state
+("checked" / "unchecked" / "mixed"). The cross-platform snapshot
+(`snapshot_accessibility_tree`) resolves through it too, so an offline test sees
+the same string VoiceOver does.
+
+`accessibility_interfaces()` says which interfaces a view can actually serve —
+a numeric range (`value`) or string content (`text`). Linux AT-SPI exports
+exactly those: `org.a11y.atspi.Value` for a slider/meter, `org.a11y.atspi.Text`
+for a `TextEditor`'s content or a `ComboBox`'s selected item (AT-SPI has no
+string-value interface, so a string value is read through Text). Check/press
+state is not a value on AT-SPI — it rides in the state bitfield
+(CHECKABLE / CHECKED / PRESSED / INDETERMINATE).
+
+A role with none of those announces "button" (or "text field", or "image") and
+then falls silent — a WCAG 4.1.2 (Name, Role, Value) failure and pure noise in
+the tree. So `ArrowButton`, `ShapeButton` and `ImageButton` carry
+`AccessRole::button` but stay OUT of the tree until you give them a name:
+
+```cpp
+auto play = std::make_unique<ImageButton>();
+play->set_image("play.png");
+play->set_access_label("Play");   // ← without this it is not announced at all
+```
+
+No name is invented for you: "Down" for an arrow or "star.png" for an icon
+would be a plausible-sounding lie about what the control does.
+
+Each role maps to a concrete platform role on all five bridges: macOS
+NSAccessibility (`platform/ns_role_mapping.hpp`, shared by the standalone
+window host and the plug-in editor host), iOS UIAccessibility traits, Windows
+UIA control types (`platform/uia_mapping.hpp`), Linux AT-SPI2 role numbers
+(`platform/atspi_mapping.hpp`), and Android TalkBack class names. JS UIs get
+the same roles by setting the ARIA `role` attribute; the token table is
+`pulp/view/aria_roles.hpp`.
+
+**Known limits (roles are correct; interaction patterns are not all wired):**
+
+- Composite widgets that PAINT their rows (`ListBox`, `TableListBox`,
+  `TabPanel`) carry NO role. They hold no child Views for their rows and tabs,
+  so a `list` / `table` / `tab_list` role would export an empty container
+  ("list, 0 items") and a tab group whose children are content panels. The
+  container role lands together with the per-row `list_item` / `row` / `cell`
+  and per-tab `tab` elements. `VirtualList` does have child Views and does
+  expose `list` + `list_item` today.
+- The UIA provider implements exactly two patterns: **Value** and
+  **RangeValue** (`IValueProvider`, `IRangeValueProvider`). There is no
+  `IInvokeProvider`, `IToggleProvider` or `ITextProvider`, so Invoke, Toggle
+  and Text are NOT advertised — a button, checkbox or label exposes its control
+  type and no pattern. Likewise ExpandCollapse (combo box), Grid/Table and
+  SelectionItem (list item, tab, radio) are unimplemented and unadvertised.
+  Pattern availability is also gated on the concrete View having a source
+  (`uia::exposes_value` / `exposes_range_value`), so a control never advertises
+  a pattern whose getter would return a null BSTR or a degenerate 0..0 range.
+- On iOS, `text_field` carries no trait: UIKit derives "text field" from
+  `UITextInput` conformance, which Pulp's accessibility elements do not have.
+- **Windows announces no check/press state.** UIA carries toggle state only on
+  the Toggle pattern, and there is no `IToggleProvider` — so Narrator reads a
+  Pulp checkbox's control type and name and says nothing about whether it is
+  checked. macOS (`accessibilityValue` → `@YES`/`@NO`/`"mixed"`), iOS and
+  Android (the "checked" / "unchecked" value string) and Linux (the AT-SPI
+  CHECKED / PRESSED / INDETERMINATE state bits) all do announce it.
+- **Linux text navigation is partial.** `org.a11y.atspi.Text` serves `GetText`,
+  `GetCharacterAtOffset`, the caret and the selection, plus `CharacterCount` —
+  enough for Orca to read a field's content. Word/line granularity
+  (`GetTextAtOffset` / `GetStringAtOffset`) and text attributes are not
+  implemented, and there is no `EditableText` interface, so an AT cannot type
+  into a Pulp field on Linux.
+- **Android: the accessibility surface is INERT.**
+  `PulpAccessibilityDelegate` (`android/app/src/main/java/com/pulp/
+  accessibility/PulpAccessibility.kt`) has no `getAccessibilityNodeProvider`
+  override, so TalkBack sees ONE node — the host `SurfaceView` — and
+  `onInitializeAccessibilityNodeInfo` overwrites that single node's
+  className/contentDescription once per widget, leaving it carrying the LAST
+  widget's role. The C++ → Kotlin role mapping is correct but currently
+  unreachable: no Pulp widget is individually announced on Android. Fixing it
+  means implementing `AccessibilityNodeProvider` with one virtual view id per
+  accessible node. The Kotlin role table is written and its ordinals are locked
+  against the C++ enum by a `static_assert`, but no CI lane compiles Kotlin, so
+  that file is UNCOMPILED as well as unreachable.
 
 ## Inspector
 

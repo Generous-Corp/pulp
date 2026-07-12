@@ -9,6 +9,7 @@
 
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_provider.hpp>
+#include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 
 #include <sstream>
@@ -40,6 +41,94 @@ std::string AccessibilityValueInterface::get_value_string() const {
         out << v;
     }
     return out.str();
+}
+
+// ── Value resolution ─────────────────────────────────────────────────────
+
+AccessToggleState accessibility_toggle_state(const View& v) {
+    auto parse = [](const std::string& s) {
+        if (s == "true")  return AccessToggleState::on;
+        if (s == "false") return AccessToggleState::off;
+        if (s == "mixed") return AccessToggleState::mixed;
+        return AccessToggleState::unset;
+    };
+    // aria-checked wins over aria-pressed: a checkbox/switch state is more
+    // semantically load-bearing than a toggle button's pressed state. Same
+    // priority the macOS bridge applies.
+    if (const auto st = parse(v.access_checked()); st != AccessToggleState::unset)
+        return st;
+    return parse(v.access_pressed());
+}
+
+std::string accessibility_toggle_state_string(const View& v) {
+    const bool from_checked = !v.access_checked().empty();
+    switch (accessibility_toggle_state(v)) {
+        case AccessToggleState::on:
+            return from_checked ? "checked" : "pressed";
+        case AccessToggleState::off:
+            return from_checked ? "unchecked" : "not pressed";
+        case AccessToggleState::mixed:
+            return "mixed";
+        case AccessToggleState::unset:
+            break;
+    }
+    return "";
+}
+
+std::string accessibility_value_string(const View& v) {
+    if (const auto* vif = dynamic_cast<const AccessibilityValueInterface*>(&v))
+        return vif->get_value_string();
+    if (const auto* tif = dynamic_cast<const AccessibilityTextInterface*>(&v))
+        return tif->get_text();
+    if (!v.access_value().empty()) return v.access_value();
+    // A Checkbox / Toggle / ToggleButton has no other value source: its state
+    // IS its value. macOS turns the state into a native @YES/@NO before it gets
+    // here; iOS and Android read this string, and without it they announced the
+    // role and nothing else.
+    return accessibility_toggle_state_string(v);
+}
+
+bool has_accessibility_value(const View& v) {
+    if (dynamic_cast<const AccessibilityValueInterface*>(&v)) return true;
+    if (dynamic_cast<const AccessibilityTextInterface*>(&v)) return true;
+    if (!v.access_value().empty()) return true;
+    return accessibility_toggle_state(v) != AccessToggleState::unset;
+}
+
+AccessibilityInterfaceSet accessibility_interfaces(const View& v) {
+    AccessibilityInterfaceSet set;
+    set.value = dynamic_cast<const AccessibilityValueInterface*>(&v) != nullptr;
+    // A numeric value is served through the Value interface, not as text: a
+    // Knob is not a text field. Text covers the two STRING sources — a text
+    // interface (exported even when EMPTY: an empty editable field still has a
+    // caret, a character count of 0, and an EDITABLE state) and a non-empty
+    // access_value slot (a ComboBox's selected item).
+    const bool has_text_iface =
+        dynamic_cast<const AccessibilityTextInterface*>(&v) != nullptr;
+    set.text = !set.value && (has_text_iface || !v.access_value().empty());
+    return set;
+}
+
+std::string accessibility_text_content(const View& v) {
+    if (const auto* tif = dynamic_cast<const AccessibilityTextInterface*>(&v))
+        return tif->get_text();
+    return v.access_value();
+}
+
+bool accessibility_text_editable(const View& v) {
+    const auto* tif = dynamic_cast<const AccessibilityTextInterface*>(&v);
+    return tif != nullptr && tif->is_editable();
+}
+
+bool is_accessibility_element(const View& v) {
+    const View::AccessRole role = v.access_role();
+    if (role == View::AccessRole::none) return false;
+    if (is_structural_access_role(role)) return true;
+    if (!v.access_label().empty()) return true;
+    if (has_accessibility_value(v)) return true;
+    // A checkbox / switch announces its state even unnamed.
+    if (!v.access_checked().empty() || !v.access_pressed().empty()) return true;
+    return false;
 }
 
 // ── Live-region announcements ────────────────────────────────────────────

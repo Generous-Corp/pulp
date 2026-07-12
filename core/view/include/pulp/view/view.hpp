@@ -464,13 +464,59 @@ public:
 
     // ── Accessibility ────────────────────────────────────────────────────
 
-    enum class AccessRole { none, slider, toggle, label, group, meter, image };
+    /// Screen-reader role. Maps to a concrete platform role on all five
+    /// bridges — see platform/{ns_role_mapping,uia_mapping,atspi_mapping}.hpp,
+    /// accessibility_ios.mm, and the ROLE_* constants in PulpAccessibility.kt.
+    /// ARIA tokens map in via pulp/view/aria_roles.hpp. `toggle` is ARIA
+    /// `switch`; `meter` is a read-only gauge, `progress_bar` task progress.
+    ///
+    /// ORDINALS ARE WIRE FORMAT — the Android JNI bridge marshals the role as
+    /// static_cast<int>(role) and PulpAccessibility.kt matches on the integer.
+    /// APPEND ONLY; never reorder or remove. Locked by test_accessibility_tree.
+    ///
+    /// A role NAMES a widget; it does not implement that widget's platform
+    /// interaction pattern (combobox expand/collapse, table traversal, invoke).
+    /// See docs/guides/modules/view.md for what is and is not wired.
+    enum class AccessRole {
+        none = 0, slider, toggle, label, group, meter, image,   // frozen 0-6
+        button, link, checkbox, radio, text_field, combo_box,
+        list, list_item, table, row, cell, tab, tab_list,
+        menu, menu_item, progress_bar, dialog, heading, scroll_bar,
+    };
 
     void set_access_role(AccessRole role) { access_role_ = role; }
     AccessRole access_role() const { return access_role_; }
 
+    /// The AUTHOR-SET accessible name (what `aria-label` maps to). An explicit
+    /// name WINS over the view's content — ARIA 1.2 §5.2.7 (accname step 2B:
+    /// aria-label is consulted before the element's contents). Setting the
+    /// empty string clears it and hands the name back to the content, which is
+    /// what removing the attribute means.
     void set_access_label(std::string label) { access_label_ = std::move(label); }
-    const std::string& access_label() const { return access_label_; }
+
+    /// The CONTENT-DERIVED accessible name: a widget's visible text
+    /// (Label::set_text, Knob/Fader/Toggle::set_label, TextButton::set_label).
+    /// It NEVER overwrites an author-set name — otherwise
+    ///     el.setAttribute('aria-label', 'Gain in decibels');
+    ///     el.textContent = 'dB';
+    /// would leave the screen reader announcing "dB", and react-reconciler's
+    /// commitTextUpdate re-writes textContent on every re-render, so even a
+    /// safe initial order would be clobbered on the next render.
+    void set_derived_access_label(std::string label) {
+        derived_access_label_ = std::move(label);
+    }
+
+    /// The resolved accessible name: author-set if present, else content-derived.
+    const std::string& access_label() const {
+        return access_label_.empty() ? derived_access_label_ : access_label_;
+    }
+
+    /// True when an author explicitly named this view (set_access_label /
+    /// aria-label), as opposed to the name being derived from its content.
+    bool has_explicit_access_label() const { return !access_label_.empty(); }
+
+    /// The content-derived name on its own, ignoring any author-set name.
+    const std::string& derived_access_label() const { return derived_access_label_; }
 
     void set_access_value(std::string value) { access_value_ = std::move(value); }
     const std::string& access_value() const { return access_value_; }
@@ -1571,7 +1617,8 @@ private:
     std::uint32_t last_paint_self_ns_ = 0;
     std::uint32_t last_paint_with_children_ns_ = 0;
     AccessRole access_role_ = AccessRole::none;
-    std::string access_label_;
+    std::string access_label_;          // author-set (aria-label) — wins
+    std::string derived_access_label_;  // content-derived (visible text)
     std::string access_value_;
     // ARIA state attributes (tri-state per spec).
     std::string access_pressed_;
@@ -1764,5 +1811,31 @@ private:
     std::optional<int>   inh_text_align_;
     std::optional<std::string> inh_font_family_;
 };
+
+// ── Accessibility exposure gate ──────────────────────────────────────────────
+//
+// See is_accessibility_element() in <pulp/view/accessibility.hpp> — the single
+// predicate every platform bridge calls. It lives there because it has to look
+// for the value/text interfaces, which are declared there. This file only
+// classifies the ROLES.
+
+/// Structural roles: a container announces the children underneath it, so it is
+/// meaningful without a name of its own. Everything else is a leaf control that
+/// must announce a name, a value, a state, or text — otherwise it is a role and
+/// nothing else, which is a WCAG 4.1.2 (Name, Role, Value) failure.
+constexpr bool is_structural_access_role(View::AccessRole role) {
+    switch (role) {
+        case View::AccessRole::group:
+        case View::AccessRole::dialog:
+        case View::AccessRole::list:
+        case View::AccessRole::table:
+        case View::AccessRole::row:
+        case View::AccessRole::menu:
+        case View::AccessRole::tab_list:
+            return true;
+        default:
+            return false;
+    }
+}
 
 } // namespace pulp::view

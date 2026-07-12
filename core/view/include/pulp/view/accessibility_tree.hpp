@@ -23,6 +23,13 @@ struct AccessibilityNodeSnapshot {
     std::string label;
     std::string value;
 
+    // True when the platform bridges put this View in the accessibility
+    // tree — pulp::view::is_accessibility_element(view), the same gate the
+    // macOS / iOS / UIA / AT-SPI / TalkBack collectors call. A role alone is
+    // not enough: a name-only role (button, link, tab, label ...) with an
+    // empty label is excluded rather than announced as a nameless control.
+    bool exposed = false;
+
     // Numeric range information when the view exposes
     // AccessibilityValueInterface. Present fields are filled; otherwise
     // has_value is false and callers should ignore min/max/current.
@@ -52,7 +59,8 @@ struct AccessibilityNodeSnapshot {
 /// pairs; the `value` fields support slider / progress checks.
 std::vector<AccessibilityNodeSnapshot> snapshot_accessibility_tree(const View& root);
 
-/// Count nodes in the tree that carry a non-none role. Handy when a test
+/// Count nodes the platform bridges actually expose (snapshot node `exposed`
+/// — role != none AND named when the role requires a name). Handy when a test
 /// only cares that *some* number of controls are exposed (e.g. preset-
 /// browser row widgets).
 std::size_t count_announceable(const View& root);

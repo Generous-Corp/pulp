@@ -218,6 +218,16 @@ pulp_add_test_suite(pulp-test-plugin-info-metadata LIBRARIES pulp::host)
 # A11y role mapping tables — UIA + AT-SPI
 pulp_add_test_suite(pulp-test-uia-mapping LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-atspi-mapping LIBRARIES pulp::view)
+# ARIA role token -> View::AccessRole (shared by the JS bridge).
+pulp_add_test_suite(pulp-test-aria-roles LIBRARIES pulp::view)
+# macOS NSAccessibility role table (shared by the window host and the
+# plug-in editor host).
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-ns-role-mapping test_ns_role_mapping.mm)
+    target_link_libraries(pulp-test-ns-role-mapping
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-ns-role-mapping)
+endif()
 # AudioSystem hotplug base plumbing
 pulp_add_test_suite(pulp-test-audio-system-hotplug LIBRARIES pulp::audio)
 
@@ -268,8 +278,6 @@ endif()
 pulp_add_test_suite(pulp-test-tempo-hook LIBRARIES pulp::format)
 # Resizable plugin shell.
 pulp_add_test_suite(pulp-test-resizable-shell LIBRARIES pulp::view)
-# ATK / AT-SPI mapping.
-pulp_add_test_suite(pulp-test-atk-mapping LIBRARIES pulp::view)
 # Background scanner.
 pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 

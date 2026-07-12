@@ -23,22 +23,36 @@
 
 #include <algorithm>
 #include <functional>
+#include <pulp/view/accessibility.hpp>
 #include <pulp/view/view.hpp>
 
 namespace pulp::view {
 
 /// Standalone, parameter-style scrollbar.
-class ScrollBar : public View {
+///
+/// Implements AccessibilityValueInterface — `scroll_bar` advertises the UIA
+/// RangeValue/Value patterns and the AT-SPI Value interface, which report 0 in
+/// a degenerate 0..0 range without a value source behind them.
+class ScrollBar : public View, public AccessibilityValueInterface {
 public:
     enum class Orientation { vertical, horizontal };
 
+    // ── AccessibilityValueInterface ──────────────────────────────────────
+    double get_current_value() const override { return value_; }
+    void set_current_value(double v) override { set_value(static_cast<float>(v)); }
+    double get_minimum_value() const override { return min_; }
+    double get_maximum_value() const override { return max_; }
+    double get_step_size() const override {
+        return arrow_step_ > 0.0f
+            ? arrow_step_
+            : AccessibilityValueInterface::get_step_size();
+    }
+
     ScrollBar() {
-        // No dedicated `scroll_bar` role in `AccessRole` yet — Knob/Fader/
-        // RangeSlider all use `slider` for the same screen-reader contract
-        // (focusable value-bearing range). Re-use that until the role enum
-        // grows a scrollbar literal; the announce text below carries the
-        // semantic distinction.
-        set_access_role(AccessRole::slider);
+        // Every platform has a first-class scrollbar role (UIA ScrollBar,
+        // AT-SPI SCROLL_BAR, NSAccessibilityScrollBarRole); it keeps the
+        // value-bearing range contract of a slider but announces correctly.
+        set_access_role(AccessRole::scroll_bar);
         set_focusable(true);
     }
 

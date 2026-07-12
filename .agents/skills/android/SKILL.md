@@ -1041,6 +1041,51 @@ bridge looks "working" from Kotlin but never reaches C++. Mirrors
 the host-app wiring pattern documented in the **motion** skill's
 Path G / Path H sections.
 
+## Accessibility (TalkBack) — the surface is INERT today
+
+**Nothing Pulp renders is announced per-widget on Android.**
+`PulpAccessibilityDelegate` (`android/app/src/main/kotlin/com/pulp/
+accessibility/PulpAccessibility.kt`) is a `View.AccessibilityDelegate`, which
+describes exactly ONE view: the host `SurfaceView`. It has no
+`getAccessibilityNodeProvider` override, so Pulp's widgets are not virtual
+accessibility nodes. `onInitializeAccessibilityNodeInfo(host, info)` receives a
+single `AccessibilityNodeInfo` and loops over every C++ accessibility node
+overwriting that same object's `className` / `contentDescription` / `text` — so
+TalkBack sees one node carrying the LAST widget's role, and every other widget
+is invisible. `performAccessibilityAction` likewise dispatches with node index
+`-1`.
+
+The C++ → Kotlin role mapping below is correct and matches the wire format, but
+it is **unreachable** until someone implements `AccessibilityNodeProvider` (or
+`ExploreByTouchHelper`): one virtual view id per accessible node,
+`createAccessibilityNodeInfo(id)` filling role/name/value/bounds,
+`getVirtualViewAt` for hit-testing, and `performAction(id, …)` routing the index
+into `nativePerformAction`. No CI lane compiles this file — Kotlin changes here
+are unexecuted until an emulator/device TalkBack run says otherwise. **Do not
+describe Android accessibility as working.**
+
+## Accessibility (TalkBack) — the role ordinal is a wire format
+
+`core/view/platform/android/accessibility_android.cpp` marshals a view's role to
+Kotlin as `static_cast<int>(View::AccessRole)`, and
+`android/app/src/main/kotlin/com/pulp/accessibility/PulpAccessibility.kt` matches
+on those integers (`ROLE_SLIDER = 1`, …). **There is no name in the protocol —
+only the ordinal.** Consequences:
+
+- `View::AccessRole` is **append-only**. Reordering or removing a value silently
+  re-labels every widget on TalkBack (a knob starts announcing as a checkbox);
+  nothing in the C++ build catches it, because the Kotlin side is not compiled
+  by the C++ CI lanes.
+- Adding a role means adding BOTH the C++ enumerator and a matching `ROLE_*`
+  constant + `when` branch in `PulpAccessibility.kt`, in the same change.
+- The ordinals are locked by the "Android role ordinals are wire format" case in
+  `test/test_accessibility_tree.cpp` (`static_assert`s). If that test fails,
+  fix the enum — do not update the test to match.
+
+Not wired yet: `CollectionInfo` / `CollectionItemInfo` for `list` / `table`
+roles. Rows and cells announce as plain `TextView`s because the C++ side does not
+yet publish per-row index metadata.
+
 ## Known Blockers
 
 1. **x86_64 Skia build** — Only arm64 Skia is built. Emulator runs arm64 via translation but an x86_64 build would be faster.

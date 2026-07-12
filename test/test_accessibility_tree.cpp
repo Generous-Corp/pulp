@@ -3,12 +3,20 @@
 // platform screen reader.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/accessibility_tree.hpp>
 #include <pulp/view/platform/atspi_mapping.hpp>
+#include <pulp/view/buttons.hpp>
+#include <pulp/view/scroll_bar.hpp>
+#include <pulp/view/table.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widgets.hpp>
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -126,13 +134,23 @@ TEST_CASE("count_announceable excludes AccessRole::none", "[a11y][harness]") {
     // root has role::none by default
     auto a = std::make_unique<Probe>();
     a->set_access_role(View::AccessRole::slider);
+    a->set_access_label("Gain");
     root.add_child(std::move(a));
     auto b = std::make_unique<Probe>();
     // b stays none — invisible to screen readers
     root.add_child(std::move(b));
     auto c = std::make_unique<Probe>();
     c->set_access_role(View::AccessRole::meter);
+    c->set_access_label("Output");
     root.add_child(std::move(c));
+    REQUIRE(count_announceable(root) == 2);
+
+    // ...and a role with NOTHING to say (no name, no value source, no state) is
+    // excluded too: a bare Probe carrying `slider` announces "slider" and then
+    // falls silent. Real widgets carry a value interface (Knob) or a name.
+    auto d = std::make_unique<Probe>();
+    d->set_access_role(View::AccessRole::slider);
+    root.add_child(std::move(d));
     REQUIRE(count_announceable(root) == 2);
 }
 
@@ -825,3 +843,540 @@ TEST_CASE("Linux AT-SPI exposes Value interface + routes Set + event hooks",
     SUCCEED("Linux AT-SPI provider is a Linux-only runtime backend");
 }
 #endif
+
+
+// ── Widget default roles ────────────────────────────────────────────────────
+//
+// The role a widget claims IS its screen-reader identity: every platform bridge
+// (NSAccessibility, UIAccessibility, UIA, AT-SPI, TalkBack) keys off it. Before
+// the AccessRole vocabulary grew past seven values, widgets were forced into
+// roles they are not: a TextButton announced as a checkbox and a ComboBox
+// announced as a slider. These cases assert the widget defaults through the
+// same headless tree snapshot the platform bridges walk.
+
+TEST_CASE("widget default accessibility roles are announceable and correct",
+          "[view][accessibility][roles]") {
+    Probe root;
+
+    auto add = [&root](auto widget) {
+        auto* raw = widget.get();
+        root.add_child(std::move(widget));
+        return raw;
+    };
+
+    auto* button = add(std::make_unique<TextButton>("Play"));
+    auto* combo  = add(std::make_unique<ComboBox>());
+    combo->set_items({"Sine", "Saw"});  // an empty dropdown announces nothing
+    auto* editor = add(std::make_unique<TextEditor>());
+    auto* check  = add(std::make_unique<Checkbox>());
+    auto* sw     = add(std::make_unique<Toggle>());
+    auto* link   = add(std::make_unique<HyperlinkButton>(
+                       "Docs", "https://example.invalid"));
+    auto* bar    = add(std::make_unique<ProgressBar>());
+    auto* scroll = add(std::make_unique<ScrollBar>());
+    auto* knob   = add(std::make_unique<Knob>());
+    auto* meter  = add(std::make_unique<Meter>());
+
+    // A push button is a button, not a checkbox.
+    REQUIRE(button->access_role() == View::AccessRole::button);
+    REQUIRE(button->access_role() != View::AccessRole::toggle);
+    // A dropdown is a combo box, not a slider.
+    REQUIRE(combo->access_role() == View::AccessRole::combo_box);
+    REQUIRE(combo->access_role() != View::AccessRole::slider);
+    // Text entry was invisible to assistive tech entirely (role none).
+    REQUIRE(editor->access_role() == View::AccessRole::text_field);
+    // A checkbox is distinct from a switch.
+    REQUIRE(check->access_role() == View::AccessRole::checkbox);
+    REQUIRE(sw->access_role()    == View::AccessRole::toggle);
+    REQUIRE(link->access_role()  == View::AccessRole::link);
+    REQUIRE(bar->access_role()   == View::AccessRole::progress_bar);
+    REQUIRE(scroll->access_role() == View::AccessRole::scroll_bar);
+    // Unchanged: value-bearing widgets keep their historical roles.
+    REQUIRE(knob->access_role()  == View::AccessRole::slider);
+    REQUIRE(meter->access_role() == View::AccessRole::meter);
+
+    // Every one of them reaches the platform accessibility tree.
+    REQUIRE(count_announceable(root) == 10);
+}
+
+// ── A role must never arrive without a name ─────────────────────────────────
+//
+// The regression this pins: giving ArrowButton / ShapeButton / ImageButton
+// AccessRole::button (correct!) without a name made every screen reader
+// announce an unnamed "button" for every transport arrow and icon in every
+// Pulp UI — a WCAG 4.1.2 (Name, Role, Value) failure that did NOT exist when
+// they were AccessRole::none and excluded from the tree. is_accessibility_
+// element() is the shared gate all six bridges call.
+
+TEST_CASE("a name-only role is not exposed until it has a name",
+          "[view][accessibility][roles]") {
+    Probe root;
+
+    auto arrow = std::make_unique<ArrowButton>(ArrowDirection::down);
+    auto* arrow_raw = arrow.get();
+    auto shape = std::make_unique<ShapeButton>();
+    auto* shape_raw = shape.get();
+    auto image = std::make_unique<ImageButton>();
+    auto* image_raw = image.get();
+    root.add_child(std::move(arrow));
+    root.add_child(std::move(shape));
+    root.add_child(std::move(image));
+
+    // They claim the right role...
+    REQUIRE(arrow_raw->access_role() == View::AccessRole::button);
+    REQUIRE(shape_raw->access_role() == View::AccessRole::button);
+    REQUIRE(image_raw->access_role() == View::AccessRole::button);
+
+    // ...but a nameless button is worse than no button: kept out of the tree.
+    REQUIRE_FALSE(is_accessibility_element(*arrow_raw));
+    REQUIRE_FALSE(is_accessibility_element(*shape_raw));
+    REQUIRE_FALSE(is_accessibility_element(*image_raw));
+    REQUIRE(count_announceable(root) == 0);
+
+    // Name them and they appear, correctly roled, on every platform.
+    arrow_raw->set_access_label("Next preset");
+    shape_raw->set_access_label("Record");
+    image_raw->set_access_label("Bypass");
+    REQUIRE(is_accessibility_element(*arrow_raw));
+    REQUIRE(count_announceable(root) == 3);
+    REQUIRE(find_by_role_and_label(root, View::AccessRole::button,
+                                   "Next preset") == arrow_raw);
+}
+
+TEST_CASE("no exposed node announces a role with nothing to say",
+          "[view][accessibility][roles]") {
+    // The invariant, asserted over the widget gallery: everything the bridges
+    // put in the tree either has a NAME, or carries CONTENT (a value / text
+    // source, an app-set value string, or an ARIA state). A node with neither
+    // announces its role and then falls silent.
+    Probe root;
+    auto add = [&root](auto widget) {
+        auto* raw = widget.get();
+        root.add_child(std::move(widget));
+        return raw;
+    };
+    add(std::make_unique<TextButton>("Play"));
+    add(std::make_unique<HyperlinkButton>("Docs", "https://example.invalid"));
+    add(std::make_unique<ArrowButton>(ArrowDirection::up));   // unnamed
+    add(std::make_unique<ShapeButton>());                     // unnamed
+    add(std::make_unique<ImageButton>());                     // unnamed
+    add(std::make_unique<ComboBox>());  // no items: nothing to announce
+    add(std::make_unique<TextEditor>());
+    add(std::make_unique<Checkbox>());
+    add(std::make_unique<Toggle>());
+    add(std::make_unique<ToggleButton>());
+    add(std::make_unique<ProgressBar>());
+    add(std::make_unique<ScrollBar>());
+    add(std::make_unique<Knob>());
+    add(std::make_unique<Fader>());
+    add(std::make_unique<Meter>());
+    add(std::make_unique<Label>("Output"));
+    add(std::make_unique<ListBox>());
+    add(std::make_unique<TableListBox>());
+    add(std::make_unique<TabPanel>());
+
+    std::size_t exposed = 0;
+    for (const auto& node : snapshot_accessibility_tree(root)) {
+        if (!node.exposed) continue;
+        ++exposed;
+        INFO("role ordinal " << static_cast<int>(node.role));
+        const bool has_name = !node.label.empty();
+        // has_accessibility_value covers all three sources the bridges read:
+        // a value interface, a text interface (TextEditor), and access_value.
+        const bool has_content = has_accessibility_value(*node.view) ||
+                                 !node.checked.empty() || !node.pressed.empty();
+        REQUIRE((has_name || has_content));
+    }
+    REQUIRE(exposed > 0);
+}
+
+TEST_CASE("painted-row containers do not claim a container role",
+          "[view][accessibility][roles]") {
+    // Deliberate: ListBox / TableListBox / TabPanel paint their rows and tabs —
+    // they hold no child Views for them. A `list` / `table` / `tab_list` role
+    // would export an empty AXList / AXTable / AXTabGroup ("list, 0 items"), and
+    // a tab group whose children are content panels is worse than none at all.
+    // The role lands with the per-row / per-tab elements. VirtualList, which DOES
+    // hold child Views, exposes list/list_item today (test_virtual_list).
+    ListBox list;
+    TableListBox table;
+    TabPanel tabs;
+    REQUIRE(list.access_role()  == View::AccessRole::none);
+    REQUIRE(table.access_role() == View::AccessRole::none);
+    REQUIRE(tabs.access_role()  == View::AccessRole::none);
+    REQUIRE_FALSE(is_accessibility_element(list));
+    REQUIRE_FALSE(is_accessibility_element(table));
+    REQUIRE_FALSE(is_accessibility_element(tabs));
+}
+
+// ── Roles carry a value the AT can actually read ────────────────────────────
+
+TEST_CASE("TextEditor exposes its content through the text interface",
+          "[view][accessibility][roles]") {
+    // `text_field` + no text source = macOS -accessibilityValue returns nil and
+    // Windows IValueProvider::get_Value returns a NULL BSTR: VoiceOver and
+    // Narrator announce "text field" and read NOTHING. Every bridge resolves the
+    // value through accessibility_value_string().
+    TextEditor editor;
+    editor.set_text("hello");
+
+    auto* tif = dynamic_cast<AccessibilityTextInterface*>(&editor);
+    REQUIRE(tif != nullptr);
+    REQUIRE(tif->get_text() == "hello");
+    REQUIRE(tif->is_editable());
+    REQUIRE(tif->get_character_count() == 5);
+    REQUIRE(accessibility_value_string(editor) == "hello");
+    REQUIRE(has_accessibility_value(editor));
+
+    // The Windows provider routes IValueProvider::SetValue back through this.
+    tif->set_text(std::string_view{"world"});
+    REQUIRE(editor.text() == "world");
+
+    // read_only editors report themselves as such, so UIA IsReadOnly and
+    // SetValue agree.
+    editor.read_only = true;
+    REQUIRE_FALSE(tif->is_editable());
+}
+
+TEST_CASE("ProgressBar exposes a real range and not a degenerate 0..0",
+          "[view][accessibility][roles]") {
+    // `progress_bar` advertises RangeValue. With no value interface behind it,
+    // UIA get_Value / get_Minimum / get_Maximum all returned 0.0 — Narrator
+    // announced 0 at any progress, and min == max == 0 divides by zero in any
+    // client computing (v - min) / (max - min).
+    ProgressBar bar;
+    bar.set_progress(0.42f);
+
+    auto* vif = dynamic_cast<AccessibilityValueInterface*>(&bar);
+    REQUIRE(vif != nullptr);
+    REQUIRE(vif->get_minimum_value() == 0.0);
+    REQUIRE(vif->get_maximum_value() == 1.0);
+    REQUIRE(vif->get_maximum_value() > vif->get_minimum_value());  // not degenerate
+    REQUIRE(vif->get_current_value() == Catch::Approx(0.42));
+    REQUIRE(vif->get_value_string() == "42%");
+
+    bar.set_progress(-1.0f);  // indeterminate
+    REQUIRE(bar.is_indeterminate());
+    REQUIRE(vif->get_current_value() == 0.0);
+    REQUIRE(vif->get_value_string() == "indeterminate");
+
+    // The label doubles as the accessible name.
+    bar.set_label("Analyzing");
+    REQUIRE(bar.access_label() == "Analyzing");
+}
+
+TEST_CASE("value-bearing widgets all carry a value source",
+          "[view][accessibility][roles]") {
+    // Every widget whose ROLE advertises a range (slider / scroll_bar / meter /
+    // progress_bar) must implement AccessibilityValueInterface, or the bridges
+    // report 0 in a 0..0 range and VoiceOver reads an empty value.
+    Knob knob;      knob.set_value(0.25f);
+    Fader fader;    fader.set_value(0.5f);
+    RangeSlider rs; rs.set_min(20.0f); rs.set_max(20000.0f); rs.set_value(1000.0f);
+    ScrollBar sb;   sb.set_range(0.0f, 200.0f); sb.set_value(50.0f);
+    Meter meter;    meter.set_level(0.3f, 0.6f);
+
+    REQUIRE(accessibility_value_string(knob) == "25%");
+    REQUIRE(accessibility_value_string(fader) == "50%");
+    REQUIRE(has_accessibility_value(rs));
+    REQUIRE(dynamic_cast<AccessibilityValueInterface*>(&rs)->get_maximum_value()
+            == Catch::Approx(20000.0));
+    REQUIRE(dynamic_cast<AccessibilityValueInterface*>(&sb)->get_current_value()
+            == Catch::Approx(50.0));
+    REQUIRE(has_accessibility_value(meter));
+
+    // A knob's own display formatter wins over the generic percentage — it is
+    // the string the sighted user reads.
+    knob.set_format([](float v) { return std::to_string(static_cast<int>(v * 24)) + " dB"; });
+    REQUIRE(accessibility_value_string(knob) == "6 dB");
+}
+
+TEST_CASE("toggles publish their state and not just their role",
+          "[view][accessibility][roles]") {
+    // A `checkbox` / `toggle` with an unset ARIA state announces the control and
+    // then says nothing about whether it is on: NSAccessibility's
+    // accessibilityValue, UIA's ToggleState and AT-SPI's CHECKED state all read
+    // access_checked.
+    Checkbox check;
+    REQUIRE(check.access_checked() == "false");
+    check.set_checked(true);
+    REQUIRE(check.access_checked() == "true");
+
+    Toggle sw;
+    REQUIRE(sw.access_checked() == "false");
+    sw.set_on(true, /*animate=*/false);
+    REQUIRE(sw.access_checked() == "true");
+
+    ToggleButton tb;
+    REQUIRE(tb.access_checked() == "false");
+    tb.set_on(true);
+    REQUIRE(tb.access_checked() == "true");
+    tb.set_label("Bypass");
+    REQUIRE(tb.access_label() == "Bypass");
+}
+
+TEST_CASE("HyperlinkButton carries its text as the accessibility label",
+          "[view][accessibility][roles]") {
+    HyperlinkButton link{"Read the docs", "https://example.invalid"};
+    REQUIRE(link.access_label() == "Read the docs");
+    link.set_text("Changelog");
+    REQUIRE(link.access_label() == "Changelog");
+}
+
+TEST_CASE("Android role ordinals are wire format",
+          "[view][accessibility][android]") {
+    // core/view/platform/android/accessibility_android.cpp marshals the role to
+    // Kotlin as static_cast<int>(role); PulpAccessibilityDelegate.kt matches on
+    // those integers. Reordering or removing an AccessRole silently
+    // re-labels every widget on TalkBack, so the ordinals are frozen here and
+    // mirrored by the ROLE_* constants in PulpAccessibility.kt.
+    using R = View::AccessRole;
+    static_assert(static_cast<int>(R::none)   == 0);
+    static_assert(static_cast<int>(R::slider) == 1);
+    static_assert(static_cast<int>(R::toggle) == 2);
+    static_assert(static_cast<int>(R::label)  == 3);
+    static_assert(static_cast<int>(R::group)  == 4);
+    static_assert(static_cast<int>(R::meter)  == 5);
+    static_assert(static_cast<int>(R::image)  == 6);
+    static_assert(static_cast<int>(R::button)       == 7);
+    static_assert(static_cast<int>(R::link)         == 8);
+    static_assert(static_cast<int>(R::checkbox)     == 9);
+    static_assert(static_cast<int>(R::radio)        == 10);
+    static_assert(static_cast<int>(R::text_field)   == 11);
+    static_assert(static_cast<int>(R::combo_box)    == 12);
+    static_assert(static_cast<int>(R::list)         == 13);
+    static_assert(static_cast<int>(R::list_item)    == 14);
+    static_assert(static_cast<int>(R::table)        == 15);
+    static_assert(static_cast<int>(R::row)          == 16);
+    static_assert(static_cast<int>(R::cell)         == 17);
+    static_assert(static_cast<int>(R::tab)          == 18);
+    static_assert(static_cast<int>(R::tab_list)     == 19);
+    static_assert(static_cast<int>(R::menu)         == 20);
+    static_assert(static_cast<int>(R::menu_item)    == 21);
+    static_assert(static_cast<int>(R::progress_bar) == 22);
+    static_assert(static_cast<int>(R::dialog)       == 23);
+    static_assert(static_cast<int>(R::heading)      == 24);
+    static_assert(static_cast<int>(R::scroll_bar)   == 25);
+    SUCCEED("AccessRole ordinals are stable for the Android JNI bridge");
+}
+
+// ── An explicit accessible name wins over content ────────────────────────────
+
+TEST_CASE("an author-set accessible name is not clobbered by content",
+          "[view][accessibility][name]") {
+    // ARIA 1.2 accname step 2B: aria-label is consulted BEFORE the element's
+    // contents — an explicit name WINS. The JS bridge's setAccessibilityLabel
+    // (aria-label replay) lands on set_access_label(); a widget's visible text
+    // lands on set_derived_access_label(). If the widgets wrote the content into
+    // the same slot:
+    //     el.setAttribute('aria-label', 'Gain in decibels');
+    //     el.textContent = 'dB';               // -> Label::set_text
+    // VoiceOver would announce "dB" and the author's name would be gone.
+    Label label{"dB"};
+    REQUIRE(label.access_label() == "dB");            // content-derived
+
+    label.set_access_label("Gain in decibels");       // aria-label
+    REQUIRE(label.access_label() == "Gain in decibels");
+    REQUIRE(label.has_explicit_access_label());
+
+    // The clobber: content written AFTER the aria-label.
+    label.set_text("dBFS");
+    REQUIRE(label.access_label() == "Gain in decibels");
+    REQUIRE(label.derived_access_label() == "dBFS");   // still tracked, just loses
+
+    // react-reconciler's commitTextUpdate rewrites textContent on EVERY
+    // re-render, so a safe initial order gets clobbered on the next render.
+    for (int render = 0; render < 3; ++render) label.set_text("dB");
+    REQUIRE(label.access_label() == "Gain in decibels");
+
+    // Removing the aria-label hands the name back to the content.
+    label.set_access_label("");
+    REQUIRE_FALSE(label.has_explicit_access_label());
+    REQUIRE(label.access_label() == "dB");
+}
+
+TEST_CASE("every content-named widget respects an author-set name",
+          "[view][accessibility][name]") {
+    // The full set of widgets that derive a name from their visible text.
+    // Each: aria-label first, then content — the content must not win.
+    Knob knob;
+    knob.set_access_label("Filter cutoff");
+    knob.set_label("Hz");
+    REQUIRE(knob.access_label() == "Filter cutoff");
+
+    Fader fader;
+    fader.set_access_label("Channel 1 volume");
+    fader.set_label("Vol");
+    REQUIRE(fader.access_label() == "Channel 1 volume");
+
+    Toggle sw;
+    sw.set_access_label("Bypass the effect");
+    sw.set_label("Byp");
+    REQUIRE(sw.access_label() == "Bypass the effect");
+
+    ToggleButton tb;
+    tb.set_access_label("Solo this track");
+    tb.set_label("S");
+    REQUIRE(tb.access_label() == "Solo this track");
+
+    ProgressBar bar;
+    bar.set_access_label("Analysis progress");
+    bar.set_label("42%");
+    REQUIRE(bar.access_label() == "Analysis progress");
+
+    TextButton button{"OK"};
+    button.set_access_label("Confirm and close");
+    button.set_label("OK!");
+    REQUIRE(button.access_label() == "Confirm and close");
+
+    HyperlinkButton link{"here", "https://example.invalid"};
+    link.set_access_label("Read the Pulp documentation");
+    link.set_text("here");
+    REQUIRE(link.access_label() == "Read the Pulp documentation");
+
+    // And the reverse order (content first, then aria-label) still ends on the
+    // author's name — this is the order the JS bridge actually replays in.
+    Label l;
+    l.set_text("dB");
+    l.set_access_label("Gain in decibels");
+    REQUIRE(l.access_label() == "Gain in decibels");
+}
+
+// ── The snapshot announces what the bridges announce ─────────────────────────
+
+TEST_CASE("the cross-platform snapshot resolves the value like every bridge",
+          "[view][accessibility][value]") {
+    // accessibility_tree.cpp used to read the raw access_value SLOT, so the
+    // snapshot — the one "bridge" that runs on every platform, and the surface
+    // the offline tests read — reported "" for a Knob that macOS / Windows /
+    // Linux all announce as "25%", and "" for a TextEditor holding "hello".
+    Probe root;
+    auto add = [&root](auto widget) {
+        auto* raw = widget.get();
+        root.add_child(std::move(widget));
+        return raw;
+    };
+    auto* knob = add(std::make_unique<Knob>());
+    knob->set_value(0.25f);
+    knob->set_access_label("Gain");
+
+    auto* editor = add(std::make_unique<TextEditor>());
+    editor->set_text("hello");
+    editor->set_access_label("Preset name");
+
+    auto* combo = add(std::make_unique<ComboBox>());
+    combo->set_items({"Sine", "Saw"});
+    combo->set_selected(1);
+    combo->set_access_label("Waveform");
+
+    auto* check = add(std::make_unique<Checkbox>());
+    check->set_access_label("Bypass");
+    check->set_checked(true);
+
+    const auto nodes = snapshot_accessibility_tree(root);
+    auto value_of = [&nodes](const View* v) -> std::string {
+        for (const auto& n : nodes)
+            if (n.view == v) return n.value;
+        return "<missing>";
+    };
+    REQUIRE(value_of(knob)   == "25%");     // value interface
+    REQUIRE(value_of(editor) == "hello");   // text interface
+    REQUIRE(value_of(combo)  == "Saw");     // access_value slot
+    REQUIRE(value_of(check)  == "checked"); // check state
+}
+
+// ── Check state reaches the platforms that have no state channel ─────────────
+
+TEST_CASE("check state resolves as a value for the bridges with no state slot",
+          "[view][accessibility][value]") {
+    // macOS turns access_checked into a native @YES/@NO accessibilityValue, and
+    // AT-SPI carries CHECKED/PRESSED in the state bitfield. iOS (UIKit collapses
+    // checkbox onto TraitButton) and Android read the VALUE string and nothing
+    // else — so without the state in the resolver they announced "button" and
+    // fell silent. Windows announces no state at all: the UIA Toggle pattern
+    // needs an IToggleProvider that PulpFragmentProvider does not implement.
+    Checkbox check;
+    REQUIRE(accessibility_value_string(check) == "unchecked");
+    REQUIRE(has_accessibility_value(check));
+    check.set_checked(true);
+    REQUIRE(accessibility_value_string(check) == "checked");
+    REQUIRE(accessibility_toggle_state(check) == AccessToggleState::on);
+
+    Toggle sw;
+    sw.set_on(true, /*animate=*/false);
+    REQUIRE(accessibility_value_string(sw) == "checked");
+
+    // Tri-state (aria-checked="mixed" from the JS bridge).
+    Probe tri;
+    tri.set_access_role(View::AccessRole::checkbox);
+    tri.set_access_checked("mixed");
+    REQUIRE(accessibility_toggle_state(tri) == AccessToggleState::mixed);
+    REQUIRE(accessibility_value_string(tri) == "mixed");
+
+    // aria-pressed (a toggle BUTTON) announces pressed / not pressed.
+    Probe pressed;
+    pressed.set_access_role(View::AccessRole::button);
+    pressed.set_access_pressed("true");
+    REQUIRE(accessibility_value_string(pressed) == "pressed");
+    pressed.set_access_pressed("false");
+    REQUIRE(accessibility_value_string(pressed) == "not pressed");
+
+    // A real value source still wins: a state string never displaces it.
+    Knob knob;
+    knob.set_value(0.5f);
+    knob.set_access_checked("true");   // nonsense, but must not shadow "50%"
+    REQUIRE(accessibility_value_string(knob) == "50%");
+}
+
+// ── The interface set each bridge exports ────────────────────────────────────
+
+TEST_CASE("a string-valued role exports a text interface, not nothing",
+          "[view][accessibility][atspi]") {
+    // The Linux TU (accessibility_linux.cpp) never compiles on the macOS gate,
+    // so its export decision is made by THIS pure predicate. Before it was
+    // wired, Linux exported org.a11y.atspi.Value for value-interface Views and
+    // NOTHING for the string-valued ones: a TextEditor holding "hello" was
+    // exported as ROLE_ENTRY with no Text and no Value interface, so Orca
+    // announced "entry" plus the name and read nothing. Same for a ComboBox
+    // whose selected item lives in access_value.
+    TextEditor editor;
+    editor.set_text("hello");
+    auto ifs = accessibility_interfaces(editor);
+    REQUIRE_FALSE(ifs.value);
+    REQUIRE(ifs.text);
+    REQUIRE(accessibility_text_content(editor) == "hello");
+    REQUIRE(accessibility_text_editable(editor));
+
+    // An EMPTY editable field still exports Text: it has a caret, a character
+    // count of 0 and an EDITABLE state.
+    TextEditor empty;
+    REQUIRE(accessibility_interfaces(empty).text);
+    REQUIRE(accessibility_text_content(empty).empty());
+
+    TextEditor ro;
+    ro.set_text("frozen");
+    ro.read_only = true;
+    REQUIRE(accessibility_interfaces(ro).text);
+    REQUIRE_FALSE(accessibility_text_editable(ro));
+
+    ComboBox combo;
+    combo.set_items({"Sine", "Saw"});
+    combo.set_selected(1);
+    ifs = accessibility_interfaces(combo);
+    REQUIRE_FALSE(ifs.value);
+    REQUIRE(ifs.text);                                   // AT-SPI reads it as Text
+    REQUIRE(accessibility_text_content(combo) == "Saw");
+    REQUIRE_FALSE(accessibility_text_editable(combo));
+
+    // A numeric range is Value, NOT Text — a Knob is not a text field.
+    Knob knob;
+    ifs = accessibility_interfaces(knob);
+    REQUIRE(ifs.value);
+    REQUIRE_FALSE(ifs.text);
+
+    // A plain label has neither: its NAME is the announcement.
+    Label label{"Output"};
+    ifs = accessibility_interfaces(label);
+    REQUIRE_FALSE(ifs.value);
+    REQUIRE_FALSE(ifs.text);
+}

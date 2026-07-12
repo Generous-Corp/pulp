@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <pulp/view/view.hpp>
+#include <pulp/view/accessibility.hpp>
 #include <pulp/view/caret.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
@@ -51,12 +52,18 @@ public:
     Label() { set_access_role(AccessRole::label); }
     explicit Label(std::string text) : text_(std::move(text)) {
         set_access_role(AccessRole::label);
-        set_access_label(text_);
+        set_derived_access_label(text_);
     }
 
     void set_text(std::string text) {
         if (text == text_) return;
         text_ = std::move(text);
+        // The text IS the accessible name for a label — the two-arg ctor set it
+        // and set_text() did not, so every Label built by the JS bridge
+        // (<span>, <p>, <label>) or by set_text() carried an empty name. It is
+        // the DERIVED name: an author-set aria-label wins over content, and
+        // react-reconciler rewrites textContent on every re-render.
+        set_derived_access_label(text_);
         // A plain set_text() supersedes any per-range styled runs from a
         // prior set_attributed_string(): the old spans index into the OLD
         // string and are stale. Drop them so paint() takes the single-style
@@ -329,9 +336,29 @@ public:
 ///           sprite-strip PNGs (no PNG bleed, crisp at any scale).
 enum class WidgetRenderStyle { standard, minimal, silver };
 
-class Knob : public View, public CustomShaderHost {
+// AccessibilityValueInterface: `AccessRole::slider` advertises the UIA
+// RangeValue/Value patterns and the AT-SPI Value interface. A slider with no
+// value source announces its name and then reads nothing (macOS) or reports
+// 0 in a degenerate 0..0 range (Windows). The role and the value ship together.
+class Knob : public View, public CustomShaderHost, public AccessibilityValueInterface {
 public:
     Knob() { set_access_role(AccessRole::slider); set_focusable(true); }
+
+    // ── AccessibilityValueInterface (normalized 0..1, like value()) ──────
+    double get_current_value() const override { return value_; }
+    void set_current_value(double v) override {
+        const float prev = value_;
+        set_value(static_cast<float>(v));
+        if (value_ != prev && on_change) on_change(value_);
+    }
+    double get_minimum_value() const override { return 0.0; }
+    double get_maximum_value() const override { return 1.0; }
+    /// Prefer the widget's own display formatter ("-6.0 dB") over the generic
+    /// percentage — it is the string the sighted user reads.
+    std::string get_value_string() const override {
+        return format_ ? format_(value_)
+                       : AccessibilityValueInterface::get_value_string();
+    }
 
     void set_render_style(WidgetRenderStyle s) { render_style_ = s; }
     WidgetRenderStyle render_style() const { return render_style_; }
@@ -377,6 +404,7 @@ public:
     void set_label(std::string text) {
         if (label_ == text) return;
         label_ = std::move(text);
+        set_derived_access_label(label_);  // the visible label is the accessible name
         request_repaint();
     }
     const std::string& label() const { return label_; }
@@ -563,12 +591,22 @@ private:
 // ── Fader ────────────────────────────────────────────────────────────────────
 // Linear slider for audio parameters
 
-class Fader : public View, public CustomShaderHost {
+class Fader : public View, public CustomShaderHost, public AccessibilityValueInterface {
 public:
     enum class Orientation { vertical, horizontal };
     enum class ThumbShape { circle, rectangle };
 
     Fader() { set_access_role(AccessRole::slider); set_focusable(true); }
+
+    // ── AccessibilityValueInterface (normalized 0..1) ────────────────────
+    double get_current_value() const override { return value_; }
+    void set_current_value(double v) override {
+        const float prev = value_;
+        set_value(static_cast<float>(v));
+        if (value_ != prev && on_change) on_change(value_);
+    }
+    double get_minimum_value() const override { return 0.0; }
+    double get_maximum_value() const override { return 1.0; }
 
     void set_render_style(WidgetRenderStyle s) { render_style_ = s; }
     WidgetRenderStyle render_style() const { return render_style_; }
@@ -620,6 +658,7 @@ public:
     void set_label(std::string text) {
         if (label_ == text) return;
         label_ = std::move(text);
+        set_derived_access_label(label_);  // the visible label is the accessible name
         request_repaint();
     }
     const std::string& label() const { return label_; }
@@ -760,13 +799,28 @@ private:
 // not preprocess them. Quantisation happens inside the widget so JS-side
 // callers see the same value the renderer paints.
 //
-class RangeSlider : public View {
+class RangeSlider : public View, public AccessibilityValueInterface {
 public:
     enum class Orientation { horizontal, vertical };
 
     RangeSlider() {
         set_access_role(AccessRole::slider);
         set_focusable(true);
+    }
+
+    // ── AccessibilityValueInterface (caller's min/max/step units) ────────
+    double get_current_value() const override { return value_; }
+    void set_current_value(double v) override {
+        const float prev = value_;
+        set_value(static_cast<float>(v));
+        if (value_ != prev && on_change) on_change(value_);
+    }
+    double get_minimum_value() const override { return min_; }
+    double get_maximum_value() const override { return max_; }
+    double get_step_size() const override {
+        return step_ > 0.0f
+            ? step_
+            : AccessibilityValueInterface::get_step_size();
     }
 
     /// Inclusive lower bound (default 0).
@@ -896,7 +950,11 @@ private:
 class Toggle : public View, public CustomShaderHost {
 public:
     Toggle() : thumb_position_(0.0f), hover_opacity_(0.0f) {
-        set_access_role(AccessRole::toggle); set_focusable(true);
+        set_access_role(AccessRole::toggle);
+        // Seed the ARIA state; Toggle::set_on() keeps it in sync. A `toggle`
+        // (ARIA switch) with no state announces nothing about on/off.
+        set_access_checked("false");
+        set_focusable(true);
     }
 
     /// Set the on/off state. By default the thumb animates to the new position;
@@ -908,7 +966,10 @@ public:
     void set_on(bool v, bool animate = true);
     bool is_on() const { return on_; }
 
-    void set_label(std::string text) { label_ = std::move(text); }
+    void set_label(std::string text) {
+        label_ = std::move(text);
+        set_derived_access_label(label_);  // the visible label is the accessible name
+    }
     const std::string& label() const { return label_; }
 
     /// Called when the toggle state changes.
@@ -948,13 +1009,24 @@ private:
 
 class Checkbox : public View {
 public:
-    Checkbox() { set_access_role(AccessRole::toggle); set_focusable(true); }
+    // `checkbox`, not `toggle`: ARIA/AT-SPI/UIA all distinguish a checkbox
+    // from a switch. Toggle/ToggleButton keep `toggle` (ARIA `switch`).
+    // access_checked is the state slot every bridge reads (NSAccessibility
+    // accessibilityValue, UIA ToggleState, the AT-SPI CHECKED state): a
+    // `checkbox` role with an unset state announces the control and then says
+    // nothing about whether it is checked. Seeded here, kept in sync below.
+    Checkbox() {
+        set_access_role(AccessRole::checkbox);
+        set_access_checked("false");
+        set_focusable(true);
+    }
 
     // Same programmatic repaint contract as Knob::set_value(), including the
     // no-change guard for bridge sync/reload loops.
     void set_checked(bool v) {
         if (checked_ == v) return;
         checked_ = v;
+        set_access_checked(v ? "true" : "false");
         request_repaint();
     }
     bool is_checked() const { return checked_; }
@@ -974,13 +1046,18 @@ private:
 
 class ToggleButton : public View {
 public:
-    ToggleButton() { set_access_role(AccessRole::toggle); set_focusable(true); }
+    ToggleButton() {
+        set_access_role(AccessRole::toggle);
+        set_access_checked("false");
+        set_focusable(true);
+    }
 
     // Same programmatic repaint contract as Knob::set_value(), including the
     // no-change guard for bridge sync/reload loops.
     void set_on(bool v) {
         if (on_ == v) return;
         on_ = v;
+        set_access_checked(v ? "true" : "false");
         request_repaint();
     }
     bool is_on() const { return on_; }
@@ -988,6 +1065,7 @@ public:
     void set_label(std::string text) {
         if (label_ == text) return;
         label_ = std::move(text);
+        set_derived_access_label(label_);  // the visible label is the accessible name
         request_repaint();
     }
     const std::string& label() const { return label_; }
@@ -1146,11 +1224,19 @@ private:
 // ── Meter ────────────────────────────────────────────────────────────────────
 // Audio level meter with peak hold
 
-class Meter : public View {
+class Meter : public View, public AccessibilityValueInterface {
 public:
     enum class Orientation { vertical, horizontal };
 
     Meter() { set_access_role(AccessRole::meter); }
+
+    // ── AccessibilityValueInterface (read-only gauge, normalized 0..1) ───
+    // `meter` maps to a UIA ProgressBar / AT-SPI LEVEL_BAR, both of which
+    // advertise a range. Without a source they report 0 in a 0..0 range.
+    double get_current_value() const override { return display_peak(); }
+    void set_current_value(double) override {}  // a meter is not writable
+    double get_minimum_value() const override { return 0.0; }
+    double get_maximum_value() const override { return 1.0; }
 
     void set_render_style(WidgetRenderStyle s) { render_style_ = s; }
     WidgetRenderStyle render_style() const { return render_style_; }

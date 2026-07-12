@@ -24,24 +24,60 @@
 
 namespace {
 
+// UIKit exposes no role string — a VoiceOver element is described by its
+// TRAITS. The trait vocabulary is much narrower than NSAccessibility's role
+// list, so several Pulp roles collapse onto Button (checkbox, radio, combo
+// box, menu item, tab) — VoiceOver then announces "button" and the element's
+// accessibilityValue carries the state. That is the correct UIKit idiom, not a
+// gap: UIKit's own UISwitch/UISegmentedControl do the same. Structural roles
+// (list / table / row / cell / group / dialog) carry no trait; the element is
+// still reachable, it just isn't announced as a control.
+//
+// No `default:` — adding an AccessRole must be a compile error here, not a
+// silent fall through to TraitNone.
 UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
     using AccessRole = pulp::view::View::AccessRole;
     switch (role) {
         case AccessRole::slider:
+        case AccessRole::scroll_bar:
             return UIAccessibilityTraitAdjustable;
         case AccessRole::toggle:
+        case AccessRole::button:
+        case AccessRole::checkbox:
+        case AccessRole::radio:
+        case AccessRole::combo_box:
+        case AccessRole::menu_item:
+        case AccessRole::tab:
             return UIAccessibilityTraitButton;
+        case AccessRole::link:
+            return UIAccessibilityTraitLink;
         case AccessRole::label:
             return UIAccessibilityTraitStaticText;
-        case AccessRole::group:
-            return UIAccessibilityTraitNone;
-        case AccessRole::meter:
-            return UIAccessibilityTraitUpdatesFrequently;
+        case AccessRole::heading:
+            return UIAccessibilityTraitHeader;
         case AccessRole::image:
             return UIAccessibilityTraitImage;
-        default:
+        case AccessRole::meter:
+        case AccessRole::progress_bar:
+            return UIAccessibilityTraitUpdatesFrequently;
+        // Text entry: UIKit has no public "text field" trait; VoiceOver derives
+        // it from the element responding to UITextInput. Pulp's element is a
+        // plain UIAccessibilityElement, so it announces as untyped text-entry.
+        // Tracked as a known iOS gap (see the ios skill).
+        case AccessRole::text_field:
+        case AccessRole::group:
+        case AccessRole::list:
+        case AccessRole::list_item:
+        case AccessRole::table:
+        case AccessRole::row:
+        case AccessRole::cell:
+        case AccessRole::tab_list:
+        case AccessRole::menu:
+        case AccessRole::dialog:
+        case AccessRole::none:
             return UIAccessibilityTraitNone;
     }
+    return UIAccessibilityTraitNone;
 }
 
 }  // namespace
@@ -63,7 +99,14 @@ UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
 
 - (NSString *)accessibilityValue {
     if (!_pulpView) return nil;
-    auto value = _pulpView->access_value();
+    // Shared resolver (accessibility.hpp): value interface → text interface →
+    // access_value slot → check/press state ("checked" / "unchecked" /
+    // "mixed"). Reading only the slot left every slider / meter / text field
+    // with an empty VoiceOver value; and because UIKit collapses checkbox /
+    // toggle onto TraitButton, the state slot is the ONLY thing that makes a
+    // checkbox announce more than "button" here (macOS has a native @YES/@NO
+    // accessibilityValue for that; UIKit does not).
+    const std::string value = pulp::view::accessibility_value_string(*_pulpView);
     return value.empty() ? nil : [NSString stringWithUTF8String:value.c_str()];
 }
 
@@ -93,7 +136,7 @@ UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
 }
 
 - (BOOL)isAccessibilityElement {
-    return _pulpView && _pulpView->access_role() != pulp::view::View::AccessRole::none;
+    return _pulpView && pulp::view::is_accessibility_element(*_pulpView);
 }
 
 // ── Adjustable support (sliders, knobs) ─────────────────────────────────
@@ -119,7 +162,7 @@ namespace {
 void collect_accessible_views(View& root, std::vector<View*>& out) {
     for (size_t i = 0; i < root.child_count(); ++i) {
         auto* child = root.child_at(i);
-        if (child->access_role() != View::AccessRole::none)
+        if (is_accessibility_element(*child))
             out.push_back(const_cast<View*>(child));
         collect_accessible_views(*const_cast<View*>(child), out);
     }

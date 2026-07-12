@@ -42,7 +42,7 @@ void close_active_combo_popup_in_subtree(View& root) {
 
 VirtualList::VirtualList() {
     set_focusable(true);
-    set_access_role(AccessRole::group);
+    set_access_role(AccessRole::list);
     set_overflow(Overflow::hidden);
 }
 
@@ -553,7 +553,7 @@ void VirtualList::position_slot(RowSlot& slot) {
 void VirtualList::update_row_accessibility(RowSlot& slot) {
     if (!slot.row || !slot.index) return;
     const auto position = row_value(*slot.index, row_count_);
-    slot.row->set_access_role(AccessRole::group);
+    slot.row->set_access_role(AccessRole::list_item);
     if (slot.row->access_label().empty()) {
         slot.row->set_access_label(position);
     }

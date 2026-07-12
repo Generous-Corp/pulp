@@ -9,6 +9,8 @@
 #if TARGET_OS_OSX
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/accessibility.hpp>
+#include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/runtime/log.hpp>
 #import <Cocoa/Cocoa.h>
 
@@ -19,24 +21,21 @@
 
 namespace pulp::view {
 
-// Map Pulp AccessRole to NSAccessibilityRole
+// Map Pulp AccessRole to NSAccessibilityRole. The table lives in
+// platform/ns_role_mapping.hpp so the standalone window host and the plug-in
+// editor host (plugin_view_host_mac.mm) cannot drift apart.
 static NSAccessibilityRole access_role_to_ns(View::AccessRole role) {
-    switch (role) {
-        case View::AccessRole::slider: return NSAccessibilitySliderRole;
-        case View::AccessRole::toggle: return NSAccessibilityCheckBoxRole;
-        case View::AccessRole::label:  return NSAccessibilityStaticTextRole;
-        case View::AccessRole::group:  return NSAccessibilityGroupRole;
-        case View::AccessRole::meter:  return NSAccessibilityProgressIndicatorRole;
-        case View::AccessRole::image:  return NSAccessibilityImageRole;
-        default: return NSAccessibilityUnknownRole;
-    }
+    return ns_role_for_access_role(role);
 }
 
-// Collect accessible children (views with a non-none AccessRole)
+// Collect accessible children. is_accessibility_element() is the shared gate
+// (view.hpp): a role alone is not enough — a role that has no content beyond
+// its name (button, link, tab, label ...) stays OUT of the tree until it has an
+// accessible name, or VoiceOver announces a nameless "button".
 static void collect_accessible(View& root, std::vector<View*>& out) {
     for (size_t i = 0; i < root.child_count(); ++i) {
         auto* child = root.child_at(i);
-        if (child->access_role() != View::AccessRole::none)
+        if (is_accessibility_element(*child))
             out.push_back(const_cast<View*>(child));
         collect_accessible(*const_cast<View*>(child), out);
     }
@@ -95,8 +94,14 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
             if (pressed == "mixed") return @"mixed";
         }
     }
-    if (!_view || _view->access_value().empty()) return nil;
-    return [NSString stringWithUTF8String:_view->access_value().c_str()];
+    // Resolve through the shared value resolver: a value interface (slider,
+    // meter, progress bar), else a text interface (TextEditor's content), else
+    // the manually-set access_value slot. Reading only the last one is why a
+    // TextEditor holding "hello" returned nil.
+    if (!_view) return nil;
+    const std::string value = pulp::view::accessibility_value_string(*_view);
+    if (value.empty()) return nil;
+    return [NSString stringWithUTF8String:value.c_str()];
 }
 
 // pulp #1737 — surface aria-disabled. NSAccessibility's
@@ -145,7 +150,7 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
     // of role. Other aria-hidden values (false, unset) keep the legacy
     // role-based gate.
     if (_view->access_hidden() == "true") return NO;
-    return _view->access_role() != pulp::view::View::AccessRole::none;
+    return pulp::view::is_accessibility_element(*_view);
 }
 
 @end

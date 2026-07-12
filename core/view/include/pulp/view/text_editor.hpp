@@ -5,6 +5,7 @@
 /// Inspired by Visage TextEditor patterns (see ~/Code/visage).
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/accessibility.hpp>
 #include <pulp/view/caret.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/platform/clipboard.hpp>
@@ -40,9 +41,10 @@ namespace pulp::view {
 /// editor->on_return = [&](const std::string& text) { apply_value(text); };
 /// editor->on_escape = [&] { revert(); };
 /// @endcode
-class TextEditor : public View {
+class TextEditor : public View, public AccessibilityTextInterface {
 public:
     TextEditor() {
+        set_access_role(AccessRole::text_field);
         set_focusable(true);
         set_cursor(CursorStyle::text);
         on_context_menu = [this](Point pos) { show_default_context_menu(pos); };
@@ -50,6 +52,29 @@ public:
     ~TextEditor() override;
 
     bool accepts_text_input() const override { return enabled() && !read_only; }
+
+    // ── AccessibilityTextInterface ───────────────────────────────────────
+    //
+    // Without this, `AccessRole::text_field` is a lie by omission: the role
+    // says "edit field", and then macOS -accessibilityValue returns nil and
+    // the Windows IValueProvider::get_Value returns a NULL BSTR, so VoiceOver
+    // and Narrator announce "text field" and read NOTHING. The bridges resolve
+    // an element's value through accessibility_value_string() (accessibility.
+    // hpp), which finds this interface by dynamic_cast; the Windows provider
+    // also routes IValueProvider::SetValue back through set_text() so
+    // IsReadOnly and "editing works" finally agree.
+    std::string get_text() const override { return text_; }
+    void set_text(std::string_view t) override { set_text(std::string(t)); }
+    /// Disambiguator: `set_text("literal")` would otherwise be ambiguous
+    /// between the std::string and std::string_view overloads (both are
+    /// user-defined conversions from const char*).
+    void set_text(const char* t) { set_text(std::string(t ? t : "")); }
+    bool is_editable() const override { return enabled() && !read_only; }
+    std::pair<int, int> get_selection() const override { return selection_range(); }
+    void set_selection(int start, int end) override;
+    int get_character_count() const override {
+        return static_cast<int>(text_.size());
+    }
 
     static constexpr int kMaxUndoHistory = 1000;
 
@@ -164,7 +189,8 @@ public:
     void select_all();
     void clear_selection();
     void set_caret_pos(int byte_offset);
-    void set_selection(int anchor_byte_offset, int active_byte_offset);
+    // set_selection(anchor, active) is declared above as the
+    // AccessibilityTextInterface override — same contract, one definition.
     int selection_anchor() const { return selection_start_; }
     int selection_active() const { return selection_end_; }
     std::pair<int, int> selection_range() const;
