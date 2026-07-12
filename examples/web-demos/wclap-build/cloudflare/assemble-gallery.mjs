@@ -392,10 +392,14 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
   const isWam = abi === "wam";
   const adapterMod = isWam ? "wam.js" : "wclap.js";
   const adapterFn = isWam ? "createWamAdapter" : "createWclapAdapter";
-  const dspUrl = isWam ? "./SuperConvolverWorklet.js" : "./SuperConvolver.wasm";
-  const processorUrl = isWam
-    ? "../../vendor-player/vendor/pulp-wasm/wam-processor.js"
-    : WORKLET;
+  const dspUrl = isWam ? "./wam-dsp.js" : "./SuperConvolver.wasm";
+  // WAM's processor module STATICALLY imports its SINGLE_FILE DSP factory as the
+  // sibling `./wam-dsp.js` (wam-processor.js:22), and that one addModule() is the
+  // whole load — dspUrl is never addModule'd. So the processor cannot be shared out
+  // of vendor-player/: it must sit in this plugin's own directory, next to that
+  // plugin's DSP. Pointing at the shared copy resolves ./wam-dsp.js to a 404 and
+  // the module graph fails as an opaque "Unable to load a worklet's module".
+  const processorUrl = isWam ? "./wam-processor.js" : WORKLET;
   const hostLabel = isWam ? "WAM" : "WebCLAP";
   const hostDocsHref = isWam
     ? "https://www.webaudiomodules.com/docs/intro/"
@@ -579,7 +583,12 @@ async function emitSuperConvolver() {
       await copyFile(join(UI_SRC, "pulp-ui.js"), join(pdir, "pulp-ui.js"));
     }
   }
-  await copyFile(wamJs, join(dir, "wam", "SuperConvolverWorklet.js"));
+  // Self-contained WAM dir: the processor + the runtime it imports, and the DSP
+  // under the sibling name the processor statically imports (see processorUrl).
+  const wamVendor = resolve(REPO, "core/format/src/wasm");
+  await copyFile(wamJs, join(dir, "wam", "wam-dsp.js"));
+  await copyFile(join(wamVendor, "wam-processor.js"), join(dir, "wam", "wam-processor.js"));
+  await copyFile(join(wamVendor, "wam-runtime.mjs"), join(dir, "wam", "wam-runtime.mjs"));
   await copyFile(wclapWasm, join(dir, "wclap", "SuperConvolver.wasm"));
   console.log(`  super-convolver/**         (the same plugin as WAM and as WebCLAP` +
               `${withUi ? ", with Pulp's own UI" : ""})`);
