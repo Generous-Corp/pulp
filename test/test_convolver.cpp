@@ -227,16 +227,39 @@ TEST_CASE("Convolver: a block-size violation does not corrupt the stream after i
     for (auto v : bad_out) REQUIRE(v == 0.0f);
     REQUIRE(torn.block_size_violations() == 1);
 
-    std::vector<float> in(kBlock), ref_out(kBlock), torn_out(kBlock);
+    // Dirty control: never sees a bad block, but carries a real history the
+    // reference does not. This is what a reset() that stopped clearing would
+    // look like, and it is what gives the tolerance below its teeth.
+    PartitionedConvolver dirty;
+    dirty.load_ir(ir.data(), ir.size(), kBlock);
+    std::vector<float> dc_in(kBlock, 0.5f), dc_out(kBlock);
+    dirty.process(dc_in.data(), dc_out.data(), kBlock);
+
+    // The two convolvers are distinct objects, so their FFT buffers land at
+    // different alignments and the SIMD path can sum in a different order --
+    // worth a few ULP on samples of magnitude ~6. An exact compare is not a
+    // property this DSP has; the `dirty` control proves this bound still catches
+    // an uncleared history by orders of magnitude.
+    constexpr float kTol = 1e-4f;
+
+    std::vector<float> in(kBlock), ref_out(kBlock), torn_out(kBlock), dirty_out(kBlock);
+    float worst_recovered = 0.0f, worst_dirty = 0.0f;
     for (size_t block = 0; block < 8; ++block) {
         for (size_t i = 0; i < kBlock; ++i)
             in[i] = std::sin(0.05f * static_cast<float>(block * kBlock + i));
         reference.process(in.data(), ref_out.data(), kBlock);
         torn.process(in.data(), torn_out.data(), kBlock);
+        dirty.process(in.data(), dirty_out.data(), kBlock);
         for (size_t i = 0; i < kBlock; ++i) {
             INFO("block " << block << " sample " << i);
-            REQUIRE_THAT(torn_out[i], WithinAbs(ref_out[i], 1e-6f));
+            REQUIRE_THAT(torn_out[i], WithinAbs(ref_out[i], kTol));
+            worst_recovered = std::max(worst_recovered, std::abs(torn_out[i] - ref_out[i]));
+            worst_dirty = std::max(worst_dirty, std::abs(dirty_out[i] - ref_out[i]));
         }
     }
+    INFO("recovered drift " << worst_recovered << " vs uncleared-history drift " << worst_dirty);
+    REQUIRE(worst_dirty > kTol * 100.0f);
+    REQUIRE(worst_recovered < kTol);
+
     REQUIRE(torn.block_size_violations() == 0);  // cleared by the recovery reset()
 }
