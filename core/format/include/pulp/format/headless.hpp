@@ -68,6 +68,15 @@ public:
                  const audio::BufferView<const float>& input,
                  ProcessContext context);
 
+    /// Process with an independently supplied sidechain bus. The sidechain is
+    /// never concatenated with or aliased to the main input; processors reach
+    /// it through ProcessBuffers::sidechain_input() / sidechain_input().
+    void process_with_sidechain(
+        audio::BufferView<float>& output,
+        const audio::BufferView<const float>& input,
+        const audio::BufferView<const float>& sidechain,
+        ProcessContext context = {});
+
     /// Process a block of audio with MIDI input and output.
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
@@ -86,6 +95,14 @@ public:
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& midi_out,
                  ProcessContext context);
+
+    void process_with_sidechain(
+        audio::BufferView<float>& output,
+        const audio::BufferView<const float>& input,
+        const audio::BufferView<const float>& sidechain,
+        midi::MidiBuffer& midi_in,
+        midi::MidiBuffer& midi_out,
+        ProcessContext context);
 
     /// Low-level process call with MIDI, context, and parameter events.
     void process(audio::BufferView<float>& output,

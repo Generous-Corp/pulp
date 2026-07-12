@@ -58,6 +58,38 @@ ProcessBuffersT<SampleType> make_process_buffers(
     };
 }
 
+template <typename SampleType>
+ProcessBuffersT<SampleType> make_process_buffers_with_sidechain(
+    audio::BufferView<SampleType>& output,
+    const audio::BufferView<const SampleType>& input,
+    const audio::BufferView<const SampleType>& sidechain,
+    std::array<ProcessBusBufferView<const SampleType>, 2>& input_buses,
+    std::array<ProcessBusBufferView<SampleType>, 1>& output_buses) {
+    input_buses = {{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     static_cast<int>(input.num_channels()), false, !input.empty()},
+            .buffer = input,
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
+                     static_cast<int>(sidechain.num_channels()), true, !sidechain.empty()},
+            .buffer = sidechain,
+        },
+    }};
+    output_buses = {{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     static_cast<int>(output.num_channels()), false, !output.empty()},
+            .buffer = output,
+        },
+    }};
+    return ProcessBuffersT<SampleType>{
+        .inputs = ProcessBusBufferSet<const SampleType>(input_buses),
+        .outputs = ProcessBusBufferSet<SampleType>(output_buses),
+    };
+}
+
 } // namespace
 
 RenderSpeedHint render_speed_hint_for(double ratio) {
@@ -113,6 +145,16 @@ void HeadlessHost::process(audio::BufferView<float>& output,
     process(output, input, midi_in, midi_out);
 }
 
+void HeadlessHost::process_with_sidechain(
+    audio::BufferView<float>& output,
+    const audio::BufferView<const float>& input,
+    const audio::BufferView<const float>& sidechain,
+    ProcessContext context) {
+    midi::MidiBuffer midi_in, midi_out;
+    process_with_sidechain(output, input, sidechain, midi_in, midi_out,
+                           std::move(context));
+}
+
 void HeadlessHost::process(audio::BufferView<float>& output,
                             const audio::BufferView<const float>& input,
                             ProcessContext context) {
@@ -156,6 +198,26 @@ void HeadlessHost::process(audio::BufferView<float>& output,
     std::array<ProcessBusBufferView<float>, 1> output_buses;
     auto process_buffers =
         make_process_buffers(output, input, input_buses, output_buses);
+    pulp::runtime::ScopedNoAlloc no_alloc_guard;
+    processor_->process(process_buffers, midi_in, midi_out, context);
+}
+
+void HeadlessHost::process_with_sidechain(
+    audio::BufferView<float>& output,
+    const audio::BufferView<const float>& input,
+    const audio::BufferView<const float>& sidechain,
+    midi::MidiBuffer& midi_in,
+    midi::MidiBuffer& midi_out,
+    ProcessContext context) {
+    if (!processor_) return;
+    if (context.sample_rate <= 0.0) context.sample_rate = sample_rate_;
+    if (context.num_samples <= 0)
+        context.num_samples = static_cast<int>(output.num_samples());
+    processor_->set_param_events(nullptr);
+    std::array<ProcessBusBufferView<const float>, 2> input_buses;
+    std::array<ProcessBusBufferView<float>, 1> output_buses;
+    auto process_buffers = make_process_buffers_with_sidechain(
+        output, input, sidechain, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
     processor_->process(process_buffers, midi_in, midi_out, context);
 }

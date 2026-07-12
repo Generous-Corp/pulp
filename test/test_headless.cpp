@@ -211,12 +211,47 @@ public:
     std::vector<pulp::state::ParameterEvent> last_param_events;
 };
 
+class SidechainProbeProcessor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "SidechainProbe",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.sidechain-probe",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 1, false}, {"Sidechain", 1, true}},
+            .output_buses = {{"Main Out", 1, false}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        const auto* sc = sidechain_input();
+        saw_sidechain = sc != nullptr;
+        if (sc) buffers_distinct = sc->channel(0).data() != input.channel(0).data();
+        for (std::size_t i = 0; i < output.num_samples(); ++i) {
+            const float side = sc ? sc->channel(0)[i] : 0.0f;
+            output.channel(0)[i] = input.channel(0)[i] + 10.0f * side;
+        }
+    }
+    bool saw_sidechain = false;
+    bool buffers_distinct = false;
+};
+
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
     return std::make_unique<TestGainProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_native_f64_probe() {
     return std::make_unique<NativeF64ProbeProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_sidechain_probe() {
+    return std::make_unique<SidechainProbeProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_null_processor() {
@@ -241,6 +276,33 @@ private:
 } // anonymous namespace
 
 using Catch::Matchers::WithinAbs;
+
+TEST_CASE("HeadlessHost injects sidechain as an independent bus", "[headless][sidechain]") {
+    pulp::format::HeadlessHost host(create_sidechain_probe);
+    host.prepare(48000.0, 8, 1, 1);
+    pulp::audio::Buffer<float> main(1, 4), sidechain(1, 4), output(1, 4);
+    for (std::size_t i = 0; i < 4; ++i) {
+        main.channel(0)[i] = static_cast<float>(i + 1);
+        sidechain.channel(0)[i] = 0.1f * static_cast<float>(i + 1);
+    }
+    const float* main_ptrs[] = {main.channel(0).data()};
+    const float* side_ptrs[] = {sidechain.channel(0).data()};
+    pulp::audio::BufferView<const float> main_view(main_ptrs, 1, 4);
+    pulp::audio::BufferView<const float> side_view(side_ptrs, 1, 4);
+    auto output_view = output.view();
+
+    host.process_with_sidechain(output_view, main_view, side_view);
+    auto* probe = host.processor_as<SidechainProbeProcessor>();
+    REQUIRE(probe != nullptr);
+    REQUIRE(probe->saw_sidechain);
+    REQUIRE(probe->buffers_distinct);
+    for (std::size_t i = 0; i < 4; ++i)
+        REQUIRE_THAT(output.channel(0)[i], WithinAbs(2.0 * (i + 1), 0.0001));
+
+    probe->saw_sidechain = true;
+    host.process(output_view, main_view);
+    REQUIRE_FALSE(probe->saw_sidechain);
+}
 
 TEST_CASE("HeadlessHost creates processor", "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
