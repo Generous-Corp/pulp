@@ -217,29 +217,40 @@ pulp_add_test_suite(pulp-test-flow-pans
 
 # GPU convolver node: golden test vs direct convolution when GPU/render is
 # available, plus CPU-fallback coverage in GPU-off builds.
+# These suites create real Dawn/Metal devices + blocking GPU readbacks, so they
+# carry RESOURCE_LOCK pulp_gpu (matching the render/GPU manifests) to serialize
+# against every other GPU test under parallel ctest — the cross-process
+# contention that intermittently trips their numeric checks after a 2s readback
+# timeout leaves a stale frame. (The GPU-agnostic transport/flow-pans suites
+# above do NOT create devices and are intentionally left parallel.)
 pulp_add_test_suite(pulp-test-gpu-convolver
     SOURCES test_gpu_convolver.cpp
-    LIBRARIES pulp::gpu-audio pulp::audio)
+    LIBRARIES pulp::gpu-audio pulp::audio
+    PROPERTIES RESOURCE_LOCK pulp_gpu)
 
 if(PULP_HAS_SKIA)
     # GPU STFT primitive: window+FFT analyze, inverse-FFT synthesize,
     # and COLA overlap-add reconstruction.
     pulp_add_test_suite(pulp-test-gpu-stft
         SOURCES test_gpu_stft.cpp
-        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
     # Spectral freeze: capture and sustain a spectral frame.
     pulp_add_test_suite(pulp-test-gpu-spectral-freeze
         SOURCES test_gpu_spectral_freeze.cpp
-        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
     # Spectral morph: blend between two captured spectra.
     pulp_add_test_suite(pulp-test-gpu-spectral-morph
         SOURCES test_gpu_spectral_morph.cpp
-        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
     # Spectral stack: multi-layer frozen stack, weighted morph, and spectral
     # smear — the batched engine that superseded the retired GpuHyperFreeze.
     pulp_add_test_suite(pulp-test-gpu-spectral-stack
         SOURCES test_gpu_spectral_stack.cpp
-        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
 endif()
 
 # Test signal source (sine tone, file playback)
