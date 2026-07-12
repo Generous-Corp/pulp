@@ -272,15 +272,45 @@ TEST_CASE("NonUniformPartitionedConvolver recovers from a torn history",
     torn.process(bad_in.data(), bad_out.data(), 48);
     REQUIRE(torn.block_size_violations() == 1);
 
-    std::vector<float> in(kBlock), ref_out(kBlock), torn_out(kBlock);
+    // Dirty: never sees a bad block, but carries a REAL history the reference
+    // does not — one prior valid block of the same DC the bad block carried.
+    // This is what "the torn history was not actually cleared" would look like,
+    // and it is the control that gives the tolerance below its teeth.
+    NonUniformPartitionedConvolver dirty;
+    dirty.load_ir(ir.data(), ir.size(), kBlock);
+    std::vector<float> dc_in(kBlock, 0.5f), dc_out(kBlock);
+    dirty.process(dc_in.data(), dc_out.data(), kBlock);
+
+    // Tolerance: the two convolvers are distinct objects, so their FFT buffers
+    // land at different alignments and the SIMD path can sum in a different
+    // order. That is worth a few ULP — measured drift is ~1.4e-6 on samples of
+    // magnitude ~5.9 — so an exact compare is not a property this DSP has. 1e-4
+    // matches the tolerance the rest of this file uses for convolver-vs-convolver
+    // comparisons, and the `dirty` control below proves it is still tight enough
+    // to catch an uncleared history by orders of magnitude.
+    constexpr float kTol = 1e-4f;
+
+    std::vector<float> in(kBlock), ref_out(kBlock), torn_out(kBlock), dirty_out(kBlock);
+    float worst_recovered = 0.0f, worst_dirty = 0.0f;
     for (std::size_t block = 0; block < 8; ++block) {
         for (std::size_t i = 0; i < kBlock; ++i)
             in[i] = std::sin(0.05f * static_cast<float>(block * kBlock + i));
         reference.process(in.data(), ref_out.data(), kBlock);
         torn.process(in.data(), torn_out.data(), kBlock);
-        for (std::size_t i = 0; i < kBlock; ++i)
-            REQUIRE_THAT(torn_out[i], WithinAbs(ref_out[i], 1e-6f));
+        dirty.process(in.data(), dirty_out.data(), kBlock);
+        for (std::size_t i = 0; i < kBlock; ++i) {
+            REQUIRE_THAT(torn_out[i], WithinAbs(ref_out[i], kTol));
+            worst_recovered = std::max(worst_recovered, std::abs(torn_out[i] - ref_out[i]));
+            worst_dirty = std::max(worst_dirty, std::abs(dirty_out[i] - ref_out[i]));
+        }
     }
+    // Teeth: an uncleared history diverges far outside the tolerance, so a
+    // reset() that silently stopped clearing would fail this test rather than
+    // slip through on a slack bound.
+    INFO("recovered drift " << worst_recovered << " vs uncleared-history drift " << worst_dirty);
+    REQUIRE(worst_dirty > kTol * 100.0f);
+    REQUIRE(worst_recovered < kTol);
+
     // reset() cleared the counter as part of the recovery.
     REQUIRE(torn.block_size_violations() == 0);
 }

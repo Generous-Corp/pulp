@@ -119,7 +119,7 @@ target and is never linked into a plugin.
 it and prove its claim:
 
 ```bash
-cmake --build build --target SuperConvolver_CLAP -j8
+cmake --build build --target SuperConvolver_CLAP -j"$(getconf _NPROCESSORS_ONLN)"
 
 pulp audio render \
   --plugin "build/CLAP/SuperConvolver.clap" --format clap \
@@ -241,9 +241,10 @@ or below −60 dB relative to the input, or the tool concludes the output isn't 
 delayed copy at all and refuses (that is the wet-reverb case above). That −60 dB
 floor is set for *real* DSP, not for bit-exact wires. Measured: the STFT engine's
 overlap-add reconstruction — which is exact only up to float rounding — still
-nulls to **−137 dB**, and a pure delay line nulls to the −200 dB floor. Both
-clear the bar by a wide margin. If your DSP genuinely cannot null below −60 dB in
-its own dry mode, use the marker policy instead.
+nulls to **−137 dB**. (A pure delay line reads −200 dB, which is not a
+measurement but a clamp: its residual is exactly zero, and −200 is the reported
+silence floor.) Both clear the bar by a wide margin. If your DSP genuinely cannot
+null below −60 dB in its own dry mode, use the marker policy instead.
 
 **The delay must be unambiguous.** A stimulus that repeats every P samples nulls
 just as well at delay D as at D+P, so the delay is not recoverable and any answer
