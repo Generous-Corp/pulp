@@ -106,6 +106,8 @@ pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupp
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
 pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
+pulp build --arch=universal    # Fat arm64+x86_64 build (runs on every Mac) — use for distribution
+pulp build --arch=arm64        # Thin Apple Silicon only (or =x86_64 for Intel-only; default =host)
 pulp build --format wam        # Build the WAMv2 (Emscripten) web plugin into build-wam/
 pulp build --format wclap      # Build the WebCLAP (wasi-sdk) module into build-wclap/
 pulp build -f wclap -j8        # Short form, with a cmake passthrough flag

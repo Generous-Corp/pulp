@@ -12,6 +12,9 @@ commands:
       - name: --js-engine
         kind: option
         description: "JS engine backend: auto (default), quickjs, jsc (Apple only), v8 (requires V8 libs). Forces reconfigure."
+      - name: --arch
+        kind: option
+        description: "macOS target architecture: `host` (default — the build machine's arch, fast for dev), `universal` (fat arm64+x86_64, runs on every Mac — use for distribution), `arm64`, or `x86_64`. Maps to the PULP_MACOS_ARCH CMake option; forces reconfigure. Note: `--js-engine v8` cannot build universal (no universal libv8)."
       - name: --watch
         kind: flag
         description: Enter a file-watching loop after the initial build and rebuild on source changes.

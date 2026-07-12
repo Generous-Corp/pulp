@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS arch knob (PULP_MACOS_ARCH) — before PulpMinOs/project
 
 # Pin the macOS deployment target from tools/deps/min_os.json BEFORE project(),
 # so Pulp's binaries target the max minimum of the prebuilt libs they link
@@ -7,7 +8,7 @@ cmake_minimum_required(VERSION 3.24)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.655.0
+    VERSION 0.656.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
