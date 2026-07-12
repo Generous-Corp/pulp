@@ -105,9 +105,14 @@ std::vector<float> muted_then_unmuted(Stack& st, uint32_t fft, int muted_hops) {
     const float mute_l1[2] = {1.0f, 0.0f};  // layer 1 parked (muted)
     const float only_l1[2] = {0.0f, 1.0f};  // layer 1 alone, audible
     std::vector<float> out(fft, 0.0f);
+    // REQUIRE the render succeeded: a GPU readback that times out under
+    // contention returns false WITHOUT filling `out`, leaving a stale frame
+    // that would otherwise surface as a misleading numeric-tolerance/peak-bin
+    // failure. With the RESOURCE_LOCK this should never fire, but if it does we
+    // want it reported honestly as a device failure, not a phase regression.
     for (int i = 0; i < muted_hops; ++i)
-        st.render(out.data(), mute_l1, 0.0f, 0.0f);
-    st.render(out.data(), only_l1, 0.0f, 0.0f);
+        REQUIRE(st.render(out.data(), mute_l1, 0.0f, 0.0f));
+    REQUIRE(st.render(out.data(), only_l1, 0.0f, 0.0f));
     return out;
 }
 template <typename Stack>
@@ -116,8 +121,8 @@ std::vector<float> always_hot(Stack& st, uint32_t fft, int hops) {
     const float only_l1[2] = {0.0f, 1.0f};
     std::vector<float> out(fft, 0.0f);
     for (int i = 0; i < hops; ++i)
-        st.render(out.data(), both, 0.0f, 0.0f);
-    st.render(out.data(), only_l1, 0.0f, 0.0f);
+        REQUIRE(st.render(out.data(), both, 0.0f, 0.0f));
+    REQUIRE(st.render(out.data(), only_l1, 0.0f, 0.0f));
     return out;
 }
 float max_abs_diff(const std::vector<float>& a, const std::vector<float>& b) {
@@ -156,9 +161,18 @@ TEST_CASE("SpectralStack keeps a muted layer's phase advancing (no un-mute click
         }
         const auto out_muted = muted_then_unmuted(muted, FFT, kMutedHops);
         const auto out_hot = always_hot(hot, FFT, kMutedHops);
-        // Layer 1 advanced kMutedHops+1 times in BOTH runs → identical frame.
-        for (uint32_t i = 0; i < FFT; ++i)
-            REQUIRE(out_muted[i] == out_hot[i]);
+        // Layer 1 advanced kMutedHops+1 times in BOTH runs, so the frames match
+        // to within FFT-backend precision. NOT bit-exact: `muted` and `hot` own
+        // separate Apple vDSP FFT instances whose optimized (alignment-dependent)
+        // paths can differ by ~5e-8 near-zero — the project's FFT contract only
+        // promises bounded single-precision error. A 1e-6 bound admits that noise
+        // yet stays ~6 orders of magnitude below the order-unity waveform error
+        // the pre-fix SF-4 phase-freeze produced (bin K2 advances π/2 per hop, so
+        // freezing it for kMutedHops leaves it π/2 out of phase). peak_bin below
+        // is the additional gross-error guard.
+        const float cpu_diff = max_abs_diff(out_muted, out_hot);
+        INFO("CPU muted/hot max absolute difference: " << cpu_diff);
+        REQUIRE(cpu_diff < 1e-6f);
         // Teeth: the un-muted layer is genuinely non-trivial (not silence).
         REQUIRE(peak_bin(out_muted) == K2);
     }
