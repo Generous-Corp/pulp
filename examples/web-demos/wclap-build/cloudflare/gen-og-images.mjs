@@ -96,6 +96,11 @@ const browser = await chromium.launch({
   args: ["--mute-audio", "--autoplay-policy=no-user-gesture-required"],
 });
 
+// The card size every unfurler is tuned for (1.91:1). Shot at deviceScaleFactor 2,
+// so the PNG lands at 2400x1260.
+const OG_W = 1200;
+const OG_H = 630;
+
 let failed = 0;
 async function attempt(pageUrl, selector, outPath, label, start) {
   const context = await browser.newContext({
@@ -115,9 +120,42 @@ async function attempt(pageUrl, selector, outPath, label, start) {
     }
     const el = await page.$(selector);
     if (!el) throw new Error(`selector ${selector} not found`);
-    await el.screenshot({ path: outPath });
-    const box = await el.boundingBox();
-    console.log(`  ok   ${label} -> ${outPath} (${Math.round(box.width * 2)}x${Math.round(box.height * 2)})`);
+
+    // Compose an OG-SHAPED card rather than shooting the element raw. Unfurlers
+    // (iMessage, Slack, Twitter) want ~1.91:1 and render anything else as a small
+    // square thumbnail instead of the large card — a portrait screenshot of a tall
+    // plugin panel technically "has an og:image" and still looks broken. So fit the
+    // element into a 1200x630 frame on the page's own background and shoot the
+    // frame. Scale is capped at 1 so a small panel is never upscaled to mush.
+    const fitted = await page.evaluate(({ sel, W, H, pad }) => {
+      const node = document.querySelector(sel);
+      const r = node.getBoundingClientRect();
+      const scale = Math.min((W - pad * 2) / r.width, (H - pad * 2) / r.height, 1);
+      const bg = getComputedStyle(document.body).backgroundColor || "#0d1117";
+      const frame = document.createElement("div");
+      frame.id = "__og_frame";
+      Object.assign(frame.style, {
+        position: "fixed", left: "0", top: "0", width: `${W}px`, height: `${H}px`,
+        background: bg, display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: "2147483647", overflow: "hidden", margin: "0",
+      });
+      // Move the live node into the frame — cloning would drop the canvas bitmap
+      // (a <canvas> clone is blank), and the whole point is the running plugin.
+      const holder = document.createElement("div");
+      holder.style.transform = `scale(${scale})`;
+      holder.style.transformOrigin = "center center";
+      holder.style.flex = "0 0 auto";
+      frame.appendChild(holder);
+      document.body.appendChild(frame);
+      holder.appendChild(node);
+      return { scale, w: Math.round(r.width), h: Math.round(r.height) };
+    }, { sel: selector, W: OG_W, H: OG_H, pad: 24 });
+
+    await page.setViewportSize({ width: OG_W, height: OG_H });
+    await sleep(250);   // one frame for the reflow + any canvas repaint
+    await page.screenshot({ path: outPath, clip: { x: 0, y: 0, width: OG_W, height: OG_H } });
+    console.log(`  ok   ${label} -> ${outPath} ` +
+                `(${OG_W * 2}x${OG_H * 2} card; panel ${fitted.w}x${fitted.h} @ ${fitted.scale.toFixed(2)}x)`);
   } finally {
     await context.close();
   }

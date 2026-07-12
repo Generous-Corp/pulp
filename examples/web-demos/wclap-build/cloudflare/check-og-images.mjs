@@ -80,13 +80,26 @@ for await (const { file, url } of demoPages(OUT)) {
 
   const st = await stat(onDisk);
   if (st.size < MIN_PNG_BYTES) { fail(url, `${path} is only ${st.size}B — a blank or truncated screenshot`); continue; }
-  const head = Buffer.alloc(4);
-  const fh = await (await import("node:fs/promises")).open(onDisk, "r");
-  await fh.read(head, 0, 4, 0);
-  await fh.close();
-  if (!head.equals(PNG_MAGIC)) { fail(url, `${path} is not a PNG`); continue; }
 
-  ok(url, `${path} (${Math.round(st.size / 1024)} KB)`);
+  // Read the IHDR: magic (8B) + length/type (8B) + width/height (8B).
+  const head = Buffer.alloc(24);
+  const fh = await (await import("node:fs/promises")).open(onDisk, "r");
+  await fh.read(head, 0, 24, 0);
+  await fh.close();
+  if (!head.subarray(0, 4).equals(PNG_MAGIC)) { fail(url, `${path} is not a PNG`); continue; }
+
+  // Aspect matters as much as existence: unfurlers render anything far from ~1.91:1
+  // as a small square thumbnail rather than a large card, so a portrait screenshot
+  // passes every other check here and STILL looks broken when the link is shared.
+  const w = head.readUInt32BE(16), h = head.readUInt32BE(20);
+  const ratio = w / h;
+  if (ratio < 1.7 || ratio > 2.1) {
+    fail(url, `${path} is ${w}x${h} (aspect ${ratio.toFixed(2)}) — unfurlers want ~1.91:1; ` +
+              "it will render as a small thumbnail, not a card");
+    continue;
+  }
+
+  ok(url, `${path} — ${w}x${h}, ${Math.round(st.size / 1024)} KB`);
 }
 
 console.log(`\nchecked ${audited} page(s)`);

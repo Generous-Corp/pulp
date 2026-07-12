@@ -143,4 +143,16 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: examples/web-demos/wclap-build/cloudflare
-          command: pages deploy public --project-name pulp-wclap-demos
+          # --branch main is REQUIRED, not cosmetic. Without it wrangler picks up the
+          # current git branch and publishes a PREVIEW alias, while og:image is an
+          # absolute production URL — so the card points at a host that has no images
+          # and every shared link unfurls blank. Cloudflare serves a missing asset as
+          # its 404 page with a 200 status, so a status-code check does not catch it.
+          command: pages deploy public --project-name pulp-wclap-demos --branch main
+
+      # The local guard checks the files on disk; only this checks the HOST. Fetch each
+      # page as a crawler does, follow its og:image, and assert the bytes are a PNG.
+      - name: Guard — the live site actually unfurls
+        if: ${{ github.event_name != 'pull_request' && env.HAS_CF_TOKEN == 'true' }}
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: node check-unfurl.mjs --base https://pulp-wclap-demos.pages.dev

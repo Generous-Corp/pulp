@@ -381,6 +381,35 @@ const SC_LEDE =
   "The same C++ processor that builds as a native VST3, AU and CLAP plugin, compiled for the web. " +
   "The editor is not HTML: it is Pulp's own view tree — the widgets, layout and text shaping the " +
   "desktop editor uses — drawn by Skia straight onto the page's canvas.";
+
+// Two builds of the same plugin, each in both ABIs. v1 is the plain Ink & Signal
+// editor over the CPU convolver — the default a Pulp plugin gets for free. v2 is
+// the full desktop editor (the animated field renderer) over WebGPU-compute DSP.
+//
+// v2's cards are emitted ONLY when its build tree is on disk (see scVariants
+// below), so this page can never advertise a link that 404s: when the v2 build
+// lands, its row appears; until then the page simply shows v1. Same discipline as
+// the optional Pulp-UI module above.
+const SC_V2_BUILD = resolve(HERE, arg("--v2-build", "../../super-convolver-gpu/build-webgpu"));
+const SC_VARIANTS = [
+  {
+    id: "v1",
+    dir: "",                       // v1 lives at /super-convolver/{wam,wclap}/ (stable URLs)
+    name: "Ink & Signal",
+    blurb: "The stock Pulp editor over the CPU convolution engine — what a Pulp plugin gets " +
+           "for free, with no GPU work of its own.",
+    always: true,
+  },
+  {
+    id: "v2",
+    dir: "gpu",                    // v2 lives at /super-convolver/gpu/{wam,wclap}/
+    name: "GPU editor + GPU DSP",
+    blurb: "The desktop editor itself — including the animated acoustic field — over convolution " +
+           "run as a WebGPU compute shader in a worker, with the CPU engine as the fallback.",
+    always: false,
+    buildDir: SC_V2_BUILD,
+  },
+];
 const SC_CFG = { mode: "audio-effect", paramRows: 2 };
 
 // Cache-bust the MAIN-THREAD player entry only. The worklet processor and the
