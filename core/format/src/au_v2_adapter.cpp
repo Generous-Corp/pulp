@@ -13,6 +13,7 @@
 #include <pulp/format/detail/param_host_sync.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/parameter_text.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -209,7 +210,7 @@ OSStatus PulpAUEffect::GetParameterInfo(AudioUnitScope inScope,
     // ...ValueFromString (handled in GetProperty). Both are gated on to_string,
     // so a plugin that declares no converter keeps the host's stock numeric
     // display unchanged.
-    if (param->to_string) {
+    if (param->to_string || !param->value_labels.empty()) {
         outParameterInfo.flags |= kAudioUnitParameterFlag_ValuesHaveStrings;
     }
 
@@ -229,9 +230,7 @@ OSStatus PulpAUEffect::GetParameterInfo(AudioUnitScope inScope,
         outParameterInfo.unit = kAudioUnitParameterUnit_Hertz;
     } else if (param->unit == "%") {
         outParameterInfo.unit = kAudioUnitParameterUnit_Percent;
-    } else if (param->range.step >= 1.0f
-               && param->range.min == 0.0f
-               && param->range.max == 1.0f) {
+    } else if (state::is_boolean_param(*param)) {
         outParameterInfo.unit = kAudioUnitParameterUnit_Boolean;
     } else {
         outParameterInfo.unit = kAudioUnitParameterUnit_Generic;
@@ -250,14 +249,15 @@ OSStatus PulpAUEffect::GetParameterValueStrings(AudioUnitScope inScope,
     const auto* param = store_.info(static_cast<state::ParamID>(inParameterID));
     if (!param) return kAudioUnitErr_InvalidParameter;
 
-    if (param->range.step < 1.0f || !param->to_string)
+    if (!state::is_discrete_param(*param))
         return kAudioUnitErr_InvalidPropertyValue;
 
-    int count = static_cast<int>((param->range.max - param->range.min) / param->range.step) + 1;
+    const int count = static_cast<int>(state::param_value_count(*param));
     CFMutableArrayRef strings = CFArrayCreateMutable(kCFAllocatorDefault, count, &kCFTypeArrayCallBacks);
     for (int i = 0; i < count; ++i) {
-        float value = param->range.min + i * param->range.step;
-        auto str = param->to_string(value);
+        const float step = param->range.step > 0.0f ? param->range.step : 1.0f;
+        float value = param->range.min + i * step;
+        auto str = format_parameter_text(*param, value);
         CFStringRef cfStr = CFStringCreateWithCString(
             kCFAllocatorDefault, str.c_str(), kCFStringEncodingUTF8);
         CFArrayAppendValue(strings, cfStr);
@@ -411,11 +411,11 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
         if (!outData) return kAudioUnitErr_InvalidProperty;
         auto* sfv = static_cast<AudioUnitParameterStringFromValue*>(outData);
         const auto* param = store_.info(static_cast<state::ParamID>(sfv->inParamID));
-        if (!param || !param->to_string) return kAudioUnitErr_InvalidPropertyValue;
+        if (!param) return kAudioUnitErr_InvalidPropertyValue;
         const float value = sfv->inValue
             ? static_cast<float>(*sfv->inValue)
             : store_.get_value(static_cast<state::ParamID>(sfv->inParamID));
-        const std::string text = param->to_string(value);
+        const std::string text = format_parameter_text(*param, value);
         sfv->outString = CFStringCreateWithCString(
             kCFAllocatorDefault, text.c_str(), kCFStringEncodingUTF8);
         if (!sfv->outString) return kAudioUnitErr_InvalidPropertyValue;
@@ -427,15 +427,15 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
         if (!outData) return kAudioUnitErr_InvalidProperty;
         auto* vfs = static_cast<AudioUnitParameterValueFromString*>(outData);
         const auto* param = store_.info(static_cast<state::ParamID>(vfs->inParamID));
-        if (!param || !param->from_string || !vfs->inString)
+        if (!param || !vfs->inString)
             return kAudioUnitErr_InvalidPropertyValue;
         char buf[256] = {0};
         if (!CFStringGetCString(vfs->inString, buf, sizeof(buf),
                                 kCFStringEncodingUTF8))
             return kAudioUnitErr_InvalidPropertyValue;
-        const float parsed = param->from_string(buf);
-        if (!std::isfinite(parsed)) return kAudioUnitErr_InvalidPropertyValue;
-        vfs->outValue = parsed;
+        const auto parsed = parse_parameter_text(*param, buf);
+        if (!parsed) return kAudioUnitErr_InvalidPropertyValue;
+        vfs->outValue = *parsed;
         return noErr;
     }
     return AUMIDIEffectBase::GetProperty(inID, inScope, inElement, outData);

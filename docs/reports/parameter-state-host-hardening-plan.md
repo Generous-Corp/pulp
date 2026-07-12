@@ -75,7 +75,7 @@ Adopt a hybrid:
 
 | Area | Status | Completion gate |
 |---|---|---|
-| Parameter semantics and canonical text conversion | CLAP and VST3 core complete; AU/AAX/LV2 pending | All adapters consume the shared model; enum/toggle/stepped/text tests pass |
+| Parameter semantics and canonical text conversion | Core adapter work complete; broader validation pending | All adapters consume the shared model; enum/toggle/stepped/text tests pass |
 | Published custom-state snapshots | Pending | Host saves copy immutable published bytes; large-state test does no serialization in save callback |
 | Standalone/headless sidechain injection | Pending | Independent main/sidechain files and harness buffers; unconnected bus is silence |
 | Declarative supported bus layouts | Pending | Multiple layouts reach VST3, AU, CLAP, AAX model, standalone selection |
@@ -106,6 +106,13 @@ Adopt a hybrid:
 - `pulp-test-clap-entry`: PASS, 284 assertions in 18 test cases. Covers custom
   parser precedence, locale-independent numeric conversion, enum label
   round-trip, rejection of numeric enum text, unit validation, and snapping.
+- `pulp-test-lv2-adapter`: PASS, 105 assertions in 13 test cases, including
+  LV2 integer/enumeration properties and labeled scale points.
+- `pulp-test-aax-model`: PASS, 137 assertions in 16 test cases. The AAX model
+  now carries the canonical metadata and advertises the number of discrete
+  values rather than re-deriving an interval count in the runtime.
+- `PulpGain_AUv3`: Release build PASS after AUv3 value strings and canonical
+  format/parse callback integration.
 
 ## Review log
 

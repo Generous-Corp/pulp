@@ -330,7 +330,7 @@ struct ParamInfo {
 };
 
 inline bool is_discrete_param(const ParamInfo& info) {
-    return info.kind != ParamKind::Continuous;
+    return info.kind != ParamKind::Continuous || info.range.step > 0.0f;
 }
 
 inline bool is_boolean_param(const ParamInfo& info) {

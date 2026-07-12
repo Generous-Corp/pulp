@@ -244,6 +244,7 @@ DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginC
 
     for (const auto& param : store.all_params()) {
         ParameterBinding binding;
+        binding.info = param;
         binding.id = param.id;
         binding.aax_id = parameter_id_string(param.id);
         binding.name = truncate_copy(param.name.empty() ? binding.aax_id : param.name, 31);
@@ -251,12 +252,10 @@ DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginC
         binding.range = param.range;
         binding.to_string = param.to_string;
         binding.from_string = param.from_string;
-        binding.discrete = param.range.step > 0.0f;
+        binding.discrete = state::is_discrete_param(param);
 
         if (binding.discrete) {
-            const auto span = param.range.max - param.range.min;
-            const auto steps = std::max(0.0f, std::round(span / param.range.step));
-            binding.step_count = static_cast<uint32_t>(steps) + 1u;
+            binding.step_count = state::param_value_count(param);
         }
 
         definition.parameters.push_back(std::move(binding));

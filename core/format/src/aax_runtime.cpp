@@ -8,6 +8,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/max_block_contract.hpp>
+#include <pulp/format/parameter_text.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
@@ -281,11 +282,7 @@ struct FloatDisplayDelegate final : AAX_IDisplayDelegate<float> {
         if (!valueString) {
             return false;
         }
-        if (binding.to_string) {
-            *valueString = binding.to_string(value);
-            return true;
-        }
-        *valueString = format_default_value(value, binding.unit);
+        *valueString = format_parameter_text(binding.info, value);
         return true;
     }
 
@@ -305,11 +302,10 @@ struct FloatDisplayDelegate final : AAX_IDisplayDelegate<float> {
         if (!value) {
             return false;
         }
-        if (binding.from_string) {
-            *value = binding.from_string(valueString.StdString());
-            return true;
-        }
-        return parse_float_value(valueString.StdString(), value);
+        const auto parsed = parse_parameter_text(binding.info, valueString.StdString());
+        if (!parsed) return false;
+        *value = *parsed;
+        return true;
     }
 
     ParameterBinding binding;

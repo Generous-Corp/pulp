@@ -57,6 +57,7 @@
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/parameter_text.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
@@ -458,14 +459,22 @@ struct ScopedAuV3HostWriting {
         if (p.unit == "dB") unit = kAudioUnitParameterUnit_Decibels;
         else if (p.unit == "Hz") unit = kAudioUnitParameterUnit_Hertz;
         else if (p.unit == "%") unit = kAudioUnitParameterUnit_Percent;
-        else if (p.range.step >= 1.0f && p.range.min == 0.0f && p.range.max == 1.0f)
+        else if (pulp::state::is_boolean_param(p))
             unit = kAudioUnitParameterUnit_Boolean;
+
+        NSMutableArray<NSString *> *valueStrings = nil;
+        if (!p.value_labels.empty()) {
+            valueStrings = [NSMutableArray arrayWithCapacity:p.value_labels.size()];
+            for (const auto& label : p.value_labels) {
+                [valueStrings addObject:[NSString stringWithUTF8String:label.c_str()]];
+            }
+        }
 
         AUParameter *auParam = [AUParameterTree createParameterWithIdentifier:identifier
             name:name address:address min:p.range.min max:p.range.max
             unit:unit unitName:nil
             flags:kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable
-            valueStrings:nil dependentParameters:nil];
+            valueStrings:valueStrings dependentParameters:nil];
         auParam.value = p.range.default_value;
         [auParams addObject:auParam];
     }
@@ -505,12 +514,24 @@ struct ScopedAuV3HostWriting {
         if (strongSelf) {
             auto* info = strongSelf->_bridge.store.info(
                 static_cast<pulp::state::ParamID>(param.address));
-            if (info && info->to_string) {
-                auto str = info->to_string(v);
+            if (info) {
+                auto str = pulp::format::format_parameter_text(*info, v);
                 return [NSString stringWithUTF8String:str.c_str()];
             }
         }
         return [NSString stringWithFormat:@"%.2f", v];
+    };
+
+    tree.implementorValueFromStringCallback = ^AUValue(AUParameter *param, NSString *text) {
+        PulpAudioUnit* strongSelf = weakSelf;
+        if (!strongSelf || !text) return param.value;
+        const auto* info = strongSelf->_bridge.store.info(
+            static_cast<pulp::state::ParamID>(param.address));
+        if (!info) return param.value;
+        const char* utf8 = [text UTF8String];
+        if (!utf8) return param.value;
+        const auto parsed = pulp::format::parse_parameter_text(*info, utf8);
+        return parsed ? *parsed : param.value;
     };
 
     // Retain: this file is MRC, and `tree` is autoreleased — without a retain it
