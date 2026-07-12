@@ -118,7 +118,16 @@ jobs:
           echo "SKIA_DIR=$root" >> "$GITHUB_ENV"
           # Asserts the slice really is Ganesh/WebGL2 (no Dawn, no Graphite) —
           # the invariant FindSkia.cmake's Emscripten arm is built on.
-          python3 tools/scripts/verify_wasm_skia_slice.py "$root"
+          #
+          # The verifier needs llvm-nm to read the archive's symbols and returns 77
+          # (CTest's SKIP code) when it cannot find it. Under `set -e` that skip is
+          # indistinguishable from a failure and kills the job — and silently
+          # skipping the check would be worse, since this is the invariant the whole
+          # Emscripten render arm rests on. emsdk ships llvm-nm, so put it on PATH
+          # and let the check actually run.
+          nm_dir="$(dirname "$(find "$EMSDK" -name llvm-nm -type f 2>/dev/null | head -1)")"
+          [ -n "$nm_dir" ] && [ "$nm_dir" != "." ] || { echo "llvm-nm not found in emsdk — cannot verify the slice"; exit 1; }
+          PATH="$nm_dir:$PATH" python3 tools/scripts/verify_wasm_skia_slice.py "$root"
 
       # ── WAMv2 (Emscripten) ────────────────────────────────────────────────
       - name: Build WAMv2 plugins
