@@ -34,6 +34,8 @@ public:
             .name = "Mode",
             .unit = "",
             .range = {0.0f, 3.0f, 0.0f, 1.0f},
+            .kind = pulp::state::ParamKind::Enum,
+            .value_labels = {"A", "B", "C", "D"},
         });
     }
 
@@ -479,6 +481,8 @@ TEST_CASE("AAX model carries descriptor and parameter metadata into definitions"
                 .name = "Shape",
                 .unit = "",
                 .range = {0.0f, 1.0f, 0.0f, 0.25f},
+                .kind = pulp::state::ParamKind::Enum,
+                .value_labels = {"0", "1", "2", "3", "4"},
             },
         },
         128);
@@ -557,8 +561,10 @@ TEST_CASE("AAX model preserves linear, log, and enum parameter tapers", "[aax][m
             // Log/skewed frequency 20..20k, 1 kHz at the normalized midpoint.
             {.id = 2, .name = "Freq", .unit = "Hz",
              .range = pulp::state::ParamRange::with_centre(20.0f, 20000.0f, 1000.0f, 1000.0f)},
-            // Enum/discrete: 3 positions (0,1,2) via step = 1.
-            {.id = 3, .name = "Mode", .unit = "", .range = {0.0f, 2.0f, 0.0f, 1.0f}},
+            // Enum/discrete: 3 explicitly declared positions (0,1,2).
+            {.id = 3, .name = "Mode", .unit = "", .range = {0.0f, 2.0f, 0.0f, 1.0f},
+             .kind = pulp::state::ParamKind::Enum,
+             .value_labels = {"A", "B", "C"}},
         });
 
     auto result = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);

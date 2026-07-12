@@ -210,3 +210,11 @@ Adopt a hybrid:
   external `AudioUnitSDK/AUMIDIEffectBase.h`; the AUv3 Objective-C++ adapter
   build above covers the locally available Apple adapter surface, and cloud CI
   owns the AUv2 SDK-enabled header lane.
+- The first governed macOS run exposed three stale semantic seams: a continuous
+  VST3 gain with a quantization step was advertised as 840 discrete steps, two
+  AUv2 tests still rejected the agreed numeric text fallback, and AAX fixtures
+  relied on step inference instead of declaring enum kind. Semantic discreteness
+  now comes only from `ParamKind`; AUv2 fallback tests assert successful
+  round-trips; AAX enum fixtures declare their kind and labels. The exact three
+  failures pass in Release, followed by StateStore 1,825/98, CLAP 302/19, LV2
+  105/13, and AAX model 142/17.

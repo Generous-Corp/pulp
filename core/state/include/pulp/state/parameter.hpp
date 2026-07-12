@@ -330,7 +330,10 @@ struct ParamInfo {
 };
 
 inline bool is_discrete_param(const ParamInfo& info) {
-    return info.kind != ParamKind::Continuous || info.range.step > 0.0f;
+    // Semantic kind is author-declared metadata. A continuous parameter may
+    // still use range.step to quantize its plain value without being exposed
+    // to hosts as an integer/indexed control.
+    return info.kind != ParamKind::Continuous;
 }
 
 inline bool is_boolean_param(const ParamInfo& info) {
