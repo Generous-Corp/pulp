@@ -335,6 +335,32 @@ class AssetContractFloor(unittest.TestCase):
         self.assertEqual(decision.action, INCOMPLETE)
 
 
+class SweepBudget(unittest.TestCase):
+    """Repairs are newest-first and capped per sweep, so they cannot stampede.
+
+    The reconciler goes live against a backlog of stuck tags AND a starved runner
+    pool. Re-dispatching all of them at once would kick off five ~2-hour matrices
+    simultaneously and starve the very release it is trying to repair. Fixing the
+    newest first and capping the sweep lets supersession settle: once the newest
+    tag publishes, the older ones are SUPERSEDED next sweep and skipped entirely.
+    """
+
+    def test_the_module_caps_redispatches_per_sweep(self) -> None:
+        src = (
+            Path(__file__).resolve().parent / "release_reconcile.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("MAX_REDISPATCH_PER_SWEEP", src)
+        self.assertIn("budget -= 1", src)
+        self.assertIn("if budget <= 0:", src)
+
+    def test_tags_are_processed_newest_first(self) -> None:
+        """`sdk_tags` must return newest-first, or the cap fixes the wrong tag."""
+        src = (
+            Path(__file__).resolve().parent / "release_reconcile.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--sort=-creatordate", src)
+
+
 class NeverDestructive(unittest.TestCase):
     """The reconciler must not be able to cancel a run or delete a release."""
 

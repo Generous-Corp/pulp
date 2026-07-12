@@ -429,6 +429,17 @@ def main() -> int:
     floor_raw = os.environ.get("ASSET_CONTRACT_FLOOR", "").strip()
     asset_floor = version_of(floor_raw) if floor_raw else None
 
+    # Repair NEWEST-FIRST, and only so many per sweep.
+    #
+    # `states` is newest-first, so the tag users actually want is fixed first. The
+    # cap then lets supersession settle: once the newest tag publishes, the older
+    # unpublished ones become SUPERSEDED on the next sweep and are skipped
+    # entirely, instead of every one of them kicking off its own ~2-hour matrix at
+    # the same moment. That matters most in exactly the situation this reconciler
+    # is introduced into — a backlog of stuck tags and a starved runner pool, where
+    # a five-way stampede would starve the release it is trying to repair.
+    budget = int(os.environ.get("MAX_REDISPATCH_PER_SWEEP", "1"))
+
     report: list[tuple[str, str]] = []
     for state in states:
         decision = decide(
@@ -438,6 +449,10 @@ def main() -> int:
         )
         print(f"  [{decision.action:11}] {decision.reason}")
         if decision.action == REDISPATCH:
+            if budget <= 0:
+                print("    (deferred — re-dispatch budget for this sweep is spent)")
+                continue
+            budget -= 1
             redispatch(repo, state.tag, dry_run)
         elif decision.action in (ESCALATE, INCOMPLETE):
             report.append((state.tag, decision.reason))
