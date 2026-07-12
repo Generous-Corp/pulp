@@ -119,9 +119,9 @@ if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/pulp.tar.gz"; then
     echo "Error: could not download pulp-$PLATFORM for this version."
     case "$PLATFORM" in
         darwin-x64)
-            echo "The Intel (x86_64) macOS build is an advisory release artifact"
-            echo "and may be absent from this particular release. Try the latest"
-            echo "release (omit --version), or build from source:"
+            echo "The Intel (x86_64) macOS build ships in current releases, but"
+            echo "older releases predate Intel support and won't have it. Try the"
+            echo "latest release (omit --version), or build from source:"
             ;;
         *)
             echo "Pre-built binaries may not be available for this version."

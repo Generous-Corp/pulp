@@ -55,6 +55,43 @@ class FindWgpuLibTests(unittest.TestCase):
 
             self.assertEqual(pc.find_wgpu_lib(build, "windows-x64"), dll)
 
+    def test_find_wgpu_lib_darwin_prefers_matching_arch(self) -> None:
+        # A warm macOS cache holds both arch slices; the packager must bundle
+        # the dylib whose Mach-O arch matches the target, not just candidates[0].
+        with tempfile.TemporaryDirectory() as td:
+            build = pathlib.Path(td) / "build"
+            arm_dir = build / "_deps" / "wgpu-arm"
+            x64_dir = build / "_deps" / "wgpu-x64"
+            arm_dir.mkdir(parents=True)
+            x64_dir.mkdir(parents=True)
+            arm_lib = arm_dir / "libwgpu_native.dylib"
+            x64_lib = x64_dir / "libwgpu_native.dylib"
+            arm_lib.write_text("arm", encoding="utf-8")
+            x64_lib.write_text("x64", encoding="utf-8")
+
+            def fake_lipo(cmd, **kwargs):
+                target = pathlib.Path(cmd[-1])
+                arch = "arm64" if target == arm_lib else "x86_64"
+                return mock.Mock(stdout=arch + "\n")
+
+            with mock.patch.object(pc.subprocess, "run", side_effect=fake_lipo):
+                self.assertEqual(pc.find_wgpu_lib(build, "darwin-x64"), x64_lib)
+                self.assertEqual(pc.find_wgpu_lib(build, "darwin-arm64"), arm_lib)
+
+    def test_find_wgpu_lib_darwin_falls_back_when_lipo_missing(self) -> None:
+        # No lipo (non-macOS / broken env) → keep prior behavior (candidates[0]),
+        # never drop the dylib; the release smoke gate's arch assert is backstop.
+        with tempfile.TemporaryDirectory() as td:
+            build = pathlib.Path(td) / "build"
+            nested = build / "_deps" / "wgpu"
+            nested.mkdir(parents=True)
+            lib = nested / "libwgpu_native.dylib"
+            lib.write_text("dylib", encoding="utf-8")
+
+            with mock.patch.object(pc.subprocess, "run",
+                                   side_effect=OSError("no lipo")):
+                self.assertEqual(pc.find_wgpu_lib(build, "darwin-x64"), lib)
+
 
 class RpathTests(unittest.TestCase):
     def test_fix_rpath_macos_deletes_absolute_rpaths_and_adds_loader_path(self) -> None:

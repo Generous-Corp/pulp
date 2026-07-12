@@ -30,25 +30,38 @@ The Tier-3 gate was blocking, but as of 2026-07-11 it is **advisory**
 the AU max-frames guard in `core/format/src/au_v2_adapter.cpp`, then restore the
 hard `needs`/`if` requirement — is a tracked follow-up.
 
-### Shipped Intel artifacts — currently DISABLED (2026-07-11)
+### Shipped Intel artifacts — cross-compiled on Apple Silicon (2026-07-11)
 
-Tier 3 *validates* a universal build; it never published an installable Intel
-binary. The separate **installable** `darwin-x64` release leg (a native thin
-matrix row on `macos-15-intel` that shipped `pulp-darwin-x64.tar.gz` +
-`pulp-sdk-darwin-x64.tar.gz`) is **temporarily removed** from `release-cli.yml`.
-The GitHub-hosted `macos-15-intel` image CPU-pegs on a full CLI+SDK build and
-reliably blows any sane timeout, shipping no artifact — and its timeout
-*cancellation* (not a clean failure) turned `build-cli`'s matrix aggregate
-`cancelled` and skipped the whole `release` job. Until the reliable path lands,
-Intel-Mac users **source-build**.
+Tier 3 *validates* a universal build; it never publishes an installable binary.
+The **installable** `darwin-x64` slice is a separate REQUIRED leg in
+`release-cli.yml` (`os: macos-15-xcompile`, `platform: darwin-x64`) that ships
+`pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz` in every release.
 
-The reliable x86_64-macOS path is the Tart Intel cross-build golden VM (arm64
-host cross-compiling x86_64); Intel returns to the release through that lane.
-Wiring it in still needs the Apple `CMAKE_OSX_ARCHITECTURES` branch for the
-`if(WIN32)`-gated wgpu arch-forcing in `PulpDependencies.cmake` plus arch-isolated
-Skia extraction (`planning/2026-07-10-intel-mac-cli-support.md`, Option A).
-`macos-15-intel` remains the pinned stable hosted x86_64 image for the Tier-2
-nightly and the successor plan when it EOLs (~Aug 2027).
+It is **cross-compiled on the healthy Apple-Silicon runner**, not the
+GitHub-hosted `macos-15-intel` image. That native runner CPU-pegs on a full
+CLI+SDK build and reliably blows any sane timeout — and worse, a timeout
+*cancellation* (which `continue-on-error` does not absorb) turned `build-cli`'s
+matrix aggregate `cancelled` and skipped the whole `release` job. The earlier
+native leg never actually shipped an artifact for exactly this
+reason. Cross-compiling sidesteps the flaky runner entirely:
+
+- `-DCMAKE_OSX_ARCHITECTURES=x86_64` drives the C++ build and the target-arch
+  wgpu/Skia selection (`PulpDependencies.cmake`, `PulpFetchContent.cmake` — the
+  Apple `CMAKE_OSX_ARCHITECTURES` branches already exist).
+- `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` builds the Rust `pulp` CLI for
+  the x86_64 triple (`rustup target add x86_64-apple-darwin` in the leg).
+- The Apple-Silicon runner's bootstrap prefetches arm64 Skia, so the leg purges
+  `external/skia-build/build` before fetching the x86_64 Skia and asserts
+  `lipo -archs libskia.a == x86_64` (the arch-clobber hazard).
+- The thin binary is smoke-tested under Rosetta on the same runner; the
+  `lipo`/`file` arch asserts prove a real x86_64 slice was shipped.
+
+The leg routes via `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default
+`["macos-15"]`), deliberately **not** `resolve-macos-runner` — Intel work stays
+off the self-hosted Studios that back the required `macos` gate. `macos-15-intel`
+remains the pinned x86_64 image only for the Tier-2 nightly's native-silicon
+signal (`nightly-intel.yml` Job A) and the successor plan when it EOLs
+(~Aug 2027). See `planning/2026-07-10-intel-mac-cli-support.md` (Option A).
 
 Runner discipline is absolute: **no Intel work ever routes to the self-hosted
 Mac Studios** that host the required `macos` gate, and **Namespace is never

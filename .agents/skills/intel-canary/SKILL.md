@@ -36,17 +36,18 @@ required `if:` (a known auval "Bad Max Frames" flake was wedging every publish;
 re-blocking — fix the AU max-frames guard in `core/format/src/au_v2_adapter.cpp`,
 then restore the hard `needs`/`if` — is a tracked follow-up).
 
-The **installable** Intel artifact was a separate concern — a native thin
-`darwin-x64` build+smoke leg in `release-cli.yml` (on `macos-15-intel`) that
-shipped `pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz`. **That leg is
-DISABLED as of 2026-07-11**: `macos-15-intel` CPU-pegs on a full CLI+SDK build,
-blows any timeout, and its timeout *cancellation* (not a clean failure, so
-`continue-on-error` didn't absorb it) turned build-cli's matrix aggregate
-`cancelled` and skipped the whole release. Intel returns via the Tart
-cross-build golden VM lane. Until then: "Intel is validated" (the Tier-3 gate,
-now advisory) still holds, but "Intel is shippable via release-cli" does NOT —
-Intel-Mac users source-build. See `docs/guides/intel-support.md` →
-"Shipped Intel artifacts".
+The **installable** Intel artifact is a separate concern — a REQUIRED
+`darwin-x64` build+smoke leg in `release-cli.yml` (`os: macos-15-xcompile`) that
+ships `pulp-darwin-x64.tar.gz` + `pulp-sdk-darwin-x64.tar.gz` in every release.
+It is **CROSS-COMPILED on the healthy Apple-Silicon runner** (`-DCMAKE_OSX_ARCHITECTURES=x86_64`
++ `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin`), NOT the flaky native
+`macos-15-intel` image — that native leg CPU-pegged and never shipped
+an artifact; its timeout *cancellation* (unabsorbed by `continue-on-error`)
+turned build-cli's aggregate `cancelled` and skipped the whole release. So BOTH
+"Intel is validated" (the Tier-3 gate, now advisory) and "Intel ships via
+release-cli" (this cross-compiled leg) now hold. `macos-15-intel` survives only
+as the Tier-2 nightly's native-silicon signal. See `docs/guides/intel-support.md`
+→ "Shipped Intel artifacts".
 
 ## The five lint classes (and why they are scoped the way they are)
 
