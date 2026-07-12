@@ -458,6 +458,7 @@ target_sources(pulp-view-core PRIVATE
     src/waveform_gpu_render_controller.cpp
     src/waveform_headless_render_backend.cpp
     src/frame_clock.cpp
+    src/host_frame_pump.cpp
     src/motion.cpp
     src/motion_geometry.cpp
     src/motion_cost.cpp

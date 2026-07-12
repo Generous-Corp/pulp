@@ -31,6 +31,34 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     catch_discover_tests(pulp-test-mac-platform-harness)
 endif()
 if(APPLE AND NOT PULP_IOS)
+    # Frame-timing seam of the CVDisplayLink-driven macOS hosts: the nominal
+    # (first-frame / wake) interval seed, whether the CPU plugin-view host runs a
+    # render link for a NATIVE (non-scripted) editor, what that link costs while
+    # the editor is static (it runs inside a DAW), and that PulpView's teardown
+    # drops its pointers into the freed host. All four answers come from
+    # CoreVideo/AppKit, so they cannot be pinned from a portable C++ test.
+    add_executable(pulp-test-mac-frame-timing
+        test_mac_frame_timing.mm
+    )
+    target_link_libraries(pulp-test-mac-frame-timing PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+        "-framework CoreVideo"
+        "-framework QuartzCore"
+    )
+    # Pull the PulpView archive member (the teardown case sends it messages but
+    # references no C++ symbol from window_host_mac.mm).
+    target_link_options(pulp-test-mac-frame-timing PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+    )
+    # CVDisplayLink is deprecated in macOS 15 but is still the only vsync source
+    # the hosts use (see window_host_mac.mm); the header under test calls it.
+    target_compile_options(pulp-test-mac-frame-timing PRIVATE
+        -Wno-deprecated-declarations)
+    catch_discover_tests(pulp-test-mac-frame-timing)
+endif()
+if(APPLE AND NOT PULP_IOS)
     # Pin the invariant -[PulpView liveFocusedView] depends on:
     # ~View() must auto-clear focused_input_ so the
     # accessor can safely re-sync the ivar to nullptr before any deref.

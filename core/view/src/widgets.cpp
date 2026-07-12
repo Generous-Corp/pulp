@@ -1473,6 +1473,16 @@ void InlineValueEditor::subscribe_caret_blink_() {
     }
 }
 
+void InlineValueEditor::on_frame_clock_changed() {
+    // Identical hazard to TextEditor::on_frame_clock_changed: a host that owns its
+    // FrameClock clears the tree's clock from its destructor and frees the clock
+    // right after, so this is the last moment the cached `caret_blink_clock_` is
+    // safe to touch. Drop the subscription now; re-home it on the new clock if we
+    // are still editing.
+    unsubscribe_caret_blink_();
+    if (editing_) subscribe_caret_blink_();
+}
+
 void InlineValueEditor::unsubscribe_caret_blink_() {
     if (caret_blink_sub_ >= 0 && caret_blink_clock_)
         caret_blink_clock_->unsubscribe(caret_blink_sub_);

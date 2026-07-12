@@ -2,6 +2,8 @@
 // Mirrors window_host_mac.mm but uses UIKit instead of AppKit.
 
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
 
 #if TARGET_OS_IOS
@@ -431,6 +433,10 @@ public:
     }
 
 private:
+    // No FrameClock / HostFramePump here: this CPU host owns no CADisplayLink,
+    // so it has nothing to pump. The GPU host (IOSGpuWindowHost) is the one that
+    // drives a frame clock. Advancing animations on this host would need a frame
+    // source first — see the iOS gap noted in docs/guides/animation.md.
     View& root_;
     UIWindow* window_ = nil;
     PulpRootView* root_view_ = nil;
@@ -497,9 +503,15 @@ public:
     IOSGpuWindowHost(View& root, const WindowOptions& options)
         : root_(root) {
         (void)options;
+        // Parity with macOS: the iOS standalone window owns a FrameClock. It
+        // previously owned none, so on iOS a standalone app pumped only gesture
+        // recognizers — FrameClock subscribers, widget animations, and CSS
+        // animation timelines never advanced at all.
+        root_.set_frame_clock(&frame_clock_);
     }
 
     ~IOSGpuWindowHost() override {
+        root_.set_frame_clock(nullptr);
         if (host_liveness_)
             host_liveness_->store(false, std::memory_order_release);
         pulp::events::MainThreadDispatcher::unregister_backend(dispatcher_token_);
@@ -529,7 +541,13 @@ public:
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 
-    void tick() {
+    /// Seed the pump's nominal (first-frame / wake) interval from the display's
+    /// real refresh period. Called by the CADisplayLink target.
+    void set_nominal_frame_dt(float dt) { frame_pump_.set_nominal_dt(dt); }
+
+    /// `frame_time` is the CADisplayLink's targetTimestamp (when this frame is
+    /// actually presented), in the CACurrentMediaTime timebase.
+    void tick(double frame_time) {
         // pulp #1402 / #1387 (iOS parity with macOS) — pump JS rAF /
         // setTimeout / async-result queues each vsync. Without this,
         // requestAnimationFrame(cb) callbacks queue forever and only fire
@@ -542,8 +560,14 @@ public:
             if (!alive_token || !alive_token->load(std::memory_order_acquire))
                 return;
         }
-        if (root_.has_time_driven_gestures()) {
-            root_.advance_gesture_recognizers();
+        // One measured dt to every consumer — the same contract the macOS hosts
+        // use (host_frame_pump.hpp). This host used to advance nothing but the
+        // gesture recognizers.
+        const auto tick_result = begin_host_frame(
+            &root_, frame_clock_, frame_pump_, frame_time,
+            needs_repaint_.load(std::memory_order_relaxed));
+        if (tick_result.should_render) {
+            advance_host_frame(&root_, frame_clock_, tick_result.dt);
             needs_repaint_.store(true, std::memory_order_relaxed);
         }
         if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {
@@ -662,6 +686,9 @@ public:
 
 private:
     View& root_;
+    FrameClock frame_clock_;
+    // Measured-dt source, fed by the CADisplayLink's targetTimestamp.
+    HostFramePump frame_pump_;
     UIWindow* window_ = nil;
     PulpMetalWindowView* metal_view_ = nil;
     std::unique_ptr<render::GpuSurface> gpu_surface_;
@@ -681,6 +708,7 @@ private:
 
     void start_display_link() {
         if (display_link_) return;
+        frame_pump_.suspend();  // (re)start is a resume, not a multi-second frame
         @autoreleasepool {
             display_link_target_ = [[PulpIOSDisplayLinkTarget alloc] init];
             display_link_target_.host = this;
@@ -692,6 +720,7 @@ private:
     }
 
     void stop_display_link() {
+        frame_pump_.suspend();
         @autoreleasepool {
             if (display_link_) {
                 [display_link_ invalidate];
@@ -756,8 +785,15 @@ private:
 
 @implementation PulpIOSDisplayLinkTarget
 - (void)tick:(CADisplayLink*)link {
-    (void)link;
-    if (_host) _host->tick();
+    if (!_host) return;
+    // targetTimestamp = when this frame will be on screen; duration = this
+    // display's nominal frame period (1/120 on ProMotion). Feeding a hardcoded
+    // 1/60 here is what made every animation run at double speed on those
+    // displays.
+    if (link.duration > 0) _host->set_nominal_frame_dt(static_cast<float>(link.duration));
+    const double frame_time = link.targetTimestamp > 0 ? link.targetTimestamp
+                                                       : CACurrentMediaTime();
+    _host->tick(frame_time);
 }
 @end
 

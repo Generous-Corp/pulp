@@ -3,6 +3,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/widgets.hpp>
@@ -281,6 +282,12 @@ static void install_app_menu(NSString* appName) {
     [self.animationTimer invalidate];
     self.animationTimer = nil;
     self.frameClock = nullptr;
+    // The pump is owned by the host and dies with it, exactly like frameClock.
+    // Clearing it is not optional belt-and-braces: the timer block dereferences
+    // BOTH (`*self.frameClock, *self.framePump`), and leaving a dangling pointer
+    // behind makes the safety of a still-queued tick depend on the short-circuit
+    // ORDER of one `&&` in that block.
+    self.framePump = nullptr;
     self.rootView = nullptr;
     _dragTarget = nullptr;
     _relativeMouseMode = NO;
@@ -1338,53 +1345,50 @@ static void install_app_menu(NSString* appName) {
 
 - (void)startAnimationTimerIfNeeded {
     if (self.animationTimer) return;
-    // 60fps timer to drive animations
+    // ~60fps timer to drive animations. The INTERVAL is a request, not a
+    // measurement: NSTimer fires late under load and is coalesced when the app
+    // is background/occluded. So the dt handed to the animation system is
+    // measured from CACurrentMediaTime (mach monotonic) via HostFramePump, never
+    // assumed from the interval. The pump also absorbs the wake-from-idle gap:
+    // this timer only exists while something is animating, so a stop/start cycle
+    // is a resume, not a multi-second frame.
     self.animationTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/60.0
         repeats:YES block:^(NSTimer* timer) {
-            if (self.frameClock) self.frameClock->tick(1.0f / 60.0f);
-            if (self.rootView) self.rootView->advance_gesture_recognizers();
-            // Advance widget animations
-            [self advanceWidgetAnimations:self.rootView dt:1.0f/60.0f];
+            (void)timer;
+            const double now = CACurrentMediaTime();
+            if (self.frameClock && self.framePump) {
+                // needs_repaint=YES: the timer only runs while something is
+                // animating, and every tick repaints below.
+                auto tick = pulp::view::begin_host_frame(
+                    self.rootView, *self.frameClock, *self.framePump, now, /*needs_repaint=*/true);
+                pulp::view::advance_host_frame(self.rootView, *self.frameClock, tick.dt);
+            } else if (self.rootView) {
+                self.rootView->advance_gesture_recognizers();
+            }
             [self setNeedsDisplay:YES];
 
-            // Stop timer when no animations are active
+            // Stop the timer when nothing is moving any more. Uses the same
+            // shared predicate as the GPU/plugin hosts so the "keep the loop
+            // alive" decision cannot drift per path (it covers widget
+            // animations, live CSS animations, time-driven gestures, and
+            // opted-in continuous repaint).
             if (self.frameClock && !self.frameClock->has_active_subscribers() &&
-                (!self.rootView || !self.rootView->has_time_driven_gestures()) &&
-                ![self hasActiveAnimations:self.rootView]) {
+                !pulp::view::needs_continuous_frames(self.rootView)) {
                 [self.animationTimer invalidate];
                 self.animationTimer = nil;
+                // Next start is a resume: don't hand the animation system the
+                // idle gap as if it were one enormous frame.
+                if (self.framePump) self.framePump->suspend();
             }
         }];
 }
 
-- (void)advanceWidgetAnimations:(pulp::view::View*)view dt:(float)dt {
-    if (!view) return;
-    // Try each animated widget type
-    if (auto* k = dynamic_cast<pulp::view::Knob*>(view)) k->advance_animations(dt);
-    else if (auto* t = dynamic_cast<pulp::view::Toggle*>(view)) t->advance_animations(dt);
-    else if (auto* f = dynamic_cast<pulp::view::Fader*>(view)) f->advance_animations(dt);
-    else if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(view)) sv->advance_animations(dt);
-    else if (auto* tip = dynamic_cast<pulp::view::Tooltip*>(view)) tip->advance_animations(dt);
-
-    for (size_t i = 0; i < view->child_count(); ++i)
-        [self advanceWidgetAnimations:view->child_at(i) dt:dt];
-}
-
-- (BOOL)hasActiveAnimations:(pulp::view::View*)view {
-    if (!view) return NO;
-    if (auto* k = dynamic_cast<pulp::view::Knob*>(view))
-        if (k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) return YES;
-    if (auto* t = dynamic_cast<pulp::view::Toggle*>(view))
-        if (t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) return YES;
-    if (auto* f = dynamic_cast<pulp::view::Fader*>(view))
-        if (f->hover_scale() > 1.01f) return YES;
-    if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(view))
-        if (sv->scroll_animating()) return YES;
-
-    for (size_t i = 0; i < view->child_count(); ++i)
-        if ([self hasActiveAnimations:view->child_at(i)]) return YES;
-    return NO;
-}
+// The per-widget animation walk and the "is anything still moving?" predicate
+// used to be duplicated here as ObjC methods; both now live in shared C++
+// (pulp::view::advance_widget_animations / needs_continuous_frames) so the CPU
+// window host, the GPU window host, and the plugin hosts cannot drift apart on
+// which widget types animate or on when the loop is allowed to idle. The old
+// local copy also never ticked CSS animation timelines — the shared walk does.
 
 - (void)drawRect:(NSRect)dirtyRect {
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
@@ -1683,6 +1687,7 @@ public:
             view_ = [[PulpView alloc] initWithFrame:frame];
             view_.rootView = &root_;
             view_.frameClock = &frame_clock_;
+            view_.framePump = &frame_pump_;
             [window_ setContentView:view_];
 
             // The CPU host backs the floating inspector
@@ -1901,6 +1906,8 @@ public:
 private:
     View& root_;
     FrameClock frame_clock_;
+    // Measured-dt source for the animation timer (see PulpView.framePump).
+    HostFramePump frame_pump_;
     NSWindow* window_ = nil;
     PulpView* view_ = nil;
     PulpWindowDelegate* delegate_ = nil;
@@ -2438,6 +2445,8 @@ public:
 private:
     View& root_;
     FrameClock frame_clock_;
+    // Measured-dt source, fed by the CVDisplayLink's own presentation timestamps.
+    HostFramePump frame_pump_;
     NSWindow* window_ = nil;
     PulpMetalView* metal_view_ = nil;
     PulpWindowDelegate* delegate_ = nil;
@@ -2485,25 +2494,9 @@ private:
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
 
-    // The continuous-frame predicate is the shared
-    // pulp::view::needs_continuous_frames() (continuous_frames.hpp).
-    static void advance_widget_animations(View* view, float dt) {
-        if (!view) return;
-        if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
-        else if (auto* t = dynamic_cast<Toggle*>(view)) t->advance_animations(dt);
-        else if (auto* f = dynamic_cast<Fader*>(view)) f->advance_animations(dt);
-        else if (auto* sv = dynamic_cast<ScrollView*>(view)) sv->advance_animations(dt);
-        else if (auto* tip = dynamic_cast<Tooltip*>(view)) tip->advance_animations(dt);
-
-        // Also drive CSS animations on every View in the
-        // tree. tick_animations honors animation_play_state_ ("paused"
-        // → no advance) and is a no-op for Views with no active CSS
-        // animations, so the recursive walk is cheap.
-        view->tick_animations(dt);
-
-        for (size_t i = 0; i < view->child_count(); ++i)
-            advance_widget_animations(view->child_at(i), dt);
-    }
+    // The continuous-frame predicate and the widget/CSS animation walk are the
+    // shared pulp::view::needs_continuous_frames() / advance_host_frame() —
+    // driven from the display-link tick above via begin_host_frame().
 
     void init_gpu(float width, float height) {
         width_ = width;
@@ -2698,21 +2691,34 @@ private:
 
     // CVDisplayLink callback — fires on the display's vsync
     static CVReturn display_link_callback(
-        CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp*,
+        CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp* output_time,
         CVOptionFlags, CVOptionFlags*, void* context)
     {
         auto* self = static_cast<MacGpuWindowHost*>(context);
-        // Guard now also fires when an idle
+        // The link's OWN presentation timestamp. Captured here on the link
+        // thread and carried into the main-thread block: the dt every animation
+        // integrates must be the interval between the frames the user SEES, not
+        // the (jittery, possibly-late) time the block happened to be scheduled.
+        const double frame_time =
+            pulp::view::mac_frame_timing::display_link_seconds(output_time);
+        // Gate now also fires when an idle
         // callback is installed, so JS rAF / setTimeout / async-result
         // queues get a vsync-paced pump even when no native widget is
         // animating and no prior request_repaint set needs_repaint_.
         // The idle pump (`scripted_ui->poll()` → `bridge.poll_async_results()`)
         // drains pending_frame_ids_ via __flushFrames__ and re-arms
         // needs_repaint_ for any frame that requested another paint.
-        const bool has_idle = self->has_idle_callback_.load(std::memory_order_acquire);
-        if (self->needs_repaint_.load(std::memory_order_relaxed) ||
-            self->continuous_frames_.load(std::memory_order_relaxed) ||
-            has_idle) {
+        //
+        // A closed gate is a vsync the frame pump never measures, so it must be
+        // recorded as a skip — otherwise the next real frame measures the whole
+        // idle gap and hands it to whatever animation just started (a 100 ms
+        // mouse-away, then a hover: the 80 ms fade would complete on frame one).
+        // should_dispatch_host_frame() owns both the decision and the bookkeeping.
+        if (pulp::view::should_dispatch_host_frame(
+                self->frame_pump_,
+                self->needs_repaint_.load(std::memory_order_relaxed),
+                self->continuous_frames_.load(std::memory_order_relaxed),
+                self->has_idle_callback_.load(std::memory_order_acquire))) {
             bool expected = false;
             if (!self->render_dispatch_queued_.compare_exchange_strong(expected, true,
                                                                        std::memory_order_acq_rel,
@@ -2735,17 +2741,20 @@ private:
                             return;
                     }
 
-                    bool animate = pulp::view::needs_continuous_frames(&self->root_);
-                    bool tick_subscribers = self->frame_clock_.has_active_subscribers();
-                    if (!self->needs_repaint_.load(std::memory_order_relaxed) && !animate && !tick_subscribers) {
+                    // One measured dt for this frame, delivered to every
+                    // consumer (activity probes, FrameClock + its subscribers,
+                    // widget animations, CSS timelines). The pump also decides
+                    // whether this frame composites at all — one tree walk.
+                    const auto tick = pulp::view::begin_host_frame(
+                        &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
+                        self->needs_repaint_.load(std::memory_order_relaxed));
+                    if (!tick.should_render) {
                         self->continuous_frames_.store(false, std::memory_order_relaxed);
                         self->render_dispatch_queued_.store(false, std::memory_order_release);
                         return;
                     }
-                    self->frame_clock_.tick(1.0f / 60.0f);
-                    self->root_.advance_gesture_recognizers();
-                    advance_widget_animations(&self->root_, 1.0f / 60.0f);
-                    if (animate || tick_subscribers) {
+                    pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    if (tick.continuous) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
                         // Note: animation pump: animation /
                         // frame-clock pumps mutate view state without
@@ -2773,6 +2782,18 @@ private:
             (CGDirectDisplayID)[[window_.screen deviceDescription][@"NSScreenNumber"] unsignedIntValue];
         CVDisplayLinkSetCurrentCGDisplay(display_link_, display_id);
         CVDisplayLinkStart(display_link_);
+
+        // Seed the pump's nominal interval from THIS display's refresh period, so
+        // the first frame (and any wake-from-idle frame) advances by one real
+        // frame of this display — 1/120 on ProMotion, not a hardcoded 1/60.
+        if (const float nominal =
+                pulp::view::mac_frame_timing::display_link_nominal_dt(display_link_);
+            nominal > 0.0f) {
+            frame_pump_.set_nominal_dt(nominal);
+        }
+        // Starting the link is a resume: whatever wall time passed while it was
+        // stopped is not elapsed animation time.
+        frame_pump_.suspend();
     }
 
     void stop_display_link() {
@@ -2781,6 +2802,7 @@ private:
             CVDisplayLinkRelease(display_link_);
             display_link_ = nullptr;
         }
+        frame_pump_.suspend();
     }
 };
 
