@@ -42,13 +42,24 @@ console.error(`pulp-web-demo: config OK → ${configPath}`);
 // ---- derived, deterministic ----
 const player = cfg.player;
 const playerHash = sha8(`${player.package}@${player.version}`);            // cache-bust, deterministic
+// Query-free base — used to build asset paths under the player (e.g. the WCLAP processor).
+const playerBaseUrl = player.importBase || `https://esm.sh/${player.package}@${player.version}`;
+// The URL the import map points at. A versioned CDN pin IS its own cache key; a self-hosted
+// importBase may be unversioned, so carry the deterministic hash there. The cache-bust must
+// live on the mapped URL — a bare specifier with a ?query never matches the import-map key.
 const playerUrl = player.importBase
-  ? player.importBase
-  : `https://esm.sh/${player.package}@${player.version}`;                  // COEP-friendly CDN, pinned
+  ? `${playerBaseUrl}${playerBaseUrl.includes("?") ? "&" : "?"}v=${playerHash}`
+  : playerBaseUrl;
+// Theme is OPTIONAL. Unset ⇒ the player uses its own bundled skin; we must not invent a
+// tokensHref (a made-up relative path just 404s and drops the skin entirely).
 const theme = cfg.theme || {};
-const tokensHref = theme.tokensHref || "./theme/tokens.css";
-const fontsHref = theme.fontHref || "./theme/fonts.css";
+const tokensHref = theme.tokensHref || null;
+const fontsHref = theme.fontHref || null;
 const themeMode = theme.mode || "auto";
+const themeLinks = [
+  tokensHref ? `<link rel="stylesheet" href="${tokensHref}" />` : null,
+  fontsHref ? `<link rel="stylesheet" href="${fontsHref}" />` : null,
+].filter(Boolean).join("\n");
 const meta = cfg.metadata || {};
 const siteBase = (meta.siteBase || "").replace(/\/$/, "");
 
@@ -75,7 +86,7 @@ function artifactsFor(plugin, abi) {
   if (explicit?.dspUrl && explicit?.processorUrl) return explicit;
   if (abi === "wam") return { dspUrl: "./wam-dsp.js", processorUrl: "./wam-processor.js" };
   // wclap: the plugin's threaded .wasm + the player-provided worklet CLAP host
-  return { dspUrl: `./${plugin.id}.wasm`, processorUrl: `${playerUrl.replace(/\/$/, "")}/vendor/pulp-wasm/wclap-processor.js` };
+  return { dspUrl: `./${plugin.id}.wasm`, processorUrl: `${playerBaseUrl.replace(/\/$/, "")}/vendor/pulp-wasm/wclap-processor.js` };
 }
 
 const ogTag = (url) => meta.ogImageStrategy === "text" ? "" : `<meta property="og:image" content="${url}og.png" />`;
@@ -89,8 +100,22 @@ const cards = [];
 for (const p of cfg.plugins) {
   const abis = p.abis || ["wam", "wclap"];
   const modeLine = p.mode ? `mode: ${JSON.stringify(p.mode)},` : "";
-  const paramBlock = p.paramOverrides ? `,\n    initialParams: ${JSON.stringify(p.paramOverrides)}` : "";
-  const midiBlock = p.midiViz ? `,\n    midiViz: ${JSON.stringify(p.midiViz)}` : "";
+  // Optional mountDemo passthroughs, emitted only when present. `synthUrls` is what makes a
+  // midi-effect demo audible (it chains into a synth voice pool) — omitting it yields silence.
+  const extras = [
+    ["tokensHref", tokensHref],
+    ["fontHref", fontsHref],
+    ["initialParams", p.paramOverrides],
+    ["midiViz", p.midiViz],
+    ["paramRows", p.paramRows],
+    ["synthUrls", p.synthUrls],
+    ["widgets", p.widgets],
+    ["choices", p.choices],
+    ["inputGain", p.inputGain],
+    ["controllers", p.controllers],
+    ["stateMemo", p.stateMemo],
+  ].filter(([, v]) => v !== undefined && v !== null);
+  const extrasBlock = extras.map(([k, v]) => `,\n    ${k}: ${JSON.stringify(v)}`).join("");
   const cardAbis = [];
 
   for (const abi of abis) {
@@ -109,12 +134,11 @@ for (const p of cfg.plugins) {
       TITLE_JSON: JSON.stringify(p.title), SUBTITLE_JSON: JSON.stringify(p.subtitle || ""),
       MODE_LINE: modeLine, PAGE_URL: pageUrl, SOURCE_URL: sourceUrl,
       OG_IMAGE_TAG: ogTag(pageUrl),
-      TOKENS_HREF: tokensHref, FONTS_HREF: fontsHref,
-      TOKENS_HREF_JSON: JSON.stringify(tokensHref), FONTS_HREF_JSON: JSON.stringify(fontsHref),
+      THEME_LINKS: themeLinks,
       THEME_MODE_JSON: JSON.stringify(themeMode),
       PLAYER_PACKAGE: player.package, PLAYER_URL: playerUrl, PLAYER_HASH: playerHash,
       BASE_PATH: basePath,
-      PARAM_OVERRIDES_BLOCK: paramBlock, MIDI_VIZ_BLOCK: midiBlock,
+      EXTRA_OPTS_BLOCK: extrasBlock,
     };
 
     if (abi === "wam") {
@@ -144,13 +168,19 @@ for (const p of cfg.plugins) {
 }
 
 // ---- gallery landing page ----
+// `gallery.emit`: true | false | "auto" (default). Auto emits only when the catalog has more
+// than one plugin — a gallery is pointless for a single plugin, and `false` lets a consumer
+// keep a hand-curated landing page of their own.
 const gallery = cfg.gallery || {};
+const emitGallery = gallery.emit === undefined || gallery.emit === "auto"
+  ? cfg.plugins.length > 1
+  : gallery.emit === true;
 const crossLinks = (gallery.crossLinks || []).map((c) => `<a href="${c.href}">${c.label}</a>`).join(" · ");
-emit("index.html", fill(T("gallery.index.html.tmpl"), {
+if (emitGallery) emit("index.html", fill(T("gallery.index.html.tmpl"), {
   GENERATOR_VERSION,
   GALLERY_TITLE: gallery.title || "Pulp web demos",
   GALLERY_URL: (cfg.deploy?.wam?.publicUrl || `${siteBase}${(cfg.deploy?.wam?.basePath) || "/"}`).replace(/\/+$/, "") + "/",
-  TOKENS_HREF: tokensHref, FONTS_HREF: fontsHref,
+  THEME_LINKS: themeLinks,
   LAYOUT_CLASS: `layout-${gallery.layout || "grid"}`,
   CROSS_LINKS: crossLinks, PLUGIN_CARDS: cards.join("\n"),
 }));

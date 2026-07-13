@@ -73,6 +73,31 @@ player behavior outside the package, which is the whole thing this skill prevent
 - Regeneration is ownership-aware: the validator refuses to clobber a locally-edited owned file
   without reconciliation.
 
+## Gallery and theme (both optional)
+
+- **`gallery.emit`** — `"auto"` (default): emit the gallery landing page only when the catalog
+  has more than one plugin (a gallery is pointless for a single plugin). `true` / `false` force
+  it; use `false` to keep a hand-curated landing page of your own.
+- **`theme`** — omit it entirely and the player uses its **own bundled skin**. Only set
+  `tokensHref` / `fontHref` when you are actually supplying a token stylesheet.
+
+## Gotchas (learned the hard way — do not re-derive)
+
+- **Never put a `?query` on the player's import specifier.** An import map keys on the *exact*
+  bare specifier, so `import ... from "<pkg>?v=<hash>"` never matches the `"<pkg>"` key and the
+  module fails to resolve — the demo does not load at all. The cache-bust belongs on the
+  **mapped URL**. A versioned CDN pin is already its own cache key.
+- **A `midi-effect` demo without `synthUrls` is SILENT.** It renders fine and looks correct, but
+  a MIDI effect emits notes with nothing to play them. `synthUrls` chains it into a synth voice
+  pool. Always set it for `mode: "midi-effect"`.
+- **The WAM artifact set is three files, not two:** `wam-dsp.js`, `wam-processor.js`, **and
+  `wam-runtime.mjs`**. The worklet imports the runtime *relative to itself*, so it must be
+  co-located with the processor. Miss it and `audioWorklet.addModule()` fails with a bare
+  `AbortError: Unable to load a worklet's module`.
+- **Never invent a `tokensHref`.** A made-up relative path just 404s and silently drops the skin.
+- **Cache-bust the main-thread entry only** — never the worklet/dsp URLs; both sides must resolve
+  to one processor name.
+
 ## Example
 
 `examples/example.config.json` is a copy-and-edit starting point: one plugin, WAM on GitHub

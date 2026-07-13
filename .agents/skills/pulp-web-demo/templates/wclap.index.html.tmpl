@@ -19,8 +19,7 @@
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="pulp:source" content="{{SOURCE_URL}}" />
 
-<link rel="stylesheet" href="{{TOKENS_HREF}}" />
-<link rel="stylesheet" href="{{FONTS_HREF}}" />
+{{THEME_LINKS}}
 
 <script type="importmap">
 { "imports": { "{{PLAYER_PACKAGE}}": "{{PLAYER_URL}}" } }
@@ -29,7 +28,9 @@
 <body>
 <div id="app"></div>
 <script type="module">
-import { mountShell, createWclapAdapter } from "{{PLAYER_PACKAGE}}?v={{PLAYER_HASH}}";
+// Pinned player resolves via the import map; the cache-bust lives on the MAPPED URL
+// (a bare specifier with a ?query would not match the import-map key).
+import { mountShell, createWclapAdapter } from "{{PLAYER_PACKAGE}}";
 {{ADAPTER_IMPORT_LINE}}
 
 if (!self.crossOriginIsolated) {
@@ -47,9 +48,7 @@ if (!self.crossOriginIsolated) {
     dspUrl: {{WCLAP_DSP_URL_JSON}},
     processorUrl: {{WCLAP_PROCESSOR_URL_JSON}},
     createAdapter: {{ADAPTER_FACTORY}},
-    tokensHref: {{TOKENS_HREF_JSON}},
-    fontHref: {{FONTS_HREF_JSON}},
-    theme: {{THEME_MODE_JSON}}{{PARAM_OVERRIDES_BLOCK}}{{MIDI_VIZ_BLOCK}}
+    theme: {{THEME_MODE_JSON}}{{EXTRA_OPTS_BLOCK}}
   });
 }
 </script>
