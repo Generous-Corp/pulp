@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06650"></a>
+## [0.665.0] - 2026-07-13
+
+- test: guard the ODR class the Debug lane catches, and stop the Yoga gate crying wolf ([#6098](https://github.com/danielraffel/pulp/pull/6098))
+- docs(skill): pulp-web-demo — the player now implements file upload ([#6099](https://github.com/danielraffel/pulp/pull/6099))
+- feat(web-player): file upload — dialog button + drag-and-drop drop zone ([#6097](https://github.com/danielraffel/pulp/pull/6097))
+- docs(ci-skill): correct the Intel leg and record the release-contention walls ([#6070](https://github.com/danielraffel/pulp/pull/6070))
+
 <a id="v06640"></a>
 ## [0.664.0] - 2026-07-13
 
@@ -6354,6 +6362,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.665.0]: https://github.com/danielraffel/pulp/releases/tag/v0.665.0
 [0.664.0]: https://github.com/danielraffel/pulp/releases/tag/v0.664.0
 [0.663.1]: https://github.com/danielraffel/pulp/releases/tag/v0.663.1
 [0.663.0]: https://github.com/danielraffel/pulp/releases/tag/v0.663.0
