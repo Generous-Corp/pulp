@@ -207,7 +207,13 @@ public:
 
     // IRangeValueProvider
     IFACEMETHODIMP SetValue(double val) override {
-        if (auto* vif = value_iface()) { vif->set_current_value(val); return S_OK; }
+        // Only claim the write when the pattern is actually advertised —
+        // is_read_only() below must agree with what this returns.
+        if (auto* vif = value_iface();
+            vif && uia::role_supports_value(role_or_none())) {
+            vif->set_current_value(val);
+            return S_OK;
+        }
         return UIA_E_NOTSUPPORTED;
     }
     IFACEMETHODIMP get_Value(double* pRetVal) override {
@@ -218,10 +224,15 @@ public:
     }
     IFACEMETHODIMP get_IsReadOnly(BOOL* pRetVal) override {
         if (!pRetVal) return E_POINTER;
-        // A meter (progress) is read-only; a slider is writable. We treat
-        // read-only as "no Value pattern advertised" so the two stay in
-        // lockstep with the shared mapping table.
-        *pRetVal = supports_value() ? VARIANT_FALSE : VARIANT_TRUE;
+        // IsReadOnly means exactly "SetValue will fail". uia::is_read_only()
+        // is the shared predicate both SetValue overloads are written against;
+        // the old proxy (supports_value()) reported "editable" for a
+        // TextEditor whose SetValue then returned UIA_E_NOTSUPPORTED, and for
+        // a Knob with no value interface at all.
+        *pRetVal = uia::is_read_only(role_or_none(), value_iface() != nullptr,
+                                     editable_text_iface() != nullptr)
+                       ? VARIANT_TRUE
+                       : VARIANT_FALSE;
         return S_OK;
     }
     IFACEMETHODIMP get_Maximum(double* pRetVal) override {
@@ -252,23 +263,30 @@ public:
     // IValueProvider
     // (SetValue collides by name with IRangeValueProvider::SetValue but
     // has a BSTR signature; declare it explicitly to disambiguate.)
-    IFACEMETHODIMP SetValue(LPCWSTR /*val*/) override {
-        // Editing a value as text is not wired through the View a11y
-        // value interface yet; report unsupported rather than silently
-        // dropping the edit.
-        return UIA_E_NOTSUPPORTED;
+    IFACEMETHODIMP SetValue(LPCWSTR val) override {
+        // Route the edit into the View's text interface (TextEditor). Without
+        // this every Narrator edit was rejected while get_IsReadOnly claimed
+        // the field was editable.
+        auto* tif = editable_text_iface();
+        if (!tif || !val) return UIA_E_NOTSUPPORTED;
+        const int len = WideCharToMultiByte(CP_UTF8, 0, val, -1, nullptr, 0,
+                                            nullptr, nullptr);
+        if (len <= 0) return UIA_E_NOTSUPPORTED;
+        std::string utf8(static_cast<size_t>(len - 1), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, val, -1, utf8.data(), len, nullptr,
+                            nullptr);
+        tif->set_text(utf8);
+        return S_OK;
     }
     IFACEMETHODIMP get_Value(BSTR* pRetVal) override {
         if (!pRetVal) return E_POINTER;
         *pRetVal = nullptr;
         if (View* v = node_.view) {
-            if (auto* vif = value_iface()) {
-                *pRetVal = make_bstr(vif->get_value_string());
-                return S_OK;
-            }
-            if (!v->access_value().empty()) {
-                *pRetVal = make_bstr(v->access_value());
-            }
+            // Shared resolver: value interface → text interface → access_value.
+            // Returning a NULL BSTR (what the text-interface-less path used to
+            // do for every TextEditor) makes Narrator read nothing at all.
+            const std::string value = accessibility_value_string(*v);
+            if (!value.empty()) *pRetVal = make_bstr(value);
         }
         return S_OK;
     }
@@ -282,16 +300,32 @@ private:
     View::AccessRole role_or_none() const {
         return node_.view ? node_.view->access_role() : View::AccessRole::none;
     }
+    // Pattern availability = role allows it AND the View can serve it. A
+    // pattern advertised without a source resolves to a null interface (or,
+    // worse, to zeros in a degenerate 0..0 range).
     bool supports_range_value() const {
-        return uia::role_supports_range_value(role_or_none());
+        return uia::exposes_range_value(role_or_none(),
+                                        value_iface() != nullptr);
     }
     bool supports_value() const {
-        return uia::role_supports_value(role_or_none());
+        return uia::exposes_value(
+            role_or_none(), value_iface() != nullptr,
+            text_iface() != nullptr,
+            node_.view && !node_.view->access_value().empty());
     }
     AccessibilityValueInterface* value_iface() const {
         return node_.view
             ? dynamic_cast<AccessibilityValueInterface*>(node_.view)
             : nullptr;
+    }
+    AccessibilityTextInterface* text_iface() const {
+        return node_.view
+            ? dynamic_cast<AccessibilityTextInterface*>(node_.view)
+            : nullptr;
+    }
+    AccessibilityTextInterface* editable_text_iface() const {
+        auto* tif = text_iface();
+        return (tif && tif->is_editable()) ? tif : nullptr;
     }
 
     std::atomic<LONG> refs_{1};
@@ -409,7 +443,7 @@ namespace {
 void build_fragment_nodes(View& v, int parent_index,
                           std::vector<FragmentNode>& nodes) {
     int my_index = parent_index;
-    if (v.access_role() != View::AccessRole::none) {
+    if (is_accessibility_element(v)) {
         FragmentNode node;
         node.view = &v;
         node.index = static_cast<int>(nodes.size());
@@ -536,12 +570,11 @@ IFACEMETHODIMP PulpFragmentProvider::GetPropertyValue(PROPERTYID propertyId,
         }
         case UIA_IsKeyboardFocusablePropertyId: {
             pRetVal->vt = VT_BOOL;
-            // Interactive roles are focusable; static text / image / group
-            // are not. Mirror pattern availability as the proxy.
-            pRetVal->boolVal =
-                (supports_range_value() ||
-                 v->access_role() == View::AccessRole::toggle)
-                    ? VARIANT_TRUE : VARIANT_FALSE;
+            // Report the view's ACTUAL focusability. This used to proxy off
+            // pattern availability (range-value or toggle), which reported
+            // VARIANT_FALSE for every focusable button / combo box / text field
+            // once those stopped masquerading as sliders and toggles.
+            pRetVal->boolVal = v->focusable() ? VARIANT_TRUE : VARIANT_FALSE;
             break;
         }
         case UIA_IsValuePatternAvailablePropertyId: {
@@ -556,26 +589,24 @@ IFACEMETHODIMP PulpFragmentProvider::GetPropertyValue(PROPERTYID propertyId,
             break;
         }
         case UIA_ValueValuePropertyId: {
-            // The "current value" property surfaced by the Value pattern.
-            if (auto* vif = value_iface()) {
+            // The "current value" property surfaced by the Value pattern —
+            // same shared resolver as IValueProvider::get_Value.
+            const std::string value = accessibility_value_string(*v);
+            if (!value.empty()) {
                 pRetVal->vt = VT_BSTR;
-                pRetVal->bstrVal = make_bstr(vif->get_value_string());
-            } else if (!v->access_value().empty()) {
-                pRetVal->vt = VT_BSTR;
-                pRetVal->bstrVal = make_bstr(v->access_value());
+                pRetVal->bstrVal = make_bstr(value);
             }
             break;
         }
-        case UIA_ToggleToggleStatePropertyId: {
-            // Tri-state aria-pressed / aria-checked → UIA ToggleState.
-            const std::string& s = !v->access_checked().empty()
-                ? v->access_checked() : v->access_pressed();
-            pRetVal->vt = VT_I4;
-            if (s == "true")        pRetVal->lVal = ToggleState_On;
-            else if (s == "mixed")  pRetVal->lVal = ToggleState_Indeterminate;
-            else                    pRetVal->lVal = ToggleState_Off;
-            break;
-        }
+        // NO UIA_ToggleToggleStatePropertyId. A toggle-state property with no
+        // ITogglePattern behind it is unreachable: a client asks
+        // IsTogglePatternAvailable (which is FALSE — patterns_for_role()
+        // advertises no Toggle pattern because PulpFragmentProvider implements
+        // no IToggleProvider) and never queries the property. Answering it
+        // anyway was dead code that made the Windows lane LOOK like it
+        // announced checkbox state; it does not. Narrator announces a Pulp
+        // checkbox's role and name and NO state until IToggleProvider lands.
+        // See docs/guides/modules/view.md ("what is and is not wired").
         case UIA_FrameworkIdPropertyId: {
             pRetVal->vt = VT_BSTR;
             pRetVal->bstrVal = SysAllocString(L"Pulp");
@@ -987,13 +1018,18 @@ void notify_accessibility_value_changed(void* handle, View& target) {
 
     if (PulpFragmentProvider* frag = fragment_for(session, target)) {
         // Populate the new value so the reader can announce it directly.
+        //
+        // Resolve through accessibility_value_string(), the same path
+        // GetPropertyValue(UIA_ValueValuePropertyId) uses. Hand-rolling the
+        // lookup here (value interface, else the raw access_value slot) skipped
+        // the text interface, so a TextEditor whose content changed raised
+        // "the value changed" carrying VT_EMPTY — Narrator announced a change
+        // with no new value.
         if (View* v = frag->view()) {
-            if (auto* vif = dynamic_cast<AccessibilityValueInterface*>(v)) {
+            const std::string value = accessibility_value_string(*v);
+            if (!value.empty()) {
                 new_v.vt = VT_BSTR;
-                new_v.bstrVal = make_bstr(vif->get_value_string());
-            } else if (!v->access_value().empty()) {
-                new_v.vt = VT_BSTR;
-                new_v.bstrVal = make_bstr(v->access_value());
+                new_v.bstrVal = make_bstr(value);
             }
         }
         UiaRaiseAutomationPropertyChangedEvent(

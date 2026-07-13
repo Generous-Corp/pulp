@@ -31,14 +31,18 @@ namespace {
 
 struct AccessNode {
     View* view = nullptr;
-    int role = 0;  // maps to View::AccessRole
+    // static_cast<int>(View::AccessRole). This integer is the WIRE FORMAT
+    // between C++ and PulpAccessibilityDelegate.kt (ROLE_* constants); the
+    // AccessRole enum is therefore append-only. Locked by the "Android role
+    // ordinals are wire format" case in test/test_accessibility_tree.cpp.
+    int role = 0;
 };
 
 thread_local std::vector<AccessNode> g_access_nodes;
 thread_local View* g_root_view = nullptr;
 
 void collect_accessible_views(View& root, std::vector<AccessNode>& out) {
-    if (root.access_role() != View::AccessRole::none) {
+    if (is_accessibility_element(root)) {
         out.push_back({&root, static_cast<int>(root.access_role())});
     }
     for (size_t i = 0; i < root.child_count(); ++i) {
@@ -88,12 +92,19 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeLabel(
     return env->NewStringUTF(g_access_nodes[index].view->access_label().c_str());
 }
 
+// The shared resolver: value interface → text interface → access_value slot →
+// check/press state ("checked" / "unchecked" / "mixed"). The state slot is the
+// only thing that gives a Checkbox / Toggle anything to say here — the Kotlin
+// side has no isCheckable/isChecked wiring, and (see PulpAccessibility.kt) the
+// delegate is inert regardless: it describes ONE node, so none of this reaches
+// TalkBack until an AccessibilityNodeProvider lands.
 JNIEXPORT jstring JNICALL
 Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeValue(
     JNIEnv* env, jobject, jint index) {
     if (index < 0 || index >= static_cast<jint>(g_access_nodes.size()))
         return env->NewStringUTF("");
-    return env->NewStringUTF(g_access_nodes[index].view->access_value().c_str());
+    return env->NewStringUTF(
+        accessibility_value_string(*g_access_nodes[index].view).c_str());
 }
 
 JNIEXPORT jfloat JNICALL

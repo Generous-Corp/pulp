@@ -587,7 +587,9 @@ TEST_CASE("Button constructors expose deterministic accessibility and intrinsic 
     TextButton default_text;
     REQUIRE(default_text.label().empty());
     REQUIRE(default_text.focusable());
-    REQUIRE(default_text.access_role() == View::AccessRole::toggle);
+    // A push button is AccessRole::button, not `toggle` (which every
+    // platform bridge renders as a checkbox).
+    REQUIRE(default_text.access_role() == View::AccessRole::button);
     REQUIRE(default_text.intrinsic_height() == 36.0f);
 
     default_text.set_label("Arm");

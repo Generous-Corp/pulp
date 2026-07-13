@@ -56,8 +56,15 @@ browser API.
 
 - **`html/ARIA`** — `aria-label` / `role` route through `setAccessibilityLabel` /
   `setAccessibilityRole` to `View::set_access_label_` /
-  `_role_`. State routing (aria-pressed/checked/disabled/hidden) is
-  partial-deferred-access-state; not part of the supported claim.
+  `_role_`. The `role` token table is `pulp/view/aria_roles.hpp`: button, link,
+  checkbox, switch, radio, textbox, combobox, list/listitem, table/row/cell,
+  tab/tablist, menu/menuitem, progressbar, meter, dialog, heading, scrollbar,
+  slider and img each map to a distinct `View::AccessRole` (and therefore to a
+  distinct platform role). Container roles Pulp has no widget for (region,
+  navigation, form, toolbar, …) still collapse to `group`; `presentation` /
+  `none` / empty removes the element from the accessibility tree. State routing
+  (aria-pressed/checked/disabled/hidden) is partial-deferred-access-state; not
+  part of the supported claim.
 - **`html/document_querySelector`** — selector engine covers tag / `.class` /
   `#id` / `[attr]` /
   `[attr=v]` (incl. `^=`/`$=`/`*=`/`|=`/`~=`) / descendant

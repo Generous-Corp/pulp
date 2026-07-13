@@ -1,6 +1,7 @@
 // widget_bridge/accessibility_api.cpp - accessibility registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/aria_roles.hpp>
 #include "api_registry.hpp"
 
 #include <string>
@@ -26,13 +27,9 @@ void WidgetBridge::register_accessibility_api() {
     // on every platform and the storage round-trips through getAttribute
     // either way.
     //
-    // Role mapping mirrors the W3C ARIA -> AccessRole bucket used by the
-    // existing widget setters: ARIA roles outside Pulp's enum collapse to
-    // `group` (the most neutral container role) so VoiceOver still
-    // announces the element as an interactive group rather than an
-    // unknown blob, and the JS-author intent ("yes, this is exposed to
-    // assistive tech") is preserved. Unknown / empty role clears the
-    // role back to AccessRole::none.
+    // Role mapping is the shared ARIA table in <pulp/view/aria_roles.hpp>
+    // (unit-tested without a JS engine). Unknown / empty role clears the role
+    // back to AccessRole::none.
     register_bridge_function(api, "setAccessibilityLabel",
                              [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -49,31 +46,9 @@ void WidgetBridge::register_accessibility_api() {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) return choc::value::Value();
 
-        // ARIA role token -> View::AccessRole bucket. Mirrors the spirit
-        // of NSAccessibilityRole / UIA control-type mapping: collapse the
-        // long ARIA tail onto the small Pulp enum, but keep semantic
-        // hints alive so the platform layer announces something sensible.
-        View::AccessRole r = View::AccessRole::none;
-        if (role.empty() || role == "none" || role == "presentation") {
-            r = View::AccessRole::none;
-        } else if (role == "slider") {
-            r = View::AccessRole::slider;
-        } else if (role == "checkbox" || role == "switch" || role == "radio") {
-            r = View::AccessRole::toggle;
-        } else if (role == "img" || role == "image") {
-            r = View::AccessRole::image;
-        } else if (role == "progressbar" || role == "meter") {
-            r = View::AccessRole::meter;
-        } else if (role == "heading" || role == "label" ||
-                   role == "text"    || role == "paragraph") {
-            r = View::AccessRole::label;
-        } else {
-            // Everything else (button, link, navigation, region, dialog,
-            // listbox, menu, ...) collapses to `group`: VoiceOver
-            // announces it as a generic interactive group, which is
-            // strictly better than treating it as untyped.
-            r = View::AccessRole::group;
-        }
+        // ARIA role token -> View::AccessRole. Single shared table so the
+        // JS bridge, the widget defaults, and the platform mappings agree.
+        const View::AccessRole r = access_role_from_aria(role);
         it->second->set_access_role(r);
         return choc::value::Value();
     });

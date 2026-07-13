@@ -10,7 +10,13 @@ void walk(const View& v, int depth,
     snap.view  = &v;
     snap.role  = v.access_role();
     snap.label = v.access_label();
-    snap.value = v.access_value();
+    // The SAME resolver every platform bridge announces through (value
+    // interface → text interface → access_value slot → check/press state).
+    // Reading the raw access_value slot made the cross-platform snapshot the
+    // one "bridge" that reported "" for a Knob every real bridge announces as
+    // "25%", and "" for a TextEditor holding "hello".
+    snap.value = accessibility_value_string(v);
+    snap.exposed = is_accessibility_element(v);
     // pulp #1737 — surface ARIA state attributes through the cross-
     // platform snapshot so AT bridges (and offline tests) see the state
     // alongside role/label/value. Platform bridges (NSAccessibility
@@ -62,7 +68,7 @@ snapshot_accessibility_tree(const View& root) {
 std::size_t count_announceable(const View& root) {
     std::size_t n = 0;
     for (const auto& node : snapshot_accessibility_tree(root)) {
-        if (node.role != View::AccessRole::none) ++n;
+        if (node.exposed) ++n;
     }
     return n;
 }

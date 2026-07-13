@@ -22,20 +22,37 @@
 //     the registry links the application up to the desktop.
 //
 // The per-widget tree is rebuilt on accessibility_tree_changed(), which also
-// emits org.a11y.atspi.Event.Object.ChildrenChanged. Slider/meter Views that
-// implement AccessibilityValueInterface additionally export org.a11y.atspi.Value
-// (CurrentValue/Minimum/Maximum/MinimumIncrement, serviced through the Properties
-// interface; CurrentValue is writable and routes back into the value interface's
-// set_current_value, the same path a user adjust takes). The notify_* hooks emit
+// emits org.a11y.atspi.Event.Object.ChildrenChanged. On top of Accessible +
+// Component, a widget exports exactly the interfaces it can serve — decided by
+// the shared accessibility_interfaces() predicate, so this bridge and the tests
+// on the macOS gate agree about a TU that only ever compiles on Linux:
+//
+//   * org.a11y.atspi.Value — a NUMERIC range (slider / meter / progress bar
+//     implementing AccessibilityValueInterface): CurrentValue / Minimum /
+//     Maximum / MinimumIncrement through the Properties interface. CurrentValue
+//     is writable and routes back into set_current_value, the same path a user
+//     adjust takes.
+//   * org.a11y.atspi.Text — a STRING value: a TextEditor's content (through
+//     AccessibilityTextInterface) or a ComboBox's selected item (the
+//     access_value slot). AT-SPI has no string-value interface, so a role that
+//     exports neither Value nor Text reads back nothing at all — Orca announces
+//     "entry" and the name, then silence. That was the state of every Pulp
+//     ENTRY / COMBO_BOX before this interface was wired.
+//
+// A check/press state is not a value in AT-SPI — it is carried in the STATE
+// bitfield (CHECKABLE / CHECKED / PRESSED / INDETERMINATE), see append_state.
+// The notify_* hooks emit
 // the matching org.a11y.atspi.Event.Object signals (StateChanged "focused",
 // PropertyChange "accessible-value" / "accessible-name") so a listening registry
 // re-reads the changed object.
 //
 // Tree-walk model (mirrors mac collect_accessible / Windows build_fragment_nodes):
-// depth-first; every View with a non-none AccessRole becomes one accessible
-// object; AccessRole::none containers are skipped as objects but recursed into,
-// so a deeply-nested accessible descendant re-parents onto the nearest
-// accessible ancestor (or onto the application root when there is none).
+// depth-first; every View that is_accessibility_element() becomes one accessible
+// object — a role alone is not enough, it must also have something to say (a
+// name, a value source, or a state). Views that are not accessibility elements
+// are skipped as objects but recursed into, so a deeply-nested accessible
+// descendant re-parents onto the nearest accessible ancestor (or onto the
+// application root when there is none).
 //
 // Run-loop requirement: the registry calls methods on us asynchronously, so the
 // host must pump DBus::dispatch() periodically or those calls hang the AT. The
@@ -43,6 +60,7 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
+#include <cassert>
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/view.hpp>
@@ -70,6 +88,7 @@ constexpr const char* kIfaceAccessible   = "org.a11y.atspi.Accessible";
 constexpr const char* kIfaceApplication  = "org.a11y.atspi.Application";
 constexpr const char* kIfaceComponent    = "org.a11y.atspi.Component";
 constexpr const char* kIfaceValue        = "org.a11y.atspi.Value";
+constexpr const char* kIfaceText         = "org.a11y.atspi.Text";
 constexpr const char* kIfaceSocket       = "org.a11y.atspi.Socket";
 constexpr const char* kIfaceEventObject  = "org.a11y.atspi.Event.Object";
 constexpr const char* kIfaceProperties   = "org.freedesktop.DBus.Properties";
@@ -171,6 +190,14 @@ struct AtspiProvider {
             if (View* v = nodes_[static_cast<size_t>(index)].view) {
                 if (v->focusable()) atspi::set_state(st, atspi::kStateFocusable);
                 if (v->has_focus()) atspi::set_state(st, atspi::kStateFocused);
+                // AT-SPI has no "value" for a checkbox: CHECKED / PRESSED /
+                // INDETERMINATE STATE bits are how Orca announces it. Without
+                // them a Pulp Checkbox announced "check box <name>" and no
+                // state. Resolved through the same helper every other bridge
+                // uses (accessibility_toggle_state).
+                st = atspi::with_toggle_state(st, accessibility_toggle_state(*v),
+                                              !v->access_checked().empty());
+                st = atspi::with_editable(st, accessibility_text_editable(*v));
             }
         }
         auto a = w.open_array("u");
@@ -184,7 +211,7 @@ struct AtspiProvider {
 
     void build_node(View& v, int parent_index) {
         int my_index = parent_index;
-        if (v.access_role() != View::AccessRole::none) {
+        if (is_accessibility_element(v)) {
             AccessNode node;
             node.view = &v;
             node.parent_index = parent_index;
@@ -291,9 +318,16 @@ struct AtspiProvider {
                 aw.append_string(kIfaceApplication);
             } else {
                 aw.append_string(kIfaceComponent);
-                // Value only when the View is value-bearing (slider/meter that
-                // implements AccessibilityValueInterface).
-                if (value_iface(index)) aw.append_string(kIfaceValue);
+                // Exactly the interfaces the View can actually serve
+                // (accessibility_interfaces): Value for a numeric range
+                // (slider/meter/progress bar), Text for a string value — a
+                // TextEditor's content or a ComboBox's selected item. AT-SPI has
+                // no string-value interface, so a role like ENTRY or COMBO_BOX
+                // with neither interface exported reads back NOTHING: Orca
+                // announces "entry" plus the name and falls silent.
+                const atspi_ifaces ifs = interfaces_for(index);
+                if (ifs.value) aw.append_string(kIfaceValue);
+                if (ifs.text)  aw.append_string(kIfaceText);
             }
             w.close_container(a);
             return true;
@@ -496,6 +530,124 @@ struct AtspiProvider {
         return v ? dynamic_cast<AccessibilityValueInterface*>(v) : nullptr;
     }
 
+    // The View behind an index, or nullptr for the application root.
+    View* view_at(int index) const {
+        if (index <= 0 || index >= static_cast<int>(nodes_.size())) return nullptr;
+        return nodes_[static_cast<size_t>(index)].view;
+    }
+
+    // The optional AccessibilityTextInterface (a TextEditor). A ComboBox has
+    // none — its string sits in the access_value slot — so every read goes
+    // through the shared resolvers below, never through this pointer alone.
+    AccessibilityTextInterface* text_iface(int index) const {
+        View* v = view_at(index);
+        return v ? dynamic_cast<AccessibilityTextInterface*>(v) : nullptr;
+    }
+
+    using atspi_ifaces = AccessibilityInterfaceSet;
+    atspi_ifaces interfaces_for(int index) const {
+        View* v = view_at(index);
+        return v ? accessibility_interfaces(*v) : atspi_ifaces{};
+    }
+
+    // Text.GetText / Text.CharacterCount content — the SHARED resolver
+    // (accessibility_text_content): text interface, else the access_value slot.
+    std::string text_for(int index) const {
+        View* v = view_at(index);
+        return v ? accessibility_text_content(*v) : std::string{};
+    }
+
+    int caret_for(int index) const {
+        if (AccessibilityTextInterface* tif = text_iface(index))
+            return tif->get_selection().second;
+        return 0;
+    }
+
+    // ── org.a11y.atspi.Text ───────────────────────────────────────────────────
+    //
+    // The string-value surface. Implemented: GetText, GetCharacterAtOffset,
+    // GetNSelections / GetSelection, SetCaretOffset, plus the CharacterCount and
+    // CaretOffset properties — enough for Orca to read an entry's content and
+    // track the caret. NOT implemented: GetTextAtOffset / GetStringAtOffset word
+    // and line granularity, text attributes, and bounded ranges (they need a
+    // laid-out glyph run per line, which TextEditor does not expose yet), so
+    // Orca's word/line navigation inside a field is still a gap.
+    bool handle_text(DBus::CallContext& ctx, int index) {
+        if (index == 0) return false;
+        if (!interfaces_for(index).text) return false;
+        const std::string& m = ctx.member();
+        const std::string text = text_for(index);
+        const int n = static_cast<int>(text.size());
+
+        if (m == "GetText") {
+            int start = 0, end = -1;
+            ctx.args().read_int32(start);
+            ctx.args().read_int32(end);
+            if (start < 0) start = 0;
+            if (end < 0 || end > n) end = n;   // -1 = "to the end", per AT-SPI
+            const std::string slice =
+                start >= end ? std::string{}
+                             : text.substr(static_cast<size_t>(start),
+                                           static_cast<size_t>(end - start));
+            ctx.reply().append_string(slice);
+            return true;
+        }
+        if (m == "GetCharacterCount") {   // some clients call it as a method
+            ctx.reply().append_int32(n);
+            return true;
+        }
+        if (m == "GetCaretOffset") {
+            ctx.reply().append_int32(caret_for(index));
+            return true;
+        }
+        if (m == "SetCaretOffset") {
+            int off = 0;
+            ctx.args().read_int32(off);
+            bool ok = false;
+            if (AccessibilityTextInterface* tif = text_iface(index)) {
+                if (off >= 0 && off <= n) {
+                    tif->set_selection(off, off);
+                    ok = true;
+                }
+            }
+            ctx.reply().append_bool(ok);
+            return true;
+        }
+        if (m == "GetCharacterAtOffset") {
+            int off = 0;
+            ctx.args().read_int32(off);
+            const int c = (off >= 0 && off < n)
+                ? static_cast<int>(static_cast<unsigned char>(text[static_cast<size_t>(off)]))
+                : 0;
+            ctx.reply().append_int32(c);
+            return true;
+        }
+        if (m == "GetNSelections") {
+            int count = 0;
+            if (AccessibilityTextInterface* tif = text_iface(index)) {
+                const auto sel = tif->get_selection();
+                count = sel.first != sel.second ? 1 : 0;
+            }
+            ctx.reply().append_int32(count);
+            return true;
+        }
+        if (m == "GetSelection") {
+            int which = 0;
+            ctx.args().read_int32(which);
+            int start = 0, end = 0;
+            if (AccessibilityTextInterface* tif = text_iface(index); tif && which == 0) {
+                const auto sel = tif->get_selection();
+                start = sel.first;
+                end = sel.second;
+            }
+            DBus::Writer w = ctx.reply();
+            w.append_int32(start);
+            w.append_int32(end);
+            return true;
+        }
+        return false;
+    }
+
     bool append_property_variant(DBus::Writer& w, int index,
                                  const std::string& iface,
                                  const std::string& prop) {
@@ -525,6 +677,14 @@ struct AtspiProvider {
             if (prop == "Version") { return variant_string(w, kToolkitVersion); }
             if (prop == "AtspiVersion") { return variant_string(w, kAtspiVersion); }
             if (prop == "Id") { return variant_int32(w, app_id); }
+        }
+        if (iface == kIfaceText && interfaces_for(index).text) {
+            if (prop == "CharacterCount") {
+                return variant_int32(w, static_cast<int>(text_for(index).size()));
+            }
+            if (prop == "CaretOffset") {
+                return variant_int32(w, caret_for(index));
+            }
         }
         if (iface == kIfaceValue) {
             if (AccessibilityValueInterface* vif = value_iface(index)) {
@@ -571,6 +731,13 @@ struct AtspiProvider {
             entry("AtspiVersion",
                   [&](DBus::Writer& ew) { variant_string(ew, kAtspiVersion); });
             entry("Id", [&](DBus::Writer& ew) { variant_int32(ew, app_id); });
+        } else if (iface == kIfaceText && interfaces_for(index).text) {
+            const int count = static_cast<int>(text_for(index).size());
+            const int caret = caret_for(index);
+            entry("CharacterCount",
+                  [&](DBus::Writer& ew) { variant_int32(ew, count); });
+            entry("CaretOffset",
+                  [&](DBus::Writer& ew) { variant_int32(ew, caret); });
         } else if (iface == kIfaceValue) {
             if (AccessibilityValueInterface* vif = value_iface(index)) {
                 entry("CurrentValue", [&](DBus::Writer& ew) {
@@ -637,9 +804,9 @@ struct AtspiProvider {
             ctx.reply().append_string(kRootXml);
         } else {
             std::string xml = kWidgetHead;
-            if (value_iface(index)) {
-                xml += "<interface name=\"org.a11y.atspi.Value\"/>";
-            }
+            const atspi_ifaces ifs = interfaces_for(index);
+            if (ifs.value) xml += "<interface name=\"org.a11y.atspi.Value\"/>";
+            if (ifs.text)  xml += "<interface name=\"org.a11y.atspi.Text\"/>";
             xml += kWidgetTail;
             ctx.reply().append_string(xml);
         }
@@ -653,12 +820,29 @@ struct AtspiProvider {
         const std::string& iface = ctx.interface();
         if (iface == kIfaceAccessible)  return handle_accessible(ctx, index);
         if (iface == kIfaceComponent)   return handle_component(ctx, index);
+        // Text METHODS (GetText, GetCaretOffset, …). GetInterfaces advertises
+        // org.a11y.atspi.Text and handle_properties serves its CharacterCount /
+        // CaretOffset properties, but without this route a screen reader's
+        // GetText(0, -1) falls through to `return false` and D-Bus answers
+        // UnknownMethod — an advertised interface that errors on every read,
+        // which is worse than never advertising it. Orca announces "entry" and
+        // then reads nothing.
+        if (iface == kIfaceText)        return handle_text(ctx, index);
         if (iface == kIfaceApplication) return index == 0 && handle_application(ctx);
         if (iface == kIfaceSocket)      return index == 0 && handle_socket(ctx);
         if (iface == kIfaceProperties)  return handle_properties(ctx, index);
         if (iface == kIfaceIntrospect)  return handle_introspect(ctx, index);
         // Legacy interface-less calls → best-effort Accessible.
         if (iface.empty()) return handle_accessible(ctx, index);
+
+        // An interface we ADVERTISE but do not route is a bug, and a silent one:
+        // returning false makes D-Bus answer UnknownMethod, so the screen reader
+        // simply reads nothing and the user has no idea why. (Value is absent
+        // here on purpose — AT-SPI's Value interface is property-based, so
+        // handle_properties serves it; Text is method-based and must be routed.)
+        // Fail loudly in a debug build rather than going quiet in a user's ear.
+        assert((iface != kIfaceText) &&
+               "advertised AT-SPI interface has no dispatch route");
         return false;
     }
 

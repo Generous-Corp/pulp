@@ -1016,6 +1016,7 @@ void View::prepare_for_reuse() {
     // next occupant of this slot.
     access_role_ = AccessRole::none;
     access_label_.clear();
+    derived_access_label_.clear();
     access_value_.clear();
     access_pressed_.clear();
     access_checked_.clear();

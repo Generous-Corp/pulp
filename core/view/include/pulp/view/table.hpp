@@ -83,6 +83,14 @@ private:
 /// Scrollable table with sortable columns
 class TableListBox : public View {
 public:
+    // No AccessRole::table here, deliberately. Rows and cells are PAINTED, not
+    // child Views, so a `table` role would export an AXTable / UIA Table with
+    // zero rows: assistive tech announces "table, 0 rows" and its grid
+    // navigation lands on nothing. A container role is only true once the
+    // children that make it true exist (per-row `row` / `cell` elements — the
+    // follow-up recorded in docs/guides/modules/view.md). Until then the widget
+    // stays out of the tree, exactly as it was before. VirtualList, which DOES
+    // hold child Views, exposes list/list_item today.
     TableListBox() { set_focusable(true); }
 
     /// Set the data model (not owned — caller must keep alive)

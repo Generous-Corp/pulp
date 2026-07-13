@@ -447,6 +447,22 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 - `UIAccessibility` is the iOS equivalent of NSAccessibility. `accessibility_ios.mm`
   bridges `AccessibilityNode` → `UIAccessibilityElement`. Unlike macOS, iOS
   accessibility is **opt-in per view**: `isAccessibilityElement = YES`.
+- **UIKit has no role STRING — only traits.** `View::AccessRole` is a much
+  richer vocabulary than `UIAccessibilityTraits`, so several roles legitimately
+  collapse onto `UIAccessibilityTraitButton` (checkbox, radio, combo box, menu
+  item, tab); VoiceOver then announces "button" and reads the element's
+  `accessibilityValue` for state. That is UIKit's own idiom (UISwitch does the
+  same) — do not "fix" it by inventing a trait.
+- **`AccessRole::text_field` carries NO trait, and that is a real gap.**
+  VoiceOver derives "text field" from the element conforming to `UITextInput`,
+  not from a trait. Pulp exposes plain `UIAccessibilityElement`s, so a
+  `TextEditor` announces as untyped text. Closing this means implementing
+  `UITextInput` on the accessibility element, not adding a case to
+  `access_role_to_traits`.
+- `access_role_to_traits()` deliberately has **no `default:` case** — adding an
+  `AccessRole` must be a compile error in `accessibility_ios.mm`, not a silent
+  fall-through to `UIAccessibilityTraitNone`. The iOS lane is not built by the
+  required macOS gate, so this is the only thing that catches an unmapped role.
 
 ### Sandboxing
 

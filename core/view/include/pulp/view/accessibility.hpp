@@ -122,6 +122,101 @@ public:
     }
 };
 
+// ── Value resolution ────────────────────────────────────────────────────
+
+class View;
+
+/// Tri-state check/press state, resolved from the ARIA slots a View carries
+/// (`aria-checked` first, then `aria-pressed` — a checkbox/switch state is
+/// more load-bearing than a toggle-button pressed state).
+enum class AccessToggleState { unset, off, on, mixed };
+
+/// The View's check/press state. `unset` for everything that is not a
+/// checkbox / switch / toggle button.
+AccessToggleState accessibility_toggle_state(const View& v);
+
+/// The state as the word a reader announces: "checked" / "unchecked" /
+/// "mixed" (aria-checked) or "pressed" / "not pressed" / "mixed"
+/// (aria-pressed). Empty when `unset`.
+std::string accessibility_toggle_state_string(const View& v);
+
+/// What assistive tech reads as the element's VALUE, resolved from the one
+/// source that is actually present, in priority order:
+///
+///   1. AccessibilityValueInterface  → get_value_string()  (slider, meter,
+///      progress bar — "-6.0 dB", "60%")
+///   2. AccessibilityTextInterface   → get_text()          (text field — the
+///      content the user typed)
+///   3. View::access_value()         → the manually-set string (combo box's
+///      selected item, or any app-set value)
+///   4. The check/press state         → "checked" / "unchecked" / "mixed"
+///      (a Checkbox / Toggle / ToggleButton has no other value; without this
+///      slot iOS and Android announce "button" with no state at all — only
+///      macOS special-cases it into a native @YES/@NO accessibilityValue)
+///   5. "" — nothing to read.
+///
+/// Every platform bridge that reads a VALUE resolves it through THIS function:
+/// macOS (state → native @YES/@NO first, then this), iOS, Android, Windows
+/// (IValueProvider::get_Value + UIA_ValueValuePropertyId) and Linux
+/// (org.a11y.atspi.Text, via accessibility_text_content()). macOS's
+/// -accessibilityValue used to read only slot 3, so a TextEditor holding
+/// "hello" returned nil and VoiceOver announced "text field" and then silence.
+///
+/// NOT covered by this function: Windows never announces a check/press state at
+/// all, because the UIA Toggle pattern needs an IToggleProvider that
+/// PulpFragmentProvider does not implement (see accessibility_win.cpp).
+std::string accessibility_value_string(const View& v);
+
+/// True when the view has ANY value source at all (slots 1–4 above). The
+/// Windows provider gates the UIA Value pattern on this: advertising
+/// IsValuePatternAvailable on an element whose get_Value returns a NULL BSTR
+/// is worse than not advertising it.
+bool has_accessibility_value(const View& v);
+
+/// The accessibility interfaces a View can actually serve. Platform bridges
+/// that publish a per-interface surface (AT-SPI's org.a11y.atspi.Value /
+/// org.a11y.atspi.Text; UIA's pattern set) export exactly these — an interface
+/// advertised without a source behind it reads back empty.
+struct AccessibilityInterfaceSet {
+    /// Numeric range (min / max / current): AccessibilityValueInterface.
+    bool value = false;
+    /// String content: AccessibilityTextInterface (a TextEditor) OR the
+    /// access_value slot (a ComboBox's selected item). AT-SPI has no "value
+    /// string" interface — a string value is read through Text.
+    bool text = false;
+};
+AccessibilityInterfaceSet accessibility_interfaces(const View& v);
+
+/// The string content a text interface exposes: AccessibilityTextInterface's
+/// content, else the access_value slot, else "". This is what AT-SPI's
+/// Text.GetText / Text.CharacterCount serve.
+std::string accessibility_text_content(const View& v);
+
+/// True when the text content is user-editable (an editable
+/// AccessibilityTextInterface). Drives AT-SPI's EDITABLE state and UIA's
+/// IsReadOnly.
+bool accessibility_text_editable(const View& v);
+
+/// The single gate EVERY accessibility bridge uses to decide whether a View
+/// enters the platform accessibility tree (macOS window host + plug-in editor
+/// host, iOS, Windows UIA fragments, Linux AT-SPI objects, Android TalkBack
+/// nodes) and the cross-platform snapshot's count_announceable().
+///
+/// A View is exposed when it has a role AND something to say with it:
+///
+///   * a structural role (group / list / table / dialog / ... ) — it announces
+///     the children underneath it;
+///   * an accessible name;
+///   * a value source (slider, meter, progress bar, text field, combo box);
+///   * an ARIA state (aria-checked / aria-pressed — a checkbox or switch).
+///
+/// A role with NONE of those announces "button" (or "text field", or "image")
+/// and then falls silent: that is a WCAG 4.1.2 (Name, Role, Value) failure and
+/// pure noise in the tree, so the View is left out until it has a name. Keep
+/// this the ONLY predicate — a bridge that hand-rolls `access_role() != none`
+/// re-admits unnamed buttons on that one platform.
+bool is_accessibility_element(const View& v);
+
 // ── Live-region announcements ───────────────────────────────────────────
 
 /// Politeness level for a live-region announcement. Mirrors the WAI-ARIA

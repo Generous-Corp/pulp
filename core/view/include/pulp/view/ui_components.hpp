@@ -5,7 +5,9 @@
 /// TabPanel, ListBox, ScrollView.
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/accessibility.hpp>
 #include <pulp/view/input_events.hpp>
+#include <algorithm>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/appearance_tracker.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -39,9 +41,13 @@ float fit_combo_label(std::string& text, float avail, float base, float min,
 /// @endcode
 class ComboBox : public View {
 public:
+    // A ComboBox is a dropdown, not a continuous range. It announced itself
+    // as AccessRole::slider until the role vocabulary grew `combo_box`, so
+    // VoiceOver / Narrator / Orca all told the user "slider" and offered
+    // increment/decrement instead of a list of choices.
     ComboBox() {
         set_focusable(true);
-        set_access_role(AccessRole::slider);
+        set_access_role(AccessRole::combo_box);
     }
 
     // pulp #1818 — clear the static `active_popup_` slot if this dying
@@ -54,7 +60,14 @@ public:
         if (active_popup_ == this) active_popup_ = nullptr;
     }
 
-    void set_items(std::vector<std::string> items) { items_ = std::move(items); }
+    /// Publishes the currently-selected item into access_value: the selected
+    /// text IS a combo box's accessible value (what NSAccessibility /
+    /// IValueProvider read), and selected_ defaults to 0 — so a combo that was
+    /// never explicitly re-selected used to paint items[0] and announce nothing.
+    void set_items(std::vector<std::string> items) {
+        items_ = std::move(items);
+        set_access_value(selected_text());
+    }
     const std::vector<std::string>& items() const { return items_; }
 
     int selected() const { return selected_; }
@@ -195,14 +208,49 @@ private:
 // ── ProgressBar ──────────────────────────────────────────────────────────
 
 /// Visual progress indicator for long-running operations.
-class ProgressBar : public View {
+///
+/// Implements AccessibilityValueInterface: `AccessRole::progress_bar` advertises
+/// the UIA RangeValue pattern / AT-SPI Value interface, and without a value
+/// source behind it Narrator reads 0 at every progress and reports the
+/// degenerate range min == max == 0 (a client computing (v-min)/(max-min)
+/// divides by zero). The role and the value ship together.
+class ProgressBar : public View, public AccessibilityValueInterface {
 public:
+    ProgressBar() { set_access_role(AccessRole::progress_bar); }
+
     /// Set progress value (0.0 to 1.0). Values < 0 show indeterminate state.
     void set_progress(float value) { progress_ = value; }
     float progress() const { return progress_; }
 
-    /// Optional label shown inside the bar.
-    void set_label(std::string label) { label_ = std::move(label); }
+    /// True while `progress() < 0` — the bar is animating an unknown-duration
+    /// task. AT reports 0 with the "indeterminate" value string.
+    bool is_indeterminate() const { return progress_ < 0.0f; }
+
+    // ── AccessibilityValueInterface ──────────────────────────────────────
+    double get_current_value() const override {
+        return is_indeterminate() ? 0.0
+                                  : static_cast<double>(std::clamp(progress_, 0.0f, 1.0f));
+    }
+    /// A progress bar is read-only (it advertises RangeValue, not Value), but
+    /// the interface is bidirectional; a host that does write lands on
+    /// set_progress rather than being silently dropped.
+    void set_current_value(double value) override {
+        set_progress(static_cast<float>(value));
+    }
+    double get_minimum_value() const override { return 0.0; }
+    double get_maximum_value() const override { return 1.0; }
+    std::string get_value_string() const override {
+        if (is_indeterminate()) return "indeterminate";
+        return AccessibilityValueInterface::get_value_string();
+    }
+
+    /// Optional label shown inside the bar. Doubles as the accessible name —
+    /// a progress bar that announces "60%" without saying 60% of WHAT is only
+    /// half an announcement.
+    void set_label(std::string label) {
+        label_ = std::move(label);
+        set_derived_access_label(label_);
+    }
 
     void paint(canvas::Canvas& canvas) override;
 
@@ -282,7 +330,14 @@ public:
 
     // Reserve the tab-bar height as top padding so tab content flows BELOW the tab bar
     // (instead of painting over it). Uses flex padding so child hit-testing stays correct.
-    TabPanel() { flex().padding_top = tab_height_; }
+    // No AccessRole::tab_list here, deliberately. The tab strip is PAINTED;
+    // TabPanel's child Views are the tab CONTENT panels, not the tabs. A
+    // `tab_list` whose children are panels is worse than no role at all —
+    // VoiceOver's tab navigation would walk content instead of tabs. The role
+    // lands with per-tab `AccessRole::tab` elements (docs/guides/modules/view.md).
+    TabPanel() {
+        flex().padding_top = tab_height_;
+    }
 
     void add_tab(std::string title, std::unique_ptr<View> content);
     void set_active_tab(int index);
@@ -491,6 +546,9 @@ public:
     /// the accent colour (`nav.selected.text`). Opt-in via set_selection_style().
     enum class SelectionStyle { standard, accent };
 
+    // No AccessRole::list here, deliberately — same reason as TableListBox:
+    // rows are painted, not child Views, so the role would export an empty
+    // AXList ("list, 0 items"). See docs/guides/modules/view.md.
     ListBox() { set_focusable(true); }
 
     void set_items(std::vector<std::string> items) { items_ = std::move(items); }

@@ -72,7 +72,8 @@ TEST_CASE("HTML role attribute routes through ARIA->AccessRole bucket",
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    // Mirror the seven ARIA role buckets we collapse the spec onto.
+    // ARIA roles map onto the expanded AccessRole vocabulary; only
+    // container-ish roles with no widget still collapse to `group`.
     bridge.load_script(R"(
         createPanel('s', '');  setAccessibilityRole('s', 'slider');
         createPanel('cb', ''); setAccessibilityRole('cb', 'checkbox');
@@ -85,13 +86,17 @@ TEST_CASE("HTML role attribute routes through ARIA->AccessRole bucket",
     )");
 
     REQUIRE(bridge.widget("s")->access_role()  == View::AccessRole::slider);
-    REQUIRE(bridge.widget("cb")->access_role() == View::AccessRole::toggle);
+    // checkbox and switch are distinct roles now (they both used to be
+    // `toggle`, so a checkbox and a switch were indistinguishable).
+    REQUIRE(bridge.widget("cb")->access_role() == View::AccessRole::checkbox);
     REQUIRE(bridge.widget("sw")->access_role() == View::AccessRole::toggle);
     REQUIRE(bridge.widget("im")->access_role() == View::AccessRole::image);
-    REQUIRE(bridge.widget("pb")->access_role() == View::AccessRole::meter);
-    REQUIRE(bridge.widget("hd")->access_role() == View::AccessRole::label);
-    // 'button' has no Pulp enum slot — collapses to `group`.
-    REQUIRE(bridge.widget("bn")->access_role() == View::AccessRole::group);
+    // progressbar is task progress, distinct from a `meter` gauge.
+    REQUIRE(bridge.widget("pb")->access_role() == View::AccessRole::progress_bar);
+    REQUIRE(bridge.widget("hd")->access_role() == View::AccessRole::heading);
+    // 'button' used to have no Pulp enum slot and collapsed to `group`, so a
+    // screen reader announced a button as a group.
+    REQUIRE(bridge.widget("bn")->access_role() == View::AccessRole::button);
     // Empty / unknown role clears to none.
     REQUIRE(bridge.widget("un")->access_role() == View::AccessRole::none);
 }
@@ -119,8 +124,7 @@ TEST_CASE("HTML setAttribute(aria-label) flushes through web-compat shim",
     auto* v = bridge.widget(id);
     REQUIRE(v != nullptr);
     REQUIRE(v->access_label() == "Save preset");
-    // 'button' -> group bucket.
-    REQUIRE(v->access_role() == View::AccessRole::group);
+    REQUIRE(v->access_role() == View::AccessRole::button);
 }
 
 TEST_CASE("HTML setAttribute before mount replays ARIA on appendChild",

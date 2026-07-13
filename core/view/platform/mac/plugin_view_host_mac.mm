@@ -15,6 +15,8 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
+#include <pulp/view/platform/ns_role_mapping.hpp>
+#include <pulp/view/accessibility.hpp>
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
 #include <pulp/view/pointer_dispatch.hpp>  // dispatch_context_menu (no-Skia builds too)
 #import <Cocoa/Cocoa.h>
@@ -100,15 +102,10 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 @implementation PulpAccessibilityElement
 - (NSAccessibilityRole)accessibilityRole {
     if (!_pulpView) return NSAccessibilityGroupRole;
-    using AR = pulp::view::View::AccessRole;
-    auto role = _pulpView->access_role();
-    if (role == AR::slider) return NSAccessibilitySliderRole;
-    if (role == AR::toggle) return NSAccessibilityCheckBoxRole;
-    if (role == AR::label)  return NSAccessibilityStaticTextRole;
-    if (role == AR::meter)  return NSAccessibilityLevelIndicatorRole;
-    if (role == AR::group)  return NSAccessibilityGroupRole;
-    if (role == AR::image)  return NSAccessibilityImageRole;
-    return NSAccessibilityGroupRole;
+    // Shared table with the standalone window host — see
+    // platform/ns_role_mapping.hpp. Views with AccessRole::none never reach
+    // here (collectAccessibleChildren: skips them).
+    return pulp::view::ns_role_for_access_role(_pulpView->access_role());
 }
 
 - (NSString*)accessibilityLabel {
@@ -117,8 +114,12 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 }
 
 - (id)accessibilityValue {
-    if (!_pulpView || _pulpView->access_value().empty()) return nil;
-    return [NSString stringWithUTF8String:_pulpView->access_value().c_str()];
+    if (!_pulpView) return nil;
+    // Same shared resolver as the standalone window host
+    // (accessibility_mac.mm): value interface → text interface → access_value.
+    const std::string value = pulp::view::accessibility_value_string(*_pulpView);
+    if (value.empty()) return nil;
+    return [NSString stringWithUTF8String:value.c_str()];
 }
 
 - (NSRect)accessibilityFrame {
@@ -936,7 +937,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 
 - (void)collectAccessibleChildren:(pulp::view::View*)view into:(NSMutableArray*)array {
     if (!view || !view->visible()) return;
-    if (view->access_role() != pulp::view::View::AccessRole::none) {
+    if (pulp::view::is_accessibility_element(*view)) {
         PulpAccessibilityElement* elem = [PulpAccessibilityElement new];
         elem.pulpView = view;
         elem.hostView = self;
