@@ -333,21 +333,47 @@ TEST_CASE("Yoga layout pass cost at 100 / 250 / 500 nodes", "[view][layout][benc
     }
     std::printf("\n");
 
-    // ── The gate ────────────────────────────────────────────────────────────
+    // ── The timing gate — OPTIMIZED BUILDS ONLY ─────────────────────────────
     //
-    // Measured on an M-series Mac (Release, -O3): a 484-node pass runs in
-    // ~0.38ms (see the baseline table at the top). The threshold below sits an order
-    // of magnitude above that so the gate fires on a real regression (e.g.
-    // someone makes layout quadratic, or adds a per-node syscall / shaping
-    // call), not on a loaded CI box.
+    // Measured on an M-series Mac (Release, -O3): a 484-node pass runs in ~0.38ms
+    // (see the baseline table at the top). The threshold sits an order of magnitude
+    // above that so it fires on a real regression (someone makes layout quadratic,
+    // or adds a per-node syscall / shaping call) and not on a loaded CI box.
     //
-    // A pass must never eat a quarter of a 60fps frame — at that point the
-    // pre-paint layout call is the frame budget.
+    // That calibration is meaningless without the optimizer. The Shipyard macOS
+    // validation lane builds **Debug (-O0)**, where the same 484-node pass takes
+    // ~4420us — about 11.6x slower, which eats the ENTIRE 11x safety margin the
+    // threshold was sized with. The gate then sits permanently at the edge
+    // (measured: 4421.8us against a 4166.7us limit, ~6% over) and load is merely
+    // what tips it. It was not flaky because the box was busy; it was a
+    // Release-calibrated gate running in an unoptimized build, and in Debug it was
+    // measuring the ABSENCE OF THE OPTIMIZER, not the cost of layout.
+    //
+    // A false red is worse than no gate: it trains everyone to wave away red as
+    // "probably the box" — which is exactly how a real bug gets dismissed.
+    //
+    // So the timing assertion is gated to optimized builds. The GitHub macOS lane
+    // configures -DCMAKE_BUILD_TYPE=Release, so this still runs with real coverage
+    // and the right calibration. The STRUCTURAL assertions below deliberately run in
+    // EVERY build — they catch "someone added a per-node allocation" and "the
+    // allocation counter got linked out", and they do not care about the optimizer.
+    //
+    // Do NOT "fix" this by flipping the Shipyard lane to Release. That -O0 lane is
+    // the only thing that can see macro-gated-header ODR violations; at -O3
+    // each TU inlines its own copy and the bug is invisible by construction. See
+    // tools/scripts/test_odr_macro_gated_headers.py.
+#ifdef NDEBUG
     for (const auto& r : results) {
         INFO("nodes=" << r.nodes << " animated=" << r.animated
                       << " mean_us=" << r.mean_us);
         REQUIRE(r.mean_us < 0.25 * kFrameBudgetUs);
     }
+#else
+    for (const auto& r : results) {
+        WARN("timing gate skipped in an unoptimized build (nodes=" << r.nodes
+             << " mean_us=" << r.mean_us << ") — the threshold is calibrated for -O3");
+    }
+#endif
 
     // The allocation counters must actually be observing the layout pass. A
     // zero here means the operator new replacement got linked out and every

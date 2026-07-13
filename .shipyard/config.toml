@@ -58,6 +58,34 @@ versioning_config   = "tools/scripts/versioning.json"
 # instead: they run under PowerShell (no `$(...)` or wrapper path assumptions)
 # and unlimited MSBuild link parallelism triggers LNK1104 on ARM64.
 
+# ── CMAKE_BUILD_TYPE=Debug IS DELIBERATE. DO NOT "FIX" IT. ───────────────────
+#
+# This contradicts CLAUDE.md ("Release is the default") and reads exactly like
+# config drift, so a tidy-minded config audit will want to flip it to Release.
+# Don't. This -O0 lane is the ONLY thing in CI that can see a whole class of
+# undefined behaviour.
+#
+# 2026-07-12: it caught a real ODR violation (#6081). `snap_to_zero()` is an inline
+# function template defined in a header, its body gated by a macro, and a test TU
+# redefined that macro before including it. Two TUs then emitted the SAME mangled
+# symbol with DIFFERENT bodies.
+#
+#   at -O3  each TU inlines its own copy, so each behaves per its own macro.
+#           The A/B test appears to work. RELEASE IS GREEN. The bug is invisible
+#           by construction — a Release-only lane cannot ever see it.
+#   at -O0  nothing is inlined. Both TUs emit a weak symbol, the linker keeps ONE
+#           arbitrarily, and both call it. DEBUG IS RED.
+#
+# The red test was the mild outcome: had the linker kept the other definition, the
+# assertions would have PASSED while exercising a no-op — a null test asserting
+# nothing, green forever.
+#
+# Debug is slower, and CLAUDE.md is right that it is the wrong default for most
+# work. The answer is not "Debug everywhere" — it is "keep ONE -O0 lane, and
+# calibrate perf gates for the build they actually run in." A perf gate that fails
+# here is a MIS-CALIBRATED GATE, not a reason to flip the lane: see
+# test/test_yoga_layout_bench.cpp, whose timing assertion was sized for -O3 and is
+# now `#ifdef NDEBUG`-gated. Guarded by tools/scripts/test_odr_macro_gated_headers.py.
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
