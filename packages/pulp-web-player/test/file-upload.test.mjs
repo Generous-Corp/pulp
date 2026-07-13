@@ -19,10 +19,11 @@
 import { document, ok, failed, audioNode } from "./dom-shim.mjs";
 
 const { mountDemo } = await import("../src/shell.js");
+const { buildContainer, parseContainer } = await import("../src/state/plugin-state.js");
 
 // ——— a mock adapter whose state is a real PLST round-trip target
-function makeAdapter() {
-  let state = new Uint8Array(0);
+function makeAdapter(initialState = new Uint8Array(0)) {
+  let state = initialState;
   return {
     descriptor: { name: "Mock", isInstrument: false, hasAudioInput: true, hasAudioOutput: true },
     audioNode: audioNode(),
@@ -43,7 +44,7 @@ function makeAdapter() {
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-async function mount(fileUpload) {
+async function mount(fileUpload, adapter = makeAdapter()) {
   // Release the previous mount FIRST. The document-level guard is process-wide, so
   // without this every case would inherit the last one's listeners — which is the
   // very leak rule 1's destroy() exists to prevent, and it would mask itself.
@@ -51,15 +52,15 @@ async function mount(fileUpload) {
   document.body.childNodes = [];
   const root = document.createElement("div");
   document.body.appendChild(root);
-  const adapter = makeAdapter();
+  let sessionCtx = null;              // the AudioContext the shell actually built
   await mountDemo({
     root, title: "Mock", subtitle: "drop zone", mode: "audio-effect", paramRows: 1,
-    createAdapter: async () => adapter,
+    createAdapter: async (ctx) => { sessionCtx = ctx; return adapter; },
     fileUpload,
   });
   await globalThis.__start();
   await settle();
-  return { root, adapter, zone: root.querySelector("#pp-fu") };
+  return { root, adapter, zone: root.querySelector("#pp-fu"), ctx: () => sessionCtx };
 }
 
 // A drag event carrying a real-ish DataTransfer.
@@ -182,10 +183,12 @@ const CFG = { accept: "audio/*,.wav", label: "Load impulse response…", hint: "
 //        its bytes want to look), and is handed the params-preserving write.
 {
   const seen = [];
-  const { zone, adapter } = await mount({
+  let handedCtx = null;
+  const { zone, adapter, ctx } = await mount({
     ...CFG,
     onFile: async (file, api) => {
       seen.push(file.name);
+      handedCtx = api.ctx;
       ok(typeof api.writeBlob === "function", "onFile: handed the params-preserving writeBlob");
       ok(api.adapter === adapter, "onFile: handed the live adapter");
       await api.writeBlob(new Uint8Array([9, 9, 9]));
@@ -196,6 +199,35 @@ const CFG = { accept: "audio/*,.wav", label: "Load impulse response…", hint: "
   await settle(); await settle();
   ok(seen[0] === "ir.aiff", "onFile: the consumer's handler receives the dropped File");
   ok(adapter.writes.length === 1, "onFile: the consumer's blob reached the plugin");
+  // The encoding an audio plugin wants is a DECODE, and decodeAudioData is a method
+  // on the AudioContext — the SESSION's, so the PCM lands at the rate the plugin runs
+  // at. Hand over the very context the adapter was built on, or every consumer either
+  // smuggles one in through a closure or builds a second one at the wrong rate.
+  ok(handedCtx && handedCtx === ctx(),
+     "onFile: handed the SESSION AudioContext (the one the adapter was created on)");
+}
+
+// ——— 7b. LOADING A FILE MUST NOT RESET THE KNOBS.
+//
+// The plugin's state is one container: [params][plugin blob]. The lazy way to deliver
+// a file is to setState() a container built around the new blob — which silently
+// writes an EMPTY parameter block, and every knob the user has moved snaps back to
+// its default the moment they drop a file. writeBlob() reads the live state, keeps
+// its params byte-for-byte, and swaps ONLY the plugin's half.
+{
+  const params = new Uint8Array([0x50, 0x55, 0x4c, 0x50, 7, 7, 7, 7]);   // a "PULP" store blob
+  const seeded = makeAdapter(buildContainer(params, new Uint8Array([1, 1])));
+  const { zone, adapter } = await mount(CFG, seeded);
+
+  zone.dispatchEvent(dragEv("drop", [fakeFile("room.wav", [0xaa, 0xbb, 0xcc])]));
+  await settle(); await settle();
+
+  ok(adapter.writes.length === 1, "params: the drop wrote the plugin's state exactly once");
+  const after = parseContainer(adapter.writes[0]);
+  ok(after.params.length === params.length && after.params.every((b, i) => b === params[i]),
+     "params: the parameter block survives a file load BYTE-FOR-BYTE (the knobs do not reset)");
+  ok(after.plugin.length === 3 && after.plugin[0] === 0xaa,
+     "params: ...and only the plugin-owned blob is replaced, by the dropped file's bytes");
 }
 
 // ——— 8. destroy() takes the DOCUMENT guard back off. A leak here means a re-mounted

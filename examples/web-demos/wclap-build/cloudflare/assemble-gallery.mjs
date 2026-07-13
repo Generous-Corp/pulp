@@ -422,8 +422,13 @@ const SC_CFG = { mode: "audio-effect", paramRows: 2 };
 async function playerVersion() {
   const { createHash } = await import("node:crypto");
   const h = createHash("sha256");
+  // The shell's ?v= must move when ANYTHING in its import closure moves, not just
+  // the shell itself: its own static imports (./ui/*.js, ./state/*.js) carry no
+  // query, so they are the modules a stale cache holds onto. The drop zone
+  // (ui/file-upload.js) is in that closure — leave it out and a fix to it ships
+  // behind a cache entry nobody can see.
   for (const f of ["shell.js", "widgets/index.js", "adapters/wam.js", "adapters/wclap.js",
-                   "state/plugin-state.js"])
+                   "state/plugin-state.js", "ui/file-upload.js", "ui/custom-ui.js"])
     h.update(await readFile(join(PKG_SRC, f)));
   for (const f of ["pulp-ui.js", "ir-source.js"])
     h.update(await readFile(join(UI_SRC, f)));
@@ -459,15 +464,23 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
   // talks only to the HostAdapter, so any visible difference between the two pages
   // is a shared-player bug.
   // "Load impulse response…" — the browser equivalent of the desktop plugin's file
-  // dialog. It decodes with the demo's own AudioContext (so the PCM already arrives
-  // at the session rate) and hands the plugin the samples through the SDK's
-  // plugin-state container: getState -> swap the plugin-owned blob for an SCv2 "Pcm"
-  // record -> setState. That path is IDENTICAL on both ABIs — no per-ABI entry
-  // point to keep in sync — and the loaded IR survives a state save/restore because
-  // it IS the state. It hangs off the shell's onReady seam rather than customUi, so
-  // it is present on the Pulp-UI page AND on the generated-grid fallback.
-  const irImport = `\n  import { mountIrLoader } from "./ir-source.js?v=${v}";` +
-                   `\n  import * as pluginState from "../../vendor-player/state/plugin-state.js?v=${v}";`;
+  // dialog. The INTERACTION is the shared player's: `fileUpload` gives both ABIs the
+  // drop zone, the dialog button (the only path that exists on a phone) and the
+  // document-level guard that keeps a near miss from navigating away and destroying
+  // the running demo. Declaring it here rather than hand-rolling a drop zone in this
+  // page is the whole point — a per-page copy is a thing the WAM and WebCLAP builds
+  // would eventually disagree about.
+  //
+  // What the page supplies is the ENCODING, because only SuperConvolver knows how its
+  // bytes want to look: irFileUpload()'s onFile decodes with the demo's AudioContext
+  // (so the PCM already arrives at the session rate) and hands the plugin the samples
+  // through the SDK's plugin-state container — getState -> swap the plugin-owned blob
+  // for an SCv2 "Pcm" record -> setState, which preserves every parameter, so loading
+  // an IR never resets a knob. That path is IDENTICAL on both ABIs, and the loaded IR
+  // survives a state save/restore because it IS the state. The zone lives in the
+  // panel's own #fileup slot, so it is present on the Pulp-UI page AND on the
+  // generated-grid fallback.
+  const irImport = `\n  import { irFileUpload } from "./ir-source.js?v=${v}";`;
   const uiImport = (withUi ? `\n  import { mountPulpUi } from "./pulp-ui.js?v=${v}";` : "") + irImport;
   const uiProp = withUi ? `
     customUi: (container, adapter) => {
@@ -478,6 +491,14 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
       // a third of the panel as dead space under the controls. This hugs the
       // content with a little breathing room; the view tree is top-aligned, so the
       // shorter box crops nothing.
+      // 8/3 is a FLOOR, not a preference — do not "tighten" it to close the gap under the
+      // knobs. The editor lays out PROPORTIONALLY to the canvas, so a shorter box does not
+      // crop the empty bottom: it squeezes every row together, and the engine status line
+      // lands ON TOP of the knob labels. Measured at 8/2.75 and 8/2.4; both collide.
+      //
+      // The gap is closed the right way instead — by moving the file-upload slot ABOVE the
+      // scope+meter (shell.js), so the loader sits directly under the controls and the two
+      // read as one unit.
       canvas.style.cssText = "width:100%;aspect-ratio:8/3;display:block";
       container.appendChild(canvas);
       const pending = mountPulpUi(canvas, adapter, { moduleUrl: "./${UI_MODULE}.js" });
@@ -531,11 +552,10 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
     processorUrl: "${processorUrl}",
 ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).join("\n")}${uiProp}
     createAdapter: (ctx, urls) => ${adapterFn}(ctx, urls),
-    // slot is the shell's plugin-chrome slot — INSIDE the panel, directly under
-    // the controls. Loading an impulse response is part of the plugin, not page
-    // furniture; mounted after the panel it read as unrelated and was easy to miss.
-    onReady: ({ adapter, ctx, slot }) =>
-      mountIrLoader(slot, adapter, ctx, pluginState),
+    // The player renders this INSIDE the panel, directly under the controls: loading
+    // an impulse response is part of the plugin, not page furniture — mounted after
+    // the panel it read as unrelated and was easy to miss entirely.
+    fileUpload: irFileUpload(),
   });
 </script>
 <p style="max-width:860px;margin:0 auto;padding:0 20px 40px;

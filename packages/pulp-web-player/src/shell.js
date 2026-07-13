@@ -207,6 +207,28 @@ function injectStyles(skin = {}) {
   .pp-btn{background:none;color:var(--text-primary);border:1px solid var(--control-border);
           border-radius:5px;padding:6px 12px;cursor:pointer;font:inherit;font-family:var(--font-family-native)}
   .pp-btn:hover{border-color:var(--accent-primary)}
+  /* ── file upload (ui/file-upload.js) ────────────────────────────────────────
+     The zone sits INSIDE the panel, directly under the controls, so it has to look
+     like part of the instrument. Unstyled, it renders as a white browser button on a
+     dark panel — which reads as a form field someone forgot, not as a control. The
+     dashed border is the affordance: it says "you can drop here" before anyone reads
+     the hint. .over is the drop highlight, scoped to THIS box (never the whole plugin)
+     so it tells you where the target is. NOTE: this whole block lives inside a JS
+     TEMPLATE LITERAL, so a backtick in a comment here terminates the string and the
+     stylesheet gets thrown as code. It has happened. Do not use backticks in here. */
+  .pp-fu{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+         border:1px dashed var(--control-border);border-radius:8px;padding:10px 12px;
+         background:var(--bg-surface);transition:border-color 120ms,background 120ms}
+  .pp-fu.over{border-color:var(--accent-primary);border-style:solid;
+              background:color-mix(in srgb,var(--accent-primary) 8%,var(--bg-surface))}
+  .pp-fu-btn{background:none;color:var(--text-primary);border:1px solid var(--control-border);
+             border-radius:5px;padding:6px 12px;cursor:pointer;font:inherit;
+             font-family:var(--font-family-native);white-space:nowrap}
+  .pp-fu-btn:hover:not(:disabled){border-color:var(--accent-primary)}
+  .pp-fu-btn:disabled{opacity:.45;cursor:default}
+  .pp-fu-hint{font-size:12px;color:var(--text-secondary);flex:1;min-width:0}
+  .pp-fu-msg{flex-basis:100%;font-size:12px;color:var(--text-secondary);line-height:1.5}
+  .pp-fu-msg:empty{display:none}
   .pp-note{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;
            background:var(--bg-surface);border:1px solid var(--control-border);border-radius:8px;padding:14px}
   .pp-note .big{font-size:30px;font-weight:700;color:var(--accent-primary);font-variant-numeric:tabular-nums}
@@ -845,7 +867,15 @@ export async function mountDemo(opts) {
     // A native-styled level meter beside the scope (WIDGETS.md "Meter").
     S.meterWidget = createWidget("meter", { width: 12, height: 56 });
     wrap.appendChild(S.meterWidget);
-    $("#params").after(wrap);
+    // AFTER the file-upload slot, not after #params. A plugin that takes a file (a
+    // convolver's IR, a sampler's sample) needs its loader to read as PART OF THE
+    // INSTRUMENT — directly under the last row of controls. Inserting the scope+meter
+    // between them pushes the loader below a waveform and a level meter, where it stops
+    // looking like a control and starts looking like page furniture, and people simply do
+    // not find the one control the demo is asking them to use.
+    //
+    // Falls back to #params when there is no upload slot, which is every other demo.
+    ($("#fileup") || $("#params")).after(wrap);
   }
   const SCOPE_DRAW = 1024;                         // samples actually plotted
 
@@ -1367,7 +1397,9 @@ function connectOutput(S) {
     // File upload (dialog + drop zone) — mounted once the adapter is live, because
     // delivering a file means writing the plugin's state through it.
     if (opts.fileUpload && !S.fileUpload) {
-      S.fileUpload = mountFileUpload({ host: $("#fileup"), adapter: S.wam, cfg: opts.fileUpload });
+      S.fileUpload = mountFileUpload({
+        host: $("#fileup"), adapter: S.wam, ctx: S.ctx, cfg: opts.fileUpload,
+      });
     }
 
     const params = await waitForParams(S.wam);

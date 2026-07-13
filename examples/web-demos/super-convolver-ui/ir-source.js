@@ -27,6 +27,16 @@
 //   • Reverting to the built-in synthetic reverb is the same call with the
 //     "Synthetic" kind — no extra plumbing.
 //
+// WHO DOES WHAT. The INTERACTION — the drop zone, the file-dialog button, the
+// document-level guard that stops a ten-pixel miss from navigating away and killing
+// the running demo — belongs to the shared player, declared with one `fileUpload`
+// option (irFileUpload(), at the bottom of this file). It is not ours to hand-roll:
+// a drop zone written into THIS page would need a twin in the WebCLAP page, and the
+// day one of them was fixed the two would disagree.
+//
+// What is ours is the ENCODING, because only SuperConvolver knows how its bytes want
+// to look. That is everything above: decode, sum to mono, emit an SCv2 record.
+//
 // The blob writers below are DOM-free on purpose: superconvolver_runner.mjs imports
 // them to drive the same bytes through both ABIs in Node.
 
@@ -86,6 +96,14 @@ export function readIrBlobKind(blob) {
  *
  * Handles WAV (RIFF) and AIFF/AIFC; returns null for anything else (MP3/OGG/FLAC),
  * where we then say nothing about the source rather than guess.
+ *
+ * WHY THIS IS NOT IN THE PLAYER, when the drop zone above it is: the player is
+ * deliberately format-agnostic. It moves BYTES — it never decodes, never inspects,
+ * and has no opinion about what is in the file, which is exactly why one `fileUpload`
+ * serves a convolver, a sampler and a preset loader alike. An audio-format parser
+ * there would be a parser it never calls. It belongs to the consumer that chooses to
+ * DESCRIBE the file — us. If a second demo ever needs the same sentence, this moves
+ * to the player as an opt-in helper rather than being copied.
  */
 export function sniffAudioHeader(bytes) {
   const dv = new DataView(bytes.buffer ?? bytes, bytes.byteOffset ?? 0, bytes.byteLength);
@@ -97,12 +115,7 @@ export function sniffAudioHeader(bytes) {
       while (o + 8 <= dv.byteLength) {
         const id = tag(o), size = dv.getUint32(o + 4, true);
         if (id === "fmt ") {
-          const teardown = () => {
-    document.removeEventListener("dragover", onDocDrag);
-    document.removeEventListener("drop", onDocDrop);
-  };
-
-  return { format: "WAV",
+          return { format: "WAV",
                    channels: dv.getUint16(o + 10, true),
                    rate: dv.getUint32(o + 12, true),
                    bits: dv.getUint16(o + 22, true) };
@@ -167,91 +180,66 @@ export async function decodeIrFile(ctx, file) {
   };
 }
 
-// ─────────────────────────────────────────────────────────── the page affordance
-
-const CSS = `
-.sc-ir { margin-top: 10px; font: 13px/1.5 system-ui, sans-serif; }
-.sc-ir-size { margin: 6px 2px 0; color: var(--text-secondary, #8b96a3); font-size: 12px; }
-.sc-ir-size b { color: var(--text-primary, #e6edf3); font-weight: 600; }
-.sc-ir-drop {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 10px 12px; border: 1px dashed rgba(255,255,255,.22); border-radius: 8px;
-  background: rgba(255,255,255,.03); color: #8b96a3; transition: border-color .12s, background .12s;
-}
-.sc-ir-drop.over { border-color: #2bd4be; background: rgba(43,212,190,.08); color: #cfe; }
-.sc-ir-btn {
-  cursor: pointer; border: 1px solid rgba(255,255,255,.22); border-radius: 6px;
-  padding: 5px 10px; background: rgba(255,255,255,.05); color: inherit; font: inherit;
-}
-.sc-ir-btn:hover { border-color: #2bd4be; color: #cfe; }
-.sc-ir-btn[disabled] { opacity: .5; cursor: default; }
-.sc-ir-name { color: #cfe; }
-`;
+// ────────────────────────────────────────────────────────── the plugin's encoding
+//
+// The INTERACTION — the drop zone, the dialog button, the document-level guard that
+// stops a near miss from navigating away and killing the demo — is the PLAYER's, and
+// is declared with one `fileUpload` option (see @danielraffel/web-player,
+// src/ui/file-upload.js). It used to live here, and that was drift: this page's
+// WebCLAP twin would have needed its own copy of six fiddly rules, and the two would
+// have disagreed about something the day one of them was fixed.
+//
+// What is genuinely OURS is the ENCODING, because only SuperConvolver knows how its
+// bytes want to look: decode the file, sum it to mono, and hand the plugin an SCv2
+// "Pcm" record. The player gives us the File and a writeBlob() that preserves the
+// parameters, and we give it back a sentence about what we did.
 
 /**
- * Mount the "load your own IR" affordance into `container`, driving `adapter`
- * (WAM or WebCLAP — same call) with `ctx` as the decoder.
+ * The `fileUpload` config for mountDemo() — the IR-specific half of "load your own
+ * impulse response". Call it once per page:
  *
- * `state` is { parseContainer, buildContainer } from the player package, so the
- * PLST container has exactly one implementation and the page does not grow a
- * second copy of the SDK's format.
+ *   mountDemo({ …, fileUpload: irFileUpload() })
  *
- * Returns { destroy() }.
+ * It keeps a little state (the loaded IR's length, the live Size value) because the
+ * sentence it writes into the zone is not a one-shot: what Size is DOING to this
+ * impulse depends on the impulse, and it must follow the knob.
  */
-export function mountIrLoader(container, adapter, ctx, state) {
-  const style = document.createElement("style");
-  style.textContent = CSS;
+export function irFileUpload() {
+  let ui = null;          // the player's api — held so the Size line can rewrite the message
+  let loaded = null;      // { seconds, facts } while a file is in
+  let sizeParamId = null, sizeMin = 0, sizeSeconds = null;
+  let watchingSize = false;
 
-  const root = document.createElement("div");
-  root.className = "sc-ir";
-  // (describeIr is defined below the mount, hoisted as a function declaration.)
-  root.innerHTML = `
-    <div class="sc-ir-drop" id="sc-ir-drop">
-      <button class="sc-ir-btn" id="sc-ir-pick" type="button">Load impulse response…</button>
-      <span id="sc-ir-msg">or drop a WAV / AIFF / FLAC / MP3 here — it stays on your machine</span>
-      <button class="sc-ir-btn" id="sc-ir-revert" type="button" disabled>Built-in reverb</button>
-      <input id="sc-ir-file" type="file" accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg" hidden>
-    </div>
-    <div class="sc-ir-size" id="sc-ir-size"></div>`;
-  container.appendChild(style);
-  container.appendChild(root);
-
-  const $ = (id) => root.querySelector("#" + id);
-  const drop = $("sc-ir-drop"), msg = $("sc-ir-msg"), file = $("sc-ir-file");
-  const pick = $("sc-ir-pick"), revert = $("sc-ir-revert");
-
-  // The loaded IR, and a LIVE readout of what Size is doing to it.
+  // What Size is doing to THIS impulse, right now.
   //
   // Size only trims an impulse that is LONGER than it (window_ir_to_length:
-  // `if (ir.size() <= target_len) return ir;`). So for a 0.5 s cabinet IR, a Size of
+  // `if (ir.size() <= target_len) return ir;`). So for a 0.5 s cabinet IR a Size of
   // 1.5 s does nothing at all — which is genuinely confusing if the copy just says
-  // "Size windows this space". Say what Size is doing to THIS file, right now, and
-  // update it as the knob moves.
-  let loaded = null;                     // { name, seconds, ... } while a file is in
-  let sizeParamId = null, sizeMin = 0;
-
-  const renderSizeLine = (sizeSeconds) => {
-    const line = root.querySelector("#sc-ir-size");
-    if (!line || !loaded) return;
-    if (!(sizeSeconds > 0)) { line.textContent = ""; return; }
+  // "Size windows this space". Say which of the three cases the user is actually in.
+  const sizeLine = () => {
+    if (!loaded || !(sizeSeconds > 0)) return "";
     const ir = loaded.seconds;
     if (ir <= sizeMin) {
-      // The knob physically cannot reach below this impulse, so it can never trim
-      // it. Say that, rather than inviting someone to turn Size somewhere it does
-      // not go — which is what a naive "turn Size below 0.05 s" would do.
-      line.innerHTML = `This impulse (${ir.toFixed(2)} s) is shorter than <b>Size</b>'s minimum ` +
-        `(${sizeMin.toFixed(2)} s), so Size cannot trim it — you always hear all of it.`;
-    } else if (sizeSeconds >= ir) {
-      line.innerHTML = `<b>Size ${sizeSeconds.toFixed(2)} s</b> is longer than this ${ir.toFixed(2)} s ` +
-        `impulse, so you are hearing all of it. Turn Size below ${ir.toFixed(2)} s to shorten it.`;
-    } else {
-      line.innerHTML = `<b>Size ${sizeSeconds.toFixed(2)} s</b> is trimming this ${ir.toFixed(2)} s ` +
-        `impulse to ${sizeSeconds.toFixed(2)} s, with a short fade at the cut.`;
+      // The knob physically cannot reach below this impulse, so it can never trim it.
+      // Say that, rather than inviting someone to turn Size somewhere it does not go.
+      return `<br>This impulse (${ir.toFixed(2)} s) is shorter than <b>Size</b>'s minimum ` +
+             `(${sizeMin.toFixed(2)} s), so Size cannot trim it — you always hear all of it.`;
     }
+    if (sizeSeconds >= ir) {
+      return `<br><b>Size ${sizeSeconds.toFixed(2)} s</b> is longer than this ${ir.toFixed(2)} s ` +
+             `impulse, so you are hearing all of it. Turn Size below ${ir.toFixed(2)} s to shorten it.`;
+    }
+    return `<br><b>Size ${sizeSeconds.toFixed(2)} s</b> is trimming this ${ir.toFixed(2)} s ` +
+           `impulse to ${sizeSeconds.toFixed(2)} s, with a short fade at the cut.`;
   };
 
-  // Chain onto the adapter's param feed so the line follows the Size knob live.
-  (async () => {
+  const render = () => { if (ui && loaded) ui.setMessage(loaded.facts + sizeLine()); };
+
+  // Chain onto the adapter's param feed so the line follows the Size knob live. Done
+  // on the first load, not at mount: with no IR in, there is nothing to say about it.
+  async function watchSize(adapter) {
+    if (watchingSize) return;
+    watchingSize = true;
     try {
       const infos = (await adapter.getParameterInfo()) || [];
       const size = infos.find((p) => /^size$/i.test(p.label || ""));
@@ -262,109 +250,42 @@ export function mountIrLoader(container, adapter, ctx, state) {
       adapter.onParamsChanged = (values, list) => {
         const arr = list && list.length ? list : infos;
         const i = arr.findIndex((p) => p.id === sizeParamId);
-        if (i >= 0 && values[i] != null) renderSizeLine(values[i]);
+        if (i >= 0 && values[i] != null) { sizeSeconds = values[i]; render(); }
         if (prev) prev(values, list);
       };
       const now = await adapter.getParameterValue(sizeParamId);
-      if (now != null) renderSizeLine(now);
+      if (now != null) sizeSeconds = now;
     } catch { /* the line is a nicety; never let it take the loader down */ }
-  })();
-
-  // Replace ONLY the plugin-owned blob; the parameters (Mix, Size, Gain, Bypass)
-  // the user has set are read back out of the live state and written straight
-  // through, so loading an IR never resets a knob.
-  async function writeBlob(blob) {
-    const current = await adapter.getState();
-    let params = new Uint8Array(0);
-    try { params = state.parseContainer(current).params; } catch { /* bare blob */ }
-    await adapter.setState(state.buildContainer(params, blob));
   }
-
-  async function load(f) {
-    if (!f) return;
-    pick.disabled = true;
-    msg.textContent = `Decoding ${f.name}…`;
-    try {
-      const ir = await decodeIrFile(ctx, f);
-      if (!ir.mono.length) throw new Error("the file decoded to no audio");
-      await writeBlob(buildPcmIrBlob(ir.mono, ir.rate));
-      loaded = { name: f.name, seconds: ir.seconds };
-      msg.innerHTML = describeIr(f, ir);
-      if (sizeParamId != null) {
-        try { renderSizeLine(await adapter.getParameterValue(sizeParamId)); } catch {}
-      }
-      revert.disabled = false;
-    } catch (err) {
-      console.warn("IR load failed:", err);
-      msg.textContent = `Could not decode ${f.name} — ${err.message || err}`;
-    } finally {
-      pick.disabled = false;
-    }
-  }
-
-  const onPick = () => file.click();
-  const onFile = () => { load(file.files && file.files[0]); file.value = ""; };
-  const onRevert = async () => {
-    await writeBlob(buildSyntheticIrBlob());
-    loaded = null;
-    const line = root.querySelector("#sc-ir-size");
-    if (line) line.textContent = "";
-    msg.textContent = "Back to the built-in synthetic reverb.";
-    revert.disabled = true;
-  };
-  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-
-  // DRAG-AND-DROP, with the two things that make it feel broken if you skip them.
-  //
-  // 1. A NEAR MISS MUST NOT NAVIGATE. The browser's default action for a file
-  //    dropped anywhere on a page is to OPEN it — which throws away the running
-  //    demo (audio context, loaded IR, knob positions). So the DOCUMENT swallows
-  //    every drag/drop; only the zone acts on one. Without this, missing the target
-  //    by ten pixels destroys your session, which is a brutal punishment for a
-  //    gesture we invited.
-  //
-  // 2. dragleave FIRES WHEN YOU CROSS A CHILD. The zone has a button and a label
-  //    inside it, and moving over them bubbles a dragleave from the child, so a naive
-  //    handler drops the highlight while the pointer is still very much inside the
-  //    zone — it strobes. Count enter/leave pairs instead of toggling on each event.
-  let depth = 0;
-  const lit = (on) => drop.classList.toggle("over", on);
-
-  const onDocDrag = (e) => { e.preventDefault(); };            // "yes, we accept files"
-  const onDocDrop = (e) => { e.preventDefault(); };            // ...but a miss does NOTHING
-
-  const onEnter = (e) => { stop(e); depth++; lit(true); };
-  const onOver  = (e) => { stop(e); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; lit(true); };
-  const onLeave = (e) => { stop(e); depth = Math.max(0, depth - 1); if (depth === 0) lit(false); };
-  const onDrop = (e) => {
-    stop(e); depth = 0; lit(false);
-    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (!f) { msg.textContent = "That drop had no file in it."; return; }
-    load(f);
-  };
-
-  pick.addEventListener("click", onPick);
-  file.addEventListener("change", onFile);
-  revert.addEventListener("click", onRevert);
-  drop.addEventListener("dragenter", onEnter);
-  drop.addEventListener("dragover", onOver);
-  drop.addEventListener("dragleave", onLeave);
-  drop.addEventListener("drop", onDrop);
-  document.addEventListener("dragover", onDocDrag);
-  document.addEventListener("drop", onDocDrop);
 
   return {
-    destroy() {
-      pick.removeEventListener("click", onPick);
-      file.removeEventListener("change", onFile);
-      revert.removeEventListener("click", onRevert);
-      drop.removeEventListener("dragenter", onEnter);
-      drop.removeEventListener("dragover", onOver);
-      drop.removeEventListener("dragleave", onLeave);
-      drop.removeEventListener("drop", onDrop);
-      teardown();                       // the DOCUMENT-level drop guard
-      root.remove();
-      style.remove();
+    accept: "audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg",
+    label: "Load impulse response…",
+    hint: "or drop a WAV / AIFF / FLAC / MP3 here — it stays on your machine",
+    revertLabel: "Built-in reverb",
+
+    // `api.ctx` is the demo's own AudioContext, so decodeAudioData resamples straight
+    // to the session rate and the plugin needs no resampling of its own — which
+    // matters, because the decode is the one step of the IR rebuild that is not
+    // time-sliced. `api.writeBlob` splices the record into the plugin's state without
+    // touching its parameters, so loading an IR never resets a knob.
+    onFile: async (file, api) => {
+      ui = api;
+      const ir = await decodeIrFile(api.ctx, file);
+      if (!ir.mono.length) throw new Error("the file decoded to no audio");
+      await api.writeBlob(buildPcmIrBlob(ir.mono, ir.rate));
+      loaded = { seconds: ir.seconds, facts: describeIr(file, ir) };
+      await watchSize(api.adapter);
+      render();
+    },
+
+    // Reverting is the same call with the "Synthetic" kind — no extra plumbing, and
+    // it survives a save/restore for the same reason the loaded IR does: it IS state.
+    onRevert: async (api) => {
+      ui = api;
+      await api.writeBlob(buildSyntheticIrBlob());
+      loaded = null;
+      api.setMessage("Back to the built-in synthetic reverb.");
     },
   };
 }
