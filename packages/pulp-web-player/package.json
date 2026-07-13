@@ -1,7 +1,7 @@
 {
   "name": "@danielraffel/web-player",
   "version": "0.1.0",
-  "description": "Reusable, skinnable, host-agnostic web player for Pulp audio plugins (WAMv2 today, WebCLAP next) — the overlay/lifecycle shell, auto-generated parameter grid, on-screen + computer keyboard + WebMIDI, oscilloscope/meter, safety limiter, PLST state container, MIDI visualisers and canvas widget set, driven through a small host-adapter interface.",
+  "description": "Reusable, skinnable, host-agnostic web player for Pulp audio plugins (WAMv2 today, WebCLAP next) \u2014 the overlay/lifecycle shell, auto-generated parameter grid, on-screen + computer keyboard + WebMIDI, oscilloscope/meter, safety limiter, PLST state container, MIDI visualisers and canvas widget set, driven through a small host-adapter interface.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.js",
@@ -23,7 +23,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node test/adapter-seam.test.mjs && node test/wclap-adapter.test.mjs && node test/custom-ui.test.mjs"
+    "test": "node test/adapter-seam.test.mjs && node test/wclap-adapter.test.mjs && node test/custom-ui.test.mjs && node test/file-upload.test.mjs"
   },
   "keywords": [
     "pulp",

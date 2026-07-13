@@ -40,6 +40,7 @@
 import { createWidget, kindFor, formatValue } from "./widgets/index.js";
 import { initModality } from "./widgets/base.js";
 import { mountCustomUi, reserveCustomUiSlot } from "./ui/custom-ui.js";
+import { mountFileUpload } from "./ui/file-upload.js";
 import { parseContainer, buildContainer } from "./state/plugin-state.js";
 // The oscilloscope trigger is pure DSP math (finds the rising zero-crossing so a
 // periodic waveform stands still) — host-agnostic, vendored from the Pulp SDK.
@@ -251,7 +252,19 @@ function injectStyles(skin = {}) {
   body{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
   #panel,.pp-top{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   #panel textarea,#panel input[type=text],#panel .pp-recv,#panel #log{
-    -webkit-user-select:text;user-select:text;-webkit-touch-callout:default}`;
+    -webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+
+  /* File upload: dialog button + drop zone. Token-driven; no hardcoded colors.
+     The highlight is scoped to the ZONE and never the whole plugin, because the
+     highlight is the thing that tells someone where the target actually is. */
+  #fileup:empty{display:none}
+  .pp-fu{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
+    border:1px dashed var(--control-border);border-radius:8px;padding:.6rem .75rem;
+    background:var(--bg-surface);transition:border-color .12s,background .12s}
+  .pp-fu.over{border-style:solid;border-color:var(--accent-primary)}
+  .pp-fu-hint{color:var(--text-secondary);font-size:.85rem}
+  .pp-fu-msg{flex-basis:100%;color:var(--text-secondary);font-size:.85rem;min-height:1.2em}
+  .pp-fu-msg .pp-fu-name{color:var(--text-primary)}`;
   const el = document.createElement("style");
   el.textContent = css;
   document.head.appendChild(el);
@@ -460,6 +473,7 @@ export async function mountDemo(opts) {
       <h1>${title}</h1>
       <div class="sub">${subtitle}</div>
       <div id="params"></div>
+      <div id="fileup"></div>
       <div id="body"></div>
       <div id="footer">
         <button id="stop">Stop Audio</button>
@@ -479,6 +493,7 @@ export async function mountDemo(opts) {
   // ——— shared demo state
   const S = {
     ctx: null, wam: null, synth: null, synthCtx: null, analyser: null,
+    fileUpload: null,   // the drop-zone handle (owns the document-level drag guard)
     inputGain: opts.inputGain ?? 1, inputTrim: null, limiter: null,
     meterWidget: null, onEvent: null, seedMemo: null, shellMode: null,
     starting: false, handlersInstalled: false, meterToken: 0,
@@ -1349,6 +1364,12 @@ function connectOutput(S) {
     S.wam = await makeAdapter(S.ctx, { dsp: opts.dspUrl, processor: opts.processorUrl });
     if (S.ctx.state !== "running") await S.ctx.resume();
 
+    // File upload (dialog + drop zone) — mounted once the adapter is live, because
+    // delivering a file means writing the plugin's state through it.
+    if (opts.fileUpload && !S.fileUpload) {
+      S.fileUpload = mountFileUpload({ host: $("#fileup"), adapter: S.wam, cfg: opts.fileUpload });
+    }
+
     const params = await waitForParams(S.wam);
     S.descriptor = S.wam.descriptor;
     S.params = params;
@@ -1444,6 +1465,10 @@ function connectOutput(S) {
     S.onReady = null;
     await S.ctx.close();
     if (S.synthCtx) { try { await S.synthCtx.close(); } catch {} }
+    // The drop zone writes through the adapter, which is about to be gone — tear it
+    // down (this is what unbinds the document-level drag guard) and let the next
+    // start re-mount it against the new adapter.
+    if (S.fileUpload) { try { S.fileUpload.destroy(); } catch {} S.fileUpload = null; }
     S.ctx = null; S.wam = null; S.synth = null; S.synthCtx = null; S.analyser = null;
     S.pool = []; S.voiceByChan.clear(); S.voiceClock = 0;
     S.limiter = null; S.inputTrim = null;   // belong to the closed context; rebuilt on next start
@@ -1464,6 +1489,11 @@ function connectOutput(S) {
     return S.inputTrim?.gain.value ?? null;
   };
   window.__player = {
+    // Releases the shell's document-level listeners (today: the file-upload drag
+    // guard). Without this, re-mounting a demo stacks another pair on every mount.
+    destroy: () => {
+      if (S.fileUpload) { try { S.fileUpload.destroy(); } catch {} S.fileUpload = null; }
+    },
     setParam: (id, v) => S.wam?.setParameterValue(id, v),
     getParam: (id) => S.wam?.getParameterValue(id),
     noteOn: (n, v = 100) => noteOn(n, "test", v),
