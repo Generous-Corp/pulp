@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06631"></a>
+## [0.663.1] - 2026-07-13
+
+- test(view): measure the per-frame Yoga layout rebuild — and conclude not to optimize it ([#6052](https://github.com/danielraffel/pulp/pull/6052))
+- test(view): setWidgetShader's contract holds without Skia too ([#6076](https://github.com/danielraffel/pulp/pull/6076))
+- build(examples): order ParamInfo designators declaration-first (GCC rejects them) ([#6082](https://github.com/danielraffel/pulp/pull/6082))
+- fix(skill): pulp-web-demo import-map resolution + mountDemo feature parity ([#6080](https://github.com/danielraffel/pulp/pull/6080))
+- skill(pulp-web-demo): add the generative web-demo skill ([#6078](https://github.com/danielraffel/pulp/pull/6078))
+- fix(view): include host_frame_pump outside PULP_HAS_SKIA (mac build break) ([#6079](https://github.com/danielraffel/pulp/pull/6079))
+- ci(release): remove run-name — it hid every release run from the VM supervisor ([#6077](https://github.com/danielraffel/pulp/pull/6077))
+
 <a id="v06630"></a>
 ## [0.663.0] - 2026-07-13
 
@@ -6336,6 +6347,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.663.1]: https://github.com/danielraffel/pulp/releases/tag/v0.663.1
 [0.663.0]: https://github.com/danielraffel/pulp/releases/tag/v0.663.0
 [0.662.0]: https://github.com/danielraffel/pulp/releases/tag/v0.662.0
 [0.661.0]: https://github.com/danielraffel/pulp/releases/tag/v0.661.0
