@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06640"></a>
+## [0.664.0] - 2026-07-13
+
+- feat(skill): pulp-web-demo file upload — config + drop-zone contract ([#6091](https://github.com/danielraffel/pulp/pull/6091))
+- fix(skill): pulp-web-demo gallery.emit + optional theme; restore clobbered gotchas ([#6085](https://github.com/danielraffel/pulp/pull/6085))
+- fix(test): remove ODR violation in the MF-3 denormal null test ([#6081](https://github.com/danielraffel/pulp/pull/6081))
+
 <a id="v06631"></a>
 ## [0.663.1] - 2026-07-13
 
@@ -6347,6 +6354,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.664.0]: https://github.com/danielraffel/pulp/releases/tag/v0.664.0
 [0.663.1]: https://github.com/danielraffel/pulp/releases/tag/v0.663.1
 [0.663.0]: https://github.com/danielraffel/pulp/releases/tag/v0.663.0
 [0.662.0]: https://github.com/danielraffel/pulp/releases/tag/v0.662.0
