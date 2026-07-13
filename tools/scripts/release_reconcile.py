@@ -28,8 +28,15 @@ SEMVER_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # Pulls the tag out of a job name like "Resolve macOS runner — v0.659.0".
 SEMVER_IN_TEXT = re.compile(r"v\d+\.\d+\.\d+")
 
-# Terminal states. A run in any other state is still doing something.
+# A run in any of these states has not finished.
 LIVE_RUN_STATES = {"queued", "in_progress", "requested", "waiting", "pending"}
+# ...but only THIS one means a runner actually picked the job up. The distinction
+# is load-bearing: a run that is merely QUEUED has no runner, and if no runner will
+# ever serve it (a bad `runs-on`, a label nothing matches, an offline host pool) it
+# stays queued forever. "Slow" and "never started" look identical in
+# LIVE_RUN_STATES, and conflating them is how a release can hang indefinitely with
+# nothing ever escalating.
+WORKING_RUN_STATES = {"in_progress"}
 
 INCIDENT_TITLE = "Release reconciler: tags stuck after repeated re-dispatch"
 INCIDENT_LABEL = "release-guard"
@@ -42,6 +49,7 @@ IN_FLIGHT = "in-flight"      # a run is working on it; leave it alone
 GRACE = "grace"              # too young to judge
 TOO_OLD = "too-old"          # outside the reconciliation window
 SUPERSEDED = "superseded"    # a newer version already shipped; not worth a rebuild
+STUCK_QUEUE = "stuck-queue"  # queued for hours and never started — no runner is coming
 DEFERRED = "deferred"        # a NEWER tag is still building; wait and see
 REDISPATCH = "redispatch"    # stuck, and we still have budget to retry
 ESCALATE = "escalate"        # stuck, and out of budget — a human must look
@@ -152,6 +160,7 @@ def decide(
     newest_published: tuple | None = None,
     newest_live: tuple | None = None,
     asset_floor: tuple | None = None,
+    stuck_queue_hours: int = 4,
 ) -> Decision:
     """Decide what to do about one tag. Pure."""
     age = now - state.created_at
@@ -175,11 +184,32 @@ def decide(
     if age > timedelta(hours=max_age_hours):
         return Decision(TOO_OLD, f"{state.tag} is older than {max_age_hours}h")
 
-    # A live run outranks every other signal, at ANY age. A release that has been
-    # building for four hours is slow, not stuck — and the whole reason releases
-    # were disappearing is that automation kept deciding otherwise. Re-dispatching
-    # here would also stampede.
-    if any(s in LIVE_RUN_STATES for s in state.run_states):
+    # A run that is actually RUNNING outranks every other signal, at ANY age. A
+    # release that has been building for four hours is slow, not stuck — and the
+    # whole reason releases were disappearing is that automation kept deciding
+    # otherwise. Re-dispatching here would also stampede.
+    if any(s in WORKING_RUN_STATES for s in state.run_states):
+        return Decision(IN_FLIGHT, f"{state.tag} has a release-cli run in flight")
+
+    # QUEUED IS NOT THE SAME AS RUNNING, and treating them alike is a blind spot.
+    # A queued job has no runner. If nothing will ever serve it — a `runs-on` no
+    # runner matches, a label typo, an offline host pool, or a workflow rename that
+    # hides the run from a self-hosted supervisor's queue filter — it stays queued
+    # FOREVER while looking, to a naive check, exactly like a slow build. That is
+    # precisely how the release lane hung for a day: runs sat queued, every watchdog
+    # saw "in flight", and nothing ever escalated.
+    #
+    # So: still queued, hours after the tag was cut, means no runner is coming.
+    # Escalate to a human — re-dispatching would just mint another queued run on the
+    # same broken route.
+    queued = [s for s in state.run_states if s in LIVE_RUN_STATES]
+    if queued and age > timedelta(hours=stuck_queue_hours):
+        return Decision(
+            STUCK_QUEUE,
+            f"queued for over {stuck_queue_hours}h and never started — no runner is "
+            f"serving this job (check `runs-on` labels and the runner pool)",
+        )
+    if queued:
         return Decision(IN_FLIGHT, f"{state.tag} has a release-cli run in flight")
 
     # No live run and no release yet — but the tag may simply have been pushed
@@ -510,6 +540,7 @@ def main() -> int:
             grace_minutes=grace, max_age_hours=max_age, max_attempts=max_attempts,
             newest_published=newest_published, newest_live=newest_live,
             asset_floor=asset_floor,
+            stuck_queue_hours=int(os.environ.get("STUCK_QUEUE_HOURS", "4")),
         )
         print(f"  [{decision.action:11}] {decision.reason}")
         if decision.action == REDISPATCH:
@@ -518,7 +549,7 @@ def main() -> int:
                 continue
             budget -= 1
             redispatch(repo, state.tag, dry_run)
-        elif decision.action in (ESCALATE, INCOMPLETE):
+        elif decision.action in (ESCALATE, INCOMPLETE, STUCK_QUEUE):
             report.append((state.tag, decision.reason))
         elif (
             state.unresolved(newest_published=newest_published, floor=asset_floor)

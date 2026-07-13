@@ -124,6 +124,64 @@ PR merge to main
 └─────────────────────────────────────────────────────────┘
 ```
 
+## Where each release leg runs (and how to move it)
+
+Routing is **data**, not code. `release-cli.yml`'s resolver
+(`tools/scripts/resolve_release_runners.py`) emits a `platform -> runs-on` map from
+repo variables, and each build/smoke leg indexes it. Moving a leg between GitHub,
+the local VM pool, or one specific machine is a variable — never a PR.
+
+```bash
+tools/scripts/release_routing.sh show                      # where everything runs
+tools/scripts/release_routing.sh local  linux-arm64        # -> local pool
+tools/scripts/release_routing.sh pin    linux-arm64 m5     # -> that one machine
+tools/scripts/release_routing.sh github linux-arm64        # -> back to GitHub
+```
+
+**The fluidity invariant:** with every variable unset, routing is byte-identical to
+GitHub-hosted. So `github <leg>` is a complete revert and takes effect on the next
+tag. If the local pool is down, getting back to GitHub is one command.
+
+**Why this exists.** Only the macOS legs used to be variable-driven; every other leg
+fell through to `|| matrix.os` — a literal GitHub-hosted label. That single
+fallthrough is the *entire* reason Linux and Windows releases could not use the
+self-hosted VMs that were already booted and idle. Measured on v0.663.1: the local
+macOS VM built `darwin-arm64` in **6.4 min after a 0.8 min wait**, while the hosted
+legs took **39-72 min to execute** and `darwin-x64` sat **127 minutes** in the queue.
+
+### What can and cannot go local
+
+| leg | local? | why |
+|---|---|---|
+| `darwin-arm64` | yes | native |
+| `darwin-x64` | yes | already a **cross-compile** on Apple Silicon; the release golden has Rosetta, so the smoke can run the x86_64 binary it just built (verified) |
+| `linux-arm64` | yes | native on the ARM Linux VM |
+| `windows-arm64` | yes | native on the ARM Windows VM |
+| `linux-x64` | **no preset** | the Linux VM is an ARM64 guest, so x86_64 means emulation |
+| `windows-x64` | **no preset** | Windows-on-ARM/Prism emulation; keep GitHub authoritative |
+
+The two x64 legs ship **real artifacts**. A subtly-wrong emulated binary is worse
+than a slow correct one, and their hosted queues are near-zero anyway — the pain was
+never there. You can still force them with an explicit labelset, but you have to
+mean it.
+
+### Pool vs one machine
+
+A bare labelset targets the **pool** — GitHub hands the job to whichever matching
+runner registers first. **GitHub Actions has no runner priority**, so a pool
+labelset gives you no M3-then-M5-then-M1 ordering; tartci's supervisor-side
+`priority_demand` / yield knobs are where real ordering would live. Until then,
+`pin` is the deterministic lever.
+
+### Still on the table
+
+- **ccache is not enabled for release builds.** The VM mounts the host ccache and
+  release-cli never uses it, so every release build is a cold compile — and on
+  Linux/Windows the tree is compiled TWICE (CLI with WebView=OFF, then the SDK with
+  WebView=ON; macOS symlinks `build-sdk -> build` and avoids it). This is the
+  largest remaining win and is tracked separately, because a change that could
+  affect a shipped binary deserves its own measured PR.
+
 ## Why publication lives in one job
 
 Publication used to be a handshake across three workflows: `release-cli`

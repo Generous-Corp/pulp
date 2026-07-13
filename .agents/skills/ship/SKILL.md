@@ -1151,6 +1151,46 @@ asserts `run-name` never returns.
 run is not cosmetic. Before changing it, grep the tartci supervisor config
 (`TARTCI_RUNNER_WORKFLOW_NAME`) for anything matching on it.
 
+
+### Release legs are individually routable (local pool / one machine / GitHub)
+
+`release-cli.yml` resolves each leg's runner from a `platform -> runs-on` map
+(`tools/scripts/resolve_release_runners.py`), driven by per-leg repo variables.
+Moving a release build is a variable, never a code change:
+
+```bash
+tools/scripts/release_routing.sh show
+tools/scripts/release_routing.sh local  linux-arm64      # -> local VM pool
+tools/scripts/release_routing.sh pin    linux-arm64 m5   # -> that one machine
+tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
+```
+
+**Fluidity invariant:** every variable unset == today's GitHub-hosted routing. If
+the local pool is down, `github <leg>` is a full revert in one command.
+
+Facts worth keeping (measured on v0.663.1):
+
+- The local macOS VM built `darwin-arm64` in **6.4 min after a 0.8 min wait**.
+  GitHub-hosted legs took **39-72 min to EXECUTE**, and `darwin-x64` sat **127 min**
+  in the hosted queue. The queue, not the compile, was the release's long pole.
+- `darwin-x64` needs **no Intel machine** — it is already a cross-compile
+  (`-DCMAKE_OSX_ARCHITECTURES=x86_64`), and the release golden has Rosetta, so the
+  smoke leg can run the x86_64 binary it just built. Verified by booting the golden.
+- **Do NOT batch both arches into one job to "reuse the warm VM".** The host ccache
+  is already mounted into every ephemeral VM (that is why the build was 6.4 min), and
+  two macOS VMs run in parallel per host (`TARTCI_MACOS_HARD_MAX=2`). Batching would
+  serialize arm64 -> x64 to save a ~1-minute CoW boot. It is a net loss.
+- **The x64 Linux/Windows legs have no local preset.** Both VMs are ARM64 guests, so
+  x86_64 there means emulation, and these are shipped artifacts. Their hosted queues
+  are near-zero — the pain was never there.
+- **GitHub Actions has NO runner priority.** A pool labelset does not give
+  M3-then-M5-then-M1 ordering; the job goes to whichever matching runner registers
+  first. Ordering belongs on the tartci supervisor side (`priority_demand` / yield).
+  `pin` is the deterministic lever today.
+- **Host-label hygiene matters for pinning.** A supervisor that advertises two host
+  labels (e.g. both `pulp-host-m5` and `pulp-host-macstudio`) makes `pin` land
+  somewhere you did not choose. Check the labels before trusting a pin.
+
 ## One installer for a plugin: standalone + plugins + diagnostics (don't ship them separately)
 
 A user wants ONE installer, not a per-format `.pkg` plus a per-app `.dmg`. Do

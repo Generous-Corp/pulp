@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_reconcile import (  # noqa: E402
     DEFERRED,
+    STUCK_QUEUE,
     ESCALATE,
     GRACE,
     IN_FLIGHT,
@@ -67,21 +68,24 @@ class Decide(unittest.TestCase):
         )
 
     def test_slow_release_is_never_touched(self) -> None:
-        """A release that has been building for FIVE HOURS is slow, not stuck.
+        """A release that has been BUILDING for five hours is slow, not stuck.
 
         This is the whole point of the reconciler. The supersede reaper cancelled
         in-flight release runs once a newer tag published, on the theory that an
         older SemVer was obsolete. Releases routinely complete out of order here
         (the pipeline outlasts the gap between tags), so that theory destroyed
-        healthy releases whose binaries had all built green. A live run must
-        outrank every other signal, at any age.
+        healthy releases whose binaries had all built green.
+
+        NOTE the precision: this invariant is about a job that is actually RUNNING.
+        An earlier version of this test also asserted it for a merely QUEUED job,
+        which encoded the opposite bug — see QueuedIsNotRunning. A queued job has no
+        runner, and "waiting patiently forever for a runner that is never coming" is
+        a hang, not patience.
         """
-        for run_state in ("queued", "in_progress", "requested", "waiting", "pending"):
-            with self.subTest(run_state=run_state):
-                decision = decide(
-                    state(age_minutes=300, run_states=(run_state,)), NOW, **LIMITS
-                )
-                self.assertEqual(decision.action, IN_FLIGHT)
+        decision = decide(
+            state(age_minutes=300, run_states=("in_progress",)), NOW, **LIMITS
+        )
+        self.assertEqual(decision.action, IN_FLIGHT)
 
     def test_completed_run_that_never_published_is_redispatched(self) -> None:
         decision = decide(state(run_states=("completed",)), NOW, **LIMITS)
@@ -249,6 +253,57 @@ class UnresolvedTracking(unittest.TestCase):
         self.assertTrue(s.unresolved(**self.CTX))
 
 
+class QueuedIsNotRunning(unittest.TestCase):
+    """A job that never STARTED is stuck, not slow — and must escalate.
+
+    The reconciler's headline rule is "a live run outranks everything, at any age",
+    because slow != stuck. But `queued` and `in_progress` are both "live", and they
+    mean opposite things: an `in_progress` job has a runner and is making progress;
+    a `queued` job has NO runner. If nothing will ever serve it — a `runs-on` label
+    nothing matches, an offline host pool, or a workflow rename that hides the run
+    from a self-hosted supervisor's queue filter — it stays queued FOREVER while
+    looking exactly like a slow build.
+
+    That is not hypothetical: it is precisely how the release lane hung for a day.
+    Runs sat queued, every watchdog read "in flight", and nothing escalated. Routing
+    releases onto local VMs makes it MORE likely (a sleeping host = no runner), so
+    this guard is a prerequisite for that change, not an afterthought.
+    """
+
+    def test_queued_for_hours_and_never_started_escalates(self) -> None:
+        decision = decide(
+            state(age_minutes=6 * 60, run_states=("queued",)), NOW, **LIMITS
+        )
+        self.assertEqual(decision.action, STUCK_QUEUE)
+        self.assertIn("no runner is serving this job", decision.reason)
+
+    def test_a_RUNNING_job_is_still_left_alone_at_any_age(self) -> None:
+        """The original invariant must survive: slow is survivable."""
+        decision = decide(
+            state(age_minutes=10 * 60, run_states=("in_progress",)), NOW, **LIMITS
+        )
+        self.assertEqual(decision.action, IN_FLIGHT)
+
+    def test_a_running_job_outranks_a_sibling_queued_job(self) -> None:
+        decision = decide(
+            state(age_minutes=8 * 60, run_states=("queued", "in_progress")),
+            NOW, **LIMITS,
+        )
+        self.assertEqual(decision.action, IN_FLIGHT)
+
+    def test_normal_queueing_is_not_escalated(self) -> None:
+        """An hour in a busy queue is ordinary — don't cry wolf."""
+        decision = decide(
+            state(age_minutes=60, run_states=("queued",)), NOW, **LIMITS
+        )
+        self.assertEqual(decision.action, IN_FLIGHT)
+
+    def test_the_threshold_is_configurable(self) -> None:
+        s = state(age_minutes=3 * 60, run_states=("queued",))
+        self.assertEqual(decide(s, NOW, stuck_queue_hours=2, **LIMITS).action, STUCK_QUEUE)
+        self.assertEqual(decide(s, NOW, stuck_queue_hours=8, **LIMITS).action, IN_FLIGHT)
+
+
 class SupersededTagsAreNotRebuilt(unittest.TestCase):
     """Don't spend a 2-hour matrix rebuilding a release nobody will install.
 
@@ -278,6 +333,14 @@ class SupersededTagsAreNotRebuilt(unittest.TestCase):
             newest_published=self.NEWER, **LIMITS,
         )
         self.assertEqual(decision.action, IN_FLIGHT)
+
+    def test_a_queued_run_does_not_outrank_supersession_forever(self) -> None:
+        """A superseded tag whose run never started is not worth waiting on."""
+        decision = decide(
+            state(age_minutes=6 * 60, run_states=("queued",)), NOW,
+            newest_published=self.NEWER, **LIMITS,
+        )
+        self.assertNotEqual(decision.action, IN_FLIGHT)
 
     def test_the_newest_tag_is_never_superseded(self) -> None:
         decision = decide(

@@ -666,6 +666,50 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
         self.assertIn('[ "$auval" = "pass" ]', self.text)
 
 
+class EveryLegIsIndividuallyRoutable(unittest.TestCase):
+    """Each release leg must pick its runner from the resolver map.
+
+    Before this, only the macOS legs were variable-driven; every other leg fell
+    through to `|| matrix.os` — a literal GitHub-hosted label. That single
+    fallthrough is the entire reason Linux and Windows releases could not use the
+    self-hosted VMs that were already booted and idle on the local pool. The VMs
+    were there; the wiring was not.
+
+    Routing is now DATA (a platform -> runs-on map), so moving a leg between
+    GitHub, the local pool, or ONE specific machine is a repo variable — never a
+    code change. That matters because a slow SDK build hogging a box you need for
+    something else has to be movable in one command.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = yaml.safe_load(RELEASE_CLI.read_text(encoding="utf-8"))
+
+    def test_build_and_smoke_legs_index_the_resolver_map(self) -> None:
+        for job in ("build-cli", "smoke-cli"):
+            with self.subTest(job=job):
+                runs_on = self.workflow["jobs"][job]["runs-on"]
+                self.assertIn("resolve-macos-runner.outputs.map", runs_on)
+                self.assertIn("matrix.platform", runs_on)
+
+    def test_no_leg_falls_through_to_a_hardcoded_hosted_label(self) -> None:
+        """`|| matrix.os` is the bug: it pins a leg to GitHub with no way out."""
+        for job in ("build-cli", "smoke-cli"):
+            with self.subTest(job=job):
+                self.assertNotIn(
+                    "|| matrix.os",
+                    self.workflow["jobs"][job]["runs-on"],
+                    "A release leg falls through to its literal GitHub-hosted label "
+                    "again, so it cannot be routed to the local pool without editing "
+                    "the workflow.",
+                )
+
+    def test_the_resolver_checks_out_the_repo_before_running_its_script(self) -> None:
+        """The resolver is a repo script; without a checkout the job dies at once."""
+        steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
+        self.assertTrue(str(steps[0].get("uses", "")).startswith("actions/checkout"))
+
+
 class SignAndReleaseCannotTouchTheRelease(unittest.TestCase):
     """sign-and-release.yml must be structurally incapable of gating a release.
 
