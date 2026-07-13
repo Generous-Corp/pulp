@@ -298,6 +298,21 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   in-worklet), and transferring an `ArrayBuffer` OUT of an AudioWorklet is
   unreliable (the receiver gets a detached buffer) — clone small payloads (state,
   sysex) instead, and never transfer a caller-owned buffer (it detaches theirs).
+  **It also needs TWO EXTERNAL CHECKOUTS, and forgetting them is a silent build
+  with a loud, misleading failure.** The gallery's 23 plugins do not live in pulp —
+  they are in the public `danielraffel/pulp-example-plugins` and
+  `danielraffel/pulp-classic-effects` repos (the examples-out-of-core split), and
+  `wclap-build/CMakeLists.txt` declares each gallery target ONLY IF its plugin
+  header is present, skipping it quietly otherwise (deliberately — that is what
+  keeps the in-repo build green without the externals). So a job that checks out
+  pulp alone builds exactly PulpGain, skips all 23 without a word, and then dies
+  hundreds of lines later in `assemble-gallery.mjs` with *"missing wasm for
+  example-plugins/mono-synth"* — which reads like an assembler bug and is not one.
+  The two roots default to SIBLINGS of the pulp checkout, which `actions/checkout`
+  cannot produce (a `path:` cannot escape the workspace), so clone them under
+  `_ext/` and pass `-DPULP_EXAMPLE_PLUGINS_DIR` / `-DPULP_CLASSIC_EFFECTS_DIR`.
+  The lane now asserts a couple of gallery wasms exist right after the build, so
+  the cause is reported where it happens rather than downstream.
 - **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
   in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
   `tools/scripts/screenshot_sync_check.py` then diffs the manifest's `[trigger].paths`

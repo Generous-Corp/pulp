@@ -47,6 +47,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The gallery's 23 plugins do NOT live in pulp — they live in two separate
+      # public repos (the examples-out-of-core split), and wclap-build/CMakeLists.txt
+      # declares each gallery target ONLY IF its plugin header is present. A job that
+      # checks out pulp alone therefore builds exactly PulpGain, skips all 23 SILENTLY
+      # (by design, so the in-repo build stays green without them) — and then dies in
+      # assemble-gallery.mjs with "missing wasm for example-plugins/mono-synth". The
+      # skip is quiet; the assemble is not. Without these two checkouts this workflow
+      # cannot deploy the gallery at all, which is exactly how it broke.
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-example-plugins
+          path: _ext/pulp-example-plugins
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-classic-effects
+          path: _ext/pulp-classic-effects
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -74,17 +91,134 @@ jobs:
         working-directory: examples/web-demos/wclap-build
         run: |
           set -euo pipefail
+          # The two plugin roots default to SIBLINGS of the pulp checkout, which is not
+          # where actions/checkout can put them (a `path:` cannot escape the workspace),
+          # so point the cache vars at the _ext checkouts above.
           cmake -S . -B build \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DPULP_EXAMPLE_PLUGINS_DIR="$GITHUB_WORKSPACE/_ext/pulp-example-plugins" \
+            -DPULP_CLASSIC_EFFECTS_DIR="$GITHUB_WORKSPACE/_ext/pulp-classic-effects" \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
+
+          # A gallery target that got skipped builds NOTHING and says nothing, and the
+          # failure then surfaces hundreds of lines later as a missing wasm in the
+          # assembler. Fail here instead, where the cause is legible.
+          missing=""
+          for p in MonoSynth Chorus; do
+            [ -f "build/$p.wasm" ] || missing="$missing $p"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::gallery plugin wasm not built:$missing — the external plugin" \
+                 "checkouts are missing or PULP_EXAMPLE_PLUGINS_DIR/PULP_CLASSIC_EFFECTS_DIR" \
+                 "point somewhere wrong, so wclap-build/CMakeLists.txt skipped the targets."
+            exit 1
+          fi
+
+      # ── The three Emscripten trees the SuperConvolver pages are built from ──────
+      #
+      # Without these the assembler SKIPS /super-convolver/{wam,wclap}/ and
+      # /super-convolver-gpu/ — quietly, with a one-line note — and the deploy then
+      # publishes a site with those pages MISSING. Since the deploy replaces the whole
+      # site, "skipped" means DELETED from the live URL, not "left as it was". That is a
+      # far worse failure than the loud one it replaced, so they are built here.
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - name: Vendor choc for the WAM build
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch pulp-webview-dnd-poc1 \
+            https://github.com/danielraffel/choc.git "$HOME/choc-src"
+          echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
+
+      - name: Cache the Skia wasm slice
+        id: skia-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/skia-wasm
+          key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
+
+      - name: Build the WAM, Pulp-UI and WebGPU-DSP modules
+        run: |
+          set -euo pipefail
+
+          # WAM: the /super-convolver/wam/ page is the same plugin through the other web
+          # ABI, and the assembler emits the pair or neither.
+          emcmake cmake -S examples/web-demos/wasm-build -B examples/web-demos/wasm-build/build \
+            -DCMAKE_BUILD_TYPE=Release -DPULP_WAM_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
+          cmake --build examples/web-demos/wasm-build/build -j"$(nproc)"
+
+          # Skia wasm slice (Ganesh/WebGL2) — the Pulp UI module's one binary dependency.
+          # URL + sha256 come from the manifest, so this lane and the dependency audit
+          # cannot disagree about which slice is in use.
+          if [ ! -d "$HOME/skia-wasm" ]; then
+            read -r url sha < <(python3 - <<'PY'
+          import json
+          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
+                     if d["name"] == "Skia")
+          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
+          print(a["url"], a["sha256"])
+          PY
+          )
+            curl -fsSL "$url" -o /tmp/skia-wasm.zip
+            echo "$sha  /tmp/skia-wasm.zip" | sha256sum -c -
+            mkdir -p "$HOME/skia-wasm"
+            unzip -q /tmp/skia-wasm.zip -d "$HOME/skia-wasm"
+          fi
+
+          # Pulp's own GPU UI, compiled to wasm. Both SuperConvolver pages mount it.
+          emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
+            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm"
+          cmake --build build-webui -j"$(nproc)"
+
+          # The Skia-free WebGPU DSP module the GPU page's worker instantiates. Guarded:
+          # the GPU-audio lane does not exist on every branch this workflow runs from, and
+          # the assembler already omits /super-convolver-gpu/ when its tree is absent. A
+          # bare `cmake -S` on a missing dir is a hard error, which would take the whole
+          # deploy down for a page that is legitimately not there.
+          if [ -d examples/web-demos/gpu-audio ]; then
+            emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
+              -DCMAKE_BUILD_TYPE=Release
+            cmake --build build-gpu-dsp -j"$(nproc)"
+          else
+            echo "note: examples/web-demos/gpu-audio is not in this tree — /super-convolver-gpu/ will not be emitted."
+          fi
 
       - name: Assemble self-contained deploy dir
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: |
+          set -euo pipefail
           node assemble.mjs                 # single-plugin isolation proof (/)
           node assemble-player.mjs          # shared-player WebCLAP demo (/player/)
-          node assemble-gallery.mjs         # the demo galleries + super-convolver (both ABIs)
+          gpu_args=""
+          [ -d "$GITHUB_WORKSPACE/build-gpu-dsp" ] && gpu_args="--gpu-build $GITHUB_WORKSPACE/build-gpu-dsp"
+          # shellcheck disable=SC2086
+          node assemble-gallery.mjs \
+            --wam-build "$GITHUB_WORKSPACE/examples/web-demos/wasm-build/build" \
+            --ui-build  "$GITHUB_WORKSPACE/build-webui" \
+            $gpu_args
+
+          # A page the assembler SKIPPED is a page this deploy DELETES from the live site
+          # — the deploy replaces the whole thing, so "not emitted" and "removed" are the
+          # same event, and the assembler only says so in a one-line note nobody reads.
+          # Fail loudly instead. If one of these is genuinely being retired, remove it from
+          # this list in the same change.
+          #
+          # /super-convolver-gpu/ is deliberately NOT listed: it is emitted conditionally
+          # (GPU_IR_HANDOFF_WIRED), so requiring it here would hard-fail every deploy made
+          # while that page is legitimately withheld. Add it to this list in the same
+          # change that makes it unconditional.
+          for p in super-convolver/wam super-convolver/wclap; do
+            [ -f "public/$p/index.html" ] || {
+              echo "::error::$p was NOT assembled — deploying now would delete it from the" \
+                   "live site. Its build tree (--wam-build / --ui-build / --gpu-build) is" \
+                   "missing or empty; see the assembler's skip note above for which."
+              exit 1
+            }
+          done
 
       # OG previews are rendered from the ASSEMBLED pages, on every deploy, so a
       # change to a plugin's UI cannot leave a stale unfurl image behind: the

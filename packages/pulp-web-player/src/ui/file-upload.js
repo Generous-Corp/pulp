@@ -23,13 +23,14 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 /**
- * @param {object}   o
- * @param {Element}  o.host     the #fileup slot in the panel
- * @param {object}   o.adapter  the live HostAdapter
- * @param {object}   o.cfg      opts.fileUpload — { accept, label, hint, revertLabel, onFile, onRevert }
+ * @param {object}     o
+ * @param {Element}    o.host     the #fileup slot in the panel
+ * @param {object}     o.adapter  the live HostAdapter
+ * @param {AudioContext} o.ctx    the demo's live AudioContext (see `api.ctx` below)
+ * @param {object}     o.cfg      opts.fileUpload — { accept, label, hint, revertLabel, onFile, onRevert }
  * @returns {{destroy():void}|null}
  */
-export function mountFileUpload({ host, adapter, cfg }) {
+export function mountFileUpload({ host, adapter, ctx, cfg }) {
   if (!host || !cfg) return null;
 
   const label = cfg.label || "Choose a file…";
@@ -56,8 +57,15 @@ export function mountFileUpload({ host, adapter, cfg }) {
 
   // Handed to the consumer so nobody re-derives the "loading a file must not reset
   // the knobs" trick: read the live state, keep its params, swap only the blob.
+  //
+  // `ctx` is here because the encoding an audio plugin wants is almost always a
+  // DECODE, and decodeAudioData is a method on the AudioContext — the SESSION's, so
+  // the PCM arrives already at the rate the plugin runs at. Without it every such
+  // consumer would either smuggle a context in through an onReady closure (implicit,
+  // and ordered by luck) or build a second AudioContext at the wrong sample rate.
   const api = {
     adapter,
+    ctx,
     setMessage,
     writeBlob: (bytes) => setPluginBlob(adapter, bytes),
   };

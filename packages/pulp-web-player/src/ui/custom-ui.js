@@ -35,12 +35,32 @@ const LOADING_CLASS = "pw-customui-loading";
 // editor slams in: the page visibly assembles in stages, which is exactly what a
 // first-time visitor reports as "it loads weird". Called by the shell before it
 // awaits the adapter; mountCustomUi() later takes the same box over.
+// `#params` is a CSS GRID sized for the generated parameter cells. Overriding it to
+// `display:block` for the reservation DESTROYS that grid, and if the custom UI then
+// fails or is slow (a browser without WebGL2, a stalled multi-MB wasm), the shell
+// falls back to the generated grid — into a host that is no longer a grid, so every
+// control stacks vertically. That shipped, and it is what a Safari user saw.
+//
+// So stash the ORIGINAL display before touching it, and restore from the stash —
+// never from `host.style.display`, which by then is our own override.
+const ORIG_DISPLAY = "pwOrigDisplay";
+
 export function reserveCustomUiSlot(host) {
   if (!host || host.querySelector("." + LOADING_CLASS)) return;
+  if (!(ORIG_DISPLAY in host.dataset)) host.dataset[ORIG_DISPLAY] = host.style.display || "";
   host.style.display = "block";
   host.style.minHeight = "var(--pw-customui-h, 380px)";
   host.style.position = "relative";
   host.appendChild(makeLoadingPlaceholder());
+}
+
+/// Put the host back exactly as it was found — grid display, no reserved height.
+function restoreHost(host) {
+  host.style.display = host.dataset[ORIG_DISPLAY] ?? "";
+  delete host.dataset[ORIG_DISPLAY];
+  host.style.minHeight = "";
+  host.style.position = "";
+  host.querySelector("." + LOADING_CLASS)?.remove();
 }
 
 function makeLoadingPlaceholder() {
@@ -58,13 +78,24 @@ function makeLoadingPlaceholder() {
     animation: "pw-customui-pulse 1.6s ease-in-out infinite",
     pointerEvents: "none",
   });
-  if (!document.getElementById("pw-customui-css")) {
-    const css = document.createElement("style");
-    css.id = "pw-customui-css";
-    css.textContent = "@keyframes pw-customui-pulse{0%,100%{opacity:.45}50%{opacity:.85}}";
-    document.head.appendChild(css);
-  }
+  injectPulseCss();
   return el;
+}
+
+// The keyframes the placeholder animates against, injected once. Tracked with a
+// module-scoped flag rather than an id lookup: `document.getElementById` is not part
+// of the minimal DOM the player's unit tests run against, and reaching into the
+// document's global id namespace to answer "did I already do this?" is a worse way to
+// remember something this module already knows.
+let pulseCssInjected = false;
+
+function injectPulseCss() {
+  if (pulseCssInjected || !document.head) return;
+  pulseCssInjected = true;
+  const css = document.createElement("style");
+  css.id = "pw-customui-css";
+  css.textContent = "@keyframes pw-customui-pulse{0%,100%{opacity:.45}50%{opacity:.85}}";
+  document.head.appendChild(css);
 }
 
 // factory(container, adapter, { params })
@@ -82,18 +113,18 @@ export function mountCustomUi({ host, adapter, factory, params = [], onFailed = 
 
   // The grid slot IS the custom UI's slot. #params is a CSS grid sized for the
   // generated cells; a custom renderer owns the whole box instead, so the grid
-  // display is suspended for as long as it is mounted and restored on destroy.
-  const gridDisplay = host.style.display;
+  // display is suspended while it is mounted and RESTORED FROM THE STASH on destroy
+  // (never from host.style.display — reserveCustomUiSlot has already overwritten it,
+  // and reading it back is what left the fallback grid stacked vertically).
   const container = document.createElement("div");
   container.id = CONTAINER_ID;
   container.className = "pw-customui";
-  host.style.display = "block";
 
   // The slot was already reserved (and is showing "Loading editor…") if the shell
   // called reserveCustomUiSlot() at start — which it does. Adopt that box rather
   // than making a second one, or the placeholder would be orphaned behind the
   // editor. If nothing reserved it, reserve it now (a consumer driving
-  // mountCustomUi directly).
+  // mountCustomUi directly). reserveCustomUiSlot owns the stash + the block display.
   if (!host.querySelector("." + LOADING_CLASS)) reserveCustomUiSlot(host);
   const placeholder = host.querySelector("." + LOADING_CLASS);
 
@@ -110,9 +141,7 @@ export function mountCustomUi({ host, adapter, factory, params = [], onFailed = 
 
   const unmount = () => {
     container.remove();
-    placeholder?.remove();
-    host.style.minHeight = "";
-    host.style.display = gridDisplay;
+    restoreHost(host);                // grid display back, exactly as found
   };
 
   let handle;
