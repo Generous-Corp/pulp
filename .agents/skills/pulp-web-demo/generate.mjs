@@ -112,6 +112,7 @@ for (const p of cfg.plugins) {
     ["widgets", p.widgets],
     ["choices", p.choices],
     ["inputGain", p.inputGain],
+    ["fileUpload", p.fileUpload],
     ["controllers", p.controllers],
     ["stateMemo", p.stateMemo],
   ].filter(([, v]) => v !== undefined && v !== null);
