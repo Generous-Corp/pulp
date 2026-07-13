@@ -29,9 +29,7 @@
 <body>
 <div id="app"></div>
 <script type="module">
-// Pinned player resolves via the import map; the cache-bust lives on the MAPPED URL
-// (a bare specifier with a ?query would not match the import-map key).
-import { mountShell, createWclapAdapter } from "{{PLAYER_PACKAGE}}";
+import { mountShell, createWclapAdapter } from "{{PLAYER_PACKAGE}}?v={{PLAYER_HASH}}";
 {{ADAPTER_IMPORT_LINE}}
 
 if (!self.crossOriginIsolated) {
@@ -51,7 +49,7 @@ if (!self.crossOriginIsolated) {
     createAdapter: {{ADAPTER_FACTORY}},
     tokensHref: {{TOKENS_HREF_JSON}},
     fontHref: {{FONTS_HREF_JSON}},
-    theme: {{THEME_MODE_JSON}}{{EXTRA_OPTS_BLOCK}}
+    theme: {{THEME_MODE_JSON}}{{PARAM_OVERRIDES_BLOCK}}{{MIDI_VIZ_BLOCK}}
   });
 }
 </script>
