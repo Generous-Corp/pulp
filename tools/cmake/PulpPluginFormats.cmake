@@ -42,9 +42,15 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/linuxmain.cpp)
     endif()
 
-    # Find VST3 entry point (convention: vst3_entry.cpp in source dir)
+    # Find VST3 entry point. A multi-plugin bundle names its entry
+    # `vst3_bundle_entry.cpp` (PULP_VST3_FACTORY_BEGIN/BUNDLE_CLASS×N/END) and
+    # takes precedence; a single plugin uses `vst3_entry.cpp` (PULP_VST3_PLUGIN).
+    # Both emit exactly one GetPluginFactory symbol, so the export list is
+    # unchanged — the bundle's factory just enumerates N classes internally.
     set(vst3_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
+        set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
         set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
     endif()
 
@@ -131,9 +137,15 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP GUI targets require Pulp::view")
     endif()
 
-    # Find CLAP entry point (convention: clap_entry.cpp in source dir)
+    # Find CLAP entry point. A multi-plugin bundle names its entry
+    # `clap_bundle_entry.cpp` (N × PULP_CLAP_BUNDLE_PLUGIN + one
+    # PULP_CLAP_BUNDLE_ENTRY) and takes precedence; a single plugin uses
+    # `clap_entry.cpp` (PULP_CLAP_PLUGIN). Both emit exactly one clap_entry
+    # symbol — the bundle's factory enumerates N plugins internally.
     set(clap_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_bundle_entry.cpp")
+        set(clap_entry "${CMAKE_CURRENT_SOURCE_DIR}/clap_bundle_entry.cpp")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
         set(clap_entry "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
     endif()
 

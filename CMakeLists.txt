@@ -152,6 +152,21 @@ option(PULP_LOTTIE "Enable Lottie animation playback via the bundled skottie mod
 # exportDesignTokens) stays compiled regardless (see core/view/src/w3c_tokens.cpp).
 # When OFF, WidgetBridge::install_runtime_import_handlers() becomes a no-op.
 option(PULP_ENABLE_DESIGN_IMPORT "Compile the design-import authoring subsystem. Default ON; release/ship OFF." ON)
+# Plugin packaging model — the centralized single-vs-bundle default.
+# `single` (the default) = one plugin per binary via pulp_add_plugin. `bundle`
+# = one binary hosting N plugins via pulp_add_plugin_bundle (Expert Sleepers
+# Silent Way style). This is an opinionated default: a project opts into
+# bundling in ONE place rather than per-macro. It records intent and is surfaced
+# in `pulp status`; the actual choice is which CMake helper a target calls, so
+# both models stay fully supported regardless. See
+# docs/reference/opinionated-defaults.md and docs/guides/plugin-bundles.md.
+set(PULP_PLUGIN_PACKAGING "single" CACHE STRING
+    "Default plugin packaging model: 'single' (one plugin per binary) or 'bundle' (N plugins per binary).")
+set_property(CACHE PULP_PLUGIN_PACKAGING PROPERTY STRINGS single bundle)
+if(NOT PULP_PLUGIN_PACKAGING STREQUAL "single" AND NOT PULP_PLUGIN_PACKAGING STREQUAL "bundle")
+    message(FATAL_ERROR "PULP_PLUGIN_PACKAGING must be 'single' or 'bundle', got '${PULP_PLUGIN_PACKAGING}'.")
+endif()
+
 option(PULP_ENABLE_SWIFT
        "Reserved compatibility toggle; currently no effect. SwiftPM and target helpers enable Swift where needed."
        OFF)

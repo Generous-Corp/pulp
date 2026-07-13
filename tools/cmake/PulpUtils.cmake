@@ -890,6 +890,106 @@ function(pulp_add_plugin target)
     message(STATUS "Pulp plugin: ${target} (formats: ${_built_formats_display})")
 endfunction()
 
+# ── pulp_add_plugin_bundle — ONE binary per format hosting MANY plugins ────
+#
+# The cross-format counterpart to the AU/VST3/CLAP bundle macros: a single
+# .vst3 / .clap that exposes N distinct plugins (Expert Sleepers Silent Way
+# style). Each format's entry TU (`<fmt>_bundle_entry.cpp` in the source dir)
+# uses the bundle macros to register N plugins into one binary; per-plugin
+# metadata (category, UI script, and — for AU — component codes) lives in the
+# macro calls, not in CMake args. The single-plugin path (`pulp_add_plugin`)
+# is unchanged and remains the default (see PULP_PLUGIN_PACKAGING).
+#
+# v1 supports the internally-enumerating formats CLAP and VST3 (each emits one
+# entry symbol whose factory lists N plugins). AU/AUv3/AAX bundles additionally
+# need a multi-component Info.plist and multi-symbol export, so they land as a
+# separate slice; requesting one here errors with that note rather than emitting
+# a silently-single-plugin binary.
+#
+#   pulp_add_plugin_bundle(MyBundle
+#       BUNDLE_NAME  "MyBundle"
+#       BUNDLE_ID    "com.example.mybundle"
+#       VERSION      "1.0.0"
+#       MANUFACTURER "Example"
+#       FORMATS      CLAP VST3
+#       SOURCES      plugin_a.cpp plugin_b.cpp   # union of the bundled plugins
+#   )
+function(pulp_add_plugin_bundle target)
+    cmake_parse_arguments(BUNDLE
+        ""
+        "BUNDLE_NAME;BUNDLE_ID;VERSION;MANUFACTURER"
+        "FORMATS;SOURCES"
+        ${ARGN}
+    )
+    if(NOT BUNDLE_BUNDLE_NAME)
+        set(BUNDLE_BUNDLE_NAME "${target}")
+    endif()
+    if(NOT BUNDLE_VERSION)
+        set(BUNDLE_VERSION "1.0.0")
+    endif()
+    if(NOT BUNDLE_MANUFACTURER)
+        set(BUNDLE_MANUFACTURER "Unknown")
+    endif()
+
+    foreach(_fmt ${BUNDLE_FORMATS})
+        if(_fmt STREQUAL "AU" OR _fmt STREQUAL "AUv3" OR _fmt STREQUAL "AAX")
+            message(FATAL_ERROR
+                "pulp_add_plugin_bundle(${target}): ${_fmt} bundles are not yet "
+                "supported. An ${_fmt} bundle needs a multi-component Info.plist and "
+                "multi-symbol export (a separate slice). Use CLAP and/or VST3 here.")
+        endif()
+    endforeach()
+
+    _pulp_configure_plugin_runtime_manifest(${target} "${BUNDLE_BUNDLE_ID}")
+
+    # All bundled plugins' code flows into each format binary. With SOURCES, an
+    # OBJECT library carries them; header-only plugins (inline factories pulled in
+    # by the per-format entry TU) use an INTERFACE library. Either way the objects
+    # reach the binary through the link (target_link_libraries(<fmt> PRIVATE
+    # ${target}_Core) in the format functions), so CORE_OBJECTS stays empty —
+    # mirroring pulp_add_plugin.
+    if(BUNDLE_SOURCES)
+        add_library(${target}_Core OBJECT ${BUNDLE_SOURCES})
+        target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
+        target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_definitions(${target}_Core PRIVATE
+            PULP_PLUGIN_NAME="${BUNDLE_BUNDLE_NAME}"
+            PULP_BUNDLE_ID="${BUNDLE_BUNDLE_ID}"
+            PULP_PLUGIN_VERSION="${BUNDLE_VERSION}")
+    else()
+        add_library(${target}_Core INTERFACE)
+        target_link_libraries(${target}_Core INTERFACE ${_PULP_FORMAT_TARGET})
+        target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+    endif()
+    set(PULP_${target}_CORE_OBJECTS "" CACHE INTERNAL "")
+    # No bundle-wide compile-time UI script: a bundle's plugins each resolve
+    # their own editor assets from the keyed registry at runtime, rather than
+    # from a single compile-time PULP_UI_SCRIPT_PATH shared by the whole binary.
+    set(PULP_${target}_UI_SCRIPT "" CACHE INTERNAL "")
+
+    if("VST3" IN_LIST BUNDLE_FORMATS AND PULP_HAS_VST3)
+        _pulp_add_vst3(${target} "${BUNDLE_BUNDLE_NAME}" "${BUNDLE_BUNDLE_ID}"
+                        "${BUNDLE_VERSION}" "${BUNDLE_MANUFACTURER}" "Effect")
+    endif()
+    if("CLAP" IN_LIST BUNDLE_FORMATS AND PULP_HAS_CLAP)
+        _pulp_add_clap(${target} "${BUNDLE_BUNDLE_NAME}" "${BUNDLE_BUNDLE_ID}"
+                        "${BUNDLE_VERSION}" "${BUNDLE_MANUFACTURER}" "Effect")
+    endif()
+
+    set(_built_formats)
+    foreach(_fmt VST3 CLAP)
+        if(TARGET ${target}_${_fmt})
+            list(APPEND _built_formats ${_fmt})
+        endif()
+    endforeach()
+    if(_built_formats)
+        list(JOIN _built_formats ";" _built_formats_display)
+    else()
+        set(_built_formats_display "none")
+    endif()
+    message(STATUS "Pulp plugin BUNDLE: ${target} (formats: ${_built_formats_display})")
+endfunction()
+
 # ── pulp_add_reload_logic — a hot-reloadable DSP "logic" library ──────────
 #
 # Builds the DSP half of a hot-reloadable plugin: a MODULE shared library that
