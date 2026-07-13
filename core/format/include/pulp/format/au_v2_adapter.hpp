@@ -429,6 +429,10 @@ struct MidiOutputPacketBuilder {
 class PulpAUEffect : public ausdk::AUMIDIEffectBase {
 public:
     explicit PulpAUEffect(AudioComponentInstance ci);
+    // Multi-plugin-bundle ctor: the component is bound to its own factory
+    // lexically (no global registry lookup). The single-arg ctor delegates
+    // here with the legacy `registered_factory()` for single-plugin bundles.
+    PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory);
 
     OSStatus GetParameterList(AudioUnitScope inScope,
                               AudioUnitParameterID* outParameterList,

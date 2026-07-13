@@ -78,6 +78,10 @@ inline std::size_t build_output_bus_infos(const PluginDescriptor& desc,
 class PulpAUInstrument : public ausdk::MusicDeviceBase {
 public:
     explicit PulpAUInstrument(AudioComponentInstance ci);
+    // Multi-plugin-bundle ctor — see PulpAUEffect. The bound factory is used
+    // both for the output-element-count probe in the base-ctor argument list
+    // and to construct the processor.
+    PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory factory);
 
     OSStatus GetParameterList(AudioUnitScope inScope,
                               AudioUnitParameterID* outParameterList,

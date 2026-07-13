@@ -110,6 +110,9 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-format-hardening LIBRARIES pulp::format)
 
+# Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
+pulp_add_test_suite(pulp-test-plugin-registry LIBRARIES pulp::format)
+
 # Standalone host render-path RT-safety guard. Drives the extracted
 # StandaloneApp::render_audio_block() seam for one steady-state block under
 # ScopedRtProcessProbe. Links the RT interposition trap TU + sets
@@ -290,6 +293,23 @@ if(APPLE AND PULP_HAS_AUSDK)
         OBJCXX_STANDARD 23
     )
     catch_discover_tests(pulp-test-au-v2-instrument-rt)
+
+    # Multi-plugin-bundle entry macros: two `aumf` plugins in one binary via
+    # PULP_AU_BUNDLE_MIDI_PLUGIN. Proves N-per-binary AUSDK_COMPONENT_ENTRY +
+    # keyed registration + lexical per-component factory binding compile and
+    # wire correctly. Needs the AudioUnitSDK the macro pulls in.
+    add_executable(pulp-test-au-bundle-entry test_au_bundle_entry.cpp)
+    target_link_libraries(pulp-test-au-bundle-entry PRIVATE
+        pulp::format
+        ausdk
+        Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework Foundation"
+    )
+    set_target_properties(pulp-test-au-bundle-entry PROPERTIES
+        CXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-bundle-entry)
 endif()
 
 # LV2 adapter tests

@@ -79,9 +79,13 @@ midi::MidiEvent decode_midi_event(uint8_t inStatus,
 }
 
 PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
+    : PulpAUEffect(ci, registered_factory())
+{
+}
+
+PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
     : AUMIDIEffectBase(ci, /*inProcessesInPlace=*/true)
 {
-    auto factory = registered_factory();
     if (factory) {
         processor_ = factory();
         if (processor_) {
