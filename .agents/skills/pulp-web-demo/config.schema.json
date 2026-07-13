@@ -1,0 +1,172 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pulp.audio/schemas/pulp-web-demo/config.schema.json",
+  "title": "pulp-web-demo config",
+  "description": "Declarative config for generating WAM+WCLAP browser demos of Pulp plugins with the shared @danielraffel/web-player. Lives at <repo-root>/.pulp-web-demo/config.json. All customization is data; the only executable seams are the optional typed module refs in .pulp-web-demo/hooks.mjs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "player", "plugins"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Config schema major version. The generator refuses mismatched majors.",
+      "type": "integer",
+      "enum": [1]
+    },
+    "player": {
+      "description": "The shared player package. Pinned by design — generated pages import this exact version; they never vendor a copy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "version"],
+      "properties": {
+        "package": { "type": "string", "default": "@danielraffel/web-player" },
+        "version": { "type": "string", "description": "Exact npm version or a CDN-pinned URL. No ranges — determinism.", "minLength": 1 },
+        "importBase": { "type": "string", "description": "Optional: base URL the pinned player is served from (self-host/CDN). Omit to use the package name via an import map." }
+      }
+    },
+    "theme": {
+      "description": "Skin the player via its token contract (19 colors + 1 font var). URLs are relative to the generated page or absolute.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokensHref": { "type": "string", "description": "Your design-token stylesheet (:root custom properties)." },
+        "fontHref": { "type": "string", "description": "Your @font-face stylesheet." },
+        "mode": { "type": "string", "enum": ["auto", "light", "dark"], "default": "auto" }
+      }
+    },
+    "deploy": {
+      "description": "Deployment profiles, selected INDEPENDENTLY for WAM and WCLAP. WAM works on plain github-pages; WCLAP needs cross-origin isolation, so its default is the header-capable cloudflare profile. github-pages+coi is a labeled fallback only.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wam": { "$ref": "#/$defs/deployProfile", "description": "Default profile: github-pages." },
+        "wclap": { "$ref": "#/$defs/deployProfile", "description": "Default profile: cloudflare (header-capable). Use github-pages+coi only as a fallback/mirror." }
+      }
+    },
+    "plugins": {
+      "description": "Catalog of plugins to generate demos for. One entry per plugin. Param controls come from the plugin's runtime descriptor (getParameterInfo()), NOT from here — only overrides live here.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/plugin" }
+    },
+    "gallery": {
+      "description": "Declarative gallery/navigation data. Cross-links between galleries are link data + a layout mode, not code.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "layout": { "type": "string", "enum": ["grid", "list", "single"], "default": "grid" },
+        "crossLinks": {
+          "description": "Other galleries to cross-link (e.g. the WAM gallery links to its WCLAP twin).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "href"],
+            "properties": {
+              "label": { "type": "string" },
+              "href": { "type": "string" },
+              "abi": { "type": "string", "enum": ["wam", "wclap"] }
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "description": "Site-wide unfurl/OG defaults. Per-plugin values override these. OG/metadata validation is BLOCKING in the generated CI.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "siteBase": { "type": "string", "description": "Canonical absolute base URL of the deployed site (used for OG urls + isolation path checks)." },
+        "ogImageStrategy": { "type": "string", "enum": ["screenshot", "text"], "default": "screenshot", "description": "screenshot = rendered per-page OG image (blocking); text = text-only unfurl (only if the public contract permits)." },
+        "sourceLinkBase": { "type": "string", "description": "Base URL for the per-page <meta name=\"pulp:source\"> link back to the plugin dir." }
+      }
+    },
+    "modules": {
+      "description": "The ONLY executable seams. Optional typed references into .pulp-web-demo/hooks.mjs. Everything else is data.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifactResolver": {
+          "type": "string",
+          "description": "Export name in hooks.mjs: (plugin, abi) => { dspUrl, processorUrl, extraAssets[] }. Maps a nonstandard build's outputs into the canonical site manifest. THE fork-avoidance seam."
+        },
+        "adapterModule": {
+          "type": "string",
+          "description": "Export name in hooks.mjs providing a non-default createAdapter (e.g. a custom WCLAP host). Omit to use the player's bundled WAM/WCLAP adapters."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "deployProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile"],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": ["github-pages", "cloudflare", "github-pages+coi"],
+          "description": "github-pages: plain static (WAM). cloudflare: server COOP/COEP/CORP (WCLAP default). github-pages+coi: service-worker isolation mirror (WCLAP FALLBACK only)."
+        },
+        "basePath": {
+          "type": "string",
+          "description": "SERVER path the gallery is served under (e.g. /my-plugins/). Used ONLY for isolation header/scope coverage — validated. Distinct from publicUrl.",
+          "default": "/"
+        },
+        "publicUrl": {
+          "type": "string",
+          "description": "Absolute public URL (origin + base path) this ABI is actually served from, e.g. https://example.com/my-plugins/ (WAM) or https://my-plugins.pages.dev/my-plugins/ (WCLAP). Used for canonical/OG page URLs. WAM and WCLAP commonly live on DIFFERENT origins."
+        },
+        "outputDir": {
+          "type": "string",
+          "description": "Repo-relative dir the generated static site is written to (e.g. docs).",
+          "default": "docs"
+        },
+        "projectName": {
+          "type": "string",
+          "description": "cloudflare only: the Pages project name."
+        }
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string", "description": "Stable slug; the demo is served at <basePath><id>/.", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "mode": { "type": "string", "enum": ["instrument", "audio-effect", "midi-effect"], "description": "Omit to derive from the plugin descriptor." },
+        "abis": {
+          "description": "Which web ABIs to generate for this plugin.",
+          "type": "array",
+          "items": { "type": "string", "enum": ["wam", "wclap"] },
+          "default": ["wam", "wclap"],
+          "minItems": 1
+        },
+        "artifacts": {
+          "description": "Explicit built-artifact URLs per ABI, relative to the plugin's demo dir. Omit to let the artifactResolver (or the default layout) locate them.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wam": { "$ref": "#/$defs/abiArtifacts" },
+            "wclap": { "$ref": "#/$defs/abiArtifacts" }
+          }
+        },
+        "paramOverrides": {
+          "description": "Widget/choices/initial overrides. Controls themselves come from getParameterInfo(); this only refines them.",
+          "type": "object"
+        },
+        "midiViz": { "type": "string", "enum": ["transpose", "mpe", "inspector", "sysex"] }
+      }
+    },
+    "abiArtifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dspUrl": { "type": "string" },
+        "processorUrl": { "type": "string" }
+      }
+    }
+  }
+}
