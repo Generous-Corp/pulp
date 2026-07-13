@@ -112,17 +112,28 @@ Any implementation MUST satisfy all six rules. Each one, skipped, makes the zone
 6. **Keep the button.** Drop is a shortcut, not a replacement — and it is the *only* path on
    touch devices.
 
-**Testing gotcha (this one bites):** drive it with real `DragEvent`s and a real `DataTransfer`
-carrying a real `File`. The real browser order when the pointer crosses into a child is
-**`dragenter` on the new target, then `dragleave` on the old** — so a test that fires a bare
-`dragleave` will report a highlight-flicker bug **that does not exist**.
+**Two testing gotchas — both make a correct implementation look broken:**
 
-**Reference implementation:** `examples/web-demos/super-convolver-ui/ir-source.js` (drop zone at
-the bottom of `mountIrLoader()`; both traps written up in its comments). It also shows a related
-trap worth knowing: **`decodeAudioData` resamples, so the decoded buffer never carries the file's
-real sample rate** — parse the WAV/AIFF header (`sniffAudioHeader`) if you want to tell the user
-the truth about their file. That code currently lives in a demo and should be **upstreamed into
-the shared player**, not copied.
+- Drive it with real `DragEvent`s and a real `DataTransfer` carrying a real `File`. The real
+  browser order when the pointer crosses into a child is **`dragenter` on the new target, then
+  `dragleave` on the old** — so a test that fires a bare `dragleave` will report a
+  highlight-flicker bug **that does not exist**.
+- **`dropEffect` cannot be asserted from a synthetic drag.** The spec honours it only during a
+  real user-initiated drag, so on a synthetic `DataTransfer` `dropEffect = "copy"` silently
+  stays `"none"` — a browser-driven test will "fail" a line that is perfectly correct. Pin rule 4
+  in a DOM shim (where the assignment is observable) and do **not** "fix" the code to satisfy a
+  synthetic drag.
+
+**The player implements this** (`src/ui/file-upload.js` in `@danielraffel/web-player`): declare
+`fileUpload` and you get the zone, the button, and all six rules for free, on both ABIs. The
+player owns the *interaction*; the **encoding is yours** — only the plugin knows how its bytes
+want to look — so pass `onFile(file, api)` and use the `api.writeBlob()` you're handed, which
+preserves the plugin's params (loading a file must never reset the knobs). With no `onFile`, the
+player writes the file's raw bytes and lets the plugin decode them.
+
+One related trap worth knowing: **`decodeAudioData` resamples**, so the decoded buffer never
+carries the file's real sample rate. If you tell the user anything about their file, parse the
+WAV/AIFF header instead of trusting the decoded buffer.
 
 ## Gotchas (learned the hard way — do not re-derive)
 
