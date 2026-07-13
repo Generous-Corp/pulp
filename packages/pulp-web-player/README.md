@@ -6,9 +6,9 @@ audio plugins. It is the runtime behind the live WAM demo galleries
 a real package so any plugin author can mount a token-faithful demo of their own
 plugin with one call.
 
-> Status: `0.x`, and `"private": true` in `package.json` while it is dogfooded
-> inside the SDK. The public `npm publish` is a single owner-gated step; everything
-> up to a green `npm publish --dry-run` is done. See "Publishing" below.
+> Status: **published on npm** — `@danielraffel/web-player`, currently `0.2.0`. Still
+> `0.x`, so minor versions may break. Releases go out via `scripts/publish.sh`; see
+> "Publishing" below.
 
 What you get in one `mountDemo()`:
 
@@ -72,20 +72,61 @@ requires it. Serve `.js`/`.mjs` with a JavaScript MIME type.
 | **`fontHref`** | URL of YOUR `@font-face` stylesheet |
 | **`theme`** | `"dark"` \| `"light"` \| `"auto"` (default: auto — follows `prefers-color-scheme`) |
 | `hostLabel`, `hostDocsHref` | header ABI label + link (default `WAM`) |
+| `galleryHref`, `sourceHref` | the "← Gallery" link, and the per-page source link (else read from `<meta name="pulp:source">`) |
+| `stateMemo` | `true` — show the state-memo surface (a text note that saves/reloads with the plugin) |
+| `controllers` | `true` — show the controller/preset surface |
+| **`fileUpload`** | `{ accept, label, hint, revertLabel?, onFile?, onRevert? }` — a file-dialog button **and** a drag-and-drop zone (see below) |
 | `createAdapter` | inject a non-WAM backend factory (see interface) |
 | `customUi` | **replace** the parameter grid with your own renderer (falls back to the grid on failure) |
 | `onReady` | **add** plugin-specific page chrome once the demo is live — `({ adapter, ctx, params, mode, root }) => handle?` |
 
 `onReady` is the seam for chrome that needs the live `HostAdapter` and/or the
-demo's `AudioContext`, neither of which exists at module scope: the SuperConvolver
-demo mounts its "load an impulse response" drop-zone there, decoding the file with
-`ctx` and writing the samples into the plugin through `adapter.setState()` (see
-`./state` below). It runs after the audio graph is wired, never gates the demo (a
+demo's `AudioContext`, neither of which exists at module scope. (For a *file* affordance
+you no longer need it — use `fileUpload` below, which owns the dialog + drop zone so every
+demo gets identical behaviour instead of hand-rolling one.) It runs after the audio graph
+is wired, never gates the demo (a
 throwing `onReady` is logged and the demo keeps running), and its returned handle's
 `destroy()` is called on Stop. It is **not** `customUi`: that one *replaces* the
 parameter grid.
 
 ---
+
+## File upload (dialog **and** drag-and-drop)
+
+If a plugin takes a user-supplied file — a convolver's impulse response, a sample, a
+preset — pass `fileUpload` and the player renders **both** a file-dialog button and a
+drop zone. A visible button is not enough (people drag files onto anything that looks
+like a target) and drop is not enough either (it does not exist on a phone, so the
+button is the only path on touch).
+
+```js
+mountDemo({
+  /* … */
+  fileUpload: {
+    accept: "audio/*,.wav,.aif,.aiff,.flac",
+    label: "Load impulse response…",
+    hint: "or drop a file here",
+    revertLabel: "Built-in reverb",          // optional: a "back to default" button
+    // The ENCODING is yours — only the plugin knows how its bytes want to look.
+    onFile: async (file, api) => {
+      const pcm = await decodeToWhateverThePluginWants(file);
+      await api.writeBlob(pcm);              // params-preserving (see below)
+      api.setMessage(`Loaded ${file.name}.`);
+    },
+  },
+});
+```
+
+**`api.writeBlob(bytes)`** writes into the plugin's PLST blob while **preserving its
+parameters** — so loading a file never resets the knobs. Omit `onFile` and the player
+writes the file's raw bytes and lets the plugin decode them itself.
+
+The zone implements the behaviours that, each one skipped, make a drop zone feel broken —
+notably a **document-level guard** (the browser's default action for a file dropped
+anywhere on the page is to *navigate to it*, which would destroy the running demo:
+audio context, loaded state, knob positions) and **depth-counted** `dragenter`/`dragleave`
+(it bubbles from the zone's own children, so a naive toggle strobes the highlight).
+`test/file-upload.test.mjs` pins all of it.
 
 ## Design-token contract (skinnability)
 
@@ -157,6 +198,10 @@ getState()          → Promise<Uint8Array>     // opaque; the shell wraps it in
 setState(bytes)
 onMidiOut           // assignable: (events, meta?) => void
 onParamsChanged     // assignable: (values, params) => void
+onLatencyChanged    // assignable: (samples) => void        (plugin latency changed)
+onStateDirty        // assignable: () => void               (plugin marked state dirty)
+beginGesture(id)    // param gesture start (host automation)
+endGesture(id)      // param gesture end
 createSecondary(urls) → Promise<HostAdapter>  // another instance on the SAME ctx
 destroy()
 ```
@@ -202,6 +247,11 @@ src/
     adapter.d.ts        # the host-adapter interface (typed contract)
   state/
     plugin-state.js     # the SDK's "PLST" plugin-state container (parse/build/splice)
+  ui/
+    custom-ui.js        # the customUi seam (replace the parameter grid)
+    file-upload.js      # the file dialog + drag-and-drop zone
+  state/
+    plugin-state.js     # the PLST container: parse/build, setPluginBlob/getPluginBlob
   widgets/              # canvas knob/fader/toggle/combo/meter + base
   theme/                # default Ink & Signal skin: tokens.css, fonts.css, Inter
   vendor/pulp-wasm/     # vendored SDK WAM runtime + WebCLAP host (see Provenance)
@@ -214,9 +264,13 @@ src/
 | `.` | `./src/index.js` |
 | `./shell` | `./src/shell.js` (host-agnostic; you always pass `createAdapter`) |
 | `./adapters/wam` | `./src/adapters/wam.js` |
+| `./adapters/wclap` | `./src/adapters/wclap.js` |
+| `./wclap-processor.js` | the worklet-resident WebCLAP host |
+| `./state` | `./src/state/plugin-state.js` (PLST container helpers) |
 | `./state` | `./src/state/plugin-state.js` — read/replace a plugin's OWN opaque blob without disturbing its parameters. ABI-agnostic (`getState`/`setState` are identical on WAM and WebCLAP), so a page can hand a plugin binary data — a sample, an impulse response, a wavetable — with no per-ABI entry point, and it survives a save/restore because it *is* the state. |
 | `./widgets` | `./src/widgets/index.js` |
 | `./theme/tokens.css`, `./theme/fonts.css` | the default skin |
+| `./package.json` | for consumers that need to read the manifest |
 
 ---
 
@@ -235,17 +289,36 @@ vendored player until this package is proven; a later step re-points them here.
 
 ## Testing
 
-- `npm test` — a static invariant check that the shell stays host-agnostic and the
-  WAM adapter exposes the full contract (`test/adapter-seam.test.mjs`).
+- `npm test` — four suites:
+  - `adapter-seam.test.mjs` — the shell stays host-agnostic and the WAM adapter exposes the full contract
+  - `wclap-adapter.test.mjs` — the WebCLAP adapter + its wasm32 ABI stay in lockstep
+  - `custom-ui.test.mjs` — `customUi` replaces the parameter grid and *nothing else*
+  - `file-upload.test.mjs` — the drop zone's six behaviours (incl. the document guard and
+    depth-counted `dragenter`/`dragleave`)
+
+  They run the real shell against a mock adapter on a small DOM shim (`test/dom-shim.mjs`).
 - `node scripts/pack-smoke.mjs` — packs the package, installs the tarball into a
   scratch consumer, and drives a real built WAM plugin headless (audio + a param +
   a state round-trip). See that script's header for what it asserts.
 
-## Publishing (owner-gated)
+## Publishing
 
-`npm publish --dry-run` from this directory reports exactly what would ship. The
-actual `npm publish` fixes the public name/scope/support expectation and is the
-**single owner-gated step** — do not run it without the owner's go. The package
-publishes as `@danielraffel/web-player`: the `@pulp` npm org was already taken by
-another party, so the package uses the publisher's own user scope (`@danielraffel`),
-which every npm account owns automatically and requires no org setup.
+`scripts/publish.sh` is the only supported path. Publishing by hand is a footgun: a
+stale checkout ships source that does not match `main` under a fresh version number,
+and **npm versions are immutable**.
+
+```sh
+./scripts/publish.sh --check-auth   # is this machine set up to publish unattended?
+./scripts/publish.sh --dry-run      # every guard, no publish
+./scripts/publish.sh                # publish
+```
+
+It refuses unless HEAD **is** `origin/main`, the tree is clean, the version is not
+already published, the tests pass on that exact commit, and the tarball actually
+carries the entrypoints it claims.
+
+Auth is **unattended**: the npm token is read from a `0600` file
+(`~/.config/pulp/secrets/npm-token`), written to a `0600` temp npmrc, and shredded on
+exit. 1Password holds only a *backup* — `./scripts/publish.sh --bootstrap` restores the
+file once per machine. (npm 2FA here is a passkey with no typeable OTP, so the token must
+be a **granular token with "Bypass 2FA" enabled**.)
