@@ -8,6 +8,11 @@ add_library(pulp-web-demos STATIC
     web_demos.cpp
 )
 
+# The browser GPU-compute worker module. Emscripten-only: under the native
+# toolchain the subdirectory declares no target (see its guard), so this costs
+# the native build nothing.
+add_subdirectory(gpu-audio)
+
 target_link_libraries(pulp-web-demos PUBLIC pulp::format)
 target_include_directories(pulp-web-demos PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

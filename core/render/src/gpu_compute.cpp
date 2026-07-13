@@ -1,11 +1,22 @@
 #include <pulp/render/gpu_compute.hpp>
 
-#ifdef PULP_HAS_SKIA
+// This file contains no Skia. It needs Dawn (webgpu_cpp.h) and nothing else.
+// Dawn happens to be *delivered* by the Skia prebuilt slice on native, which is
+// why the gate used to be spelled PULP_HAS_SKIA; the browser gets Dawn from
+// Emscripten's emdawnwebgpu port with no Skia anywhere in sight. PULP_HAS_DAWN
+// says what the code actually depends on.
+#ifdef PULP_HAS_DAWN
 
 #include <pulp/runtime/log.hpp>
 #include "webgpu/webgpu_cpp.h"
+
+// Dawn's *native* implementation headers: the instance factory and the C proc
+// table. emdawnwebgpu implements webgpu.h over the browser's navigator.gpu and
+// provides neither — see create_instance() for the two-arm seam.
+#if !defined(__EMSCRIPTEN__)
 #include "dawn/native/DawnNative.h"
 #include "dawn/dawn_proc.h"
+#endif
 
 #include "gpu_compute_pool.hpp"
 
@@ -928,11 +939,76 @@ static double now_us() {
             Clock::now().time_since_epoch()).count()) / 1000.0;
 }
 
+// Built-in WGSL for a pipeline label, or nullptr if the label is unknown. The
+// labels are exactly the ones create_pipelines() passes to create_pipeline() —
+// this table is the seam's namespace, so a pipeline added there without a row
+// here is simply not overridable.
+static const char* builtin_kernel_source(const char* label) {
+    if (!label) return nullptr;
+    static const std::unordered_map<std::string_view, const char*> kSources = {
+        {"magnitude",           kMagnitudeShader},
+        {"complex_multiply",    kComplexMultiplyShader},
+        {"fft_stockham",        kFftStockhamShader},
+        {"conv_bmul",           kComplexMulBroadcastShader},
+        {"multi_ir_mul",        kMultiIrMulShader},
+        {"multi_ir_combine",    kMultiIrCombineShader},
+        {"multi_fdl_mac",       kMultiFdlMacShader},
+        {"spectral_advance",    kSpectralAdvanceShader},
+        {"spectral_combine",    kSpectralCombineShader},
+        {"conv_in",             kConvStackInputShader},
+        {"conv_layer",          kConvStackLayerShader},
+        {"conv_head",           kConvStackHeadShader},
+        {"wavenet_rechannel",   kWavenetRechannelShader},
+        {"wavenet_layer",       kWavenetLayerShader},
+        {"wavenet_head",        kWavenetHeadShader},
+        {"wavenet_scale",       kWavenetScaleShader},
+        {"matmul",              kMatmulShader},
+        {"additive_synth",      kAdditiveSynthShader},
+        {"additive_synth_coop", kAdditiveSynthCoopShader},
+        {"modal_strike",        kModalStrikeShader},
+        {"modal_strike_coop",   kModalStrikeCoopShader},
+        {"granular_cloud",      kGranularShader},
+        {"dense_tanh",          kDenseTanhShader},
+    };
+    auto it = kSources.find(std::string_view(label));
+    return (it == kSources.end()) ? nullptr : it->second;
+}
+
+// Callback mode for every asynchronous WebGPU site in this file.
+//
+// Native Dawn resolves AllowProcessEvents callbacks from Instance::ProcessEvents(),
+// which is what the blocking readback path drives and what poll_readbacks() pumps.
+//
+// emdawnwebgpu does NOT: ProcessEvents() there does not resolve map callbacks at
+// all. Measured (headless Chrome, emsdk 6.0.2, DedicatedWorker, ProcessEvents()
+// driven from a setTimeout loop so the JS event loop turns between calls): an
+// AllowProcessEvents map callback never fired across 170+ pumped ticks, while an
+// AllowSpontaneous map on the same submit resolved from the JS event loop with
+// correct data — and resolved with ProcessEvents() never called at all. In the
+// browser the JS event loop IS the event queue; spontaneous is the only mode
+// that observes it.
+//
+// The rest of the async machinery is mode-agnostic: a spontaneous callback marks
+// the request resolved, and poll_readbacks() still decides when completions fire
+// and when a deadline expires.
+#if defined(__EMSCRIPTEN__)
+static constexpr wgpu::CallbackMode kAsyncCallbackMode =
+    wgpu::CallbackMode::AllowSpontaneous;
+#else
+static constexpr wgpu::CallbackMode kAsyncCallbackMode =
+    wgpu::CallbackMode::AllowProcessEvents;
+#endif
+
 // ── Implementation ──────────────────────────────────────────────────────────
 
 class DawnGpuCompute : public GpuCompute {
 public:
     ~DawnGpuCompute() override {
+        // Expire the liveness token first: the device-lost callback holds a
+        // weak_ptr to it and can fire during teardown (Dawn reports a destroyed
+        // device as lost), at which point `this` is already unwinding.
+        alive_.reset();
+
         // Outstanding async readbacks complete exactly once — the caller may be
         // waiting on that completion to route a block, so it fires here rather
         // than being silently dropped. Draining first also marks each request
@@ -976,7 +1052,9 @@ public:
         queue_ = nullptr;
         device_ = nullptr;
         instance_ = nullptr;
+#if !defined(__EMSCRIPTEN__)
         native_instance_.reset();
+#endif
     }
 
     bool initialize_from_surface(GpuSurface& surface) override {
@@ -996,6 +1074,18 @@ public:
     }
 
     bool initialize_standalone() override {
+#if defined(__EMSCRIPTEN__)
+        // Structurally impossible in a browser, so it fails loudly instead of
+        // returning a mysterious false: RequestAdapter/RequestDevice resolve only
+        // once control returns to the JS event loop, and there is no valid way to
+        // wait for that from inside this call (see kAsyncCallbackMode). The
+        // browser acquires its device in JS and hands it over.
+        runtime::log_error(
+            "GpuCompute: initialize_standalone() is not supported in the browser "
+            "— acquire the device in JS (navigator.gpu.requestDevice) and call "
+            "initialize_from_device()");
+        return false;
+#else
         if (!create_instance()) return false;
 
         wgpu::RequestAdapterOptions opts{};
@@ -1026,6 +1116,22 @@ public:
                 runtime::log_error("GpuCompute: WebGPU error ({}): {}",
                     static_cast<int>(type), std::string(msg.data, msg.length));
             });
+        // Device loss is normal behaviour, not an init failure: a browser tab can
+        // lose its device at any moment, and a native driver reset does the same.
+        // Every in-flight readback is completed as Failed rather than left to
+        // expire block after block with no way back.
+        dev_desc.SetDeviceLostCallback(
+            kAsyncCallbackMode,
+            [this, alive = std::weak_ptr<int>(alive_)](
+                const wgpu::Device&, wgpu::DeviceLostReason reason,
+                wgpu::StringView msg) {
+                // Dawn reports a *destroyed* device as lost, so this can land
+                // while ~DawnGpuCompute() is unwinding. The token is expired
+                // first in the dtor, which makes that case a no-op.
+                if (alive.expired()) return;
+                handle_device_lost(static_cast<int>(reason),
+                                   std::string(msg.data, msg.length));
+            });
 
         adapter_.RequestDevice(
             &dev_desc, wgpu::CallbackMode::AllowProcessEvents,
@@ -1040,6 +1146,58 @@ public:
         owns_device_ = true;
 
         return create_pipelines();
+#endif
+    }
+
+    // Adopt a device created elsewhere. The browser's DedicatedWorker awaits
+    // navigator.gpu.requestAdapter()/requestDevice() in JS and publishes the
+    // result as Module.preinitializedWebGPUDevice; the caller passes what
+    // emscripten_webgpu_get_device() returns. Natively this is the same handle
+    // style as initialize_from_surface(), minus the surface.
+    //
+    // A DeviceLost callback cannot be attached to an already-created device — it
+    // lives on the descriptor — so an adopted device's owner reports loss via
+    // notify_device_lost() (in the browser, from the `device.lost` promise).
+    bool initialize_from_device(void* wgpu_device) override {
+        if (!wgpu_device) return false;
+
+        // The caller keeps ownership of the handle, so take a reference rather
+        // than adopting the caller's: Acquire() would steal a refcount we do not
+        // own and tear the device down under the JS side.
+        device_ = wgpu::Device(static_cast<WGPUDevice>(wgpu_device));
+        if (!device_) return false;
+
+        // Instance creation is independent of the device and is what
+        // poll_readbacks() pumps natively; in the browser it is a formality (the
+        // JS event loop is the event queue) but wgpuCreateInstance() is valid
+        // there and costs nothing.
+        if (!instance_ && !create_instance()) return false;
+
+        queue_ = device_.GetQueue();
+        if (!queue_) return false;
+        owns_device_ = false;
+        device_lost_ = false;
+
+        return create_pipelines();
+    }
+
+    bool device_lost() const override { return device_lost_; }
+
+    void notify_device_lost() override {
+        handle_device_lost(-1, "reported by device owner");
+    }
+
+    // Device loss is a state transition, not an error path. Everything in flight
+    // is completed as Failed (a map on a lost device never resolves, so leaving
+    // the queue alone would expire block after block forever), and the object is
+    // marked uninitialized so the owner re-acquires a device and re-prepare_*()s
+    // rather than dispatching into a dead device.
+    void handle_device_lost(int reason, const std::string& msg) {
+        if (device_lost_) return;
+        device_lost_ = true;
+        initialized_ = false;
+        runtime::log_error("GpuCompute: device lost (reason {}): {}", reason, msg);
+        drain_readbacks(ReadbackStatus::Failed);
     }
 
     // ── Compute operations ──────────────────────────────────────────────
@@ -2635,6 +2793,18 @@ public:
 
     // ── Device sharing verification ─────────────────────────────────────
 
+#if defined(__EMSCRIPTEN__)
+    // Verifying device sharing means submitting from Skia Graphite and compute on
+    // one device and reading the result back — both blocking. There is no Skia
+    // and no blocking readback in the browser GPU-audio module, and the whole
+    // point of that module is that it needs neither. The method is pure virtual,
+    // so it stays defined and says so.
+    DeviceSharingReport verify_device_sharing(GpuSurface&) override {
+        DeviceSharingReport report;
+        report.notes = "not supported in browser";
+        return report;
+    }
+#else
     DeviceSharingReport verify_device_sharing(GpuSurface& surface) override {
         DeviceSharingReport report;
 
@@ -2720,9 +2890,27 @@ public:
 
         return report;
     }
+#endif  // !__EMSCRIPTEN__
 
     // ── Benchmarking ────────────────────────────────────────────────────
 
+#if defined(__EMSCRIPTEN__)
+    // Both benchmarks time the GPU by busy-waiting on ProcessEvents() until the
+    // map lands. That is a hard deadlock in the browser: the spin starves the JS
+    // event loop that would resolve the map, and ProcessEvents() does not resolve
+    // map callbacks there at all. Timing is not what the browser module is for —
+    // it reports per-block stats from the async path (async_stats()) — so the
+    // blocking benchmarks are compiled out rather than emulated.
+    std::vector<BenchmarkResult> benchmark_magnitude(
+        const std::vector<uint32_t>&, int) override {
+        return {};
+    }
+
+    std::vector<BenchmarkResult> benchmark_complex_multiply(
+        const std::vector<uint32_t>&, int) override {
+        return {};
+    }
+#else
     std::vector<BenchmarkResult> benchmark_magnitude(
         const std::vector<uint32_t>& sizes, int iterations) override {
         std::vector<BenchmarkResult> results;
@@ -2910,6 +3098,7 @@ public:
 
         return results;
     }
+#endif  // !__EMSCRIPTEN__
 
     // ── Asynchronous readback ───────────────────────────────────────────
 
@@ -2921,6 +3110,9 @@ public:
             || !on_complete) {
             return 0;
         }
+        // Reject at the cap BEFORE doing any GPU work — a submit whose readback
+        // cannot be admitted is wasted dispatch.
+        if (readbacks_at_cap()) return 0;
 
         const uint32_t input_bytes = num_bins * 2 * sizeof(float);
         const uint32_t output_bytes = num_bins * sizeof(float);
@@ -2937,6 +3129,9 @@ public:
         auto bind_group = create_bind_group(magnitude_pipeline_, {input_buf, output_buf});
         dispatch(magnitude_pipeline_, bind_group, (num_bins + 255) / 256);
         copy_buffer(output_buf, readback_buf, output_bytes);
+        // Counted at the submit that carries this request's readback copy (the
+        // dispatch above rides an earlier submit on the same in-order queue).
+        ++stats_->submits;
 
         // The storage buffers are done with once the GPU confirms the submit;
         // the readback buffer stays pinned until its map resolves, so it is
@@ -2945,6 +3140,107 @@ public:
 
         return read_back_async(readback_buf, magnitudes, output_bytes, deadline,
                                std::move(on_complete));
+    }
+
+    // Non-blocking convolve_batch. Identical GPU work to convolve_batch() — same
+    // plan, same buffers, same one submit — with exactly two differences:
+    //
+    //  1. The readback buffer is per-submit (from the staging pool) instead of
+    //     the plan's single shared `readback`. That single buffer is the entire
+    //     reason convolve_batch has to block: block N+1's CopyBufferToBuffer
+    //     would target a buffer still mapped for block N. The COMPUTE buffers
+    //     (buf_a/buf_b/buf_c/irspec) stay shared across in-flight blocks, which
+    //     is safe because the WebGPU queue executes submissions in order: submit
+    //     N's copy out of buf_a/buf_b runs before submit N+1's WriteBuffer into
+    //     plan.buf_a. That invariant is what makes this conversion cheap, and it
+    //     is pinned by the two-blocks-in-flight test.
+    //
+    //  2. The 1/n inverse-FFT scale runs in a completion wrapper on Success,
+    //     before the caller's callback — not in the WGSL, which is shared with
+    //     the blocking path.
+    uint64_t convolve_batch_async(const float* in_complex, float* out_complex,
+                                  uint32_t n, uint32_t batch,
+                                  std::chrono::microseconds deadline,
+                                  ReadbackCallback on_complete) override {
+        if (!initialized_ || !in_complex || !out_complex || !on_complete) return 0;
+        auto it = batch_conv_plans_.find(n);
+        if (it == batch_conv_plans_.end() || it->second.batch != batch) return 0;
+        if (readbacks_at_cap()) return 0;
+        BatchConvPlan& plan = it->second;
+
+        const uint32_t big = batch * n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t fft_wg = ((batch * (n / 2u)) + 255u) / 256u;  // batched butterflies
+        const uint32_t mul_wg = ((batch * n) + 255u) / 256u;         // batched pairs
+
+        auto readback_buf = acquire_readback_buffer(big);
+        if (!readback_buf) return 0;
+
+        queue_.WriteBuffer(plan.buf_a, 0, in_complex, big);
+
+        wgpu::CommandEncoderDescriptor enc_desc{};
+        auto encoder = device_.CreateCommandEncoder(&enc_desc);
+        encode_fft_passes(encoder, plan.fwd_bgs, fft_wg);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            pass.SetPipeline(conv_bmul_pipeline_);
+            pass.SetBindGroup(0, plan.bmul_bg);
+            pass.DispatchWorkgroups(mul_wg);
+            pass.End();
+        }
+        encoder.CopyBufferToBuffer(plan.buf_c, 0, plan.buf_a, 0, big);
+        encode_fft_passes(encoder, plan.inv_bgs, fft_wg);
+        wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
+        encoder.CopyBufferToBuffer(inv_buf, 0, readback_buf, 0, big);
+        auto cmd = encoder.Finish();
+        queue_.Submit(1, &cmd);
+        ++stats_->submits;
+
+        const uint32_t floats = batch * n * 2u;
+        const float inv = 1.0f / static_cast<float>(n);
+        auto scale_then_complete =
+            [out_complex, floats, inv, cb = std::move(on_complete)](
+                const ReadbackResult& r) {
+                if (r.status == ReadbackStatus::Success) {
+                    for (uint32_t i = 0; i < floats; ++i) out_complex[i] *= inv;
+                }
+                cb(r);
+            };
+
+        // read_back_async() re-checks the cap and hands the buffer back itself if
+        // it rejects; the check above means it cannot, but the id is what the
+        // caller keys off either way.
+        return read_back_async(readback_buf, out_complex, big, deadline,
+                               std::move(scale_then_complete));
+    }
+
+    void set_max_readbacks_in_flight(std::size_t max_in_flight) override {
+        max_readbacks_in_flight_ = (max_in_flight == 0) ? 1 : max_in_flight;
+    }
+
+    AsyncStats async_stats() const override { return *stats_; }
+
+    // ── Kernel-source seam ──────────────────────────────────────────────
+
+    const char* kernel_source(const char* label) const override {
+        return builtin_kernel_source(label);
+    }
+
+    bool override_kernel_source(const char* label, const char* wgsl) override {
+        if (!label || !wgsl) return false;
+        if (!builtin_kernel_source(label)) return false;
+        // Pipelines are compiled once, in create_pipelines(). An override applied
+        // afterwards would silently do nothing, which is exactly the kind of
+        // quiet no-op this seam exists to rule out.
+        if (initialized_) {
+            runtime::log_error(
+                "GpuCompute: override_kernel_source('{}') after initialization — "
+                "pipelines are already compiled; override before initialize_*()",
+                label);
+            return false;
+        }
+        kernel_overrides_[label] = wgsl;
+        return true;
     }
 
     std::size_t poll_readbacks() override {
@@ -3017,8 +3313,16 @@ private:
     wgpu::Queue queue_;
     wgpu::Instance instance_;
     wgpu::Adapter adapter_;
+#if !defined(__EMSCRIPTEN__)
     std::unique_ptr<dawn::native::Instance> native_instance_;
+#endif
     bool owns_device_ = false;
+    bool device_lost_ = false;
+
+    // Liveness token for callbacks that outlive this object (the device-lost
+    // callback lives on the device, which Dawn may report as lost while it is
+    // being destroyed). Expired first in the dtor.
+    std::shared_ptr<int> alive_ = std::make_shared<int>(0);
     bool has_timestamp_ = false;  // TimestampQuery feature enabled on device_
 
     // Device-level 2-slot timestamp probe, shared by any op that reports
@@ -3081,6 +3385,11 @@ private:
     // there is no collision risk. create_pipeline() routes through this so
     // repeated kernels compile once per device.
     std::unordered_map<std::string, wgpu::ComputePipeline> pipeline_cache_;
+
+    // label → replacement WGSL, consulted by create_pipeline(). Populated only
+    // before initialization (see override_kernel_source), so it is read-only for
+    // the lifetime of the compiled pipelines.
+    std::unordered_map<std::string, std::string> kernel_overrides_;
 
     // Persistent per-N FFT plan: two ping-pong complex buffers (2*N floats),
     // one uniform + one bind group PER pass (so all log2(N) passes plus the
@@ -3344,10 +3653,11 @@ private:
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute
-        // hot path. Default cap of 8 covers typical GPU dispatch depth (3-4 in
-        // flight) times per-call buffer count (2-3 inputs + output), with
-        // headroom.
-        pool_ = std::make_shared<detail::StagingBufferPool>(device_, 8);
+        // hot path. The cap is PER usage key, and the async path pins one readback
+        // buffer per in-flight request — so it must clear 2x the in-flight cap
+        // (default 4) for the MapRead key to recycle rather than churn, on top of
+        // the per-call storage buffers on the other keys.
+        pool_ = std::make_shared<detail::StagingBufferPool>(device_, 16);
 
         has_timestamp_ = device_.HasFeature(wgpu::FeatureName::TimestampQuery);
 
@@ -3357,7 +3667,17 @@ private:
         return true;
     }
 
+    // The one place a named pipeline's WGSL is turned into a pipeline, which is
+    // what makes the kernel-source seam a lookup rather than a refactor: an
+    // override substitutes the text here, and the cache (keyed by the WGSL
+    // itself) gives the mutated kernel its own entry for free.
     wgpu::ComputePipeline create_pipeline(const char* label, const char* wgsl) {
+        if (label) {
+            if (auto ov = kernel_overrides_.find(label); ov != kernel_overrides_.end()) {
+                wgsl = ov->second.c_str();
+            }
+        }
+
         std::string key(wgsl);
         if (auto it = pipeline_cache_.find(key); it != pipeline_cache_.end()) {
             return it->second;
@@ -3693,10 +4013,23 @@ private:
     // than the webgpu.h/webgpu_cpp.h API: creating the instance (which on native
     // needs dawn::native::Instance plus a proc-table registration) and driving
     // the event queue. Emscripten's emdawnwebgpu port provides neither — the
-    // browser constructs the instance via wgpu::CreateInstance() and owns the
-    // event loop. Keeping both behind these two functions means a browser
-    // carve-out replaces exactly them; every other call in this file is already
-    // plain webgpu_cpp.
+    // browser constructs the instance via wgpu::CreateInstance() and the JS
+    // event loop IS the event queue. Every other call in this file is already
+    // plain webgpu_cpp, so the browser carve-out is exactly these two functions.
+#if defined(__EMSCRIPTEN__)
+    bool create_instance() {
+        // No proc table: emdawnwebgpu links the procs directly, and there is no
+        // dawn::native to source them from.
+        instance_ = wgpu::CreateInstance(nullptr);
+        return instance_ != nullptr;
+    }
+
+    // Deliberately a no-op. emdawnwebgpu's ProcessEvents() does not resolve map
+    // callbacks (see kAsyncCallbackMode) — they arrive spontaneously from the JS
+    // event loop — so pumping here would only be a misleading suggestion that
+    // this call is how results land. Nothing in this file may ever *wait* on it.
+    void pump_events() {}
+#else
     bool create_instance() {
         const DawnProcTable& procs = dawn::native::GetProcs();
         dawnProcSetProcs(&procs);
@@ -3711,6 +4044,7 @@ private:
     void pump_events() {
         if (instance_) instance_.ProcessEvents();
     }
+#endif
 
     // ── Asynchronous readback bookkeeping ───────────────────────────────
 
@@ -3727,7 +4061,10 @@ private:
                                   // not write `dest` or touch the pool
     };
 
-    static void complete(AsyncReadback& req, ReadbackStatus status, uint32_t bytes) {
+    void complete(AsyncReadback& req, ReadbackStatus status, uint32_t bytes) {
+        if (status == ReadbackStatus::Expired) ++stats_->expired;
+        else if (status == ReadbackStatus::Failed) ++stats_->failed;
+
         if (!req.on_complete) return;
         // Move the callback out first: a completion fires exactly once even if
         // it re-enters this object.
@@ -3746,12 +4083,29 @@ private:
         }
     }
 
+    // True when another async request cannot be admitted. Checked BEFORE any
+    // buffer is acquired, so a rejected submit costs nothing.
+    bool readbacks_at_cap() const {
+        return async_readbacks_.size() >= max_readbacks_in_flight_;
+    }
+
     // Map `buffer` without blocking. Each in-flight request owns its own staging
     // buffer (the pool hands out a distinct one per acquire), so N requests can
     // be in flight at once; poll_readbacks() delivers them in submission order.
+    //
+    // Admission control: at the in-flight cap the request is REJECTED (returns 0)
+    // and its staging buffer handed straight back. Queueing instead would grow
+    // staging memory by one buffer per block for as long as the GPU is stalled —
+    // and a throttled background tab stalls for as long as it likes. A rejected
+    // submit is a miss, which the caller already routes through its MissPolicy.
     uint64_t read_back_async(wgpu::Buffer buffer, void* dest, uint32_t size,
                              std::chrono::microseconds deadline,
                              ReadbackCallback on_complete) {
+        if (readbacks_at_cap()) {
+            if (pool_) pool_->release(buffer);
+            return 0;
+        }
+
         auto req = std::make_shared<AsyncReadback>();
         req->id = ++next_readback_id_;
         req->dest = dest;
@@ -3764,11 +4118,18 @@ private:
         // The callback is intentionally non-`mutable` (see schedule_pool_release
         // for why m150's webgpu_cpp.h requires that). It mutates the request
         // through the captured shared_ptr, which a const operator() permits.
+        //
+        // The stats counter is bumped here, at the resolution itself, rather than
+        // inferred later from a completion status — a map can resolve and still
+        // complete Expired, and the browser stats block reports what the GPU
+        // actually did.
         buffer.MapAsync(wgpu::MapMode::Read, 0, size,
-            wgpu::CallbackMode::AllowProcessEvents,
-            [req](wgpu::MapAsyncStatus status, wgpu::StringView) {
+            kAsyncCallbackMode,
+            [req, stats = std::weak_ptr<AsyncStats>(stats_)](
+                wgpu::MapAsyncStatus status, wgpu::StringView) {
                 req->resolved = true;
                 req->ok = (status == wgpu::MapAsyncStatus::Success);
+                if (auto s = stats.lock()) ++s->map_resolves;
                 if (!req->abandoned) return;
                 // The deadline already fired: poll_readbacks() has delivered the
                 // completion and discarded the buffer from the pool. Release the
@@ -3781,17 +4142,55 @@ private:
 
     uint64_t next_readback_id_ = 0;
     bool polling_ = false;
+    std::size_t max_readbacks_in_flight_ = 4;
     std::deque<std::shared_ptr<AsyncReadback>> async_readbacks_;
 
+    // Held by shared_ptr because the map callback that bumps `map_resolves` can
+    // outlive this object (a map on a shared device resolves from whatever pumps
+    // the queue next); the callback holds a weak_ptr and no-ops if it is gone.
+    std::shared_ptr<AsyncStats> stats_ = std::make_shared<AsyncStats>();
+
+#if defined(__EMSCRIPTEN__)
+    // There is no correct blocking readback in a browser, so there is no browser
+    // implementation of one. Spinning on ProcessEvents() would starve the JS
+    // event loop that resolves the map — a guaranteed self-deadlock that burns
+    // the full deadline and then fails anyway. Every op that still calls this is
+    // native-only; the browser uses the async path exclusively.
+    bool read_back(wgpu::Buffer&, void*, uint32_t) {
+        if (!read_back_blocked_logged_) {
+            read_back_blocked_logged_ = true;
+            runtime::log_error(
+                "GpuCompute: blocking read_back() is not available in the browser "
+                "— use the async ops (convolve_batch_async / "
+                "compute_magnitude_async) + poll_readbacks()");
+        }
+        return false;
+    }
+    bool read_back_blocked_logged_ = false;
+#else
     bool read_back(wgpu::Buffer& buffer, void* dest, uint32_t size) {
-        bool mapped = false;
-        bool ok = false;
+        // The map request outlives this frame if the deadline fires, so its state
+        // cannot live on this stack: a pending map that resolves after the return
+        // would write through dangling pointers from whichever later
+        // ProcessEvents() happens to pump it. Same shared-state + `abandoned`
+        // shape as read_back_async().
+        struct BlockingMap {
+            bool mapped = false;
+            bool ok = false;
+            bool abandoned = false;
+            wgpu::Buffer buffer;
+        };
+        auto st = std::make_shared<BlockingMap>();
+        st->buffer = buffer;
 
         buffer.MapAsync(wgpu::MapMode::Read, 0, size,
             wgpu::CallbackMode::AllowProcessEvents,
-            [&mapped, &ok](wgpu::MapAsyncStatus status, wgpu::StringView) {
-                mapped = true;
-                ok = (status == wgpu::MapAsyncStatus::Success);
+            [st](wgpu::MapAsyncStatus status, wgpu::StringView) {
+                st->mapped = true;
+                st->ok = (status == wgpu::MapAsyncStatus::Success);
+                // The caller already gave up and returned. Release the mapping so
+                // the buffer can be torn down cleanly; nothing reads it now.
+                if (st->abandoned && st->ok) st->buffer.Unmap();
             });
 
         // Drive the event loop until the map completes. Spin (yield) for the
@@ -3804,16 +4203,19 @@ private:
         const auto start = std::chrono::steady_clock::now();
         const auto spin_until = start + std::chrono::milliseconds(4);
         const auto deadline = start + std::chrono::seconds(2);
-        while (!mapped && std::chrono::steady_clock::now() < deadline) {
+        while (!st->mapped && std::chrono::steady_clock::now() < deadline) {
             instance_.ProcessEvents();
-            if (mapped) break;
+            if (st->mapped) break;
             if (std::chrono::steady_clock::now() < spin_until)
                 std::this_thread::yield();
             else
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
-        if (!mapped || !ok) return false;
+        if (!st->mapped || !st->ok) {
+            st->abandoned = true;
+            return false;
+        }
 
         const void* data = buffer.GetConstMappedRange(0, size);
         if (!data) return false;
@@ -3836,6 +4238,7 @@ private:
         buffer.Unmap();
         return true;
     }
+#endif  // !__EMSCRIPTEN__
 };
 
 std::unique_ptr<GpuCompute> GpuCompute::create() {
@@ -3844,7 +4247,7 @@ std::unique_ptr<GpuCompute> GpuCompute::create() {
 
 } // namespace pulp::render
 
-#else // !PULP_HAS_SKIA
+#else // !PULP_HAS_DAWN
 
 namespace pulp::render {
 

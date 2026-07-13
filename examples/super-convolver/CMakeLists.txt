@@ -1,8 +1,10 @@
 # SuperConvolver — convolution reverb / impulse processor.
 # Live audio path: RT-safe CPU convolution (signal::PartitionedConvolver) with
 # lock-free runtime IR swap. Native GPU UI: live IR waveform + frequency
-# display + controls. The GPU convolution engine (core/gpu_audio) is the
-# accelerator for very long IRs / many instances.
+# display + controls. The GPU convolution engine (core/gpu_audio) is an OPT-IN
+# alternative engine for very long IRs / many rooms — a different cost shape, not
+# a faster one: a competent real-FFT CPU convolver matches or beats it at every
+# musically plausible setting measured (spike, 2026-06-29). CPU is the default.
 
 # Headless audio-validation test (golden: impulse -> IR, live Size swap,
 # dry/bypass null).

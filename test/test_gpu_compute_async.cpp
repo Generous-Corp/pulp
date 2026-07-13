@@ -4,15 +4,14 @@
 // The async path submits, returns, and delivers results from poll_readbacks()
 // so the caller owns its event loop.
 //
-// HONEST SCOPE: nothing ships on this API yet. compute_magnitude_async() has no
-// caller outside these tests — the GPU-audio worker still runs the blocking
-// path, and no browser (single-threaded) GpuCompute exists. These tests are the
-// specification the API must already satisfy BEFORE a caller can be written on a
-// single-threaded event loop, not a regression net around live usage. They pin
-// four properties: byte-equivalence with the blocking path, in-order delivery of
-// concurrent in-flight requests, bounded deadline expiry that routes to a miss
-// policy instead of hanging, and an audio thread that still neither allocates
-// nor blocks.
+// HONEST SCOPE: the native GPU-audio worker still runs the blocking path; the
+// async path is what the browser module uses, where blocking is impossible.
+// These tests are the specification that path must satisfy, exercised on a real
+// native Dawn device (there is no browser in normal CI). They pin:
+// byte-equivalence with the blocking path, in-order delivery of concurrent
+// in-flight requests with no cross-contamination, bounded deadline expiry that
+// routes to a miss policy instead of hanging, admission control at the in-flight
+// cap, and an audio thread that still neither allocates nor blocks.
 
 #include "harness/scoped_rt_process_probe.hpp"
 
@@ -220,6 +219,10 @@ TEST_CASE("Concurrent async readbacks complete in order with their own payloads"
         reqs.push_back(std::move(r));
     }
 
+    // Above the default in-flight cap (4), which is admission control, not a
+    // depth limit: raise it deliberately for this test.
+    gpu->set_max_readbacks_in_flight(kInFlight);
+
     std::vector<GpuCompute::ReadbackResult> completions;
     for (auto& r : reqs) {
         r.id = gpu->compute_magnitude_async(
@@ -334,4 +337,306 @@ TEST_CASE("Async readback on the worker keeps the audio thread allocation-free",
         REQUIRE_THAT(out.storage[0][i], WithinAbs(0.5f, 1e-4f));
     }
     REQUIRE(gpu->readbacks_in_flight() == 0);
+}
+
+// ── convolve_batch_async ────────────────────────────────────────────────────
+//
+// The async convolution reuses the plan's compute buffers across in-flight
+// blocks and takes only its readback buffer per submit. That is safe because the
+// WebGPU queue is in-order — and it is the invariant the whole browser design
+// rests on, so it is tested directly below rather than assumed.
+
+namespace {
+
+// A flat IR spectrum: every bin scales by the same complex factor, so a batch's
+// output is a deterministic function of its input and nothing else.
+std::vector<float> flat_ir_spectrum(uint32_t n, float re, float im) {
+    std::vector<float> spec(n * 2);
+    for (uint32_t i = 0; i < n; ++i) {
+        spec[i * 2] = re;
+        spec[i * 2 + 1] = im;
+    }
+    return spec;
+}
+
+// Per-batch input with a batch-dependent waveform, so a swapped or stale buffer
+// shows up as the WRONG batch's samples rather than as a plausible-looking one.
+std::vector<float> batch_input(uint32_t n, uint32_t batch, float seed) {
+    std::vector<float> in(n * 2 * batch, 0.0f);
+    for (uint32_t b = 0; b < batch; ++b) {
+        for (uint32_t i = 0; i < n; ++i) {
+            in[(b * n + i) * 2] =
+                std::sin(0.05f * static_cast<float>(i) + seed + 1.7f * static_cast<float>(b));
+        }
+    }
+    return in;
+}
+
+} // namespace
+
+TEST_CASE("convolve_batch_async matches the blocking convolve_batch",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t N = 256, B = 4;
+    const auto irspec = flat_ir_spectrum(N, 0.7f, -0.2f);
+    REQUIRE(gpu->prepare_convolution_batch(N, irspec.data(), B));
+
+    const auto in = batch_input(N, B, 0.0f);
+
+    std::vector<float> blocking(N * 2 * B, 0.0f);
+    REQUIRE(gpu->convolve_batch(in.data(), blocking.data(), N, B));
+
+    std::vector<float> async(N * 2 * B, -777.0f);
+    GpuCompute::ReadbackResult result{};
+    const uint64_t id = gpu->convolve_batch_async(
+        in.data(), async.data(), N, B, std::chrono::seconds(2),
+        [&result](const GpuCompute::ReadbackResult& r) { result = r; });
+    REQUIRE(id != 0);
+
+    drain(*gpu);
+
+    REQUIRE(result.id == id);
+    REQUIRE(result.status == GpuCompute::ReadbackStatus::Success);
+    REQUIRE(result.bytes == N * 2 * B * sizeof(float));
+    // Bit-identical: the async path runs the same kernels on the same plan, and
+    // applies the same 1/n inverse-FFT scale (in the completion, not the WGSL).
+    REQUIRE(async == blocking);
+
+    // Rejections: no plan for this n, and a batch count the plan was not built
+    // for. Neither fires the callback.
+    bool fired = false;
+    auto never = [&fired](const GpuCompute::ReadbackResult&) { fired = true; };
+    REQUIRE(gpu->convolve_batch_async(in.data(), async.data(), N * 2, B,
+                                      std::chrono::seconds(1), never) == 0);
+    REQUIRE(gpu->convolve_batch_async(in.data(), async.data(), N, B + 1,
+                                      std::chrono::seconds(1), never) == 0);
+    REQUIRE_FALSE(fired);
+}
+
+// THE load-bearing test. Two blocks in flight at once, with distinct payloads,
+// sharing the plan's compute buffers. If the in-order-queue invariant did not
+// hold — if submit N+1's WriteBuffer into plan.buf_a could land before submit
+// N's copy out of it — block 0 would come back carrying block 1's samples. That
+// is exactly the failure a shared per-plan readback buffer would also produce,
+// which is why this is the test that licenses the whole design.
+TEST_CASE("Two convolve_batch_async blocks in flight stay in order and uncontaminated",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t N = 256, B = 2;
+    const auto irspec = flat_ir_spectrum(N, 0.7f, -0.2f);
+    REQUIRE(gpu->prepare_convolution_batch(N, irspec.data(), B));
+
+    // Two distinct payloads, and the reference result for each, computed one at a
+    // time through the blocking path.
+    const auto in_a = batch_input(N, B, 0.0f);
+    const auto in_b = batch_input(N, B, 2.4f);
+    REQUIRE(in_a != in_b);
+
+    std::vector<float> ref_a(N * 2 * B, 0.0f), ref_b(N * 2 * B, 0.0f);
+    REQUIRE(gpu->convolve_batch(in_a.data(), ref_a.data(), N, B));
+    REQUIRE(gpu->convolve_batch(in_b.data(), ref_b.data(), N, B));
+    REQUIRE(ref_a != ref_b);
+
+    // Now both at once, without draining in between.
+    std::vector<float> out_a(N * 2 * B, -777.0f), out_b(N * 2 * B, -777.0f);
+    std::vector<uint64_t> order;
+
+    const uint64_t id_a = gpu->convolve_batch_async(
+        in_a.data(), out_a.data(), N, B, std::chrono::seconds(2),
+        [&order](const GpuCompute::ReadbackResult& r) {
+            REQUIRE(r.status == GpuCompute::ReadbackStatus::Success);
+            order.push_back(r.id);
+        });
+    const uint64_t id_b = gpu->convolve_batch_async(
+        in_b.data(), out_b.data(), N, B, std::chrono::seconds(2),
+        [&order](const GpuCompute::ReadbackResult& r) {
+            REQUIRE(r.status == GpuCompute::ReadbackStatus::Success);
+            order.push_back(r.id);
+        });
+
+    REQUIRE(id_a != 0);
+    REQUIRE(id_b != 0);
+    REQUIRE(id_b != id_a);
+    REQUIRE(gpu->readbacks_in_flight() == 2);
+
+    drain(*gpu);
+
+    // Submission order, not completion-race order.
+    REQUIRE(order == std::vector<uint64_t>{id_a, id_b});
+
+    // Zero cross-contamination: each block carries its OWN result.
+    REQUIRE(out_a == ref_a);
+    REQUIRE(out_b == ref_b);
+}
+
+TEST_CASE("An expired convolve_batch_async leaves dest untouched and never hangs",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t N = 256, B = 2;
+    const auto irspec = flat_ir_spectrum(N, 0.7f, -0.2f);
+    REQUIRE(gpu->prepare_convolution_batch(N, irspec.data(), B));
+    const auto in = batch_input(N, B, 0.0f);
+
+    std::vector<float> dest(N * 2 * B, -777.0f);
+    GpuCompute::ReadbackResult result{};
+    const uint64_t id = gpu->convolve_batch_async(
+        in.data(), dest.data(), N, B, std::chrono::microseconds(0),
+        [&result](const GpuCompute::ReadbackResult& r) { result = r; });
+    REQUIRE(id != 0);
+
+    const auto t0 = Clock::now();
+    drain(*gpu);
+    const auto elapsed = Clock::now() - t0;
+
+    REQUIRE(result.id == id);
+    REQUIRE(result.status == GpuCompute::ReadbackStatus::Expired);
+    REQUIRE(result.bytes == 0);
+    // Untouched — including by the 1/n scale, which only runs on Success. A late
+    // block must never smear a partial or rescaled result into the caller's
+    // buffer; the caller has already substituted per its MissPolicy.
+    REQUIRE(std::all_of(dest.begin(), dest.end(),
+                        [](float v) { return v == -777.0f; }));
+    REQUIRE(elapsed < std::chrono::milliseconds(500));
+
+    // The device survives the expiry: the discarded staging buffer did not go
+    // back on the free list while still mapped.
+    std::vector<float> after(N * 2 * B, 0.0f);
+    REQUIRE(gpu->convolve_batch(in.data(), after.data(), N, B));
+    REQUIRE(gpu->readbacks_in_flight() == 0);
+}
+
+TEST_CASE("Async admission control rejects past the in-flight cap",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t N = 256, B = 2;
+    constexpr std::size_t D = 2;
+    const auto irspec = flat_ir_spectrum(N, 0.7f, -0.2f);
+    REQUIRE(gpu->prepare_convolution_batch(N, irspec.data(), B));
+    const auto in = batch_input(N, B, 0.0f);
+
+    gpu->set_max_readbacks_in_flight(D);
+
+    std::vector<std::vector<float>> dests(D + 1,
+                                          std::vector<float>(N * 2 * B, -777.0f));
+    auto ignore = [](const GpuCompute::ReadbackResult&) {};
+
+    for (std::size_t i = 0; i < D; ++i) {
+        REQUIRE(gpu->convolve_batch_async(in.data(), dests[i].data(), N, B,
+                                          std::chrono::seconds(2), ignore) != 0);
+    }
+    REQUIRE(gpu->readbacks_in_flight() == D);
+
+    const auto before = gpu->async_stats();
+
+    // At the cap: rejected. The caller counts a miss instead of the GPU layer
+    // growing staging memory by another buffer for a device that is not keeping
+    // up (a throttled background tab, in the browser).
+    bool fired = false;
+    const uint64_t rejected = gpu->convolve_batch_async(
+        in.data(), dests[D].data(), N, B, std::chrono::seconds(2),
+        [&fired](const GpuCompute::ReadbackResult&) { fired = true; });
+    REQUIRE(rejected == 0);
+    REQUIRE_FALSE(fired);
+    REQUIRE(gpu->readbacks_in_flight() == D);
+
+    // Nothing was dispatched and no staging buffer was taken: the rejection is
+    // checked before any GPU work, so the submit counter does not move.
+    const auto after_reject = gpu->async_stats();
+    REQUIRE(after_reject.submits == before.submits);
+
+    // compute_magnitude_async is admitted through the same gate.
+    const auto pairs = constant_pairs(64, 3.0f, 4.0f);
+    std::vector<float> mags(64, 0.0f);
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), mags.data(), 64,
+                                         std::chrono::seconds(2), ignore) == 0);
+
+    drain(*gpu);
+    REQUIRE(gpu->readbacks_in_flight() == 0);
+
+    // Below the cap again, submits are admitted — the cap is backpressure, not a
+    // one-way latch.
+    REQUIRE(gpu->convolve_batch_async(in.data(), dests[0].data(), N, B,
+                                      std::chrono::seconds(2), ignore) != 0);
+    drain(*gpu);
+}
+
+TEST_CASE("Async stats count submits and map resolutions where they happen",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t N = 256, B = 2;
+    const auto irspec = flat_ir_spectrum(N, 0.7f, -0.2f);
+    REQUIRE(gpu->prepare_convolution_batch(N, irspec.data(), B));
+    const auto in = batch_input(N, B, 0.0f);
+
+    const auto before = gpu->async_stats();
+
+    std::vector<float> ok_dest(N * 2 * B, 0.0f);
+    auto ignore = [](const GpuCompute::ReadbackResult&) {};
+    REQUIRE(gpu->convolve_batch_async(in.data(), ok_dest.data(), N, B,
+                                      std::chrono::seconds(2), ignore) != 0);
+    drain(*gpu);
+
+    const auto after_ok = gpu->async_stats();
+    REQUIRE(after_ok.submits == before.submits + 1);
+    REQUIRE(after_ok.map_resolves == before.map_resolves + 1);
+    REQUIRE(after_ok.expired == before.expired);
+    REQUIRE(after_ok.failed == before.failed);
+
+    std::vector<float> late_dest(N * 2 * B, 0.0f);
+    REQUIRE(gpu->convolve_batch_async(in.data(), late_dest.data(), N, B,
+                                      std::chrono::microseconds(0), ignore) != 0);
+    drain(*gpu);
+
+    const auto after_expired = gpu->async_stats();
+    REQUIRE(after_expired.submits == after_ok.submits + 1);
+    REQUIRE(after_expired.expired == after_ok.expired + 1);
+}
+
+TEST_CASE("A GPU device is not lost until it is",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    REQUIRE(gpu->is_initialized());
+    REQUIRE_FALSE(gpu->device_lost());
+
+    constexpr uint32_t kBins = 64;
+    const auto pairs = constant_pairs(kBins, 3.0f, 4.0f);
+    std::vector<float> dest(kBins, -1.0f);
+    GpuCompute::ReadbackResult result{};
+    REQUIRE(gpu->compute_magnitude_async(
+        pairs.data(), dest.data(), kBins, std::chrono::seconds(2),
+        [&result](const GpuCompute::ReadbackResult& r) { result = r; }) != 0);
+
+    // Device loss is state, not an error path: everything in flight completes as
+    // Failed (a map on a lost device never resolves, so leaving it queued would
+    // expire block after block), the object stops reporting itself initialized,
+    // and no further work is admitted until a device is re-acquired.
+    gpu->notify_device_lost();
+
+    REQUIRE(gpu->device_lost());
+    REQUIRE_FALSE(gpu->is_initialized());
+    REQUIRE(result.status == GpuCompute::ReadbackStatus::Failed);
+    REQUIRE(gpu->readbacks_in_flight() == 0);
+    REQUIRE(std::all_of(dest.begin(), dest.end(),
+                        [](float v) { return v == -1.0f; }));
+    REQUIRE(gpu->async_stats().failed >= 1);
+
+    REQUIRE(gpu->compute_magnitude_async(pairs.data(), dest.data(), kBins,
+                                         std::chrono::seconds(1),
+                                         [](const GpuCompute::ReadbackResult&) {}) == 0);
+
+    // Idempotent.
+    gpu->notify_device_lost();
+    REQUIRE(gpu->device_lost());
 }

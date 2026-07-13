@@ -16,12 +16,21 @@ namespace pulp::gpu_audio {
 /// against MANY distinct impulse responses at once and pans the results into a
 /// stereo field — the whole bank in ONE batched GPU submit per block.
 ///
-/// This is the regime where the GPU structurally beats the CPU. On the CPU each
-/// room is an independent convolution; doing N of them per block scales the cost
-/// linearly until it exceeds the real-time budget. On the GPU the forward FFT
-/// runs once and is shared, every room's complex-multiply + inverse FFT is
-/// batched, and the num_ir results are reduced to a stereo pair ON the GPU — so
-/// only one stereo block is read back regardless of how many rooms there are.
+/// This is the regime the batched GPU path exists FOR. On the CPU each room is an
+/// independent convolution; doing N of them per block scales the cost linearly. On
+/// the GPU the forward FFT runs once and is shared, every room's complex-multiply +
+/// inverse FFT is batched, and the num_ir results are reduced to a stereo pair ON
+/// the GPU — so only one stereo block is read back regardless of how many rooms
+/// there are.
+///
+/// It is NOT a speed claim, and it must not be written as one. A spike measured on
+/// 2026-06-29 (planning/2026-06-29-superconvolver-irreducible-rooms-and-multi-ir.md)
+/// found a competent real-FFT CPU convolver matching or beating this path at every
+/// musically plausible setting measured (<= 256 rooms); the earlier "5x GPU win" was
+/// an artifact of a naive CPU baseline. What the batch buys is a different COST
+/// SHAPE — one shared forward transform, one readback, N resident IR spectra — and
+/// the headroom that comes with it. Where the crossover actually falls is a matter
+/// for measurement, per machine, not for a comment.
 ///
 /// Reducibility caveat: with CONSTANT per-room pans this batch is mathematically
 /// collapsible. Every room convolves the same input and is summed with fixed

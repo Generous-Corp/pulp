@@ -17,7 +17,10 @@
 
 #pragma once
 
-#ifdef PULP_HAS_SKIA
+// Gated on Dawn (webgpu_cpp.h), not on Skia — this header has no Skia in it.
+// Native gets Dawn from the Skia prebuilt slice, the browser from Emscripten's
+// emdawnwebgpu port; both define PULP_HAS_DAWN.
+#ifdef PULP_HAS_DAWN
 
 #include "webgpu/webgpu_cpp.h"
 
@@ -234,4 +237,4 @@ private:
 
 }  // namespace pulp::render::detail
 
-#endif  // PULP_HAS_SKIA
+#endif  // PULP_HAS_DAWN

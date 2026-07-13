@@ -74,6 +74,13 @@
 // engine, the file loader, and the editor are all native-only surfaces: they
 // compile out under PULP_WASM / PULP_HEADLESS, leaving the CPU convolution
 // engine, the parameters, and the state format byte-identical across lanes.
+//
+// A THIRD engine exists for the browser (PULP_SC_WEB_GPU, below): the same
+// fixed-block convolution, but the FFT runs as a WebGPU compute shader in a
+// DedicatedWorker outside the module, reached through the single `pulp_gpu_xfer`
+// import. It is a CAPABILITY demonstration, not a performance claim — a competent
+// CPU convolver matches or beats the GPU at every musical setting measured — so
+// the CPU engine remains the default and the always-available fallback there too.
 
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/convolver.hpp>
@@ -112,6 +119,49 @@
 #include <utility>
 #include <vector>
 
+// The browser GPU-audio engine. Compiled ONLY into the dedicated web GPU plugin
+// variant (a wasm build with -DPULP_WEB_GPU_AUDIO); the shipped CPU-only WAM and
+// WebCLAP modules must stay byte-identical, and a module's parameter list is
+// fetched once when it is mounted, so an Engine toggle cannot appear
+// conditionally inside one module — it needs its own artifact.
+#if defined(PULP_WASM) && defined(PULP_WEB_GPU_AUDIO)
+#define PULP_SC_WEB_GPU 1
+#endif
+
+#if defined(PULP_SC_WEB_GPU)
+/// The whole seam between the plugin and the browser's GPU worker. Hands one
+/// interleaved-by-plane stereo block (kChannels planes of `frames` samples) to
+/// the SharedArrayBuffer ring the WebGPU worker drains, and pops one wet block
+/// back. Returns 1 when a GPU wet block was delivered, 0 on a MISS (the worker
+/// has not produced this block in time — normal, not exceptional: a backgrounded
+/// tab throttles the worker while the AudioWorklet keeps running).
+///
+/// Every block carries its index across this seam (the ring stamps it on the JS
+/// side), so the block popped here for input block n is ALWAYS the GPU wet of
+/// input block n-L — never a wet that has drifted because an earlier block was
+/// dropped or expired. That is what makes the CPU safety net, delayed by the same
+/// L blocks, a sample-for-sample substitute for a missed GPU block.
+///
+/// `channels` is part of the ABI because the host writes channels * frames floats
+/// back into `out_planar`: the host validates BOTH dimensions against its ring and
+/// refuses (returns 0) on a mismatch, rather than overrunning this module's
+/// staging buffer from the audio thread.
+///
+/// It must be called on EVERY internal block while the plugin is running the web
+/// build — including while Engine=CPU. The push/pop pair is what advances the
+/// shared block timeline; skipping it while on CPU would leave the ring holding
+/// pre-flip wets, which the next flip to GPU would emit as if they were current.
+///
+/// The import attributes are wasm-target-only (native clang warns and ignores
+/// them); a native build — which is how the whole engine is unit-tested — links
+/// its own definition instead.
+#if defined(__wasm__)
+__attribute__((import_module("env"), import_name("pulp_gpu_xfer")))
+#endif
+extern "C" int pulp_gpu_xfer(const float* in_planar, float* out_planar, int frames,
+                             int channels);
+#endif  // PULP_SC_WEB_GPU
+
 namespace pulp::view { class View; }
 
 namespace pulp::examples {
@@ -124,6 +174,7 @@ enum SuperConvolverParams : state::ParamID {
     kEngine  = 5,  // 0 = CPU (default), 1 = GPU
     kRooms   = 6,  // GPU multi-room reverb: # of distinct IRs in one GPU batch
     kFlow    = 7,  // 0 = static field; >0 = per-block moving pans (living field)
+    kGpuOnly = 8,  // web GPU engine: 0 = CPU safety net (default), 1 = no net
 };
 
 // Live wet-output magnitude spectrum (dB), published lock-free from the audio
@@ -288,6 +339,16 @@ public:
     // re-block FIFO adds this much latency, reported for host PDC.
     static constexpr std::size_t kInternalBlock = 512;
 
+    // Round-trip latency of the browser GPU engine, in internal blocks. Each pop
+    // from the SharedArrayBuffer ring asks for the wet of the block this many
+    // blocks ago, giving the WebGPU worker that long to turn a block around before
+    // the audio thread needs it; the CPU safety net is delayed by the SAME amount
+    // (gpu_extra_ / cpu_extra_ring_) so the two wets are interchangeable
+    // sample-for-sample. 2 blocks = 1024 samples ≈ 21 ms at 48 kHz. WS-C/WS-E must
+    // pass the same value as `gpuLatencyBlocks` in the worklet's processorOptions:
+    // it is one contract, expressed in two languages.
+    static constexpr std::size_t kWebGpuLatencyBlocks = 2;
+
     // Hard cap on a loaded IR's length (at the session rate). A multi-minute
     // file would otherwise drive an unbounded decode + resample + GPU FFT; we
     // truncate to this so the worst case stays bounded. 10 s is far longer than
@@ -373,6 +434,39 @@ public:
         store.add_parameter({.id = kFlow, .name = "Flow", .unit = "%",
                              .range = {0.0f, 100.0f, 0.0f, 0.1f}});
 #endif
+
+#if defined(PULP_SC_WEB_GPU)
+        // The browser GPU variant declares exactly TWO controls — and declares
+        // them UNCONDITIONALLY, for the whole life of the module. A WAM host
+        // fetches getParameterInfo() once when the module is mounted, so a
+        // parameter list that grew or shrank later would be ABI-hostile; that is
+        // why this is a separate artifact rather than a runtime branch inside the
+        // CPU-only module.
+        //
+        // Engine: 0 = CPU PartitionedConvolver (default), 1 = the WebGPU compute
+        // path in the worker. CPU is the default and stays a working fallback —
+        // GPU is never a correctness dependency, and is NOT a speed claim.
+        store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+        // GPU only (no CPU safety net): with Engine=GPU, a block the GPU worker
+        // misses is normally covered by the latency-aligned CPU wet, so a miss is
+        // inaudible — which also means the ear cannot tell whether the GPU is
+        // really carrying the audio. Turning the net OFF makes a miss SILENT, so
+        // the GPU is provably the only thing producing sound. It is a real user
+        // affordance, not a hidden test hook: background the tab with it on and
+        // the audio drops out, which is the honest demonstration.
+        store.add_parameter({.id = kGpuOnly, .name = "GPU only", .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+#endif
+
+        // Rooms/Flow are deliberately NOT offered on the web GPU lane.
+        // GpuMultiConvolver runs MissPolicy::Silence with no CPU net, so a
+        // throttled background tab would simply drop out with nothing to cover it;
+        // and its batched multi-IR spectra are the op most likely to exceed a
+        // browser's storage-buffer binding limit. The WAM lane gets no GPU engine
+        // at all for a different reason: it is served from GitHub Pages, which
+        // cannot set COOP/COEP, so SharedArrayBuffer — the only way an
+        // AudioWorklet can reach a WebGPU worker — throws there.
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -476,6 +570,22 @@ public:
             if (g.budget_us > 0.0) g.rt_percent = g.avg_us / g.budget_us * 100.0;
         }
         return g;
+    }
+
+#elif defined(PULP_SC_WEB_GPU)
+
+    /// True when the GPU engine is the requested live path. There is no device to
+    /// probe from C++ here — the WebGPU device lives in the JS worker on the other
+    /// side of pulp_gpu_xfer — so this reports the REQUEST. Whether the GPU is
+    /// actually carrying the audio is what web_gpu_stats() answers.
+    bool gpu_engine_active() const { return requested_engine_value() == 1; }
+
+    /// Live {GPU blocks delivered, blocks missed} since prepare(), so the page can
+    /// show whether the GPU is really carrying the work. A miss is NORMAL (a
+    /// throttled tab), not an error. Any thread; relaxed counters.
+    std::pair<std::uint64_t, std::uint64_t> web_gpu_stats() const {
+        return {web_gpu_blocks_.load(std::memory_order_relaxed),
+                web_gpu_misses_.load(std::memory_order_relaxed)};
     }
 
 #else   // PULP_WASM: no GPU engine — the CPU convolution engine is the only path.
@@ -723,6 +833,20 @@ public:
         }
         gpu_built_rooms_ = init_rooms > 1 ? init_rooms : 1;
         gpu_base_dirty_ = false;
+#endif
+#if defined(PULP_SC_WEB_GPU)
+        // The browser GPU round-trip latency is a COMPILE-TIME constant, not a
+        // probed device property: the worker's ring depth is fixed by the JS side
+        // and the module cannot ask it. It is applied to BOTH engines through the
+        // existing cpu_extra_ring_, so flipping Engine never moves the reported
+        // latency (which would jump the host's PDC mid-stream).
+        gpu_extra_ = kWebGpuLatencyBlocks * kInternalBlock;
+        for (std::size_t ch = 0; ch < kChannels; ++ch)
+            cpu_wet_[ch].assign(kInternalBlock, 0.0f);
+        xfer_in_.assign(kChannels * kInternalBlock, 0.0f);
+        xfer_out_.assign(kChannels * kInternalBlock, 0.0f);
+        web_gpu_blocks_.store(0, std::memory_order_relaxed);
+        web_gpu_misses_.store(0, std::memory_order_relaxed);
 #endif
 
         // Total latency is FIXED for the prepared lifetime: the re-block FIFO
@@ -1144,6 +1268,27 @@ public:
 
         // Release the hazard: the worker may now reclaim the stack we used.
         gpu_in_use_.store(nullptr, std::memory_order_release);
+#elif defined(PULP_SC_WEB_GPU)
+        (void)ctx;
+        // ONE path for both engines, and it always drives the GPU bridge — the
+        // Engine parameter only chooses which wet is EMITTED.
+        //
+        // The bridge's push/pop pair is what advances the block timeline the ring
+        // stamps every block with, so it has to run on every block for the same
+        // reason the CPU convolver does: a convolver (or a ring) that stops running
+        // while the other engine carries the audio is not in a state you can flip
+        // back to. If Engine=CPU skipped the bridge, the out-ring would freeze
+        // holding the wets it had already produced, and the first blocks after a
+        // flip back to GPU would emit THOSE — pre-flip audio, presented as current.
+        // (They would not "simply miss": a non-empty ring is a hit.) Driving it
+        // every block instead means the flip is exactly a change of which buffer is
+        // copied out, with no dropout, no stale burst, and no resync machinery.
+        //
+        // The cost is honest and bounded: while Engine=CPU the GPU worker keeps
+        // convolving blocks whose wet is discarded. The emitted audio is unaffected
+        // — byte-identical to the CPU-only module's — and the GPU block counters
+        // only advance while the GPU engine is actually the one being heard.
+        fill_wet_web(input, n, requested_engine_value() == 1);
 #else
         (void)ctx;
         fill_wet_cpu(input, n);
@@ -1212,15 +1357,19 @@ private:
         return v;
     }
 
-#if !defined(PULP_WASM)
+#if !defined(PULP_WASM) || defined(PULP_SC_WEB_GPU)
 
-    // The engine the audio path should run. Native only: the web lanes neither
-    // compile the GPU runtime nor declare the Engine parameter (see
-    // define_parameters), so they always run the CPU convolver — which is the
-    // desktop DEFAULT engine too, not a reduced substitute.
+    // The engine the audio path should run. The CPU-only web lanes neither compile
+    // a GPU runtime nor declare the Engine parameter (see define_parameters), so
+    // they always run the CPU convolver — which is the DEFAULT engine everywhere
+    // else too, not a reduced substitute.
     int requested_engine_value() const {
         return state().get_value(kEngine) >= 0.5f ? 1 : 0;
     }
+
+#endif
+
+#if !defined(PULP_WASM)
 
     // One self-contained GPU engine: the node (single-IR OR multi-room) plus the
     // transport that drives it on a non-RT worker. Heap-owned and built/freed
@@ -1286,6 +1435,103 @@ private:
             pos = (pos + 1) % d;
         }
     }
+
+#if defined(PULP_SC_WEB_GPU)
+
+    // The web build's ONE audio path, for both engines. The same fixed re-blocking
+    // as fill_wet_cpu(), plus: every internal block is handed across the
+    // pulp_gpu_xfer bridge to the WebGPU worker, and `gpu_engine` chooses whether
+    // the GPU's wet or the CPU's is what gets emitted. RT-safe: preallocated
+    // scratch, one call, no alloc, no lock, no wait.
+    //
+    // BOTH the CPU convolver and the bridge run on EVERY block, whichever engine is
+    // selected, and for the same reason: state. (1) An overlap-save convolver's
+    // output depends on its input history, so a convolver that stopped running
+    // while the GPU carried the audio would emit garbage for its whole tail on the
+    // first block after a miss or an Engine flip — and it is the safety net itself
+    // (this is the argument behind the native path's continuously-primed fallback,
+    // gpu_audio::GpuConvolver's prime_fallback). (2) The ring is a TIMELINE: push
+    // and pop are what advance the block index every wet is stamped with, so a
+    // bridge that idled during CPU mode would hand the next GPU block a ring full
+    // of pre-flip audio.
+    void fill_wet_web(const audio::BufferView<const float>& input, std::size_t n,
+                      bool gpu_engine) {
+        // Block-boundary IR handoff and the Size request, same as the CPU engine —
+        // the CPU convolvers stay live under both engines, so they must stay current.
+        for (std::size_t ch = 0; ch < conv_.size(); ++ch)
+            conv_[ch].try_swap_ir(swapper_[ch]);
+        requested_size_.store(current_size(), std::memory_order_relaxed);
+
+        // No net: a missed block is SILENT rather than CPU-covered, so the GPU is
+        // provably the only thing making sound. Read once per host block. Only
+        // meaningful while the GPU engine is the one being emitted.
+        const bool gpu_only = gpu_engine && state().get_value(kGpuOnly) >= 0.5f;
+
+        const std::size_t in_ch = input.num_channels();
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            if (ch < in_ch)
+                std::memcpy(in_buf_[ch].data() + in_len_[ch],
+                            input.channel(ch).data(), n * sizeof(float));
+            else
+                std::memset(in_buf_[ch].data() + in_len_[ch], 0, n * sizeof(float));
+            in_len_[ch] += n;
+        }
+
+        while (in_len_[0] >= kInternalBlock) {
+            // (1) CPU wet for this block, delayed by the GPU round-trip so it is a
+            // sample-for-sample substitute for the GPU wet of the same block.
+            for (std::size_t ch = 0; ch < kChannels; ++ch) {
+                conv_[ch].process(in_buf_[ch].data(), wet_.data(), kInternalBlock);
+                delay_cpu_wet(ch);
+                std::memcpy(cpu_wet_[ch].data(), wet_.data(),
+                            kInternalBlock * sizeof(float));
+                // Pack the dry input planes for the bridge while the block is still
+                // at the head of the FIFO.
+                std::memcpy(xfer_in_.data() + ch * kInternalBlock,
+                            in_buf_[ch].data(), kInternalBlock * sizeof(float));
+            }
+
+            // (2) Hand the block to the GPU worker and take back the wet it has for
+            // input block n-kWebGpuLatencyBlocks (the ring matches wets to block
+            // indices, so this is that block's wet or nothing — never a stale one).
+            // This runs under BOTH engines: it is what keeps the shared timeline
+            // advancing. The counters, though, describe the GPU ENGINE's audio, so
+            // they only move while the GPU engine is the one being emitted.
+            const int wet_ready = pulp_gpu_xfer(xfer_in_.data(), xfer_out_.data(),
+                                                static_cast<int>(kInternalBlock),
+                                                static_cast<int>(kChannels));
+            const bool hit = gpu_engine && wet_ready != 0;
+            if (gpu_engine) {
+                if (hit)
+                    web_gpu_blocks_.fetch_add(1, std::memory_order_relaxed);
+                else
+                    web_gpu_misses_.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            // (3) Emit: on the GPU engine, the GPU wet on a hit; on a miss the
+            // L-delayed CPU wet, or silence when the user has taken the net away.
+            // On the CPU engine, always the CPU wet — byte-identical to what the
+            // CPU-only module emits, whatever the GPU worker happened to produce.
+            for (std::size_t ch = 0; ch < kChannels; ++ch) {
+                float* dst = out_buf_[ch].data() + out_len_[ch];
+                if (hit)
+                    std::memcpy(dst, xfer_out_.data() + ch * kInternalBlock,
+                                kInternalBlock * sizeof(float));
+                else if (gpu_only)
+                    std::memset(dst, 0, kInternalBlock * sizeof(float));
+                else
+                    std::memcpy(dst, cpu_wet_[ch].data(),
+                                kInternalBlock * sizeof(float));
+                out_len_[ch] += kInternalBlock;
+
+                std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
+                             (in_len_[ch] - kInternalBlock) * sizeof(float));
+                in_len_[ch] -= kInternalBlock;
+            }
+        }
+    }
+
+#endif  // PULP_SC_WEB_GPU
 
 #if !defined(PULP_WASM)
 
@@ -1915,6 +2161,16 @@ private:
     std::array<std::vector<float>, kChannels> gpu_wet_{};
     std::atomic<bool> gpu_engine_active_{false};   // mirrors (gpu_active_ != null)
     bool device_available_ = false;                // a GPU device exists (set at prepare)
+#endif
+#if defined(PULP_SC_WEB_GPU)
+    // Browser GPU engine scratch (audio thread only, preallocated at prepare):
+    // the L-delayed CPU wet held as the safety net for the block in flight, and
+    // the two planar staging buffers the pulp_gpu_xfer bridge reads/writes.
+    std::array<std::vector<float>, kChannels> cpu_wet_{};
+    std::vector<float> xfer_in_;
+    std::vector<float> xfer_out_;
+    std::atomic<std::uint64_t> web_gpu_blocks_{0};   // GPU wets delivered
+    std::atomic<std::uint64_t> web_gpu_misses_{0};   // blocks the worker missed
 #endif
     std::size_t gpu_extra_ = 0;                     // GPU transport latency, samples (fixed)
     int latency_samples_ = static_cast<int>(kInternalBlock);

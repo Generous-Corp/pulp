@@ -134,6 +134,19 @@ const check = (name, pass, detail = "") => {
   console.log(`  ${pass ? "ok  " : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
 };
 
+// The module's C ABI, listed in THREE places that must stay in sync: the
+// EMSCRIPTEN_KEEPALIVE definitions in ui_entry.cpp, _PULP_WEBUI_EXPORTED_FUNCTIONS
+// in tools/cmake/PulpWebUi.cmake, and here + pulp-ui.js. A rename that lands in
+// only two of the three otherwise surfaces as an undefined-is-not-a-function deep
+// inside a demo page.
+const EXPECTED_EXPORTS = [
+  "_malloc", "_free",
+  "_pulp_ui_add_param", "_pulp_ui_init", "_pulp_ui_resize",
+  "_pulp_ui_set_param", "_pulp_ui_get_param", "_pulp_ui_set_gpu_status",
+  "_pulp_ui_repaint", "_pulp_ui_gpu_available", "_pulp_ui_widget_rect",
+  "_pulp_ui_capture_png", "_pulp_ui_shutdown",
+];
+
 let browser;
 try {
   const exe = BROWSERS.find((p) => existsSync(p));
@@ -158,6 +171,40 @@ try {
   await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 60000 });
   const bootError = await page.evaluate(() => window.__error);
   if (bootError) throw new Error("module failed to mount:\n" + bootError);
+
+  // 0 — the C ABI. Cheap, and it catches the three-place drift before any pixel
+  // check can turn it into a mystery.
+  const missingExports = await page.evaluate((names) => {
+    const M = window.__ui.module;
+    return names.filter((n) => typeof M[n] !== "function");
+  }, EXPECTED_EXPORTS);
+  check("the module exports the full UI C ABI",
+        missingExports.length === 0,
+        missingExports.length ? "missing: " + missingExports.join(", ")
+                              : `${EXPECTED_EXPORTS.length} exports`);
+
+  // The status line is the one non-parameter surface: the GPU demo page pushes a
+  // stats blob into it at 10 Hz. Its formatting lives in the module, so a blob in
+  // must produce ink in the status region.
+  const status = await page.evaluate(() => {
+    const M = window.__ui.module;
+    const json = JSON.stringify({
+      engine: "gpu", backend: "apple / metal-3", produced: 12480, covered: 3,
+      avg_us: 214, budget_us: 10667, rt_percent: 2.0,
+    });
+    const p = M.stringToNewUTF8(json);
+    M._pulp_ui_set_gpu_status(p);
+    M._free(p);
+    M._pulp_ui_repaint();
+    const rp = M._malloc(16);
+    const ok = M._pulp_ui_widget_rect(0, 2, rp);   // kind 2 = the status line
+    const rect = ok ? Array.from(M.HEAPF32.subarray(rp >> 2, (rp >> 2) + 4)) : null;
+    M._free(rp);
+    return { rect };
+  });
+  check("the status line has bounds in the view tree",
+        !!status.rect && status.rect[2] > 0 && status.rect[3] > 0,
+        status.rect ? `[${status.rect.map(Math.round).join(",")}]` : "no status rect");
 
   // 1 — WebGL2 context. Fail loudly rather than silently rendering nothing.
   const glInfo = await page.evaluate(() => {
@@ -198,6 +245,8 @@ try {
       knob: rect(0, 0),
       label: rect(0, 1),
       labelInk: raster.width ? regionInk(raster, rect(0, 1)) : 0,
+      status: rect(0, 2),
+      statusInk: raster.width ? regionInk(raster, rect(0, 2)) : 0,
       pngBase64: toBase64(png),
     };
 
@@ -288,6 +337,11 @@ try {
   check("label region contains text ink",
         !!probe.label && probe.labelInk > 20,
         probe.label ? `${probe.labelInk} ink px in [${probe.label.map(Math.round).join(",")}]` : "no label rect");
+
+  // The GPU status blob pushed in step 0 must have rendered as real text.
+  check("the GPU status line renders the pushed stats",
+        !!probe.status && probe.statusInk > 20,
+        probe.status ? `${probe.statusInk} ink px in [${probe.status.map(Math.round).join(",")}]` : "no status rect");
 
   // 3 — a real pointer gesture on a real knob.
   const box = await page.evaluate(() => {

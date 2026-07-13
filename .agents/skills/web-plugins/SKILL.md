@@ -1,6 +1,6 @@
 ---
 name: web-plugins
-description: Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, and the Skia/WebGL2 browser window host. Covers what does and does not compile to wasm, the worklet-thread constraints (no std::thread, no fetch), the non-realtime tick, memory growth, and the silent-failure traps that make a wasm build "work" while producing no audio or no pixels.
+description: Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. Covers what does and does not compile to wasm, the worklet-thread constraints (no std::thread, no fetch, no navigator.gpu), the non-realtime tick, memory growth, how to PROVE a GPU lane actually ran rather than silently falling back to CPU, and the silent-failure traps that make a wasm build "work" while producing no audio or no pixels.
 ---
 
 # Pulp on the web (WAM v2 / WebCLAP / browser UI)
@@ -23,18 +23,108 @@ a per-demo tweak.
 
 Be precise about this; it is easy to overclaim and the claims get quoted.
 
-- **GPU audio is not in the browser.** No GPU-compute code compiles to wasm.
-  The published Skia wasm slice is Ganesh on WebGL2, and **WebGL2 has no compute
-  shaders**. A GPU-DSP lane would need WebGPU (emdawnwebgpu) in a dedicated
-  worker; that is unstarted. The browser lane is a **GPU-rendered UI over CPU
-  DSP** — say exactly that.
-- **Not Graphite/Dawn.** See the `skia-gpu-build` skill's wasm section; the slice
-  ships zero `wgpu` symbols.
+- **The UI is not Graphite/Dawn.** The published Skia wasm slice is **Ganesh on
+  WebGL2** and ships zero `wgpu` symbols (see the `skia-gpu-build` skill's wasm
+  section). WebGL2 has **no compute shaders**, so the UI's render path cannot
+  carry GPU DSP — the two lanes are unrelated (see below).
 - File-backed loaders and native editors are compiled out (`PULP_WASM` /
   `PULP_HEADLESS`). A plugin that needs an asset on the web must carry it in the
   binary or fetch it on the main thread — an `AudioWorkletGlobalScope` cannot
   fetch, which is also why the WAM worklet build must be `SINGLE_FILE` (the wasm
   embedded in the .js).
+
+## GPU audio in the browser: it exists, and it is a THIRD lane
+
+`examples/web-demos/gpu-audio/` runs SuperConvolver's convolution as a **WGSL
+compute shader on the browser's real WebGPU device**. Do not repeat the old line
+that this is impossible or unstarted. But be equally precise about its shape,
+because three separate constraints force it and each one is a trap:
+
+- **The DSP links `emdawnwebgpu`, not Skia.** Dawn's Emscripten port implements
+  `webgpu.h` over `navigator.gpu` and is **completely independent of Skia** — the
+  UI's Ganesh/WebGL2 slice is irrelevant here and must not be dragged in.
+  `tools/cmake/PulpGpuWasm.cmake` (`--use-port=emdawnwebgpu`) is deliberately
+  Skia-free.
+- **An `AudioWorklet` cannot touch `navigator.gpu`. At all.** So the compute
+  CANNOT live where the audio lives. It runs in a **DedicatedWorker**, and hands
+  finished blocks to the worklet over **SharedArrayBuffer rings** — the same shape
+  as native `GpuAudioTransport`: fixed latency primed as N blocks, lock-free ring,
+  a `MissPolicy` the audio thread applies when a block is late. (WebCLAP already
+  needs COOP/COEP, so the SAB is free; a WAM-only page would have to earn it.)
+- **The native blocking readback is FATAL in a browser.** `MapAsync` + a spin on
+  `ProcessEvents` works natively and **deadlocks on the web**: the spin starves the
+  very JS event loop that would resolve the map. The browser arm must be genuinely
+  async — submit block N+1 while N's map is still in flight, bound the in-flight
+  depth, and route a blown deadline to `MissPolicy` instead of hanging.
+
+**Never claim it is faster than the CPU.** It is not, and the plugin does not
+default to it. The 2026-06-29 spike measured a competent real-FFT CPU convolver
+beating or tying the GPU at every musically plausible setting. This is a
+**capability** result — convolution reverb running as a compute shader in a
+browser tab — and the CPU remains the default and the always-available fallback.
+
+### Proving a GPU lane ran is the whole problem
+
+A GPU path that silently falls back to the CPU is **indistinguishable from one that
+works**. "It sounds right", "the device and pipelines exist", and "no errors" all
+pass falsely when nothing ever dispatched. Two assertions carry real weight, and
+`browser-test/validate-gpu.mjs` is the worked example:
+
+- **Kill the safety net.** Run with the CPU fallback disabled: a GPU that never
+  produced a block then yields **silence**, so the run cannot be quietly covered.
+- **Tamper with the shader and watch the samples move.** Read the **actual WGSL
+  text back out of the shipped module**, rewrite it (scale the output store by
+  0.5), push it back before init, and require the audible samples to come out
+  exactly 0.5× — bit-for-bit. A JS or wasm impostor doing the arithmetic elsewhere
+  is *completely unaffected* by editing a shader it never runs. Reading the source
+  out of the module rather than pasting a copy into the test also makes it
+  drift-proof.
+
+**Never assert on `timestamp-query`.** Chrome quantizes it: a 512-point FFT block
+measures **0 ns**. A zero there is not evidence the GPU idled, and asserting either
+way manufactures false evidence. Report it; never gate on it.
+
+**Proving the ENGINE is not proving the PAGE.** The engine fixture is allowed to
+cheat — `validate-gpu.mjs` measures the impulse response on the CPU engine in one
+run and hands it to the worker in the next. A visitor gets no such favour, so
+everything between the plugin's data and the worker's kernel is UNCOVERED by it,
+and each link fails *silently*: the page loads, the CPU path plays, the GPU engine
+simply never appears, and nothing anywhere errors. Drive the ASSEMBLED page in a
+real browser too (`page-gpu.mjs`), and assert the worker's counters ADVANCE — not
+that a control exists (it can be inert), not that there are no errors (a silent
+fallback is errorless by design), and not a cumulative `produced > 0` (that latches
+on the first block ever made and then reads "GPU" forever, including while a lost
+device misses every deadline).
+
+### Getting the plugin's data OUT to the page (and the trap in it)
+
+A plugin whose DSP can also run OUTSIDE the worklet — a GPU worker, which an
+`AudioWorkletGlobalScope` cannot even reach — has to tell that somewhere what to
+work with. For a convolver that means the IR, and it must be the IR the plugin
+ACTUALLY ENDED UP WITH, after its own normalize/window pass. Handing the page a raw
+IR to give to both sides is **not** equivalent: the plugin transforms what it is
+given, so the two engines would convolve with different kernels and the CPU
+fallback would quietly stop being a substitute for a missed GPU block.
+
+The seam that works: plain **optional wasm exports** (`pulp_ir_generation` /
+`pulp_ir_snapshot` / `pulp_ir_data`) → the worklet polls → `postMessage` → the
+adapter latches and re-emits (`onIrChanged`) → the page forwards it. Not a new CLAP
+extension: an extension is permanent ABI invented for one demo, carried forever by
+every host that is not this page. An export is opt-in and invisible — the shared
+worklet checks whether the module has it and does nothing when it does not.
+
+Two things that WILL bite:
+
+- **Do not gate the poll on the non-realtime tick.** It looks obviously right — the
+  tick is what rebuilds the IR — and it silently never fires for the FIRST one. The
+  plugin builds its initial IR while ACTIVATING, so by the time audio is running it
+  has nothing pending, never asks the host for a callback, and a tick-gated poll
+  waits forever for a rebuild that already happened. Poll the generation counter
+  every quantum; it is one wasm call returning a `uint32`.
+- **Latch it in the adapter.** The first value is published while the plugin
+  activates — before the page's handler exists. Without a latch (and a replay on
+  subscribe) that first publish is lost, and the consumer waits for a change that
+  already happened.
 
 ## The worklet has no second thread
 
@@ -208,6 +298,39 @@ The `WAMv2 + WebCLAP (Linux, headless Chrome)` lane
 The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
+
+### Landmine: `pulp_add_wclap(Foo)` declares the target as `Foo-wclap`
+
+Not `Foo`. `cmake --build … --target Foo` is a hard **"No rule to make target"**,
+not a fallback — so a workflow step with the bare name fails before it reaches
+whatever it was supposed to prove. Shipped that way once in `web-plugins.yml`.
+
+### Landmine: a plugin is not time-invariant while its IR is still rebuilding
+
+Any fixture that **measures an impulse response and then convolves with it** (the
+standard way to check a convolver against an oracle) is assuming the plugin is
+linear and **time-invariant** across the capture. SuperConvolver is only that once
+its IR has stopped moving, and it does not start that way: a Size change is
+**time-sliced** across many `process()` calls and crossfaded
+(`superconvolver::SlicedIrRebuild`), exactly so the render callback stays in budget
+instead of spiking (see "Keep the work bounded").
+
+Set a parameter and capture immediately and you probe `h` **mid-crossfade** — a
+blend of two IRs, a kernel that describes no instant of the run. Everything
+downstream is then judged against it, and the failure **frames the ENGINE as broken
+when the fixture is what is wrong** (measured: CPU vs oracle relative RMS **3.4** —
+not a drift, a different signal).
+
+Two things fix it, and you want both:
+
+1. **Pre-roll of silence** before the marker impulse. The graph is live and the
+   plugin drains its sliced rebuild while nothing is being measured.
+2. **A second impulse after the analysis window**, whose response must equal the
+   first's. A pre-roll alone is just an assumption that convergence fits inside it,
+   and it rots the moment the slice budget or the IR length changes. The second
+   impulse turns it into a **checked claim** about the exact property the oracle
+   depends on, and it fails loudly with a named reason *before* the bad kernel can
+   poison anything.
 
 ## Demo pages
 

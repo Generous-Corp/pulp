@@ -148,6 +148,15 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
             const slot = slotOf.has(id) ? slotOf.get(id) : id;
             Module._pulp_ui_set_param(slot, value);
         },
+        // Host -> UI, the one non-parameter surface: the engine/miss/budget
+        // status line. `stats` is a plain object; the module formats it (see
+        // ui_entry.cpp format_gpu_status). Pass null to restore the default
+        // CPU line.
+        setGpuStatus: (stats) => {
+            const s = cstr(stats ? JSON.stringify(stats) : "");
+            Module._pulp_ui_set_gpu_status(s);
+            Module._free(s);
+        },
         destroy: () => {
             observer.disconnect();
             adapter.onParamsChanged = previousOnParamsChanged;

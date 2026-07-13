@@ -71,6 +71,19 @@ const SECTIONS = ["example-plugins", "classic-effects"];
 // click-to-start overlay), and the index is shot as its card grid.
 const SUPER_CONVOLVER = { slug: "super-convolver", dirs: ["wam", "wclap"] };
 
+// /super-convolver-gpu/ is the WebGPU-compute engine page. It is WebCLAP-ONLY (a WAM
+// module lives inside an AudioWorklet, which can neither reach navigator.gpu nor spawn
+// the worker that would), so unlike the pair above it has NO per-ABI sub-dirs — the
+// plugin is on the index itself, and the page IS the shot.
+//
+// It is listed here because assemble-gallery.mjs emits it CONDITIONALLY (only when the
+// GPU DSP build tree is present). A page that appears without an entry here would ship
+// with a baked og:image pointing at a PNG nobody generated — and Cloudflare serves a
+// missing asset as its 404 page with a 200 status, so it fails as a BLANK UNFURL rather
+// than as a broken link. check-og-images.mjs is the backstop that turns that into a
+// build failure; this is what keeps it from happening.
+const SUPER_CONVOLVER_GPU = { slug: "super-convolver-gpu" };
+
 // The two standalone pages assemble.mjs / assemble-player.mjs write. They are not
 // galleries and have no plugins array, but they are shareable URLs like any other
 // — a bare unfurl is a bare unfurl — so they get previews too. `/player/` mounts
@@ -206,6 +219,15 @@ try {
     await shoot(`${BASE}/${slug}/`, ".wrap", join(OUT, slug, "og.png"), `${slug} gallery`, false);
   } else {
     console.log(`  skip ${SUPER_CONVOLVER.slug} (not assembled)`);
+  }
+
+  // The GPU page: shot STARTED, like every other demo page, so the preview is the
+  // plugin actually running its WebGPU engine rather than a click-to-start overlay.
+  if (existsSync(join(OUT, SUPER_CONVOLVER_GPU.slug, "index.html"))) {
+    const { slug } = SUPER_CONVOLVER_GPU;
+    await shoot(`${BASE}/${slug}/`, "#panel", join(OUT, slug, "og.png"), slug, true);
+  } else {
+    console.log(`  skip ${SUPER_CONVOLVER_GPU.slug} (not assembled)`);
   }
 
   for (const s of STANDALONE) {

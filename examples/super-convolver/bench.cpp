@@ -538,10 +538,13 @@ void bench_timevarying() {
         const double sp = (cpu_med > 0 && gpu_med > 0) ? cpu_med / gpu_med : -1.0;
         std::printf("%-6u %12.1f %12.1f %10.2f %14.2e\n", N, cpu_med, gpu_med, sp, max_diff);
     }
-    std::printf("\nHere the CPU baseline is PROVABLY optimal (folding is impossible for\n");
-    std::printf("full-rank time-varying weights), so speedup > 1 is an honest musical\n");
-    std::printf("GPU win, not raw throughput. max|CPU-GPU| < 1e-4 (observed ~1e-6)\n");
-    std::printf("confirms the GPU computes the SAME result as N CPU convolvers.\n");
+    std::printf("\nHere folding is impossible (full-rank time-varying weights), so the CPU\n");
+    std::printf("must run N convolutions and the comparison is like-for-like rather than\n");
+    std::printf("raw throughput. Read the speedup column as a MEASUREMENT, not a claim:\n");
+    std::printf("the 2026-06-29 spike found a competent real-FFT CPU convolver matching\n");
+    std::printf("or beating the GPU at every musically plausible setting (<=256 rooms),\n");
+    std::printf("and this CPU baseline is only as good as its own FFT. max|CPU-GPU| < 1e-4\n");
+    std::printf("(observed ~1e-6) confirms the GPU computes the SAME result.\n");
 }
 
 int main() {

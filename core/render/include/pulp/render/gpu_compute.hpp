@@ -38,9 +38,47 @@ public:
 
     /// Initialize standalone (creates its own device, no rendering surface).
     /// Useful for benchmarking and headless compute.
+    ///
+    /// Native only. It requests the adapter and device and then pumps the event
+    /// queue once; in a browser those futures resolve only after control returns
+    /// to the JS event loop, so there is no correct in-line spelling of it. The
+    /// browser build fails this call explicitly rather than returning a
+    /// mysterious false — use initialize_from_device() there.
     virtual bool initialize_standalone() = 0;
 
+    /// Initialize by adopting an already-created WebGPU device. `wgpu_device` is
+    /// an opaque `WGPUDevice`, the same handle style as
+    /// GpuSurface::dawn_device_handle(). Acquires the device's queue, reads its
+    /// limits/features, installs the uncaptured-error and device-lost callbacks,
+    /// and builds the compute pipelines.
+    ///
+    /// This is the browser entry point. WebGPU is exposed on Window and
+    /// DedicatedWorker only, so the worker's JS awaits
+    /// navigator.gpu.requestAdapter()/requestDevice(), publishes the result as
+    /// `Module.preinitializedWebGPUDevice`, and the C++ side takes it via
+    /// `emscripten_webgpu_get_device()`. Every asynchronous step of device
+    /// acquisition stays in JS: no Asyncify is used or needed.
+    ///
+    /// Returns false on a null handle or pipeline-creation failure.
+    virtual bool initialize_from_device(void* wgpu_device) = 0;
+
     bool is_initialized() const { return initialized_; }
+
+    /// True once the WebGPU device has been lost. Device loss is normal — a
+    /// browser tab can lose its device at any time — so it is reported as state,
+    /// not as an initialization failure. On loss every in-flight readback
+    /// completes as `Failed` and `is_initialized()` goes false; the owner is
+    /// expected to re-acquire a device and re-`prepare_*`.
+    virtual bool device_lost() const = 0;
+
+    /// Report that an ADOPTED device (initialize_from_device /
+    /// initialize_from_surface) has been lost. A device-lost callback can only be
+    /// installed on the device *descriptor*, i.e. at creation, so a device this
+    /// object did not create cannot observe its own loss — its owner must say so.
+    /// In the browser that owner is the worker's JS, which awaits `device.lost`.
+    /// Idempotent. A device created by initialize_standalone() observes loss on
+    /// its own and needs no call.
+    virtual void notify_device_lost() = 0;
 
     // ── Compute operations ──────────────────────────────────────────────
 
@@ -404,20 +442,15 @@ public:
     virtual bool wavenet_forward(const float* in_block, float* out_block,
                                  uint32_t block_size, uint32_t instance = 0) = 0;
 
-    // ── Asynchronous readback (compute_magnitude ONLY, so far) ──────────────
+    // ── Asynchronous readback (compute_magnitude + convolve_batch) ──────────
     //
     // SCOPE FIRST, so nobody reads the contract below as a general promise:
-    // exactly ONE operation has an async variant — compute_magnitude_async().
-    // fft_forward, convolve, convolve_batch, multi_convolve, multi_fdl_convolve,
-    // spectral_stack_render, matmul, conv_stack_forward and wavenet_forward ALL
-    // still block. This is not a non-blocking mode for GpuCompute; it is a
-    // non-blocking compute_magnitude plus the completion machinery the rest of
-    // the ops would reuse when they are converted.
-    //
-    // Nor does any of this compile to WebAssembly today: the Dawn implementation
-    // of GpuCompute is native-only, and the browser demo ships NO GPU-compute
-    // wasm module at all. The async shape exists because a browser port would
-    // need it (see below) — not because one exists.
+    // exactly TWO operations have an async variant — compute_magnitude_async()
+    // and convolve_batch_async(). fft_forward, convolve, multi_convolve,
+    // multi_fdl_convolve, spectral_stack_render, matmul, conv_stack_forward and
+    // wavenet_forward ALL still block. This is not a non-blocking mode for
+    // GpuCompute; it is two non-blocking operations plus the completion
+    // machinery the rest of the ops reuse when they are converted.
     //
     // Every blocking operation pumps the device event queue until the GPU map
     // resolves. That is only viable where the caller owns a thread it may stall
@@ -426,7 +459,11 @@ public:
     // async path submits the dispatch, returns immediately, and hands results
     // back from poll_readbacks(), so the caller decides when completions run.
     //
-    // Contract (of the async path, i.e. compute_magnitude_async):
+    // In the browser (Emscripten/emdawnwebgpu) the blocking ops are compiled out
+    // or hard-fail: the async path is the ONLY way to get bytes back from the
+    // GPU there.
+    //
+    // Contract (of the async path):
     // - An accepted request (non-zero id) completes EXACTLY ONCE, from
     //   poll_readbacks() or from ~GpuCompute(). It never hangs: a request whose
     //   map has not resolved by its deadline completes as `Expired`, which the
@@ -464,6 +501,26 @@ public:
                                              std::chrono::microseconds deadline,
                                              ReadbackCallback on_complete) = 0;
 
+    /// Non-blocking counterpart of convolve_batch(). Same plan requirement
+    /// (prepare_convolution_batch(n, ir_spec, batch) first) and same result:
+    /// `out_complex` receives `batch * n * 2` floats, already scaled by the 1/n
+    /// inverse-FFT factor, when the completion reports Success. `deadline` is
+    /// measured from this call. Returns 0 if the request was rejected (not
+    /// initialized, no plan for `n`, batch mismatch, null pointers, no callback,
+    /// or the in-flight cap is reached) — the callback does NOT fire in that
+    /// case, and the caller counts a miss.
+    ///
+    /// Multiple blocks may be in flight at once. The plan's compute buffers are
+    /// SHARED across them, which is safe because the WebGPU queue executes
+    /// submissions in order: submit N's copy into its readback buffer runs before
+    /// submit N+1 overwrites the plan's input buffer. Only the mapped readback
+    /// buffer is per-submit (one per request, from the staging pool) — a shared
+    /// one is precisely what forces a blocking design.
+    virtual uint64_t convolve_batch_async(const float* in_complex, float* out_complex,
+                                          uint32_t n, uint32_t batch,
+                                          std::chrono::microseconds deadline,
+                                          ReadbackCallback on_complete) = 0;
+
     /// Pump the device event queue once and fire the completions that are ready
     /// or past their deadline. Never blocks. Returns the number of requests
     /// still in flight. Re-entrant calls (from inside a completion) are a no-op.
@@ -471,6 +528,51 @@ public:
 
     /// Requests submitted whose completion has not fired yet.
     virtual std::size_t readbacks_in_flight() const = 0;
+
+    /// Cap on concurrently in-flight async readbacks (default 4). Admission
+    /// control, not a hint: at the cap, an async submit is REJECTED (returns 0)
+    /// instead of queueing. Without it a stalled or throttled GPU — a
+    /// backgrounded browser tab is the ordinary case — would grow staging memory
+    /// by one buffer per audio block forever. A rejected submit is a miss, which
+    /// the caller already knows how to route (MissPolicy).
+    virtual void set_max_readbacks_in_flight(std::size_t max_in_flight) = 0;
+
+    /// Counters for the async path, incremented where the work actually happens:
+    /// `submits` at the queue submit, `map_resolves` when the GPU map callback
+    /// fires, `expired`/`failed` when a request completes with that status.
+    /// `submits - (map_resolves + expired + failed)` is not a meaningful
+    /// identity — a resolved map can still complete Expired if its deadline had
+    /// already passed.
+    struct AsyncStats {
+        uint64_t submits = 0;
+        uint64_t map_resolves = 0;
+        uint64_t expired = 0;
+        uint64_t failed = 0;
+    };
+
+    virtual AsyncStats async_stats() const = 0;
+
+    // ── Kernel-source seam (diagnostic) ──────────────────────────────────
+    //
+    // A named compute pipeline's WGSL is readable, and replaceable before the
+    // pipeline is built. This exists for ONE purpose: to demonstrate that the
+    // WGSL text is causally upstream of the audio samples — mutate the kernel,
+    // hear/measure the mutation in the output. It is what makes the browser
+    // GPU-audio claim checkable rather than asserted. It is a diagnostic seam,
+    // not a plugin/effect API: there is no validation of the replacement beyond
+    // WGSL compilation, and a bad override simply fails pipeline creation.
+
+    /// Built-in WGSL for a named pipeline (e.g. "conv_bmul", "fft_stockham",
+    /// "magnitude"). Returns nullptr for an unknown label. Pipeline labels are
+    /// the ones passed to the internal create_pipeline().
+    virtual const char* kernel_source(const char* label) const = 0;
+
+    /// Replace the WGSL of a named pipeline. MUST be called before the pipelines
+    /// are built (i.e. before initialize_*), because pipelines are compiled once
+    /// at initialization. Returns false for an unknown label, null WGSL, or a
+    /// call made after initialization — a late override is refused rather than
+    /// silently ignored.
+    virtual bool override_kernel_source(const char* label, const char* wgsl) = 0;
 
     // ── Capabilities ─────────────────────────────────────────────────────
 

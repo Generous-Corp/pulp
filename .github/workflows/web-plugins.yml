@@ -14,9 +14,11 @@ on:
       - "examples/pulp-gain/**"
       - "examples/super-convolver/**"
       - "packages/pulp-web-player/**"
+      - "core/gpu_audio/**"
       - "tools/cmake/PulpWam.cmake"
       - "tools/cmake/PulpWclap.cmake"
       - "tools/cmake/PulpWebUi.cmake"
+      - "tools/cmake/PulpGpuWasm.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/web-plugins.yml"
   # Run the required `WAMv2 + WebCLAP (Linux, headless Chrome)` check on queued
@@ -66,6 +68,46 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
+
+      # ── Is there a software WebGPU adapter on a GPU-less Linux runner? Nobody
+      #    knew, so this step FINDS OUT and PRINTS it. Deliberately NON-GATING
+      #    (`continue-on-error`): its only job is to record, run after run, what
+      #    requestAdapter() actually returns here. If it ever starts returning an
+      #    adapter, the GPU-audio fixture below can be promoted from its named skip
+      #    to a real gate on this lane too.
+      - name: Probe WebGPU on this runner (diagnostic, never gates)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq python3 >/dev/null
+          mkdir -p /tmp/gpu-probe && cd /tmp/gpu-probe
+          cat > index.html <<'HTML'
+          <!doctype html><body id=o>pending</body><script>
+          (async () => {
+            const o = document.getElementById("o");
+            if (!navigator.gpu) { o.textContent = "RESULT: no-navigator-gpu"; return; }
+            const a = await navigator.gpu.requestAdapter();
+            if (!a) { o.textContent = "RESULT: no-adapter"; return; }
+            const i = a.info || {};
+            o.textContent = "RESULT: adapter " + i.vendor + "/" + i.architecture +
+                            " features=" + [...a.features].join("|");
+          })();
+          </script>
+          HTML
+          python3 -m http.server 8811 >/dev/null 2>&1 &
+          sleep 1
+          # WebGPU needs a secure context, so the page is served over
+          # http://localhost — a data: or file:// URL has no navigator.gpu at all
+          # (measured; it is the first thing that makes a probe like this lie).
+          probe() {
+            echo "--- chrome flags: ${*:-none}"
+            "${{ steps.chrome.outputs.chrome-path }}" --headless --no-sandbox \
+              --virtual-time-budget=8000 "$@" --dump-dom http://localhost:8811/ 2>/dev/null \
+              | grep -o "RESULT:[^<]*" || echo "RESULT: (page produced nothing)"
+          }
+          probe
+          probe --enable-unsafe-swiftshader
+          probe --enable-unsafe-swiftshader --use-angle=swiftshader
 
       - name: Vendor choc for the WAM build
         run: |
@@ -171,7 +213,7 @@ jobs:
           cp ../../../core/format/src/wasm/wam-processor.js  browser-test/
           cp ../../../core/format/src/wasm/wam-runtime.mjs   browser-test/
           cp ../../../core/format/src/wasm/wam-plugin.js     browser-test/
-          ln -s "$GITHUB_WORKSPACE/node_modules" browser-test/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" browser-test/node_modules
           node browser-test/validate.mjs --screenshot /tmp/wam-browser.png
 
       # ── WebCLAP (wasi-sdk) ────────────────────────────────────────────────
@@ -210,7 +252,7 @@ jobs:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/wclap-build/browser-host/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/wclap-build/browser-host/node_modules
           node examples/web-demos/wclap-build/browser-host/validate.mjs --screenshot /tmp/wclap-browser.png
 
       # ── Pulp UI in the browser (Skia Ganesh on WebGL2) ────────────────────
@@ -232,10 +274,55 @@ jobs:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/super-convolver-ui/browser-test/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/super-convolver-ui/browser-test/node_modules
           node examples/web-demos/super-convolver-ui/browser-test/validate.mjs \
             --build "$GITHUB_WORKSPACE/build-webui" \
             --artifact /tmp/pulp-ui-browser.png
+
+      # ── The GPU-audio SAB ring ────────────────────────────────────────────
+      # The ring's core is DUPLICATED: the module source
+      # (examples/web-demos/gpu-audio/js/gpu-ring.mjs) and a verbatim inline copy in
+      # the worklet bundle, because an AudioWorklet module is a classic script and
+      # cannot import. That duplication is only tolerable because a test asserts the
+      # two are byte-identical — so the test has to actually RUN, on the audio-thread
+      # code of a PUBLISHED npm package. `npm test` also covers the adapter seams.
+      - name: web-player unit tests (incl. gpu-ring byte-identity + inertness)
+        run: npm --prefix packages/pulp-web-player test
+
+      - name: gpu-ring semantics (drops, expiries, stale wets, Engine flip)
+        run: node examples/web-demos/gpu-audio/js/gpu-ring.test.mjs
+
+      # ── The GPU-audio demo surface ────────────────────────────────────────
+      # No browser, no wasm: runs the assembler against a stub build tree and
+      # asserts what the /super-convolver-gpu/ page IS today, AND that the two
+      # SHIPPED SuperConvolver pages did not move (sha256-pinned, modulo the
+      # cache-bust hash).
+      - name: SuperConvolver GPU gallery smoke
+        run: node examples/web-demos/gpu-audio/browser-test/gallery-smoke.mjs
+
+      # The proof fixture on a GPU-less Linux runner. It SKIPS with a named reason
+      # (`SKIP: webgpu-unavailable (no-adapter)`, exit 0) rather than pretending;
+      # PULP_REQUIRE_WEBGPU is deliberately NOT set here. The real gate is the
+      # macOS job below, where a WebGPU adapter is MEASURED to exist. If the probe
+      # step above ever reports an adapter on this runner, set PULP_REQUIRE_WEBGPU=1
+      # here too and this becomes a second real gate.
+      - name: Build the WebGPU DSP module (Emscripten + emdawnwebgpu)
+        run: |
+          set -euo pipefail
+          emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-gpu-dsp -j"$(nproc)"
+
+      - name: GPU-audio browser proof (skips with a reason where there is no adapter)
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
+          node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
+            --gpu-wasm examples/web-demos/wclap-build/build/SuperConvolverGpu.wasm \
+            --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp" \
+            --screenshot /tmp/gpu-audio-browser.png
 
       - name: Upload browser screenshots
         if: always()
@@ -243,4 +330,159 @@ jobs:
         with:
           name: web-plugins-screenshots
           path: /tmp/*-browser.png
+          if-no-files-found: ignore
+
+  # ── THE REAL GPU GATE ───────────────────────────────────────────────────────
+  # Runs ONLY where a WebGPU adapter is measured to exist: the self-hosted macOS
+  # runners (PULP_LOCAL_MACOS_RUNS_ON_JSON). Probed 2026-07-12 on the Mac Studio
+  # host — headless Chrome there reports `apple / metal-3` with `timestamp-query`
+  # among its adapter features, so PULP_REQUIRE_WEBGPU=1 makes a null adapter a
+  # HARD FAILURE and the fixture cannot silently degrade into
+  # always-skipped-always-green.
+  #
+  # The job is skipped entirely when that repo variable is unset, so a fork
+  # without the runner pool does not see a permanently red check. It is advisory
+  # (not in branch protection) until it has run green for a while — but it is a
+  # REAL gate on the machines it runs on, not a decoration.
+  gpu-audio-macos:
+    name: GPU audio proof (macOS, real WebGPU)
+    if: vars.PULP_LOCAL_MACOS_RUNS_ON_JSON != ''
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - name: Set up wasi-sdk
+        run: |
+          set -euo pipefail
+          ver=25
+          url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-arm64-macos.tar.gz"
+          curl -fsSL "$url" -o /tmp/wasi-sdk.tar.gz
+          mkdir -p "$HOME/wasi-sdk-macos"
+          tar -xzf /tmp/wasi-sdk.tar.gz -C "$HOME/wasi-sdk-macos" --strip-components=1
+          echo "WASI_SDK_PREFIX=$HOME/wasi-sdk-macos" >> "$GITHUB_ENV"
+
+      - name: Install playwright-core
+        run: npm install --no-save playwright-core
+
+      # The GPU-capable WebCLAP module (Engine + "GPU only" params) and the
+      # Skia-free WebGPU DSP module the worker instantiates. No Skia anywhere in
+      # this job: the proof is about audio, not pixels.
+      - name: Build SuperConvolverGpu (WebCLAP) + the WebGPU DSP module
+        run: |
+          set -euo pipefail
+          cmake -S examples/web-demos/wclap-build -B build-wclap \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release
+          # pulp_add_wclap(Foo) declares the target as `Foo-wclap`, not `Foo` — the
+          # bare names are a hard "No rule to make target", not a fallback.
+          cmake --build build-wclap -j"$(sysctl -n hw.ncpu)" --target SuperConvolverGpu-wclap SuperConvolver-wclap
+          emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-gpu-dsp -j"$(sysctl -n hw.ncpu)"
+
+      - name: GPU-audio browser proof (WebGPU REQUIRED)
+        env:
+          PULP_REQUIRE_WEBGPU: "1"
+          CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+        run: |
+          set -euo pipefail
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
+          node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
+            --gpu-wasm build-wclap/SuperConvolverGpu.wasm \
+            --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp" \
+            --screenshot /tmp/gpu-audio-macos.png
+
+      # ── Does the SHIPPED PAGE run the GPU? ─────────────────────────────────────
+      #
+      # The proof above proves the ENGINE, and cannot prove the page: it sidesteps the IR
+      # handoff by measuring the impulse response on the CPU engine in one run and handing
+      # it to the worker in the next. A visitor gets no such favour. Everything between the
+      # plugin's IR and the worker's kernel — the wasm exports, the worklet poll, the
+      # adapter latch, lane.setIr(), the worker's re-prepare — is uncovered by it, and each
+      # link fails SILENTLY: the page loads, the CPU convolver plays, and the GPU engine
+      # simply never appears. So the assembled page gets driven in a real browser.
+      #
+      # It has to run HERE and not in the Cloudflare deploy lane, which is where the site
+      # is normally assembled: that lane is Linux, has no WebGPU adapter, and the fixture
+      # would skip. A real GPU is the whole point.
+      - name: Cache the Skia wasm slice
+        id: skia-cache-macos
+        uses: actions/cache@v4
+        with:
+          path: ~/skia-wasm
+          key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
+
+      # The gallery's other 23 plugins live in two separate public repos, and
+      # assemble-gallery.mjs hard-fails on the first missing wasm — so the page cannot be
+      # assembled without them, even though this job only cares about SuperConvolver.
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-example-plugins
+          path: _ext/pulp-example-plugins
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-classic-effects
+          path: _ext/pulp-classic-effects
+
+      - name: Assemble the GPU demo page (the real one, from the real modules)
+        run: |
+          set -euo pipefail
+          if [ ! -d "$HOME/skia-wasm" ]; then
+            read -r url sha < <(python3 - <<'PY'
+          import json
+          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
+                     if d["name"] == "Skia")
+          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
+          print(a["url"], a["sha256"])
+          PY
+          )
+            curl -fsSL "$url" -o /tmp/skia-wasm.zip
+            echo "$sha  /tmp/skia-wasm.zip" | shasum -a 256 -c -
+            mkdir -p "$HOME/skia-wasm"
+            unzip -q /tmp/skia-wasm.zip -d "$HOME/skia-wasm"
+          fi
+
+          # The page's status strip is a Label in Pulp's own view tree, so the GPU page
+          # cannot be assembled without the UI module — there is nothing to report into.
+          emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
+            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm"
+          cmake --build build-webui -j"$(sysctl -n hw.ncpu)"
+
+          # Every gallery plugin, so the assembler can run at all (see the checkouts above).
+          cmake -S examples/web-demos/wclap-build -B build-wclap \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DPULP_EXAMPLE_PLUGINS_DIR="$GITHUB_WORKSPACE/_ext/pulp-example-plugins" \
+            -DPULP_CLASSIC_EFFECTS_DIR="$GITHUB_WORKSPACE/_ext/pulp-classic-effects" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-wclap -j"$(sysctl -n hw.ncpu)"
+
+          node examples/web-demos/wclap-build/cloudflare/assemble-gallery.mjs \
+            --build "$GITHUB_WORKSPACE/build-wclap" \
+            --ui-build "$GITHUB_WORKSPACE/build-webui" \
+            --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp"
+
+      - name: The shipped page runs its GPU engine (WebGPU REQUIRED)
+        env:
+          PULP_REQUIRE_WEBGPU: "1"
+          CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+        run: |
+          set -euo pipefail
+          node examples/web-demos/gpu-audio/browser-test/page-gpu.mjs \
+            --site examples/web-demos/wclap-build/cloudflare/public
+
+      - name: Upload the proof screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-audio-macos
+          path: /tmp/gpu-audio-macos.png
           if-no-files-found: ignore

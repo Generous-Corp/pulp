@@ -84,6 +84,24 @@ public:
         auto* row_ptr = row.get();
         add_child(std::move(row));
 
+        // One status line under the knobs. It is the ONLY surface in this view
+        // that is not a parameter: the host pushes a formatted engine/miss/
+        // budget string into it (pulp_ui_set_gpu_status). It carries no speed
+        // claim — the GPU path is a capability demonstration, not a faster one.
+        auto status = std::make_unique<vw::Label>(kDefaultStatus);
+        status->set_font_size(12);
+        status->set_text_color(text_dim);
+        status->set_text_align(vw::LabelAlign::left);
+        // The GPU line is long by design (engine, backend, block counts, the
+        // µs-per-block against the real-time budget). Soft-wrap it: a single-line
+        // Label would clip the budget figure off the right edge at demo widths,
+        // and a truncated honesty statement is not one.
+        status->set_multi_line(true);
+        status->set_line_clamp(2);
+        status->flex().preferred_height = kStatusHeight;
+        status_ = status.get();
+        add_child(std::move(status));
+
         cells_.reserve(params.size());
         for (auto& spec : params) {
             auto cell = std::make_unique<vw::View>();
@@ -146,6 +164,18 @@ public:
         cell->value_label->set_text(format_value(cell->spec, real_value));
     }
 
+    /// Host -> UI. Replaces the status line under the knobs.
+    void set_status(const std::string& text) {
+        if (status_) status_->set_text(text.empty() ? kDefaultStatus : text);
+    }
+
+    /// Bounds of the status Label in root coordinates.
+    bool status_bounds(vw::Rect* out) const {
+        if (!status_) return false;
+        if (out) *out = absolute_bounds(*status_);
+        return true;
+    }
+
     /// Real-unit value currently shown for `index`; NaN when unknown.
     float param_value(int index) const {
         for (const auto& cell : cells_) {
@@ -183,6 +213,9 @@ private:
     static constexpr float kCellHeight = 128;
     static constexpr float kKnobSize = 72;
     static constexpr float kLabelHeight = 16;
+    static constexpr float kStatusHeight = 34;   // two wrapped lines at 12 px
+    static constexpr const char* kDefaultStatus =
+        "Engine: CPU — convolution on the CPU (PartitionedConvolver)";
 
     struct Cell {
         ParamSpec spec;
@@ -232,6 +265,7 @@ private:
     }
 
     vw::Label* title_ = nullptr;
+    vw::Label* status_ = nullptr;
     std::vector<Cell> cells_;
 };
 
