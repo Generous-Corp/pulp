@@ -121,10 +121,10 @@ double tone_gain_db(const std::vector<double>& samples, std::size_t begin, doubl
 // is in cycles per BASE sample, so 0.5 is base Nyquist and factor/2 is the
 // oversampled Nyquist. Returns how far the surviving output RMS sits below the
 // injected tone's RMS.
-double injected_tone_rejection_db(Oversampler64::Quality quality, Oversampler64::Factor factor,
-                                  double frequency) {
+double injected_tone_rejection_db(Oversampler64::Kind kind, Oversampler64::Quality quality,
+                                  Oversampler64::Factor factor, double frequency) {
     Oversampler64 oversampler;
-    oversampler.set_kind(Oversampler64::Kind::linear_phase_fir);
+    oversampler.set_kind(kind);
     oversampler.set_quality(quality);
     oversampler.set_factor(factor);
 
@@ -325,27 +325,103 @@ TEST_CASE("Linear-phase decimator meets its stopband rejection targets",
     }
 }
 
-TEST_CASE("Staged Biquad lane rejects callback content above base Nyquist at x16",
-          "[signal][oversampling][stopband]") {
-    Oversampler64 oversampler;
-    oversampler.set_kind(Oversampler64::Kind::fir_biquad);
-    oversampler.set_factor(Oversampler64::Factor::x16);
+TEST_CASE("Every oversampling kind passes DC at unity gain", "[signal][oversampling][passband]") {
+    // A chain of an interpolator, an identity callback and a decimator is a
+    // unity-gain system. It stops being one if the anti-alias filters leave enough
+    // of the interpolator's images standing, because decimation folds the image at
+    // every multiple of the base rate coherently back onto DC.
+    for (const auto kind : {Oversampler64::Kind::fir_biquad, Oversampler64::Kind::polyphase_iir,
+                            Oversampler64::Kind::linear_phase_fir}) {
+        for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x4,
+                                  Oversampler64::Factor::x8, Oversampler64::Factor::x16}) {
+            Oversampler64 oversampler;
+            oversampler.set_kind(kind);
+            oversampler.set_factor(factor);
 
-    std::size_t callback_frame = 0;
-    double energy = 0.0;
-    constexpr std::size_t frames = 8192;
-    for (std::size_t i = 0; i < frames; ++i) {
-        const double output = oversampler.process(0.0, [&](double) {
-            const double value = std::sin(2.0 * kPi * (0.55 / 16.0) * callback_frame);
-            ++callback_frame;
-            return value;
-        });
-        if (i > 2048)
-            energy += output * output;
+            constexpr std::size_t frames = 4096;
+            const std::size_t settled =
+                static_cast<std::size_t>(2 * oversampler.latency_samples() + 512);
+            double sum = 0.0;
+            for (std::size_t i = 0; i < frames; ++i) {
+                const double output = oversampler.process(1.0, [](double sample) { return sample; });
+                if (i >= settled)
+                    sum += output;
+            }
+            const double gain = sum / static_cast<double>(frames - settled);
+            INFO("kind=" << static_cast<int>(kind) << " factor=" << static_cast<int>(factor)
+                         << " DC gain=" << gain);
+            REQUIRE_THAT(gain, WithinAbs(1.0, 1e-3));
+        }
     }
-    const double rms_db = 10.0 * std::log10(energy / (frames - 2049));
-    INFO("x16 staged-Biquad stopband RMS dBFS=" << rms_db);
-    REQUIRE(rms_db < -24.0);
+}
+
+TEST_CASE("Biquad lane keeps one character at every factor",
+          "[signal][oversampling][passband][stopband]") {
+    // The Biquad tier is deliberately cheap, so its numbers are modest: roughly
+    // -1.9 dB at 0.3 of the base rate and only ~9 dB of alias rejection just above
+    // base Nyquist. What must NOT vary is *which* numbers you get — raising the
+    // factor buys headroom for the callback's own harmonics, it does not re-tune
+    // the filter. Pinning the passband and the rejection together is what keeps
+    // that honest: rejection can always be inflated by dropping the stage cutoffs,
+    // but only by lowpassing away the top of the band, which the passband half of
+    // this test forbids.
+    constexpr std::array<double, 5> kPassband = {0.0, 0.05, 0.1, 0.2, 0.3};
+    constexpr std::array<double, 3> kStopband = {0.55, 0.6, 0.75};
+    constexpr double amplitude = 0.5;
+    constexpr std::size_t frames = 8192;
+
+    auto passband_gain_db = [](Oversampler64::Factor factor, double frequency) {
+        Oversampler64 oversampler;
+        oversampler.set_kind(Oversampler64::Kind::fir_biquad);
+        oversampler.set_factor(factor);
+        std::vector<double> output(frames);
+        for (std::size_t i = 0; i < frames; ++i) {
+            const double input = amplitude * std::sin(2.0 * kPi * frequency * i);
+            output[i] = oversampler.process(input, [](double sample) { return sample; });
+        }
+        return tone_gain_db(output, 2048, frequency, amplitude);
+    };
+
+    // Anchor x2 absolutely first. Every other factor is pinned *relative* to it, so
+    // without this the whole lane could be muffled in lockstep — drop the shared
+    // cutoff and each factor still tracks x2 while the guide's quoted numbers
+    // quietly stop being true.
+    REQUIRE_THAT(passband_gain_db(Oversampler64::Factor::x2, 0.1), WithinAbs(-0.018, 0.05));
+    REQUIRE_THAT(passband_gain_db(Oversampler64::Factor::x2, 0.3), WithinAbs(-1.79, 0.30));
+    REQUIRE_THAT(injected_tone_rejection_db(Oversampler64::Kind::fir_biquad,
+                                            Oversampler64::Quality::standard,
+                                            Oversampler64::Factor::x2, 0.55),
+                 WithinAbs(8.89, 1.0));
+
+    for (const auto factor : {Oversampler64::Factor::x4, Oversampler64::Factor::x8,
+                              Oversampler64::Factor::x16}) {
+        for (const double frequency : kPassband) {
+            if (frequency == 0.0)
+                continue; // DC is covered exactly by the unity-gain case above.
+            const double reference = passband_gain_db(Oversampler64::Factor::x2, frequency);
+            const double actual = passband_gain_db(factor, frequency);
+            INFO("factor=" << static_cast<int>(factor) << " f=" << frequency << " x2=" << reference
+                           << " dB, actual=" << actual << " dB");
+            REQUIRE_THAT(actual, WithinAbs(reference, 0.25));
+        }
+        for (const double frequency : kStopband) {
+            // Quality only selects between the linear-phase FIR designs; the Biquad
+            // lane ignores it.
+            const auto rejection_at = [frequency](Oversampler64::Factor which) {
+                return injected_tone_rejection_db(Oversampler64::Kind::fir_biquad,
+                                                  Oversampler64::Quality::standard, which,
+                                                  frequency);
+            };
+            const double reference = rejection_at(Oversampler64::Factor::x2);
+            const double rejection = rejection_at(factor);
+            INFO("factor=" << static_cast<int>(factor) << " f=" << frequency
+                           << " rejection=" << rejection << " dB, x2=" << reference << " dB");
+            REQUIRE(rejection > 8.0);
+            // A higher factor may reject *better* — its extra stages also attenuate
+            // content far above the fold boundary — but it must never reject worse.
+            REQUIRE(rejection > reference - 0.5);
+        }
+    }
 }
 
 TEST_CASE("Every decimation stage holds its design floor against base-band aliases",
@@ -375,6 +451,7 @@ TEST_CASE("Every decimation stage holds its design floor against base-band alias
             for (const double offset : kOffsets) {
                 const double frequency = fold - 0.5 + offset;
                 const double rejection = injected_tone_rejection_db(
+                    Oversampler64::Kind::linear_phase_fir,
                     static_cast<Oversampler64::Quality>(config.quality),
                     static_cast<Oversampler64::Factor>(config.factor), frequency);
                 if (rejection < worst_db) {

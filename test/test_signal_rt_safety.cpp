@@ -160,6 +160,44 @@ TEST_CASE("Oversampler process_block is allocation-free after configuration",
     REQUIRE(callback_hits == static_cast<int>(input.size()) * os.factor_value());
 }
 
+TEST_CASE("Oversampler does not copy a std::function callback per sample",
+          "[signal][oversampling][rt-safety]") {
+    // The type-erased overload takes its callback by reference. Taking it by value
+    // would copy the callable once per sample — and a payload too large for
+    // std::function's small-object buffer heap-allocates on every copy, which turns
+    // an otherwise RT-safe block into hundreds of allocations.
+    Oversampler os;
+    os.set_kind(Oversampler::Kind::linear_phase_fir);
+    os.set_factor(Oversampler::Factor::x4);
+
+    std::array<float, 64> payload {}; // far past any small-object buffer
+    payload.fill(0.5f);
+    std::function<float(float)> waveshape = [payload](float sample) {
+        return sample * payload[0];
+    };
+
+    std::array<float, 32> input {};
+    std::array<float, 32> output {};
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = static_cast<float>(i % 7) * 0.05f;
+
+    // A non-const std::function lvalue still binds the templated overload, so probe
+    // the type-erased one through a const reference — otherwise its body, which is
+    // the code that used to copy, never runs here at all.
+    const std::function<float(float)>& erased = waveshape;
+
+    // Settle first: the probe must see the steady state, not first-touch effects.
+    os.process_block(input.data(), output.data(), input.size(), waveshape);
+
+    pulp::test::RtAllocationProbe probe;
+    os.process_block(input.data(), output.data(), input.size(), waveshape);
+    os.process_block(input.data(), output.data(), input.size(), erased);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        static_cast<void>(os.process(input[i], erased));
+
+    REQUIRE(probe.allocation_count() == 0);
+}
+
 TEST_CASE("Scalar signal helpers are allocation-free after configuration",
           "[signal][rt-safety]") {
     Bias bias;
