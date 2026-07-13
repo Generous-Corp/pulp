@@ -671,6 +671,46 @@ asserts `run-name` never returns.
 run is not cosmetic. Before changing it, grep the tartci supervisor config
 (`TARTCI_RUNNER_WORKFLOW_NAME`) for anything matching on it.
 
+
+### Keep ONE -O0 lane: it sees UB that -O3 provably hides
+
+`.shipyard/config.toml`'s macOS validation lane builds **Debug (-O0)**. This
+contradicts CLAUDE.md ("Release is the default") and reads like config drift — a
+config audit will want to flip it. **Don't.** It is the only lane in CI that can see
+a whole class of undefined behaviour.
+
+2026-07-12 (#6081): a macro-gated **inline function template in a header**
+(`snap_to_zero()`), plus a test TU that redefined that macro before including it, is
+an ODR violation — two TUs emit the same mangled symbol with different bodies.
+
+```
+-O3   each TU inlines its own copy -> each behaves per its own macro
+      the A/B test appears to work. RELEASE IS GREEN. Invisible by construction.
+-O0   nothing inlines -> both emit a weak symbol, the linker keeps ONE arbitrarily
+      the "disabled" reference silently ran the enabled code. DEBUG IS RED.
+```
+
+The red test was the *mild* outcome: had the linker kept the other definition, the
+assertions would have PASSED while exercising a no-op — a null test asserting
+nothing, green forever.
+
+**The fix shape is not "delete the redefine"** — it is *give the variant its own
+binary*, compiled consistently end to end, linking no default-built TU (see
+`test/denormal_null_refgen.cpp`). Guarded by
+`tools/scripts/test_odr_macro_gated_headers.py`, which only flags macros that gate an
+inline/template **function body** (a macro guarding an `#include` or a platform block
+cannot cause ODR).
+
+**A perf gate failing on that lane is a MIS-CALIBRATED GATE, not a reason to flip the
+lane.** `test_yoga_layout_bench`'s timing threshold was sized at ~11x a *Release*
+baseline; in Debug the same pass is ~11.6x slower, eating the entire margin, so it
+sat permanently at the edge and load merely tipped it. It is now `#ifdef NDEBUG`-gated
+(the GitHub macOS lane is Release, so real coverage is preserved), while the
+structural assertions still run in every build.
+
+> A false red is worse than no gate: it trains everyone to wave away red as
+> "probably the box" — which is exactly how a real bug gets dismissed.
+
 ## Current Build-and-Test routing
 
 As of the 2026-05-20 classify gate, `build.yml` runs a cheap

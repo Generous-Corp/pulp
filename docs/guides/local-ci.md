@@ -2007,3 +2007,52 @@ echo '{"jobs": []}' > ~/Library/Application\ Support/shipyard/queue/queue.json
 ```
 
 Re-running `tools/install-shipyard.sh` also performs this reset automatically. Tracked as #528.
+
+## The Shipyard macOS lane builds Debug — on purpose
+
+`.shipyard/config.toml` configures the macOS validation lane with
+`-DCMAKE_BUILD_TYPE=Debug`. This contradicts CLAUDE.md ("Release is the default")
+and looks like config drift. **It is deliberate, and flipping it to Release would
+remove the only lane in CI that can see a whole class of undefined behaviour.**
+
+On 2026-07-12 it caught a real ODR violation (#6081). `snap_to_zero()` is an inline
+function *template* defined in a header, its body gated by a build-time macro, and a
+test TU redefined that macro before including the header. Both translation units then
+emitted the **same mangled symbol with different bodies**:
+
+| build | what happens | result |
+|---|---|---|
+| `-O3` | each TU inlines its own copy, so each behaves per its own macro | the A/B test appears to work — **Release is green, the bug is invisible by construction** |
+| `-O0` | nothing inlines; both TUs emit a weak symbol, the linker keeps exactly **one**, and both call it | the "disabled" reference silently ran the enabled code — **Debug is red** |
+
+The red test was the *mild* outcome. The linker's choice is arbitrary: had it kept
+the other definition, the assertions would have **passed while exercising a no-op** —
+a null test, asserting nothing, green forever.
+
+**The fix shape** is not "delete the redefine". It is: give the variant its **own
+binary**, compiled consistently end to end, linking no default-built TU (see
+`test/denormal_null_refgen.cpp`). The class is now guarded by
+`tools/scripts/test_odr_macro_gated_headers.py`.
+
+### A perf gate failing there is a mis-calibrated gate, not a reason to flip the lane
+
+Debug builds are much slower, and CLAUDE.md is right that Debug is the wrong default
+for most work. The answer is not "Debug everywhere" — it is **keep one `-O0` lane,
+and calibrate perf gates for the build they actually run in.**
+
+`test/test_yoga_layout_bench.cpp` is the worked example. Its timing threshold is
+0.25 x a 60fps frame (4166.7us), sized at ~11x an M-series **Release** baseline
+(~380us) to tolerate a loaded CI box. But in the Debug lane the same 484-node pass
+takes ~4420us — about **11.6x slower**, which eats the entire safety margin. The gate
+sat permanently at the edge (4421.8us vs 4166.7us, ~6% over) and load merely tipped
+it. It was never "flaky because the box was busy"; it was a Release-calibrated gate
+running unoptimized, where it measured **the absence of the optimizer**, not the cost
+of layout.
+
+The timing assertion is now `#ifdef NDEBUG`-gated — the GitHub macOS lane configures
+Release, so it still runs with real coverage and the right calibration. The
+**structural** assertions (`allocs_per_pass > 0`, frees-match-allocs) still run in
+every build; they catch real regressions and do not care about the optimizer.
+
+> A false red is worse than no gate: it trains everyone to wave away red as
+> "probably the box" — which is exactly how a real bug gets dismissed.
