@@ -33,8 +33,7 @@ namespace {
 // a throwaway probe of the registered factory here (instrument construction is
 // not on the audio thread, so the extra allocation is harmless). Falls back to a
 // single output bus if no factory is registered.
-UInt32 registry_output_element_count() {
-    auto& factory = registered_factory();
+UInt32 registry_output_element_count(ProcessorFactory factory) {
     if (!factory) return 1;
     auto probe = factory();
     if (!probe) return 1;
@@ -58,11 +57,15 @@ UInt32 registry_output_element_count() {
 }  // namespace
 
 PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
+    : PulpAUInstrument(ci, registered_factory())
+{
+}
+
+PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory factory)
     : MusicDeviceBase(ci, /*numInputs=*/0,
-                      /*numOutputs=*/registry_output_element_count(),
+                      /*numOutputs=*/registry_output_element_count(factory),
                       /*numGroups=*/0)
 {
-    auto factory = registered_factory();
     if (factory) {
         processor_ = factory();
         if (processor_) {

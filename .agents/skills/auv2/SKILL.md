@@ -114,6 +114,28 @@ The instrument adapter (`core/format/src/au_v2_instrument.cpp`) uses the same `p
 
 `AUMIDIBase::HandleSysEx(data, length)` does not carry a per-event sample offset at this SDK layer. We enqueue the payload with `sample_offset == 0` so it is delivered at the leading edge of the current `ProcessBufferLists()` block.
 
+## Multi-plugin bundles — one binary, many plugins (Silent Way style)
+
+The single-plugin macros (`PULP_AU_PLUGIN` / `PULP_AU_MIDI_PLUGIN` / `PULP_AU_INSTRUMENT`) set one global `registered_factory()` slot, so one binary = one plugin. To host **many** plugins in ONE `.component` (like Expert Sleepers Silent Way — one bundle, N AudioComponents), use the bundle variants in the same headers:
+
+| Macro | Type | Base factory |
+|-------|------|--------------|
+| `PULP_AU_BUNDLE_PLUGIN` | `aufx` | `AUBaseFactory` |
+| `PULP_AU_BUNDLE_MIDI_PLUGIN` | `aumf` | `AUMIDIEffectFactory` |
+| `PULP_AU_BUNDLE_INSTRUMENT` | `aumu` | `AUMusicDeviceFactory` |
+
+Each expands to a distinct `ClassName : PulpAUEffect`/`PulpAUInstrument` bound to its OWN factory **lexically** — via the `(AudioComponentInstance, ProcessorFactory)` ctor added to both adapters — plus one `AUSDK_COMPONENT_ENTRY` (legal N-per-binary; each generates a distinct `ClassNameFactory` the Info.plist references). So instantiation never reads the global slot, and a bundle leaves `registered_factory()` null by construction (a stray global read then fails loudly instead of building an arbitrary plugin).
+
+Key rules, each learned the hard way:
+
+- **`factory_fn` is the single source of truth.** The macro force-assigns it onto the registration's `.factory`, so the factory the host constructs and the one `find_plugin`/`registered_plugins` report are provably the same function. **Do NOT set `.factory` in the braced-init** — it is overwritten and ignored. (An earlier design took factory twice; a mismatch silently split-brained the class vs the registry.)
+- **The registration braced-init is trailing `__VA_ARGS__`,** because the preprocessor does not protect the `{.id=…, .au_subtype=…}` commas and an extra paren pair would form a GNU statement-expression. Pass `{.id="com.x.foo", .au_type='aumf', .au_subtype='Foo1', .au_manufacturer='Mfr '}` bare.
+- **One plugin, several AU types:** register it once per type (a Silent Way module is `aumf`+`aumu`+`augn`), all sharing one `id`+factory, differing only in `au_type`/`au_subtype`. `find_plugin(id)` returns the first match; `registered_plugins()` enumerates all.
+- **Registry storage is static-init-safe:** a fixed-capacity (`kMaxPlugins`) POD array, constant-initialized before any registrar runs (verified: `constinit` compiles), no heap/`std::string`/logging on the registration path. Past the cap, `register_plugin` drops silently — keep the cap generously above `plugins × types`.
+- The keyed API lives in `core/format/include/pulp/format/registry.hpp`: `register_plugin(const PluginRegistration&)`, `find_plugin(id)`, `registered_plugins()`, plus `reset_registry_for_testing()` (test-only). The legacy `register_plugin(ProcessorFactory)` / `registered_factory()` global path is unchanged (last-write-wins), so single-plugin bundles and the adapter save/restore test idiom are untouched.
+
+Tests: `test/test_plugin_registry.cpp` (portable registry contract) and `test/test_au_bundle_entry.cpp` (two `aumf` plugins in one binary via the macros; asserts the mismatched-`.factory` override).
+
 ## Recent changes
 
 ### Param-events sidecar + RT-safety guard
