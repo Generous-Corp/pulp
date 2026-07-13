@@ -149,6 +149,10 @@ WAV/AIFF header instead of trusting the decoded buffer.
   co-located with the processor. Miss it and `audioWorklet.addModule()` fails with a bare
   `AbortError: Unable to load a worklet's module`.
 - **Never invent a `tokensHref`.** A made-up relative path just 404s and silently drops the skin.
+- **Pin a player version that actually HAS the features you declare.** The config pins the
+  player, so declaring `fileUpload` against a version predating it yields a demo that silently
+  renders no zone. `fileUpload` needs **>= 0.2.0**. When the player gains a feature, bump the
+  pin in your config — the pin is what the generated page imports.
 - **Cache-bust the main-thread entry only** — never the worklet/dsp URLs; both sides must resolve
   to one processor name.
 

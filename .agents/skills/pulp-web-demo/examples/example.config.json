@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "player": {
     "package": "@danielraffel/web-player",
-    "version": "0.1.0"
+    "version": "0.2.1"
   },
   "theme": {
     "tokensHref": "./theme/tokens.css",
@@ -30,10 +30,14 @@
     "sourceLinkBase": "https://github.com/you/my-plugins/tree/main"
   },
   "gallery": {
-    "title": "My plugins — live web demos",
+    "title": "My plugins \u2014 live web demos",
     "layout": "grid",
     "crossLinks": [
-      { "label": "also runs as WCLAP →", "href": "https://my-plugins.pages.dev/my-plugins/", "abi": "wclap" }
+      {
+        "label": "also runs as WCLAP \u2192",
+        "href": "https://my-plugins.pages.dev/my-plugins/",
+        "abi": "wclap"
+      }
     ]
   },
   "plugins": [
@@ -42,7 +46,10 @@
       "title": "My Plugin",
       "subtitle": "One honest sentence about what it does.",
       "mode": "audio-effect",
-      "abis": ["wam", "wclap"]
+      "abis": [
+        "wam",
+        "wclap"
+      ]
     }
   ]
 }
