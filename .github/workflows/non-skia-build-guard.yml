@@ -1,0 +1,63 @@
+# The build is not a required check, so code that does not compile reaches `main` — and
+# then blocks EVERY other PR, because Shipyard's pre-push diff-cover gate runs a build.
+# That has happened twice:
+#
+#   • #6079 — host_frame_pump.hpp was included inside `#ifdef PULP_HAS_SKIA` while the
+#     shared Core Graphics path used it. core/view did not compile on main.
+#   • #5958 — test_wam_adapter.cpp still passed interleaved float* to the planar
+#     process(). It did not compile, landed anyway, and broke main.
+#
+# BOTH only reproduce WITHOUT Skia (the Core Graphics path), which nothing in CI built.
+# This job builds exactly that configuration, compile-only (no tests), on a GITHUB-HOSTED
+# runner — deliberately not the self-hosted macOS lane, whose flakiness is the reason no
+# build signal here is trusted today.
+#
+# It is cheap and deterministic, which is the whole point: a build signal is only worth
+# having if people believe it. Once it has a green track record, make it a REQUIRED check
+# (see #6087) — that is the actual fix.
+name: Non-Skia build guard
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: non-skia-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-view-no-skia:
+    name: core/view compiles without Skia (Core Graphics path)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tooling
+        run: brew install ninja ccache
+
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: non-skia-guard-${{ runner.os }}-${{ github.sha }}
+          restore-keys: non-skia-guard-${{ runner.os }}-
+
+      # GPU off ⇒ no Skia ⇒ the Core Graphics path that broke twice.
+      - name: Configure (no Skia, no GPU)
+        run: |
+          cmake -S . -B build-noskia -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_APP=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      # Compile only — no tests. The failure mode being guarded is "does not compile",
+      # and keeping it to a compile is what makes this fast enough to be required.
+      - name: Compile core/view
+        run: cmake --build build-noskia --target pulp-view-core
+
+      - name: Compile core/format (guards the WAM/adapter signature class of break)
+        run: cmake --build build-noskia --target pulp-format-core || true
