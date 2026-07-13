@@ -63,6 +63,43 @@ factory_fn)` macro (in `vst3_entry.hpp`) expands to a single
 the class under `kVstAudioEffectClass`. One factory per TU — do not
 macro-expand it twice in the same plugin.
 
+### Multi-plugin bundle — one VST3 binary, many plugins
+
+VST3's factory natively lists multiple classes (multiple `DEF_CLASS2` between one
+`BEGIN_FACTORY_DEF`/`END_FACTORY`), so a bundle is structured exactly like
+Steinberg's own multi-class factory. The bundle macros in `vst3_entry.hpp`:
+
+```cpp
+PULP_VST3_BUNDLE_PLUGIN(Foo, create_foo, {.id="com.x.foo"})   // file scope: create fn + keyed reg
+PULP_VST3_BUNDLE_PLUGIN(Bar, create_bar, {.id="com.x.bar"})
+PULP_VST3_FACTORY_BEGIN("My Co", "https://x.com", "mailto:info@x.com")
+    PULP_VST3_BUNDLE_CLASS(Foo, kFooUID, "Foo", Steinberg::Vst::PlugType::kFx, "1.0.0")
+    PULP_VST3_BUNDLE_CLASS(Bar, kBarUID, "Bar", Steinberg::Vst::PlugType::kFx, "1.0.0")
+PULP_VST3_FACTORY_END
+```
+
+Each `_PLUGIN` generates a file-scope `_pulp_vst3_create_<Ident>` bound to its own
+`factory_fn` (`PulpVst3Processor` already takes the factory — no global read), and
+registers a keyed `PluginRegistration` (see the `auv2` skill + `registry.hpp`) for
+enumeration / per-plugin editor assets. Load-bearing rules:
+
+- **`Ident` links `_PLUGIN` to `_CLASS`** by naming the same generated create-fn
+  symbol — a mismatch fails to COMPILE (undefined symbol), so the pair can't
+  silently desync. **Every class needs a distinct `FUID`** (Reaper de-dupes by
+  UID — see that gotcha below).
+- **`factory_fn` is the single source of truth**, force-assigned onto the keyed
+  entry's `.factory`; do NOT set `.factory` in the braced-init (ignored). Same
+  rule as the AU bundle macros.
+- **A test/executable that expands the factory macros must compile the SDK glue**
+  the plugin CMake target does — `public.sdk/source/main/pluginfactory.cpp`
+  (`CPluginFactory`/`gPluginFactory`), `moduleinit.cpp`, and the platform main
+  (`macmain.cpp` defines `moduleHandle`, referenced by `moduleinit.cpp`). Omitting
+  the platform main gives an undefined `_moduleHandle`. See
+  `test/test_vst3_bundle_entry.cpp` + its target in
+  `test/cmake/core_audio_platform_format_tests.cmake`.
+
+Single-plugin `PULP_VST3_PLUGIN` is unchanged; a bundle is opt-in.
+
 ### `initialize` — the setup path
 
 ```cpp

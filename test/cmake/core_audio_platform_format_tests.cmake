@@ -244,6 +244,34 @@ if(PULP_HAS_VST3)
         PULP_VST3_GUI=1
     )
     catch_discover_tests(pulp-test-vst3-param-display)
+
+    # Multi-plugin-bundle entry macros: two plugins from one VST3 factory via
+    # PULP_VST3_BUNDLE_PLUGIN + PULP_VST3_FACTORY_BEGIN/_BUNDLE_CLASS/_END.
+    # Drives the generated GetPluginFactory() to assert both classes register,
+    # plus the keyed registry + factory_fn-authoritative wiring. Compiles
+    # vst3_plug_view.cpp for the GUI symbols PulpVst3Processor references,
+    # mirroring the plugin-state target.
+    # The factory macros reference the SDK's CPluginFactory / gPluginFactory
+    # (pluginfactory.cpp), the module-init registry (moduleinit.cpp), and the
+    # platform module handle (macmain.cpp defines moduleHandle) — the same SDK
+    # sources a real VST3 plugin target compiles in. macmain's bundleEntry/
+    # bundleExit are simply unused defined symbols in a test executable and do
+    # not conflict with Catch2's main.
+    add_executable(pulp-test-vst3-bundle-entry
+        test_vst3_bundle_entry.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
+        ${VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
+        ${VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
+        $<$<PLATFORM_ID:Darwin>:${VST3_SDK_DIR}/public.sdk/source/main/macmain.cpp>
+        $<$<PLATFORM_ID:Linux>:${VST3_SDK_DIR}/public.sdk/source/main/linuxmain.cpp>
+        $<$<PLATFORM_ID:Windows>:${VST3_SDK_DIR}/public.sdk/source/main/dllmain.cpp>
+    )
+    target_link_libraries(pulp-test-vst3-bundle-entry PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-bundle-entry PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1
+    )
+    catch_discover_tests(pulp-test-vst3-bundle-entry)
 endif()
 
 if(APPLE AND PULP_HAS_AUSDK)
