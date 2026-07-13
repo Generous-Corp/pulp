@@ -174,10 +174,18 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm"
           cmake --build build-webui -j"$(nproc)"
 
-          # The Skia-free WebGPU DSP module the GPU page's worker instantiates.
-          emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-gpu-dsp -j"$(nproc)"
+          # The Skia-free WebGPU DSP module the GPU page's worker instantiates. Guarded:
+          # the GPU-audio lane does not exist on every branch this workflow runs from, and
+          # the assembler already omits /super-convolver-gpu/ when its tree is absent. A
+          # bare `cmake -S` on a missing dir is a hard error, which would take the whole
+          # deploy down for a page that is legitimately not there.
+          if [ -d examples/web-demos/gpu-audio ]; then
+            emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
+              -DCMAKE_BUILD_TYPE=Release
+            cmake --build build-gpu-dsp -j"$(nproc)"
+          else
+            echo "note: examples/web-demos/gpu-audio is not in this tree — /super-convolver-gpu/ will not be emitted."
+          fi
 
       - name: Assemble self-contained deploy dir
         working-directory: examples/web-demos/wclap-build/cloudflare
@@ -185,10 +193,13 @@ jobs:
           set -euo pipefail
           node assemble.mjs                 # single-plugin isolation proof (/)
           node assemble-player.mjs          # shared-player WebCLAP demo (/player/)
+          gpu_args=""
+          [ -d "$GITHUB_WORKSPACE/build-gpu-dsp" ] && gpu_args="--gpu-build $GITHUB_WORKSPACE/build-gpu-dsp"
+          # shellcheck disable=SC2086
           node assemble-gallery.mjs \
             --wam-build "$GITHUB_WORKSPACE/examples/web-demos/wasm-build/build" \
             --ui-build  "$GITHUB_WORKSPACE/build-webui" \
-            --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp"
+            $gpu_args
 
           # A page the assembler SKIPPED is a page this deploy DELETES from the live site
           # — the deploy replaces the whole thing, so "not emitted" and "removed" are the
