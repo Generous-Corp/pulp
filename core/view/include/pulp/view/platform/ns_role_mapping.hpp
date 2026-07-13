@@ -20,7 +20,13 @@
 // fallthrough); NSAccessibilityUnknownRole is a defensive value, not the
 // mechanism by which unroled views are hidden.
 
+// TargetConditionals.h is Apple-only, and this is a PUBLIC header — the
+// "public headers compile standalone" gate parses it on Linux, where an
+// unconditional include is a fatal error. TARGET_OS_OSX is then undefined off
+// Apple, which `#if` reads as 0, so the body below is correctly skipped.
+#if defined(__APPLE__)
 #include <TargetConditionals.h>
+#endif
 
 #if defined(__OBJC__) && TARGET_OS_OSX
 
