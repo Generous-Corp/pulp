@@ -77,14 +77,75 @@ export function readIrBlobKind(blob) {
 }
 
 /**
+ * Read the SOURCE file's real format straight from its header.
+ *
+ * decodeAudioData RESAMPLES to the AudioContext's rate, so the decoded buffer's
+ * sampleRate is the SESSION's, never the file's — reporting it back to the user as
+ * "your file is 48 kHz" is simply false when they handed us a 44.1 kHz cabinet IR.
+ * The header is the only honest source for what they actually gave us.
+ *
+ * Handles WAV (RIFF) and AIFF/AIFC; returns null for anything else (MP3/OGG/FLAC),
+ * where we then say nothing about the source rather than guess.
+ */
+export function sniffAudioHeader(bytes) {
+  const dv = new DataView(bytes.buffer ?? bytes, bytes.byteOffset ?? 0, bytes.byteLength);
+  const tag = (o) => String.fromCharCode(dv.getUint8(o), dv.getUint8(o+1), dv.getUint8(o+2), dv.getUint8(o+3));
+  try {
+    if (tag(0) === "RIFF" && tag(8) === "WAVE") {
+      // walk the chunk list to "fmt "
+      let o = 12;
+      while (o + 8 <= dv.byteLength) {
+        const id = tag(o), size = dv.getUint32(o + 4, true);
+        if (id === "fmt ") {
+          const teardown = () => {
+    document.removeEventListener("dragover", onDocDrag);
+    document.removeEventListener("drop", onDocDrop);
+  };
+
+  return { format: "WAV",
+                   channels: dv.getUint16(o + 10, true),
+                   rate: dv.getUint32(o + 12, true),
+                   bits: dv.getUint16(o + 22, true) };
+        }
+        o += 8 + size + (size & 1);
+      }
+    }
+    if (tag(0) === "FORM" && (tag(8) === "AIFF" || tag(8) === "AIFC")) {
+      let o = 12;
+      while (o + 8 <= dv.byteLength) {
+        const id = tag(o), size = dv.getUint32(o + 4);
+        if (id === "COMM") {
+          // sample rate is an 80-bit IEEE extended float
+          const exp = dv.getUint16(o + 16) - 16383;
+          let mant = 0;
+          for (let i = 0; i < 8; i++) mant = mant * 256 + dv.getUint8(o + 18 + i);
+          return { format: tag(8),
+                   channels: dv.getUint16(o + 8),
+                   rate: Math.round(mant * Math.pow(2, exp - 63)),
+                   bits: dv.getUint16(o + 14) };
+        }
+        o += 8 + size + (size & 1);
+      }
+    }
+  } catch { /* malformed header — fall through */ }
+  return null;
+}
+
+/**
  * Decode an audio File/Blob into a MONO Float32Array at the AudioContext's own
  * sample rate. decodeAudioData resamples to the context rate for us, so the PCM
  * the plugin receives needs no resampling on its side — which matters, because the
  * decode is the one step of the IR rebuild that is not time-sliced.
+ *
+ * Returns what we did to the file as well as the result, so the page can tell the
+ * truth about it: `source` is what they handed us, the rest is what the plugin got.
  */
 export async function decodeIrFile(ctx, file) {
-  const buf = await ctx.decodeAudioData(await file.arrayBuffer());
-  const frames = Math.min(buf.length, Math.floor(MAX_IR_SECONDS * buf.sampleRate));
+  const raw = await file.arrayBuffer();
+  const source = sniffAudioHeader(new Uint8Array(raw));   // may be null (mp3/flac/ogg)
+  const buf = await ctx.decodeAudioData(raw);
+  const maxFrames = Math.floor(MAX_IR_SECONDS * buf.sampleRate);
+  const frames = Math.min(buf.length, maxFrames);
   const mono = new Float32Array(frames);
   for (let c = 0; c < buf.numberOfChannels; c++) {
     const plane = buf.getChannelData(c);
@@ -94,14 +155,24 @@ export async function decodeIrFile(ctx, file) {
     const inv = 1 / buf.numberOfChannels;
     for (let i = 0; i < frames; i++) mono[i] *= inv;
   }
-  return { mono, rate: buf.sampleRate, seconds: frames / buf.sampleRate,
-           channels: buf.numberOfChannels };
+  return {
+    mono,
+    rate: buf.sampleRate,                      // the SESSION rate (what the plugin gets)
+    seconds: frames / buf.sampleRate,
+    channels: buf.numberOfChannels,            // as decoded
+    source,                                    // the file's OWN format, or null
+    truncated: buf.length > frames,            // we cut it at MAX_IR_SECONDS
+    fullSeconds: buf.length / buf.sampleRate,  // what it would have been
+    resampled: !!(source && source.rate && source.rate !== buf.sampleRate),
+  };
 }
 
 // ─────────────────────────────────────────────────────────── the page affordance
 
 const CSS = `
 .sc-ir { margin-top: 10px; font: 13px/1.5 system-ui, sans-serif; }
+.sc-ir-size { margin: 6px 2px 0; color: var(--text-secondary, #8b96a3); font-size: 12px; }
+.sc-ir-size b { color: var(--text-primary, #e6edf3); font-weight: 600; }
 .sc-ir-drop {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 10px 12px; border: 1px dashed rgba(255,255,255,.22); border-radius: 8px;
@@ -133,19 +204,71 @@ export function mountIrLoader(container, adapter, ctx, state) {
 
   const root = document.createElement("div");
   root.className = "sc-ir";
+  // (describeIr is defined below the mount, hoisted as a function declaration.)
   root.innerHTML = `
     <div class="sc-ir-drop" id="sc-ir-drop">
       <button class="sc-ir-btn" id="sc-ir-pick" type="button">Load impulse response…</button>
       <span id="sc-ir-msg">or drop a WAV / AIFF / FLAC / MP3 here — it stays on your machine</span>
       <button class="sc-ir-btn" id="sc-ir-revert" type="button" disabled>Built-in reverb</button>
       <input id="sc-ir-file" type="file" accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg" hidden>
-    </div>`;
+    </div>
+    <div class="sc-ir-size" id="sc-ir-size"></div>`;
   container.appendChild(style);
   container.appendChild(root);
 
   const $ = (id) => root.querySelector("#" + id);
   const drop = $("sc-ir-drop"), msg = $("sc-ir-msg"), file = $("sc-ir-file");
   const pick = $("sc-ir-pick"), revert = $("sc-ir-revert");
+
+  // The loaded IR, and a LIVE readout of what Size is doing to it.
+  //
+  // Size only trims an impulse that is LONGER than it (window_ir_to_length:
+  // `if (ir.size() <= target_len) return ir;`). So for a 0.5 s cabinet IR, a Size of
+  // 1.5 s does nothing at all — which is genuinely confusing if the copy just says
+  // "Size windows this space". Say what Size is doing to THIS file, right now, and
+  // update it as the knob moves.
+  let loaded = null;                     // { name, seconds, ... } while a file is in
+  let sizeParamId = null, sizeMin = 0;
+
+  const renderSizeLine = (sizeSeconds) => {
+    const line = root.querySelector("#sc-ir-size");
+    if (!line || !loaded) return;
+    if (!(sizeSeconds > 0)) { line.textContent = ""; return; }
+    const ir = loaded.seconds;
+    if (ir <= sizeMin) {
+      // The knob physically cannot reach below this impulse, so it can never trim
+      // it. Say that, rather than inviting someone to turn Size somewhere it does
+      // not go — which is what a naive "turn Size below 0.05 s" would do.
+      line.innerHTML = `This impulse (${ir.toFixed(2)} s) is shorter than <b>Size</b>'s minimum ` +
+        `(${sizeMin.toFixed(2)} s), so Size cannot trim it — you always hear all of it.`;
+    } else if (sizeSeconds >= ir) {
+      line.innerHTML = `<b>Size ${sizeSeconds.toFixed(2)} s</b> is longer than this ${ir.toFixed(2)} s ` +
+        `impulse, so you are hearing all of it. Turn Size below ${ir.toFixed(2)} s to shorten it.`;
+    } else {
+      line.innerHTML = `<b>Size ${sizeSeconds.toFixed(2)} s</b> is trimming this ${ir.toFixed(2)} s ` +
+        `impulse to ${sizeSeconds.toFixed(2)} s, with a short fade at the cut.`;
+    }
+  };
+
+  // Chain onto the adapter's param feed so the line follows the Size knob live.
+  (async () => {
+    try {
+      const infos = (await adapter.getParameterInfo()) || [];
+      const size = infos.find((p) => /^size$/i.test(p.label || ""));
+      if (!size) return;
+      sizeParamId = size.id;
+      sizeMin = typeof size.minValue === "number" ? size.minValue : 0;
+      const prev = adapter.onParamsChanged;
+      adapter.onParamsChanged = (values, list) => {
+        const arr = list && list.length ? list : infos;
+        const i = arr.findIndex((p) => p.id === sizeParamId);
+        if (i >= 0 && values[i] != null) renderSizeLine(values[i]);
+        if (prev) prev(values, list);
+      };
+      const now = await adapter.getParameterValue(sizeParamId);
+      if (now != null) renderSizeLine(now);
+    } catch { /* the line is a nicety; never let it take the loader down */ }
+  })();
 
   // Replace ONLY the plugin-owned blob; the parameters (Mix, Size, Gain, Bypass)
   // the user has set are read back out of the live state and written straight
@@ -165,9 +288,11 @@ export function mountIrLoader(container, adapter, ctx, state) {
       const ir = await decodeIrFile(ctx, f);
       if (!ir.mono.length) throw new Error("the file decoded to no audio");
       await writeBlob(buildPcmIrBlob(ir.mono, ir.rate));
-      msg.innerHTML = `<span class="sc-ir-name">${f.name}</span> — ` +
-        `${ir.seconds.toFixed(2)} s, summed to mono at ${(ir.rate / 1000).toFixed(1)} kHz. ` +
-        `Size now windows <em>this</em> space.`;
+      loaded = { name: f.name, seconds: ir.seconds };
+      msg.innerHTML = describeIr(f, ir);
+      if (sizeParamId != null) {
+        try { renderSizeLine(await adapter.getParameterValue(sizeParamId)); } catch {}
+      }
       revert.disabled = false;
     } catch (err) {
       console.warn("IR load failed:", err);
@@ -181,36 +306,101 @@ export function mountIrLoader(container, adapter, ctx, state) {
   const onFile = () => { load(file.files && file.files[0]); file.value = ""; };
   const onRevert = async () => {
     await writeBlob(buildSyntheticIrBlob());
+    loaded = null;
+    const line = root.querySelector("#sc-ir-size");
+    if (line) line.textContent = "";
     msg.textContent = "Back to the built-in synthetic reverb.";
     revert.disabled = true;
   };
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  const onOver = (e) => { stop(e); drop.classList.add("over"); };
-  const onLeave = (e) => { stop(e); drop.classList.remove("over"); };
+
+  // DRAG-AND-DROP, with the two things that make it feel broken if you skip them.
+  //
+  // 1. A NEAR MISS MUST NOT NAVIGATE. The browser's default action for a file
+  //    dropped anywhere on a page is to OPEN it — which throws away the running
+  //    demo (audio context, loaded IR, knob positions). So the DOCUMENT swallows
+  //    every drag/drop; only the zone acts on one. Without this, missing the target
+  //    by ten pixels destroys your session, which is a brutal punishment for a
+  //    gesture we invited.
+  //
+  // 2. dragleave FIRES WHEN YOU CROSS A CHILD. The zone has a button and a label
+  //    inside it, and moving over them bubbles a dragleave from the child, so a naive
+  //    handler drops the highlight while the pointer is still very much inside the
+  //    zone — it strobes. Count enter/leave pairs instead of toggling on each event.
+  let depth = 0;
+  const lit = (on) => drop.classList.toggle("over", on);
+
+  const onDocDrag = (e) => { e.preventDefault(); };            // "yes, we accept files"
+  const onDocDrop = (e) => { e.preventDefault(); };            // ...but a miss does NOTHING
+
+  const onEnter = (e) => { stop(e); depth++; lit(true); };
+  const onOver  = (e) => { stop(e); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; lit(true); };
+  const onLeave = (e) => { stop(e); depth = Math.max(0, depth - 1); if (depth === 0) lit(false); };
   const onDrop = (e) => {
-    stop(e); drop.classList.remove("over");
-    load(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+    stop(e); depth = 0; lit(false);
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) { msg.textContent = "That drop had no file in it."; return; }
+    load(f);
   };
 
   pick.addEventListener("click", onPick);
   file.addEventListener("change", onFile);
   revert.addEventListener("click", onRevert);
-  drop.addEventListener("dragenter", onOver);
+  drop.addEventListener("dragenter", onEnter);
   drop.addEventListener("dragover", onOver);
   drop.addEventListener("dragleave", onLeave);
   drop.addEventListener("drop", onDrop);
+  document.addEventListener("dragover", onDocDrag);
+  document.addEventListener("drop", onDocDrop);
 
   return {
     destroy() {
       pick.removeEventListener("click", onPick);
       file.removeEventListener("change", onFile);
       revert.removeEventListener("click", onRevert);
-      drop.removeEventListener("dragenter", onOver);
+      drop.removeEventListener("dragenter", onEnter);
       drop.removeEventListener("dragover", onOver);
       drop.removeEventListener("dragleave", onLeave);
       drop.removeEventListener("drop", onDrop);
+      teardown();                       // the DOCUMENT-level drop guard
       root.remove();
       style.remove();
     },
   };
+}
+
+// ─────────────────────────────────────────────────── what happened to your file
+//
+// The old line — "0.05 s, summed to mono at 48.0 kHz. Size now windows this space."
+// — was wrong twice over. It reported the SESSION's sample rate as if it were the
+// file's (decodeAudioData resamples, so the decoded buffer never carries the file's
+// rate), and "windows this space" is not a sentence anyone outside DSP can read.
+//
+// Say what we actually did to their file, and only what is true: the source facts
+// come from the real header (sniffAudioHeader), and each clause is emitted only
+// when it applies. Then say what the Size knob will do to THIS IR — which depends
+// on its length, because Size only trims an IR that is LONGER than it
+// (window_ir_to_length: `if (ir.size() <= target_len) return ir;`).
+function describeIr(file, ir) {
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  const facts = [];
+  facts.push(`${ir.seconds.toFixed(2)} s`);
+
+  const srcCh = ir.source?.channels ?? ir.channels;
+  if (srcCh > 1) facts.push(`${srcCh === 2 ? "stereo" : srcCh + " channels"} → mono`);
+  else facts.push("mono");
+
+  if (ir.source?.rate) {
+    facts.push(ir.resampled
+      ? `${(ir.source.rate / 1000).toFixed(1)} → ${(ir.rate / 1000).toFixed(1)} kHz`
+      : `${(ir.rate / 1000).toFixed(1)} kHz`);
+  }
+  if (ir.source?.bits) facts.push(`${ir.source.bits}-bit`);
+  if (ir.truncated) facts.push(`trimmed from ${ir.fullSeconds.toFixed(1)} s`);
+
+  // Facts only. What Size is DOING to this impulse is a live thing — it follows the
+  // knob — so it lives in the #sc-ir-size line, not baked into this one-shot string.
+  return `<span class="sc-ir-name">${esc(file.name)}</span> — ${facts.join(" · ")}.`;
 }
