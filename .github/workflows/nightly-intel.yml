@@ -7,12 +7,18 @@ name: Nightly Intel
 # auto-release-watchdog.yml / nightly-full-build.yml):
 #
 #   Job A — NATIVE Intel on `macos-15-intel` (real Intel CPU + toolchain, no
-#           Rosetta): full Release build + ctest + auval. This runner has known
-#           flake reports (C++ linker-image errors, 100% CPU pegging), so a
-#           red run is classified: an *infra* signature (linker-image bug /
-#           timeout / CPU-peg) is labelled `runner-infra` and does NOT page;
-#           a product failure does. timeout-minutes: 120 keeps a pegged runner
-#           from burning six hours.
+#           Rosetta): full Release build + ctest. This runner has known flake
+#           reports (C++ linker-image errors, 100% CPU pegging), so a red run is
+#           classified: an *infra* signature is labelled `runner-infra` and does
+#           NOT page; a product failure does.
+#
+#           Its build is bounded by a STEP-level `timeout`, deliberately, rather
+#           than by the job timeout. Letting the JOB time out makes GitHub mark it
+#           `cancelled`, which cancels the whole RUN — so nightly-intel concluded
+#           `cancelled` every single night and looked, to anyone scanning run
+#           conclusions, like it produced no Intel signal at all. It did: Job B
+#           succeeded every time. Never let a known-flaky advisory leg decide the
+#           run's conclusion; bound it and report a loud infra-skip instead.
 #
 #   Job B — INDEPENDENT cross-check on the STABLE `macos-15` (Apple Silicon):
 #           universal (arm64;x86_64) build, `lipo -archs` + `codesign --verify`
@@ -83,19 +89,47 @@ jobs:
           # builds native x86_64 — no cross-compile, no Rosetta.
           cmake -S . -B "${BUILD_DIR}" -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build everything (keep-going)
+      # BOUND THE BUILD IN THE STEP, not with the job timeout.
+      #
+      # This job has timed out at its 120-minute job limit on EVERY scheduled run —
+      # it has never once completed. GitHub reports a job timeout as `cancelled`,
+      # which cancels the whole workflow RUN, which means nightly-intel's run-level
+      # conclusion has been `cancelled` every night. Anyone scanning run conclusions
+      # reasonably concludes "no Intel signal at all".
+      #
+      # That conclusion is wrong, and the distinction matters: the
+      # `universal-crosscheck` job (the arm64+Rosetta lipo + dual-arch auval signal
+      # that release-cli relies on) SUCCEEDS every night. The good signal was there
+      # the whole time, buried under a run conclusion poisoned by this leg.
+      #
+      # The `macos-15-intel` image is known to CPU-peg (see this file's header). So
+      # bound the build with a STEP-level timeout well inside the job limit. The job
+      # then finishes NORMALLY with a loud, explicit infra-skip — never a silent
+      # cancel — and the run can reach a conclusive success/failure that reflects the
+      # signal that actually works.
+      - name: Build everything (keep-going, bounded)
         id: build
         shell: bash
         run: |
           set -o pipefail
-          if cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-intel-native.log; then
+          # Comfortably inside `timeout-minutes: 120` so WE decide the outcome, not
+          # GitHub's canceller.
+          if timeout 75m cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-intel-native.log; then
             echo "status=pass" >> "$GITHUB_OUTPUT"
+          elif [ "${PIPESTATUS[0]}" = "124" ]; then
+            # 124 == GNU timeout killed it. The macos-15-intel image pegged again.
+            # Infra, not product. Say so LOUDLY and let the run conclude.
+            echo "::warning::native Intel build exceeded 75m on macos-15-intel (the image CPU-pegs). Classified INFRA, not a product failure — the universal cross-check is the authoritative Intel signal."
+            echo "status=infra-timeout" >> "$GITHUB_OUTPUT"
           else
             echo "status=fail" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run test suite (informational)
         id: test
+        # Pointless (and slow) against a half-built tree — if the build was killed
+        # for pegging the runner, ctest has nothing meaningful to run.
+        if: steps.build.outputs.status != 'infra-timeout'
         shell: bash
         run: |
           set -o pipefail
@@ -127,6 +161,11 @@ jobs:
           # C++ linker-image errors and CPU-peg/timeout. A build failure whose
           # log matches these is runner-infra, not a Pulp product regression.
           infra="false"
+          # A bounded-build timeout is infra BY CONSTRUCTION — we killed it, the
+          # product did not fail. Mark it before the log-sniffing heuristic below.
+          if [ "$build" = "infra-timeout" ]; then
+            infra="true"
+          fi
           if [ "$result" = "failure" ] && [ -f build-intel-native.log ]; then
             if grep -qE 'ld: |clang: error:.*linker command failed|Killed: 9|Segmentation fault: 11|could not open.*for reading|malformed object' build-intel-native.log; then
               infra="true"
