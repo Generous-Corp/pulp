@@ -3949,3 +3949,18 @@ draft/published flips, stray `release-untagged-*` entries, and GitHub's
 notes link a PR (`#N`) for every entry via `compose_release_notes.py`'s
 `pr_for_commit` GitHub commit→PR lookup; only genuine direct-to-main commits show
 a short SHA. See `planning/2026-07-10-release-page-hygiene.md`.
+
+## The non-Skia build guard (why it exists)
+
+`non-skia-build-guard.yml` compiles `core/view` with `PULP_ENABLE_GPU=OFF` (⇒ no Skia ⇒ the
+Core Graphics path) on a **GitHub-hosted** macOS runner, compile-only.
+
+It exists because **the build is not a required check**, so code that does not compile has
+reached `main` twice — and each time it then blocked *every* PR, since Shipyard's pre-push
+diff-cover gate runs a build (#6079, #5958). Both breaks **only reproduce without Skia**,
+which nothing else in CI builds.
+
+The deeper failure it addresses: when the only build signal is the flaky self-hosted macOS
+lane, a *real* failure is indistinguishable from noise — #5958's genuine compile error was
+waved through as flake for exactly that reason. This guard is fast (~7 min) and deterministic
+so the signal is believable. **Make it a required check** (#6087); that is the actual fix.
