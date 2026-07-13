@@ -285,6 +285,11 @@
         "tools/deps/manifest.json"
       ]
     },
+    "pulp-web-demo": {
+      "paths": [
+        ".agents/skills/pulp-web-demo/**"
+      ]
+    },
     "pr-review-sweep": {
       "paths": [],
       "_doc": {
