@@ -4,16 +4,19 @@ name: Release CLI
 # docs/guides/release-pipeline.md — keep that doc in sync when you change
 # this workflow.
 
-# Put the TAG in the run's display title, for both trigger types.
+# DO NOT ADD `run-name:` TO THIS WORKFLOW.
 #
-# This is load-bearing, not cosmetic. A `workflow_dispatch` run's `head_branch`
-# is the ref it was dispatched FROM (`main`), NOT the tag it is building — so a
-# repair run dispatched by release-reconcile.yml is indistinguishable, by
-# head_branch, from any other run on main. Without a tag-bearing display title
-# the reconciler cannot see its own repairs: it would count zero attempts, never
-# escalate, and fire a fresh re-dispatch every 30 minutes forever.
-run-name: >-
-  Release ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+# GitHub returns a workflow's `run-name` as `workflow_run.name` in the REST API —
+# it REPLACES the workflow name, it does not sit alongside it. The self-hosted
+# tartci supervisor that provisions this workflow's macOS VMs selects its work
+# with `select(.name == "Release CLI")`, so the moment a run-name is set, every
+# release run becomes invisible to it: it reports `queued=0`, never boots a VM,
+# and the `darwin-arm64` leg queues forever. No macOS runner, no release. Ever.
+#
+# (Learned the hard way: a run-name was added here to let release-reconcile.yml
+# attribute its repair runs, and it silently broke the release lane instead. The
+# tag is carried in a JOB name below, which the API exposes separately and the
+# supervisor does not key on.)
 
 on:
   push:
@@ -86,6 +89,13 @@ jobs:
   # sat idle). Routing the release leg to the idle self-hosted pool by default
   # removes that single point of failure for publishing.
   resolve-macos-runner:
+    # The job name carries the tag so release-reconcile.yml can attribute a REPAIR
+    # run to the tag it is building. A workflow_dispatch run's `head_branch` is the
+    # ref it was dispatched FROM (`main`), not the tag — without this the
+    # reconciler cannot see its own repairs, counts zero attempts, never escalates,
+    # and re-dispatches forever. This is the SAFE place to put it: job names are a
+    # separate API field, unlike `run-name` (see the warning at the top of the file).
+    name: Resolve macOS runner — ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     runs-on: ubuntu-latest
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}

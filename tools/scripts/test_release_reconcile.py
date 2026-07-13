@@ -143,41 +143,35 @@ class Decide(unittest.TestCase):
 
 
 class RunOwnership(unittest.TestCase):
-    """The reconciler must be able to SEE its own repair runs.
+    """The reconciler must SEE its own repair runs — without a `run-name`.
 
-    It re-dispatches release-cli with `--ref main` (so the run uses main's fixed
-    workflow to build the tag's source). That makes the run's `head_branch` equal
-    `main`, NOT the tag. Matching runs on head_branch alone therefore made every
-    repair invisible: attempts counted zero, escalation never fired, and a fresh
-    re-dispatch went out every 30 minutes forever — a stampede, not a reconciler.
+    It re-dispatches release-cli with `--ref main` (so the repair uses main's fixed
+    workflow to build the tag's source), which makes the run's `head_branch` equal
+    `main`, NOT the tag. Matching on head_branch alone makes every repair invisible:
+    zero attempts counted, escalation never fires, and a fresh re-dispatch goes out
+    every 30 minutes forever.
 
-    release-cli.yml sets `run-name: Release <tag>`, surfacing as `display_title`.
+    The tag is therefore carried in a JOB name. It must NOT be carried in a
+    `run-name`: GitHub returns `run-name` as `workflow_run.name`, REPLACING the
+    workflow name, and the self-hosted tartci supervisor selects its work with
+    `select(.name == "Release CLI")`. Setting one hides every release run from the
+    supervisor, which then reports `queued=0` and never boots a macOS VM — no
+    runner, no release. That regression shipped once; these tests keep it dead.
     """
 
-    def test_repair_run_dispatched_from_main_is_attributed_to_its_tag(self) -> None:
-        repair = {
-            "head_branch": "main",             # dispatched FROM main...
-            "display_title": "Release v0.655.0",  # ...but building v0.655.0
-            "event": "workflow_dispatch",
-        }
-        self.assertTrue(runs_this_tag(repair, "v0.655.0"))
-        self.assertFalse(runs_this_tag(repair, "v0.656.0"))
+    def test_repair_run_dispatched_from_main_is_attributed_by_job_name(self) -> None:
+        repair = {"head_branch": "main", "event": "workflow_dispatch", "id": 1}
+        self.assertTrue(runs_this_tag(repair, "v0.659.0", "v0.659.0"))
+        self.assertFalse(runs_this_tag(repair, "v0.660.0", "v0.659.0"))
 
-    def test_tag_push_run_still_matches_via_head_branch(self) -> None:
-        push = {
-            "head_branch": "v0.655.0",
-            "display_title": "some commit subject",  # pre-run-name history
-            "event": "push",
-        }
-        self.assertTrue(runs_this_tag(push, "v0.655.0"))
+    def test_tag_push_run_matches_via_head_branch(self) -> None:
+        push = {"head_branch": "v0.659.0", "event": "push", "id": 2}
+        self.assertTrue(runs_this_tag(push, "v0.659.0"))
 
-    def test_an_unrelated_main_run_is_not_attributed_to_a_tag(self) -> None:
-        other = {
-            "head_branch": "main",
-            "display_title": "Release v0.999.0",
-            "event": "workflow_dispatch",
-        }
-        self.assertFalse(runs_this_tag(other, "v0.655.0"))
+    def test_an_unattributable_dispatch_run_matches_nothing(self) -> None:
+        """Fail closed: never claim a run we could not attribute."""
+        unknown = {"head_branch": "main", "event": "workflow_dispatch", "id": 3}
+        self.assertFalse(runs_this_tag(unknown, "v0.659.0", None))
 
 
 class PublishedDoesNotImplyComplete(unittest.TestCase):
