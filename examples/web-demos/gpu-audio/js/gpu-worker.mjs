@@ -52,6 +52,12 @@ const MAX_IN_FLIGHT = 3;     // multiple staging buffers, never one blocking rea
 let ring = null;
 let gpu = null;
 let running = false;
+// A new IR the plugin published, waiting to be swapped in at a safe point in the loop
+// (see step 0 of runLoop). Null in steady state.
+let pendingIr = null;
+// What pulp_gpu_prepare needs to be re-called with. Captured at bring-up so an IR swap
+// re-prepares against exactly the same stream geometry the ring was built for.
+let prepared = null;   // { sampleRate, blockSize, channels }
 
 const state = {
   produced: 0, expired: 0, queueSubmits: 0, mapResolves: 0, gpuNsLast: 0,
@@ -212,6 +218,51 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
   while (running) {
     if (ring.flags() & FLAG_SHUTDOWN) break;
 
+    // 0. A NEW IR. The plugin rebuilt its impulse response (the user moved Size, or
+    //    uploaded one), so the kernel this worker convolves with is now the wrong one
+    //    and every block it produces from here is a different reverb than the CPU
+    //    convolver's. Re-prepare.
+    //
+    //    Applied HERE, at the top of the loop, and only once nothing is in flight:
+    //    pulp_gpu_prepare tears down and rebuilds the pipelines and the IR's frequency-
+    //    domain partitions, so doing it under a block that is mid-submit would readback
+    //    a block convolved with half of each kernel. Draining first costs a few blocks
+    //    and is the only version of this that is correct.
+    //
+    //    Those few blocks are MISSES, and that is not a problem to be solved — it is the
+    //    safety net doing its job. A missed block is covered by the plugin's CPU
+    //    convolver, which is ALSO crossfading to the new IR (its rebuild is time-sliced
+    //    for exactly that reason), so the swap is heard as the same smooth Size change
+    //    the CPU engine gives. With the net removed ("GPU only") those blocks are
+    //    silent instead — which is what "no safety net" means, and is why it is not the
+    //    default.
+    if (pendingIr) {
+      const ir = pendingIr;
+      pendingIr = null;
+      if (inFlight.size > 0) {
+        pendingIr = ir;                 // still busy — re-arm and drain first
+      } else {
+        try {
+          const p = gpu.malloc(ir.length * 4);
+          gpu.heapF32().set(ir, p >> 2);
+          if (!(await gpu.api.prepare(prepared.sampleRate, prepared.blockSize,
+                                      prepared.channels, p, ir.length, 1))) {
+            throw new Error("pulp_gpu_prepare(ir) returned 0");
+          }
+          state.irSwaps = (state.irSwaps || 0) + 1;
+          stash.clear();                // stamped against the OLD kernel
+        } catch (err) {
+          // A failed re-prepare must not take the audio down: the lane goes quiet, the
+          // CPU net covers, and the page is told why rather than left guessing.
+          running = false;
+          state.state = STATE_FAILED;
+          ring.publishStats(state);
+          self.postMessage({ type: "failed", reason: "ir-swap-failed:" + String((err && err.message) || err) });
+          break;
+        }
+      }
+    }
+
     // 1. Expire anything past its deadline BEFORE polling, mirroring the native
     //    readback poll's deadline-at-entry semantics.
     const now = performance.now();
@@ -347,6 +398,8 @@ async function bringUp(msg) {
     }
   }
 
+  prepared = { sampleRate: msg.sampleRate, blockSize, channels };
+
   state.state = STATE_READY;
   ring.setFlag(FLAG_WORKER_READY);
   ring.publishStats(state);
@@ -455,6 +508,12 @@ self.onmessage = async (e) => {
       // page shows it verbatim rather than a generic "GPU unavailable".
       self.postMessage({ type: "failed", reason: String((err && err.message) || err) });
     }
+  } else if (msg.type === "ir") {
+    // Queued, never applied here: this runs on the worker's event loop, which can land
+    // in the middle of a submitted-but-not-read-back block. runLoop applies it once
+    // nothing is in flight.
+    const ir = msg.ir instanceof Float32Array ? msg.ir : new Float32Array(msg.ir || []);
+    if (ir.length) pendingIr = ir;
   } else if (msg.type === "shutdown") {
     running = false;
     if (ring) ring.setFlag(FLAG_SHUTDOWN);

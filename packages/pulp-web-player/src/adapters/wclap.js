@@ -92,6 +92,11 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
   let paramInfo = [];              // ParameterInfo[] in stable order
   const paramValues = new Map();   // id -> current value (mirror)
   let onParamsChangedCb = null;
+  // The plugin's live impulse response, whenever it changes. Only a module that
+  // exports one publishes it (see wclap-processor.js pollIr) — for everything else
+  // this never fires.
+  let onIrChangedCb = null;
+  let lastIr = null;
   let onMidiOutCb = null;
   let onLatencyChangedCb = null;   // additive: (samples) => void
   let onStateDirtyCb = null;       // additive: () => void — plugin marked its state dirty
@@ -143,6 +148,15 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
         case "paramsChanged":
           for (const c of m.changes) paramValues.set(c.id, c.value);
           onParamsChangedCb && onParamsChangedCb(buildValues(), paramInfo);
+          break;
+        case "irChanged":
+          // Latched, because the consumer usually arrives AFTER the plugin has already
+          // published: the first IR lands during activate, and the page only wires its
+          // handler once the adapter resolves. Without the latch that first publish is
+          // lost and the GPU worker sits with no kernel until the user happens to move
+          // Size — which reads exactly like "the GPU engine is broken".
+          lastIr = m.ir;
+          onIrChangedCb && onIrChangedCb(lastIr);
           break;
         case "midiOut":
           onMidiOutCb && onMidiOutCb(m.events);
@@ -234,6 +248,13 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
     set onMidiOut(fn) { onMidiOutCb = fn; },
     get onParamsChanged() { return onParamsChangedCb; },
     set onParamsChanged(fn) { onParamsChangedCb = fn; },
+    // The plugin's live IR. Assigning a handler replays the latest one immediately if
+    // the plugin already published (see the latch above), so a late subscriber is not
+    // punished for being late.
+    get onIrChanged() { return onIrChangedCb; },
+    set onIrChanged(fn) { onIrChangedCb = fn; if (fn && lastIr) fn(lastIr); },
+    /// The last IR the plugin published, or null.
+    get impulseResponse() { return lastIr; },
     // Additive (beyond the shared HostAdapter contract): notifications the
     // WebCLAP host forwards from the plugin. Safe no-ops if the shell ignores them.
     get onLatencyChanged() { return onLatencyChangedCb; },

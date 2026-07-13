@@ -130,6 +130,26 @@ export async function startGpuLane(opts) {
     limits: result.limits,
     timestampQuery: !!result.timestampQuery,
 
+    // Hand the worker the impulse response the PLUGIN is actually using. Both engines
+    // have to convolve with the same kernel or the CPU convolver stops being a
+    // sample-for-sample substitute for a block the GPU missed, and the "safety net" is
+    // really a second, different reverb cutting in.
+    //
+    // The plugin publishes its IR post-normalize and post-window (see the WebCLAP
+    // module's pulp_ir_* exports), so this is the transformed IR, not the source file
+    // the user picked. Handing the page's raw IR to both sides would NOT be equivalent.
+    //
+    // Safe to call at any time, including before the worker has finished bring-up: it
+    // is queued and applied at a safe point in the worker's loop.
+    setIr(samples) {
+      if (!samples || !samples.length) return false;
+      const ir = samples instanceof Float32Array ? samples : Float32Array.from(samples);
+      // Copied, never transferred: the caller (the page) still owns this array, and the
+      // plugin may publish the same buffer again.
+      try { worker.postMessage({ type: "ir", ir: ir.slice() }); return true; }
+      catch { return false; }
+    },
+
     // Poll at ~10 Hz with setInterval, NOT requestAnimationFrame: rAF is throttled
     // in a background tab, so the readout would freeze exactly when misses are
     // most interesting (a backgrounded tab keeps rendering audio but throttles the

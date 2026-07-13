@@ -792,6 +792,40 @@ class RealtimeWclapPlugin {
   // so it is never reentrant with process().
   onMainThread() { this.host.call(this._fn(PLUGIN.on_main_thread), this.ptr); }
 
+  // ── Optional: a module that publishes its live impulse response ──────────────
+  //
+  // A convolution plugin whose DSP can also run somewhere OUTSIDE the worklet (the
+  // GPU worker, which an AudioWorkletGlobalScope cannot even reach) has to tell that
+  // somewhere WHICH impulse response to convolve with — and it must be the IR the
+  // plugin actually ended up with, after its own normalize/window pass, or the two
+  // engines are different reverbs and neither can stand in for the other.
+  //
+  // Three optional wasm exports carry it. Entirely opt-in: a module without them is
+  // untouched, and this whole path costs one `undefined` check.
+  //
+  // Polled right after on_main_thread(), which is the ONLY place the plugin can change
+  // its IR (the rebuild is off-audio-thread work; see non_realtime_tick_pending), so
+  // there is no per-quantum cost and no polling loop. The generation counter is the
+  // cheap question; the snapshot is the expensive one, and only a changed generation
+  // asks it.
+  pollIr() {
+    const ex = this.host.ex;
+    if (this._irGen === undefined) {
+      this._irGen = ex.pulp_ir_generation ? 0 : -1;   // -1 = this module has no IR to publish
+    }
+    if (this._irGen < 0) return null;
+
+    const gen = ex.pulp_ir_generation() >>> 0;
+    if (gen === this._irGen) return null;
+    this._irGen = gen;
+
+    const len = ex.pulp_ir_snapshot() >>> 0;
+    if (!len) return null;
+    // Copied, not a view: the wasm heap can be grown or rewritten by the next call,
+    // and this is about to cross a thread boundary.
+    return new Float32Array(this.host.memory.buffer, ex.pulp_ir_data(), len).slice();
+  }
+
   // Current plugin-reported latency / tail in samples (clap.latency / clap.tail
   // plugin extensions). Extension pointers are resolved + cached once; a plugin
   // that does not expose the extension reports 0. `>>> 0` keeps the uint32 ABI.
@@ -966,7 +1000,18 @@ class RealtimeWclapPlugin {
       h._mainThreadCallbackPending = false;
       this.onMainThread();
     }
-    return { params: this._outParamEvents, midi: this._outMidi };
+    // Polled EVERY quantum, not just after a tick. Gating this on the tick looks right —
+    // the tick is what REBUILDS the IR — and it silently never fires for the first one:
+    // the plugin builds its initial IR while ACTIVATING, so by the time audio is running
+    // it has nothing pending, never asks the host for a callback, and a tick-gated poll
+    // waits forever for a rebuild that already happened. The GPU worker would then sit
+    // with no kernel until the user happened to move a knob.
+    //
+    // The cost is one wasm call per quantum returning a uint32 (~375/s), which is
+    // nothing; the expensive part — copying the IR out — still only happens when the
+    // generation actually changes.
+    const ir = this.pollIr();
+    return { params: this._outParamEvents, midi: this._outMidi, ir };
   }
 
   // ── clap.state (main-thread op; runs in the worklet message loop, never
@@ -1150,6 +1195,11 @@ class WclapProcessor extends AudioWorkletProcessor {
     const captured = this.plugin.processQuantum(inCh, frames, params, midi, sysex, out);
     if (captured.params.length) this.port.postMessage({ type: "paramsChanged", changes: captured.params.slice() });
     if (captured.midi.length) this.port.postMessage({ type: "midiOut", events: captured.midi.map((m) => ({ bytes: m.bytes.slice() })) });
+    // Rare by construction — only when the plugin actually rebuilt its IR (a Size move,
+    // an uploaded impulse), which is a user action, not a per-block event. The array is
+    // CLONED, not transferred: transferring out of an AudioWorklet is unreliable (the
+    // receiver can get a detached buffer), and it is not ours to detach anyway.
+    if (captured.ir) this.port.postMessage({ type: "irChanged", ir: captured.ir });
 
     if (this.diag) {
       this.quanta++;

@@ -671,29 +671,27 @@ const GPU_TARGET = "SuperConvolverGpu";       // super_convolver_gpu_wclap
 
 // *** THE PAGE IS NOT EMITTED WHILE THIS IS FALSE. ***
 //
-// The GPU worker convolves with the IR the PAGE hands it (startGpuLane({ ir })),
-// and the plugin's IR is built in C++ (build_base_ir, keyed off Size, then
-// normalized and windowed). Nothing carries those samples from the plugin to the
-// page — the page reads `window.__scGpuIr`, and nothing in this repo sets it. So
-// the handshake below can only ever fail, the page can only ever load the CPU
-// module, and the Engine toggle can only ever be hidden.
+// The GPU worker convolves with the IR the PAGE hands it, and that IR must be the one the
+// PLUGIN is actually using — post-normalize, post-window — or the two engines are
+// different reverbs and the CPU convolver stops being a sample-for-sample substitute for
+// a block the GPU missed. "The safety net" would really be a second effect cutting in.
 //
-// A page TITLED "GPU engine", whose <meta description> and OG card say the
-// convolution "is running as a WebGPU compute shader in your browser tab", that
-// runs 100 % CPU for every visitor, is a capability lie — displaced from the toggle
-// (which correctly refuses to render) onto the chrome and the shareable link. An
-// inline "GPU engine unavailable" note does not qualify a browser tab title, a
-// gallery listing, or a link someone pastes into Slack.
+// That handoff is WIRED (it was not, and this page was withheld until it was): the WebCLAP
+// module exports its live IR and a generation counter (pulp_ir_* in
+// wclap-build/plugins/super_convolver_gpu_wclap.cpp), the worklet polls it on the
+// non-realtime tick, the adapter latches and re-emits it (onIrChanged), and the page
+// forwards it with lane.setIr(). It re-fires on every rebuild — a Size move, an uploaded
+// impulse — so the engines cannot drift apart.
 //
-// The GPU engine itself is real and is PROVEN — in real Chrome, on a real WebGPU
-// device, against the real modules — by
-// examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs, which sidesteps the
-// handoff by measuring the impulse response on the CPU engine and handing THAT to
-// the worker. A demo page cannot do that. Flip this to true in the same change that
-// makes the plugin publish its live base IR to the page (see
-// examples/web-demos/gpu-audio/README.md, "Open cross-workstream contract"), and
-// the page below — copy, toggle, stats and all — ships as written.
-const GPU_IR_HANDOFF_WIRED = false;
+// This flag stays as the switch it always was. Set it back to false the moment the page
+// could no longer honestly claim a running WebGPU shader: the title, <meta description>,
+// OG card and gallery link all assert that in the PRESENT TENSE, and a page that serves
+// 100 % CPU to every visitor while saying so is a capability lie — one displaced from the
+// toggle (which correctly refuses to render) onto the chrome and onto a link someone
+// pastes into Slack. browser-test/gallery-smoke.mjs holds the static half of that
+// contract; browser-test/page-gpu.mjs drives the assembled page in a real browser and
+// asserts the GPU is producing blocks on it.
+const GPU_IR_HANDOFF_WIRED = true;
 
 const GPU_TITLE = "SuperConvolver — GPU engine";
 const GPU_SUBTITLE =
@@ -749,21 +747,22 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   let lane = null;
   let handshake = probe();
 
-  // The IR is the PLUGIN's, and the worker is what convolves with it. Without a
-  // handoff the GPU lane would convolve with the unit impulse it was self-tested
-  // with and quietly pass the dry signal through — a GPU engine that appears to
-  // work and does nothing. So: no IR, no GPU engine. This is a real open contract,
-  // not a defensive branch (examples/web-demos/gpu-audio/README.md, "Open
-  // cross-workstream contract").
-  const gpuIr = (window.__scGpuIr instanceof Float32Array && window.__scGpuIr.length)
-    ? window.__scGpuIr : null;
-  if (handshake.ok && !gpuIr) handshake = { ok: false, reason: "no-ir-handoff" };
-
+  // The IR is the PLUGIN's, and the worker is what convolves with it. Without it the
+  // GPU lane would still be convolving with the unit impulse it was self-tested with
+  // — i.e. passing the dry signal through — which is a GPU engine that appears to work
+  // and does nothing.
+  //
+  // The IR cannot be supplied HERE, though, and that is not a defect: the plugin does
+  // not exist yet. It is instantiated inside the worklet by createAdapter() below, and
+  // only then does it build its IR. So the lane starts with no kernel, the plugin
+  // publishes its IR when it has one (pulp_ir_* exports → worklet → adapter), and the
+  // page forwards it with lane.setIr(). Until that lands, the Engine toggle is not
+  // rendered — see irReady.
   if (handshake.ok) {
     lane = await startGpuLane({
       workerUrl: "./gpu-worker.mjs",
       moduleUrl: "./pulp-gpu-dsp.js",
-      ir: gpuIr,
+      ir: null,
       sampleRate: 48000,
       blockSize: INTERNAL_BLOCK,
       latencyBlocks: GPU_LATENCY_BLOCKS,
@@ -803,8 +802,35 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       // is exactly the "inert and misleading" failure the PULP_WASM compile-out
       // already fixed once. It is also gated on descriptor.gpuLane, which is true
       // only when the worklet really attached the ring.
-      const laneAttached = gpuOk && !!(adapter.descriptor && adapter.descriptor.gpuLane);
-      if (laneAttached) {
+      // The plugin's live IR, forwarded to the worker. Assigning the handler also
+      // REPLAYS the latest IR if the plugin already published one (the adapter latches
+      // it) — which it has, because the first IR is built while the plugin activates,
+      // before this custom UI is ever mounted. Without that replay the GPU would sit
+      // with no kernel until the user happened to move Size.
+      //
+      // This fires again on every rebuild — a Size move, an uploaded impulse — so the
+      // two engines never drift apart onto different reverbs.
+      const ringAttached = gpuOk && !!(adapter.descriptor && adapter.descriptor.gpuLane);
+      let laneAttached = false;   // ring attached AND the worker has the plugin's kernel
+
+      // Built when the FIRST IR reaches the worker — not before. Two reasons it cannot
+      // just be rendered up front and gated later:
+      //
+      //   • A toggle offered before the worker has a kernel would switch the audio to a
+      //     GPU still convolving with the unit impulse it was self-tested with. That is
+      //     not a degraded reverb, it is NO reverb: the effect would audibly vanish.
+      //   • An inert-but-present control is the "inert and misleading" failure the
+      //     PULP_WASM compile-out already fixed once. So it does not exist until it works.
+      //
+      // WHEN the IR arrives is not knowable here. The plugin builds it on its first
+      // non-realtime tick, which needs process() to have run, which needs the user to
+      // have started audio — the adapter may already have it (it latches, and assigning
+      // the handler below replays it synchronously) or it may be seconds away. Both
+      // paths land here.
+      const mountEngineToggle = () => {
+        if (laneAttached) return;      // already up
+        laneAttached = true;
+        offNote.remove();
         const row = document.createElement("div");
         row.className = "engine-row";
         row.innerHTML =
@@ -828,13 +854,30 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           if (engine) adapter.setParameterValue(engine.id, Number(select.value));
         });
         window.__engineSelect = select;
-      } else {
-        const off = document.createElement("p");
-        off.className = "engine-off";
-        off.textContent = gpuOk
+      };
+
+      // What the page says while there is no working GPU lane — and what it keeps saying
+      // if one never arrives. Named reason, never a generic "unavailable".
+      const offNote = document.createElement("p");
+      offNote.className = "engine-off";
+      offNote.textContent = !gpuOk
+        ? "GPU engine unavailable (" + handshake.reason + ") — running the CPU convolver."
+        : !ringAttached
           ? "GPU engine unavailable (no-gpu-lane-in-worklet) — running the CPU convolver."
-          : "GPU engine unavailable (" + handshake.reason + ") — running the CPU convolver.";
-        container.appendChild(off);
+          : "GPU engine starting — waiting for the plugin's impulse response. Running the CPU convolver.";
+      container.appendChild(offNote);
+
+      // The plugin's live IR → the worker. Assigning this handler REPLAYS the latest IR
+      // if the plugin already published one (the adapter latches it), so a handler that
+      // arrives late is not punished for it. It fires again on every rebuild — a Size
+      // move, an uploaded impulse — so the two engines can never drift onto different
+      // reverbs, which is the one thing that would stop the CPU net from being a
+      // sample-for-sample substitute for a missed GPU block.
+      if (ringAttached) {
+        adapter.onIrChanged = (ir) => {
+          if (!lane || !lane.ok) return;
+          if (lane.setIr(ir)) mountEngineToggle();
+        };
       }
 
       const canvas = document.createElement("canvas");

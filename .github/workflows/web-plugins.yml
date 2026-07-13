@@ -401,6 +401,84 @@ jobs:
             --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp" \
             --screenshot /tmp/gpu-audio-macos.png
 
+      # ── Does the SHIPPED PAGE run the GPU? ─────────────────────────────────────
+      #
+      # The proof above proves the ENGINE, and cannot prove the page: it sidesteps the IR
+      # handoff by measuring the impulse response on the CPU engine in one run and handing
+      # it to the worker in the next. A visitor gets no such favour. Everything between the
+      # plugin's IR and the worker's kernel — the wasm exports, the worklet poll, the
+      # adapter latch, lane.setIr(), the worker's re-prepare — is uncovered by it, and each
+      # link fails SILENTLY: the page loads, the CPU convolver plays, and the GPU engine
+      # simply never appears. So the assembled page gets driven in a real browser.
+      #
+      # It has to run HERE and not in the Cloudflare deploy lane, which is where the site
+      # is normally assembled: that lane is Linux, has no WebGPU adapter, and the fixture
+      # would skip. A real GPU is the whole point.
+      - name: Cache the Skia wasm slice
+        id: skia-cache-macos
+        uses: actions/cache@v4
+        with:
+          path: ~/skia-wasm
+          key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
+
+      # The gallery's other 23 plugins live in two separate public repos, and
+      # assemble-gallery.mjs hard-fails on the first missing wasm — so the page cannot be
+      # assembled without them, even though this job only cares about SuperConvolver.
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-example-plugins
+          path: _ext/pulp-example-plugins
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-classic-effects
+          path: _ext/pulp-classic-effects
+
+      - name: Assemble the GPU demo page (the real one, from the real modules)
+        run: |
+          set -euo pipefail
+          if [ ! -d "$HOME/skia-wasm" ]; then
+            read -r url sha < <(python3 - <<'PY'
+          import json
+          dep = next(d for d in json.load(open("tools/deps/manifest.json"))["dependencies"]
+                     if d["name"] == "Skia")
+          a = dep["determinism"]["release_assets"]["wasm-wasm32"]
+          print(a["url"], a["sha256"])
+          PY
+          )
+            curl -fsSL "$url" -o /tmp/skia-wasm.zip
+            echo "$sha  /tmp/skia-wasm.zip" | shasum -a 256 -c -
+            mkdir -p "$HOME/skia-wasm"
+            unzip -q /tmp/skia-wasm.zip -d "$HOME/skia-wasm"
+          fi
+
+          # The page's status strip is a Label in Pulp's own view tree, so the GPU page
+          # cannot be assembled without the UI module — there is nothing to report into.
+          emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
+            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm"
+          cmake --build build-webui -j"$(sysctl -n hw.ncpu)"
+
+          # Every gallery plugin, so the assembler can run at all (see the checkouts above).
+          cmake -S examples/web-demos/wclap-build -B build-wclap \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DPULP_EXAMPLE_PLUGINS_DIR="$GITHUB_WORKSPACE/_ext/pulp-example-plugins" \
+            -DPULP_CLASSIC_EFFECTS_DIR="$GITHUB_WORKSPACE/_ext/pulp-classic-effects" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-wclap -j"$(sysctl -n hw.ncpu)"
+
+          node examples/web-demos/wclap-build/cloudflare/assemble-gallery.mjs \
+            --build "$GITHUB_WORKSPACE/build-wclap" \
+            --ui-build "$GITHUB_WORKSPACE/build-webui" \
+            --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp"
+
+      - name: The shipped page runs its GPU engine (WebGPU REQUIRED)
+        env:
+          PULP_REQUIRE_WEBGPU: "1"
+          CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+        run: |
+          set -euo pipefail
+          node examples/web-demos/gpu-audio/browser-test/page-gpu.mjs \
+            --site examples/web-demos/wclap-build/cloudflare/public
+
       - name: Upload the proof screenshot
         if: always()
         uses: actions/upload-artifact@v4

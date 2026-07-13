@@ -60,11 +60,17 @@ const TARGETS = [
 // else about them is pinned byte-for-byte.
 const CACHEBUST = /\?v=[0-9a-f]{8}/g;
 const normalize = (html) => html.replace(CACHEBUST, "?v=<player>");
+// Re-pinned after rebasing onto main. These moved because MAIN moved them (the browser
+// UI + Safari editor work changed both shipped pages), NOT because the GPU work touched
+// them — verified by running origin/main's OWN assembler against the same stub inputs and
+// getting byte-identical output. That check is the only thing that makes a re-pin
+// honest: without it, "re-pin until green" quietly launders exactly the regression this
+// pin exists to catch. Re-do it, do not just paste the new value.
 const SHIPPED = {
   "super-convolver/wam/index.html":
-    "eb6f11fd93961da7baacc657af0d3a922a933063085cc910cd18b1a3b7dec186",
+    "c4f7cf5810a2a9de844bf7dba17f989193975b632bdfc7edefb110211e199c3a",
   "super-convolver/wclap/index.html":
-    "ab8d379bb16dd94663d14875c8d9ae4312ce32d4c20eab78f28382e39184f357",
+    "060bb95a976d8373050e11b2cafdd2d88b37f81db083506f3ba0879a5eca65d0",
 };
 
 const steps = [];
@@ -131,12 +137,30 @@ try {
     check("the CPU module is loaded when the handshake fails",
           html.includes('gpuOk ? "./SuperConvolverGpu.wasm" : "./SuperConvolver.wasm"'),
           "dspUrl is chosen from the handshake result");
-    check("the Engine toggle is HIDDEN, not disabled, when the handshake fails",
-          /if \(laneAttached\) \{[\s\S]*?<select id="engine"/.test(html) && !/disabled/.test(html),
-          "the <select> is only constructed inside `if (laneAttached)`; nothing is rendered disabled");
+    check("the Engine toggle is HIDDEN, not disabled, when there is no working GPU lane",
+          /const mountEngineToggle = \(\) => \{[\s\S]*?<select id="engine"/.test(html) &&
+            !/disabled/.test(html),
+          "the <select> only exists inside mountEngineToggle(); nothing is rendered disabled");
     check("the toggle is gated on the ring ACTUALLY being attached in the worklet",
           html.includes("adapter.descriptor.gpuLane"),
-          "laneAttached = gpuOk && descriptor.gpuLane");
+          "ringAttached = gpuOk && descriptor.gpuLane");
+
+    // ── The IR handoff. This is what the page could not do before, and every one of
+    //    these is a way it could look wired and not be.
+    check("the page does NOT start the lane with an IR it cannot have",
+          /startGpuLane\(\{[\s\S]*?ir: null/.test(html),
+          "the plugin does not exist yet at handshake time — the IR arrives later, from it");
+    check("the dead window.__scGpuIr seam is gone",
+          !html.includes("__scGpuIr"),
+          "nothing set it; a page reading it would silently never get an IR");
+    check("the page forwards the PLUGIN's IR to the worker",
+          html.includes("adapter.onIrChanged") && html.includes("lane.setIr("),
+          "plugin (pulp_ir_* exports) → worklet → adapter.onIrChanged → lane.setIr() → worker");
+    check("the Engine toggle appears only once the worker HAS that IR",
+          /if \(lane\.setIr\(ir\)\) mountEngineToggle\(\)/.test(html),
+          "mountEngineToggle() is called from the IR handler and nowhere else — a toggle " +
+          "offered earlier would switch the audio to a GPU still convolving with the unit " +
+          "impulse it was self-tested with, and the reverb would audibly vanish");
     check("the copy makes no speed claim",
           /not faster than the CPU path/.test(html) &&
             !/(faster than|speed-?up|[0-9]x faster)/i.test(html.replace(/not faster than the CPU path/g, "")),

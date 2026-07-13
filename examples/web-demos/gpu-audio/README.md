@@ -79,7 +79,7 @@ interval.
 
 | | |
 |---|---|
-| `/super-convolver-gpu/` | The page is written, and is **NOT EMITTED** — see "Open cross-workstream contract" below. Its GPU engine cannot run until the plugin publishes its IR to the page, and a page titled "GPU engine" that serves 100 % CPU to every visitor is a capability lie. `GPU_IR_HANDOFF_WIRED` in `assemble-gallery.mjs` is the one-line switch; `browser-test/gallery-smoke.mjs` asserts the page stays unemitted while it is false. The two shipped pages, `/super-convolver/wam/` and `/super-convolver/wclap/`, are unchanged and sha256-pinned by the same smoke. |
+| `/super-convolver-gpu/` | **Shipped.** The IR handoff is wired (see below), so the page's GPU engine actually runs — proven on the assembled page, in a real browser, by `browser-test/page-gpu.mjs`: the Engine toggle only exists once the plugin's IR has reached the worker, and with GPU selected the worker's own counters advance (measured: **0 of 192 blocks missed** in the steady-state window). `GPU_IR_HANDOFF_WIRED` in `assemble-gallery.mjs` remains the switch — set it false the moment the page could no longer honestly claim a running shader. The two shipped pages, `/super-convolver/wam/` and `/super-convolver/wclap/`, are unchanged and sha256-pinned by `gallery-smoke.mjs`. |
 | Engine CPU/GPU toggle | Rendered **only** when the handshake succeeds AND the worklet really attached the ring (`descriptor.gpuLane`). Where it fails the toggle is **not rendered at all** and the page names the reason. An inert control is the "inert and misleading" failure the `PULP_WASM` compile-out already fixed once. |
 | Status strip | One `Label` in Pulp's own view tree, repainted from `pulp_ui_set_gpu_status(json)` at 10 Hz on a **`setInterval`, not `requestAnimationFrame`** — rAF is throttled in a background tab, exactly when misses are most interesting. `budget_us` and `rt_percent` are derived on the page by the same arithmetic native `gpu_status()` uses, so the browser and the native build print the same numbers computed the same way. |
 
@@ -241,29 +241,46 @@ node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
   `navigator.gpu` at all** — WebGPU needs a secure context. Every probe here serves
   over `http://localhost`. This is the first thing that makes a naive probe lie.
 
-## Open cross-workstream contract
+## The IR handoff (closed)
 
-**The IR handoff is not wired — and that is why the demo page is not emitted.**
-`startGpuLane({ ir })` is what tells the worker which impulse response to convolve
-with, and the plugin's IR is built in C++ (`build_base_ir`, keyed off Size, then
-normalized and windowed). Nothing carries those samples from the plugin to the page,
-so the page reads `window.__scGpuIr`, which nothing sets — the handshake can only
-ever fail, the CPU module is the only one that can ever load, and the Engine toggle
-can only ever be hidden.
+The GPU worker must convolve with the impulse response the PLUGIN is actually using. Not
+an equivalent one, and not the raw file the user picked: the plugin NORMALIZES and WINDOWS
+what it is given (`build_base_ir`, keyed off Size), so handing the page a source IR to give
+to both sides would leave the two engines convolving with different kernels — and the CPU
+convolver would stop being a sample-for-sample substitute for a block the GPU missed. The
+"safety net" would really be a second, different reverb cutting in.
 
-Refusing to render an inert toggle was right. It is not enough: the page's `<title>`,
-`<meta description>`, OG card and gallery link all assert, in the present tense, that
-the convolution IS running as a WebGPU compute shader. So the assembler now refuses
-to write the page at all (`GPU_IR_HANDOFF_WIRED = false` in
-`../wclap-build/cloudflare/assemble-gallery.mjs` — one line, next to the reasoning).
+This was open for a while, and the demo page was withheld the whole time, because a page
+titled "GPU engine" that serves 100 % CPU to every visitor is a capability lie — displaced
+from the toggle (which correctly refuses to render) onto the chrome and onto a link someone
+pastes into Slack.
 
-What closes it: the plugin publishing its LIVE base IR (the normalized, windowed
-`worker_base_ir_`, not the raw source) out through the worklet to the page, which
-forwards it to the worker. Handing the page a raw IR to give to both sides is not
-equivalent — the plugin transforms what it is given, so the two would convolve with
-different kernels and the CPU net would no longer be a sample-for-sample substitute.
-The fixture sidesteps all of this by MEASURING the impulse response on the CPU
-engine and handing THAT to the worker; a demo page cannot.
+It is now wired, end to end:
+
+| Link | Where |
+|---|---|
+| The plugin publishes its live, post-transform IR + a generation counter | `pulp_ir_generation` / `pulp_ir_snapshot` / `pulp_ir_data` — plain wasm exports in `wclap-build/plugins/super_convolver_gpu_wclap.cpp`. Deliberately NOT a new CLAP extension: an extension would be permanent ABI invented for one demo, carried forever by every host that is not this page. An export is opt-in and invisible. |
+| The worklet polls it and forwards the samples | `wclap-processor.js` `pollIr()`. **Polled every quantum, not on the non-realtime tick** — see the trap below. |
+| The adapter latches it and re-emits | `adapters/wclap.js` `onIrChanged`. Latched because the first IR is published while the plugin ACTIVATES, before the page's handler exists; assigning the handler replays it. |
+| The page hands it to the worker | `lane.setIr()` → `gpu-worker.mjs`, which re-prepares at a safe point in its loop. |
+
+**The trap, and it is a good one.** Gating the poll on the non-realtime tick looks obviously
+right — the tick is what rebuilds the IR — and it silently never fires for the FIRST one.
+The plugin builds its initial IR while activating, so by the time audio is running it has
+nothing pending, never asks the host for a callback, and a tick-gated poll waits forever for
+a rebuild that already happened. The GPU worker sits with no kernel, the page never offers
+the toggle, and nothing anywhere reports an error. Poll the generation counter every
+quantum; it is one wasm call returning a `uint32`.
+
+**The swap is covered by the existing safety net, for free.** `pulp_gpu_prepare` rebuilds
+the pipelines and the IR's frequency-domain partitions, so the worker DRAINS everything in
+flight before re-preparing — a re-prepare under a submitted block would read back audio
+convolved with half of each kernel. Those drained blocks are misses, and a miss is exactly
+what `MissPolicy::CpuFallback` exists for: the plugin's CPU convolver covers them, and it is
+*also* crossfading to the new IR (its rebuild is time-sliced for precisely that reason). So
+a Size move on the GPU engine is heard as the same smooth change the CPU engine gives.
+Under "GPU only" those blocks are silent instead — which is what "no safety net" means, and
+is why it is not the default.
 
 ## Measured numbers
 

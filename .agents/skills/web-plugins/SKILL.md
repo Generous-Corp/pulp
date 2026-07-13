@@ -84,6 +84,48 @@ pass falsely when nothing ever dispatched. Two assertions carry real weight, and
 measures **0 ns**. A zero there is not evidence the GPU idled, and asserting either
 way manufactures false evidence. Report it; never gate on it.
 
+**Proving the ENGINE is not proving the PAGE.** The engine fixture is allowed to
+cheat — `validate-gpu.mjs` measures the impulse response on the CPU engine in one
+run and hands it to the worker in the next. A visitor gets no such favour, so
+everything between the plugin's data and the worker's kernel is UNCOVERED by it,
+and each link fails *silently*: the page loads, the CPU path plays, the GPU engine
+simply never appears, and nothing anywhere errors. Drive the ASSEMBLED page in a
+real browser too (`page-gpu.mjs`), and assert the worker's counters ADVANCE — not
+that a control exists (it can be inert), not that there are no errors (a silent
+fallback is errorless by design), and not a cumulative `produced > 0` (that latches
+on the first block ever made and then reads "GPU" forever, including while a lost
+device misses every deadline).
+
+### Getting the plugin's data OUT to the page (and the trap in it)
+
+A plugin whose DSP can also run OUTSIDE the worklet — a GPU worker, which an
+`AudioWorkletGlobalScope` cannot even reach — has to tell that somewhere what to
+work with. For a convolver that means the IR, and it must be the IR the plugin
+ACTUALLY ENDED UP WITH, after its own normalize/window pass. Handing the page a raw
+IR to give to both sides is **not** equivalent: the plugin transforms what it is
+given, so the two engines would convolve with different kernels and the CPU
+fallback would quietly stop being a substitute for a missed GPU block.
+
+The seam that works: plain **optional wasm exports** (`pulp_ir_generation` /
+`pulp_ir_snapshot` / `pulp_ir_data`) → the worklet polls → `postMessage` → the
+adapter latches and re-emits (`onIrChanged`) → the page forwards it. Not a new CLAP
+extension: an extension is permanent ABI invented for one demo, carried forever by
+every host that is not this page. An export is opt-in and invisible — the shared
+worklet checks whether the module has it and does nothing when it does not.
+
+Two things that WILL bite:
+
+- **Do not gate the poll on the non-realtime tick.** It looks obviously right — the
+  tick is what rebuilds the IR — and it silently never fires for the FIRST one. The
+  plugin builds its initial IR while ACTIVATING, so by the time audio is running it
+  has nothing pending, never asks the host for a callback, and a tick-gated poll
+  waits forever for a rebuild that already happened. Poll the generation counter
+  every quantum; it is one wasm call returning a `uint32`.
+- **Latch it in the adapter.** The first value is published while the plugin
+  activates — before the page's handler exists. Without a latch (and a replay on
+  subscribe) that first publish is lost, and the consumer waits for a change that
+  already happened.
+
 ## The worklet has no second thread
 
 A WAM module runs entirely inside the audio worklet: **there is no `std::thread`
