@@ -382,7 +382,9 @@ jobs:
           cmake -S examples/web-demos/wclap-build -B build-wclap \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-wclap -j"$(sysctl -n hw.ncpu)" --target SuperConvolverGpu SuperConvolver
+          # pulp_add_wclap(Foo) declares the target as `Foo-wclap`, not `Foo` — the
+          # bare names are a hard "No rule to make target", not a fallback.
+          cmake --build build-wclap -j"$(sysctl -n hw.ncpu)" --target SuperConvolverGpu-wclap SuperConvolver-wclap
           emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build-gpu-dsp -j"$(sysctl -n hw.ncpu)"

@@ -37,14 +37,41 @@
 // proof: it passes falsely when nothing ever dispatches and the CPU net covers.
 //
 // ALIGNMENT (why the truncated oracle kernel is EXACT, not approximate): the
-// source buffer is [unit impulse][D zeros][noise burst]. The plugin's response to
-// the lone impulse IS its impulse response h, so the first non-silent captured
-// sample is a marker that removes the plugin's latency from both the kernel and
-// the signal window. With D > N the impulse's own response has left the window
-// under test, and by causality the first N samples of (x * h) depend only on
-// h[0..N) — so comparing against a convolution with the first N taps of the
-// MEASURED h is exact. h is measured on the CPU engine (Run C), so the kernel
-// Run A is judged against never came from the GPU.
+// source buffer is [PREROLL silence][unit impulse][D zeros][noise burst][gap][unit
+// impulse]. The plugin's response to the lone impulse IS its impulse response h, so
+// the first non-silent captured sample is a marker that removes the plugin's
+// latency from both the kernel and the signal window. With D > N the impulse's own
+// response has left the window under test, and by causality the first N samples of
+// (x * h) depend only on h[0..N) — so comparing against a convolution with the
+// first N taps of the MEASURED h is exact. h is measured on the CPU engine (Run C),
+// so the kernel Run A is judged against never came from the GPU.
+//
+// THE PREROLL AND THE SECOND IMPULSE — the oracle's whole argument assumes the
+// engine is LINEAR TIME-INVARIANT across the capture: measure h once, convolve, and
+// expect the noise burst to agree. SuperConvolver is only LTI once its IR has
+// STOPPED CHANGING, and it does not start that way. A Size change does not take
+// effect at once: the rebuild (decode → window → FFT plan) is TIME-SLICED across
+// many process() calls and crossfaded (superconvolver::SlicedIrRebuild), precisely
+// so the render callback stays inside its budget instead of spiking. So the engine
+// spends the first stretch after setShortIr() crossfading from the DEFAULT 1.5 s IR
+// toward the 0.05 s one — it is genuinely time-VARYING, and h probed there is a
+// blend of two IRs that describes no instant of the run.
+//
+// Capturing immediately is therefore measuring a moving target: it FAILED that way
+// (CPU vs oracle: relative RMS 3.4 — not a drift, a different signal), and it fails
+// in a way that frames the ENGINE as broken when the fixture is what is wrong.
+//
+// So: PREROLL samples of silence run first. The graph is live, process() is being
+// called, the plugin is draining its sliced rebuild — and nothing is being measured
+// yet. THEN the marker impulse.
+//
+// A silent pre-roll is still only an ASSUMPTION that convergence fits inside it, and
+// an assumption that decays the moment someone changes the slice budget or the IR
+// length. So the source ends with a SECOND unit impulse, after the analysis window,
+// and its response must equal the first one's. That is a direct test of the
+// time-invariance the oracle depends on: if the IR were still moving anywhere in the
+// measured span, the two impulse responses would disagree and this fails LOUDLY with
+// a named reason — instead of silently poisoning every other check downstream.
 //
 // THE TAMPER SHIM: pulp_gpu_override_kernel lives on the GPU DSP module, which is
 // instantiated inside the DedicatedWorker (gpu-worker.mjs) — the page cannot
@@ -104,6 +131,11 @@ const requireWebGpu = process.env.PULP_REQUIRE_WEBGPU === "1";
 // rounding. The earlier 2e-3 placeholder was 10,000x the real error and would have
 // passed a visibly wrong convolution.
 const TOL = Number(arg("--tol", process.env.PULP_GPU_RMS_TOL || "1e-5"));
+// The two impulse responses are the SAME engine convolving the SAME unit impulse,
+// so they agree to the bit unless the IR actually moved between them. The tolerance
+// is loose only to absorb block-phase noise; what it must reject is a still-
+// converging rebuild, and that misses by O(1), not by 1e-4.
+const TOL_IR = 1e-4;
 
 const BROWSERS = [
   arg("--browser", null),
@@ -128,6 +160,17 @@ for (const f of ["gpu-bridge.mjs", "gpu-worker.mjs", "gpu-ring.mjs"])
 const N = 8192;
 const D = 16384;
 const BURST = 8192;
+// Silence before the marker impulse, so the time-sliced IR rebuild has converged
+// before anything is measured (see THE PREROLL AND THE SECOND IMPULSE). 0.5 s is
+// ~187 process() quanta — orders of magnitude more than the rebuild needs — and the
+// second impulse below is what actually PROVES it landed, so this length is a
+// comfortable margin rather than a load-bearing guess.
+const PREROLL = 24000;
+// The second impulse sits GAP samples past the end of the analysis window, far
+// enough that the noise burst's own decaying tail (<= the IR's 2,400 taps at minimum
+// Size) cannot bleed into it.
+const IMP2_GAP = 8192;
+const IMP2_OFF = D + N + IMP2_GAP;         // relative to the marker, in both source and capture
 const RUN_SECONDS = 3;                     // real time; also the miss-rate window
 const SAMPLE_RATE = 48000;
 const CAPTURE = SAMPLE_RATE * RUN_SECONDS;
@@ -203,6 +246,9 @@ import { probe, startGpuLane } from "/bridge/gpu-bridge.mjs";
 
 const log = (m) => { document.getElementById("log").textContent += "\\n" + m; };
 const N = ${N}, D = ${D}, CAPTURE = ${CAPTURE}, BLOCK = ${BLOCK};
+// The page builds the source buffer, so the pre-roll and the second impulse's offset
+// have to cross the string boundary with the rest of the geometry.
+const PREROLL = ${PREROLL}, IMP2_OFF = ${IMP2_OFF};
 const LATENCY_BLOCKS = ${LATENCY_BLOCKS}, SAMPLE_RATE = ${SAMPLE_RATE};
 const NOISE = Float32Array.from(${JSON.stringify(Array.from(noise))});
 window.__preflight = null;
@@ -223,11 +269,13 @@ async function adapterProbe() {
 }
 
 function sourceBuffer(ctx) {
-  // [unit impulse][D-1 zeros][noise burst][silence] — see the ALIGNMENT note.
+  // [PREROLL silence][impulse][D-1 zeros][noise burst][gap][impulse][silence]
+  // — see the ALIGNMENT note.
   const buf = ctx.createBuffer(1, CAPTURE, ctx.sampleRate);
   const ch = buf.getChannelData(0);
-  ch[0] = 1;
-  ch.set(NOISE, D);
+  ch[PREROLL] = 1;                       // the marker, and the measured IR
+  ch.set(NOISE, PREROLL + D);            // the signal under test
+  ch[PREROLL + IMP2_OFF] = 1;            // the time-invariance check
   return buf;
 }
 
@@ -448,9 +496,14 @@ function align(audio) {
   if (marker < 0) return { why: `SILENCE — peak |x| = ${peak.toExponential(2)}, ${audio.length} samples scanned` };
   const h = Float64Array.from(audio.slice(marker, marker + N));
   const y = Float64Array.from(audio.slice(marker + D, marker + D + N));
-  if (h.length !== N || y.length !== N)
-    return { why: `capture too short — marker at ${marker}, need ${marker + D + N} samples, have ${audio.length}` };
-  return { marker, h, y, peak };
+  // The SAME impulse, replayed after the analysis window. Its response is at the
+  // same offset in the capture as in the source, because the plugin's latency is
+  // fixed — that is the premise the marker already relies on.
+  const h2 = Float64Array.from(audio.slice(marker + IMP2_OFF, marker + IMP2_OFF + N));
+  const need = marker + IMP2_OFF + N;
+  if (h.length !== N || y.length !== N || h2.length !== N)
+    return { why: `capture too short — marker at ${marker}, need ${need} samples, have ${audio.length}` };
+  return { marker, h, y, h2, peak };
 }
 const aligned = (w) => !!(w && w.h);
 
@@ -498,6 +551,24 @@ try {
           aligned(wc) ? `marker at ${wc.marker}, peak ${wc.peak.toFixed(3)}, ${runC.captured} frames captured`
                       : wc.why);
     if (!aligned(wc)) throw new Error("Run C produced no usable audio — the harness cannot proceed");
+
+    // GATE THE KERNEL BEFORE ANYTHING USES IT. h is about to become the oracle's
+    // kernel AND the GPU worker's IR, so if the engine was still mid-rebuild when h
+    // was probed, every check downstream is measuring a moving target and reports
+    // the ENGINE as broken. Replaying the same impulse after the analysis window
+    // answers that directly: equal responses = the IR held still across the whole
+    // measured span (LTI), which is the premise the oracle rests on.
+    const drift = relativeRmsError(wc.h2, wc.h, N);
+    check("Run C — the CPU engine's impulse response is TIME-INVARIANT across the capture " +
+          "(the sliced IR rebuild converged in the pre-roll, so h is a real IR and not a crossfade)",
+          drift < TOL_IR, `relative RMS drift between the two impulse responses ${drift.toExponential(2)} ` +
+                          `(tolerance ${TOL_IR}); pre-roll ${PREROLL} samples`);
+    if (!(drift < TOL_IR))
+      throw new Error(
+        "the measured impulse response MOVED during the capture — h is a blend of two IRs, not an IR. " +
+        "Every oracle comparison downstream would be judged against a kernel that describes no instant of " +
+        "the run. Most likely the time-sliced IR rebuild has not converged within PREROLL: raise PREROLL, " +
+        "or check SlicedIrRebuild's slice budget.");
 
     // Hand the measured IR to the page: the GPU worker must convolve with the
     // SAME impulse response, or its wet is a different reverb and the comparison

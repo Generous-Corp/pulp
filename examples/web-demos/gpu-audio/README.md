@@ -121,6 +121,31 @@ guaranteed false FAIL.
 | **C** | Engine=CPU. Matches the oracle. It also measures the impulse response the oracle convolves with — so the kernel Run A is judged against never came from the GPU. The GPU worker keeps dispatching here (the plugin drives the ring on every block, whichever engine is selected), and that its wet was NOT emitted is what the oracle check proves: at this point the worker is still convolving with the unit impulse it was self-tested with, whose wet is the DRY signal — had any of it reached the output, the error would be enormous rather than ~2e-7. |
 | **D** | The negative path: the worker script 404s. The lane must fail with a NAMED reason, no ring may attach, and the CPU convolver must still play correctly. |
 
+### The engine is not LTI until its IR stops moving
+
+The oracle's argument — measure `h` once, convolve, compare — assumes the plugin is
+linear and TIME-INVARIANT across the capture. SuperConvolver is only time-invariant
+once its IR has stopped changing, and it does not start that way: a Size change is
+**time-sliced** across many `process()` calls and crossfaded
+(`superconvolver::SlicedIrRebuild`), so the render callback stays inside its budget
+instead of spiking. For a stretch after the fixture drives Size to its minimum, the
+engine is genuinely crossfading from the default 1.5 s IR toward the 0.05 s one.
+
+Probing `h` in that window measures a blend of two IRs — a kernel that describes no
+instant of the run — and every comparison downstream is then judged against it. This
+is not hypothetical: it is what happened, and the failure **frames the engine as
+broken when the fixture is what is wrong** (CPU vs oracle: relative RMS 3.4 — not a
+drift, a different signal).
+
+So the source begins with a **pre-roll of silence**: the graph is live and the plugin
+is draining its sliced rebuild while nothing is being measured. And because a
+pre-roll is still only an assumption that convergence fits inside it — one that rots
+the moment the slice budget or the IR length changes — the source **ends with a second
+unit impulse**, and its response must equal the first's. That turns the assumption
+into a checked claim: if the IR moved anywhere in the measured span, the two impulse
+responses disagree and Run C fails loudly, before `h` can poison anything. Measured
+drift on the recorded run: `0.00e+0` — bit-identical.
+
 **Reported, never gated:** adapter info, `queueSubmits`/`mapResolves` monotonicity,
 `queueSubmits >= produced`, and `gpuNsLast`. **`gpu_ns > 0` is never asserted** —
 Chrome quantizes timestamp-query: measured 0 ns for a 256-element dispatch and
@@ -248,17 +273,19 @@ headless Chrome on an Apple M-series GPU (`apple` / `metal-3`), against the real
 (emdawnwebgpu). Exit 0. Verbatim, from the run:
 
 ```
-ok  Run A — the GPU-only engine produced audio (not silence) — marker at 1536, peak 0.508
-ok  Run A — the GPU audio matches the float64 direct-convolution oracle — relative RMS error 1.68e-7 (tolerance 1e-5)
-..  HEADLINE — the GPU-produced share of a 3 s real-time run — 286/288 = 99.3% (2 blocks the CPU net would have covered, had it been alive)
-..  counters (diagnostic) — queueSubmits=286 mapResolves=286 expired=0 · queueSubmits >= produced: true
-..  block time (diagnostic) — avg 1994 µs of a 10667 µs budget (18.7% of real time)
+ok  Run C — the CPU engine's impulse response is TIME-INVARIANT across the capture — relative RMS drift 0.00e+0 (tolerance 1e-4); pre-roll 24000 samples
+ok  Run C — the CPU audio matches the float64 direct-convolution oracle — relative RMS error 2.04e-7 (tolerance 1e-5)
+ok  Run A — the GPU-only engine produced audio (not silence) — marker at 25408, peak 0.508
+ok  Run A — the GPU audio matches the float64 direct-convolution oracle — relative RMS error 1.71e-7 (tolerance 1e-5)
+..  HEADLINE — the GPU-produced share of a 3 s real-time run — 312/314 = 99.4% (2 blocks the CPU net would have covered, had it been alive)
+..  counters (diagnostic) — queueSubmits=313 mapResolves=312 expired=0 · queueSubmits >= produced: true
+..  block time (diagnostic) — avg 2212 µs of a 10667 µs budget (20.7% of real time)
 ok  Run B — the audio is Run A x 0.5, SAMPLE-WISE — max |b - 0.5a| = 0.00e+0 (floor 1.08e-4), rms ratio 0.5000
 ```
 
 **The GPU path holds real time on this machine**, with the CPU net switched off:
-286 of 288 blocks produced on the GPU over a 3-second real-time run, zero expiries,
-at ~19% of the per-block wall-clock budget. The 2 blocks it did not produce are the
+312 of 314 blocks produced on the GPU over a 3-second real-time run, zero expiries,
+at ~21% of the per-block wall-clock budget. The 2 blocks it did not produce are the
 L = 2 START-UP blocks, whose wet cannot exist because nothing was pushed 2 blocks
 before the stream began — they are misses by construction, not by failure (there is
 no silence priming; see "Every block carries its sequence number"). Run B is the one that
