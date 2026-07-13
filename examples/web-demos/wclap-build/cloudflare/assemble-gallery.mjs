@@ -473,7 +473,12 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
     customUi: (container, adapter) => {
       const canvas = document.createElement("canvas");
       canvas.id = "pulp-ui-canvas";
-      canvas.style.cssText = "width:100%;aspect-ratio:8/5;display:block";
+      // 8:3, not 8:5. The editor's content — title, one row of knobs, their labels
+      // and values — ends around 190px at a 590px width, so an 8:5 box (369px) left
+      // a third of the panel as dead space under the controls. This hugs the
+      // content with a little breathing room; the view tree is top-aligned, so the
+      // shorter box crops nothing.
+      canvas.style.cssText = "width:100%;aspect-ratio:8/3;display:block";
       container.appendChild(canvas);
       const pending = mountPulpUi(canvas, adapter, { moduleUrl: "./${UI_MODULE}.js" });
       // The shell handles the rejection (it restores the grid); this keeps the
@@ -490,6 +495,13 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>${esc(SC_TITLE)} — Pulp ${hostLabel} demo</title>
+  <style>
+    /* The height the shell reserves for the editor while its multi-MB wasm loads.
+       Keep it in step with the canvas's 8:3 box (see the customUi factory above):
+       reserve MORE and a gap opens under the placeholder, reserve LESS and the
+       panel still jumps when the editor arrives. */
+    :root{--pw-customui-h:230px}
+  </style>
   <meta name="description" content="${attr(SC_SUBTITLE)}">
   <meta name="pulp:source" content="${attr(SC_SRC)}">
   <meta property="og:type" content="website">
@@ -519,11 +531,13 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
     processorUrl: "${processorUrl}",
 ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).join("\n")}${uiProp}
     createAdapter: (ctx, urls) => ${adapterFn}(ctx, urls),
-    onReady: ({ adapter, ctx }) =>
-      mountIrLoader(document.getElementById("ir"), adapter, ctx, pluginState),
+    // slot is the shell's plugin-chrome slot — INSIDE the panel, directly under
+    // the controls. Loading an impulse response is part of the plugin, not page
+    // furniture; mounted after the panel it read as unrelated and was easy to miss.
+    onReady: ({ adapter, ctx, slot }) =>
+      mountIrLoader(slot, adapter, ctx, pluginState),
   });
 </script>
-<div id="ir" style="max-width:860px;margin:0 auto;padding:0 20px"></div>
 <p style="max-width:860px;margin:0 auto;padding:0 20px 40px;
           font:13px/1.6 system-ui;color:#8b96a3">
   This is the <b>${hostLabel}</b> build. The same plugin also runs as

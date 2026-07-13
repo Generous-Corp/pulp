@@ -1422,8 +1422,22 @@ function connectOutput(S) {
     // it on failure). This ADDS to the page and never gates the audio demo — a
     // throwing onReady is logged and the demo keeps running.
     try {
+      // Give plugin chrome a home INSIDE the panel, directly under the controls
+      // and above the scope — it belongs to the plugin, so it must look like it.
+      // A page that mounts its own <div> somewhere after the panel gets chrome
+      // that reads as unrelated page furniture and is easy to miss entirely
+      // (which is exactly what SuperConvolver's "load an impulse response" did).
+      // Passed as `slot`; `root` stays available for anything genuinely page-level.
+      let slot = root.querySelector("#plugin-chrome");
+      if (!slot) {
+        slot = document.createElement("div");
+        slot.id = "plugin-chrome";
+        const params_el = root.querySelector("#params");
+        if (params_el) params_el.after(slot);
+        else root.querySelector("#panel")?.appendChild(slot);
+      }
       S.onReady = opts.onReady?.({
-        adapter: S.wam, ctx: S.ctx, params, mode: S.mode, root,
+        adapter: S.wam, ctx: S.ctx, params, mode: S.mode, root, slot,
       }) || null;
     } catch (err) {
       console.warn("onReady failed:", err);

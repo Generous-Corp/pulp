@@ -21,11 +21,20 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
         throw new Error("mountPulpUi: the canvas element needs an id (the module binds by selector)");
     }
     const moduleUrl = opts.moduleUrl || DEFAULT_MODULE_URL;
+    // A breadcrumb trail. A mount that stalls leaves NO error and no console line —
+    // the page just says "Loading editor…" forever — so record where we got to.
+    const trace = (globalThis.__pulpUiTrace = globalThis.__pulpUiTrace || []);
+    const T = (m) => trace.push(`${Math.round(performance.now())}ms ${m}`);
+
+    T("import module JS");
     const createModule = (await import(moduleUrl)).default;
 
+    T("adapter.getParameterInfo()");
     const params = (await adapter.getParameterInfo()) || [];
 
+    T(`got ${params.length} params; createModule()`);
     const Module = await createModule({ canvas: canvasEl });
+    T("runtime initialized");
 
     const cstr = (s) => Module.stringToNewUTF8(s || "");
     const slotOf = new Map(); // adapter param id -> slot index
@@ -59,10 +68,42 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
         if (p && typeof adapter.endGesture === "function") adapter.endGesture(p.id);
     };
 
+    // SIZING — the one thing that must not be guessed.
+    //
+    // The canvas is styled `width:100%; aspect-ratio:8/5` and mounted in the same
+    // tick it is appended. Chrome resolves that box on the first
+    // getBoundingClientRect(); SAFARI DOES NOT — it hands back the element's
+    // INTRINSIC 300x150 default. Initialising the editor at 300px wide makes Yoga
+    // wrap the controls into a vertical column and the editor never reaches its
+    // real size: a Safari user sees the knobs stacked and the editor "stuck
+    // loading". Reported from a live page, 2026-07-12.
+    //
+    // So never trust the canvas's own box when it is still the untouched default.
+    // Measure the PARENT — a plain block, always laid out — and derive the height
+    // from the canvas's declared aspect-ratio (falling back to the 8:5 the page
+    // asks for). The ResizeObserver below corrects both once layout settles.
+    const CANVAS_DEFAULT_W = 300, CANVAS_DEFAULT_H = 150;   // the HTML intrinsic size
     const rect = canvasEl.getBoundingClientRect();
-    const width = Math.max(1, Math.round(rect.width || canvasEl.clientWidth || 640));
-    const height = Math.max(1, Math.round(rect.height || canvasEl.clientHeight || 360));
+    const parentRect = canvasEl.parentElement?.getBoundingClientRect();
+    const declaredRatio = (() => {
+        const ar = getComputedStyle(canvasEl).aspectRatio;               // e.g. "8 / 5"
+        const m = ar && ar.match(/^\s*([\d.]+)\s*\/\s*([\d.]+)\s*$/);
+        return m && +m[2] ? +m[1] / +m[2] : 8 / 5;
+    })();
+
+    let width = Math.round(rect.width);
+    if (!width || width === CANVAS_DEFAULT_W) {
+        width = Math.round(parentRect?.width || canvasEl.clientWidth || 640);
+    }
+    let height = Math.round(rect.height);
+    if (!height || height === CANVAS_DEFAULT_H) {
+        height = Math.round(width / declaredRatio);
+    }
+    width = Math.max(1, width);
+    height = Math.max(1, height);
+
     const selector = cstr("#" + canvasEl.id);
+    T(`_pulp_ui_init(${width}x${height})`);
     const ok = Module._pulp_ui_init(selector, width, height, window.devicePixelRatio || 1);
     Module._free(selector);
     if (!ok) throw new Error("mountPulpUi: _pulp_ui_init failed (no window host / no WebGL2 context)");
@@ -79,15 +120,27 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
         if (previousOnParamsChanged) previousOnParamsChanged(values, infos);
     };
 
+    // Observe the PARENT as well as the canvas: on a browser that has not resolved
+    // the canvas's percentage box yet (see the sizing note above), the canvas's own
+    // entry keeps reporting the intrinsic default and the editor would stay stuck at
+    // 300px forever. The parent is a plain block and always reports its real width,
+    // so the first parent callback is what rescues it.
+    const applySize = (w, h) => {
+        w = Math.max(1, Math.round(w));
+        h = Math.max(1, Math.round(h || w / declaredRatio));
+        if (w === CANVAS_DEFAULT_W && h === CANVAS_DEFAULT_H) return;   // the untouched default: not a real measurement
+        Module._pulp_ui_resize(w, h, window.devicePixelRatio || 1);
+    };
     const observer = new ResizeObserver((entries) => {
         for (const entry of entries) {
             const box = entry.contentRect;
-            const w = Math.max(1, Math.round(box.width));
-            const h = Math.max(1, Math.round(box.height));
-            Module._pulp_ui_resize(w, h, window.devicePixelRatio || 1);
+            if (entry.target === canvasEl) applySize(box.width, box.height);
+            else applySize(box.width, box.width / declaredRatio);        // the parent: derive the height
         }
     });
     observer.observe(canvasEl);
+    if (canvasEl.parentElement) observer.observe(canvasEl.parentElement);
+    T("MOUNTED");
 
     return {
         module: Module,
