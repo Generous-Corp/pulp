@@ -644,6 +644,318 @@ ${ogUrlAndImage(pageUrl, hasOgImage, "")}
 `;
 }
 
+// ── SuperConvolver GPU: a SEPARATE page, deliberately. ─────────────────────
+// /super-convolver/{wam,wclap}/ are the shipped demo and stay byte-identical —
+// the GPU engine ships at /super-convolver-gpu/ (WebCLAP only; a WAM module has
+// no worker seam to reach WebGPU through) so a browser that cannot run WebGPU
+// compute can never regress the demo that works everywhere.
+//
+// The page runs the capability handshake BEFORE it creates the adapter, and
+// loads the GPU-capable module only when the handshake says ok. When it fails
+// the page loads the ORDINARY CPU module, names the reason, and does not render
+// an Engine toggle at all: an inert toggle is exactly the "inert and
+// misleading" control the PULP_WASM compile-out already removed once.
+const GPU_SRC = resolve(REPO, "examples/web-demos/gpu-audio/js");
+// The browser seam (examples/web-demos/gpu-audio/js): gpu-bridge.mjs runs on the
+// page (probe + bring-up + stats), gpu-worker.mjs is the DedicatedWorker that
+// owns the WebGPU device — an AudioWorkletGlobalScope can neither touch
+// navigator.gpu nor spawn a Worker, so the worker is not optional — and
+// gpu-ring.mjs is the SharedArrayBuffer both of them (and the worklet) map. All
+// three must be same-origin, hence the copy into the page dir.
+const GPU_BRIDGE_FILES = ["gpu-bridge.mjs", "gpu-worker.mjs", "gpu-ring.mjs"];
+// The Skia-free WebGPU DSP module the worker instantiates (examples/web-demos/
+// gpu-audio, target pulp-gpu-dsp). Built with emcmake into its own tree.
+const GPU_DSP_BUILD = resolve(HERE, arg("--gpu-build", "../../gpu-audio/build-gpu-dsp"));
+const GPU_DSP_FILES = ["pulp-gpu-dsp.js", "pulp-gpu-dsp.wasm"];
+const GPU_TARGET = "SuperConvolverGpu";       // super_convolver_gpu_wclap
+
+// *** THE PAGE IS NOT EMITTED WHILE THIS IS FALSE. ***
+//
+// The GPU worker convolves with the IR the PAGE hands it (startGpuLane({ ir })),
+// and the plugin's IR is built in C++ (build_base_ir, keyed off Size, then
+// normalized and windowed). Nothing carries those samples from the plugin to the
+// page — the page reads `window.__scGpuIr`, and nothing in this repo sets it. So
+// the handshake below can only ever fail, the page can only ever load the CPU
+// module, and the Engine toggle can only ever be hidden.
+//
+// A page TITLED "GPU engine", whose <meta description> and OG card say the
+// convolution "is running as a WebGPU compute shader in your browser tab", that
+// runs 100 % CPU for every visitor, is a capability lie — displaced from the toggle
+// (which correctly refuses to render) onto the chrome and the shareable link. An
+// inline "GPU engine unavailable" note does not qualify a browser tab title, a
+// gallery listing, or a link someone pastes into Slack.
+//
+// The GPU engine itself is real and is PROVEN — in real Chrome, on a real WebGPU
+// device, against the real modules — by
+// examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs, which sidesteps the
+// handoff by measuring the impulse response on the CPU engine and handing THAT to
+// the worker. A demo page cannot do that. Flip this to true in the same change that
+// makes the plugin publish its live base IR to the page (see
+// examples/web-demos/gpu-audio/README.md, "Open cross-workstream contract"), and
+// the page below — copy, toggle, stats and all — ships as written.
+const GPU_IR_HANDOFF_WIRED = false;
+
+const GPU_TITLE = "SuperConvolver — GPU engine";
+const GPU_SUBTITLE =
+  "The same convolution reverb, with its FFT convolution running as a WebGPU compute " +
+  "shader in your browser tab. It is not faster than the CPU path — a competent real-FFT " +
+  "CPU convolver matches or beats it. CPU is the default and always the fallback.";
+
+function superConvolverGpuPage(pageUrl, hasOgImage, v) {
+  return `<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>${esc(GPU_TITLE)} — Pulp WebCLAP demo</title>
+  <meta name="description" content="${attr(GPU_SUBTITLE)}">
+  <meta name="pulp:source" content="${attr(SC_SRC)}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Pulp">
+  <meta property="og:title" content="${attr(GPU_TITLE + " — Pulp WebCLAP demo")}">
+  <meta property="og:description" content="${attr(GPU_SUBTITLE)}">
+${ogUrlAndImage(pageUrl, hasOgImage)}
+  <link rel="icon" href="data:,">
+  <style>
+    .engine-row{max-width:860px;margin:0 auto 10px;display:flex;align-items:center;gap:10px;
+                font:13px/1.5 system-ui;color:#cdd6e3}
+    .engine-row select{background:#0c1116;color:#cdd6e3;border:1px solid #2a3340;border-radius:6px;
+                       padding:4px 8px;font:13px system-ui}
+    .engine-note{max-width:860px;margin:0 auto 14px;font:12.5px/1.6 system-ui;color:#8b96a3}
+    .engine-off{max-width:860px;margin:0 auto 14px;font:13px/1.6 system-ui;color:#e0b070}
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+  import { mountDemo } from "../vendor-player/shell.js?v=${v}";
+  import { createWclapAdapter } from "../vendor-player/adapters/wclap.js?v=${v}";
+  import { mountPulpUi } from "./pulp-ui.js?v=${v}";
+  import { probe, startGpuLane } from "./gpu-bridge.mjs";
+
+  // Both constants are the plugin's, restated here because the ring is allocated
+  // on this side: kInternalBlock and kWebGpuLatencyBlocks in
+  // examples/super-convolver/super_convolver.hpp. One contract, two languages —
+  // a mismatch is a latency bug, not a rounding error.
+  const INTERNAL_BLOCK = 512;
+  const GPU_LATENCY_BLOCKS = 2;
+
+  // ── The handshake, BEFORE the adapter is created. ───────────────────────
+  // Cheap main-thread preconditions first (SAB + cross-origin isolation), then
+  // the REAL bring-up in the worker: adapter -> device -> shaders -> pipelines ->
+  // a unit-impulse self-test. Only an "ok" from all of that loads the GPU-capable
+  // module. A page that loaded it and then missed every block would just be a
+  // worse CPU demo with a lying toggle on top.
+  let lane = null;
+  let handshake = probe();
+
+  // The IR is the PLUGIN's, and the worker is what convolves with it. Without a
+  // handoff the GPU lane would convolve with the unit impulse it was self-tested
+  // with and quietly pass the dry signal through — a GPU engine that appears to
+  // work and does nothing. So: no IR, no GPU engine. This is a real open contract,
+  // not a defensive branch (examples/web-demos/gpu-audio/README.md, "Open
+  // cross-workstream contract").
+  const gpuIr = (window.__scGpuIr instanceof Float32Array && window.__scGpuIr.length)
+    ? window.__scGpuIr : null;
+  if (handshake.ok && !gpuIr) handshake = { ok: false, reason: "no-ir-handoff" };
+
+  if (handshake.ok) {
+    lane = await startGpuLane({
+      workerUrl: "./gpu-worker.mjs",
+      moduleUrl: "./pulp-gpu-dsp.js",
+      ir: gpuIr,
+      sampleRate: 48000,
+      blockSize: INTERNAL_BLOCK,
+      latencyBlocks: GPU_LATENCY_BLOCKS,
+      onDeviceLost: (info) => {
+        // Normal behaviour, not a fatal error: the worklet misses from here on
+        // and the plugin's CPU convolver covers every block.
+        console.warn("WebGPU device lost:", info && info.reason);
+      },
+    });
+    handshake = lane.ok ? lane : { ok: false, reason: lane.reason };
+  }
+  const gpuOk = !!(handshake && handshake.ok);
+  window.__gpuProbe = gpuOk
+    ? { ok: true, adapterInfo: lane.adapterInfo, features: lane.features,
+        limits: lane.limits, timestampQuery: lane.timestampQuery }
+    : { ok: false, reason: handshake.reason };
+
+  const info = gpuOk ? (lane.adapterInfo || {}) : {};
+  const backend = [info.vendor, info.architecture].filter(Boolean).join(" / ");
+
+  let audioContext = null;
+
+  mountDemo({
+    root: document.getElementById("app"),
+    title: "${esc(GPU_TITLE)}",
+    subtitle: "${attr(GPU_SUBTITLE)}",
+    hostLabel: "WebCLAP",
+    hostDocsHref: "https://github.com/free-audio/clap",
+    galleryHref: "../super-convolver/index.html",
+    sourceHref: "${attr(SC_SRC)}",
+    dspUrl: gpuOk ? "./${GPU_TARGET}.wasm" : "./SuperConvolver.wasm",
+    processorUrl: "${WORKLET}",
+${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).join("\n")}
+    customUi: (container, adapter) => {
+      // The Engine control is DOM, not a knob: it is a page-level engine switch.
+      // Where the handshake failed it is NOT RENDERED AT ALL — an inert control
+      // is exactly the "inert and misleading" failure the PULP_WASM compile-out
+      // already fixed once. It is also gated on descriptor.gpuLane, which is true
+      // only when the worklet really attached the ring.
+      const laneAttached = gpuOk && !!(adapter.descriptor && adapter.descriptor.gpuLane);
+      if (laneAttached) {
+        const row = document.createElement("div");
+        row.className = "engine-row";
+        row.innerHTML =
+          '<label for="engine">Engine</label>' +
+          '<select id="engine"><option value="0">CPU</option>' +
+          '<option value="1">GPU (WebGPU compute)</option></select>';
+        const note = document.createElement("p");
+        note.className = "engine-note";
+        note.textContent =
+          "On GPU, this convolution is running as a WebGPU compute shader in your browser " +
+          "tab. It is not faster than the CPU path — a competent real-FFT CPU convolver " +
+          "matches or beats it. CPU is the default and always the fallback: a GPU block " +
+          "that misses its deadline is covered by the CPU convolver, which runs primed the " +
+          "whole time.";
+        container.appendChild(row);
+        container.appendChild(note);
+        const select = row.querySelector("select");
+        select.addEventListener("change", async () => {
+          const params = (await adapter.getParameterInfo()) || [];
+          const engine = params.find((p) => /^engine$/i.test(p.label || ""));
+          if (engine) adapter.setParameterValue(engine.id, Number(select.value));
+        });
+        window.__engineSelect = select;
+      } else {
+        const off = document.createElement("p");
+        off.className = "engine-off";
+        off.textContent = gpuOk
+          ? "GPU engine unavailable (no-gpu-lane-in-worklet) — running the CPU convolver."
+          : "GPU engine unavailable (" + handshake.reason + ") — running the CPU convolver.";
+        container.appendChild(off);
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.id = "pulp-ui-canvas";
+      canvas.style.cssText = "width:100%;aspect-ratio:8/5;display:block";
+      container.appendChild(canvas);
+
+      const pending = mountPulpUi(canvas, adapter, { moduleUrl: "./${UI_MODULE}.js" });
+      pending.catch((err) => { console.warn("Pulp UI failed to mount:", err); });
+
+      // 10 Hz, on a setInterval and NOT requestAnimationFrame: a backgrounded tab
+      // throttles rAF, and that is exactly when GPU deadlines are missed — the
+      // readout must not freeze at the moment it gets interesting.
+      let timer = 0;
+      let lastProduced = 0;
+      pending.then((ui) => {
+        if (!ui) return;
+        timer = setInterval(() => {
+          const stats = laneAttached && lane ? lane.pollStats() : null;
+          if (!stats) { ui.setGpuStatus({ engine: "cpu" }); return; }
+          // "Is the GPU carrying the audio RIGHT NOW" — a RECENT-WINDOW test, not a
+          // cumulative one. A "produced > 0" test would latch on the first block made
+          // and then read "Engine: GPU" forever, including while a backgrounded tab
+          // or a lost device is missing every deadline and the CPU net is producing
+          // 100 % of what you hear.
+          const producedNow = (stats.produced || 0) > lastProduced;
+          lastProduced = stats.produced || 0;
+          // budget_us and rt_percent are derived HERE, by the same arithmetic
+          // native gpu_status() uses (super_convolver.hpp), so the browser and
+          // the native build print the same numbers computed the same way.
+          const sampleRate = (audioContext && audioContext.sampleRate) || 48000;
+          const budget_us = (INTERNAL_BLOCK / sampleRate) * 1e6;
+          const avg_us = stats.avgBlockUs || 0;
+          ui.setGpuStatus({
+            engine: producedNow ? "gpu" : "cpu",
+            backend,
+            produced: stats.produced || 0,
+            covered: stats.miss || 0,   // covered by the CPU net — never "produced"
+            avg_us,
+            budget_us,
+            rt_percent: budget_us > 0 ? (avg_us / budget_us) * 100 : 0,
+            note: stats.deviceLost ? "device lost — the CPU convolver is covering every block" : "",
+          });
+          window.__gpuStats = stats;
+        }, 100);
+      }, () => {});
+
+      return {
+        ready: pending,
+        destroy: () => {
+          if (timer) clearInterval(timer);
+          if (lane && lane.ok) lane.shutdown();
+          pending.then((ui) => ui && ui.destroy(), () => {});
+        },
+      };
+    },
+    createAdapter: async (ctx, urls) => {
+      audioContext = ctx;
+      // The SAB is handed to the worklet at construction; it is the only way the
+      // audio thread can reach the worker that owns the WebGPU device.
+      return createWclapAdapter(ctx, urls, gpuOk
+        ? { gpuSab: lane.sab, gpuLatencyBlocks: lane.latencyBlocks }
+        : {});
+    },
+  });
+</script>
+<p style="max-width:860px;margin:0 auto;padding:0 20px 40px;
+          font:13px/1.6 system-ui;color:#8b96a3">
+  The CPU-only builds of the same plugin are at
+  <a href="../super-convolver/" style="color:#2bd4be">SuperConvolver (WAM &amp; WebCLAP) &rarr;</a>.
+</p>
+</body>
+</html>
+`;
+}
+
+// The Pulp UI module trio (.js/.wasm/.data — the .data carries icudtl.dat, which
+// SkUnicode needs or every Label shapes to zero width).
+const UI_FILES = [`${UI_MODULE}.js`, `${UI_MODULE}.wasm`, `${UI_MODULE}.data`];
+
+async function emitSuperConvolverGpu() {
+  if (!GPU_IR_HANDOFF_WIRED) {
+    console.warn("assemble-gallery: NOT emitting super-convolver-gpu — the IR handoff " +
+                 "is unwired (nothing sets window.__scGpuIr), so the page's GPU engine " +
+                 "could never run and its title/description/OG would claim a WebGPU " +
+                 "shader that never dispatches. See GPU_IR_HANDOFF_WIRED.");
+    return 0;
+  }
+  const gpuWasm = [join(BUILD, `${GPU_TARGET}.wclap`, "module.wasm"), join(BUILD, `${GPU_TARGET}.wasm`)]
+    .find((p) => existsSync(p));
+  const cpuWasm = [join(BUILD, "SuperConvolver.wclap", "module.wasm"), join(BUILD, "SuperConvolver.wasm")]
+    .find((p) => existsSync(p));
+  const bridgeOk = GPU_BRIDGE_FILES.every((f) => existsSync(join(GPU_SRC, f)));
+  const dspOk = GPU_DSP_FILES.every((f) => existsSync(join(GPU_DSP_BUILD, f)));
+  // The GPU page has NO generated-grid fallback: its status line IS a Pulp UI
+  // Label, so without the UI module there is nothing to report into.
+  const withUi = UI_FILES.every((f) => existsSync(join(UI_BUILD, f)));
+  if (!gpuWasm || !cpuWasm || !withUi || !bridgeOk || !dspOk) {
+    console.warn("assemble-gallery: skipping super-convolver-gpu — needs " +
+                 `${GPU_TARGET} + SuperConvolver in ${BUILD}, the Pulp UI module ` +
+                 `(--ui-build), ${GPU_BRIDGE_FILES.join(" + ")} in ${GPU_SRC}, and ` +
+                 `${GPU_DSP_FILES.join(" + ")} in ${GPU_DSP_BUILD} (--gpu-build).`);
+    return 0;
+  }
+  const v = await playerVersion();
+  const dir = join(OUT, "super-convolver-gpu");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "index.html"),
+                  superConvolverGpuPage(`${SITE_BASE}/super-convolver-gpu/`,
+                                        existsSync(join(dir, "og.png")), v));
+  await copyFile(gpuWasm, join(dir, `${GPU_TARGET}.wasm`));
+  await copyFile(cpuWasm, join(dir, "SuperConvolver.wasm"));
+  for (const f of UI_FILES) await copyFile(join(UI_BUILD, f), join(dir, f));
+  await copyFile(join(UI_SRC, "pulp-ui.js"), join(dir, "pulp-ui.js"));
+  for (const f of GPU_BRIDGE_FILES) await copyFile(join(GPU_SRC, f), join(dir, f));
+  for (const f of GPU_DSP_FILES) await copyFile(join(GPU_DSP_BUILD, f), join(dir, f));
+  console.log("  super-convolver-gpu/**     (WebGPU compute engine offered; CPU is the default " +
+              "engine and the always-live fallback)");
+  return 1;
+}
+
 async function emitSuperConvolver() {
   const wclapWasm = [join(BUILD, "SuperConvolver.wclap", "module.wasm"), join(BUILD, "SuperConvolver.wasm")]
     .find((p) => existsSync(p));
@@ -656,7 +968,7 @@ async function emitSuperConvolver() {
   // The Pulp UI module: <module>.js + .wasm + the .data MEMFS image (it carries
   // icudtl.dat, which SkUnicode needs for text shaping — a page without it draws
   // no text). All three, or the pages fall back to the generated grid.
-  const uiFiles = [`${UI_MODULE}.js`, `${UI_MODULE}.wasm`, `${UI_MODULE}.data`];
+  const uiFiles = UI_FILES;
   const withUi = uiFiles.every((f) => existsSync(join(UI_BUILD, f)));
   if (!withUi)
     console.warn(`assemble-gallery: super-convolver — no Pulp UI module in ${UI_BUILD} ` +
@@ -754,6 +1066,12 @@ for (const section of SECTIONS) {
 }
 
 wrote += await emitSuperConvolver();
+// Independent of the pair above: /super-convolver-gpu/ is WebCLAP-only, so it
+// does not need the WAM build tree, and the two shipped pages do not need it.
+// It is also the one page that can be SKIPPED on honesty grounds — see
+// GPU_IR_HANDOFF_WIRED — so the root banner links it only when it was written.
+const gpuPages = await emitSuperConvolverGpu();
+wrote += gpuPages;
 
 // ── 3. surface both galleries from the generated root isolation-proof page. ──
 const rootIndex = join(OUT, "index.html");
@@ -765,8 +1083,11 @@ if (existsSync(rootIndex)) {
       `<strong>WebCLAP demo gallery →</strong> ` +
       `<a href="./example-plugins/" style="color:#2bd4be">Example Plugins (8)</a> &middot; ` +
       `<a href="./classic-effects/" style="color:#2bd4be">Classic Effects (15)</a> &middot; ` +
-      `<a href="./super-convolver/" style="color:#2bd4be">SuperConvolver (WAM &amp; WebCLAP)</a> ` +
-      `— every WAM demo, rebuilt as a threaded WebCLAP module behind the same player.</div>`;
+      `<a href="./super-convolver/" style="color:#2bd4be">SuperConvolver (WAM &amp; WebCLAP)</a>` +
+      (gpuPages > 0
+        ? ` &middot; <a href="./super-convolver-gpu/" style="color:#2bd4be">SuperConvolver (WebGPU compute engine)</a>`
+        : ``) +
+      ` — every WAM demo, rebuilt as a threaded WebCLAP module behind the same player.</div>`;
     html = html.replace("<body>", banner);
     await writeFile(rootIndex, html);
     console.log("  index.html                 (+ gallery banner → example-plugins / classic-effects)");

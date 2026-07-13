@@ -39,10 +39,16 @@ target_link_libraries(pulp-gpu-audio
 # fallback). Without pulp::render, compile no-render definitions that satisfy the
 # public API and let callers fall back cleanly at runtime.
 if(TARGET pulp::render)
+    # src/web/web_gpu_convolver.cpp is the submit/collect (never-blocking)
+    # counterpart of the GpuConvolver node, written for a single-threaded event
+    # loop. It is plain C++ over the GpuCompute interface, so it builds and is
+    # unit-tested natively here even though its reason to exist is the browser
+    # worker (which compiles the same TU through tools/cmake/PulpGpuWasm.cmake,
+    # not through this target).
     target_sources(pulp-gpu-audio PRIVATE
         src/gpu_convolver.cpp src/gpu_multi_convolver.cpp src/gpu_stft.cpp
         src/gpu_spectral_freeze.cpp src/gpu_spectral_morph.cpp
-        src/spectral_stack.cpp)
+        src/spectral_stack.cpp src/web/web_gpu_convolver.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::render pulp::signal)
 else()
     target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp)

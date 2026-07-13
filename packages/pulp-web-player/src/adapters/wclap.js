@@ -13,7 +13,8 @@
 //   urls  — the shell's { dsp, processor } seam is honoured: `dsp` is the
 //           WebCLAP .wasm URL, `processor` is the wclap-processor.js worklet URL.
 //           (Aliases { wasmUrl, workletUrl } are also accepted.)
-//   opts  — { pluginIndex, channelCount, diag, onDiag } (all optional).
+//   opts  — { pluginIndex, channelCount, diag, onDiag, gpuSab, gpuLatencyBlocks }
+//           (all optional; the last two opt this instance into the GPU lane).
 //
 // This adapter implements the FULL contract on real CLAP machinery:
 //   • audioNode / params / set/get              — real (worklet-resident host).
@@ -75,7 +76,16 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
 
   const node = new AudioWorkletNode(ctx, WORKLET_NAME, {
     numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [channelCount],
-    processorOptions: { useInternalTone: false, diag: !!opts.diag, pluginIndex },
+    processorOptions: {
+      useInternalTone: false, diag: !!opts.diag, pluginIndex,
+      // Optional GPU lane. The PAGE owns the SharedArrayBuffer (it also hands the
+      // same one to the WebGPU DedicatedWorker — see
+      // examples/web-demos/gpu-audio/js/gpu-bridge.mjs) because an
+      // AudioWorkletProcessor can neither touch navigator.gpu nor spawn a Worker.
+      // Omit it and the worklet's GPU path is wholly inert.
+      gpuSab: opts.gpuSab || null,
+      gpuLatencyBlocks: opts.gpuLatencyBlocks || 0,
+    },
   });
 
   let descriptor = null;
@@ -107,6 +117,11 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
             // clap.latency plugin extension). Mirrors WAM's descriptor.latencySamples
             // so the shell can compensate PDC identically across both backends.
             latencySamples: m.descriptor.latencySamples || 0,
+            // True only when a GPU ring was actually attached in the worklet. The
+            // page must gate its Engine=CPU/GPU toggle on this — never offer a
+            // toggle that silently does nothing.
+            gpuLane: !!m.descriptor.gpuLane,
+            gpuLatencyBlocks: m.descriptor.gpuLatencyBlocks || 0,
             id: m.descriptor.id,
           };
           paramInfo = m.params.map((p) => ({
@@ -227,6 +242,8 @@ export async function createWclapAdapter(ctx, urls = {}, opts = {}) {
     set onStateDirty(fn) { onStateDirtyCb = fn; },
 
     // Another worklet-resident instance on the SAME AudioContext (voice pool).
+    // Deliberately NOT given the GPU ring: one ring has exactly one producer and
+    // one consumer, so a second instance would corrupt the cursors.
     createSecondary(secondaryUrls) {
       return createWclapAdapter(ctx, {
         dsp: (secondaryUrls && (secondaryUrls.wasmUrl || secondaryUrls.dsp)) || wasmUrl,

@@ -55,6 +55,22 @@ pulp_add_wclap(SuperConvolver
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/super_convolver_wclap.cpp
     INCLUDES ${PULP_ROOT}/examples/super-convolver)
 
+# SuperConvolver GPU — the SAME processor source with PULP_WEB_GPU_AUDIO, which
+# compiles in the browser GPU engine: the convolution FFT runs as WebGPU compute
+# shaders in a DedicatedWorker, reached from the audio thread over a single
+# `pulp_gpu_xfer` wasm import (env.pulp_gpu_xfer). CPU stays the default engine
+# and the fallback; the GPU is a capability demonstration, not a speed claim.
+#
+# It is a SECOND artifact on purpose. The module above must stay byte-identical —
+# a WAM/CLAP host reads the parameter list once at mount, so the Engine and
+# "GPU only" controls cannot appear conditionally inside one module — and only
+# THIS module carries the pulp_gpu_xfer import, which a host without
+# cross-origin isolation (no SharedArrayBuffer → no GPU worker) cannot satisfy.
+pulp_add_wclap(SuperConvolverGpu
+    ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/super_convolver_gpu_wclap.cpp
+    INCLUDES ${PULP_ROOT}/examples/super-convolver)
+target_compile_definitions(SuperConvolverGpu-wclap PRIVATE PULP_WEB_GPU_AUDIO=1)
+
 # ── WebCLAP 1:1 demo gallery ────────────────────────────────────────────────
 # A WebCLAP module for EVERY plugin that already has a WAM demo, so the WebCLAP
 # site mirrors both existing WAM galleries one-for-one. INCLUDES point at the

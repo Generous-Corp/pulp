@@ -129,6 +129,12 @@ if(PULP_HAS_SKIA)
         target_link_libraries(pulp-render PUBLIC skia::dawn)
     endif()
     target_compile_definitions(pulp-render PUBLIC PULP_HAS_SKIA=1)
+    # The GPU-compute layer (gpu_compute.cpp / gpu_compute_pool.hpp) contains no
+    # Skia — it needs Dawn. On native, Dawn arrives inside the Skia prebuilt
+    # slice (skia::dawn + ${SKIA_INCLUDE_DIRS}/dawn below), so the two travel
+    # together here; a browser build gets Dawn from Emscripten's emdawnwebgpu
+    # port with no Skia at all and defines PULP_HAS_DAWN on its own.
+    target_compile_definitions(pulp-render PUBLIC PULP_HAS_DAWN=1)
     target_include_directories(pulp-render PRIVATE ${SKIA_INCLUDE_DIRS})
 
     # Dawn headers from Skia's bundled Dawn

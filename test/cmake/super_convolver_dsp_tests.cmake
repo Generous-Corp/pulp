@@ -29,6 +29,33 @@ if(PULP_BUILD_TESTS AND PULP_HAS_CLAP AND TARGET pulp::gpu-audio AND TARGET pulp
         INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/super-convolver)
 endif()
 
+# The BROWSER GPU engine, tested natively. The engine's only route to a GPU is the
+# `pulp_gpu_xfer` wasm import, so compiling the processor with PULP_WASM +
+# PULP_WEB_GPU_AUDIO and linking a stub import in the test IS the browser, minus
+# the nondeterminism — the whole engine (latency, safety-net alignment, miss and
+# hit paths) is decided on this side of that seam and needs no browser and no GPU.
+# Only pulp::format + pulp::signal are linked (as in the web lanes' own link line):
+# if the GPU/render stack ever leaked back into the web gating, this fails to
+# build. PULP_HEADLESS drops create_view(), so no view TU is needed.
+#
+# The same source is built a SECOND time WITHOUT PULP_WEB_GPU_AUDIO to pin the
+# other half of the contract — the shipped CPU-only web module still declares
+# exactly four parameters. It is a separate binary because one binary cannot hold
+# both configurations of the class (different layouts → ODR).
+if(PULP_BUILD_TESTS)
+    pulp_add_test_suite(pulp-test-super-convolver-web-gpu
+        SOURCES test_super_convolver_web_gpu.cpp
+        LIBRARIES pulp::format pulp::signal
+        COMPILE_DEFINITIONS PULP_WASM=1 PULP_HEADLESS=1 PULP_WEB_GPU_AUDIO=1
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/super-convolver)
+
+    pulp_add_test_suite(pulp-test-super-convolver-web-cpu
+        SOURCES test_super_convolver_web_gpu.cpp
+        LIBRARIES pulp::format pulp::signal
+        COMPILE_DEFINITIONS PULP_WASM=1 PULP_HEADLESS=1
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/super-convolver)
+endif()
+
 # Web-lane compile guard. The processor must still compile with PULP_WASM +
 # PULP_HEADLESS — the two web plugin lanes (WAM, WCLAP), where there is no GPU
 # runtime, no file dialog, no FormatRegistry, no editor, and no thread to run a
