@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06630"></a>
+## [0.663.0] - 2026-07-13
+
+- fix(view): give widgets accessibility roles that are actually true ([#6073](https://github.com/danielraffel/pulp/pull/6073))
+- ci(release): don't rebuild a stuck tag while a NEWER tag is still building ([#6075](https://github.com/danielraffel/pulp/pull/6075))
+- ci(release): make publication single-owner so slow releases still ship ([#6053](https://github.com/danielraffel/pulp/pull/6053))
+
 <a id="v06620"></a>
 ## [0.662.0] - 2026-07-12
 
@@ -6329,6 +6336,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.663.0]: https://github.com/danielraffel/pulp/releases/tag/v0.663.0
 [0.662.0]: https://github.com/danielraffel/pulp/releases/tag/v0.662.0
 [0.661.0]: https://github.com/danielraffel/pulp/releases/tag/v0.661.0
 [0.660.0]: https://github.com/danielraffel/pulp/releases/tag/v0.660.0
