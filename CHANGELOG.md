@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06680"></a>
+## [0.668.0] - 2026-07-13
+
+- feat(gpu-audio): run SuperConvolver's convolution as a WGSL compute shader in the browser ([#6094](https://github.com/danielraffel/pulp/pull/6094))
+- fix(super-convolver-ui): tell the truth about a loaded IR, and make the drop zone safe ([#6093](https://github.com/danielraffel/pulp/pull/6093))
+- fix(web-player): publish.sh cried wolf on a successful publish ([#6110](https://github.com/danielraffel/pulp/pull/6110))
+- chore(web-player): 0.2.1 — publish the corrected README ([#6109](https://github.com/danielraffel/pulp/pull/6109))
+- docs(web-player): make the README true ([#6108](https://github.com/danielraffel/pulp/pull/6108))
+- chore(web-player): unattended publish — file-backed token, 1Password is backup only ([#6107](https://github.com/danielraffel/pulp/pull/6107))
+- chore(web-player): a publish script that cannot ship stale source ([#6106](https://github.com/danielraffel/pulp/pull/6106))
+- chore(web-player): 0.2.0 — file upload (dialog + drag-and-drop) ([#6105](https://github.com/danielraffel/pulp/pull/6105))
+
 <a id="v06650"></a>
 ## [0.665.0] - 2026-07-13
 
@@ -6362,6 +6374,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.668.0]: https://github.com/danielraffel/pulp/releases/tag/v0.668.0
 [0.665.0]: https://github.com/danielraffel/pulp/releases/tag/v0.665.0
 [0.664.0]: https://github.com/danielraffel/pulp/releases/tag/v0.664.0
 [0.663.1]: https://github.com/danielraffel/pulp/releases/tag/v0.663.1
