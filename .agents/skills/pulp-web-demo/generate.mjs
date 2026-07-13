@@ -42,14 +42,9 @@ console.error(`pulp-web-demo: config OK → ${configPath}`);
 // ---- derived, deterministic ----
 const player = cfg.player;
 const playerHash = sha8(`${player.package}@${player.version}`);            // cache-bust, deterministic
-// Query-free base — used to build asset paths under the player (e.g. the WCLAP processor).
-const playerBaseUrl = player.importBase || `https://esm.sh/${player.package}@${player.version}`;
-// The URL the import map points at. A versioned CDN pin IS its own cache key; a self-hosted
-// importBase may be unversioned, so carry the deterministic hash there. The cache-bust must
-// live on the mapped URL — a bare specifier with a ?query never matches the import-map key.
 const playerUrl = player.importBase
-  ? `${playerBaseUrl}${playerBaseUrl.includes("?") ? "&" : "?"}v=${playerHash}`
-  : playerBaseUrl;
+  ? player.importBase
+  : `https://esm.sh/${player.package}@${player.version}`;                  // COEP-friendly CDN, pinned
 const theme = cfg.theme || {};
 const tokensHref = theme.tokensHref || "./theme/tokens.css";
 const fontsHref = theme.fontHref || "./theme/fonts.css";
@@ -80,7 +75,7 @@ function artifactsFor(plugin, abi) {
   if (explicit?.dspUrl && explicit?.processorUrl) return explicit;
   if (abi === "wam") return { dspUrl: "./wam-dsp.js", processorUrl: "./wam-processor.js" };
   // wclap: the plugin's threaded .wasm + the player-provided worklet CLAP host
-  return { dspUrl: `./${plugin.id}.wasm`, processorUrl: `${playerBaseUrl.replace(/\/$/, "")}/vendor/pulp-wasm/wclap-processor.js` };
+  return { dspUrl: `./${plugin.id}.wasm`, processorUrl: `${playerUrl.replace(/\/$/, "")}/vendor/pulp-wasm/wclap-processor.js` };
 }
 
 const ogTag = (url) => meta.ogImageStrategy === "text" ? "" : `<meta property="og:image" content="${url}og.png" />`;
@@ -94,20 +89,8 @@ const cards = [];
 for (const p of cfg.plugins) {
   const abis = p.abis || ["wam", "wclap"];
   const modeLine = p.mode ? `mode: ${JSON.stringify(p.mode)},` : "";
-  // Optional mountDemo passthroughs, emitted only when present. `synthUrls` is what makes a
-  // midi-effect demo audible (it chains into a synth voice pool) — omitting it yields silence.
-  const extras = [
-    ["initialParams", p.paramOverrides],
-    ["midiViz", p.midiViz],
-    ["paramRows", p.paramRows],
-    ["synthUrls", p.synthUrls],
-    ["widgets", p.widgets],
-    ["choices", p.choices],
-    ["inputGain", p.inputGain],
-    ["controllers", p.controllers],
-    ["stateMemo", p.stateMemo],
-  ].filter(([, v]) => v !== undefined && v !== null);
-  const extrasBlock = extras.map(([k, v]) => `,\n    ${k}: ${JSON.stringify(v)}`).join("");
+  const paramBlock = p.paramOverrides ? `,\n    initialParams: ${JSON.stringify(p.paramOverrides)}` : "";
+  const midiBlock = p.midiViz ? `,\n    midiViz: ${JSON.stringify(p.midiViz)}` : "";
   const cardAbis = [];
 
   for (const abi of abis) {
@@ -131,7 +114,7 @@ for (const p of cfg.plugins) {
       THEME_MODE_JSON: JSON.stringify(themeMode),
       PLAYER_PACKAGE: player.package, PLAYER_URL: playerUrl, PLAYER_HASH: playerHash,
       BASE_PATH: basePath,
-      EXTRA_OPTS_BLOCK: extrasBlock,
+      PARAM_OVERRIDES_BLOCK: paramBlock, MIDI_VIZ_BLOCK: midiBlock,
     };
 
     if (abi === "wam") {
