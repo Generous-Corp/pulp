@@ -47,6 +47,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The gallery's 23 plugins do NOT live in pulp — they live in two separate
+      # public repos (the examples-out-of-core split), and wclap-build/CMakeLists.txt
+      # declares each gallery target ONLY IF its plugin header is present. A job that
+      # checks out pulp alone therefore builds exactly PulpGain, skips all 23 SILENTLY
+      # (by design, so the in-repo build stays green without them) — and then dies in
+      # assemble-gallery.mjs with "missing wasm for example-plugins/mono-synth". The
+      # skip is quiet; the assemble is not. Without these two checkouts this workflow
+      # cannot deploy the gallery at all, which is exactly how it broke.
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-example-plugins
+          path: _ext/pulp-example-plugins
+      - uses: actions/checkout@v4
+        with:
+          repository: danielraffel/pulp-classic-effects
+          path: _ext/pulp-classic-effects
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -74,10 +91,29 @@ jobs:
         working-directory: examples/web-demos/wclap-build
         run: |
           set -euo pipefail
+          # The two plugin roots default to SIBLINGS of the pulp checkout, which is not
+          # where actions/checkout can put them (a `path:` cannot escape the workspace),
+          # so point the cache vars at the _ext checkouts above.
           cmake -S . -B build \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DPULP_EXAMPLE_PLUGINS_DIR="$GITHUB_WORKSPACE/_ext/pulp-example-plugins" \
+            -DPULP_CLASSIC_EFFECTS_DIR="$GITHUB_WORKSPACE/_ext/pulp-classic-effects" \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
+
+          # A gallery target that got skipped builds NOTHING and says nothing, and the
+          # failure then surfaces hundreds of lines later as a missing wasm in the
+          # assembler. Fail here instead, where the cause is legible.
+          missing=""
+          for p in MonoSynth Chorus; do
+            [ -f "build/$p.wasm" ] || missing="$missing $p"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::gallery plugin wasm not built:$missing — the external plugin" \
+                 "checkouts are missing or PULP_EXAMPLE_PLUGINS_DIR/PULP_CLASSIC_EFFECTS_DIR" \
+                 "point somewhere wrong, so wclap-build/CMakeLists.txt skipped the targets."
+            exit 1
+          fi
 
       - name: Assemble self-contained deploy dir
         working-directory: examples/web-demos/wclap-build/cloudflare
