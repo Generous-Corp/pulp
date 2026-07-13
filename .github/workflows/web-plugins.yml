@@ -213,7 +213,7 @@ jobs:
           cp ../../../core/format/src/wasm/wam-processor.js  browser-test/
           cp ../../../core/format/src/wasm/wam-runtime.mjs   browser-test/
           cp ../../../core/format/src/wasm/wam-plugin.js     browser-test/
-          ln -s "$GITHUB_WORKSPACE/node_modules" browser-test/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" browser-test/node_modules
           node browser-test/validate.mjs --screenshot /tmp/wam-browser.png
 
       # ── WebCLAP (wasi-sdk) ────────────────────────────────────────────────
@@ -252,7 +252,7 @@ jobs:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/wclap-build/browser-host/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/wclap-build/browser-host/node_modules
           node examples/web-demos/wclap-build/browser-host/validate.mjs --screenshot /tmp/wclap-browser.png
 
       # ── Pulp UI in the browser (Skia Ganesh on WebGL2) ────────────────────
@@ -274,7 +274,7 @@ jobs:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/super-convolver-ui/browser-test/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/super-convolver-ui/browser-test/node_modules
           node examples/web-demos/super-convolver-ui/browser-test/validate.mjs \
             --build "$GITHUB_WORKSPACE/build-webui" \
             --artifact /tmp/pulp-ui-browser.png
@@ -318,7 +318,7 @@ jobs:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
           node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
             --gpu-wasm examples/web-demos/wclap-build/build/SuperConvolverGpu.wasm \
             --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp" \
@@ -395,7 +395,7 @@ jobs:
           CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
         run: |
           set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
+          ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
           node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
             --gpu-wasm build-wclap/SuperConvolverGpu.wasm \
             --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp" \
