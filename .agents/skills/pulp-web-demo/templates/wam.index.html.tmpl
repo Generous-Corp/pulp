@@ -16,8 +16,7 @@
 <meta name="pulp:source" content="{{SOURCE_URL}}" />
 
 <!-- Your skin: 19 color tokens + 1 font var. The player is 100% token-driven. -->
-<link rel="stylesheet" href="{{TOKENS_HREF}}" />
-<link rel="stylesheet" href="{{FONTS_HREF}}" />
+{{THEME_LINKS}}
 
 <!-- Pinned shared player — imported, never vendored. -->
 <script type="importmap">
@@ -27,9 +26,10 @@
 <body>
 <div id="app"></div>
 <script type="module">
-// Cache-bust the MAIN-THREAD entry only (?v=<hash>); NEVER the worklet/dsp URLs —
-// both sides must hash to one processor name.
-import { mountDemo } from "{{PLAYER_PACKAGE}}?v={{PLAYER_HASH}}";
+// The pinned player resolves through the import map above. The cache-bust lives on the
+// MAPPED URL (a bare specifier with a ?query would not match the import-map key), and
+// NEVER on the worklet/dsp URLs — both sides must hash to one processor name.
+import { mountDemo } from "{{PLAYER_PACKAGE}}";
 
 mountDemo({
   root: document.getElementById("app"),
@@ -39,9 +39,7 @@ mountDemo({
   {{MODE_LINE}}
   dspUrl: {{WAM_DSP_URL_JSON}},
   processorUrl: {{WAM_PROCESSOR_URL_JSON}},
-  tokensHref: {{TOKENS_HREF_JSON}},
-  fontHref: {{FONTS_HREF_JSON}},
-  theme: {{THEME_MODE_JSON}}{{PARAM_OVERRIDES_BLOCK}}{{MIDI_VIZ_BLOCK}}
+  theme: {{THEME_MODE_JSON}}{{EXTRA_OPTS_BLOCK}}
 });
 </script>
 </body>
