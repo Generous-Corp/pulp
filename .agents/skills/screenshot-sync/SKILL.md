@@ -248,6 +248,20 @@ own layout.
 
 ## Gotchas
 
+- **A NEW page must be registered in `gen-og-images.mjs` by hand.** Only the
+  *galleries* auto-discover their demos (they read the `plugins = [...]` array back
+  out of the assembled `index.html`). Every non-gallery page — the standalone pages,
+  `super-convolver`, `super-convolver-gpu` — is a **hardcoded entry**. Add a page to
+  `assemble-gallery.mjs` without adding it there and `assemble-gallery.mjs` still
+  bakes an absolute `og:image` URL for it, pointing at a PNG that nobody ever
+  generated. And **Cloudflare serves a missing asset as its 404 page with HTTP 200**,
+  so this does not fail as a broken link — it fails as a **blank unfurl**, and a
+  naive `curl -w %{http_code}` check says `200` and confirms the lie. That is the
+  exact bug that shipped. `check-og-images.mjs` (file exists, real PNG magic bytes,
+  aspect ≈ 1.91:1) and `check-unfurl.mjs` (fetch the LIVE URL as a crawler and
+  follow the `og:image`) are the backstops — but the fix is to register the page.
+  Doubly easy to miss when the page is emitted **conditionally**, like
+  `super-convolver-gpu`, which only appears when its GPU DSP build tree exists.
 - **Cache-bust the main-thread player entry ONLY — never the worklet processor
   or the DSP module.** An AudioWorklet processor's *registered name* is derived
   from the URL it was added from, so the main thread and the worklet must agree

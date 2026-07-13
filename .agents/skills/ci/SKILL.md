@@ -280,6 +280,19 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   hostile-state rejection (overflow/CRC/truncation) folded into
   `wam_feature_runner.mjs` — so a regression in the state codec or chain runtime
   fails here rather than only in a browser.
+- **The GPU-audio proof inside `web-plugins.yml` needs a real GPU, so it is a
+  macOS job.** The Linux leg has **no WebGPU adapter at all** (measured:
+  `--use-webgpu-adapter=swiftshader` and `forceFallbackAdapter:true` both return
+  null), so `validate-gpu.mjs` there **skips with a named reason and exits 0** —
+  and a non-gating probe step prints what `requestAdapter()` actually returns, so
+  "does Linux CI have a software adapter yet?" stays a measured question rather
+  than an assumption. The real gate runs on macOS with `PULP_REQUIRE_WEBGPU=1`,
+  which turns "no adapter" from a skip into a failure. If you see the GPU-audio
+  proof "passing" on Linux, it did not run.
+  Two traps when editing that job: `pulp_add_wclap(Foo)` declares the CMake target
+  as **`Foo-wclap`** (the bare name is a hard "No rule to make target"), and the
+  emsdk `llvm-nm` must be on `PATH` or `verify_wasm_skia_slice.py` — which exits 77
+  to mean CTest-SKIP — kills the step under `set -e` instead of skipping.
 - **`wclap-cloudflare.yml` is WebCLAP's canonical-host lane (Cloudflare Pages).**
   Separate from `web-plugins.yml`: it builds the threaded WebCLAP PulpGain module
   (pinned wasi-sdk), assembles a self-contained deploy dir, proves it headlessly
