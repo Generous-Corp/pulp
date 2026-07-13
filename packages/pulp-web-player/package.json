@@ -1,6 +1,6 @@
 {
   "name": "@danielraffel/web-player",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reusable, skinnable, host-agnostic web player for Pulp audio plugins (WAMv2 today, WebCLAP next) \u2014 the overlay/lifecycle shell, auto-generated parameter grid, on-screen + computer keyboard + WebMIDI, oscilloscope/meter, safety limiter, PLST state container, MIDI visualisers and canvas widget set, driven through a small host-adapter interface.",
   "license": "MIT",
   "type": "module",
