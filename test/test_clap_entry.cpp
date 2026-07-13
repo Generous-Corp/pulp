@@ -244,16 +244,24 @@ public:
     }
 };
 
+// Swap the binary's single registered CLAP plugin to a different factory for
+// the duration of a test, then restore. Mirrors how a single-plugin binary
+// registers exactly one record; resets + re-registers + rebuilds the descriptor.
 class ScopedClapFactory {
 public:
     explicit ScopedClapFactory(pulp::format::ProcessorFactory factory)
-        : previous_(pulp::format::clap_generic::g_factory) {
-        pulp::format::clap_generic::g_factory = factory;
-        pulp::format::clap_generic::init_descriptor();
+        : previous_(pulp::format::clap_generic::g_clap_record_count > 0
+                        ? pulp::format::clap_generic::g_clap_records[0].factory
+                        : nullptr) {
+        pulp::format::clap_generic::reset_clap_records_for_testing();
+        pulp::format::clap_generic::register_clap_record(factory, /*publish_keyed=*/false);
+        pulp::format::clap_generic::init_all_records();
     }
     ~ScopedClapFactory() {
-        pulp::format::clap_generic::g_factory = previous_;
-        pulp::format::clap_generic::init_descriptor();
+        pulp::format::clap_generic::reset_clap_records_for_testing();
+        if (previous_)
+            pulp::format::clap_generic::register_clap_record(previous_, /*publish_keyed=*/false);
+        pulp::format::clap_generic::init_all_records();
     }
 
 private:
@@ -315,9 +323,7 @@ TEST_CASE("PULP_CLAP_PLUGIN generates valid entry", "[clap][entry]") {
     REQUIRE(clap_entry.init != nullptr);
     REQUIRE(clap_entry.get_factory != nullptr);
 
-    pulp::format::clap_generic::init_descriptor();
-
-    // Initialize
+    // Initialize — builds every registered plugin's descriptor.
     REQUIRE(clap_entry.init("test"));
 
     // Get factory
@@ -528,8 +534,6 @@ TEST_CASE("CLAP remote-controls extension exposes grouped parameter pages",
 
 TEST_CASE("CLAP entry fallback metadata handles missing processors",
           "[clap][entry][fallback]") {
-    auto saved_desc = pulp::format::clap_generic::g_desc;
-
     pulp::format::PluginDescriptor fallback{};
     fallback.name = "FallbackClap";
     fallback.manufacturer = "PulpTest";
@@ -541,9 +545,12 @@ TEST_CASE("CLAP entry fallback metadata handles missing processors",
     fallback.accepts_midi = false;
     fallback.produces_midi = false;
     fallback.tail_samples = 64;
-    pulp::format::clap_generic::g_desc = fallback;
 
     pulp::format::clap_adapter::PulpClapPlugin data;
+    // Before clap_init() builds `processor`, extension queries read the
+    // per-instance descriptor snapshot (set from the plugin record at
+    // create_plugin() in production) — exercise exactly that path here.
+    data.descriptor_snapshot = fallback;
     clap_plugin_t plugin{};
     plugin.plugin_data = &data;
 
@@ -581,14 +588,10 @@ TEST_CASE("CLAP entry fallback metadata handles missing processors",
     clap_istream_t in_stream{.ctx = &source, .read = stream_read};
     REQUIRE_FALSE(pulp::format::clap_generic::state_save(&plugin, &out_stream));
     REQUIRE_FALSE(pulp::format::clap_generic::state_load(&plugin, &in_stream));
-
-    pulp::format::clap_generic::g_desc = saved_desc;
 }
 
 TEST_CASE("CLAP audio ports advertise PREFERS_64BITS for native-f64 descriptors",
           "[clap][entry][ports][f64]") {
-    auto saved_desc = pulp::format::clap_generic::g_desc;
-
     pulp::format::PluginDescriptor native{};
     native.name = "NativeF64Clap";
     native.manufacturer = "PulpTest";
@@ -604,9 +607,9 @@ TEST_CASE("CLAP audio ports advertise PREFERS_64BITS for native-f64 descriptors"
     SECTION("node_capabilities flag") {
         native.node_capabilities.supports_f64_audio = true;
     }
-    pulp::format::clap_generic::g_desc = native;
 
     pulp::format::clap_adapter::PulpClapPlugin data;
+    data.descriptor_snapshot = native;
     clap_plugin_t plugin{};
     plugin.plugin_data = &data;
 
@@ -619,8 +622,6 @@ TEST_CASE("CLAP audio ports advertise PREFERS_64BITS for native-f64 descriptors"
     REQUIRE(port.flags == (CLAP_AUDIO_PORT_IS_MAIN |
                            CLAP_AUDIO_PORT_SUPPORTS_64BITS |
                            CLAP_AUDIO_PORT_PREFERS_64BITS));
-
-    pulp::format::clap_generic::g_desc = saved_desc;
 }
 
 TEST_CASE("CLAP params extension reports metadata and text conversions",

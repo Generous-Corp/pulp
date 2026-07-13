@@ -43,12 +43,53 @@ binary and CLAP is the fastest iteration lane because the
 | Tests | `test/test_clap_entry.cpp` (dlopen + descriptor), `test/test_clap_ara_extension.cpp` (ARA companion factory), `test/test_clap_webview.cpp` (WebView bridge) |
 | CLI validator invocation | `tools/cli/cmd_validate.cpp` (`clap-validator validate …` with dlopen-only fallback) |
 
-The `PULP_CLAP_PLUGIN(factory_fn)` macro (bottom of `clap_entry.hpp`)
-is the sole developer-facing surface. It expands to the static
-`g_factory` initialisation, calls `register_plugin(factory_fn)`, fills
-in `g_clap_desc` from the `PluginDescriptor`, and defines the
-`clap_entry` exported symbol. There is no separate "factory" TU — the
-macro is the factory.
+The `PULP_CLAP_PLUGIN(factory_fn)` macro (bottom of `clap_entry.hpp`) is the
+single-plugin developer surface. It registers one plugin *record*, keeps the
+legacy global factory slot (`register_plugin(factory_fn)`), and defines the
+`clap_entry` exported symbol. There is no separate "factory" TU — the macro is
+the factory.
+
+### Multi-plugin bundle — one CLAP binary, many plugins
+
+A CLAP module has exactly ONE `clap_entry` symbol but its factory may list many
+plugins. `clap_entry.hpp` supports this via a per-plugin **record** array
+(`g_clap_records`) instead of the old single `g_factory`/`g_desc`/`g_clap_desc`
+globals:
+
+```cpp
+PULP_CLAP_BUNDLE_PLUGIN(Foo, create_foo)   // register a plugin (repeat, distinct Ident)
+PULP_CLAP_BUNDLE_PLUGIN(Bar, create_bar)
+PULP_CLAP_BUNDLE_ENTRY()                    // the ONE clap_entry symbol
+```
+
+Load-bearing facts, each a trap if forgotten:
+
+- **Descriptors are built in `entry_init()`, NOT at static init.** Building a
+  descriptor calls the factory → constructs a `Processor`, which is unsafe during
+  C++ static initialization (global/`std::string` order). `register_clap_record`
+  stores only the factory at static init; `init_all_records()` (invoked from the
+  host's `clap_entry.init()`) fills each record's descriptor. A test that queries
+  the factory MUST call `clap_entry.init(...)` first — the old
+  `init_descriptor()` free function is gone.
+- **`get_plugin_count()` returns the count of uniquely-addressable plugins**
+  (the deduplicated index `init_all_records()` builds — a record whose
+  `bundle_id` collides with an earlier one, or whose factory returned null, is
+  excluded so the host is never handed an advertised-but-unreachable
+  descriptor). **`create_plugin(id)` resolves BY ID** (via `find_clap_record`),
+  not by a single hardcoded descriptor. Every plugin needs a unique `bundle_id`.
+- **Extension callbacks read per-instance metadata, never a global.** Before
+  `clap_init()` constructs `processor`, `audio_ports` / `note_ports` read
+  `PulpClapPlugin::descriptor_snapshot` (cached from the record at
+  `create_plugin()`); after, they prefer the live `processor->descriptor()`. When
+  adding a new extension that needs bus/MIDI metadata, follow this pattern — do
+  NOT reintroduce a file-scope descriptor global.
+- Each record is also published to the shared keyed registry (`registry.hpp`,
+  see the `auv2` skill) at init for cross-format enumeration / editor assets.
+- Single-plugin `PULP_CLAP_PLUGIN` is unchanged behaviourally; a bundle is opt-in.
+
+Tests: `test/test_clap_bundle_entry.cpp` (two plugins, one entry) and the
+migrated `test/test_clap_entry.cpp` (single-plugin contract + per-instance
+`descriptor_snapshot` fallback).
 
 ## Core conventions
 

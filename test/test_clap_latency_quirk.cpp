@@ -94,8 +94,7 @@ uint32_t adapter_reported_latency() {
 
 TEST_CASE("CLAP adapter respects clamp_latency_to_nonneg end-to-end",
           "[format][host-quirks][p3][clap][latency]") {
-    REQUIRE(clap_entry.init("test"));
-    clap_generic::init_descriptor();
+    REQUIRE(clap_entry.init("test"));  // builds the plugin's descriptor
     set_host_quirk_policy(std::nullopt);
     clear_quirk_overrides();
 

@@ -149,6 +149,17 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-entry PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-entry)
 
+    # Multi-plugin-bundle entry: two plugins from one clap_entry via
+    # PULP_CLAP_BUNDLE_PLUGIN + PULP_CLAP_BUNDLE_ENTRY. Compiles the adapter TU
+    # so it owns its own clap_entry symbol generator, mirroring pulp-test-clap-entry.
+    add_executable(pulp-test-clap-bundle-entry test_clap_bundle_entry.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
+    )
+    target_link_libraries(pulp-test-clap-bundle-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-bundle-entry PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-bundle-entry)
+
     # CLAP inbound/outbound MIDI event coverage + steady-state RT process guard.
     #
     # Unlike `pulp-test-clap-entry` above, this test DOES NOT re-compile
