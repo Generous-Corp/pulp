@@ -78,13 +78,24 @@ function makeLoadingPlaceholder() {
     animation: "pw-customui-pulse 1.6s ease-in-out infinite",
     pointerEvents: "none",
   });
-  if (!document.getElementById("pw-customui-css")) {
-    const css = document.createElement("style");
-    css.id = "pw-customui-css";
-    css.textContent = "@keyframes pw-customui-pulse{0%,100%{opacity:.45}50%{opacity:.85}}";
-    document.head.appendChild(css);
-  }
+  injectPulseCss();
   return el;
+}
+
+// The keyframes the placeholder animates against, injected once. Tracked with a
+// module-scoped flag rather than an id lookup: `document.getElementById` is not part
+// of the minimal DOM the player's unit tests run against, and reaching into the
+// document's global id namespace to answer "did I already do this?" is a worse way to
+// remember something this module already knows.
+let pulseCssInjected = false;
+
+function injectPulseCss() {
+  if (pulseCssInjected || !document.head) return;
+  pulseCssInjected = true;
+  const css = document.createElement("style");
+  css.id = "pw-customui-css";
+  css.textContent = "@keyframes pw-customui-pulse{0%,100%{opacity:.45}50%{opacity:.85}}";
+  document.head.appendChild(css);
 }
 
 // factory(container, adapter, { params })

@@ -190,11 +190,55 @@ function assertShellIntact(root, label) {
      "async-failing customUi: generated grid rendered after the ready promise rejects");
   ok(!root.querySelector("#custom-ui"), "async-failing customUi: failed container removed");
   ok(destroyed === 1, "async-failing customUi: the handle's destroy() ran exactly once");
+
+  // Rendering the CELLS is not the same as rendering the GRID, and asserting only the
+  // former is what let this ship: #params is a CSS grid, the slot reservation overrides
+  // it to `display:block` to hold the editor's box, and the fallback restored that
+  // override instead of the original value. The cells were all present — stacked
+  // vertically, one per row. That is the bug a Safari user actually saw, and the count
+  // assertion above is blind to it.
+  const paramsEl = root.querySelector("#params");
+  ok(paramsEl.style.display !== "block",
+     "async-failing customUi: #params is a GRID again, not the reservation's display:block " +
+     "(otherwise every generated cell stacks vertically)");
+  ok(!paramsEl.style.minHeight,
+     "async-failing customUi: the reserved editor height is released (the grid sizes itself)");
+  ok(!root.querySelector(".pw-customui-loading"),
+     "async-failing customUi: the 'Loading editor…' placeholder is gone");
   ok(Object.keys(globalThis.__widgets).length === PARAMS.length,
      "async-failing customUi: the widget registry is populated (param sync works again)");
   ok(warnings.some((w) => /customUi failed to mount asynchronously/.test(w)),
      "async-failing customUi: failure is logged");
   assertShellIntact(root, "async-failing customUi");
+}
+
+// ——— 4d. The slot is RESERVED before the editor arrives.
+//
+// A real custom UI mounts behind two long awaits (the DSP wasm, then a multi-megabyte
+// UI wasm). Without a reservation the panel sits with an empty gap where the controls
+// belong and the editor then slams in — the page visibly assembles in stages, which is
+// what a first-time visitor reports as "it loads weird". So the shell reserves the box
+// at start, and the editor takes that same box over.
+//
+// The reservation is only correct if it is also REVERSIBLE (4c) — it overrides a CSS
+// grid to do its job, so the two halves are tested together.
+{
+  const factory = (container) => {
+    // Never resolves: freezes the mount exactly where a real editor spends its time,
+    // so we can look at the panel mid-load instead of after.
+    container.appendChild(document.createElement("canvas"));
+    return { ready: new Promise(() => {}), destroy: () => {} };
+  };
+  const { root } = await mount({ customUi: factory });
+  await settle();
+
+  const paramsEl = root.querySelector("#params");
+  ok(!!root.querySelector(".pw-customui-loading"),
+     "reserved slot: the 'Loading editor…' placeholder is showing while the editor loads");
+  ok(paramsEl.style.minHeight,
+     "reserved slot: the panel already holds the editor's height (no gap, no late reflow)");
+  ok(root.querySelectorAll("#params .pw-cell").length === 0,
+     "reserved slot: the generated grid is NOT built behind a still-loading editor");
 }
 
 // ——— 5. Teardown: destroy() runs, DOM detached, no leaked rAF / listener.
