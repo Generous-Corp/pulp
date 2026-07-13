@@ -39,11 +39,16 @@
 // view_is_in_tree, modifiers_from_ns_flags) — same pulp-view-core lib.
 #include "window_host_mac_internal.hpp"
 
+// The host frame pump drives BOTH the Core Graphics and the Skia paths (the CG
+// host owns a HostFramePump member and calls should_dispatch_host_frame /
+// begin_host_frame / advance_host_frame), so these must not sit behind
+// PULP_HAS_SKIA — a non-Skia build would not see the type.
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
+
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
-#include <pulp/view/frame_clock.hpp>
-#include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include "window_host_mac_capture.h"  // mac_capture::encode_rgba_to_png
