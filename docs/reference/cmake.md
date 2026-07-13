@@ -91,6 +91,45 @@ token files require the matching `SCRIPT` / `TOKENS` argument so the project
 makes the choice intentionally. The helper does not apply kits automatically
 and does not run package code.
 
+## pulp_add_plugin_bundle
+
+**Status**: usable
+
+Package MANY plugins into ONE binary per format — the multi-plugin counterpart
+to [`pulp_add_plugin`](#pulp_add_plugin). One `.clap` / `.vst3` exposes N
+distinct plugins (Expert Sleepers Silent Way style). The single-plugin path is
+unchanged and remains the default; see
+[`PULP_PLUGIN_PACKAGING`](opinionated-defaults.md#plugin-packaging).
+
+```cmake
+pulp_add_plugin_bundle(<target>
+    FORMATS      CLAP VST3       # bundle-capable formats
+    BUNDLE_NAME  <string>        # binary/bundle name (default <target>)
+    BUNDLE_ID    <string>        # reverse-DNS id for the bundle
+    VERSION      <string>        # default "1.0.0"
+    MANUFACTURER <string>        # default "Unknown"
+    SOURCES      <file-list>     # optional; union of the bundled plugins' sources
+)
+```
+
+Each format's entry translation unit — `clap_bundle_entry.cpp` /
+`vst3_bundle_entry.cpp` in the target's source dir — uses the bundle macros
+(`PULP_CLAP_BUNDLE_PLUGIN` + `PULP_CLAP_BUNDLE_ENTRY`;
+`PULP_VST3_BUNDLE_PLUGIN` + `PULP_VST3_FACTORY_BEGIN`/`_BUNDLE_CLASS`/`_FACTORY_END`)
+to register N plugins into one binary. Per-plugin metadata (category, ids, and —
+for AU — component codes) lives in those macro calls, not in CMake args. The
+format functions automatically prefer a `<fmt>_bundle_entry.cpp` over the
+single-plugin `<fmt>_entry.cpp`.
+
+**Supported formats:** `CLAP` and `VST3` (each emits one entry symbol whose
+factory enumerates N plugins internally). `AU`/`AUv3`/`AAX` bundles additionally
+need a multi-component `Info.plist` and multi-symbol export and are not yet
+supported here — requesting one is a configure-time error rather than a
+silently-single-plugin binary.
+
+See the [plugin-bundles guide](../guides/plugin-bundles.md) for a full walk-through
+and the `examples/combined-bundle-demo` project.
+
 ## pulp_enable_midi_tuning_provider
 
 Attach Pulp's provider-neutral optional microtuning wrappers to a plugin target.

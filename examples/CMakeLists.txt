@@ -25,6 +25,9 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
+# Combined-bundle demo: ONE binary per format exposing TWO plugins via
+# pulp_add_plugin_bundle() (multi-plugin packaging surface).
+add_subdirectory(combined-bundle-demo)
 # Bitches Brew (Silent Way-inspired control-voltage plug-in suite) lives in its
 # own repo and consumes Pulp as an SDK:
 # https://github.com/danielraffel/pulp-bitches-brew

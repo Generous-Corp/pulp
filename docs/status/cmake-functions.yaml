@@ -39,6 +39,23 @@ functions:
       - pulp-install-${target}
     docs: reference/cmake.md#pulp_add_plugin
 
+  - name: pulp_add_plugin_bundle
+    status: usable
+    summary: Package MANY plugins into ONE binary per format (CLAP, VST3) — the multi-plugin counterpart to pulp_add_plugin.
+    required:
+      - FORMATS
+    optional:
+      - BUNDLE_NAME
+      - BUNDLE_ID
+      - VERSION
+      - MANUFACTURER
+      - SOURCES
+    creates:
+      - ${target}_Core
+      - ${target}_VST3
+      - ${target}_CLAP
+    docs: reference/cmake.md#pulp_add_plugin_bundle
+
   - name: pulp_add_reload_logic
     status: usable
     summary: Build a hot-reloadable DSP "logic" MODULE (PULP_RELOAD_LOGIC) and optionally publish it to the path a ReloadableShell watches.
