@@ -130,9 +130,17 @@ unset token
 
 npm publish --userconfig "$TMPNPMRC" --access public
 
-# ── 6. Verify the registry actually serves the new code. ────────────────────────
-sleep 5
-published="$(npm view "$PKG" version 2>/dev/null || echo '?')"
+# ── 6. Verify the registry actually serves the new version.
+#       `npm view` reads through a cache and the registry itself takes a moment to
+#       settle, so a single eager check right after publish reports the OLD version
+#       and cries wolf on a publish that in fact succeeded. Retry with backoff and
+#       read the registry directly rather than trusting the cache.
+for attempt in 1 2 3 4 5 6; do
+  published="$(curl -fsS "https://registry.npmjs.org/${PKG}" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)["dist-tags"].latest)}catch{console.log("?")}})')"
+  [[ "$published" == "$VERSION" ]] && break
+  sleep $(( attempt * 5 ))
+done
 [[ "$published" == "$VERSION" ]] \
-  || die "published, but the registry still reports $published — check npm"
+  || die "published, but after ~105s the registry still reports '$published' — check npm"
 printf '\n  ✓ %s@%s is live\n' "$PKG" "$VERSION"
