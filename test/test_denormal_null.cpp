@@ -39,7 +39,7 @@ TEST_CASE("MF-3: snap_to_zero is bit-exact vs snap-disabled on real audio",
                   "test_denormal_null must be compiled with snap enabled");
 
     const denormal_null::AllOutputs snap_on = denormal_null::render_all();
-    const denormal_null::AllOutputs snap_off = denormal_null_reference();
+    const denormal_null::AllOutputs snap_off = denormal_null_run_reference().outputs;
 
     require_bit_exact(snap_on.biquad, snap_off.biquad);
     require_bit_exact(snap_on.svf, snap_off.svf);
@@ -61,7 +61,8 @@ TEST_CASE("MF-3: guarded feedback filters flush to a subnormal-free tail",
     //     least one filter — proof the configs actually decay that far, so the
     //     snap-ON result below is not vacuously clean;
     //   * the snap-ON build (this TU) must produce NO subnormal tail sample.
-    const denormal_null::TailReport snap_off = denormal_null_reference_tail();
+    const denormal_null::Reference reference = denormal_null_run_reference();
+    const denormal_null::TailReport snap_off = reference.tail;
     const denormal_null::TailReport snap_on = denormal_null::render_tails();
 
     // The guard flushes every feedback state cleanly.
@@ -72,21 +73,24 @@ TEST_CASE("MF-3: guarded feedback filters flush to a subnormal-free tail",
     REQUIRE_FALSE(snap_on.reverb);
 
     // The test has teeth: without the guard, these tails go subnormal — but
-    // ONLY where the CPU can actually represent a subnormal. If this process
-    // is in a hardware flush-to-zero mode (an FTZ/DAZ default, a fast-math
-    // CRT that sets FPCR/MXCSR at startup, or an inherited FP mode on the CI
-    // host), every decaying tail is flushed straight to zero and the reference
-    // physically cannot produce a subnormal. That is an environment property,
-    // not a broken guard, so the teeth check is skipped rather than failed —
-    // the snap-ON "no subnormal tail" assertions above stay HARD regardless.
-    // Anywhere denormals ARE representable, the reference MUST hit one, or the
-    // null test is vacuous.
+    // ONLY where the CPU can actually represent a subnormal. If the REFERENCE
+    // process ran in a hardware flush-to-zero mode (an FTZ/DAZ default, a
+    // fast-math CRT that sets FPCR/MXCSR at startup, or an inherited FP mode
+    // on the CI host), every decaying tail is flushed straight to zero and the
+    // reference physically cannot produce a subnormal. That is an environment
+    // property, not a broken guard, so the teeth check is skipped rather than
+    // failed — the snap-ON "no subnormal tail" assertions above stay HARD
+    // regardless. Anywhere denormals ARE representable, the reference MUST hit
+    // one, or the null test is vacuous.
+    //
+    // The FP mode that matters is the reference child's, not ours: it is the
+    // process that had to be able to represent a subnormal.
     const bool reference_saw_subnormals =
         snap_off.dc_blocker || snap_off.ballistics || snap_off.svf ||
         snap_off.ladder || snap_off.reverb;
-    if (!reference_saw_subnormals && pulp::signal::denormals_are_flushed()) {
+    if (!reference_saw_subnormals && reference.denormals_flushed) {
         SKIP("reference tail cannot exhibit subnormals: the CPU is flushing "
-             "denormals to zero for this process (hardware/OS FTZ)");
+             "denormals to zero for that process (hardware/OS FTZ)");
     }
     REQUIRE(reference_saw_subnormals);
 }
