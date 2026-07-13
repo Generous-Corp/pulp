@@ -69,7 +69,62 @@ player behavior outside the package, which is the whole thing this skill prevent
   never the worklet/dsp URLs (both sides must resolve one processor name).
 - **Cross-origin isolation must cover the real deployed path** (e.g. `/my-plugins/`), and
   every worklet/wasm dependency must be isolation-compatible — validated, not assumed.
-- **OG/metadata generation + checks are blocking** (never `continue-on-error`).
+- **OG/metadata checks are blocking** (never `continue-on-error`). The generator emits the
+  `og:image` **tag** but does not **render** the image (rendering needs a browser; the generator
+  is offline + deterministic). So with `ogImageStrategy: "screenshot"` your pipeline MUST render
+  the images *before* `validate.mjs --check-metadata` runs — the validator fails if the tag points
+  at a file that isn't there, **or isn't really a PNG**. Do not settle for an HTTP 200: a static
+  host (Cloudflare Pages) will serve a missing asset as 200 and cheerfully confirm an image that
+  does not exist. Check the bytes. Use `ogImageStrategy: "text"` if you don't render images.
+- Regeneration is ownership-aware: the validator refuses to clobber a locally-edited owned file
+  without reconciliation.
+
+## File upload (dialog **and** drag-and-drop)
+
+If a plugin takes a user-supplied file (a convolver's impulse response, a sample, a preset),
+declare it with the per-plugin **`fileUpload`** config (`accept`, `label`, `hint`). The demo must
+then offer **both** a file-dialog button **and** a drop zone — people drag files onto anything
+that looks like a target.
+
+**This is a PLAYER behavior, not a per-demo one.** Like every other UX invariant, the drop-zone
+mechanics belong in the shared player so both ABIs inherit them. Re-implementing a drop zone in
+one demo page is exactly the drift this skill exists to prevent — its WCLAP twin would then need
+its own copy, and the two would diverge.
+
+**Put it INSIDE the plugin, directly under the controls.** Placement is not cosmetics here. A
+loader parked below the plugin panel — in the page chrome, past the scope and the meter — reads
+as page furniture rather than part of the instrument, and people simply do not find it: it is
+the one control the demo is *asking* them to use, and it is the one sitting outside the box
+everything else lives in. It belongs in the panel, immediately under the last row of controls,
+with the gap between them tight enough that they read as one unit. The player exposes a slot for
+exactly this (chrome the plugin owns, rendered inside the panel); use it rather than appending to
+the page.
+
+Any implementation MUST satisfy all six rules. Each one, skipped, makes the zone feel broken:
+
+1. **Swallow drops on the whole `document`.** The browser's default action for a file dropped
+   anywhere on the page is to **navigate to it**, destroying the running demo — audio context,
+   loaded state, knob positions. Add `document` listeners for `dragover` and `drop` that call
+   `preventDefault()` and nothing else, so a ten-pixel miss is inert rather than session-ending.
+   That is a brutal punishment for a gesture you invited. **Unbind them in `destroy()`.**
+2. **Count `dragenter`/`dragleave` depth — do not toggle.** `dragleave` bubbles from the zone's
+   own children, so dragging across a button *inside* the zone fires it and the highlight
+   strobes. Keep a depth counter; clear the highlight only at zero.
+3. **Scope the highlight to the drop zone**, never the whole plugin — the highlight is the thing
+   that tells someone where the target is.
+4. **Set `dataTransfer.dropEffect = "copy"`** on `dragover`, so the cursor shows a copy badge
+   rather than a "no entry" sign.
+5. **Handle the empty drop.** `dataTransfer.files[0]` can be `undefined` (dragged text, a URL).
+   Say so; don't throw.
+6. **Keep the button.** Drop is a shortcut, not a replacement — and it is the *only* path on
+   touch devices.
+
+**Two testing gotchas — both make a correct implementation look broken:**
+
+- Drive it with real `DragEvent`s and a real `DataTransfer` carrying a real `File`. The real
+  browser order when the pointer crosses into a child is **`dragenter` on the new target, then
+  `dragleave` on the old** — so a test that fires a bare `dragleave` will report a
+  highlight-flicker bug **that does not exist**.
 - Regeneration is ownership-aware: the validator refuses to clobber a locally-edited owned file
   without reconciliation.
 
