@@ -8,6 +8,9 @@
 #include <yoga/Yoga.h>
 #include <vector>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
@@ -471,7 +474,40 @@ static void apply_border_widths(YGNodeRef node, const View& view) {
     YGNodeStyleSetBorder(node, YGEdgeLeft,   left);
 }
 
-static void build_yoga_subtree(View& view, YGNodeRef node) {
+// ── Layout-pass instrumentation ─────────────────────────────────────────────
+//
+// Measurement hooks for the layout-cost investigation (see
+// test/test_yoga_layout_bench.cpp). Cost is one relaxed atomic store per PASS
+// (not per node — the node tally is a plain local counter threaded through
+// build_yoga_subtree), so this is not measurable against a pass that already
+// costs hundreds of microseconds.
+//
+// `PULP_LAYOUT_STATS=1` additionally prints one line per pass to stderr, which
+// is how a real (non-synthetic) UI's managed-node count is measured: run any
+// example headlessly with the env var set and read the node count off the
+// last-painted frame.
+namespace {
+std::atomic<uint64_t> g_layout_pass_count{0};
+std::atomic<uint32_t> g_layout_last_nodes{0};
+std::atomic<uint32_t> g_layout_max_nodes{0};
+
+bool layout_stats_enabled() {
+    static const bool on = std::getenv("PULP_LAYOUT_STATS") != nullptr;
+    return on;
+}
+} // namespace
+
+uint64_t yoga_layout_pass_count()      { return g_layout_pass_count.load(std::memory_order_relaxed); }
+uint32_t yoga_layout_last_node_count() { return g_layout_last_nodes.load(std::memory_order_relaxed); }
+uint32_t yoga_layout_max_node_count()  { return g_layout_max_nodes.load(std::memory_order_relaxed); }
+void     yoga_layout_reset_stats() {
+    g_layout_pass_count.store(0, std::memory_order_relaxed);
+    g_layout_last_nodes.store(0, std::memory_order_relaxed);
+    g_layout_max_nodes.store(0, std::memory_order_relaxed);
+}
+
+static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally) {
+    ++node_tally;
     // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
     // any flex-flow attributes are applied, so flex_grow/flex_shrink/
     // flex_basis can be gated on absolute-ness in apply_flex_style and
@@ -553,7 +589,7 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
     for (size_t i = 0; i < children.size(); ++i) {
         auto* child = children[i];
         YGNodeRef ygChild = YGNodeNew();
-        build_yoga_subtree(*child, ygChild);
+        build_yoga_subtree(*child, ygChild, node_tally);
         YGNodeInsertChild(node, ygChild, static_cast<uint32_t>(i));
     }
 }
@@ -590,10 +626,13 @@ static void apply_yoga_results(View& parent, YGNodeRef node) {
 void yoga_layout(View& root) {
     auto rootBounds = root.local_bounds();
 
+    const auto stats_t0 = std::chrono::steady_clock::now();
+    uint32_t node_tally = 0;
+
     YGNodeRef ygRoot = YGNodeNew();
     YGNodeStyleSetWidth(ygRoot, rootBounds.width);
     YGNodeStyleSetHeight(ygRoot, rootBounds.height);
-    build_yoga_subtree(root, ygRoot);
+    build_yoga_subtree(root, ygRoot, node_tally);
 
     // Root direction follows the View's own writing_direction. When `inherit`
     // (the default), Yoga falls back to LTR at the root, matching CSS / RN
@@ -619,6 +658,18 @@ void yoga_layout(View& root) {
     }
 
     YGNodeFreeRecursive(ygRoot);
+
+    const uint64_t pass = g_layout_pass_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    g_layout_last_nodes.store(node_tally, std::memory_order_relaxed);
+    if (node_tally > g_layout_max_nodes.load(std::memory_order_relaxed))
+        g_layout_max_nodes.store(node_tally, std::memory_order_relaxed);
+    if (layout_stats_enabled()) {
+        const double us = std::chrono::duration<double, std::micro>(
+                              std::chrono::steady_clock::now() - stats_t0).count();
+        std::fprintf(stderr, "[layout-stats] pass=%llu nodes=%u root=%.0fx%.0f us=%.1f\n",
+                     static_cast<unsigned long long>(pass), node_tally,
+                     rootBounds.width, rootBounds.height, us);
+    }
 }
 
 } // namespace pulp::view

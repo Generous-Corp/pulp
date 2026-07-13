@@ -1,6 +1,18 @@
 # Optional benchmark test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# ── Yoga layout-pass benchmark ──────────────────────────────────────────────
+#
+# Measures the per-frame cost of View::layout_children() -> yoga_layout(),
+# which rebuilds and destroys the whole YGNode tree on every call. Runs by
+# default (it is a few seconds) because it doubles as a timing + allocation
+# regression gate on the pre-paint layout path; filter it with
+# `ctest -LE bench` or run it alone with `ctest -R "Yoga layout"`.
+pulp_add_test_suite(pulp-test-yoga-layout-bench
+    LIBRARIES pulp::view
+    LABELS "bench"
+    TIMEOUT 120)
+
 # ── Zero-copy benchmark ─────────────────────────────────────────────────────
 #
 # Tooling-only tests, gated on PULP_BENCHMARK. The perf-counter unit
