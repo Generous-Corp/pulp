@@ -51,6 +51,14 @@ struct PulpClapPlugin {
     std::unique_ptr<Processor> processor;
     ProcessorFactory factory;
 
+    // Descriptor snapshot cached at create_plugin() from this instance's plugin
+    // record. In a multi-plugin bundle there is no single global descriptor, so
+    // extension callbacks that may fire before clap_init() constructs `processor`
+    // (audio-ports / note-ports enumeration) read bus/MIDI metadata from here
+    // instead of a shared global. Once `processor` exists, callbacks prefer its
+    // live descriptor.
+    PluginDescriptor descriptor_snapshot{};
+
     // Host accommodations, resolved once in clap_init() via the runtime
     // policy. Adapters consult these instead of hardcoding workarounds.
     HostQuirks host_quirks{};

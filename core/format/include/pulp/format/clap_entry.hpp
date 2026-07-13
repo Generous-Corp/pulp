@@ -35,57 +35,161 @@
 // Internal implementation — do not call directly
 namespace pulp::format::clap_generic {
 
-// These are populated at static init by PULP_CLAP_PLUGIN
-inline ProcessorFactory g_factory = nullptr;
-inline PluginDescriptor g_desc{};
-inline clap_plugin_descriptor_t g_clap_desc{};
-inline const char* g_features[4] = {};
+// Per-plugin record. One CLAP binary can host many plugins (a bundle); the
+// single-plugin macro registers exactly one. Only the factory is stored at
+// static init — the descriptor (which requires CALLING the factory to build a
+// Processor) is filled lazily in init_record(), invoked from entry_init(), the
+// host's module-load callback. Constructing a Processor during C++ static
+// initialization is unsafe (std::string/global order), so this deferral is
+// load-bearing, not cosmetic.
+struct ClapPluginRecord {
+    ProcessorFactory factory = nullptr;
+    PluginDescriptor desc{};
+    clap_plugin_descriptor_t clap_desc{};
+    const char* features[4] = {};
+    bool initialized = false;
+    // Bundle records publish themselves to the shared keyed registry (for
+    // cross-format enumeration + per-plugin editor-asset lookup). The
+    // legacy single-plugin PULP_CLAP_PLUGIN path leaves the keyed table
+    // empty — matching AU/VST3, where only the bundle macros register keyed
+    // entries — so single-plugin binaries keep their documented contract.
+    bool publish_keyed = false;
+};
 
-inline void init_descriptor() {
-    if (!g_factory) return;
-    auto proc = g_factory();
+// Fixed-capacity storage — no heap, static-init safe. A combined bundle
+// registers one record per plugin; 64 is far above any real CLAP suite.
+inline constexpr uint32_t kMaxClapPlugins = 64;
+inline ClapPluginRecord g_clap_records[kMaxClapPlugins];
+inline uint32_t g_clap_record_count = 0;
+
+// Deduplicated view over the initialized records — the addressable plugin set
+// the CLAP factory advertises. Built by init_all_records(); a record whose id
+// collides with an earlier one (developer error in a bundle) is excluded so the
+// host never sees an advertised-but-unreachable plugin (create_plugin resolves
+// an id to the FIRST matching record, so only that one is addressable).
+inline ClapPluginRecord* g_clap_index[kMaxClapPlugins] = {};
+inline uint32_t g_clap_index_count = 0;
+
+// Static-init-safe: stores the factory only, never calls it. `publish_keyed`
+// records also register into the shared keyed registry at init time.
+inline void register_clap_record(ProcessorFactory factory, bool publish_keyed) {
+    if (g_clap_record_count >= kMaxClapPlugins) return;
+    auto& rec = g_clap_records[g_clap_record_count++];
+    rec.factory = factory;
+    rec.publish_keyed = publish_keyed;
+}
+
+// Deferred descriptor build (NOT at static init). Idempotent.
+inline void init_record(ClapPluginRecord& rec) {
+    if (rec.initialized || !rec.factory) return;
+    auto proc = rec.factory();
     if (!proc) return;
-    g_desc = proc->descriptor();
+    rec.desc = proc->descriptor();
 
-    // Map category to CLAP features
-    switch (g_desc.category) {
+    switch (rec.desc.category) {
         case PluginCategory::Effect:
-            g_features[0] = CLAP_PLUGIN_FEATURE_AUDIO_EFFECT;
+            rec.features[0] = CLAP_PLUGIN_FEATURE_AUDIO_EFFECT;
             break;
         case PluginCategory::Instrument:
-            g_features[0] = CLAP_PLUGIN_FEATURE_INSTRUMENT;
+            rec.features[0] = CLAP_PLUGIN_FEATURE_INSTRUMENT;
             break;
         case PluginCategory::MidiEffect:
-            g_features[0] = CLAP_PLUGIN_FEATURE_NOTE_EFFECT;
+            rec.features[0] = CLAP_PLUGIN_FEATURE_NOTE_EFFECT;
             break;
     }
-    g_features[1] = nullptr;
+    rec.features[1] = nullptr;
 
-    g_clap_desc = {
+    // c_str() views into rec.desc, which lives in the stable g_clap_records
+    // array for the process lifetime — so these pointers stay valid.
+    rec.clap_desc = {
         .clap_version = CLAP_VERSION,
-        .id = g_desc.bundle_id.c_str(),
-        .name = g_desc.name.c_str(),
-        .vendor = g_desc.manufacturer.c_str(),
+        .id = rec.desc.bundle_id.c_str(),
+        .name = rec.desc.name.c_str(),
+        .vendor = rec.desc.manufacturer.c_str(),
         .url = "",
         .manual_url = "",
         .support_url = "",
-        .version = g_desc.version.c_str(),
+        .version = rec.desc.version.c_str(),
         .description = "",
-        .features = g_features,
+        .features = rec.features,
     };
+
+    rec.initialized = true;
+}
+
+inline void init_all_records() {
+    g_clap_index_count = 0;
+    for (uint32_t i = 0; i < g_clap_record_count; ++i) {
+        auto& rec = g_clap_records[i];
+        init_record(rec);
+        if (!rec.initialized) continue;  // factory returned null
+
+        // Exclude a duplicate id: the host must not be handed an advertised
+        // descriptor it cannot instantiate (create_plugin resolves to the
+        // first record with that id). First writer wins; later dupes drop.
+        bool dupe = false;
+        for (uint32_t j = 0; j < g_clap_index_count; ++j) {
+            if (std::strcmp(g_clap_index[j]->clap_desc.id, rec.clap_desc.id) == 0) {
+                dupe = true;
+                break;
+            }
+        }
+        if (dupe) continue;
+        g_clap_index[g_clap_index_count++] = &rec;
+
+        // Publish to the shared keyed registry only AFTER dedup, so a duplicate
+        // id never lands an unreachable second entry in registered_plugins().
+        // Bundle records only — the legacy single-plugin path leaves it empty
+        // (see publish_keyed). Guard on find_plugin so publication is idempotent:
+        // a matched re-init won't double-publish, and in a combined AU+VST3+CLAP
+        // bundle the one logical plugin (shared bundle_id across formats) keeps a
+        // single keyed entry for editor-asset lookup. AU codes are 0 for CLAP.
+        if (rec.publish_keyed && find_plugin(rec.clap_desc.id) == nullptr) {
+            register_plugin(PluginRegistration{
+                .id = rec.clap_desc.id,
+                .factory = rec.factory,
+            });
+        }
+    }
+}
+
+// Test-only: clear all records back to empty. Registration is meant to happen
+// once at static init and never be torn down; this exists so a test can swap the
+// binary's plugin set deterministically. NOT for production use.
+inline void reset_clap_records_for_testing() {
+    for (uint32_t i = 0; i < g_clap_record_count; ++i) {
+        g_clap_records[i] = ClapPluginRecord{};
+    }
+    g_clap_record_count = 0;
+    for (uint32_t i = 0; i < g_clap_index_count; ++i) g_clap_index[i] = nullptr;
+    g_clap_index_count = 0;
+}
+
+// Find a record by CLAP id (bundle_id). Null if unknown or not yet initialized.
+inline ClapPluginRecord* find_clap_record(const char* id) {
+    if (!id) return nullptr;
+    for (uint32_t i = 0; i < g_clap_record_count; ++i) {
+        if (g_clap_records[i].initialized &&
+            strcmp(g_clap_records[i].clap_desc.id, id) == 0) {
+            return &g_clap_records[i];
+        }
+    }
+    return nullptr;
 }
 
 // ── Audio ports extension (multi-bus) ──────────────────────────────────
 inline uint32_t audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    auto desc = self->processor ? self->processor->descriptor() : g_desc;
+    auto desc = self->processor ? self->processor->descriptor()
+                                : self->descriptor_snapshot;
     return static_cast<uint32_t>(is_input ? desc.input_buses.size() : desc.output_buses.size());
 }
 
 inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input,
                             clap_audio_port_info_t* info) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    auto desc = self->processor ? self->processor->descriptor() : g_desc;
+    auto desc = self->processor ? self->processor->descriptor()
+                                : self->descriptor_snapshot;
     auto& buses = is_input ? desc.input_buses : desc.output_buses;
 
     if (index >= buses.size()) return false;
@@ -320,17 +424,23 @@ inline const clap_plugin_params_t params_ext = {
 };
 
 // ── Note ports extension (for instruments) ─────────────────────────────
-inline uint32_t note_ports_count(const clap_plugin_t*, bool is_input) {
-    if (is_input && g_desc.accepts_midi) return 1;
-    if (!is_input && g_desc.produces_midi) return 1;
+inline uint32_t note_ports_count(const clap_plugin_t* plugin, bool is_input) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    const auto& desc = self->processor ? self->processor->descriptor()
+                                       : self->descriptor_snapshot;
+    if (is_input && desc.accepts_midi) return 1;
+    if (!is_input && desc.produces_midi) return 1;
     return 0;
 }
 
-inline bool note_ports_get(const clap_plugin_t*, uint32_t index, bool is_input,
+inline bool note_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input,
                             clap_note_port_info_t* info) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    const auto& desc = self->processor ? self->processor->descriptor()
+                                       : self->descriptor_snapshot;
     if (index != 0) return false;
-    if (is_input && !g_desc.accepts_midi) return false;
-    if (!is_input && !g_desc.produces_midi) return false;
+    if (is_input && !desc.accepts_midi) return false;
+    if (!is_input && !desc.produces_midi) return false;
 
     info->id = is_input ? 0 : 1;
     runtime::copy_c_string(info->name, is_input ? "Note In" : "Note Out");
@@ -733,15 +843,21 @@ inline const void* get_extension(const clap_plugin_t* plugin, const char* id) {
 inline const clap_plugin_t* create_plugin(const clap_plugin_factory_t*,
                                            const clap_host_t* host,
                                            const char* plugin_id) {
-    if (strcmp(plugin_id, g_clap_desc.id) != 0) return nullptr;
+    // Resolve which of the binary's plugins the host asked for. In a
+    // single-plugin binary there is exactly one record; in a bundle, match by id.
+    ClapPluginRecord* rec = find_clap_record(plugin_id);
+    if (!rec) return nullptr;
 
     auto* instance = new clap_adapter::PulpClapPlugin();
-    instance->factory = g_factory;
+    instance->factory = rec->factory;
+    // Cache this plugin's descriptor so pre-init extension queries (audio/note
+    // ports) resolve per-plugin metadata without a shared global.
+    instance->descriptor_snapshot = rec->desc;
     // Keep the host pointer so clap_on_main_thread() can republish
     // latency / tail changes the processor flagged.
     instance->host = host;
     instance->plugin = {
-        .desc = &g_clap_desc,
+        .desc = &rec->clap_desc,
         .plugin_data = instance,
         .init = clap_adapter::clap_init,
         .destroy = clap_adapter::clap_destroy,
@@ -757,9 +873,15 @@ inline const clap_plugin_t* create_plugin(const clap_plugin_factory_t*,
     return &instance->plugin;
 }
 
-inline uint32_t get_plugin_count(const clap_plugin_factory_t*) { return 1; }
+// Enumerate over the deduplicated index (built in init_all_records) so the host
+// only ever sees addressable, uniquely-identified plugins — never a failed-init
+// hole or an advertised-but-unreachable duplicate id.
+inline uint32_t get_plugin_count(const clap_plugin_factory_t*) {
+    return g_clap_index_count;
+}
 inline const clap_plugin_descriptor_t* get_plugin_descriptor(const clap_plugin_factory_t*, uint32_t i) {
-    return i == 0 ? &g_clap_desc : nullptr;
+    if (i >= g_clap_index_count) return nullptr;
+    return &g_clap_index[i]->clap_desc;
 }
 
 inline const clap_plugin_factory_t plugin_factory = {
@@ -768,7 +890,20 @@ inline const clap_plugin_factory_t plugin_factory = {
     .create_plugin = create_plugin,
 };
 
-inline bool entry_init(const char*) { return true; }
+inline bool entry_init(const char*) {
+    // Build every registered plugin's descriptor here — the host's module-load
+    // callback, safely after C++ static initialization — never at static init.
+    init_all_records();
+    return true;
+}
+// CLAP's init/deinit are nestable and matched, and { return true; } / {} pairs
+// are explicitly sanctioned by the entry contract. Our records are an immutable,
+// bounded (kMaxClapPlugins) module-lifetime cache: init_record() is idempotent,
+// so a re-init after a matched deinit reuses identical descriptors, and the
+// storage does not grow per cycle. Final DSO unload reclaims it. This mirrors the
+// AU/VST3 registrars, which run at static init and never unregister. Nothing to
+// release here — and doing so would be actively wrong, since a record's clap_desc
+// backs any clap_plugin_t the host has not yet destroyed.
 inline void entry_deinit() {}
 inline const void* entry_get_factory(const char* factory_id) {
     if (strcmp(factory_id, CLAP_PLUGIN_FACTORY_ID) == 0) return &plugin_factory;
@@ -777,21 +912,47 @@ inline const void* entry_get_factory(const char* factory_id) {
 
 } // namespace pulp::format::clap_generic
 
-// ── Public macro ───────────────────────────────────────────────────────
-// Place in ONE .cpp file per CLAP plugin.
-#define PULP_CLAP_PLUGIN(factory_fn) \
-    namespace { \
-        struct PulpClapInit { \
-            PulpClapInit() { \
-                pulp::format::clap_generic::g_factory = factory_fn; \
-                pulp::format::register_plugin(factory_fn); \
-                pulp::format::clap_generic::init_descriptor(); \
-            } \
-        } _pulp_clap_init; \
-    } \
+// ── Public macros ──────────────────────────────────────────────────────
+
+// The one CLAP module entry symbol. Exactly ONE per binary — the single-plugin
+// macro emits it for you; a bundle emits it once via PULP_CLAP_BUNDLE_ENTRY().
+#define PULP_CLAP_BUNDLE_ENTRY() \
     extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = { \
         .clap_version = CLAP_VERSION, \
         .init = pulp::format::clap_generic::entry_init, \
         .deinit = pulp::format::clap_generic::entry_deinit, \
         .get_factory = pulp::format::clap_generic::entry_get_factory, \
     };
+
+// Register one plugin in a multi-plugin CLAP bundle. Repeat once per plugin,
+// each with a distinct `Ident` token (used only to name the registrar). The
+// factory is stored at static init; its descriptor is built later in
+// entry_init() (never at static init). Pair N of these with ONE
+// PULP_CLAP_BUNDLE_ENTRY(). Bundles do NOT set the legacy global factory slot —
+// each plugin is resolved by id at create_plugin().
+#define PULP_CLAP_BUNDLE_PLUGIN(Ident, factory_fn) \
+    namespace { \
+        struct Ident##_ClapRegistrar { \
+            Ident##_ClapRegistrar() { \
+                pulp::format::clap_generic::register_clap_record(factory_fn, \
+                                                                 /*publish_keyed=*/true); \
+            } \
+        } Ident##_clap_registrar_; \
+    }
+
+// Place in ONE .cpp file per single-plugin CLAP bundle. Registers the one
+// plugin, keeps the legacy global factory slot (single-plugin back-compat), and
+// emits the module entry. Unchanged usage; descriptor build now happens in
+// entry_init() rather than at static init, so no Processor is constructed during
+// C++ static initialization.
+#define PULP_CLAP_PLUGIN(factory_fn) \
+    namespace { \
+        struct PulpClapInit { \
+            PulpClapInit() { \
+                pulp::format::clap_generic::register_clap_record(factory_fn, \
+                                                                 /*publish_keyed=*/false); \
+                pulp::format::register_plugin(factory_fn); \
+            } \
+        } _pulp_clap_init; \
+    } \
+    PULP_CLAP_BUNDLE_ENTRY()

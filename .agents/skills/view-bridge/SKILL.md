@@ -548,6 +548,20 @@ fresh lib instead of segfaulting at first paint.
    on THAT object, not just its host. Test: `[idle-pump][crash]` in
    `test_view_bridge.cpp` builds the pump, destroys the bridge, calls the pump →
    no-op instead of use-after-free.
+10. **In a multi-plugin bundle, editor/metadata callbacks must resolve
+    PER-INSTANCE state — never a process global.** A CLAP/AU/VST3 bundle exposes
+    N plugins from one binary, so a single shared descriptor global would hand
+    every plugin's editor the *first* plugin's metadata. The CLAP adapter caches
+    a per-instance `PulpClapPlugin::descriptor_snapshot` at `create_plugin()`
+    time; the audio/note-port and descriptor callbacks read
+    `self->processor ? processor->descriptor() : descriptor_snapshot`, never a
+    file-scope global. When wiring a new editor-facing callback (bus layout,
+    channel names, editor size, feature flags) in a bundle-capable adapter, pull
+    the answer from the instance's own processor/descriptor snapshot, or from the
+    keyed registry entry looked up by the instance's id — a global read silently
+    returns another plugin's data only once a second plugin ships, so it passes
+    every single-plugin test. Registry lookup is `find_plugin(id)`; the id is the
+    plugin's `bundle_id`.
 
 ## Tests
 

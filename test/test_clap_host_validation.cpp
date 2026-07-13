@@ -210,11 +210,8 @@ TEST_CASE("CLAP plugin id + parameter IDs are stable across instances",
     // the count this test pins.
     pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
 
-    // Force the entry to reinitialise its cached descriptor so we read
-    // the canonical (factory-fresh) value rather than a leftover from
-    // an earlier suite.
+    // init() builds the plugin's descriptor from a factory-fresh Processor.
     REQUIRE(clap_entry.init("test"));
-    pulp::format::clap_generic::init_descriptor();
 
     auto* factory = static_cast<const clap_plugin_factory_t*>(
         clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
@@ -320,7 +317,6 @@ TEST_CASE("CLAP plugin state save → load → save is byte-equivalent",
     // handle (it lives in clap_entry.hpp, NOT in clap_adapter.cpp's
     // get_extension dispatcher).
     REQUIRE(clap_entry.init("test"));
-    pulp::format::clap_generic::init_descriptor();
     auto* factory = static_cast<const clap_plugin_factory_t*>(
         clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
     REQUIRE(factory != nullptr);
