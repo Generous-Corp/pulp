@@ -1123,6 +1123,34 @@ Both macOS legs prefer `PULP_RELEASE_MACOS_RUNS_ON_JSON`. The signing leg then
 uses optional Namespace or GitHub-hosted `macos-15`; it deliberately does not fall
 back to the shared local PR pool because it imports a Developer ID private key.
 
+
+### NEVER set `run-name:` on release-cli.yml (it stops all releases)
+
+GitHub returns a workflow's `run-name` as **`workflow_run.name`** in the REST API —
+it **REPLACES** the workflow name, it does not sit alongside it. The self-hosted
+tartci supervisor that provisions release-cli's macOS VMs picks up its work with:
+
+```
+select(.name == "Release CLI")
+```
+
+So the moment a `run-name` is set, **every release run becomes invisible to the
+supervisor**. Its log reads `queued=0 running_macos_vms=0/2` while release runs sit
+with their required `darwin-arm64` leg queued forever. No macOS VM is booted, no
+runner appears, and **no release can ever build** — silently, for every future tag.
+
+This shipped once (a run-name was added so `release-reconcile.yml` could attribute
+its repair runs, since a `workflow_dispatch` run's `head_branch` is the ref it was
+dispatched FROM, not the tag it builds). The tag now travels in a **job name**
+(`resolve-macos-runner`), which the API exposes as a separate field and the
+supervisor does not key on. `tools/scripts/test_release_workflow_test_step.py`
+asserts `run-name` never returns.
+
+**The general rule:** a workflow's public identity (`name`, and therefore
+`run-name`) is an **interface** that self-hosted infrastructure keys on. Renaming a
+run is not cosmetic. Before changing it, grep the tartci supervisor config
+(`TARTCI_RUNNER_WORKFLOW_NAME`) for anything matching on it.
+
 ## One installer for a plugin: standalone + plugins + diagnostics (don't ship them separately)
 
 A user wants ONE installer, not a per-format `.pkg` plus a per-app `.dmg`. Do

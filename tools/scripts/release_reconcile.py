@@ -25,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, Sequence
 
 SEMVER_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+# Pulls the tag out of a job name like "Resolve macOS runner — v0.659.0".
+SEMVER_IN_TEXT = re.compile(r"v\d+\.\d+\.\d+")
 
 # Terminal states. A run in any other state is still doing something.
 LIVE_RUN_STATES = {"queued", "in_progress", "requested", "waiting", "pending"}
@@ -286,9 +288,31 @@ def collect(
     )
     flat_runs = [r for page in runs for r in page["workflow_runs"]]
 
+    # For a dispatch run, head_branch is `main`, so resolve its tag from its first
+    # job's name (release-cli.yml embeds it there). Only dispatch runs need this
+    # extra lookup, and there are only ever a handful in the window.
+    dispatch_tag: dict[int, str | None] = {}
+    for r in flat_runs:
+        if r.get("event") != "workflow_dispatch":
+            continue
+        found = None
+        try:
+            jobs = gh_json(["api", f"repos/{repo}/actions/runs/{r['id']}/jobs"])
+            for j in (jobs or {}).get("jobs", []):
+                m = SEMVER_IN_TEXT.search(j.get("name", ""))
+                if m:
+                    found = m.group(0)
+                    break
+        except subprocess.CalledProcessError:
+            pass
+        dispatch_tag[r["id"]] = found
+
     states: list[TagState] = []
     for tag, created_at in tags:
-        tag_runs = [r for r in flat_runs if runs_this_tag(r, tag)]
+        tag_runs = [
+            r for r in flat_runs
+            if runs_this_tag(r, tag, dispatch_tag.get(r["id"]))
+        ]
         rel = by_tag.get(tag)
         states.append(
             TagState(
@@ -310,21 +334,29 @@ def collect(
     return states
 
 
-def runs_this_tag(run: dict, tag: str) -> bool:
+def runs_this_tag(run: dict, tag: str, dispatch_tag: str | None = None) -> bool:
     """Does this workflow run belong to `tag`?
 
     `head_branch` is NOT sufficient. For a tag push it is the tag, but for a
     workflow_dispatch it is the ref the run was dispatched FROM — `main` — because
     we deliberately dispatch main's (fixed) workflow to build an old tag's source.
-    Matching on head_branch alone therefore makes every REPAIR run invisible to
-    the reconciler, which would then see zero attempts, never escalate, and fire a
-    fresh re-dispatch every 30 minutes forever.
+    Matching on head_branch alone makes every REPAIR run invisible: zero attempts
+    counted, escalation never fires, and a fresh re-dispatch goes out every 30
+    minutes forever.
 
-    release-cli.yml sets `run-name: Release <tag>` for both trigger types, which
-    surfaces as `display_title`. That is the reliable link. head_branch is kept as
-    a fallback so runs predating that run-name still match.
+    So a dispatch run is attributed by the tag embedded in its FIRST JOB's name
+    (`dispatch_tag`, read from the jobs API by `collect()`).
+
+    It is NOT attributed by a `run-name`, and release-cli.yml must never set one.
+    GitHub returns `run-name` as `workflow_run.name` — REPLACING the workflow name —
+    and the self-hosted tartci supervisor picks up its work with
+    `select(.name == "Release CLI")`. A run-name therefore hides every release run
+    from the supervisor, which then reports `queued=0` and never boots a macOS VM.
+    No runner, no release, ever. Job names are a separate API field and are safe.
     """
-    return run.get("display_title") == f"Release {tag}" or run.get("head_branch") == tag
+    if run.get("head_branch") == tag:
+        return True
+    return dispatch_tag is not None and dispatch_tag == tag
 
 
 def redispatch(repo: str, tag: str, dry_run: bool) -> None:

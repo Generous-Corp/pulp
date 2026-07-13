@@ -569,12 +569,33 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         )
         self.assertIs(self.workflow["concurrency"]["cancel-in-progress"], False)
 
-    def test_run_name_carries_the_tag_so_repairs_are_attributable(self) -> None:
-        """release-reconcile.py identifies repair runs by display_title."""
-        run_name = self.workflow["run-name"]
-        self.assertIn("inputs.version", run_name)
-        self.assertIn("github.ref_name", run_name)
-        self.assertTrue(run_name.startswith("Release "))
+    def test_release_cli_must_never_set_a_run_name(self) -> None:
+        """A `run-name` on this workflow stops every release from getting a runner.
+
+        GitHub returns `run-name` as `workflow_run.name` in the REST API — it
+        REPLACES the workflow name rather than sitting alongside it. The self-hosted
+        tartci supervisor that provisions this workflow's macOS VMs selects its work
+        with `select(.name == "Release CLI")`. So the moment a run-name is set, every
+        release run is invisible to it: it reports `queued=0`, never boots a VM, and
+        the required `darwin-arm64` leg queues forever. No macOS runner, no release.
+
+        This shipped once, to let release-reconcile.yml attribute repair runs, and it
+        silently broke the release lane. The tag belongs in a JOB name instead.
+        """
+        self.assertNotIn(
+            "run-name",
+            self.workflow,
+            "release-cli.yml set a `run-name`. That hides every release run from the "
+            "tartci supervisor (which matches `.name == \"Release CLI\"`), so no "
+            "macOS VM is ever provisioned and NO RELEASE CAN BUILD. Put the tag in a "
+            "job name instead.",
+        )
+
+    def test_the_tag_is_carried_in_a_job_name_for_repair_attribution(self) -> None:
+        """release-reconcile.py resolves a dispatch run's tag from its job names."""
+        name = self.workflow["jobs"]["resolve-macos-runner"]["name"]
+        self.assertIn("inputs.version", name)
+        self.assertIn("github.ref_name", name)
 
     def test_publish_transaction_is_globally_serialized(self) -> None:
         """The latest-pointer decision is a read-then-write; serialize it.
