@@ -2523,10 +2523,22 @@ TEST_CASE("WidgetBridge setWidgetShader reports every failure honestly",
         globalThis.cleared  = clearWidgetShader('knob');
     )");
 
+    // A valid shader installs — but only where there is a compiler to accept it.
+    // The sanitizer and coverage lanes configure -DPULP_ENABLE_GPU=OFF, and with
+    // no Skia there is no SkSL compiler: compile_sksl() reports "Skia not
+    // available", so setWidgetShader() honestly refuses rather than installing a
+    // shader that could never paint. Refusing loudly is the contract this whole
+    // test is about, so assert that instead of skipping the case.
+#ifdef PULP_HAS_SKIA
     REQUIRE(engine.evaluate("ok.success").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("ok.error").toString().empty());
+#else
+    REQUIRE_FALSE(engine.evaluate("ok.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("ok.error").toString().empty());
+#endif
 
-    // Garbage SkSL: rejected, with the compiler's reason.
+    // Garbage SkSL: rejected, with a reason. (With Skia that reason is the SkSL
+    // compiler's; without it, that no compiler exists. Either way: never silent.)
     REQUIRE_FALSE(engine.evaluate("garbage.success").getWithDefault<bool>(true));
     REQUIRE_FALSE(engine.evaluate("garbage.error").toString().empty());
 
