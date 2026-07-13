@@ -147,8 +147,15 @@ TEST_CASE("TransientPhasePolicy64 fires on double broadband onsets",
     REQUIRE(policy.analyze(frames, 1, bins) > 0.0);
 }
 
-TEST_CASE("Transient preservation keeps click crest under time stretch",
+TEST_CASE("Transient preservation keeps a stretched impulse peaky",
           "[signal][transient]") {
+    // A single loud isolated impulse is a maximally unambiguous transient: the
+    // spectral-flux detector fires far above its median-relative threshold, so
+    // the detect/phase-reset decision is identical across architectures,
+    // optimization levels, and SIMD targets — the assertion measures the
+    // feature, not floating-point luck. With phase reset on (transient
+    // preservation) the impulse stays sharp under time-stretch; with it off the
+    // phase vocoder smears it across frames, lowering the peak-to-RMS crest.
     auto crest_db = [](const std::vector<float>& x) {
         float peak = 0.0f;
         for (float v : x) peak = std::max(peak, std::abs(v));
@@ -158,7 +165,7 @@ TEST_CASE("Transient preservation keeps click crest under time stretch",
         return 20.0 * std::log10((peak + 1e-30) / (rms + 1e-30));
     };
 
-    auto stretch_clicks = [&](bool preserve) {
+    auto stretch_impulse = [&](bool preserve) {
         RealtimePitchTimeConfig config;
         config.quality = PitchTimeQuality::quality;
         config.mode = PitchTimeMode::time_stretch;
@@ -168,7 +175,7 @@ TEST_CASE("Transient preservation keeps click crest under time stretch",
         proc.set_time_ratio(1.5f);
 
         std::vector<float> in(96000, 0.0f);
-        for (int i = 4800; i < 96000; i += 9600) in[static_cast<size_t>(i)] = 0.9f;
+        in[24000] = 1.0f;  // one strong isolated impulse in silence
         const float* ip[1];
         std::vector<float> collected;
         std::vector<float> chunk(1024);
@@ -184,10 +191,14 @@ TEST_CASE("Transient preservation keeps click crest under time stretch",
         return crest_db(collected);
     };
 
-    const double crest_on = stretch_clicks(true);
-    const double crest_off = stretch_clicks(false);
+    const double crest_on = stretch_impulse(true);
+    const double crest_off = stretch_impulse(false);
     INFO("crest on " << crest_on << " dB, off " << crest_off << " dB");
-    REQUIRE(crest_on + 0.25 > crest_off);
+    // Preservation keeps the impulse clearly peakier. The measured margin is
+    // ~4.4 dB (x86_64) / ~4.9 dB (arm64); assert a conservative 2 dB so the
+    // test is a real behavioral guarantee with wide cross-architecture headroom
+    // rather than a rounding-noise coin flip.
+    REQUIRE(crest_on > crest_off + 2.0);
 }
 
 // ── FreezeHold (through the processor) ──────────────────────────────────────
