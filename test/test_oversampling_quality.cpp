@@ -116,6 +116,39 @@ double tone_gain_db(const std::vector<double>& samples, std::size_t begin, doubl
     return 20.0 * std::log10(amplitude / input_amplitude);
 }
 
+// Rejection of a pure tone injected *inside* the callback, i.e. content the
+// oversampled DSP produced rather than content the caller supplied. `frequency`
+// is in cycles per BASE sample, so 0.5 is base Nyquist and factor/2 is the
+// oversampled Nyquist. Returns how far the surviving output RMS sits below the
+// injected tone's RMS.
+double injected_tone_rejection_db(Oversampler64::Quality quality, Oversampler64::Factor factor,
+                                  double frequency) {
+    Oversampler64 oversampler;
+    oversampler.set_kind(Oversampler64::Kind::linear_phase_fir);
+    oversampler.set_quality(quality);
+    oversampler.set_factor(factor);
+
+    const double oversampled_frequency = frequency / static_cast<double>(factor);
+    constexpr std::size_t frames = 8192;
+    const std::size_t settled = static_cast<std::size_t>(2 * oversampler.latency_samples() + 512);
+
+    std::size_t callback_frame = 0;
+    double energy = 0.0;
+    for (std::size_t i = 0; i < frames; ++i) {
+        const double output = oversampler.process(0.0, [&](double) {
+            const double value = std::sin(2.0 * kPi * oversampled_frequency *
+                                          static_cast<double>(callback_frame));
+            ++callback_frame;
+            return value;
+        });
+        if (i >= settled)
+            energy += output * output;
+    }
+    const double mean_square = energy / static_cast<double>(frames - settled);
+    // A unit-amplitude sine has mean square 0.5.
+    return 10.0 * std::log10(0.5 / (mean_square + 1e-300));
+}
+
 } // namespace
 
 TEST_CASE("Linear-phase oversampler reports and produces its pinned latency",
@@ -313,6 +346,102 @@ TEST_CASE("Staged Biquad lane rejects callback content above base Nyquist at x16
     const double rms_db = 10.0 * std::log10(energy / (frames - 2049));
     INFO("x16 staged-Biquad stopband RMS dBFS=" << rms_db);
     REQUIRE(rms_db < -24.0);
+}
+
+TEST_CASE("Every decimation stage holds its design floor against base-band aliases",
+          "[signal][oversampling][stopband]") {
+    // Each 2x decimation stage `s` folds around 2^s * Fs, so callback content in
+    // (2^s - 0.5, 2^s) * Fs aliases straight into the base passband and is
+    // attenuated by that stage's stopband alone — the lower stages pass the alias
+    // through untouched. Probing one window per stage therefore pins every stage's
+    // stopband independently; probing only near base Nyquist (window s = 0) leaves
+    // the upper stages of x4/x8/x16 completely unconstrained.
+    //
+    // Attenuation is weakest at the low end of each window (nearest the stage's
+    // stopband edge), so the offsets crowd toward zero.
+    constexpr std::array<double, 9> kOffsets = {0.001, 0.005, 0.02, 0.05, 0.1,
+                                                0.15,  0.25,  0.35, 0.49};
+
+    for (const auto& config : kConfigurations) {
+        const bool pristine = config.quality == Oversampler::Quality::pristine;
+        // The designs target 96 dB / 140 dB; hold them to that within a 2 dB margin.
+        const double floor_db = pristine ? 138.0 : 94.0;
+        const int factor = static_cast<int>(config.factor);
+
+        double worst_db = 1e9;
+        double worst_frequency = 0.0;
+        for (int stage = 0; (1 << stage) < factor; ++stage) {
+            const double fold = static_cast<double>(1 << stage);
+            for (const double offset : kOffsets) {
+                const double frequency = fold - 0.5 + offset;
+                const double rejection = injected_tone_rejection_db(
+                    static_cast<Oversampler64::Quality>(config.quality),
+                    static_cast<Oversampler64::Factor>(config.factor), frequency);
+                if (rejection < worst_db) {
+                    worst_db = rejection;
+                    worst_frequency = frequency;
+                }
+            }
+        }
+        INFO("factor=" << factor << " pristine=" << pristine << " worst rejection dB=" << worst_db
+                       << " at " << worst_frequency << "*Fs (floor " << floor_db << ")");
+        REQUIRE(worst_db > floor_db);
+    }
+}
+
+TEST_CASE("Linear-phase oversampler reset restores a fresh instance exactly",
+          "[signal][oversampling][reset]") {
+    auto configure = [](Oversampler& oversampler, Oversampler::Factor factor,
+                        Oversampler::Quality quality) {
+        oversampler.set_kind(Oversampler::Kind::linear_phase_fir);
+        oversampler.set_quality(quality);
+        oversampler.set_factor(factor);
+    };
+    auto saturate = [](float sample) { return std::tanh(2.0f * sample); };
+
+    for (const auto& config : kConfigurations) {
+        Oversampler warmed;
+        Oversampler fresh;
+        configure(warmed, config.factor, config.quality);
+        configure(fresh, config.factor, config.quality);
+
+        // Push enough signal to fill every stage's delay line and leave the
+        // decimators' odd-phase holdover non-zero, then reset.
+        for (std::size_t i = 0; i < 777; ++i) {
+            const float input = 0.7f * std::sin(static_cast<float>(2.0 * kPi * 0.13 * i));
+            static_cast<void>(warmed.process(input, saturate));
+        }
+        warmed.reset();
+
+        for (std::size_t i = 0; i < 512; ++i) {
+            const float input = 0.4f * std::sin(static_cast<float>(2.0 * kPi * 0.071 * i));
+            INFO("factor=" << static_cast<int>(config.factor)
+                           << " quality=" << static_cast<int>(config.quality) << " frame=" << i);
+            REQUIRE(warmed.process(input, saturate) == fresh.process(input, saturate));
+        }
+    }
+}
+
+TEST_CASE("Linear-phase latency is an exact sample count, not a truncation",
+          "[signal][oversampling][latency]") {
+    // latency() sums (taps - 1) / 2^(stage + 1) and returns the integer cast of
+    // that sum while reporting `constant = true`. The tap counts are chosen so the
+    // sum is integral; a tap-table edit that broke that would silently under-report
+    // a fractional delay to the host. Pin the invariant itself, independent of the
+    // expected-sample pins.
+    for (const auto& config : kConfigurations) {
+        Oversampler oversampler;
+        oversampler.set_kind(Oversampler::Kind::linear_phase_fir);
+        oversampler.set_quality(config.quality);
+        oversampler.set_factor(config.factor);
+
+        const auto latency = oversampler.latency();
+        INFO("factor=" << oversampler.factor_value()
+                       << " exact=" << latency.exact_input_samples);
+        REQUIRE(latency.constant);
+        REQUIRE_THAT(latency.exact_input_samples,
+                     WithinAbs(static_cast<double>(latency.input_samples), 1e-9));
+    }
 }
 
 TEST_CASE("Pristine float decimator keeps stopband energy below its numeric floor",
