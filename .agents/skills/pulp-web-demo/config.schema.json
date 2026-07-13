@@ -53,6 +53,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "emit": {
+          "description": "Whether to generate the gallery landing page. Default 'auto': emit when the catalog has more than one plugin (a gallery is pointless for a single plugin). Set false to keep a hand-curated gallery of your own.",
+          "type": ["boolean", "string"],
+          "enum": [true, false, "auto"],
+          "default": "auto"
+        },
         "title": { "type": "string" },
         "layout": { "type": "string", "enum": ["grid", "list", "single"], "default": "grid" },
         "crossLinks": {
@@ -154,10 +160,49 @@
           }
         },
         "paramOverrides": {
-          "description": "Widget/choices/initial overrides. Controls themselves come from getParameterInfo(); this only refines them.",
+          "description": "Initial param values by label. Controls themselves come from getParameterInfo(); this only refines them.",
           "type": "object"
         },
-        "midiViz": { "type": "string", "enum": ["transpose", "mpe", "inspector", "sysex"] }
+        "midiViz": { "type": "string", "enum": ["transpose", "mpe", "inspector", "sysex"] },
+        "paramRows": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Rows to reserve in the param grid before params arrive, so the panel doesn't jump on start."
+        },
+        "synthUrls": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Chain this plugin into a synth voice pool so a MIDI effect is AUDIBLE. Required for midi-effect demos — without it they render but produce no sound.",
+          "properties": {
+            "dsp": { "type": "string" },
+            "processor": { "type": "string" }
+          }
+        },
+        "widgets": {
+          "description": "Widget-kind overrides by param id or label, e.g. { \"Gain\": \"fader\" }. Values: knob|fader|toggle|combo.",
+          "type": "object"
+        },
+        "choices": {
+          "description": "Names for a stepped int param, e.g. { \"Waveform\": [\"Saw\", \"Square\"] }.",
+          "type": "object"
+        },
+        "inputGain": { "type": "number", "description": "Linear source trim in front of an effect." },
+        "fileUpload": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Declare that this plugin accepts a user-supplied file (e.g. a convolver's impulse response). The player must then offer BOTH a file-dialog button AND a drag-and-drop zone — drop is a shortcut, not a replacement, and the button is the only path on touch devices. The drop-zone mechanics are a PLAYER behavior (see SKILL.md 'File upload'); never re-implement them per demo.",
+          "properties": {
+            "accept": {
+              "type": "string",
+              "description": "Input accept list, e.g. \"audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg\"."
+            },
+            "label": { "type": "string", "description": "Button label, e.g. \"Load impulse response…\"." },
+            "hint": { "type": "string", "description": "Short line shown in the drop zone, e.g. \"or drop a file here\"." },
+            "revertLabel": { "type": "string", "description": "Optional label for a 'back to the built-in' control." }
+          }
+        },
+        "controllers": { "type": "boolean", "description": "Expose the controller/preset surface." },
+        "stateMemo": { "type": "boolean", "description": "Enable the state-memo surface." }
       }
     },
     "abiArtifacts": {

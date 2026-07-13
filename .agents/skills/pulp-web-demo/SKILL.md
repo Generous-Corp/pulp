@@ -73,6 +73,74 @@ player behavior outside the package, which is the whole thing this skill prevent
 - Regeneration is ownership-aware: the validator refuses to clobber a locally-edited owned file
   without reconciliation.
 
+## Gallery and theme (both optional)
+
+- **`gallery.emit`** — `"auto"` (default): emit the gallery landing page only when the catalog
+  has more than one plugin (a gallery is pointless for a single plugin). `true` / `false` force
+  it; use `false` to keep a hand-curated landing page of your own.
+- **`theme`** — omit it entirely and the player uses its **own bundled skin**. Only set
+  `tokensHref` / `fontHref` when you are actually supplying a token stylesheet.
+
+## File upload (dialog **and** drag-and-drop)
+
+If a plugin takes a user-supplied file (a convolver's impulse response, a sample, a preset),
+declare it with the per-plugin **`fileUpload`** config (`accept`, `label`, `hint`). The demo must
+then offer **both** a file-dialog button **and** a drop zone — people drag files onto anything
+that looks like a target.
+
+**This is a PLAYER behavior, not a per-demo one.** Like every other UX invariant, the drop-zone
+mechanics belong in the shared player so both ABIs inherit them. Re-implementing a drop zone in
+one demo page is exactly the drift this skill exists to prevent — its WCLAP twin would then need
+its own copy, and the two would diverge.
+
+Any implementation MUST satisfy all six rules. Each one, skipped, makes the zone feel broken:
+
+1. **Swallow drops on the whole `document`.** The browser's default action for a file dropped
+   anywhere on the page is to **navigate to it**, destroying the running demo — audio context,
+   loaded state, knob positions. Add `document` listeners for `dragover` and `drop` that call
+   `preventDefault()` and nothing else, so a ten-pixel miss is inert rather than session-ending.
+   That is a brutal punishment for a gesture you invited. **Unbind them in `destroy()`.**
+2. **Count `dragenter`/`dragleave` depth — do not toggle.** `dragleave` bubbles from the zone's
+   own children, so dragging across a button *inside* the zone fires it and the highlight
+   strobes. Keep a depth counter; clear the highlight only at zero.
+3. **Scope the highlight to the drop zone**, never the whole plugin — the highlight is the thing
+   that tells someone where the target is.
+4. **Set `dataTransfer.dropEffect = "copy"`** on `dragover`, so the cursor shows a copy badge
+   rather than a "no entry" sign.
+5. **Handle the empty drop.** `dataTransfer.files[0]` can be `undefined` (dragged text, a URL).
+   Say so; don't throw.
+6. **Keep the button.** Drop is a shortcut, not a replacement — and it is the *only* path on
+   touch devices.
+
+**Testing gotcha (this one bites):** drive it with real `DragEvent`s and a real `DataTransfer`
+carrying a real `File`. The real browser order when the pointer crosses into a child is
+**`dragenter` on the new target, then `dragleave` on the old** — so a test that fires a bare
+`dragleave` will report a highlight-flicker bug **that does not exist**.
+
+**Reference implementation:** `examples/web-demos/super-convolver-ui/ir-source.js` (drop zone at
+the bottom of `mountIrLoader()`; both traps written up in its comments). It also shows a related
+trap worth knowing: **`decodeAudioData` resamples, so the decoded buffer never carries the file's
+real sample rate** — parse the WAV/AIFF header (`sniffAudioHeader`) if you want to tell the user
+the truth about their file. That code currently lives in a demo and should be **upstreamed into
+the shared player**, not copied.
+
+## Gotchas (learned the hard way — do not re-derive)
+
+- **Never put a `?query` on the player's import specifier.** An import map keys on the *exact*
+  bare specifier, so `import ... from "<pkg>?v=<hash>"` never matches the `"<pkg>"` key and the
+  module fails to resolve — the demo does not load at all. The cache-bust belongs on the
+  **mapped URL**. A versioned CDN pin is already its own cache key.
+- **A `midi-effect` demo without `synthUrls` is SILENT.** It renders fine and looks correct, but
+  a MIDI effect emits notes with nothing to play them. `synthUrls` chains it into a synth voice
+  pool. Always set it for `mode: "midi-effect"`.
+- **The WAM artifact set is three files, not two:** `wam-dsp.js`, `wam-processor.js`, **and
+  `wam-runtime.mjs`**. The worklet imports the runtime *relative to itself*, so it must be
+  co-located with the processor. Miss it and `audioWorklet.addModule()` fails with a bare
+  `AbortError: Unable to load a worklet's module`.
+- **Never invent a `tokensHref`.** A made-up relative path just 404s and silently drops the skin.
+- **Cache-bust the main-thread entry only** — never the worklet/dsp URLs; both sides must resolve
+  to one processor name.
+
 ## Example
 
 `examples/example.config.json` is a copy-and-edit starting point: one plugin, WAM on GitHub
