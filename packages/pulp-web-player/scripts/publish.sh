@@ -14,19 +14,56 @@
 # So this script refuses to publish unless the tree it is publishing IS origin/main,
 # clean, tested, and carrying the files it claims to carry.
 #
-# THE TOKEN never touches disk in plaintext and is never held in a persistent npmrc.
-# It lives in 1Password (which already syncs across the machines), is read at run
-# time, written to a 0600 temp npmrc, and shredded on exit — including on failure.
-# npm 2FA is a passkey with no typeable OTP, so the token is a GRANULAR token with
-# "Bypass 2FA" enabled; that is the only combination that can publish non-interactively.
+# THE TOKEN — file-backed, never a prompt.
+#
+# The live path is a FILE with strict permissions:  ~/.config/pulp/secrets/npm-token
+# (0600, inside a 0700 dir — the same convention as notary.env and pulp-signing.p12).
+# 1Password holds a BACKUP copy; it is NOT the live path and is never read here.
+#
+# That distinction is the whole point: if a release needs a human to approve a
+# 1Password prompt, the release is not unattended. It is the same reason the git
+# signing key is a file (~/.ssh/github-signing-<machine>) with `IdentityAgent none`
+# rather than the 1Password SSH agent. 1Password is the backup, not the live path.
+#
+# One-time per machine:  ./scripts/publish.sh --bootstrap   (reads 1Password ONCE,
+# writes the 0600 file). Every publish after that is silent.
+#
+# npm 2FA here is a passkey with no typeable OTP, so this must be a GRANULAR token
+# with "Bypass 2FA" enabled — the only kind that can publish non-interactively.
 set -euo pipefail
 
 readonly PKG="@danielraffel/web-player"
-readonly OP_REF="op://Private/jd6btv2ja4rnoxcvmt2zy53nau/working token NO 2fa"
+readonly TOKEN_FILE="${PULP_NPM_TOKEN_FILE:-$HOME/.config/pulp/secrets/npm-token}"
+readonly OP_BACKUP_REF="op://Private/jd6btv2ja4rnoxcvmt2zy53nau/working token NO 2fa"  # BACKUP only
 readonly MUST_SHIP=("src/shell.js" "src/index.js" "src/ui/file-upload.js" "src/state/plugin-state.js")
 
 cd "$(dirname "$0")/.."
 DRY_RUN=0; [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+
+# ── --check-auth: is THIS machine set up to publish unattended? Answers the only
+#    question that matters — will a publish stop and ask a human? Touches nothing.
+if [[ "${1:-}" == "--check-auth" ]]; then
+  [[ -f "$TOKEN_FILE" ]] || { printf '  ✗ no token at %s — run: ./scripts/publish.sh --bootstrap\n' "$TOKEN_FILE"; exit 1; }
+  perms="$(stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || stat -c '%a' "$TOKEN_FILE")"
+  [[ "$perms" == "600" ]] || { printf '  ✗ %s is mode %s — must be 0600\n' "$TOKEN_FILE" "$perms"; exit 1; }
+  [[ "$(head -c4 "$TOKEN_FILE")" == "npm_" ]] || { printf '  ✗ %s does not hold an npm token\n' "$TOKEN_FILE"; exit 1; }
+  printf '  ✓ %s (0600, npm_…)\n' "$TOKEN_FILE"
+  printf '  ✓ unattended: the live path is this file — no 1Password, no agent, no prompt\n'
+  printf '  ✓ 1Password holds the BACKUP only (restore with --bootstrap)\n'
+  exit 0
+fi
+
+# ── bootstrap: materialise the file-backed token from the 1Password BACKUP. This is
+#    the ONLY code path that touches 1Password, and it runs once per machine.
+if [[ "${1:-}" == "--bootstrap" ]]; then
+  command -v op >/dev/null || { printf '  1Password CLI (op) not found\n' >&2; exit 1; }
+  mkdir -p "$(dirname "$TOKEN_FILE")"; chmod 700 "$(dirname "$TOKEN_FILE")"
+  tok="$(op read "$OP_BACKUP_REF")" || { printf '  could not read the 1Password backup\n' >&2; exit 1; }
+  [[ "$tok" == npm_* ]] || { printf '  that does not look like an npm token\n' >&2; exit 1; }
+  umask 077; printf '%s\n' "$tok" > "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"; unset tok
+  printf '  ✓ wrote %s (0600). Publishes are unattended from now on.\n' "$TOKEN_FILE"
+  exit 0
+fi
 
 die() { printf '\n  ✗ %s\n' "$*" >&2; exit 1; }
 say() { printf '  %s\n' "$*"; }
@@ -65,21 +102,29 @@ for f in "${MUST_SHIP[@]}"; do
 done
 say "✓ tarball carries all ${#MUST_SHIP[@]} required entrypoints"
 
+# ── 5. Auth: the LIVE path is a 0600 file. No 1Password, no agent, NO PROMPT.
+#       Checked even on a dry run — an unattended publish that would have stopped to
+#       ask a human is exactly the failure this script exists to rule out.
+[[ -f "$TOKEN_FILE" ]] \
+  || die "no token at $TOKEN_FILE — run once per machine: ./scripts/publish.sh --bootstrap"
+perms="$(stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || stat -c '%a' "$TOKEN_FILE")"
+[[ "$perms" == "600" ]] || die "$TOKEN_FILE is mode $perms — must be 0600"
+[[ "$(head -c4 "$TOKEN_FILE")" == "npm_" ]] || die "$TOKEN_FILE does not contain an npm token"
+say "✓ token: file-backed, 0600, unattended (1Password is the backup, not the live path)"
+
 if (( DRY_RUN )); then
-  printf '\n  DRY RUN — everything passed; not publishing.\n'
+  printf '\n  DRY RUN — every guard passed, auth is unattended; not publishing.\n'
   exit 0
 fi
 
 # ── 5. Publish. Token read at run time; npmrc is 0600 and shredded on ANY exit. ─
-command -v op >/dev/null || die "1Password CLI (op) not found — needed to read the npm token"
 TMPNPMRC="$(mktemp -t webplayer-npmrc.XXXXXX)"
 cleanup() { rm -f "$TMPNPMRC"; }
 trap cleanup EXIT INT TERM
 chmod 600 "$TMPNPMRC"
 
-token="$(op read "$OP_REF" 2>/dev/null)" \
-  || die "could not read the npm token from 1Password. Is 1Password unlocked? ($OP_REF)"
-[[ "$token" == npm_* ]] || die "the value in 1Password does not look like an npm token"
+token="$(< "$TOKEN_FILE")"
+[[ "$token" == npm_* ]] || die "$TOKEN_FILE does not contain an npm token"
 printf '//registry.npmjs.org/:_authToken=%s\n' "$token" > "$TMPNPMRC"
 unset token
 
