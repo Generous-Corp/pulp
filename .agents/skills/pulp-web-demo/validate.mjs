@@ -6,11 +6,11 @@
 //   node validate.mjs --site <dir> --check-metadata   # OG/unfurl tags present (blocking)
 //   node validate.mjs --site <dir> --check-ownership  # owned files unmodified since generation
 //
-// The headline risk (Codex): isolation must cover the REAL base path (e.g. /my-plugins/),
+// The headline risk (Codex): isolation must cover the REAL base path (e.g. /example-plugins/),
 // not "/", or the page loads and only threaded init fails.
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { createHash } from "node:crypto";
 
 const args = process.argv.slice(2);
@@ -80,6 +80,23 @@ function checkIsolation(cfg, site) {
 }
 
 // ---- metadata / OG (blocking) ----
+//
+// The generator EMITS an og:image tag; it does not RENDER the image (rendering needs a
+// browser, and the generator is deliberately offline + deterministic). So the tag can
+// point at nothing. Worse: a static host will happily serve a missing asset as HTTP 200
+// (Cloudflare Pages does), so a status-code probe would confirm an image that isn't there.
+// The only honest check is the bytes: the file must exist AND start with the PNG magic.
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+function ogImageIsReal(site, pageRel, imgUrl) {
+  // og:image is absolute (siteBase + basePath + id + "/og.png"); resolve it to the page dir
+  const name = imgUrl.split("/").pop();
+  const f = join(site, dirname(pageRel), name);
+  if (!existsSync(f)) return { ok: false, why: `missing: ${dirname(pageRel)}/${name}` };
+  const head = readFileSync(f).subarray(0, 8);
+  if (!head.equals(PNG_MAGIC)) return { ok: false, why: `${dirname(pageRel)}/${name} is not a PNG (a host would still serve it 200)` };
+  return { ok: true };
+}
+
 function checkMetadata(cfg, site) {
   const strategy = cfg.metadata?.ogImageStrategy || "screenshot";
   const pages = [];
@@ -93,7 +110,14 @@ function checkMetadata(cfg, site) {
     if (strategy === "screenshot" && !/property="og:image"/.test(h) && !/index\.html$/.test(rel) === false && !rel.startsWith("index")) {
       // gallery root may omit a per-plugin image; plugin pages must have one under screenshot strategy
     }
-    if (strategy === "screenshot" && /\/index\.html$/.test("/" + rel) && rel !== "index.html" && !/property="og:image"/.test(h)) bad(`${rel}: screenshot strategy requires og:image`);
+    if (strategy === "screenshot" && rel !== "index.html") {
+      const m = h.match(/property="og:image" content="([^"]+)"/);
+      if (!m) { bad(`${rel}: screenshot strategy requires og:image`); }
+      else {
+        const v = ogImageIsReal(site, rel, m[1]);
+        if (!v.ok) bad(`${rel}: og:image ${v.why}`);
+      }
+    }
   }
   if (pages.length) ok(`metadata present on ${pages.length} pages (strategy: ${strategy})`);
 }
