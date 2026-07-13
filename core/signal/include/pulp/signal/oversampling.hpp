@@ -17,10 +17,13 @@ namespace pulp::signal {
 //
 // Three filter `Kind`s are available:
 //
-//   * `fir_biquad` (default) — the source-compatible single Biquad pair for
-//     x2/x4, with staged pairs for x8/x16. Lightweight and symmetric, but
-//     transition-band selectivity is limited and the filters' cutoffs scale
-//     with the labelled sample rate.
+//   * `fir_biquad` (default) — a Butterworth Biquad pair per 2x stage.
+//     Lightweight and symmetric, but a single biquad cannot reject much near
+//     the fold boundary: worst-case base-band alias rejection is only around
+//     7 dB, and the passband is about -1.9 dB at 0.3 of the base rate. Those
+//     figures hold at every factor — raising the factor buys headroom for the
+//     callback's own harmonics, not a cleaner filter. Reach for one of the
+//     kinds below when the anti-aliasing itself has to be good.
 //   * `polyphase_iir` — half-band polyphase IIR (Vaidyanathan /
 //     Regalia-Mitra) using `HalfBandUpsampler2x` /
 //     `HalfBandDownsampler2x`. Sample-rate-invariant, < 0.001 dB
@@ -64,10 +67,11 @@ template <typename SampleType = float> class OversamplerT {
 
     /// RT contract: set_factor(), set_sample_rate(), set_kind(), and reset()
     /// are setup/control operations that mutate filter state and should run
-    /// outside the audio callback. After configuration, the templated
-    /// process() and process_block() paths are allocation-free when the
-    /// supplied callback is also allocation-free. The std::function overload is
-    /// source-compatible but does not make heap-backed callbacks RT-safe.
+    /// outside the audio callback. After configuration, process() and
+    /// process_block() are allocation-free whenever the supplied callback is —
+    /// including for a std::function callback, which is taken by reference and
+    /// never copied per sample. A std::function still costs an indirect call, so
+    /// hot paths should prefer the templated overload.
     void set_factor(Factor f) {
         factor_ = f;
         configure_filters();
@@ -131,10 +135,13 @@ template <typename SampleType = float> class OversamplerT {
         return process_with_callback(input, std::forward<Callback>(callback));
     }
 
-    // Source-compatible convenience overload for callers that already hold a
-    // std::function. Capturing or heap-backed std::function payloads are not a
-    // realtime-safety guarantee; hot paths should use the templated overload.
-    SampleType process(SampleType input, std::function<SampleType(SampleType)> callback) {
+    // Convenience overload for callers that already hold a std::function. Taken by
+    // const reference: a by-value parameter would copy the callable — and so heap
+    // -allocate, for any payload too large for the small-object buffer — on every
+    // sample, including once per sample underneath process_block(). Invoking a
+    // std::function still costs an indirect call; hot paths want the templated
+    // overload above.
+    SampleType process(SampleType input, const std::function<SampleType(SampleType)>& callback) {
         return process_with_callback(input, callback);
     }
 
@@ -143,13 +150,13 @@ template <typename SampleType = float> class OversamplerT {
     template <typename Callback>
     void process_block(const SampleType* input, SampleType* output, std::size_t num_samples,
                        Callback&& callback) {
+        // Dispatch straight to the implementation instead of re-running overload
+        // resolution once per sample.
         for (std::size_t i = 0; i < num_samples; ++i)
-            output[i] = process(input[i], callback);
+            output[i] = process_with_callback(input[i], callback);
     }
 
     void reset() {
-        aa_up_.reset();
-        aa_down_.reset();
         for (auto& stage : biquad_up_stages_)
             stage.reset();
         for (auto& stage : biquad_down_stages_)
@@ -192,24 +199,25 @@ template <typename SampleType = float> class OversamplerT {
     }
 
     // ── fir_biquad lane ────────────────────────────────────────────────
-    BiquadT<SampleType> aa_up_;
-    BiquadT<SampleType> aa_down_;
     std::array<BiquadT<SampleType>, kMaxStages> biquad_up_stages_;
     std::array<BiquadT<SampleType>, kMaxStages> biquad_down_stages_;
 
     void configure_filters() {
-        SampleType cutoff = sample_rate_ * SampleType{0.4f}; // Below Nyquist of original rate
-        const SampleType os_rate = sample_rate_ * static_cast<SampleType>(factor_value(factor_));
-        aa_up_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff, SampleType{0.707f},
-                                os_rate);
-        aa_down_.set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff, SampleType{0.707f},
-                                  os_rate);
+        // A 2x stage decimates to 2^stage * Fs, so what it has to keep clean is that
+        // rate's Nyquist — half of it — not the base rate's. Putting each stage's
+        // cutoff at 0.8 of its own fold boundary hands every stage the same
+        // normalized filter, which is what stage 0's 0.4 * Fs already was. Reusing
+        // one absolute 0.4 * Fs cutoff at every stage instead would make each added
+        // stage lowpass the base band again, dragging the passband down with it.
+        const SampleType base_cutoff = sample_rate_ * SampleType{0.4f};
         for (std::size_t stage = 0; stage < kMaxStages; ++stage) {
             const SampleType stage_rate = sample_rate_ * static_cast<SampleType>(1u << (stage + 1));
-            biquad_up_stages_[stage].set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
-                                                      SampleType{0.707f}, stage_rate);
-            biquad_down_stages_[stage].set_coefficients(BiquadT<SampleType>::Type::lowpass, cutoff,
-                                                        SampleType{0.707f}, stage_rate);
+            const SampleType stage_cutoff = base_cutoff * static_cast<SampleType>(1u << stage);
+            biquad_up_stages_[stage].set_coefficients(BiquadT<SampleType>::Type::lowpass,
+                                                      stage_cutoff, SampleType{0.707f}, stage_rate);
+            biquad_down_stages_[stage].set_coefficients(BiquadT<SampleType>::Type::lowpass,
+                                                        stage_cutoff, SampleType{0.707f},
+                                                        stage_rate);
         }
         if (kind_ == Kind::linear_phase_fir)
             configure_linear_phase_filters();
@@ -237,19 +245,6 @@ template <typename SampleType = float> class OversamplerT {
 
     template <typename Callback>
     SampleType process_fir_biquad(SampleType input, Callback& callback) {
-        if (factor_ == Factor::x2 || factor_ == Factor::x4) {
-            const int factor = factor_value(factor_);
-            std::array<SampleType, static_cast<std::size_t>(Factor::x4)> values{};
-            values[0] = input * static_cast<SampleType>(factor);
-            for (int i = 0; i < factor; ++i)
-                values[i] = aa_up_.process(values[i]);
-            for (int i = 0; i < factor; ++i)
-                values[i] = callback(values[i]);
-            for (int i = 0; i < factor; ++i)
-                values[i] = aa_down_.process(values[i]);
-            return values[0];
-        }
-
         std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
         std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
         values[0] = input;
