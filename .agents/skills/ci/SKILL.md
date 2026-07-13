@@ -473,19 +473,23 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `release-dry-run.yml`, `sign-and-release.yml`, `release-cli-local.sh`, and
   checkout-backed SDK configure paths aligned when touching release CMake
   flags.
-- **`sign-and-release.yml` waits on `release-cli.yml` to create the release —
-  the wait must cover release-cli's FULL runtime.** Since the release split
-  (release-cli is the sole creator of the GitHub release; sign-and-release only
-  attaches `appcast.xml` on top), sign-and-release polls `gh release view "$TAG"`
-  until the release exists. release-cli creates it only after its whole chain
-  (`build-cli → smoke-cli`), which includes a self-hosted
-  darwin-arm64 leg that can queue behind a busy runner — routinely far longer
-  than 10 minutes. A too-short poll loses that race on every tag and leaves the
-  published release without its Sparkle feed (the watchdog flags it as a broken
-  release). Keep the wait window generous (currently `150 * 20s = 50 min`); if
-  release-cli grows a slower leg, widen it rather than letting the appcast attach
-  silently time out. The SDK/CLI binaries are unaffected either way — they are
-  release-cli's output; only the appcast rides on sign-and-release.
+- **`sign-and-release.yml` does NOT wait on the release any more — do not add the
+  poll back.** It used to poll `gh release view "$TAG"` until release-cli created
+  the release, so it could attach `appcast.xml`. That poll ran on the macOS
+  notarize job, which holds the single release VM — the same VM release-cli's
+  `darwin-arm64` leg needs to *produce* the release being waited for. It was a
+  circular wait, and every tag where signing won the race deadlocked until the
+  poll timed out.
+
+  `release-cli.yml` now writes `appcast.xml` itself (the Sparkle feed is a pure
+  function of the tag name, so nothing about it needed macOS signing) and is the
+  sole owner of publication end to end. `sign-and-release.yml` holds
+  `contents: read` and cannot write a release at all: it may fail, hang, or be
+  cancelled without affecting whether the SDK ships.
+
+  Widening a poll timeout was the old mitigation and it is exactly backwards — a
+  longer wait squats the scarce VM for longer. If you find yourself raising a
+  timeout on the release VM, stop: move the wait off the VM instead.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push
@@ -745,22 +749,53 @@ fails and the whole release never publishes (the `release` job `needs` the full
 `manifests/pulp.macos.toml`); the workflow fallback stays as the portability
 belt for any un-baked runner.
 
-### `release-cli.yml` has a native Intel (`darwin-x64`) leg
+### `release-cli.yml`'s Intel (`darwin-x64`) leg is CROSS-COMPILED, not native
 
 `release-cli.yml`'s macOS matrix ships TWO slices: `darwin-arm64` (routed through
-`resolve-macos-runner`) and `darwin-x64` on GitHub-hosted `macos-15-intel`. The
-Intel leg deliberately **does not** go through the resolver — the `runs-on`
-ternary only routes `matrix.os == 'macos-15'`, so `macos-15-intel` runs on that
-fixed hosted label (no self-hosted/Namespace/VM routing, and Rust is
-preinstalled so the toolchain-bootstrap above is a no-op there). It's a native
-build (no cross-compile, no Rosetta) with a `CMAKE_OSX_DEPLOYMENT_TARGET=13.0`
-floor and an arch-asserting smoke. `macos-15-intel` is the pinned stable hosted
-x86_64 macOS image (supported ~through Aug 2027; `macos-13` retired Dec 2025;
-`macos-26-intel` also exists but is newer/less-baked) — when it EOLs, the
-successor is cross-compiling on the arm64 pool
-(`planning/2026-07-10-intel-mac-cli-support.md`). Do NOT route this leg to the
-self-hosted studios (the `no Intel on the studios` discipline in
-`docs/guides/intel-support.md`).
+`resolve-macos-runner`) and `darwin-x64`, which **cross-compiles on an
+Apple-Silicon runner** via the `macos-15-xcompile` sentinel — routed by
+`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default `["macos-15"]`), deliberately
+NOT through `resolve-macos-runner`. It builds with
+`-DCMAKE_OSX_ARCHITECTURES=x86_64` plus
+`-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin`, and smoke-tests the thin binary
+under Rosetta. It is a **REQUIRED** leg, the same reliability class as
+`darwin-arm64`, so Intel ships in every release.
+
+The native `macos-15-intel` image is **not** used: it CPU-pegs, queues for hours,
+and never reliably shipped an artifact. Do not "restore" a native Intel leg, and
+do not route Intel to the self-hosted studios (the `no Intel on the studios`
+discipline in `docs/guides/intel-support.md`).
+
+### A release starves behind advisory lanes — check contention before blaming a build
+
+Three separate capacity walls have each, on their own, stopped a tagged SDK from
+publishing while every platform binary built green. When a tag is stuck, work
+down this list before touching build code:
+
+1. **The macOS release VM is a capacity-1 pool.** It takes a 6-core lease and the
+   host budget fits exactly one, so `release-cli`'s `darwin-arm64` leg cannot run
+   alongside anything else that wants that VM. Anything that *waits* on another
+   workflow while holding it deadlocks the release outright.
+2. **`release-path-pr-gate.yml` routes its macOS leg at that same release VM**
+   (via `PULP_RELEASE_MACOS_RUNS_ON_JSON`). So **every PR competes with actual
+   releases** for the one VM. A release job queued 90 minutes will keep losing to
+   PR jobs queued 2 minutes — meanwhile the Studios sit idle. The tell is a
+   `darwin-arm64` leg stuck `queued` for hours with no failure.
+3. **GitHub-hosted macOS concurrency is effectively ~1 job at a time.** The
+   release's `darwin-x64` and universal-arch-gate legs both land on hosted
+   `macos-15`, where they queue behind *advisory* lanes — sanitizers (×4 per PR),
+   coverage, `sandbox-e2e`, Android, Intel-portability, consumer smoke. None of
+   those are required checks; the release is. It loses to all of them.
+
+**Diagnose, don't guess.** `tartci observe macos` on the VM host shows what the
+runner is *actually* running (it prints the live `Running job:` line), and
+
+```bash
+ghapp api repos/danielraffel/pulp/actions/runners     # busy/idle per runner
+```
+
+distinguishes "saturated" from "wedged" from "starved by a lower-priority lane."
+An offline-but-`busy=True` runner is a dead VM still holding its slot.
 
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
