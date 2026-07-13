@@ -28,4 +28,30 @@
     }; \
     AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, ClassName)
 
+// ── Multi-plugin bundle variant ──────────────────────────────────────────
+// One binary hosts many instruments (`aumu`). Binds each component to its own
+// factory lexically (via the factory-taking PulpAUInstrument ctor), so the
+// base-ctor output-element probe and processor construction never consult the
+// legacy global slot, and registers a KEYED entry (which never touches that
+// global). Expand once per component; N per binary is legal. The trailing arg
+// is a PluginRegistration braced-init carrying id + AU codes (WITHOUT
+// `.factory` — bound from factory_fn, see PULP_AU_BUNDLE_ENTRY_); it is
+// variadic so its internal commas survive the preprocessor.
+#define PULP_AU_BUNDLE_INSTRUMENT(ClassName, factory_fn, ...) \
+    namespace { \
+        struct ClassName##_Registrar { \
+            ClassName##_Registrar() { \
+                ::pulp::format::PluginRegistration reg __VA_ARGS__; \
+                reg.factory = factory_fn; \
+                ::pulp::format::register_plugin(reg); \
+            } \
+        } ClassName##_registrar_; \
+    } \
+    class ClassName : public pulp::format::au::PulpAUInstrument { \
+    public: \
+        explicit ClassName(AudioComponentInstance ci) \
+            : PulpAUInstrument(ci, factory_fn) {} \
+    }; \
+    AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, ClassName)
+
 #endif // defined(__APPLE__)
