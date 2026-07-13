@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "player": {
+    "package": "@danielraffel/web-player",
+    "version": "0.1.0"
+  },
+  "theme": {
+    "tokensHref": "./theme/tokens.css",
+    "fontHref": "./theme/fonts.css",
+    "mode": "auto"
+  },
+  "deploy": {
+    "wam": {
+      "profile": "github-pages",
+      "basePath": "/my-plugins/",
+      "publicUrl": "https://example.com/my-plugins/",
+      "outputDir": "docs"
+    },
+    "wclap": {
+      "profile": "cloudflare",
+      "basePath": "/my-plugins/",
+      "publicUrl": "https://my-plugins.pages.dev/my-plugins/",
+      "outputDir": "docs",
+      "projectName": "my-plugins"
+    }
+  },
+  "metadata": {
+    "siteBase": "https://example.com/my-plugins",
+    "ogImageStrategy": "screenshot",
+    "sourceLinkBase": "https://github.com/you/my-plugins/tree/main"
+  },
+  "gallery": {
+    "title": "My plugins — live web demos",
+    "layout": "grid",
+    "crossLinks": [
+      { "label": "also runs as WCLAP →", "href": "https://my-plugins.pages.dev/my-plugins/", "abi": "wclap" }
+    ]
+  },
+  "plugins": [
+    {
+      "id": "my-plugin",
+      "title": "My Plugin",
+      "subtitle": "One honest sentence about what it does.",
+      "mode": "audio-effect",
+      "abis": ["wam", "wclap"]
+    }
+  ]
+}
