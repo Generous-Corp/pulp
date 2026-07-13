@@ -187,6 +187,20 @@
           "type": "object"
         },
         "inputGain": { "type": "number", "description": "Linear source trim in front of an effect." },
+        "fileUpload": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Declare that this plugin accepts a user-supplied file (e.g. a convolver's impulse response). The player must then offer BOTH a file-dialog button AND a drag-and-drop zone — drop is a shortcut, not a replacement, and the button is the only path on touch devices. The drop-zone mechanics are a PLAYER behavior (see SKILL.md 'File upload'); never re-implement them per demo.",
+          "properties": {
+            "accept": {
+              "type": "string",
+              "description": "Input accept list, e.g. \"audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg\"."
+            },
+            "label": { "type": "string", "description": "Button label, e.g. \"Load impulse response…\"." },
+            "hint": { "type": "string", "description": "Short line shown in the drop zone, e.g. \"or drop a file here\"." },
+            "revertLabel": { "type": "string", "description": "Optional label for a 'back to the built-in' control." }
+          }
+        },
         "controllers": { "type": "boolean", "description": "Expose the controller/preset surface." },
         "stateMemo": { "type": "boolean", "description": "Enable the state-memo surface." }
       }
