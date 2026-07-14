@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/elliptic_halfband_iir.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/oversampling_fir.hpp>
 
@@ -15,7 +16,7 @@ namespace pulp::signal {
 // Oversampling processor — runs a callback at 2x, 4x, 8x, or 16x sample rate
 // with anti-aliasing filters on input and output.
 //
-// Three filter `Kind`s are available:
+// Four filter `Kind`s are available:
 //
 //   * `fir_biquad` (default) — a Butterworth Biquad pair per 2x stage.
 //     Lightweight and symmetric, but a single biquad cannot reject much near
@@ -32,6 +33,17 @@ namespace pulp::signal {
 //   * `linear_phase_fir` — Kaiser-windowed FIR with a transition that ends at
 //     the base-rate Nyquist. `Quality::standard` is a 96 dB design flat to
 //     80% of Nyquist; `Quality::pristine` uses a 140 dB prototype flat to 90%.
+//   * `elliptic_polyphase_iir` — half-band polyphase IIR using the
+//     Valenzuela-Constantinides elliptic design (`EllipticHalfBandUpsampler2x`
+//     / `EllipticHalfBandDownsampler2x`) instead of `polyphase_iir`'s fixed
+//     six-section design. Same allpass-network shape and the same "no
+//     constant latency" contract, but a different, design-equation-driven
+//     section count per stage: the design equations solve directly for a
+//     requested transition width and stopband floor, so pick this kind when
+//     a specific latency/response operating point matters more than
+//     matching `polyphase_iir`'s fixed coefficient table. `Quality` selects
+//     the per-stage transition-width/stopband schedule, same as
+//     `linear_phase_fir`.
 //
 // Switch with `set_kind()`. All kinds share the same callback API so
 // callers don't need to know which filter is active. Configure factor,
@@ -45,9 +57,10 @@ template <typename SampleType = float> class OversamplerT {
 
     /// Which anti-aliasing filter family the oversampler uses.
     enum class Kind {
-        fir_biquad,       ///< Original biquad lowpass on both sides.
-        polyphase_iir,    ///< Half-band polyphase IIR (allpass-network).
-        linear_phase_fir, ///< Linear-phase FIR with reported integer latency.
+        fir_biquad,             ///< Original biquad lowpass on both sides.
+        polyphase_iir,          ///< Half-band polyphase IIR (allpass-network).
+        linear_phase_fir,       ///< Linear-phase FIR with reported integer latency.
+        elliptic_polyphase_iir, ///< Half-band polyphase IIR, elliptic (Valenzuela-Constantinides) design.
     };
 
     enum class Quality {
@@ -86,12 +99,16 @@ template <typename SampleType = float> class OversamplerT {
         kind_ = kind;
         if (kind_ == Kind::linear_phase_fir)
             configure_linear_phase_filters();
+        else if (kind_ == Kind::elliptic_polyphase_iir)
+            configure_elliptic_filters();
         reset();
     }
     void set_quality(Quality quality) {
         quality_ = quality;
         if (kind_ == Kind::linear_phase_fir)
             configure_linear_phase_filters();
+        else if (kind_ == Kind::elliptic_polyphase_iir)
+            configure_elliptic_filters();
         reset();
     }
     Kind kind() const {
@@ -165,6 +182,10 @@ template <typename SampleType = float> class OversamplerT {
             stage.reset();
         for (auto& stage : hb_down_stages_)
             stage.reset();
+        for (auto& stage : elliptic_up_stages_)
+            stage.reset();
+        for (auto& stage : elliptic_down_stages_)
+            stage.reset();
         for (auto& stage : fir_stages_)
             stage.reset();
     }
@@ -195,6 +216,9 @@ template <typename SampleType = float> class OversamplerT {
         if (kind_ == Kind::polyphase_iir) {
             return process_polyphase_iir(input, callback);
         }
+        if (kind_ == Kind::elliptic_polyphase_iir) {
+            return process_elliptic_polyphase_iir(input, callback);
+        }
         return process_fir_biquad(input, callback);
     }
 
@@ -221,6 +245,32 @@ template <typename SampleType = float> class OversamplerT {
         }
         if (kind_ == Kind::linear_phase_fir)
             configure_linear_phase_filters();
+        else if (kind_ == Kind::elliptic_polyphase_iir)
+            configure_elliptic_filters();
+    }
+
+    // Per-stage transition-width / stopband-floor schedule for the elliptic
+    // design: stage 0 gets half the transition width of later stages (its
+    // Nyquist has the least headroom), and each stage's stopband floor
+    // shallows by a fixed step off a deep stage-0 floor — a linear
+    // `floor_start + step * stage_index` progression. `Quality::pristine`
+    // narrows the transition width and deepens the stage-0 floor relative to
+    // `Quality::standard`, with a larger per-stage step.
+    void configure_elliptic_filters() {
+        const bool max_quality = quality_ == Quality::pristine;
+        const double tw_up_base = max_quality ? 0.10 : 0.12;
+        const double tw_down_base = max_quality ? 0.12 : 0.15;
+        const double gain_start_up = max_quality ? -90.0 : -70.0;
+        const double gain_start_down = max_quality ? -75.0 : -60.0;
+        const double gain_step = max_quality ? 10.0 : 8.0;
+        for (std::size_t stage = 0; stage < kMaxStages; ++stage) {
+            const double half_first = stage == 0 ? 0.5 : 1.0;
+            const double stage_index = static_cast<double>(stage);
+            elliptic_up_stages_[stage].configure(tw_up_base * half_first,
+                                                 gain_start_up + gain_step * stage_index);
+            elliptic_down_stages_[stage].configure(tw_down_base * half_first,
+                                                   gain_start_down + gain_step * stage_index);
+        }
     }
 
     void configure_linear_phase_filters() {
@@ -273,6 +323,9 @@ template <typename SampleType = float> class OversamplerT {
     // ── polyphase_iir lane ─────────────────────────────────────────────
     std::array<HalfBandUpsampler2xT<SampleType>, kMaxStages> hb_up_stages_;
     std::array<HalfBandDownsampler2xT<SampleType>, kMaxStages> hb_down_stages_;
+    // ── elliptic_polyphase_iir lane ────────────────────────────────────
+    std::array<EllipticHalfBandUpsampler2xT<SampleType>, kMaxStages> elliptic_up_stages_;
+    std::array<EllipticHalfBandDownsampler2xT<SampleType>, kMaxStages> elliptic_down_stages_;
     std::array<detail::LinearPhaseOversamplingStage2x<SampleType>, kMaxStages> fir_stages_;
 
     template <typename Callback>
@@ -295,6 +348,31 @@ template <typename SampleType = float> class OversamplerT {
             count /= 2;
             for (std::size_t i = 0; i < count; ++i) {
                 values[i] = hb_down_stages_[stage].process(values[2 * i], values[2 * i + 1]);
+            }
+        }
+        return values[0];
+    }
+
+    template <typename Callback>
+    SampleType process_elliptic_polyphase_iir(SampleType input, Callback& callback) {
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> values{};
+        std::array<SampleType, static_cast<std::size_t>(Factor::x16)> expanded{};
+        values[0] = input;
+        std::size_t count = 1;
+        const int stages = stage_count();
+        for (int stage = 0; stage < stages; ++stage) {
+            for (std::size_t i = 0; i < count; ++i) {
+                elliptic_up_stages_[stage].process(values[i], expanded[2 * i], expanded[2 * i + 1]);
+            }
+            count *= 2;
+            std::copy_n(expanded.begin(), count, values.begin());
+        }
+        for (std::size_t i = 0; i < count; ++i)
+            values[i] = callback(values[i]);
+        for (int stage = stages; stage-- > 0;) {
+            count /= 2;
+            for (std::size_t i = 0; i < count; ++i) {
+                values[i] = elliptic_down_stages_[stage].process(values[2 * i], values[2 * i + 1]);
             }
         }
         return values[0];

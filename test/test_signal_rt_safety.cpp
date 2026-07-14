@@ -14,6 +14,7 @@
 #include <pulp/signal/fft_backend.hpp>
 #include <pulp/signal/freeze_hold.hpp>
 #include <pulp/signal/freeze_loop_sampler.hpp>
+#include <pulp/signal/elliptic_halfband_iir.hpp>
 #include <pulp/signal/halfband_iir.hpp>
 #include <pulp/signal/interpolator.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
@@ -132,6 +133,14 @@ TEST_CASE("Oversampler process is allocation-free after configuration",
     require_process_allocates_no_memory(Oversampler::Kind::linear_phase_fir,
                                         Oversampler::Factor::x8);
     require_process_allocates_no_memory(Oversampler::Kind::linear_phase_fir,
+                                        Oversampler::Factor::x16);
+    require_process_allocates_no_memory(Oversampler::Kind::elliptic_polyphase_iir,
+                                        Oversampler::Factor::x2);
+    require_process_allocates_no_memory(Oversampler::Kind::elliptic_polyphase_iir,
+                                        Oversampler::Factor::x4);
+    require_process_allocates_no_memory(Oversampler::Kind::elliptic_polyphase_iir,
+                                        Oversampler::Factor::x8);
+    require_process_allocates_no_memory(Oversampler::Kind::elliptic_polyphase_iir,
                                         Oversampler::Factor::x16);
 }
 
@@ -1064,6 +1073,8 @@ TEST_CASE("Prepared phase and half-band helpers are allocation-free while proces
     HalfBandAllpassSection section(0.5f);
     HalfBandUpsampler2x upsampler;
     HalfBandDownsampler2x downsampler;
+    EllipticHalfBandUpsampler2x elliptic_upsampler;
+    EllipticHalfBandDownsampler2x elliptic_downsampler;
 
     NoiseMorpher noise_morpher;
     noise_morpher.prepare(8, 0x1234ull);
@@ -1116,6 +1127,16 @@ TEST_CASE("Prepared phase and half-band helpers are allocation-free while proces
         (void)downsampler.process(lo, hi);
         downsampler.process_block(up_output, down_output);
         downsampler.reset();
+
+        (void)elliptic_upsampler.direct_sections();
+        (void)elliptic_upsampler.delayed_sections();
+        elliptic_upsampler.process(0.125f, lo, hi);
+        elliptic_upsampler.reset();
+
+        (void)elliptic_downsampler.direct_sections();
+        (void)elliptic_downsampler.delayed_sections();
+        (void)elliptic_downsampler.process(lo, hi);
+        elliptic_downsampler.reset();
 
         (void)noise_morpher.num_bins();
         noise_morpher.push_envelope(envelope_b.data());

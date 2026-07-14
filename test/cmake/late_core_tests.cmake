@@ -34,6 +34,12 @@ pulp_add_test_suite(pulp-test-resampler LIBRARIES pulp::signal)
 # Polyphase IIR half-band filter
 pulp_add_test_suite(pulp-test-halfband-iir LIBRARIES pulp::signal)
 
+# Elliptic (Valenzuela-Constantinides) polyphase IIR half-band filter
+pulp_add_test_suite(pulp-test-elliptic-halfband-iir LIBRARIES pulp::signal)
+
+# Block-oriented multi-channel polyphase oversampler
+pulp_add_test_suite(pulp-test-polyphase-block-oversampler LIBRARIES pulp::signal)
+
 # Generic Synthesiser polyphony
 pulp_add_test_suite(pulp-test-synthesiser
     SOURCES test_synthesiser.cpp harness/rt_allocation_probe.cpp

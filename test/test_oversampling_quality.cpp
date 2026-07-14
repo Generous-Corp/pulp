@@ -176,7 +176,8 @@ TEST_CASE("Linear-phase oversampler reports and produces its pinned latency",
 TEST_CASE("Minimum-phase oversampler does not claim constant latency",
           "[signal][oversampling][latency]") {
     Oversampler oversampler;
-    for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir}) {
+    for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir,
+                            Oversampler::Kind::elliptic_polyphase_iir}) {
         oversampler.set_kind(kind);
         REQUIRE_FALSE(oversampler.latency().constant);
         REQUIRE(oversampler.latency_samples() == 0);
@@ -210,6 +211,7 @@ TEST_CASE("Every linear-phase factor preserves its advertised base-rate passband
 
 TEST_CASE("Every oversampling lane supports every factor", "[signal][oversampling][factor]") {
     for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir,
+                            Oversampler::Kind::elliptic_polyphase_iir,
                             Oversampler::Kind::linear_phase_fir}) {
         for (const auto factor : {Oversampler::Factor::x2, Oversampler::Factor::x4,
                                   Oversampler::Factor::x8, Oversampler::Factor::x16}) {
@@ -331,6 +333,7 @@ TEST_CASE("Every oversampling kind passes DC at unity gain", "[signal][oversampl
     // of the interpolator's images standing, because decimation folds the image at
     // every multiple of the base rate coherently back onto DC.
     for (const auto kind : {Oversampler64::Kind::fir_biquad, Oversampler64::Kind::polyphase_iir,
+                            Oversampler64::Kind::elliptic_polyphase_iir,
                             Oversampler64::Kind::linear_phase_fir}) {
         for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x4,
                                   Oversampler64::Factor::x8, Oversampler64::Factor::x16}) {
@@ -519,6 +522,123 @@ TEST_CASE("Linear-phase latency is an exact sample count, not a truncation",
         REQUIRE_THAT(latency.exact_input_samples,
                      WithinAbs(static_cast<double>(latency.input_samples), 1e-9));
     }
+}
+
+TEST_CASE("Elliptic polyphase IIR oversampler preserves passband gain at every factor",
+          "[signal][oversampling][elliptic][passband]") {
+    constexpr double amplitude = 0.5;
+    constexpr std::size_t frames = 8192;
+    for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x4,
+                              Oversampler64::Factor::x8, Oversampler64::Factor::x16}) {
+        for (const auto quality :
+             {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+            Oversampler64 oversampler;
+            oversampler.set_kind(Oversampler64::Kind::elliptic_polyphase_iir);
+            oversampler.set_quality(quality);
+            oversampler.set_factor(factor);
+
+            constexpr double frequency = 0.1;
+            std::vector<double> output(frames);
+            for (std::size_t i = 0; i < frames; ++i) {
+                const double input = amplitude * std::sin(2.0 * kPi * frequency * i);
+                output[i] = oversampler.process(input, [](double sample) { return sample; });
+            }
+            const double gain_db = tone_gain_db(output, 2048, frequency, amplitude);
+            INFO("factor=" << static_cast<int>(factor) << " quality=" << static_cast<int>(quality)
+                           << " gain_db=" << gain_db);
+            REQUIRE(std::abs(gain_db) < 0.25);
+        }
+    }
+}
+
+TEST_CASE("Elliptic polyphase IIR oversampler rejects deep-stopband energy",
+          "[signal][oversampling][elliptic][stopband]") {
+    // Same shape as the biquad/linear-phase stopband checks above: drive a
+    // tone the callback itself introduces near the fold boundary and
+    // confirm the decimator holds it down. Pristine's tighter per-stage
+    // schedule (configure_elliptic_filters()) must reject at least as well
+    // as standard.
+    const double standard_rejection = injected_tone_rejection_db(
+        Oversampler64::Kind::elliptic_polyphase_iir, Oversampler64::Quality::standard,
+        Oversampler64::Factor::x2, 0.55);
+    const double pristine_rejection = injected_tone_rejection_db(
+        Oversampler64::Kind::elliptic_polyphase_iir, Oversampler64::Quality::pristine,
+        Oversampler64::Factor::x2, 0.55);
+    INFO("standard=" << standard_rejection << " dB pristine=" << pristine_rejection << " dB");
+    REQUIRE(standard_rejection > 20.0);
+    REQUIRE(pristine_rejection > standard_rejection - 1.0);
+}
+
+TEST_CASE("Elliptic polyphase IIR differs in group delay from the default polyphase IIR design",
+          "[signal][oversampling][elliptic][latency]") {
+    // This is the whole reason the Kind exists: the two minimum-phase
+    // polyphase IIR designs are NOT interchangeable latency-wise. Neither
+    // reports a latency() (both are correctly non-constant / frequency-
+    // dependent group delay), so the only way to observe the difference is
+    // to compare their impulse responses directly. A relabelled copy of
+    // `polyphase_iir` would produce a bit-identical response; a genuinely
+    // different design (different section count, different coefficients)
+    // does not.
+    for (const auto factor : {Oversampler::Factor::x2, Oversampler::Factor::x4,
+                              Oversampler::Factor::x8}) {
+        Oversampler default_design;
+        default_design.set_kind(Oversampler::Kind::polyphase_iir);
+        default_design.set_factor(factor);
+        const auto default_impulse = render_impulse(default_design, 256);
+
+        Oversampler elliptic_design;
+        elliptic_design.set_kind(Oversampler::Kind::elliptic_polyphase_iir);
+        elliptic_design.set_quality(Oversampler::Quality::pristine);
+        elliptic_design.set_factor(factor);
+        const auto elliptic_impulse = render_impulse(elliptic_design, 256);
+
+        double max_abs_diff = 0.0;
+        for (std::size_t i = 0; i < default_impulse.size(); ++i) {
+            max_abs_diff = std::max(
+                max_abs_diff,
+                static_cast<double>(std::abs(default_impulse[i] - elliptic_impulse[i])));
+        }
+        INFO("factor=" << static_cast<int>(factor) << " max_abs_diff=" << max_abs_diff);
+        REQUIRE(std::isfinite(max_abs_diff));
+        REQUIRE(max_abs_diff > 1e-3);
+    }
+}
+
+TEST_CASE("Elliptic polyphase IIR oversampler reset restores a fresh instance exactly",
+          "[signal][oversampling][elliptic][reset]") {
+    Oversampler warmed, fresh;
+    warmed.set_kind(Oversampler::Kind::elliptic_polyphase_iir);
+    fresh.set_kind(Oversampler::Kind::elliptic_polyphase_iir);
+    warmed.set_quality(Oversampler::Quality::pristine);
+    fresh.set_quality(Oversampler::Quality::pristine);
+    warmed.set_factor(Oversampler::Factor::x4);
+    fresh.set_factor(Oversampler::Factor::x4);
+
+    auto saturate = [](float sample) { return std::tanh(2.0f * sample); };
+    for (std::size_t i = 0; i < 777; ++i) {
+        const float input = 0.7f * std::sin(static_cast<float>(2.0 * kPi * 0.13 * i));
+        static_cast<void>(warmed.process(input, saturate));
+    }
+    warmed.reset();
+
+    for (std::size_t i = 0; i < 512; ++i) {
+        const float input = 0.4f * std::sin(static_cast<float>(2.0 * kPi * 0.071 * i));
+        INFO("frame=" << i);
+        REQUIRE(warmed.process(input, saturate) == fresh.process(input, saturate));
+    }
+}
+
+TEST_CASE("OversamplerT::Kind ordinals preserve pre-elliptic ABI",
+          "[signal][oversampling][kind][abi]") {
+    // elliptic_polyphase_iir was added after linear_phase_fir already
+    // shipped as ordinal 2. Inserting it before linear_phase_fir would bump
+    // linear_phase_fir to ordinal 3, silently reinterpreting any persisted
+    // integer Kind == 2 (e.g. a saved plugin state) as a different filter
+    // after upgrading. New kinds must only ever append at the end.
+    REQUIRE(static_cast<int>(Oversampler::Kind::fir_biquad) == 0);
+    REQUIRE(static_cast<int>(Oversampler::Kind::polyphase_iir) == 1);
+    REQUIRE(static_cast<int>(Oversampler::Kind::linear_phase_fir) == 2);
+    REQUIRE(static_cast<int>(Oversampler::Kind::elliptic_polyphase_iir) == 3);
 }
 
 TEST_CASE("Pristine float decimator keeps stopband energy below its numeric floor",

@@ -495,7 +495,8 @@ a working convolution and would hide the bug. Assert
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
-| Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
+| Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; two minimum-phase polyphase IIR designs (fixed six-section and elliptic Valenzuela-Constantinides) and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
+| Polyphase Block Oversampling | `polyphase_block_oversampler.hpp` | Block-oriented, multi-channel half-band oversampling that exposes the intermediate oversampled buffer for joint-channel work (shared dither, stereo-linked sidechain) between the up and down passes |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
 | Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
 | Waveshaper | `waveshaper.hpp` | Static nonlinear distortion via transfer function (tanh, soft clip, custom) |
