@@ -83,7 +83,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
     }
 
-    canvas.set_font("Inter", font_size_);
+    canvas.set_font(font_family_.empty() ? std::string("Inter") : font_family_, font_size_);
     canvas.set_text_align(canvas::TextAlign::left);
 
     // Display text
@@ -93,7 +93,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
 
     if (multi_line) {
-        canvas.set_font("Inter", font_size_);
+        canvas.set_font(font_family_.empty() ? std::string("Inter") : font_family_, font_size_);
         canvas.set_text_align(canvas::TextAlign::left);
         const float inner_x = b.x + 6.0f;
         const float inner_y = b.y + 4.0f;
@@ -400,12 +400,22 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
     auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
     auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
-    auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
-    selection_fill.a = 168;
-    auto selected_text_color = resolve_color("bg.primary", bg_color);
+    // The selection band's colour is a token in its own right, honoured exactly
+    // as authored — alpha included. Falling back to the accent colour with a
+    // forced alpha (the old behaviour) meant a skin could never choose the
+    // selection's transparency: whatever it set was overwritten.
+    auto accent = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
+    accent.a = 168;
+    auto selection_fill = resolve_color("text.selection", accent);
+    auto selected_text_color = resolve_color("text.selected", resolve_color("bg.primary", bg_color));
 
     canvas.save();
-    canvas.clip_rect(text_inner_x - 2.0f, b.y + 2.0f, text_inner_w + 4.0f, std::max(0.0f, b.height - 4.0f));
+    // Clip the text to the frame's content box. The inset is the field's own —
+    // a skin that asked for a 4px indent gets its text clipped at 4px, not at a
+    // widget constant that has nothing to do with the frame it drew.
+    canvas.clip_rect(b.x + pad.left - 2.0f, b.y + pad.top,
+                     std::max(0.0f, b.width - pad.horizontal() + 4.0f),
+                     std::max(0.0f, b.height - pad.vertical()));
 
     // Reuse the cached single-line snapshot for all per-glyph x lookups
     // (selection start/width, before/selected/after text origins). The

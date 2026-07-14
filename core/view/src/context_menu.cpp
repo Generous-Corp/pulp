@@ -39,12 +39,23 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
     // what lets a menu be sized before it is shown.
     auto& shaper = canvas::global_text_shaper();
 
-    float widest = kMinWidth;
+    // The stock minimum width is a floor on the STOCK look only. Once a metrics
+    // delegate is sizing the rows it owns the width outright, and silently
+    // clamping its answer up to a widget constant would make a skinned menu
+    // that asked for 60px come out 120px wide for no reason the skin can see.
+    float widest = 0.0f;
+    bool any_delegated_width = false;
     float stacked = 0.0f;
     std::vector<float> heights;
     heights.reserve(items_.size());
 
-    for (const auto& it : items_) {
+    // A separator is a divider BETWEEN rows, so a trailing one divides nothing
+    // and is dropped rather than adding a strip of empty panel at the bottom.
+    std::size_t count = items_.size();
+    while (count > 0 && items_[count - 1].separator) --count;
+
+    for (std::size_t idx = 0; idx < count; ++idx) {
+        const auto& it = items_[idx];
         BoxSize size;
         bool sized = false;
         if (metrics != nullptr) {
@@ -57,6 +68,7 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
             q.standard_height = 0.0f;   // no caller-forced row height
             sized = metrics->menu_item_size(q, size, const_cast<ContextMenu&>(*this));
         }
+        if (sized && size.width > 0.0f) any_delegated_width = true;
         if (!sized || size.width <= 0.0f) {
             size.width = it.separator
                 ? 0.0f
@@ -70,6 +82,7 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
         stacked += size.height;
     }
 
+    if (!any_delegated_width) widest = std::max(widest, kMinWidth);
     const float width = widest + lay.border * 2.0f;
     const float height = stacked + lay.border * 2.0f;
 
@@ -84,11 +97,15 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
     lay.box = {x, y, width, height};
 
     float row_y = y + lay.border;
-    lay.rows.reserve(heights.size());
+    lay.rows.reserve(items_.size());
     for (float h : heights) {
         lay.rows.push_back({x + lay.border, row_y, widest, h});
         row_y += h;
     }
+    // Dropped trailing separators still need a rect so `rows` stays index-
+    // aligned with `items`; they are simply empty.
+    while (lay.rows.size() < items_.size())
+        lay.rows.push_back({x + lay.border, row_y, widest, 0.0f});
     return lay;
 }
 

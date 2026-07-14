@@ -571,6 +571,29 @@ void TextEditor::advance_caret_blink(float dt) {
     caret_blink_.advance(dt);
 }
 
+float TextEditor::intrinsic_height() const {
+    EdgeInsets pad{};
+    const float stock_pad = std::max(9.0f, border_width() + 7.0f);
+    pad = EdgeInsets{stock_pad * 0.5f, stock_pad, stock_pad * 0.5f, stock_pad};
+    if (auto* m = effective_metrics(); m != nullptr) {
+        EdgeInsets from_delegate;
+        if (m->text_field_insets(from_delegate, const_cast<TextEditor&>(*this)))
+            pad = from_delegate;
+    }
+    if (has_own_insets_) pad = insets_;
+
+    float size = font_size_;
+    if (auto* m = effective_metrics(); m != nullptr) {
+        FontSpec f;
+        if (m->text_field_font(f, const_cast<TextEditor&>(*this)) && f.size > 0.0f)
+            size = f.size;
+    }
+    // A conservative single-line box: the em size plus the usual ascender +
+    // descender allowance, then the frame.
+    const float line = std::ceil(size * 1.35f);
+    return line + pad.vertical();
+}
+
 float TextEditor::caret_width() const {
     // Precedence mirrors the insets: an explicit per-widget width wins, then an
     // installed metrics delegate, then the stock stroke.

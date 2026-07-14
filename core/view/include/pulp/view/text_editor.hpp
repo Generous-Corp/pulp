@@ -256,6 +256,21 @@ public:
     bool undo();
     bool redo();
 
+    // ── Layout ────────────────────────────────────────────────────────────
+
+    /// The field's natural height: one line of text plus the frame insets.
+    ///
+    /// This is the hook the layout engine measures leaves through, so it is also
+    /// where an installed `WidgetMetrics` delegate reaches the layout pass — the
+    /// delegate supplies the font and the insets, and the height follows from
+    /// them. Without this a field placed in a flex container has no opinion about
+    /// its own height and collapses to zero, which is why a skin that only
+    /// restyled the field's PIXELS could never have made it the right size.
+    ///
+    /// Width is deliberately left with no opinion (0): a text field is nearly
+    /// always stretched by its container, not sized by its content.
+    float intrinsic_height() const override;
+
     // ── Painting ──────────────────────────────────────────────────────────
 
     void paint(canvas::Canvas& canvas) override;
@@ -286,6 +301,17 @@ public:
         invalidate_layout_cache();
     }
     float font_size() const { return font_size_; }
+
+    /// Typeface family. Empty means the default. A field whose skin draws in one
+    /// face while the field measures and shapes in another is a field whose caret
+    /// and selection band land in the wrong place, so the family belongs to the
+    /// widget, not just to the painter.
+    void set_font_family(std::string family) {
+        font_family_ = std::move(family);
+        invalidate_layout_cache();
+        request_repaint();
+    }
+    const std::string& font_family() const { return font_family_; }
 
     /// Extra left inset (px) for the text / placeholder / caret — used to clear a
     /// leading icon (an imported search field's magnifier). 0 = default padding.
@@ -355,6 +381,7 @@ private:
     int selection_start_ = 0;    ///< Selection anchor as a UTF-8 byte offset.
     int selection_end_ = 0;      ///< Selection active end (= caret) as a UTF-8 byte offset.
     float font_size_ = 13.0f;
+    std::string font_family_;
     float content_inset_left_ = 0.0f; ///< Extra left inset to clear a leading icon
     canvas::TextAlign text_align_ = canvas::TextAlign::left;
     EdgeInsets insets_{};
