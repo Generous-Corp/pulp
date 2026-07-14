@@ -55,4 +55,58 @@ bool dispatch_context_menu(View& root, Point root_pos) {
     return true;
 }
 
+namespace {
+// Pointer-compare only, so it is safe to call with a `needle` that points at
+// freed memory: a captured drag target can be unmounted (and destroyed) between
+// the press and the next event of the same gesture. Internal — the platform
+// hosts have their own copy under their own name; this one guards the shared
+// delivery below, including BETWEEN channels (a modern handler may unmount the
+// very view the legacy handler is about to be called on).
+bool still_in_tree(View* needle, View* root) {
+    if (!needle || !root) return false;
+    if (needle == root) return true;
+    for (size_t i = 0; i < root->child_count(); ++i)
+        if (still_in_tree(needle, root->child_at(i))) return true;
+    return false;
+}
+}  // namespace
+
+void deliver_mouse_drag(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count,
+                        PointerType pointer_type, float pressure) {
+    if (!still_in_tree(target, &root)) return;
+
+    const Point local = point_to_local(root_pt, target, &root);
+
+    // 1. Modern channel. This is the only place a drag carries its modifiers.
+    MouseEvent me;
+    me.position = local;
+    me.window_position = root_pt;
+    me.button = MouseButton::left;
+    me.modifiers = modifiers;
+    me.click_count = click_count;
+    me.is_down = true;  // the button is still held during a drag
+    me.phase = MousePhase::drag;
+    me.pointer_type = pointer_type;
+    me.pressure = pressure;
+    target->on_mouse_event(me);
+
+    // A modern handler may unmount the tree it was dispatched into (a state
+    // change that destroys the widget). Re-validate before the legacy hop.
+    if (!still_in_tree(target, &root)) return;
+
+    // 2. Legacy channel (bare Point; no modifiers). Kept for compatibility.
+    target->on_mouse_drag(local);
+    if (!still_in_tree(target, &root)) return;
+    if (target->on_drag) target->on_drag(local);
+    if (!still_in_tree(target, &root)) return;
+
+    // 3. Ancestor bubbling: a presentational leaf is often the hit target while
+    // the drag handler lives on an outer wrapper.
+    for (auto* b = target->parent(); b; b = b->parent()) {
+        if (!b->on_drag) continue;
+        b->on_drag(point_to_local(root_pt, b, &root));
+    }
+}
+
 }  // namespace pulp::view

@@ -462,6 +462,27 @@ DesignFrameElement::Kind DesignFrameView::element_kind(int i) const {
     return elements_[i].kind;
 }
 
+int DesignFrameView::element_option_count(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
+    // A toggle is a 2-position control that carries no `options` list.
+    if (elements_[i].kind == DesignFrameElement::Kind::toggle) return 2;
+    if (!element_is_discrete(i)) return 0;  // continuous: no option denominator
+    return static_cast<int>(elements_[i].options.size());
+}
+
+bool DesignFrameView::element_is_discrete(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return false;
+    switch (elements_[i].kind) {
+        case DesignFrameElement::Kind::toggle:     // 2 positions, no options list
+        case DesignFrameElement::Kind::dropdown:
+        case DesignFrameElement::Kind::tab_group:
+        case DesignFrameElement::Kind::stepper:
+            return true;
+        default:
+            return false;
+    }
+}
+
 float DesignFrameView::choice_to_norm(int i, int selected) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return 0.0f;
     const int n = static_cast<int>(elements_[i].options.size());

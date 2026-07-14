@@ -303,28 +303,32 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
   }
 }
 
-void pulp_plugin_mouse_drag(pulp::view::View* root, pulp::view::Point pt,
+// `event` supplies the modifier flags and click count the drag carries. They
+// used to be dropped on the floor: the drag phase was delivered on the legacy
+// `on_mouse_drag(Point)` channel ONLY, so a view could read Shift/Cmd on press
+// and on release but never DURING the drag. Delivery itself now lives in the
+// portable pulp::view::deliver_mouse_drag (shared with the window host, and
+// headlessly testable) — see pointer_dispatch.hpp for the ordering contract.
+void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
+                            pulp::view::Point pt,
                             pulp::view::View** drag_target) {
   try {
     using namespace pulp::view::mac_geometry;
     if (!root) return;
+    const uint16_t mods = modifiers_from_ns_flags(event.modifierFlags);
     pulp::view::MouseEvent gesture_event;
     gesture_event.position = pt;
     gesture_event.window_position = pt;
     gesture_event.button = pulp::view::MouseButton::left;
+    gesture_event.modifiers = mods;
     gesture_event.is_down = true;
     gesture_event.phase = pulp::view::MousePhase::drag;
     if (root->dispatch_gesture_pointer_event(gesture_event))
         return;
     if (!*drag_target) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
-    auto local = to_local(pt, *drag_target, root);
-    (*drag_target)->on_mouse_drag(local);
-    if ((*drag_target)->on_drag) (*drag_target)->on_drag(local);
-    for (auto* b = (*drag_target)->parent(); b; b = b->parent()) {
-        if (!b->on_drag) continue;
-        (*b).on_drag(to_local(pt, b, root));
-    }
+    pulp::view::deliver_mouse_drag(*root, *drag_target, pt, mods,
+                                   static_cast<int>(event.clickCount));
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
   } catch (...) {
@@ -882,7 +886,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     [self syncKeyFocus];
 }
 - (void)mouseDragged:(NSEvent*)event {
-    pulp_plugin_mouse_drag(self.rootView, [self localPoint:event], &_dragTarget);
+    pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget);
     [self setNeedsDisplay:YES];
 }
 - (void)mouseUp:(NSEvent*)event {
@@ -1653,7 +1657,7 @@ private:
     [self syncKeyFocus];
 }
 - (void)mouseDragged:(NSEvent*)event {
-    pulp_plugin_mouse_drag(self.rootView, [self localPoint:event], &_dragTarget);
+    pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget);
     if (self.rootView) self.rootView->request_repaint();
 }
 - (void)mouseUp:(NSEvent*)event {

@@ -9,7 +9,12 @@
 #include <vector>
 
 namespace pulp::runtime { class MessageChannel; }
-namespace pulp::view { class ScriptedUiSession; }
+namespace pulp::view {
+class ScriptedUiSession;
+class HostActionSurface;
+class HostParamSurface;
+class StateStoreHostParamSurface;
+} // namespace pulp::view
 
 namespace pulp::format {
 
@@ -142,6 +147,32 @@ public:
     state::StateStore& store() { return store_; }
     bool uses_script_ui() const { return uses_script_ui_; }
 
+    /// The runtime host-parameter surface installed on the open view tree.
+    ///
+    /// A view built by `create_view()` — in particular an imported
+    /// `DesignFrameView` with `route_changes_to_host_params(true)` — resolves
+    /// its `param_key`s against `View::host_params()`. `open()` installs this
+    /// StateStore-backed surface on the tree, so those views drive the
+    /// processor's parameters with no per-plugin wiring: keys resolve to the
+    /// store parameter whose `ParamInfo::name` matches (the convention the
+    /// design-param generator already emits).
+    ///
+    /// This is the ONLY writer the routed path uses. A consumer that ALSO
+    /// forwards `DesignFrameView::on_element_changed` into the same store would
+    /// deliver each gesture twice; wire one or the other, never both (see
+    /// `routes_changes_to_host_params()`).
+    ///
+    /// Null before `open()` / after `close()`.
+    view::HostParamSurface* host_params();
+
+    /// Install the command channel a routed view's `Kind::action` clicks reach
+    /// (`route_actions_to_host(true)` → `View::host_actions()`). Pulp has no
+    /// native action backing — the destination is host-defined — so this stays
+    /// caller-supplied and is null by default. The surface must outlive the
+    /// open view. Applied immediately when the bridge is already open.
+    void set_host_actions(view::HostActionSurface* actions);
+    view::HostActionSurface* host_actions() const { return host_actions_; }
+
     /// Cross-thread liveness token. Set true at construction, false in the
     /// destructor. A callback that outlives or races this bridge — the GPU
     /// display-link scripted-idle pump is dispatched to the main queue and can
@@ -206,6 +237,10 @@ private:
 
     std::unique_ptr<view::View> view_;
     view::View* view_raw_ = nullptr;  ///< valid even after release_view()
+    /// Production backing for View::host_params() — built in open(), detached
+    /// from the tree in close() BEFORE the view dies. See host_params().
+    std::unique_ptr<view::StateStoreHostParamSurface> host_param_surface_;
+    view::HostActionSurface* host_actions_ = nullptr;  ///< caller-owned; may be null
     std::unique_ptr<view::ScriptedUiSession> scripted_ui_;
     bool uses_script_ui_ = false;
     bool attached_ = false;  ///< true between notify_attached() and close()

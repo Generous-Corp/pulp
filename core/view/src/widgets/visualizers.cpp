@@ -340,7 +340,27 @@ void Meter::set_level(float rms, float peak) {
 }
 
 void Meter::update(float raw_peak, float raw_rms, float dt) {
+    const float prev_rms = ballistics_.display_rms;
+    const float prev_peak = ballistics_.display_peak;
+    const float prev_held = ballistics_.held_peak;
+
     ballistics_.update(raw_peak, raw_rms, dt);
+
+    // ── Idle gate ────────────────────────────────────────────────────────────
+    // A source-bound meter is a FrameClock subscriber, so update() runs every
+    // vsync for as long as it is bound — including through silence, when the
+    // ballistics have already decayed and the next frame would be pixel-for-pixel
+    // identical. Repainting anyway costs a composite per meter per vsync forever;
+    // on the plug-in-view-host path (a DAW) each of those is a FULL-surface
+    // repaint. Nothing moved, so ask for nothing: a silent plug-in settles to
+    // zero repaints per second instead of burning the editor's frame budget.
+    // Any real level change fails this compare on the very next frame, so the
+    // gate never swallows motion — only the still frames after it.
+    const bool unchanged = ballistics_.display_rms == prev_rms &&
+                           ballistics_.display_peak == prev_peak &&
+                           ballistics_.held_peak == prev_held;
+    if (unchanged) return;
+
     const auto b = local_bounds();
     request_repaint(Rect{b.x - kMeterPeakOverscan, b.y - kMeterPeakOverscan,
                          b.width + 2 * kMeterPeakOverscan,

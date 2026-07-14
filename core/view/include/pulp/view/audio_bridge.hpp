@@ -56,9 +56,15 @@ struct MeterBallistics {
             }
         }
 
-        // Clamp to zero for very small values
+        // Clamp to zero for very small values. `held_peak` decays exponentially
+        // and so approaches zero without ever reaching it — left unclamped it
+        // changes by a fraction of a bit every frame FOREVER, which is invisible
+        // on screen but keeps a meter's idle gate (Meter::update) from ever
+        // seeing a still frame. Snap it like the other two so a silent meter
+        // truly settles.
         if (display_peak < 1e-6f) display_peak = 0;
         if (display_rms < 1e-6f) display_rms = 0;
+        if (held_peak < 1e-6f) held_peak = 0;
     }
 };
 

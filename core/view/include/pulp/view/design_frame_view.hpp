@@ -305,6 +305,20 @@ public:
         static const std::string kEmpty;
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].action : kEmpty;
     }
+    // Number of discrete options element `i` offers (dropdown entries, tab_group
+    // tabs, stepper positions), or 0 when the element is continuous (knob /
+    // fader / xy_pad) or out of range. This is the DENOMINATOR of the element's
+    // normalized value: a choice control reports selected_index /
+    // max(1, option_count - 1) (see choice_to_norm), so a binder that does not
+    // know the option count cannot map the element's normalized value onto a
+    // host parameter's own step count. A toggle reports 2 (off/on) even though
+    // it declares no `options` list. Non-zero exactly when
+    // element_is_discrete(i).
+    int element_option_count(int i) const;
+    // Whether element `i` carries a finite set of positions (dropdown / tab_group
+    // / stepper / toggle) rather than a continuous range. A toggle is discrete
+    // with two positions even though it declares no `options` list.
+    bool element_is_discrete(int i) const;
     // The Y axis (0=top, 1=bottom) of an xy_pad element `i`, or 0.5. The X axis is
     // element_value(i).
     float element_value_y(int i) const {
@@ -445,11 +459,21 @@ public:
     // Enable with route_changes_to_host_params(true): thereafter a user gesture
     // on a param_key-tagged element drives host_params() directly
     // (begin_gesture / set_param / end_gesture), and sync_from_host_params()
-    // pulls current values + display text back at tick. on_element_changed still
-    // fires as an additional observer, so existing consumers are unaffected. A
-    // control whose param_key is empty or unknown to the surface is left to
-    // local state (degrades exactly like a preview with a null surface). OFF by
-    // default — the embed/binder path is unchanged.
+    // pulls current values + display text back at tick. A control whose
+    // param_key is empty or unknown to the surface is left to local state
+    // (degrades exactly like a preview with a null surface).
+    //
+    // OFF by default, and that default is load-bearing. on_element_changed keeps
+    // firing when routing is on, which is harmless for a consumer that OBSERVES
+    // and a double-write for one that WRITES. An embed that already carries the
+    // gesture itself — on_element_changed → StateStore → set_param, which is the
+    // existing binder path — must NOT also turn routing on: the host would
+    // receive every value and every gesture bracket twice, which reads as a
+    // doubled automation write and an unbalanced begin/end pair.
+    //
+    // Pick exactly one path per view: the binder (leave this off), or the
+    // surface (turn it on and drop the write side of your on_element_changed
+    // handler, keeping it only for observation).
     void route_changes_to_host_params(bool enable) { route_to_host_params_ = enable; }
     bool routes_changes_to_host_params() const { return route_to_host_params_; }
 

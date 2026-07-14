@@ -722,23 +722,16 @@ static void install_app_menu(NSString* appName) {
                 _dragTarget = nullptr;
                 return;
             }
-            auto local = to_local(pt, _dragTarget, self.rootView);
-            _dragTarget->on_mouse_drag(local);
-            if (_dragTarget->on_drag) _dragTarget->on_drag(local);
-
-            // Bubble on_drag up to ancestors with on_drag set. Mirrors what
-            // mouseDown already does for on_pointer_event.
-            // Without this, JSX patterns where the click target is an
-            // inner presentational widget (Chainer's XY pad dot, the
-            // 5px slider track) but the drag handler is on an outer
-            // wrapper get a one-shot pointerdown but no drag stream.
-            // Re-toLocal per ancestor so the event coords are in that
-            // ancestor's local space.
-            for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
-                if (!bubble->on_drag) continue;
-                auto bubble_local = to_local(pt, bubble, self.rootView);
-                bubble->on_drag(bubble_local);
-            }
+            // Deliver the drag on the MODERN channel (on_mouse_event, phase =
+            // drag, carrying the modifier flags) AND the legacy on_mouse_drag /
+            // on_drag pair, then bubble on_drag to ancestors — an inner
+            // presentational widget is often the hit target while the drag
+            // handler lives on an outer wrapper. Shared with the plug-in view
+            // host; ordering contract in pointer_dispatch.hpp.
+            pulp::view::deliver_mouse_drag(
+                *self.rootView, _dragTarget, pt,
+                modifiers_from_ns_flags(event.modifierFlags),
+                static_cast<int>(event.clickCount));
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost mouseDragged error: " << e.what() << "\n";

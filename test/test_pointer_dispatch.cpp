@@ -11,6 +11,9 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
+#include <string>
+#include <vector>
+
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
 
@@ -168,4 +171,127 @@ TEST_CASE("point_to_local divides out a scaled ancestor", "[view][input]") {
     const Point local = point_to_local({130, 90}, leafp, &root);
     CHECK_THAT(local.x, WithinAbs(20.0, 1e-4));  // (130 - 50 - 20*2) / 2
     CHECK_THAT(local.y, WithinAbs(20.0, 1e-4));  // (90  - 30 - 10*2) / 2
+}
+
+// ── Drag delivery on the modern event channel (deliver_mouse_drag) ───────────
+//
+// Before this existed, both macOS hosts delivered `press` and `release` on BOTH
+// the modern `on_mouse_event` channel and the legacy `on_mouse_*` callbacks, but
+// delivered `drag` on the LEGACY channel only — and the legacy drag callback
+// carries nothing but a Point. A view could therefore see modifier keys on the
+// press and on the release of a gesture, but never DURING it, so "hold Shift to
+// fine-adjust while dragging" — the most common plug-in knob idiom there is —
+// could not be written at all.
+
+namespace {
+
+// Records every channel a pointer phase arrives on, in arrival order, so both
+// the exactly-once property and the modern-before-legacy ordering are asserted.
+class DragSpy : public View {
+public:
+    DragSpy() {
+        on_drag = [this](Point p) {
+            log.push_back("on_drag");
+            last_on_drag = p;
+        };
+    }
+
+    void on_mouse_event(const MouseEvent& e) override {
+        log.push_back("on_mouse_event");
+        events.push_back(e);
+    }
+    void on_mouse_drag(Point p) override {
+        log.push_back("on_mouse_drag");
+        last_legacy = p;
+    }
+
+    std::vector<std::string> log;
+    std::vector<MouseEvent> events;
+    Point last_legacy{};
+    Point last_on_drag{};
+};
+
+}  // namespace
+
+TEST_CASE("deliver_mouse_drag carries modifiers on the modern channel", "[view][input][drag]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<DragSpy>();
+    DragSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    deliver_mouse_drag(root, spy, {130, 70}, kModShift | kModCmd, /*click_count=*/1);
+
+    REQUIRE(spy->events.size() == 1);
+    const MouseEvent& e = spy->events.front();
+    CHECK(e.phase == MousePhase::drag);
+    CHECK(e.is_down);                       // the button is still held mid-drag
+    CHECK(e.isShiftDown());                 // <-- the wire: modifiers DURING a drag
+    CHECK((e.modifiers & kModCmd) != 0);
+    CHECK(e.button == MouseButton::left);
+    CHECK(e.click_count == 1);
+    // Local to the spy, window-space preserved for the host.
+    CHECK_THAT(e.position.x, WithinAbs(30.0f, 0.01f));
+    CHECK_THAT(e.position.y, WithinAbs(20.0f, 0.01f));
+    CHECK_THAT(e.window_position.x, WithinAbs(130.0f, 0.01f));
+}
+
+TEST_CASE("deliver_mouse_drag fires each channel exactly once, modern first",
+          "[view][input][drag]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<DragSpy>();
+    DragSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    deliver_mouse_drag(root, spy, {130, 70}, 0);
+
+    // Exactly once per channel, in the documented order (pointer_dispatch.hpp).
+    REQUIRE(spy->log == std::vector<std::string>{"on_mouse_event", "on_mouse_drag", "on_drag"});
+    // The legacy channels still receive the same local point they always did.
+    CHECK_THAT(spy->last_legacy.x, WithinAbs(30.0f, 0.01f));
+    CHECK_THAT(spy->last_on_drag.y, WithinAbs(20.0f, 0.01f));
+}
+
+TEST_CASE("deliver_mouse_drag bubbles on_drag to ancestors in their own space",
+          "[view][input][drag]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto wrapper = std::make_unique<View>();
+    View* wrap = wrapper.get();
+    wrap->set_bounds({100, 50, 200, 200});
+    int wrap_hits = 0;
+    Point wrap_pt{};
+    wrap->on_drag = [&](Point p) { ++wrap_hits; wrap_pt = p; };
+
+    auto child = std::make_unique<DragSpy>();
+    DragSpy* spy = child.get();
+    spy->set_bounds({10, 10, 50, 50});      // (110,60) in root space
+    wrap->add_child(std::move(child));
+    root.add_child(std::move(wrapper));
+
+    deliver_mouse_drag(root, spy, {130, 70}, 0);
+
+    // The inner presentational widget is the hit target; the drag handler lives
+    // on the outer wrapper. Both get exactly one call, each in its own space.
+    CHECK(wrap_hits == 1);
+    CHECK_THAT(wrap_pt.x, WithinAbs(30.0f, 0.01f));   // 130 - 100
+    CHECK_THAT(spy->last_on_drag.x, WithinAbs(20.0f, 0.01f));  // 130 - 100 - 10
+}
+
+TEST_CASE("deliver_mouse_drag is inert for a target that left the tree",
+          "[view][input][drag]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<DragSpy>();
+    DragSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    auto detached = root.remove_child(spy);   // unmounted mid-gesture
+    deliver_mouse_drag(root, spy, {130, 70}, kModShift);
+    CHECK(spy->log.empty());                  // no channel fires; no deref hazard
 }

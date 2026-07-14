@@ -4,6 +4,9 @@
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/message_channel.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/state/listener_token.hpp>
+#include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -13,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 using namespace pulp;
 
@@ -624,4 +628,128 @@ TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
     bridge.reset();         // destroy the bridge out from under the pump
     pump();                 // must NOT touch the freed bridge — token is false
     SUCCEED("idle pump no-oped after the bridge was destroyed");
+}
+
+// ── Runtime host-parameter surface (W3) ──────────────────────────────────────
+//
+// An imported design turns its knobs against `View::host_params()`. Nothing in
+// production ever installed one, so `route_changes_to_host_params(true)` — which
+// the importer emits for every bound control — resolved to a null surface and
+// the control drove nothing. ViewBridge is the SDK's own view owner, so it is
+// where the StateStore-backed surface belongs: every native Pulp editor now gets
+// it with no per-plugin wiring.
+//
+// Exactly-once matters here. The surface is the ONLY writer on the routed path;
+// a consumer that ALSO forwarded on_element_changed into the same store would
+// double every gesture. These tests pin one write and one gesture bracket.
+
+namespace {
+
+// A processor whose editor is a faithful-import-shaped DesignFrameView: one knob
+// bound to param_key "gain", routing its changes to the host-param surface.
+class RoutedFrameProcessor : public format::Processor {
+public:
+    format::PluginDescriptor descriptor() const override {
+        return {"RoutedFrame", "Acme", "com.acme.routed", "1.0.0",
+                format::PluginCategory::Effect};
+    }
+    // The design's param_key ("gain") is matched against ParamInfo::name — the
+    // convention the design-param generator already emits.
+    void define_parameters(state::StateStore& s) override {
+        s.add_parameter({1, "gain", "", {0.0f, 1.0f, 0.0f}});
+    }
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&,
+                 const format::ProcessContext&) override {}
+
+    std::unique_ptr<view::View> create_view() override {
+        const std::string svg =
+            R"(<svg width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>)";
+        view::DesignFrameElement knob;
+        knob.kind = view::DesignFrameElement::Kind::knob;
+        knob.x = 10; knob.y = 10; knob.w = 20; knob.h = 20;
+        knob.cx = 20; knob.cy = 20; knob.hit_radius = 20.0f;
+        knob.value = 0.0f;
+        knob.param_key = "gain";
+        auto frame = std::make_unique<view::DesignFrameView>(svg, std::vector{knob},
+                                                             0, 0, 100, 100);
+        frame->route_changes_to_host_params(true);   // what the importer emits
+        frame->set_bounds({0, 0, 100, 100});
+        last_frame = frame.get();
+        return frame;
+    }
+
+    view::DesignFrameView* last_frame = nullptr;
+};
+
+}  // namespace
+
+TEST_CASE("ViewBridge installs a StateStore-backed host-param surface on the view",
+          "[view-bridge][host-param]") {
+    RoutedFrameProcessor proc;
+    state::StateStore store;
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+
+    REQUIRE(bridge.host_params() == nullptr);   // nothing before open()
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.view() != nullptr);
+
+    // The tree can now resolve design keys against the processor's parameters.
+    REQUIRE(bridge.host_params() != nullptr);
+    REQUIRE(bridge.view()->host_params() == bridge.host_params());
+    CHECK(bridge.host_params()->has_param("gain"));
+    CHECK_FALSE(bridge.host_params()->has_param("nope"));
+
+    // ...and it is detached before the view dies, so nothing dangles.
+    bridge.close();
+    CHECK(bridge.host_params() == nullptr);
+}
+
+TEST_CASE("a routed design control drives the store exactly once per gesture",
+          "[view-bridge][host-param]") {
+    RoutedFrameProcessor proc;
+    state::StateStore store;
+    proc.define_parameters(store);
+
+    int writes = 0, begins = 0, ends = 0;
+    auto token = store.add_listener([&](state::ParamID id, float) {
+                                        if (id == 1) ++writes;
+                                    },
+                                    state::ListenerThread::Main);
+    store.set_gesture_callbacks([&](state::ParamID id) { if (id == 1) ++begins; },
+                                [&](state::ParamID id) { if (id == 1) ++ends; });
+
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    REQUIRE(proc.last_frame != nullptr);
+
+    // One user gesture on the knob: press at its center, drag up, release.
+    proc.last_frame->simulate_drag({20, 20}, {20, 5});
+
+    CHECK(begins == 1);                  // exactly one undo group opened
+    CHECK(ends == 1);                    // ...and closed
+    CHECK(writes >= 1);                  // the drag reached the processor's param
+    CHECK(store.get_normalized(1) > 0.0f);
+
+    // Exactly-once, stated as the thing that actually breaks: a second writer on
+    // the same gesture would show up as a doubled gesture bracket.
+    CHECK(begins == ends);
+    CHECK(begins != 2);
+}
+
+TEST_CASE("a routed control degrades to local state when the key is unknown",
+          "[view-bridge][host-param]") {
+    // A design control whose param_key the processor does not declare must not
+    // fabricate a parameter or crash — it just drives its own visual.
+    RoutedFrameProcessor proc;
+    state::StateStore store;                 // deliberately EMPTY: no "gain" param
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.host_params() != nullptr);
+    CHECK_FALSE(bridge.host_params()->has_param("gain"));
+
+    proc.last_frame->simulate_drag({20, 20}, {20, 5});
+    CHECK(proc.last_frame->element_value(0) > 0.0f);   // the control still moved
 }
