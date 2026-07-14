@@ -22,15 +22,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/events/message_loop_integration.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <thread>
-
-#if defined(__APPLE__)
-#  include <CoreFoundation/CoreFoundation.h>
-#endif
 
 using namespace pulp::events;
 
@@ -125,17 +122,14 @@ TEST_CASE("plugin backend marshals call_async onto the main thread",
     worker.join();
     REQUIRE(posted.load());
 
-    // Cocoa's main-queue work runs when CFRunLoop is serviced. The
-    // dispatch_get_main_queue() runloop source fires only when the runloop
-    // is in its default mode and gets a tick. Spin the runloop here in the
-    // same way a DAW's main thread would.
+    // Headless native hosts explicitly service bounded main-loop slices.
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (!ran.load() && std::chrono::steady_clock::now() < deadline) {
-        // Process one runloop iteration (up to 100ms). This drains the
-        // main queue's runloop source.
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, /*seconds=*/0.1,
-                           /*returnAfterSourceHandled=*/true);
+        const auto result = MessageLoopIntegration::pump_main_loop_for(
+            std::chrono::milliseconds(100));
+        REQUIRE(result != MainLoopPumpResult::Unsupported);
+        REQUIRE(result != MainLoopPumpResult::WrongThread);
     }
 
     REQUIRE(ran.load());

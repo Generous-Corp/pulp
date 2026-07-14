@@ -27,9 +27,19 @@ target_sources(pulp-events PRIVATE
 # Other platforms get a no-op stub; their own message-loop integration
 # paths live outside this dispatcher shim.
 if(APPLE)
-    target_sources(pulp-events PRIVATE src/plugin_main_thread_mac.mm)
+    target_sources(pulp-events PRIVATE
+        src/plugin_main_thread_mac.mm
+        src/message_loop_pump_mac.mm
+    )
+    target_link_libraries(pulp-events PRIVATE
+        "-framework CoreFoundation"
+        "-framework Foundation"
+    )
 else()
-    target_sources(pulp-events PRIVATE src/plugin_main_thread_stub.cpp)
+    target_sources(pulp-events PRIVATE
+        src/plugin_main_thread_stub.cpp
+        src/message_loop_pump_stub.cpp
+    )
 endif()
 
 # Platform mDNS backends for NetworkServiceDiscovery. macOS / iOS get a
