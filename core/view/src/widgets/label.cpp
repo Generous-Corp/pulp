@@ -1,4 +1,5 @@
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/image_cache.hpp>
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <string>
 
@@ -584,6 +586,10 @@ void Label::paint_attributed_(canvas::Canvas& canvas) {
 }
 
 void Label::paint(canvas::Canvas& canvas) {
+    // While the inline editor is open it IS the label's visible surface; the
+    // static text underneath would show through the field's own background
+    // wherever that background is transparent.
+    if (editor_ != nullptr) return;
     if (text_.empty()) return;
     // Per-range styled (mixed) text on a single line lowers to the span draw;
     // multi-line / unstyled falls through to the single-style path below.
@@ -907,5 +913,79 @@ void Label::paint(canvas::Canvas& canvas) {
     canvas.clear_font_features();
 }
 
+
+
+// ── Click-to-edit ────────────────────────────────────────────────────────
+
+void Label::on_mouse_down(Point pos) {
+    (void)pos;
+    if (edit_trigger_ == EditTrigger::none || editor_ != nullptr) return;
+
+    // Double-click detection. The view layer delivers plain downs, so the
+    // Label counts them itself against a 400 ms window — the same threshold
+    // the platform hosts use for their own double-click synthesis.
+    constexpr double kDoubleClickWindow = 0.400;
+    const double now = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    click_count_ = (now - last_click_time_ <= kDoubleClickWindow) ? click_count_ + 1 : 1;
+    last_click_time_ = now;
+
+    const bool armed = (edit_trigger_ == EditTrigger::single_click && click_count_ >= 1) ||
+                       (edit_trigger_ == EditTrigger::double_click && click_count_ >= 2);
+    if (armed) show_editor();
+}
+
+void Label::show_editor() {
+    if (editor_ != nullptr) return;
+
+    auto owned = std::make_unique<TextEditor>();
+    editor_ = owned.get();
+    editor_->set_bounds({0, 0, local_bounds().width, local_bounds().height});
+    editor_->set_text(text_);
+    editor_->set_font_size(font_size_);
+    editor_->select_on_focus = true;
+    editor_->multi_line = false;
+
+    // Carry the Label's alignment into the field so the text does not jump
+    // sideways at the moment the editor opens — the single most visible tell
+    // that an inline rename is not really "in place".
+    switch (text_align_) {
+        case LabelAlign::center: editor_->set_text_align(canvas::TextAlign::center); break;
+        case LabelAlign::right:  editor_->set_text_align(canvas::TextAlign::right);  break;
+        default:                 editor_->set_text_align(canvas::TextAlign::left);   break;
+    }
+
+    editor_->on_return = [this](const std::string&) { hide_editor(/*commit=*/true); };
+    editor_->on_escape = [this] { hide_editor(/*commit=*/false); };
+    editor_->on_focus_lost = [this](const std::string&) { hide_editor(/*commit=*/true); };
+
+    add_child(std::move(owned));
+    editor_->set_focus(true);
+    editor_->on_focus_changed(true);
+    click_count_ = 0;
+    if (on_editor_show) on_editor_show();
+    request_repaint();
+}
+
+void Label::hide_editor(bool commit) {
+    if (editor_ == nullptr) return;
+
+    // Detach FIRST, then run the callbacks. A commit handler is entitled to
+    // delete the Label's owner (a rename that closes the row it renamed), and
+    // it must not do that while we still hold a raw pointer into our own child
+    // vector. `keep_alive` also holds the editor past its own on_focus_lost —
+    // which is what is calling us — so the callback's stack frame stays valid.
+    TextEditor* ed = editor_;
+    editor_ = nullptr;
+    const std::string new_text = ed->text();
+    auto keep_alive = remove_child(ed);
+
+    if (commit && new_text != text_) {
+        set_text(new_text);
+        if (on_text_change) on_text_change(new_text);
+    }
+    if (on_editor_hide) on_editor_hide();
+    request_repaint();
+}
 
 } // namespace pulp::view

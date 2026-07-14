@@ -190,4 +190,29 @@ void dispatch_drag_exit(View& root, DragSession& session);
 bool dispatch_drop(View& root, DragSession& session, const DropData& data,
                    Point root_pos);
 
+// ── In-tree drag source ──────────────────────────────────────────────────────
+//
+// Everything above routes a drag that ORIGINATED OUTSIDE the view tree (the OS
+// handed it to a platform backend). An ActiveDrag is the other direction: a drag
+// that starts INSIDE the tree and stays there.
+//
+// The payload never touches the OS pasteboard, so it can be anything a DropData
+// can carry — including a `custom_data` blob — and it arrives at the receiver
+// byte-for-byte. (An OS-mediated drag can only carry serialized types, which is
+// why code that needs to hand a live object across a drag usually ends up
+// parking it in a side channel and dragging a token. An in-tree drag does not
+// need that.)
+//
+// The SOURCE view drives the gesture, because the source view is the one holding
+// the pointer capture: it calls start_drag() on press-and-move, drag_to() on each
+// motion tick, and drop_here() on release. The tree does the rest — hit-testing
+// receivers under the pointer, firing accept_drag()/leave_drag() for highlight,
+// and committing through the same dispatch core a native drop uses.
+struct ActiveDrag {
+    DropData data;
+    View* source = nullptr;
+    DragSession session;
+    bool active = false;
+};
+
 } // namespace pulp::view

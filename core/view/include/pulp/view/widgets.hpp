@@ -10,7 +10,9 @@
 #include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/slider_core.hpp>
 #include <pulp/view/sprite_strip.hpp>
+#include <pulp/view/widget_painter.hpp>
 #include <pulp/view/value_source.hpp>
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
@@ -26,6 +28,8 @@
 #include <optional>
 
 namespace pulp::view {
+
+class TextEditor;   // pulp/view/text_editor.hpp — the Label's inline edit field
 
 // ── Label ────────────────────────────────────────────────────────────────────
 // Static or dynamic text display
@@ -233,7 +237,59 @@ public:
     TextEditMetrics text_edit_metrics(canvas::Canvas& canvas,
                                       std::string_view edit_text) const;
 
+    // ── Click-to-edit ────────────────────────────────────────────────────
+    //
+    // A Label can turn itself into a text field in place. `set_editable`
+    // arms the gesture; a matching click spawns a child TextEditor sized to
+    // the Label's bounds, seeded with the Label's text, focused and
+    // select-all'd. Return commits (the Label's text is replaced and
+    // `on_text_change` fires), Escape reverts, and clicking away commits —
+    // the three endings a rename field is expected to have.
+    //
+    // The editor is a real child View, so a painter or metrics delegate
+    // installed on an ancestor styles it exactly like any other text field.
+
+    enum class EditTrigger {
+        none,          ///< not editable
+        single_click,
+        double_click,
+    };
+
+    void set_editable(EditTrigger trigger) {
+        edit_trigger_ = trigger;
+        set_cursor(trigger == EditTrigger::none ? CursorStyle::default_ : CursorStyle::text);
+    }
+    EditTrigger editable() const { return edit_trigger_; }
+
+    /// Fires when an edit is COMMITTED with new text (not on every keystroke,
+    /// and not at all when the edit is reverted).
+    std::function<void(const std::string& text)> on_text_change;
+
+    /// Fires when the inline editor opens / closes, for owners that need to
+    /// suppress a hover highlight or a drag gesture for the duration.
+    std::function<void()> on_editor_show;
+    std::function<void()> on_editor_hide;
+
+    /// Open the inline editor now, regardless of the click trigger. This is
+    /// the programmatic route — a rename command in a menu, or a keyboard
+    /// shortcut.
+    void show_editor();
+    /// Close the inline editor. `commit` false discards the edit.
+    void hide_editor(bool commit);
+    bool editor_active() const { return editor_ != nullptr; }
+    /// The live inline editor, or null. For tests and for owners that want to
+    /// configure it (an input filter, a max length) after it opens.
+    TextEditor* editor() const { return editor_; }
+
+    void on_mouse_down(Point pos) override;
+    bool wants_mouse_input() const override { return edit_trigger_ != EditTrigger::none; }
+
 private:
+    EditTrigger edit_trigger_ = EditTrigger::none;
+    TextEditor* editor_ = nullptr;      ///< non-owning; the child vector owns it
+    int click_count_ = 0;
+    double last_click_time_ = 0.0;
+
     /// Resolved typography + origin shared by paint() and
     /// text_edit_metrics(). Factoring this out is the WYSIWYG invariant:
     /// the caret overlay and the painter resolve the SAME inherited
@@ -342,7 +398,40 @@ enum class WidgetRenderStyle { standard, minimal, silver };
 // 0 in a degenerate 0..0 range (Windows). The role and the value ship together.
 class Knob : public View, public CustomShaderHost, public AccessibilityValueInterface {
 public:
-    Knob() { set_access_role(AccessRole::slider); set_focusable(true); }
+    Knob() {
+        set_access_role(AccessRole::slider);
+        set_focusable(true);
+        // A knob's pointer travel is shorter than a fader's: 150px crosses the
+        // whole range, which is what a compact plugin panel expects.
+        core_.set_drag_sensitivity(150);
+    }
+
+    // ── Value engine ─────────────────────────────────────────────────────
+    //
+    // The knob's REAL-WORLD value, range, interval, response curve and drag law
+    // live in a SliderCore (slider_core.hpp). `value()` below stays the
+    // normalized [0,1] position in that range — that is the space a parameter
+    // store and the design/JS bridges speak — so a knob with the default 0..1
+    // range behaves exactly as it always has, and `set_range()` is what turns it
+    // into a real control (20..20000 Hz, -60..+12 dB, quantized to an interval).
+
+    SliderCore& slider() { return core_; }
+    const SliderCore& slider() const { return core_; }
+
+    /// Real-world range and quantization interval. Re-derives the real value from
+    /// the current normalized position; silent (a reconfiguration is not an edit).
+    void set_range(double min_value, double max_value, double interval = 0.0) {
+        core_.set_range(min_value, max_value, interval);
+        core_.set_normalized(value_, Notify::none);
+        value_ = static_cast<float>(core_.normalized());
+        request_repaint();
+    }
+    double real_value() const { return core_.value(); }
+    /// Write in real-world units. Snapped to the interval, clamped to the range.
+    bool set_real_value(double v, Notify notify = Notify::sync) {
+        core_.set_value(v, Notify::none);
+        return store_normalized(static_cast<float>(core_.normalized()), notify);
+    }
 
     // ── AccessibilityValueInterface (normalized 0..1, like value()) ──────
     double get_current_value() const override { return value_; }
@@ -373,15 +462,21 @@ public:
     // and restore_values(...) call set_value()/set_on() in tight loops during
     // sync/reload; firing a host repaint per call when the value is unchanged
     // burns wall-clock on large widget trees with no visible benefit.
-    void set_value(float v) {
-        float clamped = std::clamp(v, 0.0f, 1.0f);
-        if (clamped == value_) return;
-        value_ = clamped;
-        request_repaint();
-    }
+    void set_value(float v) { store_normalized(v, Notify::none); }
+
+    /// Notifying overload. `Notify::none` matches the historical `set_value(v)`
+    /// (repaint, no callback) — the right choice when the knob is being synced
+    /// FROM the thing it drives. `Notify::sync` fires `on_change` before
+    /// returning; `Notify::async` defers it to the next
+    /// `pulp::view::flush_async_notifications()`.
+    bool set_value(float v, Notify notify) { return store_normalized(v, notify); }
+
     float value() const { return value_; }
 
-    void set_default_value(float v) { default_value_ = std::clamp(v, 0.0f, 1.0f); }
+    void set_default_value(float v) {
+        default_value_ = std::clamp(v, 0.0f, 1.0f);
+        core_.set_default_value(core_.value_for_normalized(default_value_));
+    }
     float default_value() const { return default_value_; }
 
     /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
@@ -389,16 +484,22 @@ public:
     /// wants). Value is normalized 0..1; set_skew_from_midpoint takes a
     /// normalized midpoint. Applies to the value arc, dot, and drag; modulation
     /// rings are unaffected.
-    void set_skew(float s) { skew_ = std::max(0.0001f, s); }
-    float skew() const { return skew_; }
+    void set_skew(float s) { core_.set_skew(s); }
+    float skew() const { return static_cast<float>(core_.skew()); }
+    /// `mid_normalized` is in the knob's NORMALIZED space (see value()), so this
+    /// call means the same thing with or without a real range configured.
     void set_skew_from_midpoint(float mid_normalized) {
-        float p = std::clamp(mid_normalized, 1e-4f, 1.0f - 1e-4f);
-        skew_ = std::max(0.0001f, std::log(0.5f) / std::log(p));
+        core_.set_skew_from_midpoint(
+            core_.value_for_normalized(std::clamp(mid_normalized, 1e-4f, 1.0f - 1e-4f)));
     }
-    float position_for_value() const { return skew_ == 1.0f ? value_ : std::pow(value_, skew_); }
+    float position_for_value() const {
+        const float s = skew();
+        return s == 1.0f ? value_ : std::pow(value_, s);
+    }
     float value_for_position(float p) const {
         p = std::clamp(p, 0.0f, 1.0f);
-        return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
+        const float s = skew();
+        return s == 1.0f ? p : std::pow(p, 1.0f / s);
     }
 
     void set_label(std::string text) {
@@ -501,8 +602,16 @@ public:
     // Scroll-wheel adjusts the value (hover + wheel).
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override {
-        float nv = std::clamp(value_ + (-delta_y) * 0.004f, 0.0f, 1.0f);
-        if (nv != value_) { set_value(nv); if (on_change) on_change(value_); }
+        // A QUANTIZED control moves by exactly one interval per notch. The
+        // continuous nudge below is smaller than most intervals, so snapping
+        // would return the value to the step it started on and the wheel would
+        // do nothing at all — a control with an interval had a dead wheel.
+        if (core_.interval() > 0.0) {
+            const double step = (delta_y < 0.0f ? 1.0 : -1.0) * core_.interval();
+            set_real_value(core_.value() + step, Notify::sync);
+            return;
+        }
+        store_normalized(value_ + (-delta_y) * 0.004f, Notify::sync);
     }
 
     // True while a value drag (or modulation-handle drag) is in progress so a
@@ -516,15 +625,37 @@ private:
     bool mod_drag_is_high_ = true; ///< dragging the high (vs low) handle
     float mod_drag_last_angle_ = 0.0f;  ///< continuous (unwrapped) drag angle; the
                                         ///< bottom gap is a hard wall — see on_mouse_drag
+    /// The knob's position in its range, normalized to [0,1]. Mirrors
+    /// `core_.normalized()`; the two are kept in lockstep by store_normalized().
     float value_ = 0.0f;
-    float skew_ = 1.0f;            ///< 1 = linear; <1 = finer control at the low end
-    float default_value_ = 0.5f;
+    SliderCore core_;              ///< range, interval, curve, default, drag law
+    float default_value_ = 0.5f;   ///< the reset target, in normalized units
     std::string label_;
     std::function<std::string(float)> format_;
     ValueAnimation hover_glow_{0.0f};
     float drag_start_y_ = 0;
-    float drag_start_value_ = 0;
+    float drag_start_proportion_ = 0;   ///< travel proportion when the drag began
+    float drag_last_y_ = 0;             ///< previous tick (velocity-mode integration)
     bool gesture_active_ = false;
+
+    /// The single place `value_` and `core_` are written. Clamps to [0,1], snaps
+    /// through the core's interval, repaints on a real change, and notifies per
+    /// the policy. Returns true if the stored value moved.
+    bool store_normalized(float n, Notify notify) {
+        core_.set_normalized(std::clamp(n, 0.0f, 1.0f), Notify::none);
+        const float snapped = static_cast<float>(core_.normalized());
+        if (snapped == value_) return false;
+        value_ = snapped;
+        request_repaint();
+        if (notify == Notify::sync) {
+            if (on_change) on_change(value_);
+        } else if (notify == Notify::async && on_change) {
+            auto fn = on_change;
+            const float v = value_;
+            queue_async_notification([fn, v] { fn(v); });
+        }
+        return true;
+    }
     bool show_label_ = true;
     std::string widget_schema_;   // JSON declarative schema
     std::string lottie_json_;     // Lottie animation JSON

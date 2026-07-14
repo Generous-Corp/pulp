@@ -13,6 +13,8 @@
 /// context menu does not darken what is behind it).
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/widget_painter.hpp>
+#include <pulp/view/widget_metrics.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
@@ -37,7 +39,17 @@ public:
         bool enabled = true;
         bool checked = false;
         bool separator = false;
+        /// A non-selectable title row that groups the items below it.
+        bool header = false;
+        bool has_submenu = false;
         static Item make_separator() { return Item{0, "", true, false, true}; }
+        static Item make_header(std::string title) {
+            Item i;
+            i.label = std::move(title);
+            i.enabled = false;
+            i.header = true;
+            return i;
+        }
     };
 
     ContextMenu() { set_focusable(true); }
@@ -68,13 +80,32 @@ public:
     View* hit_test(Point local_point) override;  // whole overlay is hit (catch outside clicks)
     bool wants_mouse_input() const override { return true; }
 
+    /// The menu's resolved geometry: the panel rect and one rect per row, in
+    /// this view's LOCAL coordinates. Rows are NOT assumed to be uniform height
+    /// — a skin may make a separator two pixels tall and a label row twenty —
+    /// so hit-testing and painting both walk this list rather than dividing by
+    /// a row constant.
+    struct MenuLayout {
+        Rect box{};
+        float border = 0.0f;         ///< panel-edge padding on all four sides
+        FontSpec font{};             ///< the font the rows are measured/drawn with
+        std::vector<Rect> rows{};    ///< one per item, in item order
+    };
+
+    /// Compute the menu's own size and row positions, with no canvas and no
+    /// paint. This is the sizing entry point: it asks the metrics delegate
+    /// (`effective_metrics()`) for each row's natural size, the panel border,
+    /// and the row font, and falls back to the stock look for anything the
+    /// delegate declines. A caller can therefore ask a menu how big it wants to
+    /// be BEFORE it is ever shown.
+    MenuLayout layout() const;
+
+    /// Convenience: the panel width `layout()` would choose.
+    float measured_width() const { return layout().box.width; }
+
 private:
-    // Computed menu-box geometry in this view's LOCAL coords. Shared by paint,
-    // hit_test, and mouse hover so they always agree.
-    Rect menu_box(const canvas::Canvas* canvas = nullptr) const;
-    float measured_width() const;  // cached label-driven width (set in paint)
     // Row index under a local point, or -1 if outside the box / on a non-row.
-    int row_at(Point local_point, const Rect& box) const;
+    int row_at(Point local_point, const MenuLayout& lay) const;
     void move_hover(int delta);    // keyboard nav, skipping separators + disabled
     void fire_close(std::optional<int> result);
 
@@ -82,15 +113,13 @@ private:
     Point anchor_{0, 0};
     int hover_index_ = -1;
     bool closed_ = false;
-    // Width measured during paint (depends on a canvas/font); cached so geometry
-    // is stable for headless hit-testing before the first paint. Defaults to the
-    // minimum width until paint runs.
-    mutable float cached_width_ = 120.0f;
 
     static constexpr float kRowHeight = 24.0f;
     static constexpr float kHPad = 34.0f;   // total horizontal label padding
     static constexpr float kMinWidth = 120.0f;
     static constexpr float kRadius = 4.0f;
+    static constexpr float kSeparatorHeight = 24.0f;
+    static constexpr float kFontSize = 12.0f;
 };
 
 /// Design-system alias. The Ink & Signal Figma library names this primitive

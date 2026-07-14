@@ -6,6 +6,8 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/accessibility.hpp>
+#include <pulp/view/widget_metrics.hpp>
+#include <pulp/view/widget_painter.hpp>
 #include <pulp/view/caret.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/platform/clipboard.hpp>
@@ -171,6 +173,54 @@ public:
     /// Called whenever the text content changes.
     std::function<void(const std::string& text)> on_change;
 
+    /// Called when the field loses keyboard focus. The common inline-rename
+    /// idiom is `on_return` = commit, `on_escape` = revert, `on_focus_lost` =
+    /// commit — clicking away from a rename field should keep the edit, and
+    /// without this hook a widget cannot tell the difference between "the user
+    /// left" and "the user is still typing".
+    std::function<void(const std::string& text)> on_focus_lost;
+
+    // ── Frame geometry ───────────────────────────────────────────────────
+
+    /// Horizontal alignment of the text inside the field. Default `left`.
+    /// A one-line field in a narrow inline-rename slot is very often centred.
+    void set_text_align(canvas::TextAlign a) {
+        text_align_ = a;
+        invalidate_layout_cache();
+        request_repaint();
+    }
+    canvas::TextAlign text_align() const { return text_align_; }
+
+    /// The gap between the field's frame and its text, per side. Overrides the
+    /// stock padding on every side that is set. A metrics delegate
+    /// (`WidgetMetrics::text_field_insets`) supplies this when one is installed;
+    /// this setter is the direct, per-widget route.
+    void set_insets(EdgeInsets insets) {
+        insets_ = insets;
+        has_own_insets_ = true;
+        invalidate_layout_cache();
+        request_repaint();
+    }
+    EdgeInsets insets() const { return insets_; }
+
+    /// Caret stroke width in pixels. Sub-pixel values render as an antialiased
+    /// hairline. 0 restores the default. A metrics delegate
+    /// (`WidgetMetrics::caret_width`) supplies this when one is installed.
+    void set_caret_width(float px) {
+        caret_width_ = px;
+        request_repaint();
+    }
+    float caret_width() const;
+
+    /// Force the caret hidden even while focused. A field that shows a
+    /// selection band often wants the caret suppressed for the duration; this
+    /// is the switch. Independent of blink: an invisible caret does not blink.
+    void set_caret_visible(bool v) {
+        caret_visible_ = v;
+        request_repaint();
+    }
+    bool caret_visible() const { return caret_visible_; }
+
     // ── Text access ──────────────────────────────────────────────────────
 
     const std::string& text() const { return text_; }
@@ -306,6 +356,11 @@ private:
     int selection_end_ = 0;      ///< Selection active end (= caret) as a UTF-8 byte offset.
     float font_size_ = 13.0f;
     float content_inset_left_ = 0.0f; ///< Extra left inset to clear a leading icon
+    canvas::TextAlign text_align_ = canvas::TextAlign::left;
+    EdgeInsets insets_{};
+    bool has_own_insets_ = false;
+    float caret_width_ = 0.0f;     ///< 0 = use the delegate's, else the default
+    bool caret_visible_ = true;
     float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
     CaretBlink caret_blink_;     ///< Solid-while-moving, blinking-while-still state machine
     CaretStyle caret_style_ = default_caret_style();

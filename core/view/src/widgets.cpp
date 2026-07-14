@@ -213,11 +213,8 @@ void Knob::on_mouse_leave() {
 
 void Knob::on_mouse_event(const MouseEvent& event) {
     if (!event.is_down) return;
-    // Double-click: reset to default (0.5)
-    if (event.click_count >= 2) {
-        value_ = default_value_;
-        if (on_change) on_change(value_);
-    }
+    // Double-click returns the knob to its default position.
+    if (event.click_count >= 2) store_normalized(default_value_, Notify::sync);
 }
 
 void Knob::on_mouse_down(Point pos) {
@@ -251,7 +248,8 @@ void Knob::on_mouse_down(Point pos) {
         }
     }
     drag_start_y_ = pos.y;
-    drag_start_value_ = value_;
+    drag_last_y_ = pos.y;
+    drag_start_proportion_ = position_for_value();
     if (!gesture_active_) {
         gesture_active_ = true;
         if (on_gesture_begin) on_gesture_begin();
@@ -300,17 +298,23 @@ void Knob::on_mouse_drag(Point pos) {
         }
         return;
     }
-    // Drag up to increase, down to decrease. 150px = full track. The delta is
-    // applied in POSITION space and mapped back through the skew curve, so a
-    // skewed knob drags perceptually-linearly (identical when skew is 1).
-    float delta = (drag_start_y_ - pos.y) / 150.0f;
-    float start_pos = skew_ == 1.0f ? drag_start_value_
-                                    : std::pow(drag_start_value_, skew_);
-    float new_val = value_for_position(std::clamp(start_pos + delta, 0.0f, 1.0f));
-    if (new_val != value_) {
-        value_ = new_val;
-        if (on_change) on_change(value_);
-    }
+    // Drag up to increase, down to decrease. The travel is applied in the core's
+    // PROPORTION space (post-curve), so a skewed knob drags perceptually
+    // linearly; the core maps it back to a real value, then clamps and snaps it.
+    // Sensitivity, the fine-drag divisor and the velocity law all live in the
+    // core — the widget only supplies the pixels.
+    const double delta_total = static_cast<double>(drag_start_y_ - pos.y);
+    const double delta_tick = static_cast<double>(drag_last_y_ - pos.y);
+    drag_last_y_ = pos.y;
+    const bool moved = core_.velocity_mode()
+        ? core_.drag_step(delta_tick, /*fine*/ false, Notify::none)
+        : core_.drag_to(delta_total, drag_start_proportion_, /*fine*/ false, Notify::none);
+    if (!moved) return;
+    const float snapped = static_cast<float>(core_.normalized());
+    if (snapped == value_) return;
+    value_ = snapped;
+    request_repaint();
+    if (on_change) on_change(value_);
 }
 
 void Knob::advance_animations(float dt) {
@@ -515,6 +519,25 @@ float Knob::modulated_value(size_t ring) const {
 }
 
 void Knob::paint(canvas::Canvas& canvas) {
+    // A paint delegate installed on this knob or on any ancestor gets first
+    // refusal (widget_painter.hpp). It declines by default, in which case the
+    // stock rendering below runs unchanged.
+    if (auto* p = effective_painter()) {
+        RotaryPaintState s;
+        s.bounds = local_bounds();
+        s.enabled = enabled();
+        s.hovered = is_hovered();
+        s.pressed = gesture_active_;
+        s.focused = has_focus();
+        s.position = position_for_value();
+        s.start_angle = Knob::start_angle;
+        s.end_angle = Knob::end_angle;
+        s.value = core_.value();
+        s.value_min = core_.minimum();
+        s.value_max = core_.maximum();
+        if (p->paint_rotary(canvas, s, *this)) return;
+    }
+
     auto b = local_bounds();
     float cx = b.width * 0.5f;
     float cy = b.height * 0.5f;

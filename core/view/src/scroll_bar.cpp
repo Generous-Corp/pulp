@@ -1,4 +1,5 @@
 #include <pulp/view/scroll_bar.hpp>
+#include <pulp/view/widget_painter.hpp>
 
 #include <algorithm>
 
@@ -128,6 +129,27 @@ bool ScrollBar::on_key_event(const KeyEvent& event) {
 void ScrollBar::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     if (b.width <= 0 || b.height <= 0) return;
+
+    // Paint delegate first refusal (widget_painter.hpp). The thumb geometry is
+    // handed over in PIXELS (leading edge + extent along the bar's axis) because
+    // that is what a scrollbar skin draws with; the value/range travel too.
+    if (auto* p = effective_painter()) {
+        LinearPaintState ps;
+        ps.bounds = b;
+        ps.enabled = enabled();
+        ps.hovered = is_hovered();
+        ps.pressed = dragging_;
+        ps.focused = has_focus();
+        ps.horizontal = orientation_ == Orientation::horizontal;
+        ps.thumb_size = thumb_pixel_length();
+        ps.thumb_pos = thumb_pixel_offset() + kArrowReserve;
+        ps.track_min = kArrowReserve;
+        ps.track_max = (ps.horizontal ? b.width : b.height) - kArrowReserve;
+        ps.value = value_;
+        ps.value_min = min_;
+        ps.value_max = max_;
+        if (p->paint_scroll_bar(canvas, ps, *this)) return;
+    }
 
     const auto track_color =
         resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));

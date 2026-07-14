@@ -418,6 +418,7 @@ target_sources(pulp-view-core PRIVATE
     src/yoga_layout.cpp
     src/layout_snapshot.cpp
     src/widgets.cpp
+    src/slider_core.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp
     src/editor_bridge.cpp

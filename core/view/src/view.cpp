@@ -1,4 +1,6 @@
 #include <pulp/view/view.hpp>
+#include <pulp/view/widget_painter.hpp>
+#include <pulp/view/widget_metrics.hpp>
 #include <pulp/view/tracing_badge.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/motion.hpp>
@@ -1411,6 +1413,97 @@ void View::paint_overlays(canvas::Canvas& canvas, View* painting_root) {
     if (s_inspector_paint_hook) {
         s_inspector_paint_hook(canvas, painting_root);
     }
+}
+
+// ── In-tree drag source ──────────────────────────────────────────────────────
+//
+// The drag record lives on the ROOT so every view in the tree agrees on which
+// drag is in flight, and so a second tree in the same process cannot see it.
+
+namespace {
+View* tree_root(View* v) {
+    while (v != nullptr && v->parent() != nullptr) v = v->parent();
+    return v;
+}
+} // namespace
+
+bool View::start_drag(DropData data) {
+    View* root = tree_root(this);
+    if (root == nullptr) return false;
+    // An empty payload is a no-op, not a drag: a receiver that gets handed
+    // nothing has no way to decline meaningfully.
+    if (data.file_paths.empty() && data.text.empty() && data.custom_data.empty())
+        return false;
+    root->active_drag_ = std::make_unique<ActiveDrag>();
+    root->active_drag_->data = std::move(data);
+    root->active_drag_->source = this;
+    root->active_drag_->active = true;
+    return true;
+}
+
+void View::drag_to(Point root_pos) {
+    View* root = tree_root(this);
+    if (root == nullptr || !root->active_drag_ || !root->active_drag_->active) return;
+    auto& d = *root->active_drag_;
+    // enter and move share one entry point: dispatch_drag_enter is documented as
+    // idempotent, and it is what maintains the hover/leave transitions.
+    dispatch_drag_enter(*root, d.session, d.data, root_pos);
+}
+
+bool View::drop_here(Point root_pos) {
+    View* root = tree_root(this);
+    if (root == nullptr || !root->active_drag_ || !root->active_drag_->active) return false;
+    auto d = std::move(root->active_drag_);
+    root->active_drag_.reset();          // the drag is over before the receiver runs,
+                                         // so a receiver may start a new one
+    return dispatch_drop(*root, d->session, d->data, root_pos);
+}
+
+void View::cancel_drag() {
+    View* root = tree_root(this);
+    if (root == nullptr || !root->active_drag_) return;
+    dispatch_drag_exit(*root, root->active_drag_->session);
+    root->active_drag_.reset();
+}
+
+bool View::drag_active() const {
+    const View* root = this;
+    while (root->parent_ != nullptr) root = root->parent_;
+    return root->active_drag_ != nullptr && root->active_drag_->active;
+}
+
+void View::set_painter(std::shared_ptr<WidgetPainter> p) {
+    painter_ = std::move(p);
+    request_repaint();
+}
+
+WidgetPainter* View::effective_painter() const {
+    for (const View* v = this; v != nullptr; v = v->parent_)
+        if (v->painter_) return v->painter_.get();
+    return nullptr;
+}
+
+namespace {
+void invalidate_layout_subtree(View& v) {
+    v.invalidate_layout();
+    for (size_t i = 0; i < v.child_count(); ++i) invalidate_layout_subtree(*v.child_at(i));
+}
+}  // namespace
+
+void View::set_metrics(std::shared_ptr<WidgetMetrics> m) {
+    metrics_ = std::move(m);
+    // A metric change is a SIZE change, so the subtree must re-measure, not
+    // just repaint. This is the whole reason metrics and painters are separate
+    // objects: installing a painter is a paint invalidation, installing metrics
+    // is a layout invalidation.
+    invalidate_layout_subtree(*this);
+    request_repaint();
+}
+
+WidgetMetrics* View::effective_metrics() const {
+    for (const View* v = this; v != nullptr; v = v->parent_)
+        if (v->metrics_) return v->metrics_.get();
+    return nullptr;
 }
 
 Color View::resolve_color(const std::string& name, Color fallback) const {

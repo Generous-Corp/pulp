@@ -4,6 +4,7 @@
 // TextButton, HyperlinkButton, ArrowButton, ShapeButton, ImageButton.
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/widget_painter.hpp>
 #include <pulp/view/animation.hpp>
 #include <string>
 #include <functional>
@@ -47,11 +48,18 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    void on_mouse_up(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
     bool wants_mouse_input() const override { return true; }
 
+    bool is_pressed() const { return pressed_; }
+
     float intrinsic_height() const override { return 36.0f; }
+
+    /// The stock label rendering, split out of paint() so a delegate that skins
+    /// only the button FACE still gets the default text drawn over it.
+    void paint_label(canvas::Canvas& canvas);
 
 private:
     std::string label_;

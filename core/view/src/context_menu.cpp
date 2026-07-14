@@ -1,6 +1,10 @@
 #include <pulp/view/context_menu.hpp>
+#include <pulp/view/widget_painter.hpp>
+
+#include <pulp/canvas/text_shaper.hpp>
 
 #include <algorithm>
+#include <vector>
 
 namespace pulp::view {
 
@@ -12,50 +16,92 @@ bool is_selectable(const ContextMenu::Item& it) {
 
 }  // namespace
 
-float ContextMenu::measured_width() const {
-    return cached_width_;
-}
+ContextMenu::MenuLayout ContextMenu::layout() const {
+    MenuLayout lay;
 
-Rect ContextMenu::menu_box(const canvas::Canvas* canvas) const {
-    // Width: max measured label width + padding, clamped to a minimum. When a
-    // canvas is available (during paint) measure with the real font; otherwise
-    // fall back to the cached width so headless hit-testing is stable.
-    float width = kMinWidth;
-    if (canvas) {
-        // const_cast: measure_text/set_font are non-const on the canvas, but
-        // measuring text is logically a read for our geometry. We never mutate
-        // pixels here.
-        auto* c = const_cast<canvas::Canvas*>(canvas);
-        c->set_font("Inter", 12);
-        for (const auto& it : items_) {
-            if (it.separator) continue;
-            width = std::max(width, c->measure_text(it.label) + kHPad);
+    // ── The sizing delegate (widget_metrics.hpp) ─────────────────────────
+    // A menu's panel size is a pure function of its rows, so the delegate is
+    // asked three things — the row font, each row's natural size, and the panel
+    // border — and the menu does the arithmetic. Each hook may decline, in
+    // which case the stock metric below is used for that hook alone.
+    WidgetMetrics* metrics = effective_metrics();
+
+    lay.font = FontSpec{"Inter", kFontSize, 400, 0.0f};
+    if (metrics != nullptr)
+        metrics->menu_font(lay.font, const_cast<ContextMenu&>(*this));
+
+    lay.border = 0.0f;
+    if (metrics != nullptr)
+        metrics->menu_border(lay.border, const_cast<ContextMenu&>(*this));
+
+    // Measure with the SAME shaper the painter draws with, so a measured width
+    // and a drawn width cannot disagree. This runs with no canvas, which is
+    // what lets a menu be sized before it is shown.
+    auto& shaper = canvas::global_text_shaper();
+
+    float widest = kMinWidth;
+    float stacked = 0.0f;
+    std::vector<float> heights;
+    heights.reserve(items_.size());
+
+    for (const auto& it : items_) {
+        BoxSize size;
+        bool sized = false;
+        if (metrics != nullptr) {
+            MenuItemMetricsQuery q;
+            q.text = it.label;
+            q.separator = it.separator;
+            q.header = it.header;
+            q.ticked = it.checked;
+            q.has_submenu = it.has_submenu;
+            q.standard_height = 0.0f;   // no caller-forced row height
+            sized = metrics->menu_item_size(q, size, const_cast<ContextMenu&>(*this));
         }
-        cached_width_ = width;
-    } else {
-        width = cached_width_;
+        if (!sized || size.width <= 0.0f) {
+            size.width = it.separator
+                ? 0.0f
+                : shaper.prepare(it.label, lay.font.family, lay.font.size).total_width() + kHPad;
+        }
+        if (!sized || size.height <= 0.0f)
+            size.height = it.separator ? kSeparatorHeight : kRowHeight;
+
+        widest = std::max(widest, size.width);
+        heights.push_back(size.height);
+        stacked += size.height;
     }
 
-    float height = static_cast<float>(items_.size()) * kRowHeight;
+    const float width = widest + lay.border * 2.0f;
+    const float height = stacked + lay.border * 2.0f;
 
+    // Position: flip left / up if the box would spill past the overlay bounds.
     auto b = local_bounds();
     float x = anchor_.x;
     float y = anchor_.y;
-    // Flip left / up if the box would spill past the overlay bounds.
     if (b.width > 0.0f && x + width > b.width) x = anchor_.x - width;
     if (b.height > 0.0f && y + height > b.height) y = anchor_.y - height;
     x = std::max(0.0f, x);
     y = std::max(0.0f, y);
-    return {x, y, width, height};
+    lay.box = {x, y, width, height};
+
+    float row_y = y + lay.border;
+    lay.rows.reserve(heights.size());
+    for (float h : heights) {
+        lay.rows.push_back({x + lay.border, row_y, widest, h});
+        row_y += h;
+    }
+    return lay;
 }
 
-int ContextMenu::row_at(Point local_point, const Rect& box) const {
+int ContextMenu::row_at(Point local_point, const MenuLayout& lay) const {
+    const Rect& box = lay.box;
     if (local_point.x < box.x || local_point.x > box.x + box.width ||
         local_point.y < box.y || local_point.y > box.y + box.height)
         return -1;
-    int idx = static_cast<int>((local_point.y - box.y) / kRowHeight);
-    if (idx < 0 || idx >= static_cast<int>(items_.size())) return -1;
-    return idx;
+    for (int i = 0; i < static_cast<int>(lay.rows.size()); ++i) {
+        const Rect& r = lay.rows[static_cast<size_t>(i)];
+        if (local_point.y >= r.y && local_point.y < r.y + r.height) return i;
+    }
+    return -1;
 }
 
 void ContextMenu::move_hover(int delta) {
@@ -91,7 +137,8 @@ void ContextMenu::fire_close(std::optional<int> result) {
 void ContextMenu::paint(canvas::Canvas& canvas) {
     if (items_.empty()) return;
 
-    const Rect box = menu_box(&canvas);
+    const MenuLayout lay = layout();
+    const Rect& box = lay.box;
 
     auto bg = resolve_color("bg.elevated", canvas::Color::rgba8(45, 45, 60));
     auto border_c = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
@@ -101,30 +148,66 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
 
     canvas.save();
 
-    // Menu box background + 1px rounded border.
-    canvas.set_fill_color(bg);
-    canvas.fill_rounded_rect(box.x, box.y, box.width, box.height, kRadius);
-    canvas.set_stroke_color(border_c);
-    canvas.set_line_width(1);
-    canvas.stroke_rounded_rect(box.x, box.y, box.width, box.height, kRadius);
+    // Paint delegate (widget_painter.hpp): the panel surface and each row are
+    // separate hooks, so a skin can restyle rows and keep the stock panel, or
+    // the reverse. Each declines by default.
+    WidgetPainter* delegate = effective_painter();
 
-    canvas.set_font("Inter", 12);
+    bool panel_skinned = false;
+    if (delegate != nullptr) {
+        MenuBackgroundPaintState ps;
+        ps.bounds = box;
+        ps.enabled = enabled();
+        panel_skinned = delegate->paint_menu_background(canvas, ps, *this);
+    }
+    if (!panel_skinned) {
+        // Menu box background + 1px rounded border.
+        canvas.set_fill_color(bg);
+        canvas.fill_rounded_rect(box.x, box.y, box.width, box.height, kRadius);
+        canvas.set_stroke_color(border_c);
+        canvas.set_line_width(1);
+        canvas.stroke_rounded_rect(box.x, box.y, box.width, box.height, kRadius);
+    }
+
+    canvas.set_font(lay.font.family, lay.font.size);
     for (int i = 0; i < static_cast<int>(items_.size()); ++i) {
         const auto& it = items_[static_cast<size_t>(i)];
-        float iy = box.y + static_cast<float>(i) * kRowHeight;
+        const Rect row = lay.rows[static_cast<size_t>(i)];
+        const float iy = row.y;
+        const float rh = row.height;
+
+        if (delegate != nullptr) {
+            if (it.header) {
+                MenuHeaderPaintState hs;
+                hs.bounds = row;
+                hs.text = it.label;
+                if (delegate->paint_menu_section_header(canvas, hs, *this)) continue;
+            } else {
+                MenuItemPaintState is;
+                is.bounds = row;
+                is.enabled = it.enabled;
+                is.text = it.label;
+                is.separator = it.separator;
+                is.highlighted = (i == hover_index_ && it.enabled);
+                is.hovered = is.highlighted;
+                is.ticked = it.checked;
+                is.has_submenu = it.has_submenu;
+                if (delegate->paint_menu_item(canvas, is, *this)) continue;
+            }
+        }
 
         if (it.separator) {
             canvas.set_stroke_color(border_c);
             canvas.set_line_width(0.5f);
-            canvas.stroke_line(box.x + 4, iy + kRowHeight * 0.5f,
-                               box.x + box.width - 4, iy + kRowHeight * 0.5f);
+            canvas.stroke_line(row.x + 4, iy + rh * 0.5f,
+                               row.x + row.width - 4, iy + rh * 0.5f);
             continue;
         }
 
         // Hover highlight only on enabled rows.
         if (i == hover_index_ && it.enabled) {
             canvas.set_fill_color(accent_c);
-            canvas.fill_rect(box.x + 1, iy, box.width - 2, kRowHeight);
+            canvas.fill_rect(row.x + 1, iy, row.width - 2, rh);
         }
 
         // Checkmark glyph for checked items.
@@ -133,7 +216,7 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
                                    ? canvas::Color::rgba8(255, 255, 255)
                                    : accent_c;
             canvas.set_fill_color(check_color);
-            canvas.fill_text("\xe2\x9c\x93", box.x + 6, iy + 16);
+            canvas.fill_text("\xe2\x9c\x93", row.x + 6, iy + rh * 0.5f + 4.0f);
         }
 
         // Dim disabled rows; white text on the hovered row.
@@ -142,7 +225,7 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         else if (i == hover_index_) row_text = canvas::Color::rgba8(255, 255, 255);
         canvas.set_fill_color(row_text);
         canvas.set_text_align(canvas::TextAlign::left);
-        canvas.fill_text(it.label, box.x + 22, iy + 16);
+        canvas.fill_text(it.label, row.x + 22, iy + rh * 0.5f + 4.0f);
     }
 
     canvas.restore();
@@ -152,8 +235,8 @@ void ContextMenu::on_mouse_event(const MouseEvent& event) {
     if (closed_ || items_.empty()) return;
     if (event.is_wheel) return;
 
-    const Rect box = menu_box();  // headless geometry (cached width)
-    const int row = row_at(event.position, box);
+    const MenuLayout lay = layout();  // canvas-free geometry
+    const int row = row_at(event.position, lay);
 
     if (!event.is_down) {
         // Hover: only over enabled, non-separator rows.

@@ -1,4 +1,5 @@
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/widget_painter.hpp>
 #include <pulp/view/animation.hpp>
 #include <algorithm>
 
@@ -68,6 +69,23 @@ float ComboBox::dropdown_width_hint() const {
 
 void ComboBox::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
+
+    // Paint delegate first refusal (widget_painter.hpp). Covers the CLOSED field
+    // only — the open dropdown is a menu surface and goes through the menu hooks.
+    bool skinned = false;
+    if (auto* p = effective_painter()) {
+        ComboBoxPaintState ps;
+        ps.bounds = b;
+        ps.enabled = enabled();
+        ps.hovered = is_hovered();
+        ps.pressed = open_;
+        ps.focused = has_focus();
+        ps.popup_open = open_;
+        ps.text = selected_text();
+        const float bh = std::min(b.height, 28.0f);
+        ps.arrow_zone = Rect{b.width - 24.0f, 0.0f, 24.0f, bh};
+        skinned = p->paint_combo_box(canvas, ps, *this);
+    }
     auto bg = resolve_color("bg.surface", canvas::Color::rgba8(30, 30, 46));
     auto border_c = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
     auto text_c = resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
@@ -75,11 +93,13 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     float base_h = std::min(b.height, 28.0f);
 
     // Background
-    canvas.set_fill_color(bg);
-    canvas.fill_rounded_rect(0, 0, b.width, base_h, 4);
-    canvas.set_stroke_color(border_c);
-    canvas.set_line_width(1);
-    canvas.stroke_rounded_rect(0, 0, b.width, base_h, 4);
+    if (!skinned) {
+        canvas.set_fill_color(bg);
+        canvas.fill_rounded_rect(0, 0, b.width, base_h, 4);
+        canvas.set_stroke_color(border_c);
+        canvas.set_line_width(1);
+        canvas.stroke_rounded_rect(0, 0, b.width, base_h, 4);
+    }
 
     // Selected text. The box width often comes straight from a design (a Figma
     // dropdown sized tight to its own label), so prefer SHRINKING the font to fit
@@ -102,10 +122,12 @@ void ComboBox::paint(canvas::Canvas& canvas) {
             canvas.set_font("Inter", f);
             return canvas.measure_text(s);
         });
-    canvas.set_font("Inter", font_size);
-    canvas.set_fill_color(text_c);
-    canvas.set_text_align(canvas::TextAlign::left);
-    canvas.fill_text(display_text, 8, base_h * 0.5f + font_size * 0.34f);
+    if (!skinned) {
+        canvas.set_font("Inter", font_size);
+        canvas.set_fill_color(text_c);
+        canvas.set_text_align(canvas::TextAlign::left);
+        canvas.fill_text(display_text, 8, base_h * 0.5f + font_size * 0.34f);
+    }
 
     // Dropdown chevron — vertically centered on the field so it lines up with
     // the field text's optical centre (which sits at base_h*0.5). The V's
@@ -114,10 +136,12 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     float ax = b.width - 16;
     float ay = base_h * 0.5f - 1.0f;
     auto arrow_c = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 170));
-    canvas.set_stroke_color(arrow_c);
-    canvas.set_line_width(1.5f);
-    canvas.stroke_line(ax - 3, ay - 2, ax, ay + 2);
-    canvas.stroke_line(ax, ay + 2, ax + 3, ay - 2);
+    if (!skinned) {
+        canvas.set_stroke_color(arrow_c);
+        canvas.set_line_width(1.5f);
+        canvas.stroke_line(ax - 3, ay - 2, ax, ay + 2);
+        canvas.stroke_line(ax, ay + 2, ax + 3, ay - 2);
+    }
 
     // Dropdown menu: deferred to overlay queue so it paints on top of everything
     if (open_ && !items_.empty()) {
