@@ -137,3 +137,4 @@ external/skia-build/.skia-asset-sha256
 # External SDKs cloned by setup.sh / FetchContent — never committed.
 external/AudioUnitSDK
 external/vst3sdk
+examples/web-demos/wclap-build/build
