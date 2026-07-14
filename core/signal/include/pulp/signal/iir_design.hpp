@@ -21,10 +21,12 @@
 ///     integrals K and E" (1965) — AGM for K(m).
 
 #include <pulp/signal/filter_design.hpp>
+#include <pulp/signal/frequency_response.hpp>
 #include <pulp/signal/special_functions.hpp>
 
 #include <cmath>
 #include <complex>
+#include <span>
 #include <vector>
 #include <algorithm>
 
@@ -584,29 +586,14 @@ private:
 
 // ── Cascade evaluation helpers (utility) ─────────────────────────────────
 
-/// Evaluate the magnitude response of a cascade of biquads at a given
-/// normalized digital frequency omega = 2*pi*f/fs. Pure utility — useful
-/// for testing and for runtime spectrum-display widgets.
-inline double cascade_magnitude(const std::vector<FilterDesign::Coefficients>& sos,
-                                double omega) {
-    std::complex<double> z = std::polar(1.0, omega);
-    std::complex<double> z_inv = 1.0 / z;
-    std::complex<double> h(1.0, 0.0);
-    for (const auto& c : sos) {
-        std::complex<double> num = static_cast<double>(c.b0)
-                                 + static_cast<double>(c.b1) * z_inv
-                                 + static_cast<double>(c.b2) * z_inv * z_inv;
-        std::complex<double> den = 1.0
-                                 + static_cast<double>(c.a1) * z_inv
-                                 + static_cast<double>(c.a2) * z_inv * z_inv;
-        h *= num / den;
-    }
-    return std::abs(h);
-}
+// cascade_magnitude() lives in frequency_response.hpp (included above) and
+// takes a std::span, so the std::vector a design helper returns converts
+// implicitly. It is deliberately not reimplemented here: one evaluator of
+// H(z), shared by the tests, the UI curve widgets, and this header.
 
 /// Returns true if every biquad section's poles lie strictly inside the
 /// unit circle (i.e. the filter is BIBO stable).
-inline bool cascade_is_stable(const std::vector<FilterDesign::Coefficients>& sos) {
+inline bool cascade_is_stable(std::span<const FilterDesign::Coefficients> sos) {
     for (const auto& c : sos) {
         // Poles are roots of z^2 + a1 z + a2 = 0. With real coefficients:
         //   |a2| < 1 AND |a1| < 1 + a2.

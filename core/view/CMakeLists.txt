@@ -464,6 +464,7 @@ target_sources(pulp-view-core PRIVATE
     src/motion_cost.cpp
     src/window_manager.cpp
     src/eq_curve_view.cpp
+    src/graph_scale.cpp
     src/step_grid_view.cpp
     src/midi_keyboard.cpp
     src/musical_typing_keyboard.cpp

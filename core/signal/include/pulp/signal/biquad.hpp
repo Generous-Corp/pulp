@@ -7,6 +7,22 @@
 
 namespace pulp::signal {
 
+// Coefficients of one normalized second-order section (a0 == 1).
+//
+// This is the canonical exchange type between the three layers that all speak
+// biquads: design (FilterDesign / IirDesign produce it), runtime (BiquadT
+// consumes it via set_coefficients and hands it back via coefficients()), and
+// analysis (frequency_response.hpp evaluates H(z) from it). Keeping one shared
+// struct is what lets a UI ask a live filter what it looks like instead of
+// re-deriving — or approximating — the response itself.
+template <typename SampleType = float>
+struct BiquadCoefficientsT {
+    SampleType b0 = 1, b1 = 0, b2 = 0;
+    SampleType a1 = 0, a2 = 0;
+};
+
+using BiquadCoefficients = BiquadCoefficientsT<float>;
+
 // Biquad IIR filter — standard second-order section.
 // RT contract: coefficient calculation and process/reset paths allocate no
 // memory. Retune coefficients at a block boundary if parameter continuity
@@ -19,7 +35,27 @@ class BiquadT {
 public:
     enum class Type { lowpass, highpass, bandpass, notch, allpass, peaking, low_shelf, high_shelf };
 
+    using Coefficients = BiquadCoefficientsT<SampleType>;
+
     BiquadT() = default;
+
+    // Load pre-designed coefficients (from FilterDesign, IirDesign, or any
+    // other source). Accepts a section of any floating-point precision so a
+    // float design table can drive a double-precision filter and vice versa.
+    // Assumes the section is already normalized to a0 == 1.
+    template <typename U>
+    void set_coefficients(const BiquadCoefficientsT<U>& c) {
+        b0_ = static_cast<SampleType>(c.b0);
+        b1_ = static_cast<SampleType>(c.b1);
+        b2_ = static_cast<SampleType>(c.b2);
+        a1_ = static_cast<SampleType>(c.a1);
+        a2_ = static_cast<SampleType>(c.a2);
+    }
+
+    // Read back the normalized coefficients currently in force. Lets analysis
+    // and UI code evaluate this exact filter's response (see
+    // frequency_response.hpp) rather than guessing at its shape.
+    Coefficients coefficients() const { return {b0_, b1_, b2_, a1_, a2_}; }
 
     // Configure from type, frequency, Q, and optional gain (for peaking/shelf)
     void set_coefficients(Type type,

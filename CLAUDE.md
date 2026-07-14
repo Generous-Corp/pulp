@@ -303,6 +303,43 @@ Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migratio
 
 **This applies to source code too — comments AND test names/tags, not just docs.** Do NOT write phase/PR/issue/wave/handoff breadcrumbs in `core/`, `test/`, or any shipped source. Specifically forbidden in code: `(Phase N)` / `Phase N will…` / `4f`-style sub-phase labels, `[phaseN]` Catch2 tags, "sub-PR"/"slice N of", and bare `#1234` issue/PR references. Write the comment as a present-tense statement of what the code does or a neutral capability note (e.g. "feedback needs a previous-block slot" — not "Phase 4d adds feedback"). A test tag should say what it covers (`[parity]`, `[rt-safety]`), never which session shipped it. The phase/PR narrative goes in the **commit message** and the **planning submodule**, where reviewers expect it. (`docs_noise_lint.py`'s diff-scoped scan enforces this — for docs/skills across the working tree, and for **source comments and test tags** (`core/`, `examples/`, `tools/`, `test/`, `apple/`, `inspect/`, `ship/`) on changed/added lines only, so the historical backlog never blocks. It is comment-aware (only `//`, `/* */`, and `#` comment text, plus string-literal Catch2 `[tag]`s — never code). Runs in the pre-push hook (report mode, enforcing-by-default); demote with `PULP_DISABLE_PREPUSH_GATES=1`. Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment.) The `code-comments` skill has the full forbidden/keep/rewrite guidance with concrete examples and a pre-commit `rg` self-check — consult it before adding comments.
 
+### Expose the Pipeline, Not Just the Endpoints
+
+When a class computes an intermediate that is meaningful on its own — filter
+coefficients, a frequency response, an envelope shape, a bin→Hz mapping, a
+value↔normalized transform — and that intermediate is derivable without the
+class's mutable state, it MUST be reachable as a public pure function or
+returned value. Not sealed inside a private method, and not reachable only by
+pushing samples through `process()`.
+
+The test: **could a widget, a test, or another subsystem correctly draw or
+verify this stage without running audio through it?** If not, the stage is
+sealed — and someone will eventually re-derive it, wrong.
+
+That is not hypothetical. `EqCurveView` shipped for months drawing a Gaussian
+bell for *every* EQ band type (a low-pass rendered as a symmetric bump) because
+`Biquad` had no coefficient accessor and `FilterDesign`'s output could not be
+loaded into a `Biquad` — so there was no path from a band to its curve, while
+the correct evaluator sat unreachable in `iir_design.hpp`. Every existing test
+passed, because they all checked band bookkeeping and none checked the curve.
+
+The canonical in-repo example of the right shape is `canvas::TextShaper`:
+`prepare()` returns the expensive intermediate (`PreparedText`) as a public
+value, and `layout()` is cheap arithmetic over it — measure once, reflow
+forever. `state::NormalisableRange` and `signal::frequency_response` follow the
+same pattern.
+
+Practical rules:
+- When adding a DSP class, ship the pure "what does it look like" function
+  (`coefficients()`, `magnitude_db()`, `level_at()`) in the same PR as the
+  stateful "push samples through it" method.
+- A `core/view` widget must never contain filter, envelope, or spectrum math
+  that `core/signal` does not export. `std::log10` / `std::exp` / `std::pow`
+  inside a `core/view/src/` paint path is a smell worth grepping for.
+- If a doc comment shows an API seam, that seam must actually compile.
+  `filter_design.hpp` advertised `biquad.set_coefficients(coeffs)` for months;
+  the overload did not exist.
+
 ### Verify Against Code, Not Planning Docs
 
 When assessing what features exist or what claims are accurate, **always check the actual code on the current branch** — never trust planning documents, phase trackers, or status files as the source of truth. Planning docs describe intent; the code describes reality. If there is a conflict, the code wins. This applies to:

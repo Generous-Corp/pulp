@@ -146,6 +146,10 @@ pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters LIBRARIES pulp::signal)
+# Filter analysis: coefficients -> magnitude response -> sampled curve. Asserts
+# the SHAPE of each filter type (a lowpass rolls off, a notch nulls, a shelf
+# plateaus), which is what distinguishes a real response from an approximation.
+pulp_add_test_suite(pulp-test-frequency-response LIBRARIES pulp::signal)
 # Signal spectral tests extracted from test_signal.cpp.
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
 pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
