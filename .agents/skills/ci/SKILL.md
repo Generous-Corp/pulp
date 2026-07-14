@@ -54,6 +54,48 @@ summary/watch commands.
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
 
+## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
+
+Hard-fails a PR when Pulp's own source names another UI framework — in a
+comment, a doc-comment, an identifier, or a test name — or adopts one of its
+class names into a Pulp API. Runs in `gates.sh` (gate 14), in CI, and as a
+ctest.
+
+Two halves, and the second is the one that catches the deeper problem:
+
+* **prose** — a foreign framework named in Pulp source.
+* **names** — a foreign framework's *class name* adopted into Pulp's API. A
+  comment is a liability; an adopted type name is the liability shipped in the
+  public headers, where every downstream user inherits it.
+
+It doubles as a design check: **if a doc-comment needs a foreign framework's
+vocabulary to make sense, the API is a compatibility shim wearing a feature's
+clothes** — redesign it rather than renaming it.
+
+Three carve-outs, each of which would be a *bug* to "clean up":
+
+* `core/format/host_quirks/**` and the tests that pin its `LessonOnly` rows.
+  The prior-art citation IS the audit trail the `Reference-Lineage` trailer
+  policy requires; removing it destroys the provenance it exists to record.
+* `test/test_cli_import*.cpp` — those files carry the importer's own
+  **denylist literals**. Strip the framework names and the check that rejects
+  vendored foreign code silently passes everything.
+* VST3 interface names Pulp implements (`IPlugView`, `IPluginFactory`). Word
+  boundaries keep them out of the net — they are Steinberg's names, spoken by
+  necessity.
+
+Translation tables (`SomeFramework::Widget → pulp::view::Widget`) are *data* and
+belong in the importer that owns them, never in `core/`.
+
+If you hit it: rewrite the comment to say what the code *does*, in units a
+reader who has never seen that framework can act on. Rename an adopted type and
+ship a `[[deprecated]]` alias so downstream keeps compiling — lines containing
+`[[deprecated` are skipped, since naming a foreign name in order to point
+*away* from it is the mechanism that makes a rename shippable.
+
+`--selftest` proves the gate can fail (8 cases). A gate that cannot fail is not
+a gate.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before shelling out to `pulp` (or `shipyard pr`, which ultimately
