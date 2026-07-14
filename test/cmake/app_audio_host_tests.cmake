@@ -9,6 +9,10 @@ catch_discover_tests(pulp-test-wam-adapter)
 # Parameter attachment tests
 pulp_add_test_suite(pulp-test-param-attachment LIBRARIES pulp::view)
 
+# The value engine the continuous controls share: range, interval, skew, drag
+# law, gesture bracketing, and the notify policy.
+pulp_add_test_suite(pulp-test-slider-core LIBRARIES pulp::view)
+
 # App framework tests (KeyMapping, MenuBar, Toolbar, AppSettings)
 pulp_add_test_suite(pulp-test-app-framework LIBRARIES pulp::view)
 
