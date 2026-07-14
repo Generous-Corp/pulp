@@ -156,9 +156,5 @@ private:
 };
 
 
-/// Deprecated names. Kept so existing callers keep compiling. The virtual hook
-/// (`on_update()`) is deliberately NOT aliased — see async_updater.hpp.
-using AsyncUpdater [[deprecated("renamed to pulp::events::CoalescedUpdater")]] = CoalescedUpdater;
-using LambdaAsyncUpdater [[deprecated("renamed to pulp::events::LambdaCoalescedUpdater")]] = LambdaCoalescedUpdater;
 
 }  // namespace pulp::events

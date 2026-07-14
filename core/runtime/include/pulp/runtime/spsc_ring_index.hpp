@@ -180,10 +180,5 @@ private:
     std::atomic<int> write_pos_{0};
 };
 
-/// Deprecated spelling of `SpscRingIndex`. Kept so existing code keeps
-/// compiling; the type is identical. Prefer `SpscRingIndex` — the class manages
-/// ring INDICES into a buffer it does not own, which is the one thing the old
-/// name never said.
-using AbstractFifo [[deprecated("renamed to pulp::runtime::SpscRingIndex")]] = SpscRingIndex;
 
 }  // namespace pulp::runtime

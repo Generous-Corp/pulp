@@ -111,14 +111,6 @@ struct ParamRange {
     /// Equivalent to choosing the skew that satisfies denormalize(0.5) == center.
     /// Falls back to a linear range when @p center is not strictly inside the
     /// open interval (min, max).
-    /// Deprecated spelling. The codebase is US-English throughout; this keeps
-    /// existing callers compiling.
-    [[deprecated("renamed to with_center()")]]
-    static ParamRange with_centre(float lo, float hi, float center,
-                                  float def = 0.0f, float step_value = 0.0f) {
-        return with_center(lo, hi, center, def, step_value);
-    }
-
     static ParamRange with_center(float lo, float hi, float center,
                                   float def = 0.0f, float step_value = 0.0f) {
         ParamRange r{lo, hi, def, step_value, 1.0f, false};
@@ -278,11 +270,6 @@ struct SkewedRange {
     }
 };
 
-/// Deprecated spelling of `SkewedRange<T>`. Kept so existing code keeps
-/// compiling; the type is identical. Prefer `SkewedRange<T>` — it names the
-/// thing the type actually is (a min/max range plus a skew curve).
-template<typename T = float>
-using NormalisableRange [[deprecated("renamed to pulp::state::SkewedRange")]] = SkewedRange<T>;
 
 /// Immutable parameter metadata, registered once at plugin initialization.
 ///

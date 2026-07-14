@@ -159,12 +159,5 @@ public:
 // type. The new names say what the values are — native, format-specific
 // handles — rather than the vaguer "extension".
 
-using ExtensionsVisitor [[deprecated("renamed to pulp::host::NativeHandleVisitor")]] = NativeHandleVisitor;
-using ExtensionFormat [[deprecated("renamed to pulp::host::NativeHandleFormat")]] = NativeHandleFormat;
-using Vst3Extension [[deprecated("renamed to pulp::host::Vst3NativeHandle")]] = Vst3NativeHandle;
-using AudioUnitExtension [[deprecated("renamed to pulp::host::AudioUnitNativeHandle")]] = AudioUnitNativeHandle;
-using AudioUnitV3Extension [[deprecated("renamed to pulp::host::AudioUnitV3NativeHandle")]] = AudioUnitV3NativeHandle;
-using ClapExtension [[deprecated("renamed to pulp::host::ClapNativeHandle")]] = ClapNativeHandle;
-using Lv2Extension [[deprecated("renamed to pulp::host::Lv2NativeHandle")]] = Lv2NativeHandle;
 
 } // namespace pulp::host

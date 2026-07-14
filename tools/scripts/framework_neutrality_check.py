@@ -185,7 +185,6 @@ PATTERNS = [(p, w, "prose") for p, w in PROSE_PATTERNS] + \
 
 # A rename ships with an alias that names the OLD spelling so downstream keeps
 # compiling. That is the one legitimate way a foreign name may appear.
-DEPRECATED_ALIAS = "[[deprecated"
 
 SUGGESTION = """
   PROSE — describe the behaviour, not its ancestry. Instead of:
@@ -232,8 +231,6 @@ def scan(repo: Path = REPO) -> list[tuple[str, int, str, str, str]]:
             except OSError:
                 continue
             for lineno, line in enumerate(text.splitlines(), 1):
-                if DEPRECATED_ALIAS in line:
-                    continue
                 for pattern, why, kind in PATTERNS:
                     if pattern.search(line):
                         hits.append((rel, lineno, line.strip()[:100], why, kind))
@@ -298,10 +295,13 @@ def selftest() -> int:
           "packages/pulp-react/src/types.ts": "/// a LookAndFeel object\n"},
          2)
 
-    case("deprecated alias naming the old spelling is allowed",
+    # Policy: an alias to a foreign name is NOT allowed. It preserves the foreign
+    # name in the tree, which is the exact red flag this gate removes. Rename every
+    # caller instead of leaving a compatibility alias.
+    case("a deprecated alias to a foreign name is flagged",
          {"core/runtime/include/pulp/runtime/spsc_ring_index.hpp":
           'using AbstractFifo [[deprecated("renamed to SpscRingIndex")]] = SpscRingIndex;\n'},
-         0)
+         1)
 
     case("host-quirks provenance is exempt",
          {"core/format/include/pulp/format/host_quirks/cubase.hpp":

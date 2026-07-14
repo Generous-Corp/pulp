@@ -278,9 +278,5 @@ private:
 };
 
 
-/// Deprecated names. Kept so existing callers keep compiling.
-using AudioThumbnail [[deprecated("renamed to pulp::audio::WaveformOverview")]] = WaveformOverview;
-using AudioThumbnailCache [[deprecated("renamed to pulp::audio::WaveformOverviewCache")]] = WaveformOverviewCache;
-using AudioThumbnailInfo [[deprecated("renamed to pulp::audio::WaveformOverviewInfo")]] = WaveformOverviewInfo;
 
 }  // namespace pulp::audio

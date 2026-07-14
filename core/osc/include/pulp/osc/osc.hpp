@@ -15,10 +15,6 @@ namespace pulp::osc {
 
 /// 32-bit RGBA colour — the OSC 1.0 optional `'r'` type tag.
 /// Stored as four 8-bit channels in transmission order.
-/// Deprecated spelling. The codebase is US-English throughout; this alias keeps
-/// existing callers compiling.
-struct ColorRgba;
-using ColourRgba [[deprecated("renamed to pulp::osc::ColorRgba")]] = ColorRgba;
 
 struct ColorRgba {
     uint8_t r = 0;
