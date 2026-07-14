@@ -815,6 +815,15 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   let audioContext = null;
   let engineIsGpu = false;   // is the GPU the engine that is EMITTING? (see the status poll)
 
+  // The ONE place the engine is decided — and the only one that tells the worker whether to
+  // do any GPU work at all. Before this, the worker convolved every block in BOTH engines:
+  // measured with the select on CPU, ~100 queue submits a second producing a wet stream that
+  // was then thrown away. "Engine: CPU" now means the GPU is idle, not merely ignored.
+  const setEngineGpu = (on) => {
+    engineIsGpu = !!on;
+    try { if (lane && lane.setEngine) lane.setEngine(engineIsGpu); } catch { /* lane is optional */ }
+  };
+
   mountDemo({
     root: document.getElementById("app"),
     title: "${esc(GPU_TITLE)}",
@@ -908,8 +917,8 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
 
         // Which engine is actually EMITTING. Kept in sync from both directions: this
         // control, and the plugin itself (a preset or a host can move the parameter).
-        engineIsGpu = Number(select.value) >= 1;
-        select.addEventListener("change", () => { engineIsGpu = Number(select.value) >= 1; });
+        setEngineGpu(Number(select.value) >= 1);
+        select.addEventListener("change", () => setEngineGpu(Number(select.value) >= 1));
       };
 
       // What the page says while there is no working GPU lane — and what it keeps saying
@@ -930,9 +939,14 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       adapter.onParamsChanged = (values, infos) => {
         try {
           const list = infos || [];
-          const e = list.find((x) => /^engine$/i.test(x.label || ""));
-          if (e && values && typeof values[e.id] === "number") {
-            engineIsGpu = values[e.id] >= 0.5;
+          // POSITIONAL, not keyed by id. The adapter builds this array by mapping over
+          // paramInfo, so values[i] belongs to list[i] — indexing it by the parameter's ID
+          // reads whatever parameter happens to sit at that position (Engine's id is 5, so
+          // values[e.id] was the SIXTH parameter's value). It looked like it worked only
+          // because the select path also sets this directly.
+          const i = list.findIndex((x) => /^engine$/i.test(x.label || ""));
+          if (i >= 0 && values && typeof values[i] === "number") {
+            setEngineGpu(values[i] >= 0.5);
             const sel = document.querySelector("#engine");
             if (sel) sel.value = engineIsGpu ? "1" : "0";
           }
@@ -986,7 +1000,12 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
         if (!ui) return;
         timer = setInterval(() => {
           const stats = laneAttached && lane ? lane.pollStats() : null;
-          if (!stats) { ui.setGpuStatus({ engine: "cpu" }); return; }
+          // No lane, no stats — and nothing to say. The engine is named by the <select>
+          // right below the canvas, which is also the control that changes it; the plugin's
+          // view tree carries no status line to update (a label whose text changes on a
+          // 10 Hz timer is a layout event on a 10 Hz timer, and at phone width it sheared
+          // through the knob labels).
+          if (!stats) return;
           // "Is the GPU carrying the audio RIGHT NOW" — a RECENT-WINDOW test, not a
           // cumulative one. A "produced > 0" test would latch on the first block made
           // and then read "Engine: GPU" forever, including while a backgrounded tab

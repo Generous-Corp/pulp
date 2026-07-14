@@ -19,7 +19,7 @@
 
 import {
   allocate as allocateRing,
-  FLAG_SHUTDOWN, FLAG_DEVICE_LOST,
+  FLAG_SHUTDOWN, FLAG_DEVICE_LOST, FLAG_ENGINE_GPU,
   STATE_DEVICE_LOST, STATE_FAILED, STATE_READY,
 } from "./gpu-ring.mjs";
 
@@ -148,6 +148,21 @@ export async function startGpuLane(opts) {
       // plugin may publish the same buffer again.
       try { worker.postMessage({ type: "ir", ir: ir.slice() }); return true; }
       catch { return false; }
+    },
+
+    // Which engine is the plugin actually listening to? The worker convolves ONLY while
+    // this says GPU. It is not a hint: with it clear the worker issues no dispatch at all,
+    // because doing GPU work for an engine the user switched off is a pegged GPU meter and a
+    // drained battery in exchange for audio nobody hears.
+    //
+    // Drive it from the PLUGIN's Engine parameter — the <select> and a preset/host write are
+    // both just ways of moving that parameter, and only the parameter decides which wet the
+    // plugin emits. A few ms of disagreement across a flip is harmless in either direction:
+    // the worker idle while the plugin wants GPU is a run of misses the CPU net covers, and
+    // the worker live while the plugin wants CPU is a few wasted blocks.
+    setEngine(gpu) {
+      if (gpu) ring.setFlag(FLAG_ENGINE_GPU);
+      else ring.clearFlag(FLAG_ENGINE_GPU);
     },
 
     // Poll at ~10 Hz with setInterval, NOT requestAnimationFrame: rAF is throttled

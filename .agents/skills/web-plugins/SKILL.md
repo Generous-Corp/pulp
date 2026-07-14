@@ -339,3 +339,63 @@ COOP/COEP) is the `screenshot-sync` skill plus the personal `pulp-web-demo`
 standard. The one rule worth repeating here because it silently kills audio:
 **never cache-bust the worklet processor URL** — the registered processor name is
 derived from it, so a `?v=` forks the name and the node never constructs.
+
+## Landmine: the OG bake is a TWO-PASS assemble — the second pass needs the same args
+
+`gen-og-images.mjs` shoots each page, then `assemble-gallery.mjs` runs **again** to bake the
+`og:image` / twitter block into the HTML — a page's tags are emitted only when its `og.png`
+already exists on disk, which is only true on that second pass.
+
+Run the second pass **bare** (`node assemble-gallery.mjs` with no `--wam-build` / `--ui-build`
+/ `--gpu-build`) and the assembler cannot find the build trees, so it **skips** every page that
+needs one. It skips them quietly — a one-line note — and therefore never rewrites their HTML,
+which is the only thing that pass exists to do. `/super-convolver-gpu/`'s og.png was shot
+perfectly and then never referenced: the page shipped with **no `og:image` at all** and
+unfurled bare. Pass the same trees to both passes.
+
+## The page owns the engine readout, not the view tree
+
+A status line *inside* the plugin canvas that the page refreshes on a timer is a layout event
+on a timer: every time a counter gains a digit the label re-measures, and at phone width it
+sheared straight through the knob labels above it. It was also duplicate chrome — the page
+already renders an Engine `<select>` directly under the canvas, which both names the engine and
+is the control that changes it.
+
+Put live metrics in **DOM slots** beside that control, each with a fixed width and
+`font-variant-numeric: tabular-nums`, so a changing number never moves the layout. The view
+tree carries the controls; the page carries the readout.
+
+## Landmine: an offered engine is not a running engine — gate the WORK, not the output
+
+A GPU (or any offload) lane fed by a SharedArrayBuffer ring keeps receiving blocks in **both**
+engines: the plugin pushes on every block regardless, because that is what advances the shared
+block timeline and keeps the two paths sample-aligned. A worker that convolves whatever it is
+handed therefore keeps the GPU **fully busy while the user is on CPU** — measured on the
+shipped SuperConvolver page at ~100 queue submits per second, a whole wet stream produced and
+discarded. The user sees it: *"in CPU mode I still see spikes on my GPU meter."* Selecting CPU
+must make the GPU **idle**, not merely ignored.
+
+Gate it with a ring FLAG the worker reads once per tick (not a message — the worker's job is to
+never stall). While it is clear: drain the input ring into plain memory, submit nothing.
+
+**But idling is only half of it.** A partitioned convolver's tail comes from a frequency-domain
+delay line of recent input spectra, and **updating that line IS the GPU work** — the forward FFT
+is a dispatch. So an idle GPU is one whose memory of the recent past goes stale, and resuming
+with a stale line smears a **ghost of pre-flip audio** under the new material. Buffer the raw
+input blocks while idle (a memcpy) and **replay them on the flip**, oldest first with outputs
+discarded, to rebuild exactly the line the GPU would have had. One priming burst, then live.
+Keep the history exactly as long as the convolver's memory (`ceil(irFrames / block) + 1`);
+replaying more just overwrites the same partitions.
+
+Assert BOTH halves in the browser fixture, from the worker's OWN counters in the SAB (never a
+label the page prints): submits do **not** advance while on CPU, and the priming counter is
+non-zero after the flip. Mutation-check the first one — an always-on worker must make it fail.
+
+## Landmine: the adapter's `values` array is POSITIONAL, not keyed by parameter id
+
+`onParamsChanged(values, infos)` hands you `values` built as `infos.map(p => value(p.id))` — so
+`values[i]` belongs to `infos[i]`. Reading `values[param.id]` "works" only when ids happen to
+equal indices; on SuperConvolver, Engine's id is 5, so `values[e.id]` silently read the SIXTH
+parameter. Find the INDEX (`infos.findIndex(...)`) and read `values[index]`. This bug hid for a
+long time because the page's `<select>` handler also set the same state directly — the broken
+path only ran for preset/host writes.

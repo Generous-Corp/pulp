@@ -316,3 +316,16 @@ own layout.
   combined-site template lives in pulp core (`cloudflare/assemble-gallery.mjs`).
 - **This is a porting/consistency tool.** It re-shoots the repo's own UI. Never
   fabricate or copy another product's screenshots.
+
+## Landmine: the OG bake is a TWO-PASS assemble — pass BOTH passes the same build trees
+
+`gen-og-images.mjs` shoots each page, then the site assembler runs **again** to bake the
+`og:image` / twitter block into the HTML — a page gets its tags only when its `og.png` already
+exists on disk, which is only true on that second pass.
+
+Run the second pass **bare** (no `--wam-build` / `--ui-build` / `--gpu-build`) and the assembler
+cannot find the build trees, so it **skips** every page that needs one — quietly, in a one-line
+note — and therefore never rewrites their HTML, which is the only thing that pass exists to do.
+`/super-convolver-gpu/`'s og.png was shot perfectly, then never referenced: the page shipped
+with **no `og:image` at all** and unfurled bare. The image existing on disk proves nothing;
+check the HTML.

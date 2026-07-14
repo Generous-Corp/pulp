@@ -21,7 +21,6 @@
 #include <pulp/view/web/web_event_translate.hpp>
 #include <pulp/view/window_host.hpp>
 
-#include <choc/text/choc_JSON.h>
 
 #include <emscripten.h>
 
@@ -61,54 +60,6 @@ std::string group_thousands(double value) {
     return out;
 }
 
-/// Renders the host's stats blob into the one status line. The blob is the
-/// page's, not this module's: budget_us and rt_percent are DERIVED THERE, by
-/// the same arithmetic native gpu_status() uses, so the browser and the native
-/// build print the same numbers computed the same way.
-///
-/// The copy carries no speed claim. A measured spike (2026-06-29) showed a
-/// competent real-FFT CPU convolver matches or beats this GPU path at every
-/// musically plausible setting; the GPU engine is a capability demonstration.
-/// Missed GPU deadlines are reported as blocks the CPU net COVERED — never as
-/// blocks the GPU produced.
-std::string format_gpu_status(const char* json) {
-    if (!json || !*json) return {};
-    try {
-        auto v = choc::json::parse(json);
-        if (!v.isObject()) return {};
-        const auto text = [&](const char* key) -> std::string {
-            return v.hasObjectMember(key) ? v[key].toString() : std::string();
-        };
-        const auto number = [&](const char* key) -> double {
-            return v.hasObjectMember(key) ? v[key].getWithDefault<double>(0.0) : 0.0;
-        };
-
-        const std::string engine = text("engine");
-        const std::string note = text("note");
-        std::string line;
-
-        if (engine == "gpu") {
-            const std::string backend = text("backend");
-            // IDENTITY ONLY — no live numbers in the view tree.
-            //
-            // The metrics now live in DOM slots on the page, each with a fixed width and
-            // tabular figures. They were here, inside the canvas, and every time a counter
-            // gained a digit the whole line re-laid out: it wrapped to two lines, and at
-            // phone width it sheared straight through the knob labels above it. A view-tree
-            // label that changes width on a 10 Hz timer is a layout event on a 10 Hz timer.
-            char buf[128];
-            std::snprintf(buf, sizeof(buf), "Engine: GPU — WGSL compute%s%s",
-                          backend.empty() ? "" : " on ", backend.c_str());
-            line = buf;
-        } else {
-            line = "Engine: CPU";
-        }
-        if (!note.empty()) line += " · " + note;
-        return line;
-    } catch (...) {
-        return {};
-    }
-}
 
 }  // namespace
 
@@ -221,28 +172,14 @@ int pulp_ui_gpu_available() {
     return pulp::view::web::browser_host_gpu_available() ? 1 : 0;
 }
 
-// Host -> UI. `json` is the page's stats blob (engine / backend / produced /
-// covered / avg_us / budget_us / rt_percent / note); an unparseable or empty
-// blob restores the default CPU line rather than leaving a stale GPU readout on
-// screen. The page pushes this on a setInterval, NOT a rAF: a backgrounded tab
-// throttles rAF, and that is exactly when misses are most interesting.
-EMSCRIPTEN_KEEPALIVE
-void pulp_ui_set_gpu_status(const char* json) {
-    if (!g_ui) return;
-    g_ui->set_status(format_gpu_status(json));
-    if (g_host) g_host->mark_dirty();
-}
-
 // Root-relative rect of a widget, written as [x, y, w, h] floats. `kind` 0 =
-// the knob, 1 = the name label, 2 = the status line (index ignored). Returns 0
-// when the index is unknown.
+// the knob, 1 = the name label. Returns 0 when the index is unknown.
 EMSCRIPTEN_KEEPALIVE
 int pulp_ui_widget_rect(int index, int kind, float* out_rect) {
     if (!g_ui || !out_rect) return 0;
     pulp::view::Rect r;
-    const bool ok = (kind == 0)   ? g_ui->knob_bounds(index, &r)
-                    : (kind == 2) ? g_ui->status_bounds(&r)
-                                  : g_ui->label_bounds(index, &r);
+    const bool ok = (kind == 0) ? g_ui->knob_bounds(index, &r)
+                                : g_ui->label_bounds(index, &r);
     if (!ok) return 0;
     out_rect[0] = r.x;
     out_rect[1] = r.y;
