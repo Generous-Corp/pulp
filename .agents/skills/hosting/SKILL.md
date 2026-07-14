@@ -140,6 +140,21 @@ empties `std::filesystem::path::extension()` (step up via `parent_path()` when
 `filename()` is empty), and a plain `dlopen` of a relative bundle path triggers
 the `@rpath` search dance — pass an absolute path.
 
+## Headless Audio Unit event-loop servicing
+
+Licensed Audio Units may complete initialization asynchronously via XPC,
+timers, or dispatch-main callbacks. GUI hosts service these naturally; an
+offline analyzer may otherwise produce plausible but incorrect audio or ignore
+early parameter writes without reporting an error.
+
+Use `pulp::events::MessageLoopIntegration::pump_main_loop_for()` from the
+process main/control thread to service bounded slices before parameter access
+and between offline render blocks. Never call it from the audio callback. The
+result reports event-loop progress only, not license or plug-in readiness, so a
+tool must own a configurable warm-up and post-write/render-settle policy. Put
+the entire instantiate/process probe in a child process; isolated scanning alone
+does not contain crashes in deeper plug-in code.
+
 ## Signal graph gotchas
 
 - `SignalGraph` dispatches plugin nodes through the additive

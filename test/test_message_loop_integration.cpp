@@ -2,6 +2,12 @@
 #include <pulp/events/message_loop_integration.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <thread>
+
+#if defined(__APPLE__)
+#  include <dispatch/dispatch.h>
+#endif
 
 using namespace pulp::events;
 
@@ -162,3 +168,46 @@ TEST_CASE("MessageLoopIntegration call_sync forwards return value",
     MessageLoopIntegration::unregister_kind(token);
     REQUIRE(MainThreadDispatcher::unregister_backend(token));
 }
+
+#if defined(__APPLE__)
+TEST_CASE("MessageLoopIntegration pumps queued Apple main-loop work",
+          "[events][message-loop-integration][macos]") {
+    std::atomic<bool> ran{false};
+    auto* ran_ptr = &ran;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ran_ptr->store(true, std::memory_order_release);
+    });
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    MainLoopPumpResult result = MainLoopPumpResult::TimedOut;
+    while (!ran.load(std::memory_order_acquire)
+           && std::chrono::steady_clock::now() < deadline) {
+        result = MessageLoopIntegration::pump_main_loop_for(
+            std::chrono::milliseconds(50));
+        REQUIRE(result != MainLoopPumpResult::Unsupported);
+        REQUIRE(result != MainLoopPumpResult::WrongThread);
+    }
+
+    REQUIRE(ran.load(std::memory_order_acquire));
+}
+
+TEST_CASE("MessageLoopIntegration rejects Apple main-loop pumping off-main",
+          "[events][message-loop-integration][macos]") {
+    std::atomic<MainLoopPumpResult> result{MainLoopPumpResult::Unsupported};
+    std::thread worker([&] {
+        result.store(MessageLoopIntegration::pump_main_loop_for(
+            std::chrono::milliseconds(1)));
+    });
+    worker.join();
+
+    REQUIRE(result.load() == MainLoopPumpResult::WrongThread);
+}
+#else
+TEST_CASE("MessageLoopIntegration reports bounded pumping unsupported",
+          "[events][message-loop-integration]") {
+    REQUIRE(MessageLoopIntegration::pump_main_loop_for(
+                std::chrono::milliseconds(1))
+            == MainLoopPumpResult::Unsupported);
+}
+#endif

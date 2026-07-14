@@ -11,6 +11,8 @@ interface. Feature depth still varies by format: parameter, MIDI, state,
 editor, and extension support are not identical across loaders.
 `SignalGraph` topology, block processing, automation routing, and delay
 compensation are implemented over the same `PluginSlot` interface.
+The VST3 and AU loaders are not stubs: both instantiate and process third-party
+plug-ins in supported desktop builds.
 
 ## Quick start
 
@@ -106,6 +108,62 @@ This example loads the plug-in in-process and is meant for trusted local
 testing. An unattended analyzer should put the load / prepare / process / state
 probes behind a child-process timeout, as noted above.
 
+## Headless Audio Unit initialization
+
+Some licensed Audio Units finish initialization asynchronously using XPC,
+timers, or dispatch-main callbacks. A GUI application naturally services those
+events. An offline analyzer or renderer must do so explicitly on its process
+main thread:
+
+```cpp
+#include <pulp/events/message_loop_integration.hpp>
+
+#include <thread>
+
+using namespace std::chrono_literals;
+
+// After load/prepare, and before reading or writing parameters:
+const auto deadline = std::chrono::steady_clock::now() + 500ms;
+while (std::chrono::steady_clock::now() < deadline) {
+    const auto result =
+        pulp::events::MessageLoopIntegration::pump_main_loop_for(25ms);
+    if (result == pulp::events::MainLoopPumpResult::Unsupported ||
+        result == pulp::events::MainLoopPumpResult::WrongThread) {
+        break;
+    }
+    if (result == pulp::events::MainLoopPumpResult::Finished ||
+        result == pulp::events::MainLoopPumpResult::Stopped) {
+        std::this_thread::sleep_for(1ms);
+    }
+}
+```
+
+This API services at most one bounded slice and must never be called from an
+audio callback. It reports event-loop progress, not plug-in or license
+readiness. Analysis tools should make their warm-up and post-parameter-write
+settle periods configurable, apply parameter writes after warm-up, and continue
+servicing bounded slices between offline blocks when the plug-in requires it.
+For plug-ins that slew parameter changes, render and discard an appropriate
+settle interval before capturing the measurement.
+
+## Runnable example
+
+[`examples/plugin-host-demo`](../../examples/plugin-host-demo/) scans installed
+plug-ins, selects a descriptor, loads and prepares it, prints metadata and
+parameters, then processes a synthetic audio block. Build the examples and run:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=ON
+cmake --build build --config Release --target pulp-plugin-host-demo -j4
+build/examples/plugin-host-demo/pulp-plugin-host-demo --list
+build/examples/plugin-host-demo/pulp-plugin-host-demo --id <plugin-id> --warmup-ms 500
+```
+
+`--warmup-ms` demonstrates the headless main-loop policy above. It is not a
+universal value; choose and validate a duration for the plug-ins being analyzed.
+The demo is itself a convenient probe executable, but a production tool should
+launch equivalent deep probes as disposable child processes.
+
 ## Signal graph
 
 `SignalGraph` is a DAG of nodes: `InputNode`, `OutputNode`, `GainNode`,
@@ -177,4 +235,6 @@ These exist to smoke-test the loaders outside a full DAW context.
   matching `info.unique_id`).
 - Third-party hosted editor embedding is not wired in the current host
   loaders; the typed hosted-editor API exists, but CLAP / VST3 / AU / LV2
-  slots still report no hosted editor.
+  slots still report no hosted editor. This does not prevent metadata,
+  parameter, state, MIDI, or audio analysis; it means Pulp cannot currently
+  create and display the vendor's native editor UI.
