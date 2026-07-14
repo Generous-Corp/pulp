@@ -7,12 +7,29 @@
 #include "include/core/SkSize.h"
 #include "modules/svg/include/SkSVGDOM.h"
 
+#ifdef PULP_HAS_SKRESOURCES
+#include "include/codec/SkCodec.h"
+#include "include/codec/SkGifDecoder.h"
+#include "include/codec/SkJpegDecoder.h"
+#include "include/codec/SkPngDecoder.h"
+#include "include/codec/SkWebpDecoder.h"
+// SkResources.h only forward-declares SkFontMgr, but
+// DataURIResourceProviderProxy::Make defaults its `sk_sp<const SkFontMgr>`
+// argument to nullptr — instantiating that temporary needs the complete type.
+#include "include/core/SkFontMgr.h"
+#include "modules/skresources/include/SkResources.h"
+#endif
+
 #include <pulp/canvas/svg_dom_cache.hpp>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cstddef>
 #include <list>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -44,6 +61,136 @@ std::uint64_t fnv1a(const std::string& s) noexcept {
     }
     return h;
 }
+
+// Skia's SVG parser only recognizes the XLink form of the href attribute: the
+// literal name it matches is "xlink:href" (SkSVGImage / SkSVGUse /
+// SkSVGFeImage). SVG 2 deprecated that in favour of a bare `href`, and that is
+// what every modern design-tool export emits — Figma's, for one, writes
+// `<image href="data:image/png;base64,...">` with no xlink namespace at all.
+// Skia silently drops the attribute, the IRI stays empty, and the element
+// renders blank no matter how good the resource provider is.
+//
+// Rewrite the bare attribute NAME to the XLink spelling before parsing. Only
+// inside a tag, never inside an attribute value or text content, and never on a
+// tag that already carries an `xlink:href` (that would duplicate the
+// attribute). The document bytes the cache is keyed on stay untouched — this
+// runs inside the build step.
+//
+// Skia's XML reader does not do namespace resolution (it matches the prefixed
+// name as a literal string), so the rewritten document does not need an
+// xmlns:xlink declaration to parse.
+std::string normalize_svg_hrefs(const std::string& doc) {
+    static constexpr char kBare[] = "href";
+    static constexpr std::size_t kBareLen = 4;
+
+    // Is `pos` the start of a bare `href` attribute NAME? It must be preceded
+    // by a name delimiter (not ':' — that is the xlink: form — and not another
+    // name character), and followed by '=' (allowing whitespace).
+    auto is_bare_href_name = [&](std::size_t pos) {
+        if (doc.compare(pos, kBareLen, kBare) != 0) return false;
+        if (pos == 0) return false;
+        const char prev = doc[pos - 1];
+        const bool name_char = std::isalnum(static_cast<unsigned char>(prev)) ||
+                               prev == ':' || prev == '-' || prev == '_';
+        if (name_char) return false;
+        std::size_t after = pos + kBareLen;
+        while (after < doc.size() &&
+               std::isspace(static_cast<unsigned char>(doc[after])))
+            ++after;
+        return after < doc.size() && doc[after] == '=';
+    };
+
+    std::string out;
+    out.reserve(doc.size() + 64);
+
+    std::size_t i = 0;
+    while (i < doc.size()) {
+        if (doc[i] != '<') {
+            out.push_back(doc[i++]);
+            continue;
+        }
+        // Span the whole tag, honoring quoted attribute values (a '>' inside a
+        // value does not end the tag).
+        std::size_t end = i + 1;
+        char quote = '\0';
+        while (end < doc.size()) {
+            const char c = doc[end];
+            if (quote != '\0') {
+                if (c == quote) quote = '\0';
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '>') {
+                break;
+            }
+            ++end;
+        }
+        const std::size_t tag_end = std::min(end, doc.size() - 1);
+        const std::string_view tag(doc.data() + i, tag_end - i + 1);
+
+        // A tag that already spells it xlink:href needs no rewrite (and must
+        // not get a duplicate attribute).
+        if (tag.find("xlink:href") == std::string_view::npos) {
+            std::size_t j = i;
+            char q = '\0';
+            while (j <= tag_end) {
+                const char c = doc[j];
+                if (q != '\0') {
+                    if (c == q) q = '\0';
+                    out.push_back(c);
+                    ++j;
+                    continue;
+                }
+                if (c == '"' || c == '\'') {
+                    q = c;
+                    out.push_back(c);
+                    ++j;
+                    continue;
+                }
+                if (c == 'h' && is_bare_href_name(j)) {
+                    out.append("xlink:href");
+                    j += kBareLen;
+                    continue;
+                }
+                out.push_back(c);
+                ++j;
+            }
+        } else {
+            out.append(tag);
+        }
+        i = tag_end + 1;
+    }
+    return out;
+}
+
+#ifdef PULP_HAS_SKRESOURCES
+// SkSVGDOM resolves <image href="..."> through a skresources::ResourceProvider.
+// Skia's builder defaults it to NULL, and SkSVGImage::LoadImage bails out on a
+// null provider — so every <image> element, including the base64 data URIs a
+// Figma / design-tool SVG export uses for its bitmap assets, rendered BLANK.
+// DataURIResourceProviderProxy base64-decodes `data:` hrefs into an SkImage;
+// it forwards anything else to its inner provider, which is null here (Pulp
+// deliberately does not let an SVG document pull external files off disk or the
+// network — only self-contained documents resolve).
+//
+// The decode itself goes through SkCodec, whose codec registry is EMPTY until
+// something calls SkCodecs::Register (Skia m119+ dropped the built-in list), so
+// register the formats the bundled libskia.a actually defines before the first
+// document is parsed.
+sk_sp<skresources::ResourceProvider> svg_resource_provider() {
+    static const sk_sp<skresources::ResourceProvider> provider = [] {
+        SkCodecs::Register(SkPngDecoder::Decoder());
+        SkCodecs::Register(SkJpegDecoder::Decoder());
+        SkCodecs::Register(SkWebpDecoder::Decoder());
+        SkCodecs::Register(SkGifDecoder::Decoder());
+        // kPreDecode: the DOM is cached and replayed every frame, so decoding
+        // once at parse time keeps the paint path off the codec.
+        return sk_sp<skresources::ResourceProvider>(
+            skresources::DataURIResourceProviderProxy::Make(
+                /*rp=*/nullptr, skresources::ImageDecodeStrategy::kPreDecode));
+    }();
+    return provider;
+}
+#endif  // PULP_HAS_SKRESOURCES
 }  // namespace
 
 struct SvgDomCache::Impl {
@@ -74,11 +221,21 @@ SvgDomCache& SvgDomCache::instance() {
 
 sk_sp<SkSVGDOM> SvgDomCache::get_or_build(const std::string& svg_document) {
     return get_or_build(svg_document, [&] {
-        // copyData=false: the stream borrows the caller's string only for the
-        // duration of make(), which fully materializes the DOM.
-        SkMemoryStream stream(svg_document.data(), svg_document.size(),
+        // Rewrite SVG-2 `href` to the `xlink:href` Skia's parser matches; see
+        // normalize_svg_hrefs(). Keyed on the ORIGINAL bytes — the rewrite is
+        // an implementation detail of the build step.
+        const std::string parsed = normalize_svg_hrefs(svg_document);
+        // copyData=false: the stream borrows `parsed` only for the duration of
+        // make(), which fully materializes the DOM.
+        SkMemoryStream stream(parsed.data(), parsed.size(),
                               /*copyData=*/false);
-        return SkSVGDOM::Builder().make(stream);
+        SkSVGDOM::Builder builder;
+#ifdef PULP_HAS_SKRESOURCES
+        // Without this, <image href="data:image/png;base64,..."> never resolves
+        // and renders blank. See svg_resource_provider().
+        builder.setResourceProvider(svg_resource_provider());
+#endif
+        return builder.make(stream);
     });
 }
 

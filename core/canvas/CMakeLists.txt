@@ -187,6 +187,42 @@ if(PULP_HAS_SKIA)
     target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_SKIA=1)
     target_include_directories(pulp-canvas PRIVATE ${SKIA_INCLUDE_DIRS})
 
+    # skresources — the module that owns skresources::ResourceProvider and its
+    # DataURIResourceProviderProxy. SkSVGDOM resolves <image href="..."> ONLY
+    # through a resource provider (SkSVGImage::LoadImage returns early on a null
+    # one), so without it every <image> element — including the base64 data URIs
+    # a design-tool SVG export uses for its bitmap assets — renders BLANK.
+    # src/svg_dom_cache.cpp installs the data-URI proxy when this is available.
+    #
+    # Detection is a real try-link, not a header or archive check: where the
+    # symbols live varies by slice. The pinned mac/linux/windows bundles compile
+    # the skresources objects INTO libsvg.a (there is no libskresources.a at
+    # all), while other slices ship a standalone libskresources.a — and the wasm
+    # slice ships neither (same missing-skjson/skresources gap that disables
+    # skottie there, see tools/cmake/FindSkia.cmake). A try-link is the only
+    # probe that gets all three right.
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES skia::skia)
+    set(CMAKE_REQUIRED_INCLUDES ${SKIA_INCLUDE_DIRS})
+    check_cxx_source_compiles("
+        #include \"include/core/SkFontMgr.h\"
+        #include \"modules/skresources/include/SkResources.h\"
+        int main() {
+            auto rp = skresources::DataURIResourceProviderProxy::Make(
+                nullptr, skresources::ImageDecodeStrategy::kPreDecode);
+            return rp ? 0 : 1;
+        }
+    " PULP_SKRESOURCES_LINKS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    unset(CMAKE_REQUIRED_INCLUDES)
+    if(PULP_SKRESOURCES_LINKS)
+        target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_SKRESOURCES=1)
+        message(STATUS "Pulp: SVG <image> data-URI decoding enabled (skresources links)")
+    else()
+        message(STATUS "Pulp: this Skia bundle cannot link skresources — SVG "
+                       "<image> elements (incl. base64 data URIs) render blank")
+    endif()
+
     # Opt-in Lottie playback (PULP_LOTTIE). skottie/sksg ship inside the Skia
     # bundle and are already linked via skia::skia's glob, and the skottie
     # include dir is already in SKIA_INCLUDE_DIRS — so enabling Lottie only adds
