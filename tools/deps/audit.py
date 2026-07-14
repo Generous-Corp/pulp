@@ -16,9 +16,10 @@ It verifies two classes of invariant:
 
 2. **Completeness** — every dependency declared in a real manifest source
    (``requirements-docs.txt``, ``mkdocs.yml``, ``CMakeLists.txt``'s
-   ``FetchContent_Declare`` blocks, or ``external/``) is represented by a
-   manifest entry. This class of check was missing, which is how #582
-   shipped MkDocs Material without touching the four attribution files.
+   ``FetchContent_Declare`` blocks, ``external/``, or a recognized
+   redistributed bootstrap binary) is represented by a manifest entry. This
+   class of check was missing, which is how #582 shipped MkDocs Material
+   without touching the four attribution files.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ EXTRA_CMAKELISTS = [
     ROOT / "bindings" / "python" / "CMakeLists.txt",
 ]
 EXTERNAL_DIR = ROOT / "external"
+GRADLE_WRAPPER_JAR = ROOT / "android" / "gradle" / "wrapper" / "gradle-wrapper.jar"
 
 
 def load_manifest() -> list[dict]:
@@ -326,6 +328,17 @@ def parse_external_dirs() -> list[DeclaredDep]:
     return out
 
 
+def parse_redistributed_tooling() -> list[DeclaredDep]:
+    """Surface committed binary bootstrap tools that need attribution."""
+    if not GRADLE_WRAPPER_JAR.is_file():
+        return []
+    return [DeclaredDep(
+        name="Gradle Wrapper",
+        source="android/gradle/wrapper/gradle-wrapper.jar",
+        location="redistributed binary",
+    )]
+
+
 def collect_declared(
     extra_requirements: Path | None = None,
     extra_mkdocs: Path | None = None,
@@ -356,6 +369,7 @@ def collect_declared(
         for cm in EXTRA_CMAKELISTS:
             declared.extend(parse_fetchcontent(cm))
         declared.extend(parse_external_dirs())
+        declared.extend(parse_redistributed_tooling())
         return declared
     finally:
         REQUIREMENTS_DOCS, MKDOCS_YML, EXTRA_CMAKELISTS, ROOT_CMAKELISTS = saved
@@ -548,8 +562,8 @@ def main() -> int:
         })
 
     # Completeness check — any dep declared in a real manifest source
-    # (pip requirements, mkdocs.yml, FetchContent_Declare, external/)
-    # must be represented in manifest.json.
+    # (pip requirements, mkdocs.yml, FetchContent_Declare, external/, or a
+    # recognized redistributed bootstrap binary) must be in manifest.json.
     declared = collect_declared()
     uncovered = find_uncovered_declarations(manifest, declared)
 

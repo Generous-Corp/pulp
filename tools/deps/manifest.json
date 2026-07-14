@@ -393,6 +393,27 @@
       ]
     },
     {
+      "name": "Gradle Wrapper",
+      "category": "tooling",
+      "license": "Apache-2.0",
+      "version": "8.11",
+      "source_kind": "vendored",
+      "repository": "https://github.com/gradle/gradle.git",
+      "upstream": { "kind": "git-tag", "ref": "v8.11.0" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Redistributed Android build bootstrap. gradle-wrapper.jar SHA-256: b3a875ddc1f044746e1b1a55f645584505f4a10438c1afea9f15e92a7c42ec13; the JAR manifest identifies Gradle Wrapper and SPDX Apache-2.0, and META-INF/LICENSE contains the full license.",
+      "source_files": [
+        "android/gradlew",
+        "android/gradlew.bat",
+        "android/gradle/wrapper/gradle-wrapper.jar",
+        "android/gradle/wrapper/gradle-wrapper.properties",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "Highway",
       "category": "runtime",
       "license": "Apache-2.0",
@@ -420,10 +441,13 @@
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Vendored deterministic text-shaping font. SHA-256: 40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82.",
+      "notes": "Vendored deterministic text-shaping font. Inter-Regular.ttf SHA-256: 40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82. The web-player also redistributes the identical TTF and inter.woff2 (SHA-256: 338239f6b590b8ced3bf857654d32da3fd3663294cd3003651ed57aa3abd7aa1).",
       "source_files": [
         "external/fonts/Inter-Regular.ttf",
         "external/fonts/README.md",
+        "packages/pulp-web-player/src/theme/Inter-Regular.ttf",
+        "packages/pulp-web-player/src/theme/inter.woff2",
+        "packages/pulp-web-player/THIRD_PARTY_NOTICES.md",
         "docs/reference/text-shaping.md",
         "ci/visual-harness.Dockerfile"
       ]

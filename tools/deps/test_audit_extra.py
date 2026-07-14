@@ -143,6 +143,28 @@ class ParserEdgeTests(unittest.TestCase):
             [audit.DeclaredDep("actual-dep", "external/", "actual-dep/")],
         )
 
+    def test_redistributed_tooling_parser_detects_gradle_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            wrapper = Path(td) / "gradle-wrapper.jar"
+            wrapper.write_bytes(b"fixture")
+            with mock.patch.object(audit, "GRADLE_WRAPPER_JAR", wrapper):
+                declared = audit.parse_redistributed_tooling()
+
+        self.assertEqual(
+            declared,
+            [audit.DeclaredDep(
+                "Gradle Wrapper",
+                "android/gradle/wrapper/gradle-wrapper.jar",
+                "redistributed binary",
+            )],
+        )
+
+    def test_redistributed_tooling_parser_ignores_missing_wrapper(self) -> None:
+        missing = Path(tempfile.gettempdir()) / "pulp-missing-gradle-wrapper.jar"
+        self.assertFalse(missing.exists())
+        with mock.patch.object(audit, "GRADLE_WRAPPER_JAR", missing):
+            self.assertEqual(audit.parse_redistributed_tooling(), [])
+
     def test_collect_declared_restores_globals_after_extra_inputs(self) -> None:
         original = (
             audit.REQUIREMENTS_DOCS,

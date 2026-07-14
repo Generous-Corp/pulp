@@ -35,7 +35,16 @@ set -euo pipefail
 readonly PKG="@danielraffel/web-player"
 readonly TOKEN_FILE="${PULP_NPM_TOKEN_FILE:-$HOME/.config/pulp/secrets/npm-token}"
 readonly OP_BACKUP_REF="op://Private/jd6btv2ja4rnoxcvmt2zy53nau/working token NO 2fa"  # BACKUP only
-readonly MUST_SHIP=("src/shell.js" "src/index.js" "src/ui/file-upload.js" "src/state/plugin-state.js")
+readonly MUST_SHIP=(
+  "LICENSE"
+  "THIRD_PARTY_NOTICES.md"
+  "src/shell.js"
+  "src/index.js"
+  "src/ui/file-upload.js"
+  "src/state/plugin-state.js"
+  "src/theme/Inter-Regular.ttf"
+  "src/theme/inter.woff2"
+)
 
 cd "$(dirname "$0")/.."
 DRY_RUN=0; [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
@@ -100,7 +109,7 @@ manifest="$(npm pack --dry-run --json 2>/dev/null)"
 for f in "${MUST_SHIP[@]}"; do
   grep -q "\"$f\"" <<<"$manifest" || die "tarball is MISSING $f — packaging regression, not publishing"
 done
-say "✓ tarball carries all ${#MUST_SHIP[@]} required entrypoints"
+say "✓ tarball carries all ${#MUST_SHIP[@]} required files"
 
 # ── 5. Auth: the LIVE path is a 0600 file. No 1Password, no agent, NO PROMPT.
 #       Checked even on a dry run — an unattended publish that would have stopped to

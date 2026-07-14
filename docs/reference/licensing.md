@@ -70,6 +70,7 @@ Embedded at build time for deterministic text rendering. Both fonts are redistri
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
+| **Gradle Wrapper** | Apache-2.0 | Redistributed wrapper scripts and bootstrap JAR for the pinned Android Gradle 8.11 toolchain | [github.com/gradle/gradle](https://github.com/gradle/gradle/tree/v8.11.0) |
 | **Oboe** | Apache-2.0 | Android audio backend (AAudio/OpenSL ES abstraction) | [github.com/google/oboe](https://github.com/google/oboe) |
 
 ### System Services & OS-Provided Dependencies
