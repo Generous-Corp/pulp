@@ -323,6 +323,20 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 ctest --test-dir build --output-on-failure
 ```
 
+### Keep Gradle redistribution and outputs clean
+
+The committed wrapper files (`android/gradlew`, `gradlew.bat`, and
+`gradle/wrapper/**`) are redistributed tooling, not generated build output.
+Keep the pinned Gradle version, wrapper JAR SHA-256, and Apache-2.0 attribution
+in sync across `tools/deps/manifest.json`, `DEPENDENCIES.md`, `NOTICE.md`, and
+`docs/reference/licensing.md`. `tools/deps/audit.py --strict` detects a wrapper
+JAR that is missing from the inventory.
+
+Gradle output directories (`android/.gradle/` and every `android/**/build/`)
+must remain ignored. In particular, never commit
+`android/build/reports/problems/problems-report.html`: it is generated,
+machine-specific, and embeds third-party report assets.
+
 ## Deploy & Test on Emulator
 
 ### Start emulator

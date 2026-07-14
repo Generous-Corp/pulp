@@ -6,7 +6,8 @@ audio plugins. It is the runtime behind the live WAM demo galleries
 a real package so any plugin author can mount a token-faithful demo of their own
 plugin with one call.
 
-> Status: **published on npm** — `@danielraffel/web-player`, currently `0.2.0`. Still
+> Status: **published on npm** — `@danielraffel/web-player`; the next corrected
+> package version is `0.2.2`. Still
 > `0.x`, so minor versions may break. Releases go out via `scripts/publish.sh`; see
 > "Publishing" below.
 
@@ -52,6 +53,10 @@ mountDemo({
 
 The page must be a **secure context** (`https://` or `localhost`) — AudioWorklet
 requires it. Serve `.js`/`.mjs` with a JavaScript MIME type.
+
+The package is MIT-licensed. Its bundled Inter font files are distributed
+under the SIL Open Font License 1.1; see `LICENSE` and
+`THIRD_PARTY_NOTICES.md` in the npm package.
 
 ### Key `mountDemo` options
 

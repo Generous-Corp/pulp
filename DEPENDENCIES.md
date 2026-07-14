@@ -26,8 +26,9 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | DRACO | 1.5.7 | Apache-2.0 | Optional glTF mesh decompression; fetched via FetchContent only when `PULP_ENABLE_DRACO=ON` (default OFF) | pulp-render | 2026-04-21 |
 | dr_libs | vendored-snapshot | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (dr_flac, dr_mp3, dr_wav) | pulp-audio | 2026-04-07 |
 | fastgltf | v0.9.0 | MIT | Optional native no-JS glTF/GLB parser; fetched only when `PULP_ENABLE_SCENE3D=ON` | pulp-scene | 2026-06-03 |
+| Gradle Wrapper | 8.11 | Apache-2.0 | Redistributed wrapper scripts and JAR used to bootstrap the pinned Android build toolchain (JAR SHA-256 `b3a875ddc1f044746e1b1a55f645584505f4a10438c1afea9f15e92a7c42ec13`) | Android tooling | 2026-07-14 |
 | Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
-| Inter | 4.001;git-9221beed3 | SIL OFL 1.1 | Embedded UI font (Inter-Regular.ttf, SHA-256 `40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82`) | pulp-view | 2026-04-21 |
+| Inter | 4.001;git-9221beed3 | SIL OFL 1.1 | Embedded UI font. TTF SHA-256 `40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82`; web-player WOFF2 SHA-256 `338239f6b590b8ced3bf857654d32da3fd3663294cd3003651ed57aa3abd7aa1` | pulp-view, web-player | 2026-04-21 |
 | JetBrains Mono | 2.304 | SIL OFL 1.1 | Embedded monospace font (JetBrainsMono-Regular.ttf, SHA-256 `a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f`) | pulp-view | 2026-04-21 |
 | Khronos Box Textured fixture | b510eca2e2ef33f62f9ed57d6e7ce2d10ebb2bdebc4a8e59d347719ba81abdf4 | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture | test fixture | 2026-06-03 |
 | lcov_cobertura | 2.1.2 | Apache-2.0 | LCOV→Cobertura converter; vendored as `tools/scripts/lcov_cobertura.py` for the coverage pipeline (single-file Python script, no pip dependency in CI) | tooling | 2026-04-21 |
