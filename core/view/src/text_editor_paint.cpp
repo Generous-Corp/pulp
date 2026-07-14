@@ -384,7 +384,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
 
     float text_x = text_inner_x - scroll_offset_;
     // Horizontal alignment. Only meaningful when the run FITS: a run wider than
-    // the field is scrolled, and scrolling already owns the origin, so a centre
+    // the field is scrolled, and scrolling already owns the origin, so a center
     // alignment there would fight the caret-follow. Slack is therefore clamped
     // at zero and a long string keeps the left-aligned scrolled behaviour.
     if (text_align_ != canvas::TextAlign::left) {

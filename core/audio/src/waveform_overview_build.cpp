@@ -1,4 +1,4 @@
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -38,11 +38,11 @@ ThumbnailLevel decimate_level(const ThumbnailLevel& src) {
 
 }  // namespace
 
-AudioThumbnail AudioThumbnail::build_from_buffer_view(
+WaveformOverview WaveformOverview::build_from_buffer_view(
     BufferView<const float> source,
     uint32_t sample_rate,
     uint32_t samples_per_peak) {
-    AudioThumbnail t;
+    WaveformOverview t;
     if (source.num_channels() == 0 || source.num_samples() == 0 || samples_per_peak == 0) {
         return t;
     }
@@ -92,7 +92,7 @@ AudioThumbnail AudioThumbnail::build_from_buffer_view(
     return t;
 }
 
-AudioThumbnail AudioThumbnail::build_from_buffer(
+WaveformOverview WaveformOverview::build_from_buffer(
     const AudioFileData& data,
     uint32_t samples_per_peak) {
     if (data.empty() || samples_per_peak == 0) {
@@ -115,7 +115,7 @@ AudioThumbnail AudioThumbnail::build_from_buffer(
         samples_per_peak);
 }
 
-std::optional<AudioThumbnail> AudioThumbnail::build_from_path(
+std::optional<WaveformOverview> WaveformOverview::build_from_path(
     const std::string& path,
     uint32_t samples_per_peak) {
     auto data = read_audio_file(path);
@@ -124,8 +124,8 @@ std::optional<AudioThumbnail> AudioThumbnail::build_from_path(
     return build_from_buffer(*data, samples_per_peak);
 }
 
-AudioThumbnailInfo AudioThumbnail::info() const noexcept {
-    AudioThumbnailInfo i;
+WaveformOverviewInfo WaveformOverview::info() const noexcept {
+    WaveformOverviewInfo i;
     i.num_channels = num_channels_;
     i.num_source_frames = num_source_frames_;
     i.sample_rate = sample_rate_;
@@ -140,7 +140,7 @@ AudioThumbnailInfo AudioThumbnail::info() const noexcept {
     return i;
 }
 
-std::size_t AudioThumbnail::best_level_for(uint32_t target_peaks) const noexcept {
+std::size_t WaveformOverview::best_level_for(uint32_t target_peaks) const noexcept {
     if (levels_.empty()) return 0;
     if (target_peaks == 0) return levels_.size() - 1;
     // Walk from coarsest to finest, return the first level that has at
@@ -152,7 +152,7 @@ std::size_t AudioThumbnail::best_level_for(uint32_t target_peaks) const noexcept
     return 0;  // finest available
 }
 
-std::size_t AudioThumbnail::render_min_max(uint32_t channel,
+std::size_t WaveformOverview::render_min_max(uint32_t channel,
                                            uint32_t target_peaks,
                                            float* dst) const noexcept {
     if (dst == nullptr || target_peaks == 0 || levels_.empty()) {

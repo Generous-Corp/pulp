@@ -159,7 +159,7 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativePerformAction(
 
     switch (action) {
         case ACTION_CLICK: {
-            // Compute the target's centre in root coordinates and dispatch
+            // Compute the target's center in root coordinates and dispatch
             // through the root view. simulate_click() interprets its arg as
             // a root-relative point and then hit_tests from the receiver,
             // so it must be called on the root, not the target.

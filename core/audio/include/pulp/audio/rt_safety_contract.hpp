@@ -445,7 +445,7 @@ inline constexpr std::array kSamplerLooperRtSafetyContracts{
         "publication owner with recorder and slot bank quiesced as required",
         "Moves completed recorder data into prepared slots outside the callback."),
     detail::make_rt_safety_contract(
-        "AudioThumbnail",
+        "WaveformOverview",
         "build_and_cache",
         RtSafetyClass::BackgroundThreadOnly,
         false,

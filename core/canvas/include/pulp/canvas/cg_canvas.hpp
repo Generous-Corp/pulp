@@ -233,7 +233,7 @@ private:
     //
     // gradient_kind_ identifies which Draw* call to issue from
     // fill_with_active_paint(). `radial_two_circles` is the spec-correct
-    // two-circle form (inner + outer centres, inner_r in grad_radius_inner_,
+    // two-circle form (inner + outer centers, inner_r in grad_radius_inner_,
     // outer_r in grad_radius_); `conic_image` is a software-rasterised CGImage
     // that we paint via CGContextDrawImage inside the active clip.
     enum class GradientKind { none, linear, radial, radial_two_circles, conic_image };
@@ -258,7 +258,7 @@ private:
 
     // Software-rasterised conic gradient. CG has no native conic shader, so
     // set_fill_gradient_conic walks every pixel of a bounding-box bitmap,
-    // computes the angle from the centre, interpolates the colour stops, and
+    // computes the angle from the center, interpolates the colour stops, and
     // stores the resulting CGImage here. fill_with_active_paint paints it via
     // CGContextDrawImage inside the active clip. The image is released in
     // clear_fill_gradient / dtor / on next gradient set.

@@ -1,4 +1,4 @@
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 
 #include <cstring>
 #include <limits>
@@ -54,7 +54,7 @@ bool read_le(const uint8_t* data, std::size_t size, std::size_t& off, T& out) {
 
 }  // namespace
 
-std::vector<uint8_t> serialize_thumbnail(const AudioThumbnail& t) {
+std::vector<uint8_t> serialize_thumbnail(const WaveformOverview& t) {
     const auto info = t.info();
     std::vector<uint8_t> out;
     // 4 (magic) + 2 (ver) + 4 + 8 + 4 + 4 + per-level overhead + peaks.
@@ -81,7 +81,7 @@ std::vector<uint8_t> serialize_thumbnail(const AudioThumbnail& t) {
     return out;
 }
 
-std::optional<AudioThumbnail> deserialize_thumbnail(const uint8_t* data,
+std::optional<WaveformOverview> deserialize_thumbnail(const uint8_t* data,
                                                     std::size_t size) {
     if (data == nullptr || size < 26) return std::nullopt;
     if (std::memcmp(data, kThumbnailMagic, 4) != 0) return std::nullopt;
@@ -104,13 +104,13 @@ std::optional<AudioThumbnail> deserialize_thumbnail(const uint8_t* data,
     if (num_levels == 0 || num_levels > 32) return std::nullopt;
 
     // Header validation is complete; rebuild the exact serialized level
-    // hierarchy through AudioThumbnail's internal factory without re-decimating.
-    return AudioThumbnail::from_serialized_levels(
+    // hierarchy through WaveformOverview's internal factory without re-decimating.
+    return WaveformOverview::from_serialized_levels(
         num_channels, num_frames, sample_rate, num_levels,
         data, size, off);
 }
 
-std::optional<AudioThumbnail> AudioThumbnail::from_serialized_levels(
+std::optional<WaveformOverview> WaveformOverview::from_serialized_levels(
     uint32_t num_channels,
     uint64_t num_source_frames,
     uint32_t sample_rate,
@@ -118,7 +118,7 @@ std::optional<AudioThumbnail> AudioThumbnail::from_serialized_levels(
     const uint8_t* data,
     std::size_t size,
     std::size_t offset) {
-    AudioThumbnail t;
+    WaveformOverview t;
     t.num_channels_ = num_channels;
     t.num_source_frames_ = num_source_frames;
     t.sample_rate_ = sample_rate;

@@ -1384,7 +1384,7 @@ TEST_CASE("LottieAnimation composites skottie frames onto a SkiaCanvas",
     const auto rgba = render_lottie_frame_rgba(kLottieRedSolid, px);
     REQUIRE(rgba.size() == static_cast<std::size_t>(px) * px * 4);
 
-    // The centre pixel must be the authored opaque red — proves skottie parsed
+    // The center pixel must be the authored opaque red — proves skottie parsed
     // the solid layer and the frame was composited, not left transparent.
     const std::size_t c = ((static_cast<std::size_t>(px) / 2) * px + px / 2) * 4;
     CAPTURE(rgba[c], rgba[c + 1], rgba[c + 2], rgba[c + 3]);

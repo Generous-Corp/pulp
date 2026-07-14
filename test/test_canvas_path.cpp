@@ -159,10 +159,10 @@ TEST_CASE("the two fill rules disagree about a twice-enclosed region",
     // twice. nonzero counts 2 (inside); evenodd counts 2 (outside). If both rules
     // agree here, the rule is being ignored.
     const Path p = nested_squares_same_winding();
-    const Point2D centre{50, 50};
+    const Point2D center{50, 50};
 
-    REQUIRE(p.contains(centre, FillRule::nonzero));
-    REQUIRE_FALSE(p.contains(centre, FillRule::evenodd));
+    REQUIRE(p.contains(center, FillRule::nonzero));
+    REQUIRE_FALSE(p.contains(center, FillRule::evenodd));
 
     // In the band between the two squares, both rules agree: inside.
     const Point2D band{10, 50};
@@ -215,7 +215,7 @@ TEST_CASE("scale_to_fit fills the target rect when proportions are free",
     REQUIRE_THAT(b.height, Catch::Matchers::WithinAbs(50.0, 1e-3));
 }
 
-TEST_CASE("scale_to_fit centres the slack on the axis that did not bind",
+TEST_CASE("scale_to_fit centers the slack on the axis that did not bind",
           "[canvas][path]") {
     // THE case the header documents. A 10x10 square fitted into a 100x200 box
     // with proportions preserved scales by min(10, 20) = 10x, giving 100x100 --
@@ -229,7 +229,7 @@ TEST_CASE("scale_to_fit centres the slack on the axis that did not bind",
     REQUIRE_THAT(b.height, Catch::Matchers::WithinAbs(100.0, 1e-3));
 
     REQUIRE_THAT(b.x, Catch::Matchers::WithinAbs(0.0, 1e-3));    // bound axis: flush
-    REQUIRE_THAT(b.y, Catch::Matchers::WithinAbs(50.0, 1e-3));   // free axis: centred
+    REQUIRE_THAT(b.y, Catch::Matchers::WithinAbs(50.0, 1e-3));   // free axis: centerd
 }
 
 TEST_CASE("scale_to_fit honours a non-zero target origin", "[canvas][path]") {
@@ -329,7 +329,7 @@ TEST_CASE("a circle measures its diameter, and its hull happens to agree",
     const auto hull = c.control_bounds();
     REQUIRE_THAT(hull.width, Catch::Matchers::WithinAbs(b.width, 0.05));
 
-    REQUIRE(c.contains(50, 50));            // centre
+    REQUIRE(c.contains(50, 50));            // center
     REQUIRE_FALSE(c.contains(50, 10));      // outside the top edge
     REQUIRE_FALSE(c.contains(30, 30));      // in the corner the circle misses
 }

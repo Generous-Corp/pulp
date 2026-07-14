@@ -399,7 +399,7 @@ using pulp::canvas_test::sample_pixel;
 // ── End-to-end FilterBank repro: JS → bridge → CanvasWidget → SkiaCanvas ──
 //
 // The full FilterBank-style sequence must record and paint; if the JS
-// snippet aborts on an unsupported Canvas2D method, the centre pixel
+// snippet aborts on an unsupported Canvas2D method, the center pixel
 // stays the parent's dark navy instead of the gradient fill colour.
 TEST_CASE("Canvas2D shim end-to-end: FilterBank gradient draws onto Skia surface",
           "[view][canvas2d][skia][issue-964]") {
@@ -444,11 +444,11 @@ TEST_CASE("Canvas2D shim end-to-end: FilterBank gradient draws onto Skia surface
     pulp::canvas::SkiaCanvas canvas(sk_canvas);
     cw->paint(canvas);
 
-    // Centre pixel: must be opaque red (the gradient — both stops are red,
+    // Center pixel: must be opaque red (the gradient — both stops are red,
     // so colour-interpolation is irrelevant). If the JS render aborts
     // before fillRect runs, this samples the navy parent instead.
     auto px = sample_pixel(surface.get(), 32, 32);
-    INFO("Centre rgba=(" << int(px.r) << "," << int(px.g) << ","
+    INFO("Center rgba=(" << int(px.r) << "," << int(px.g) << ","
          << int(px.b) << "," << int(px.a) << ")");
     REQUIRE(px.a == 255);
     REQUIRE(px.r == 255);
@@ -491,7 +491,7 @@ TEST_CASE("Canvas2D save/restore brackets do not erase fillStyle pixels",
     cw->paint(canvas);
 
     auto px = sample_pixel(surface.get(), 16, 16);
-    INFO("Centre rgba=(" << int(px.r) << "," << int(px.g) << ","
+    INFO("Center rgba=(" << int(px.r) << "," << int(px.g) << ","
          << int(px.b) << "," << int(px.a) << ")");
     REQUIRE(px.a == 255);
     REQUIRE(px.r == 0x00);
@@ -661,7 +661,7 @@ TEST_CASE("Canvas2D conic gradient flushes via canvasSetConicGradient bridge fn"
         if (cmd.type == CanvasDrawCmd::Type::set_fill_gradient_conic) {
             saw_conic = true;
             seen_conic = true;
-            // Centre + start angle round-trip exactly.
+            // Center + start angle round-trip exactly.
             REQUIRE(cmd.x == 50.0f);
             REQUIRE(cmd.y == 50.0f);
             REQUIRE(cmd.extra == 0.0f);
@@ -830,9 +830,9 @@ TEST_CASE("Canvas2D miterLimit ignores non-positive / non-finite assignments",
 TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
           "[view][canvas2d][issue-1434][bridge-thin][skia]") {
     // Smoke test: render a conic gradient and confirm the pixels at
-    // (right of centre) and (below centre) differ. With the conic
+    // (right of center) and (below center) differ. With the conic
     // bridge wired, Skia's MakeSweep distributes red→green→blue around
-    // the centre — so the right and bottom samples should not match.
+    // the center — so the right and bottom samples should not match.
     // A degenerate fallback would draw a flat first-stop colour, making
     // those samples match exactly.
     ScriptedBridge env;
@@ -870,7 +870,7 @@ TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
     auto sample = [&](int x, int y) {
         return *static_cast<const uint32_t*>(pm.addr(x, y));
     };
-    // Two angularly-distinct points around the centre. With a real
+    // Two angularly-distinct points around the center. With a real
     // conic sweep these MUST be different colours; with a flat-first-stop
     // fallback they would match.
     uint32_t right = sample(60, 32);

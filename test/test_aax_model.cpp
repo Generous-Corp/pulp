@@ -560,7 +560,7 @@ TEST_CASE("AAX model preserves linear, log, and enum parameter tapers", "[aax][m
             {.id = 1, .name = "Gain", .unit = "", .range = {0.0f, 1.0f, 0.5f, 0.0f}},
             // Log/skewed frequency 20..20k, 1 kHz at the normalized midpoint.
             {.id = 2, .name = "Freq", .unit = "Hz",
-             .range = pulp::state::ParamRange::with_centre(20.0f, 20000.0f, 1000.0f, 1000.0f)},
+             .range = pulp::state::ParamRange::with_center(20.0f, 20000.0f, 1000.0f, 1000.0f)},
             // Enum/discrete: 3 explicitly declared positions (0,1,2).
             {.id = 3, .name = "Mode", .unit = "", .range = {0.0f, 2.0f, 0.0f, 1.0f},
              .kind = pulp::state::ParamKind::Enum,
@@ -581,7 +581,7 @@ TEST_CASE("AAX model preserves linear, log, and enum parameter tapers", "[aax][m
     REQUIRE_FALSE(gain.discrete);
 
     // Log taper survives into the binding: non-linear skew, and the normalized
-    // midpoint still maps back near the chosen 1 kHz centre.
+    // midpoint still maps back near the chosen 1 kHz center.
     REQUIRE_FALSE(freq.range.is_linear());
     REQUIRE(freq.range.skew != 1.0f);
     REQUIRE_FALSE(freq.discrete);

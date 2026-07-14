@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/audio_file.hpp>
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/waveform_headless_render_backend.hpp>
 
 #include <cmath>
@@ -9,7 +9,7 @@
 #include <numbers>
 
 using pulp::audio::AudioFileData;
-using pulp::audio::AudioThumbnail;
+using pulp::audio::WaveformOverview;
 using namespace pulp::view;
 
 namespace {
@@ -44,7 +44,7 @@ WaveformViewport make_viewport(std::int64_t visible_start = 100,
     return viewport;
 }
 
-WaveformGpuLayerPlan make_layer_plan(const AudioThumbnail& thumbnail,
+WaveformGpuLayerPlan make_layer_plan(const WaveformOverview& thumbnail,
                                      std::uint64_t source_generation = 1,
                                      int64_t playhead_sample = 150,
                                      bool prefer_gpu = true,
@@ -64,7 +64,7 @@ WaveformGpuLayerPlan make_layer_plan(const AudioThumbnail& thumbnail,
 
 TEST_CASE("Waveform headless backend renders CPU fallback without caching",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 220.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 220.0), 10);
     const auto plan = make_layer_plan(thumbnail, 1, 150, false);
     REQUIRE(plan.static_layer.valid);
 
@@ -83,7 +83,7 @@ TEST_CASE("Waveform headless backend renders CPU fallback without caching",
 
 TEST_CASE("Waveform headless backend uploads once and draws cached static vertices",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 330.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 330.0), 10);
     const auto plan = make_layer_plan(thumbnail);
     REQUIRE(plan.static_layer.valid);
 
@@ -110,7 +110,7 @@ TEST_CASE("Waveform headless backend uploads once and draws cached static vertic
 
 TEST_CASE("Waveform headless backend reuses static payload for playhead-only redraw",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 440.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 440.0), 10);
     const auto first_plan = make_layer_plan(thumbnail, 1, 150);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 2, .max_staging_vertices = 256});
 
@@ -136,7 +136,7 @@ TEST_CASE("Waveform headless backend reuses static payload for playhead-only red
 
 TEST_CASE("Waveform headless backend releases replaced backend generations",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 550.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 550.0), 10);
     const auto plan = make_layer_plan(thumbnail);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 1, .max_staging_vertices = 256});
 
@@ -158,7 +158,7 @@ TEST_CASE("Waveform headless backend releases replaced backend generations",
 
 TEST_CASE("Waveform headless backend releases evicted cache payloads on capacity pressure",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 660.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 660.0), 10);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 1, .max_staging_vertices = 256});
 
     const auto first_plan = make_layer_plan(thumbnail, 1);
@@ -177,7 +177,7 @@ TEST_CASE("Waveform headless backend releases evicted cache payloads on capacity
 
 TEST_CASE("Waveform headless backend releases cache payloads when prepared smaller",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 770.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 770.0), 10);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 2, .max_staging_vertices = 256});
 
     const auto first_plan = make_layer_plan(thumbnail, 1);
@@ -195,7 +195,7 @@ TEST_CASE("Waveform headless backend releases cache payloads when prepared small
 
 TEST_CASE("Waveform headless backend uses CPU fallback when backend is unavailable",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 880.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 880.0), 10);
     const auto plan = make_layer_plan(thumbnail, 1, 150, true);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 2, .max_staging_vertices = 256});
 
@@ -210,7 +210,7 @@ TEST_CASE("Waveform headless backend uses CPU fallback when backend is unavailab
 
 TEST_CASE("Waveform headless backend reports staging limits without caching",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 990.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 990.0), 10);
     const auto plan = make_layer_plan(thumbnail);
     REQUIRE(plan.static_layer.vertex_count > 4);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 2, .max_staging_vertices = 4});
@@ -226,7 +226,7 @@ TEST_CASE("Waveform headless backend reports staging limits without caching",
 
 TEST_CASE("Waveform headless backend rejects uploads when cache capacity is zero",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 123.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 123.0), 10);
     const auto plan = make_layer_plan(thumbnail);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 0, .max_staging_vertices = 256});
 
@@ -243,7 +243,7 @@ TEST_CASE("Waveform headless backend rejects uploads when cache capacity is zero
 
 TEST_CASE("Waveform headless backend preserves no-fallback backend-unavailable decisions",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 234.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 234.0), 10);
     auto plan = make_layer_plan(thumbnail, 1, 150, true);
     plan.static_layer.cpu_fallback_available = false;
     WaveformHeadlessRenderBackend backend({.cache_capacity = 2, .max_staging_vertices = 256});
@@ -259,7 +259,7 @@ TEST_CASE("Waveform headless backend preserves no-fallback backend-unavailable d
 
 TEST_CASE("Waveform headless backend clear releases all cached payloads",
           "[view][waveform][headless]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(make_sine(48000, 1000, 1, 110.0), 10);
+    const auto thumbnail = WaveformOverview::build_from_buffer(make_sine(48000, 1000, 1, 110.0), 10);
     WaveformHeadlessRenderBackend backend({.cache_capacity = 2, .max_staging_vertices = 256});
     const auto first = backend.render(thumbnail, make_layer_plan(thumbnail, 1), {.backend_available = true, .backend_generation = 1});
     const auto second = backend.render(thumbnail, make_layer_plan(thumbnail, 2), {.backend_available = true, .backend_generation = 1});

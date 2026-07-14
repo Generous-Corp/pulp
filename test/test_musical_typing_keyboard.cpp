@@ -215,7 +215,7 @@ TEST_CASE("MusicalTypingKeyboard: typing white-key click plays + lights",
     kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
     kb.on_gesture_end = [&](int i) { ends.push_back(kb.element_note(i)); };
 
-    // White key 'a' (note 0): rect x[102,157] y[117,195]. Click low-centre (below
+    // White key 'a' (note 0): rect x[102,157] y[117,195]. Click low-center (below
     // the black keys, which end at y=171) so only the white key is under it.
     const int a = note_idx(kb, 0);
     kb.on_mouse_down({120.0f, 185.0f});
@@ -246,7 +246,7 @@ TEST_CASE("MusicalTypingKeyboard: piano white-key click plays its MIDI note",
     std::vector<int> begins;
     kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
     // Leftmost piano white key C2 (MIDI 48): rect x[28,60] y[62,140] (−8 post-#82);
-    // click low-centre (below the black keys) so only the white key is under it.
+    // click low-center (below the black keys) so only the white key is under it.
     kb.on_mouse_down({44.0f, 130.0f});
     REQUIRE(begins == std::vector<int>{48});
     kb.on_mouse_up({44.0f, 130.0f});
@@ -424,7 +424,7 @@ TEST_CASE("MusicalTypingKeyboard: the piano window shifts its range with the oct
     kb.set_mode(Mode::piano); refit(kb);
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
-    // Leftmost piano white key (rect x[28,60] y[62,140]); low-centre click.
+    // Leftmost piano white key (rect x[28,60] y[62,140]); low-center click.
     auto click_left = [&] { kb.on_mouse_down({44.0f, 130.0f}); kb.on_mouse_up({44.0f, 130.0f}); };
     auto shift = [&](KeyCode k, int n) { for (int i = 0; i < n; ++i) {
         KeyEvent e{}; e.key = k; e.is_down = true; kb.on_key_event(e); } };
@@ -589,7 +589,7 @@ TEST_CASE("MusicalTypingKeyboard: keys 1/2 are momentary pitch bend (down/up)",
     REQUIRE(bends.back() == -1.0f);             // full bend down while held
     REQUIRE(kb.element_value(down) == 1.0f);    // lit while held
     e.is_down = false; kb.on_key_event(e);                                     // release
-    REQUIRE(bends.back() == 0.0f);              // springs back to centre
+    REQUIRE(bends.back() == 0.0f);              // springs back to center
     REQUIRE(kb.element_value(down) == 0.0f);    // unlit
 
     e.key = KeyCode::num2; e.is_down = true; kb.on_key_event(e);  // hold 2 → up
@@ -637,7 +637,7 @@ TEST_CASE("MusicalTypingKeyboard: modulation pads mirror keys 3–8 and latch",
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<float> mods;
     kb.on_modulation = [&](float a) { mods.push_back(a); };
-    // mod_3 pad sits at x=326 (200 + 3*42), y=63,36,38 → centre ~ (344,82).
+    // mod_3 pad sits at x=326 (200 + 3*42), y=63,36,38 → center ~ (344,82).
     kb.on_mouse_down({344, 82});
     REQUIRE(mods.back() == Catch::Approx(3.0f / 5.0f));
     kb.on_mouse_up({344, 82});
@@ -691,7 +691,7 @@ TEST_CASE("MusicalTypingKeyboard: dragging the overview strip sets the octave (s
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
 
     // Press on the centered full-range ruler ~2 octaves right of the octave-0
-    // window centre (≈344 + 2*~37 ≈ 418), y in the strip band. Snaps to octave +2.
+    // window center (≈344 + 2*~37 ≈ 418), y in the strip band. Snaps to octave +2.
     kb.on_mouse_down({418.0f, 30.0f});
     REQUIRE(kb.controller().octave_shift() == 2);
     REQUIRE(ons.empty());
@@ -754,10 +754,10 @@ TEST_CASE("MusicalTypingKeyboard: a strip click does not play or light a key",
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
-    kb.on_mouse_down({344.0f, 30.0f});          // octave-0 window centre (≈344)
+    kb.on_mouse_down({344.0f, 30.0f});          // octave-0 window center (≈344)
     kb.on_mouse_up({344.0f, 30.0f});
     REQUIRE(ons.empty());
-    REQUIRE(kb.controller().octave_shift() == 0);   // centre ⇒ octave 0
+    REQUIRE(kb.controller().octave_shift() == 0);   // center ⇒ octave 0
 }
 
 TEST_CASE("MusicalTypingKeyboard: a mode toggle reports the new intrinsic size",

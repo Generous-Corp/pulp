@@ -1032,14 +1032,14 @@ TEST_CASE("Codegen renders fader at derived thumb width + emits thin track width
     std::string js = generate_pulp_js(ir, opts);
 
     // The fader WIDGET renders at the narrow thumb width (28), while the column
-    // keeps the box width (96) so the narrow widget centres in its slot.
+    // keeps the box width (96) so the narrow widget centers in its slot.
     REQUIRE(js.find("setFlex('Fader__Master0', 'width', 28)") != std::string::npos);
     REQUIRE(js.find("setFlex('Fader__Master0_col', 'min_width', 96)") != std::string::npos);
     // The thin track width flows through to the render path.
     REQUIRE(js.find("setFaderTrackWidth('Fader__Master0', 5)") != std::string::npos);
 }
 
-TEST_CASE("Codegen renders meter at derived narrow bar width, centred in column",
+TEST_CASE("Codegen renders meter at derived narrow bar width, centerd in column",
           "[view][import][skin][meter][width]") {
     DesignIR ir;
     ir.root.type = "frame";
@@ -1063,7 +1063,7 @@ TEST_CASE("Codegen renders meter at derived narrow bar width, centred in column"
     opts.skin_meters = true;
     std::string js = generate_pulp_js(ir, opts);
 
-    // The meter renders at the narrow bar width (18), centred via the column
+    // The meter renders at the narrow bar width (18), centerd via the column
     // which keeps the box width (69) as its min_width.
     REQUIRE(js.find("setFlex('Meter__Out_L0', 'width', 18)") != std::string::npos);
     REQUIRE(js.find("setFlex('Meter__Out_L0_col', 'min_width', 69)") != std::string::npos);

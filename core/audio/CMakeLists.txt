@@ -60,9 +60,9 @@ target_sources(pulp-audio PRIVATE
     src/slice_map.cpp
     src/slice_point_analyzer.cpp
     src/signalsmith_time_pitch_processor.cpp
-    src/audio_thumbnail_build.cpp
-    src/audio_thumbnail_cache.cpp
-    src/audio_thumbnail_serialization.cpp
+    src/waveform_overview_build.cpp
+    src/waveform_overview_cache.cpp
+    src/waveform_overview_serialization.cpp
     src/wav_metadata.cpp
     src/audio_device_manager.cpp
     src/audio_probe.cpp

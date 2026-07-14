@@ -109,7 +109,7 @@ bool PropertiesFile::save_to(const std::string& dest) const {
     // therefore leaves the previously-saved settings intact rather than
     // truncating them — settings/preset files are user data, so a partial
     // write must never clobber a known-good file. Mirrors the temp-then-rename
-    // convention already used by skp_capture and audio_thumbnail_cache.
+    // convention already used by skp_capture and waveform_overview_cache.
     const std::string tmp_path = dest + ".tmp";
     {
         std::ofstream file(tmp_path);

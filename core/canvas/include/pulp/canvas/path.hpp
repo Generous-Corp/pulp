@@ -172,7 +172,7 @@ public:
     Path& add_arc(float cx, float cy, float rx, float ry,
                   float start_angle, float sweep_angle);
 
-    /// A pie slice / wedge: centre → arc → back to centre, closed.
+    /// A pie slice / wedge: center → arc → back to center, closed.
     Path& add_pie(float cx, float cy, float rx, float ry,
                   float start_angle, float sweep_angle);
 
@@ -194,7 +194,7 @@ public:
     /// The transform that would scale this path to fit `(x, y, w, h)`.
     ///
     /// With `preserve_proportions`, the path is scaled uniformly by
-    /// `min(w / bounds.width, h / bounds.height)` and then **centred** on both
+    /// `min(w / bounds.width, h / bounds.height)` and then **centerd** on both
     /// axes within the target rect — so the slack on the axis that did not
     /// bind is split evenly, not dumped at one edge. (Derived empirically; see
     /// `test_canvas_path.cpp`, which pins the centring with a case whose
@@ -343,8 +343,8 @@ private:
 
     /// The SVG `A`/`a` segment: an arc in ENDPOINT parameterization (radii,
     /// x-axis rotation, large-arc and sweep flags, and an endpoint) rather
-    /// than the centre parameterization every renderer actually wants.
-    /// Converts to centre form per the SVG spec's implementation notes, then
+    /// than the center parameterization every renderer actually wants.
+    /// Converts to center form per the SVG spec's implementation notes, then
     /// emits cubics. Out-of-range radii are scaled up to reach the endpoint,
     /// exactly as the spec requires; zero radii degrade to a straight line.
     void append_svg_arc(Point2D from, float rx, float ry, float x_axis_rotation_deg,

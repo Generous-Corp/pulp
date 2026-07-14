@@ -24,7 +24,7 @@ void fill_sine(std::vector<float>& f, uint32_t k) {
         f[i] = std::sin(2.0f * 3.14159265f * k * i / f.size());
 }
 // A Hann-windowed sine — a realistic analysis frame with a rounded (unimodal)
-// spectral peak, so a heavy symmetric smear keeps the mode centred instead of
+// spectral peak, so a heavy symmetric smear keeps the mode centerd instead of
 // flattening a bare delta into an argmax-ambiguous plateau.
 void fill_windowed_sine(std::vector<float>& f, uint32_t k) {
     const auto w = pulp::signal::WindowFunction::generate(
@@ -84,7 +84,7 @@ TEST_CASE("GpuSpectralStack smear spreads spectral energy", "[gpu_audio][spectra
 
     // Smear blurs the sharp peak — energy bleeds into neighbouring bins.
     REQUIRE(mag_at(wet, K1 + 6) > 3.0f * mag_at(dry, K1 + 6));
-    REQUIRE(peak_bin(wet) == K1);  // still centred on the tone
+    REQUIRE(peak_bin(wet) == K1);  // still centerd on the tone
 }
 
 TEST_CASE("GpuSpectralStack render before capture fails", "[gpu_audio][spectral][gpu]") {

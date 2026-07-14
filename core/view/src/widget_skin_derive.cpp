@@ -29,7 +29,7 @@ inline canvas::Color to_color(const RGB& c) {
 }
 
 // Locate the widget art region as the tallest contiguous run of opaque pixels
-// in the centre column. Design-tool exports bake the live control at the top
+// in the center column. Design-tool exports bake the live control at the top
 // of the PNG and flatten label / value / metadata text below it as smaller,
 // gapped glyph runs — so the tallest opaque run is the control art.
 bool find_art_region(const SkinImage& img, int cx, int& top, int& bottom) {
@@ -77,7 +77,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
     int top = 0, bottom = 0;
     if (!find_art_region(img, cx, top, bottom)) return out;
 
-    // Collect opaque centre-column rows of the art region.
+    // Collect opaque center-column rows of the art region.
     std::vector<std::pair<int, RGB>> rows;
     for (int y = top; y < bottom; ++y) {
         RGB c = pixel(img, cx, y);
@@ -101,7 +101,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         // design draws with a slightly lighter edge so it
         // doesn't read as a flat slab. We first try to RECOVER that edge by
         // scanning across a representative dark track row for the brightest
-        // low-saturation pixel and comparing it to the fill at the row centre —
+        // low-saturation pixel and comparing it to the fill at the row center —
         // a real outline shows a clear luminance delta. When the captured edge
         // is a sub-pixel anti-aliased rim that the flat-PNG sample can't
         // resolve (it reads as uniform fill), we SYNTHESISE the rim by
@@ -113,7 +113,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
             const RGB track_rgb = low_sat[low_sat.size() / 6].second;
             const int track_lum = lum(track_rgb);
             int track_row = low_sat[low_sat.size() / 2].first;  // a mid dark row
-            int centre_lum = lum(pixel(img, cx, track_row));      // the fill here
+            int center_lum = lum(pixel(img, cx, track_row));      // the fill here
             int l = 0, r = 0;
             bool recovered = false;
             if (row_art_bounds(img, track_row, cx, l, r)) {
@@ -124,7 +124,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
                     if (c.a <= 200 || sat(c) >= 25) continue;
                     if (lum(c) > best_lum) { best_lum = lum(c); brightest = c; }
                 }
-                if (best_lum - centre_lum > 12) {
+                if (best_lum - center_lum > 12) {
                     out.track_border_color = to_color(brightest);
                     out.has_track_border = true;
                     recovered = true;
@@ -161,7 +161,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         }
 
         // Thumb border / bevel: nearest-to-mid-grey low-sat row within a small
-        // window around the thumb centre (the darker edge of the slab).
+        // window around the thumb center (the darker edge of the slab).
         RGB border{};
         bool found_border = false;
         int best_dist = 1 << 30;

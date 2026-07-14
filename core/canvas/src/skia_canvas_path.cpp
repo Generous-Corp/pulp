@@ -163,7 +163,7 @@ void SkiaCanvas::draw_path_shadow(const Path& path, float dx, float dy,
     if (!canvas_ || path.is_empty()) return;
 
     // Grow the silhouette by `spread` BEFORE blurring, per the CSS box-shadow
-    // model. Scaling about the centre is exact for a convex path and an
+    // model. Scaling about the center is exact for a convex path and an
     // approximation for a concave one (a true spread is a path outset, which
     // Skia does not expose as a cheap primitive).
     Path shadow = path;

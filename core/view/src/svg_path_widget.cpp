@@ -344,7 +344,7 @@ void emit_arc_as_cubics(std::vector<SvgPathSegment>& out,
     const float cos_phi = std::cos(phi);
     const float sin_phi = std::sin(phi);
 
-    // Step 1: transform to centred parametrisation (W3C eq. F.6.5.1).
+    // Step 1: transform to centerd parametrisation (W3C eq. F.6.5.1).
     const float dx = (x1 - x2) * 0.5f;
     const float dy = (y1 - y2) * 0.5f;
     const float x1p =  cos_phi * dx + sin_phi * dy;
@@ -370,7 +370,7 @@ void emit_arc_as_cubics(std::vector<SvgPathSegment>& out,
     const float cxp =  coef * (rx * y1p) / ry;
     const float cyp = -coef * (ry * x1p) / rx;
 
-    // Centre in original coords.
+    // Center in original coords.
     const float cx = cos_phi * cxp - sin_phi * cyp + (x1 + x2) * 0.5f;
     const float cy = sin_phi * cxp + cos_phi * cyp + (y1 + y2) * 0.5f;
 
@@ -694,7 +694,7 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
     const float vh = viewbox_h_ > 0 ? viewbox_h_ : b.height;
 
     canvas.save();
-    // xMidYMid meet — preserve aspect, centre, scale to fit.
+    // xMidYMid meet — preserve aspect, center, scale to fit.
     const float sx = b.width / vw;
     const float sy = b.height / vh;
     const float scale = std::min(sx, sy);

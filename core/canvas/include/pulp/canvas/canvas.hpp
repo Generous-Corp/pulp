@@ -715,7 +715,7 @@ public:
     ///
     /// `spread` grows the shadow's silhouette before blurring, matching the
     /// CSS `box-shadow` spread term. The default fallback approximates it by
-    /// scaling the path about its own centre, which is exact for convex shapes
+    /// scaling the path about its own center, which is exact for convex shapes
     /// and an approximation for concave ones (a true spread is a Minkowski
     /// sum / path outset, which is not something the immediate-mode API can
     /// express).
@@ -808,7 +808,7 @@ public:
         (void)layer; (void)dest;
     }
 
-    /// Composite a sealed layer rotated about its own centre.
+    /// Composite a sealed layer rotated about its own center.
     virtual void draw_layer_rotated(LayerHandle layer, float angle_rad) {
         (void)layer; (void)angle_rad;
     }

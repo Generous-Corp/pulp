@@ -89,7 +89,7 @@ private:
 
 // ── Stepper ───────────────────────────────────────────────────────────────
 // [−] value [+] numeric stepper. Click the −/+ zones to nudge by step; click
-// the centre value to type a number (Enter commits, Esc cancels); scroll-wheel
+// the center value to type a number (Enter commits, Esc cancels); scroll-wheel
 // over it to nudge.
 class Stepper : public View {
 public:
@@ -125,7 +125,7 @@ public:
     float intrinsic_height() const override { return 36.0f; }
 private:
     void commit_edit_();
-    int zone_at_(float x) const;   ///< 0 = minus, 1 = plus, -1 = centre/none
+    int zone_at_(float x) const;   ///< 0 = minus, 1 = plus, -1 = center/none
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
     double wheel_step_ = 0.0;   ///< 0 = use step_; set from typed decimal precision
     std::string suffix_ = "";
@@ -139,7 +139,7 @@ private:
 };
 
 // ── PanControl (1-D) ──────────────────────────────────────────────────────
-// Bipolar horizontal pan: centre detent, accent fill from centre to thumb.
+// Bipolar horizontal pan: center detent, accent fill from center to thumb.
 class PanControl : public View {
 public:
     void set_value(float v);            // -1 (L) .. +1 (R)
@@ -280,7 +280,7 @@ public:
     float intrinsic_height() const override { return 32.0f; }
 private:
     void commit_edit_();
-    int zone_at_(float x) const;   ///< 0 = ‹ decrement, 1 = › increment, -1 = centre/none
+    int zone_at_(float x) const;   ///< 0 = ‹ decrement, 1 = › increment, -1 = center/none
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
     std::string suffix_;
     bool editing_ = false;

@@ -8,7 +8,7 @@
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/text_shaper.hpp>
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -134,7 +134,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
         }
 
         // `none` — natural size, no scaling. Crop or letterbox both axes.
-        // Centre by default; object-position refines letterboxed placement
+        // Center by default; object-position refines letterboxed placement
         // below while the crop window stays centered.
         if (fit == "none") {
             float dw = std::min(b.width,  img_w);
@@ -194,7 +194,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
         // shim normalises to a `<x>% <y>%` two-token string before
         // routing through setObjectPosition. Anything we can't parse
         // collapses to "50% 50%" (the spec default), which keeps the
-        // centred-by-default `compute_fit` result.
+        // centerd-by-default `compute_fit` result.
         auto parse_object_position = [&](float& px, float& py) {
             px = 50.0f; py = 50.0f;
             const std::string& s = object_position();
@@ -643,7 +643,7 @@ void XYPad::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4.0f);
 
-    // Grid lines — a 4×4 grid (matches the Figma XY pad), not just a centre cross.
+    // Grid lines — a 4×4 grid (matches the Figma XY pad), not just a center cross.
     auto grid = resolve_color("waveform.grid", canvas::Color::rgba8(60, 60, 75));
     canvas.set_stroke_color(grid);
     canvas.set_line_width(0.5f);
@@ -744,7 +744,7 @@ void WaveformView::set_data(std::vector<float> samples) {
 }
 
 void WaveformView::set_thumbnail(
-    std::shared_ptr<const pulp::audio::AudioThumbnail> thumb,
+    std::shared_ptr<const pulp::audio::WaveformOverview> thumb,
     uint32_t channel) {
     thumbnail_owner_ = std::move(thumb);
     thumbnail_ = thumbnail_owner_.get();
@@ -754,12 +754,12 @@ void WaveformView::set_thumbnail(
     samples_.clear();
 }
 
-void WaveformView::set_thumbnail(const pulp::audio::AudioThumbnail* thumb,
+void WaveformView::set_thumbnail(const pulp::audio::WaveformOverview* thumb,
                                  uint32_t channel) {
     set_thumbnail_borrowed(thumb, channel);
 }
 
-void WaveformView::set_thumbnail_borrowed(const pulp::audio::AudioThumbnail* thumb,
+void WaveformView::set_thumbnail_borrowed(const pulp::audio::WaveformOverview* thumb,
                                           uint32_t channel) {
     thumbnail_owner_.reset();
     thumbnail_ = thumb;
@@ -897,7 +897,7 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     canvas.stroke_line(0, cy, b.width, cy);
 
     // Mirrored bar waveform — one vertical bar per column at the column's peak
-    // amplitude, mirrored about the centre line (the classic audio-editor
+    // amplitude, mirrored about the center line (the classic audio-editor
     // thumbnail). Drawn with fill_rect so it renders on the CPU raster path,
     // not only the GPU waveform shader.
     const int cols = std::max(1, std::min<int>(static_cast<int>(b.width), 512));

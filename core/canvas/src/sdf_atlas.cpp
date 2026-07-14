@@ -234,7 +234,7 @@ GlyphMetrics glyph_metrics_skia(const sk_sp<SkTypeface>& face,
 // Skia-backed glyph rasterizer.
 //
 // Builds a temporary SkBitmap of size w × h, paints the requested
-// codepoint into the centre using the requested font, and reads back
+// codepoint into the center using the requested font, and reads back
 // the alpha channel as a binary mask. Returns an empty vector if the
 // font cannot be loaded so the caller can fall back to the
 // placeholder.

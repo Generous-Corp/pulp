@@ -367,17 +367,17 @@ TEST_CASE("ToggleButton radio group is mutually exclusive", "[design-system][int
     ind.on_mouse_down({0, 0}); REQUIRE_FALSE(ind.is_on());
 }
 
-TEST_CASE("RangeSlider skew maps the midpoint to the track centre", "[design-system][skew]") {
+TEST_CASE("RangeSlider skew maps the midpoint to the track center", "[design-system][skew]") {
     auto close = [](float a, float b, float tol) { return std::fabs(a - b) < tol; };
     RangeSlider s; s.set_bounds({0, 0, 200, 18});
     s.set_min(20); s.set_max(20000);
 
-    // Linear default: centre of the track is the arithmetic midpoint.
+    // Linear default: center of the track is the arithmetic midpoint.
     s.on_mouse_event([] { MouseEvent e; e.is_down = true; e.position = {100, 9}; return e; }());
     REQUIRE(close(s.value(), 10010.0f, 50.0f));
 
-    // Log skew: the centre of the track now yields ~1000 (the chosen midpoint),
-    // and the thumb for value 1000 sits at the centre (position ≈ 0.5).
+    // Log skew: the center of the track now yields ~1000 (the chosen midpoint),
+    // and the thumb for value 1000 sits at the center (position ≈ 0.5).
     s.set_skew_from_midpoint(1000.0f);
     s.on_mouse_event([] { MouseEvent e; e.is_down = true; e.position = {100, 9}; return e; }());
     REQUIRE(close(s.value(), 1000.0f, 60.0f));
@@ -391,7 +391,7 @@ TEST_CASE("RangeSlider skew maps the midpoint to the track centre", "[design-sys
 TEST_CASE("Knob/Fader skew round-trips position and value", "[design-system][skew]") {
     auto close = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
     Knob k; k.set_skew_from_midpoint(0.25f);
-    REQUIRE(close(k.value_for_position(0.5f), 0.25f));   // centre → midpoint
+    REQUIRE(close(k.value_for_position(0.5f), 0.25f));   // center → midpoint
     REQUIRE(close(k.position_for_value() , 0.0f));        // value 0 → pos 0
     k.set_value(0.25f);
     REQUIRE(close(k.position_for_value(), 0.5f));
@@ -418,7 +418,7 @@ TEST_CASE("ChannelStrip fader + pan drag and fire callbacks", "[design-system][i
     cs.on_mouse_drag({50.0f, 150.0f});
     REQUIRE(cs.level() < 0.3f);
 
-    // Pan row (bottom band, y >= h - 36) — drag left of centre pans left.
+    // Pan row (bottom band, y >= h - 36) — drag left of center pans left.
     cs.on_mouse_down({10.0f, 175.0f});
     REQUIRE(pan_fired);
     REQUIRE(cs.pan() < 0.0f);
@@ -476,7 +476,7 @@ TEST_CASE("Scrolling closes an open ComboBox dropdown", "[design-system][interac
 
 TEST_CASE("Stepper click-to-type edits the value", "[design-system][interaction]") {
     Stepper s; s.set_bounds({0, 0, 140, 36}); s.set_range(-99, 99); s.set_value(0);
-    s.on_mouse_down({70.0f, 18.0f});   // centre cell → begin editing
+    s.on_mouse_down({70.0f, 18.0f});   // center cell → begin editing
     REQUIRE(s.is_editing());
     TextInputEvent te; te.text = "12"; s.on_text_input(te);
     KeyEvent enter; enter.key = KeyCode::enter; enter.is_down = true;
@@ -583,8 +583,8 @@ TEST_CASE("Stepper scrubs on vertical drag and shows zone hover/press state",
     s.set_step(1); s.set_value(0);
     int fired = 0; s.on_change = [&](double) { ++fired; };
 
-    // Drag up from the centre cell increases; down decreases (snapped to step).
-    s.on_mouse_down({70.0f, 18.0f});   // centre press → begins as click-to-type
+    // Drag up from the center cell increases; down decreases (snapped to step).
+    s.on_mouse_down({70.0f, 18.0f});   // center press → begins as click-to-type
     s.on_mouse_drag({70.0f, 0.0f});    // 18px up → +3 steps at 6px/step
     REQUIRE(s.value() == 3.0);
     REQUIRE_FALSE(s.is_editing());     // a real drag cancels the would-be edit
@@ -620,7 +620,7 @@ TEST_CASE("NumberBox steps, click-to-types, and scrubs on vertical drag",
     REQUIRE(n.value() == 0.0);
     n.on_mouse_up({6.0f, 16.0f});
 
-    // Centre click types a value (new capability, mirrors Stepper).
+    // Center click types a value (new capability, mirrors Stepper).
     n.on_mouse_down({60.0f, 16.0f});
     REQUIRE(n.is_editing());
     TextInputEvent te; te.text = "42"; n.on_text_input(te);
@@ -629,7 +629,7 @@ TEST_CASE("NumberBox steps, click-to-types, and scrubs on vertical drag",
     REQUIRE_FALSE(n.is_editing());
     REQUIRE(n.value() == 42.0);
 
-    // Centre drag scrubs instead of editing.
+    // Center drag scrubs instead of editing.
     n.set_value(0);
     n.on_mouse_down({60.0f, 16.0f});
     n.on_mouse_drag({60.0f, -12.0f});  // 28px up from y=16 → +4 steps at 6px/step ≈ round(4.67)=5

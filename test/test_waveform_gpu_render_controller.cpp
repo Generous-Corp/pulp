@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/audio_file.hpp>
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/waveform_gpu_render_controller.hpp>
 
 #include <cmath>
@@ -10,7 +10,7 @@
 #include <vector>
 
 using pulp::audio::AudioFileData;
-using pulp::audio::AudioThumbnail;
+using pulp::audio::WaveformOverview;
 using namespace pulp::view;
 
 namespace {
@@ -43,7 +43,7 @@ WaveformViewport make_viewport() {
     return viewport;
 }
 
-WaveformGpuLayerPlan make_layer_plan(const AudioThumbnail& thumbnail,
+WaveformGpuLayerPlan make_layer_plan(const WaveformOverview& thumbnail,
                                      std::uint64_t source_generation = 1,
                                      int64_t playhead_sample = 150,
                                      bool prefer_gpu = true,
@@ -64,7 +64,7 @@ WaveformGpuLayerPlan make_layer_plan(const AudioThumbnail& thumbnail,
 TEST_CASE("Waveform GPU render controller ignores invalid plans",
           "[view][waveform][gpu]") {
     WaveformGpuRenderController controller(2);
-    AudioThumbnail empty;
+    WaveformOverview empty;
     const auto plan = build_waveform_gpu_layer_plan(empty, make_viewport(), 150);
     std::vector<WaveformPeakVertex> staging(8);
 
@@ -82,7 +82,7 @@ TEST_CASE("Waveform GPU render controller ignores invalid plans",
 
 TEST_CASE("Waveform GPU render controller produces CPU fallback without cache stats",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 220.0),
         10);
     WaveformGpuRenderController controller(2);
@@ -106,7 +106,7 @@ TEST_CASE("Waveform GPU render controller produces CPU fallback without cache st
 
 TEST_CASE("Waveform GPU render controller falls back when backend is unavailable",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 220.0),
         10);
     WaveformGpuRenderController controller(2);
@@ -138,7 +138,7 @@ TEST_CASE("Waveform GPU render controller falls back when backend is unavailable
 
 TEST_CASE("Waveform GPU render controller uploads only after backend commit",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 330.0),
         10);
     WaveformGpuRenderController controller(2);
@@ -174,7 +174,7 @@ TEST_CASE("Waveform GPU render controller uploads only after backend commit",
 
 TEST_CASE("Waveform GPU render controller validates playhead-only redraw against cache",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 440.0),
         10);
     WaveformGpuRenderController controller(2);
@@ -221,7 +221,7 @@ TEST_CASE("Waveform GPU render controller validates playhead-only redraw against
 
 TEST_CASE("Waveform GPU render controller surfaces replacement and eviction records",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 550.0),
         10);
     WaveformGpuRenderController controller(1);
@@ -252,7 +252,7 @@ TEST_CASE("Waveform GPU render controller surfaces replacement and eviction reco
 
 TEST_CASE("Waveform GPU render controller separates backend resource generations",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 605.0),
         10);
     WaveformGpuRenderController controller(1);
@@ -312,7 +312,7 @@ TEST_CASE("Waveform GPU render controller separates backend resource generations
 
 TEST_CASE("Waveform GPU render controller rejects undersized staging without writes",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 660.0),
         10);
     WaveformGpuRenderController controller(2);
@@ -330,7 +330,7 @@ TEST_CASE("Waveform GPU render controller rejects undersized staging without wri
 
 TEST_CASE("Waveform GPU render controller treats source generation as upload identity",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 770.0),
         10);
     WaveformGpuRenderController controller(2);
@@ -355,10 +355,10 @@ TEST_CASE("Waveform GPU render controller treats source generation as upload ide
 
 TEST_CASE("Waveform GPU render controller rejects plan/thumbnail mismatches",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 880.0),
         10);
-    const auto mismatched_thumbnail = AudioThumbnail::build_from_buffer(
+    const auto mismatched_thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 80, 1, 880.0),
         10);
     WaveformGpuRenderController controller(2);

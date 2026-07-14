@@ -253,7 +253,7 @@ Sync primitives (in `core/runtime/`):
 |-----------|------|---------|
 | platform | `core/platform/` | OS detection, types, Windows registry |
 | runtime | `core/runtime/` | Logging, SIMD (Highway), XML, ZIP, HTTP, sockets, pipes, base64, crypto (mbedTLS), i18n, analytics, licensing, BigInteger |
-| events | `core/events/` | EventLoop, Timer, AsyncUpdater, InterprocessConnection, ChildProcessManager, NetworkServiceDiscovery |
+| events | `core/events/` | EventLoop, Timer, CoalescedUpdater, InterprocessConnection, ChildProcessManager, NetworkServiceDiscovery |
 | audio | `core/audio/` | BufferView, FormatRegistry (WAV/FLAC/MP3/OGG/AIFF/AAC), ChannelSet, OfflineProcessor, SystemVolume |
 | midi | `core/midi/` | MidiEvent, MidiBuffer (via choc::midi), MIDI CI (discovery, profiles, properties) |
 | state | `core/state/` | ParamValue, ParamInfo, StateStore, Binding, StateTree, PropertiesFile, CachedProperty |

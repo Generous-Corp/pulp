@@ -1307,7 +1307,7 @@ static CGImageRef build_conic_gradient_image(
     std::vector<uint8_t> pixels(total, 0);
     constexpr double kTwoPi = 6.283185307179586;
     for (int py = 0; py < height; ++py) {
-        // Pixel centre in canvas space — bounds.origin is top-left of the
+        // Pixel center in canvas space — bounds.origin is top-left of the
         // image in canvas coords, so offset by (px+0.5, py+0.5).
         const double sample_y = bounds.origin.y + py + 0.5;
         for (int px = 0; px < width; ++px) {
@@ -1489,7 +1489,7 @@ void CoreGraphicsCanvas::fill_with_active_paint() {
             CGPointMake(grad_x1_, grad_y1_), grad_radius_,
             opts);
     } else if (gradient_kind_ == GradientKind::radial || gradient_is_radial_) {
-        // Single-circle form — inner circle collapses to centre, radius 0.
+        // Single-circle form — inner circle collapses to center, radius 0.
         CGContextDrawRadialGradient(ctx_,
             gradient,
             CGPointMake(grad_x0_, grad_y0_), 0.0,

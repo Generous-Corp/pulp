@@ -7,7 +7,7 @@
 /// upload, but they do not own Dawn/Skia/Metal resources. They are safe to use
 /// in CPU-only/headless builds and keep WaveformView display-only.
 
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/waveform_editor_primitives.hpp>
 
 #include <cstddef>
@@ -28,7 +28,7 @@ struct WaveformPeakVertex {
 
 struct WaveformGpuUploadKey {
     std::uint64_t source_generation = 0;
-    std::uint32_t channel = pulp::audio::AudioThumbnail::kAllChannels;
+    std::uint32_t channel = pulp::audio::WaveformOverview::kAllChannels;
     std::uint32_t thumbnail_level_index = 0;
     std::uint32_t samples_per_peak = 0;
     std::uint32_t first_peak = 0;
@@ -54,7 +54,7 @@ struct WaveformGpuLayerConfig {
     // Required cache identity supplied by the source/editor owner. Increment
     // whenever thumbnail content changes; 0 produces an invalid GPU plan.
     std::uint64_t source_generation = 0;
-    std::uint32_t channel = pulp::audio::AudioThumbnail::kAllChannels;
+    std::uint32_t channel = pulp::audio::WaveformOverview::kAllChannels;
     std::uint32_t max_columns = 0;
     bool prefer_gpu = true;
 };
@@ -77,12 +77,12 @@ struct WaveformGpuLayerPlan {
 };
 
 [[nodiscard]] WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformViewport& viewport,
     const WaveformGpuLayerConfig& config = {});
 
 [[nodiscard]] WaveformGpuLayerPlan build_waveform_gpu_layer_plan(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformViewport& viewport,
     int64_t playhead_sample,
     const WaveformGpuLayerConfig& config = {},
@@ -92,7 +92,7 @@ struct WaveformGpuLayerPlan {
 /// the number of vertices written, capped by dst.size(). This function performs
 /// no allocation and does not touch backend GPU resources.
 std::size_t fill_waveform_peak_vertices(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformGpuStaticLayerPlan& plan,
     std::span<WaveformPeakVertex> dst) noexcept;
 

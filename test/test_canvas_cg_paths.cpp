@@ -192,7 +192,7 @@ TEST_CASE("CoreGraphicsCanvas Canvas2D path API fills (issue 1322)",
         CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
                                   static_cast<float>(H));
         canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
-        // Diamond covering the centre of the bitmap (16,8)→(24,16)→(16,24)→(8,16).
+        // Diamond covering the center of the bitmap (16,8)→(24,16)→(16,24)→(8,16).
         canvas.begin_path();
         canvas.move_to(16.0f, 8.0f);
         canvas.line_to(24.0f, 16.0f);
@@ -476,13 +476,13 @@ TEST_CASE("CoreGraphicsCanvas::fill_path honors FillRule -- evenodd rings",
     const auto eo = render(FillRule::evenodd);
     const auto nz = render(FillRule::nonzero);
 
-    // Centre of the hole: transparent under even-odd, painted under nonzero.
-    INFO("evenodd centre a=" << int(alpha_at(eo, 24, 24))
-         << " nonzero centre a=" << int(alpha_at(nz, 24, 24)));
+    // Center of the hole: transparent under even-odd, painted under nonzero.
+    INFO("evenodd center a=" << int(alpha_at(eo, 24, 24))
+         << " nonzero center a=" << int(alpha_at(nz, 24, 24)));
     REQUIRE(alpha_at(eo, 24, 24) < 20u);
     REQUIRE(alpha_at(nz, 24, 24) > 200u);
 
-    // The ring band (r = 15 above the centre) is painted under BOTH rules —
+    // The ring band (r = 15 above the center) is painted under BOTH rules —
     // even-odd punches the hole, it does not blank the shape.
     REQUIRE(alpha_at(eo, 24, 9) > 200u);
     REQUIRE(alpha_at(nz, 24, 9) > 200u);
@@ -833,7 +833,7 @@ TEST_CASE("CoreGraphicsCanvas::set_blend_mode every enum value round-trips throu
             canvas.fill_rect(0, 0, W, H);
         }
         CGContextRelease(ctx);
-        // Sample the centre pixel — this is post-blend output.
+        // Sample the center pixel — this is post-blend output.
         const size_t idx = (static_cast<size_t>(H / 2) * W + (W / 2)) * 4u;
         const int r = pixels[idx + 0];
         const int g = pixels[idx + 1];

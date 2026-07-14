@@ -822,7 +822,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             // must already encode the parameter taper. For a frequency-unit
             // knob (Hz / kHz) use a LOG taper — that's how audio cutoff/freq
             // controls are laid out (and how Figma's library knob is drawn), so
-            // 880 Hz in [20, 20000] lands near the centre (≈0.55), indicator
+            // 880 Hz in [20, 20000] lands near the center (≈0.55), indicator
             // ~straight up, matching the design. Linear units fall back to the
             // plain (value-min)/(max-min) map. Generalizable rule keyed on the
             // IR's own units attribute — no per-instance angle hardcoding.
@@ -1364,7 +1364,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // When the IR carries an explicit height that's meaningfully taller
         // than the font (Figma's Auto-Layout / text-frame conventions use
         // a height-greater-than-font-size to RESERVE a vertical slot the
-        // text is supposed to be CENTRED within), emit setVerticalAlign:
+        // text is supposed to be CENTERED within), emit setVerticalAlign:
         // center so Pulp's Label draws its glyphs at the slot's optical
         // middle. Without this Label defaults to top-aligned, and the
         // SEARCH input's "Search" text rides above the magnifying-glass
@@ -1652,16 +1652,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         }
         // Cap-height nudge for [small icon, UPPERCASE label] header rows.
         // Figma vertically centers icons on the label's cap-height optical
-        // centre. CSS / Yoga `align-items: center` uses the line-box math
-        // centre, which sits ~font_size * 0.15 BELOW the cap-glyph optical
-        // centre because the line box reserves descender slack the
+        // center. CSS / Yoga `align-items: center` uses the line-box math
+        // center, which sits ~font_size * 0.15 BELOW the cap-glyph optical
+        // center because the line box reserves descender slack the
         // uppercase glyphs don't occupy. Pulp's Label::resolved_state()
-        // produces the same math-centre baseline, so the dot ends up
+        // produces the same math-center baseline, so the dot ends up
         // visually below the label glyphs. Generalisable rule: when a row
         // has align_items: center, at least one uppercase text child, and
         // any image child whose min-dim ≤ that label's font_size, emit a
-        // negative margin_top on the icon so its centre lifts to the
-        // cap-glyph centre. No hardcoded constants — the nudge is derived
+        // negative margin_top on the icon so its center lifts to the
+        // cap-glyph center. No hardcoded constants — the nudge is derived
         // from the label's own font_size.
         float upper_font_size = 0.0f;
         if (is_row && node.layout.align == LayoutAlign::center && !baseline_override) {
@@ -1676,8 +1676,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         }
         // In flex with align-items: center, a margin_top of -M shifts the
         // child's position UP by M/2 (Yoga centers around the margin-
-        // adjusted box). So to lift the icon's centre by font_size * 0.15
-        // (the cap-vs-math centre delta for an uppercase line-box) we
+        // adjusted box). So to lift the icon's center by font_size * 0.15
+        // (the cap-vs-math center delta for an uppercase line-box) we
         // need a -2 × that margin.
         float cap_nudge = (upper_font_size > 0.0f)
                               ? std::round(upper_font_size * 0.30f)

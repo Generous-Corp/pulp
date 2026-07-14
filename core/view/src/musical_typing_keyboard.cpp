@@ -339,7 +339,7 @@ void MusicalTypingKeyboard::control_release(const std::string& tag) {
         tag == "vel_down" || tag == "vel_up") {
         flash_action(tag, false);   // end the tap-flash (the step already fired on press)
     } else if (tag == "pb_down" || tag == "pb_up") {
-        pb_value_ = 0;                              // momentary: spring back to centre
+        pb_value_ = 0;                              // momentary: spring back to center
         if (on_pitch_bend) on_pitch_bend(0.0f);
         if (e >= 0) set_element_value(e, 0.0f);
     } else if (tag == "sustain") {
@@ -577,7 +577,7 @@ bool MusicalTypingKeyboard::point_over_strip(Point pos, float& panel_x) const {
 int MusicalTypingKeyboard::octave_for_strip_x(float panel_x) const {
     float x0, x1; strip_bounds(x0, x1);
     const int base = controller_.base_note();
-    // Snap to the octave whose visible-window CENTRE is nearest x. The window is
+    // Snap to the octave whose visible-window CENTER is nearest x. The window is
     // wider on the piano tab (3 octaves) than typing (the ~1.5-octave play span).
     const int span = (active_frame() == kTypingFrame) ? kPlaySpan : kPianoSpan;
     const float c0 = (midi_to_x(base, x0, x1) + midi_to_x(base + span, x0, x1)) * 0.5f;

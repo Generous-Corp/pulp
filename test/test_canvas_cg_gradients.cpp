@@ -64,7 +64,7 @@ CGContextRef cg_make_bitmap(int w, int h, std::vector<uint8_t>& pixels) {
 // `createConicGradient` on CG must produce angle-varying colour instead of a
 // first-stop solid fallback. We fill a 64x64 square
 // with a 4-stop conic spanning red / green / blue / red and sample the four
-// cardinal directions from the centre. Each cardinal must hit a different
+// cardinal directions from the center. Each cardinal must hit a different
 // dominant channel — proving the sweep actually rotated through the stops.
 TEST_CASE("CoreGraphicsCanvas createConicGradient sweeps angle through stops",
           "[canvas][cg][issue-1524]") {
@@ -89,7 +89,7 @@ TEST_CASE("CoreGraphicsCanvas createConicGradient sweeps angle through stops",
     CGContextRelease(ctx);
 
     CgPixelGrid grid{pixels, W, H};
-    // East cardinal — far right, vertically centred — must be red-dominant.
+    // East cardinal — far right, vertically centerd — must be red-dominant.
     auto east  = grid.at(W - 4, H / 2);
     auto south = grid.at(W / 2, H - 4);   // canvas y down = +y → green stop
     auto west  = grid.at(3,     H / 2);
@@ -110,13 +110,13 @@ TEST_CASE("CoreGraphicsCanvas createConicGradient sweeps angle through stops",
 
 // `createRadialGradient` two-circle form must honour the inner circle. Dropping
 // (x0,y0,r0) and forwarding only the outer circle makes a gradient with an
-// *offset* inner circle paint as if inner_centre==outer_centre — visually the
+// *offset* inner circle paint as if inner_center==outer_center — visually the
 // same as a single-circle radial.
 //
 // Strategy: build a 64x64 with a two-circle radial whose inner circle sits
-// well to the right of the outer centre and whose stops are red→blue.
+// well to the right of the outer center and whose stops are red→blue.
 // With both circles wired, the red-dominant region must shift toward the
-// inner-circle centre. With the bug, red lands at the outer centre instead.
+// inner-circle center. With the bug, red lands at the outer center instead.
 TEST_CASE("CoreGraphicsCanvas radial two-circle form honours inner circle",
           "[canvas][cg][issue-1524]") {
     constexpr int W = 64, H = 64;
@@ -131,11 +131,11 @@ TEST_CASE("CoreGraphicsCanvas radial two-circle form honours inner circle",
             Color::rgba(0.0f, 0.0f, 1.0f, 1.0f)   // blue at outer circle (t=1)
         };
         const float pos[] = {0.0f, 1.0f};
-        // Inner circle: centre (50, 32), radius 0 (point) — far to the right.
-        // Outer circle: centre (32, 32), radius 30 — covers most of the canvas.
+        // Inner circle: center (50, 32), radius 0 (point) — far to the right.
+        // Outer circle: center (32, 32), radius 30 — covers most of the canvas.
         // Spec semantics: red is concentrated near (50, 32); blue is at the
         // outer circle's ring. If the inner circle collapses to (32, 32), red
-        // lands at the centre instead.
+        // lands at the center instead.
         canvas.set_fill_gradient_radial_two_circles(
             50.0f, 32.0f, 0.0f,
             32.0f, 32.0f, 30.0f,
@@ -145,15 +145,15 @@ TEST_CASE("CoreGraphicsCanvas radial two-circle form honours inner circle",
     CGContextRelease(ctx);
 
     CgPixelGrid grid{pixels, W, H};
-    // Sample near the inner-circle centre (50, 32) — must be red-dominant.
+    // Sample near the inner-circle center (50, 32) — must be red-dominant.
     auto near_inner = grid.at(50, 32);
-    // Sample near the outer-circle centre (32, 32) — must NOT be red-dominant,
+    // Sample near the outer-circle center (32, 32) — must NOT be red-dominant,
     // which catches the inner circle collapsing onto the outer circle.
-    auto at_outer_centre = grid.at(32, 32);
+    auto at_outer_center = grid.at(32, 32);
     INFO("near_inner=" << near_inner[0] << "," << near_inner[1] << "," << near_inner[2]);
-    INFO("at_outer_centre=" << at_outer_centre[0] << "," << at_outer_centre[1] << "," << at_outer_centre[2]);
+    INFO("at_outer_center=" << at_outer_center[0] << "," << at_outer_center[1] << "," << at_outer_center[2]);
     REQUIRE(near_inner[0] > near_inner[2]);             // red > blue near inner
-    REQUIRE(at_outer_centre[0] < near_inner[0]);        // outer-centre is less red than inner
+    REQUIRE(at_outer_center[0] < near_inner[0]);        // outer-center is less red than inner
     // Defensive: gradient must have actually painted (alpha 255 inside the
     // outer circle).
     REQUIRE(near_inner[3] == 255);
@@ -451,7 +451,7 @@ TEST_CASE("CoreGraphicsCanvas::stroke_text gradient is canvas-space anchored",
             canvas.set_line_width(2.5f);
             canvas.set_font("Helvetica", 32);
             // Long string of W glyphs covers most of the canvas width
-            // so we always have stroked pixels to sample at the centre.
+            // so we always have stroked pixels to sample at the center.
             canvas.stroke_text("WWWWWWWW", text_x, 36);
         }
         CGContextRelease(ctx);

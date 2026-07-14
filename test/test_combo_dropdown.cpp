@@ -128,7 +128,7 @@ TEST_CASE("ComboBox: long list clamps to the window and scrolls to reach items",
     // visible row is a deep item — clicking it selects an item that would have
     // been off-screen (and thus unselectable) without scrolling.
     MouseEvent pick;
-    pick.position = {60, y + 12.0f};         // centre of the first visible row
+    pick.position = {60, y + 12.0f};         // center of the first visible row
     pick.is_down = true;
     combo->on_mouse_event(pick);
     REQUIRE_FALSE(combo->is_open());

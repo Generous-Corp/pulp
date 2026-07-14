@@ -62,7 +62,7 @@ public:
     // These surface the controls that DON'T map to controller state. Keys 1–8 and
     // tab mirror the on-screen buttons exactly:
     //   • on_pitch_bend(−1..+1) — keys 1 / 2 (and the −/+ pads) are MOMENTARY:
-    //     hold → full bend down (−1) / up (+1), release → 0 (spring to centre).
+    //     hold → full bend down (−1) / up (+1), release → 0 (spring to center).
     //     Bipolar; the host maps it to its bend range. Readout shows −20 / 0 / +20.
     //   • on_sustain(bool)      — sustain pad / tab key, MOMENTARY hold: true while
     //     held, false on release (lit while held).

@@ -38,7 +38,7 @@ inline uint8_t scale_16_to_7(uint16_t v16) {
         (static_cast<uint32_t>(v16) * 127u + 0x7FFFu) / 0xFFFFu);
 }
 
-/// Scale a 14-bit value (0..16383, centre 8192) to 32-bit (centre 0x80000000)
+/// Scale a 14-bit value (0..16383, center 8192) to 32-bit (center 0x80000000)
 /// using MIDI 2.0 Min/Center/Max scaling so the midpoint is preserved exactly.
 inline uint32_t scale_14_to_32(uint16_t v14) {
     constexpr uint32_t src_max = 0x3FFFu;

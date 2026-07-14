@@ -482,10 +482,10 @@ TEST_CASE("derive_*_skin recovers horizontal art widths (pulp #3191 width fix)",
           "[view][widget][issue-3191]") {
     // The captured art's visible element is a NARROW inset region, not the full
     // node box. The sampler must recover those horizontal extents from the
-    // pixels so the widget renders narrow + centred. We build synthetic images
+    // pixels so the widget renders narrow + centerd. We build synthetic images
     // whose art is a known inset width and assert the recovered px.
 
-    SECTION("meter bar width from a narrow centred bar") {
+    SECTION("meter bar width from a narrow centerd bar") {
         // 40-wide box; the coloured bar is x=[14..25] (12 px) — a 30% inset,
         // mirroring the captured meter's ~26%-of-box bar. Faint label glyphs
         // below the bar must NOT widen the recovered bar width.
@@ -543,7 +543,7 @@ TEST_CASE("derive_*_skin recovers horizontal art widths (pulp #3191 width fix)",
         REQUIRE(skin.thumb_width_px == Catch::Approx(24.0f).margin(1.0f));
         // Track is the thin 4-px column, NOT the 24-px thumb or 60-px box.
         REQUIRE(skin.track_width_px == Catch::Approx(4.0f).margin(1.0f));
-        // Thumb slab centred at y≈44 within art rows [10,80) → ~0.51 up the
+        // Thumb slab centerd at y≈44 within art rows [10,80) → ~0.51 up the
         // bar (1 = top, 0 = bottom). pulp #3191 position fix.
         REQUIRE(skin.has_thumb_position);
         REQUIRE(skin.thumb_position == Catch::Approx(0.51f).margin(0.1f));
@@ -776,7 +776,7 @@ TEST_CASE("derive_fader_skin fill colour is the dominant mid tone, not the most-
 TEST_CASE("Skinned Fader honours derived thin track width (pulp #3191)",
           "[view][widget][issue-3191]") {
     // A skinned fader whose widget box was sized to the captured thumb width
-    // must draw its TRACK at the derived thin width (centred), not a fraction
+    // must draw its TRACK at the derived thin width (centerd), not a fraction
     // of the widget box. We render into a RecordingCanvas and assert the track
     // rect spans ~the derived width, far narrower than the box.
     Fader fader;
@@ -795,7 +795,7 @@ TEST_CASE("Skinned Fader honours derived thin track width (pulp #3191)",
     fader.paint(rc);
     // Rect geometry is in f[0..3] = x, y, w, h. The track is the FIRST
     // full-height rounded rect (drawn before fill + thumb). Assert it is the
-    // derived thin width (~5 px) and centred — NOT a fraction of the 28-px box
+    // derived thin width (~5 px) and centerd — NOT a fraction of the 28-px box
     // (the old skinned heuristic would have drawn 28*0.18 ≈ 5 here by accident,
     // so make the box wide enough that 0.18*box would clearly differ).
     auto rects = commands_of(rc, DrawCommand::Type::fill_rounded_rect);
@@ -804,7 +804,7 @@ TEST_CASE("Skinned Fader honours derived thin track width (pulp #3191)",
         if (r.f[3] >= 180.0f) {  // full-height → the track
             found_thin_track = true;
             REQUIRE(r.f[2] == Catch::Approx(5.0f).margin(1.5f));            // width
-            REQUIRE(r.f[0] == Catch::Approx((60.0f - 5.0f) * 0.5f).margin(1.5f));  // centred x
+            REQUIRE(r.f[0] == Catch::Approx((60.0f - 5.0f) * 0.5f).margin(1.5f));  // centerd x
             break;
         }
     }

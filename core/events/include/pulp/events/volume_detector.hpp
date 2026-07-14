@@ -1,8 +1,8 @@
 #pragma once
 
 // MountedVolumeListChangeDetector — monitors filesystem for volume mount/unmount.
-// ScopedLowPowerModeDisabler is in async_updater.hpp.
-// LockingAsyncUpdater is in async_updater.hpp.
+// ScopedLowPowerModeDisabler is in coalesced_updater.hpp.
+// LockingCoalescedUpdater is in coalesced_updater.hpp.
 // NetworkServiceDiscovery — mDNS-based service discovery.
 
 #include <string>
@@ -166,17 +166,17 @@ private:
     std::unique_ptr<Backend> backend_;
 };
 
-/// Locking variant of AsyncUpdater — blocks the trigger thread until
+/// Locking variant of CoalescedUpdater — blocks the trigger thread until
 /// the update is processed on the event thread. Use with caution.
-class LockingAsyncUpdater {
+class LockingCoalescedUpdater {
 public:
-    virtual ~LockingAsyncUpdater() = default;
+    virtual ~LockingCoalescedUpdater() = default;
 
     /// Trigger and wait for the update to be processed.
     void trigger_and_wait();
 
     /// Override to handle the update.
-    virtual void handle_async_update() = 0;
+    virtual void on_update() = 0;
 
 private:
     std::atomic<bool> pending_{false};

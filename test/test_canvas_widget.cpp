@@ -444,7 +444,7 @@ TEST_CASE("CanvasWidget content paints over parent View bg via paint_all",
     // navy. If the v0.57.0 regression is present, this samples (8,12,24)
     // (parent navy) or (0,0,0,0) (kClear leaked outside a layer).
     auto px = sample_pixel(surface.get(), 32, 32);
-    INFO("Centre pixel rgba=("
+    INFO("Center pixel rgba=("
          << int(px.r) << "," << int(px.g) << ","
          << int(px.b) << "," << int(px.a) << ")");
     REQUIRE(px.a == 255);
@@ -469,7 +469,7 @@ TEST_CASE("CanvasWidget draws on top of sibling-painted parent surface",
     parent.set_bounds({0, 0, 80, 60});
     parent.set_background_color(pulp::canvas::Color::rgba8(8, 12, 24, 255));  // dark navy
 
-    // CanvasWidget covers only the inner 60x40 region centred at (40, 30).
+    // CanvasWidget covers only the inner 60x40 region centerd at (40, 30).
     auto cw = std::make_unique<CanvasWidget>();
     cw->set_bounds({10, 10, 60, 40});
     {

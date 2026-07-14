@@ -15,24 +15,29 @@ namespace pulp::osc {
 
 /// 32-bit RGBA colour — the OSC 1.0 optional `'r'` type tag.
 /// Stored as four 8-bit channels in transmission order.
-struct ColourRgba {
+/// Deprecated spelling. The codebase is US-English throughout; this alias keeps
+/// existing callers compiling.
+struct ColorRgba;
+using ColourRgba [[deprecated("renamed to pulp::osc::ColorRgba")]] = ColorRgba;
+
+struct ColorRgba {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
     uint8_t a = 0xff;
 
-    constexpr ColourRgba() = default;
-    constexpr ColourRgba(uint8_t r_, uint8_t g_, uint8_t b_, uint8_t a_ = 0xff)
+    constexpr ColorRgba() = default;
+    constexpr ColorRgba(uint8_t r_, uint8_t g_, uint8_t b_, uint8_t a_ = 0xff)
         : r(r_), g(g_), b(b_), a(a_) {}
 
-    bool operator==(const ColourRgba& o) const {
+    bool operator==(const ColorRgba& o) const {
         return r == o.r && g == o.g && b == o.b && a == o.a;
     }
 };
 
 // OSC argument types (OSC 1.0 spec + the optional RGBA colour type).
 using Argument = std::variant<int32_t, float, std::string,
-                              std::vector<uint8_t>, ColourRgba>;
+                              std::vector<uint8_t>, ColorRgba>;
 
 // An OSC message: address pattern + typed arguments
 struct Message {
@@ -47,13 +52,13 @@ struct Message {
     Message& add(float v)         { args.emplace_back(v); return *this; }
     Message& add(std::string v)   { args.emplace_back(std::move(v)); return *this; }
     Message& add(std::vector<uint8_t> v) { args.emplace_back(std::move(v)); return *this; }
-    Message& add(ColourRgba c)    { args.emplace_back(c); return *this; }
+    Message& add(ColorRgba c)    { args.emplace_back(c); return *this; }
 
     // Get argument at index (returns default if wrong type or out of range)
     int32_t get_int(size_t i, int32_t def = 0) const;
     float get_float(size_t i, float def = 0) const;
     std::string get_string(size_t i, const std::string& def = "") const;
-    ColourRgba get_colour(size_t i, ColourRgba def = {}) const;
+    ColorRgba get_colour(size_t i, ColorRgba def = {}) const;
 };
 
 struct Bundle;

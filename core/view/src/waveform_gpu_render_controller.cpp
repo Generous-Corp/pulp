@@ -16,7 +16,7 @@ WaveformGpuRenderDecision make_base_decision(const WaveformGpuLayerPlan& plan,
 }
 
 WaveformGpuRenderDecision fill_vertices_for_action(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformGpuLayerPlan& plan,
     std::span<WaveformPeakVertex> staging_vertices,
     std::uint64_t backend_generation,
@@ -58,7 +58,7 @@ bool WaveformGpuRenderController::prepare(
 }
 
 WaveformGpuRenderDecision WaveformGpuRenderController::plan_render(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformGpuLayerPlan& plan,
     const WaveformGpuRenderContext& context,
     std::span<WaveformPeakVertex> staging_vertices) noexcept {

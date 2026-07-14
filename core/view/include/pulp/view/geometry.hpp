@@ -37,7 +37,7 @@ struct IntRect;  // below
 /// Axis-aligned rectangle in continuous (float) coordinates.
 ///
 /// ── WHY THERE IS ALSO AN `IntRect` ──────────────────────────────────────
-/// A float rect's centre is `x + width / 2.0f`. An INTEGER rect's centre is
+/// A float rect's center is `x + width / 2.0f`. An INTEGER rect's center is
 /// `x + width / 2` — integer division, which TRUNCATES. For an even extent the
 /// two agree; for an odd one they differ by half a pixel. That half pixel is
 /// not academic: it is the difference between a 7px row's content landing on
@@ -58,9 +58,9 @@ struct Rect {
     Size size() const { return {width, height}; }
     Point center() const { return {x + width * 0.5f, y + height * 0.5f}; }
 
-    /// True centre in continuous coordinates — exact halves, no truncation.
-    constexpr float centre_x() const { return x + width * 0.5f; }
-    constexpr float centre_y() const { return y + height * 0.5f; }
+    /// True center in continuous coordinates — exact halves, no truncation.
+    constexpr float center_x() const { return x + width * 0.5f; }
+    constexpr float center_y() const { return y + height * 0.5f; }
 
     bool contains(Point p) const {
         return p.x >= x && p.x < right() && p.y >= y && p.y < bottom();
@@ -115,8 +115,8 @@ struct Rect {
         return {nx, ny, width, height};
     }
 
-    /// Resize about the centre — the centre stays put and the edges move.
-    constexpr Rect with_size_keeping_centre(float w, float h) const {
+    /// Resize about the center — the center stays put and the edges move.
+    constexpr Rect with_size_keeping_center(float w, float h) const {
         return {x + (width - w) * 0.5f, y + (height - h) * 0.5f, w, h};
     }
 
@@ -208,7 +208,7 @@ struct Rect {
 
 /// Axis-aligned rectangle in DISCRETE (integer) coordinates.
 ///
-/// Every operation here uses integer arithmetic — most importantly, the centre
+/// Every operation here uses integer arithmetic — most importantly, the center
 /// is an integer division and therefore truncates. See the note on `Rect`.
 struct IntRect {
     int x = 0, y = 0, width = 0, height = 0;
@@ -216,10 +216,10 @@ struct IntRect {
     constexpr int right() const { return x + width; }
     constexpr int bottom() const { return y + height; }
 
-    /// Integer centre. `IntRect{0,0,7,7}.centre_x() == 3`, NOT 3.5 — the half
+    /// Integer center. `IntRect{0,0,7,7}.center_x() == 3`, NOT 3.5 — the half
     /// pixel is truncated away, and that is the whole point of this type.
-    constexpr int centre_x() const { return x + width / 2; }
-    constexpr int centre_y() const { return y + height / 2; }
+    constexpr int center_x() const { return x + width / 2; }
+    constexpr int center_y() const { return y + height / 2; }
 
     constexpr bool is_empty() const { return width <= 0 || height <= 0; }
 
@@ -252,10 +252,10 @@ struct IntRect {
         return {nx, ny, width, height};
     }
 
-    /// Resize about the centre, in integer arithmetic. `(width - w) / 2`
-    /// truncates: IntRect{0,0,7,7}.with_size_keeping_centre(4,4) is at x=1
+    /// Resize about the center, in integer arithmetic. `(width - w) / 2`
+    /// truncates: IntRect{0,0,7,7}.with_size_keeping_center(4,4) is at x=1
     /// (because 3/2 == 1), where the float rect would be at x=1.5.
-    constexpr IntRect with_size_keeping_centre(int w, int h) const {
+    constexpr IntRect with_size_keeping_center(int w, int h) const {
         return {x + (width - w) / 2, y + (height - h) / 2, w, h};
     }
 

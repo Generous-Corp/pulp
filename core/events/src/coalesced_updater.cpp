@@ -1,4 +1,4 @@
-#include <pulp/events/async_updater.hpp>
+#include <pulp/events/coalesced_updater.hpp>
 
 #include <algorithm>
 

@@ -351,7 +351,7 @@ void CoreGraphicsCanvas::draw_layer_rotated(LayerHandle layer, float angle_rad) 
     const float cy = rec->bounds.y + rec->bounds.height * 0.5f;
 
     CGContextSaveGState(ctx_);
-    // Rotate about the layer's own centre, in the caller's y-down space.
+    // Rotate about the layer's own center, in the caller's y-down space.
     CGContextTranslateCTM(ctx_, cx, cy);
     CGContextRotateCTM(ctx_, angle_rad);
     CGContextTranslateCTM(ctx_, -cx, -cy);

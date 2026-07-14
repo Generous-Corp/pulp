@@ -20,7 +20,7 @@ using Item = ContextMenu::Item;
 
 constexpr float kAnchorX = 10.0f, kAnchorY = 10.0f;
 
-// The centre of row `i`, taken from the menu's own resolved geometry.
+// The center of row `i`, taken from the menu's own resolved geometry.
 //
 // This used to assume a uniform 24px grid (kAnchorY + i*24 + 12) — which is
 // exactly the "divide by a row constant" mistake the menu's rows are laid out to

@@ -80,8 +80,8 @@ TEST_CASE("design viewport: taller window letterboxes vertically", "[view][desig
 
 TEST_CASE("design viewport: input inverse round-trips a known point",
           "[view][design-viewport]") {
-    // Mouse at the centre of a wider-than-design window should map to
-    // the centre of the design surface, not the centre of the window.
+    // Mouse at the center of a wider-than-design window should map to
+    // the center of the design surface, not the center of the window.
     const float ww = 1600.0f, wh = 860.0f, dw = 1320.0f, dh = 860.0f;
     auto t = xform(ww, wh, dw, dh);
     REQUIRE(t.ok);
@@ -241,8 +241,8 @@ TEST_CASE("hidpi: pixel input divides by scale before the logical inverse",
           "[view][design-viewport][hidpi]") {
     // Win/Linux deliver pointer coords in PHYSICAL pixels. The host divides by
     // scale to get logical host coords, THEN applies the design-viewport
-    // inverse. With a design viewport set, the centre of the physical surface
-    // must still map to the centre of the design surface.
+    // inverse. With a design viewport set, the center of the physical surface
+    // must still map to the center of the design surface.
     const float logical_w = 1600.0f, logical_h = 860.0f;
     const float dw = 1320.0f, dh = 860.0f;
     constexpr float scale = 2.0f;
@@ -257,7 +257,7 @@ TEST_CASE("hidpi: pixel input divides by scale before the logical inverse",
         return std::pair{(lx - tx) / sx, (ly - ty) / sy};
     };
 
-    // Centre of the PHYSICAL surface (3200x1720) → centre of the design surface.
+    // Center of the PHYSICAL surface (3200x1720) → center of the design surface.
     auto [rx, ry] = pixel_to_root(logical_w * scale * 0.5f,
                                   logical_h * scale * 0.5f);
     REQUIRE_THAT(rx, WithinAbs(dw * 0.5f, kEps));

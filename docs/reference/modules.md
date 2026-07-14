@@ -233,8 +233,8 @@ worker->on_message = [](std::string_view result) { update_list(result); };
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| Action Broadcaster | `async_updater.hpp` | `broadcaster.send_action("file_open")` to all listeners |
-| Async Updater | `async_updater.hpp` | Coalesce rapid cross-thread triggers into one callback |
+| Action Broadcaster | `coalesced_updater.hpp` | `broadcaster.send_action("file_open")` to all listeners |
+| Async Updater | `coalesced_updater.hpp` | Coalesce rapid cross-thread triggers into one callback |
 | Event Loop | `event_loop.hpp` | `EventLoop loop; loop.dispatch([]{...}); loop.dispatch_after(100ms, []{...})` |
 | Service Discovery | `service_discovery.hpp` | `ServicePublisher` / `ServiceBrowser` use a platform default backend when available; use `NetworkServiceDiscovery::install_backend()` for custom or test backends |
 | Timer | `timer.hpp` | `Timer timer(loop, 100ms, []{...}); timer.start();` — periodic or one-shot |
@@ -330,7 +330,7 @@ Reusable low-level pieces for building samplers, generated-audio freeze/loop wor
 | Editing, import/export, and bounce metadata | `sample_edit_document.hpp`, `sample_asset_io.hpp`, `wav_metadata.hpp` | Track non-destructive edit intent, import/export policy, drop classification, and WAV metadata/interchange outside realtime paths |
 | Onset, slice, key/tempo, and transient analysis | `onset_detector.hpp`, `slice_point_analyzer.hpp`, `slice_map.hpp`, `analyzer_provider.hpp`, `built_in_key_tempo_analyzer.hpp`, `built_in_transient_classifier.hpp` | Provide package-free fallback analysis plus neutral provider/provenance metadata for future package-backed MIR adapters |
 | Time/pitch extension point | `analyzer_provider.hpp`, `signalsmith_time_pitch_processor.hpp` | Optional package-backed time-stretch/pitch-shift processor contract; availability and licensing stay explicit |
-| Waveform summaries and render backends | `audio_thumbnail.hpp`, `waveform_gpu_primitives.hpp`, `waveform_gpu_render_controller.hpp`, `waveform_headless_render_backend.hpp` | Build/cache serialized CPU waveform summaries, plan generation-keyed static layer uploads, exercise backend resource lifecycle in CPU/headless paths, and keep future GPU-assisted analysis/rendering off live audio-thread waits |
+| Waveform summaries and render backends | `waveform_overview.hpp`, `waveform_gpu_primitives.hpp`, `waveform_gpu_render_controller.hpp`, `waveform_headless_render_backend.hpp` | Build/cache serialized CPU waveform summaries, plan generation-keyed static layer uploads, exercise backend resource lifecycle in CPU/headless paths, and keep future GPU-assisted analysis/rendering off live audio-thread waits |
 | Realtime contract labels | `rt_safety_contract.hpp` | Machine-checkable sampler/looper RT-safety labels for representative hot paths and off-thread helpers |
 
 ### Other audio features

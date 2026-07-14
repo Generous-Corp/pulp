@@ -124,7 +124,7 @@ TEST_CASE("object-fit: contain letterboxes preserving aspect ratio",
           "[widgets][image][object-fit][issue-1737]") {
     using Catch::Matchers::WithinAbs;
     // 200×100 box, 50×50 image → contain shrinks to fit the smaller
-    // axis (height): 100×100 painted dst, centred horizontally.
+    // axis (height): 100×100 painted dst, centerd horizontally.
     ImageView v;
     configure_view(v, 200, 100, "contain");
     ImageStubCanvas cv;
@@ -134,7 +134,7 @@ TEST_CASE("object-fit: contain letterboxes preserving aspect ratio",
     REQUIRE(cv.draws[0].has_src == false);
     REQUIRE_THAT(cv.draws[0].dw, WithinAbs(100.0f, 0.001f));
     REQUIRE_THAT(cv.draws[0].dh, WithinAbs(100.0f, 0.001f));
-    // Centred horizontally: x = (200 - 100) / 2 = 50.
+    // Centerd horizontally: x = (200 - 100) / 2 = 50.
     REQUIRE_THAT(cv.draws[0].dx, WithinAbs(50.0f, 0.001f));
     REQUIRE_THAT(cv.draws[0].dy, WithinAbs(0.0f, 0.001f));
 }
@@ -153,15 +153,15 @@ TEST_CASE("object-fit: cover crops, scales to cover the larger axis",
     REQUIRE(cv.draws[0].has_src == false);
     REQUIRE_THAT(cv.draws[0].dw, WithinAbs(200.0f, 0.001f));
     REQUIRE_THAT(cv.draws[0].dh, WithinAbs(200.0f, 0.001f));
-    // Centred vertically: y = (100 - 200) / 2 = -50 (overflow above
+    // Centerd vertically: y = (100 - 200) / 2 = -50 (overflow above
     // and below the box; clip happens at the canvas level).
     REQUIRE_THAT(cv.draws[0].dy, WithinAbs(-50.0f, 0.001f));
 }
 
-TEST_CASE("object-fit: none paints natural size centred",
+TEST_CASE("object-fit: none paints natural size centerd",
           "[widgets][image][object-fit][issue-1737]") {
     using Catch::Matchers::WithinAbs;
-    // 200×100 box, 50×50 image → none paints at native 50×50 centred.
+    // 200×100 box, 50×50 image → none paints at native 50×50 centerd.
     ImageView v;
     configure_view(v, 200, 100, "none");
     ImageStubCanvas cv;
@@ -205,7 +205,7 @@ TEST_CASE("object-fit: none crops via source-rect when image overflows box",
 TEST_CASE("object-fit: scale-down picks none when image fits in box",
           "[widgets][image][object-fit][issue-1737]") {
     using Catch::Matchers::WithinAbs;
-    // 200×100 box, 50×50 image fits → behave as `none` (50×50 centred).
+    // 200×100 box, 50×50 image fits → behave as `none` (50×50 centerd).
     ImageView v;
     configure_view(v, 200, 100, "scale-down");
     ImageStubCanvas cv;
@@ -230,7 +230,7 @@ TEST_CASE("object-fit: scale-down picks contain when image overflows box",
     REQUIRE_THAT(cv.draws[0].dh, WithinAbs(50.0f, 0.001f));
 }
 
-TEST_CASE("object-position: percentage offsets the centred dst",
+TEST_CASE("object-position: percentage offsets the centerd dst",
           "[widgets][image][object-position][issue-1737]") {
     using Catch::Matchers::WithinAbs;
     // 200×100 box, 50×50 image with object-fit: contain → 100×100 dst.

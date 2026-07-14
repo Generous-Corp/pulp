@@ -770,7 +770,7 @@ void Label::paint(canvas::Canvas& canvas) {
             break;
         case canvas::TextVerticalAlign::center:
         default:
-            // Centre the visible block within bounds, then offset to the
+            // Center the visible block within bounds, then offset to the
             // first line's baseline. For single-line this collapses to
             // bounds.h/2 + 0.35*font_size (the historic formula) because
             // text_h == effective_font_size and 0.85 - 0.5 == 0.35.

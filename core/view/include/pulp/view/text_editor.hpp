@@ -183,7 +183,7 @@ public:
     // ── Frame geometry ───────────────────────────────────────────────────
 
     /// Horizontal alignment of the text inside the field. Default `left`.
-    /// A one-line field in a narrow inline-rename slot is very often centred.
+    /// A one-line field in a narrow inline-rename slot is very often centerd.
     void set_text_align(canvas::TextAlign a) {
         text_align_ = a;
         invalidate_layout_cache();

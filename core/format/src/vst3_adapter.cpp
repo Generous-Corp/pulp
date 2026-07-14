@@ -1044,7 +1044,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                             midi::MidiEvent me;
                             if (decoded.controller == detail::kVst3CtrlPitchBend) {
                                 // Normalized 0..1 → 14-bit pitch bend
-                                // (0..16383, centre 8192).
+                                // (0..16383, center 8192).
                                 const auto bend14 = static_cast<uint16_t>(
                                     std::clamp<int>(
                                         static_cast<int>(norm * 16383.0 + 0.5),

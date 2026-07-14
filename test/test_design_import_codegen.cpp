@@ -1794,7 +1794,7 @@ TEST_CASE("native codegen log-tapers a Hz-unit knob's initial value (issue-3192)
           "[view][import][issue-3192]") {
     // A frequency knob's value→angle map is logarithmic. The native silver knob
     // maps a 0..1 value linearly to its sweep, so the imported value must be the
-    // LOG-normalised position — 880 Hz in [20, 20000] lands near centre (~0.55),
+    // LOG-normalised position — 880 Hz in [20, 20000] lands near center (~0.55),
     // not at the far end (a raw 880 would clamp to 1.0) and not at the linear
     // position (~0.04, indicator pointing the wrong way).
     DesignIR ir;

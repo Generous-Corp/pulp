@@ -186,7 +186,7 @@ TEST_CASE("SkiaCanvas honors sticky Canvas2D shadow state on fillRect",
     canvas.fill_rect(16, 16, 16, 16);
 
     // Pixel at (40, 40) is 8px past the bottom-right corner of the rect
-    // along both axes — directly under the shadow centre.
+    // along both axes — directly under the shadow center.
     auto shadow_px = sample_pixel(surface.get(), 40, 40);
     INFO("shadow px rgba=(" << int(shadow_px.r) << "," << int(shadow_px.g)
          << "," << int(shadow_px.b) << "," << int(shadow_px.a) << ")");

@@ -12,7 +12,7 @@ target_sources(pulp-events PRIVATE
     src/main_thread_dispatcher.cpp
     src/message_loop_integration.cpp
     src/timer.cpp
-    src/async_updater.cpp
+    src/coalesced_updater.cpp
     src/interprocess_connection.cpp
     src/child_process_manager.cpp
     src/volume_detector.cpp

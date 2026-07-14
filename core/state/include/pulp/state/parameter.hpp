@@ -83,13 +83,13 @@ enum class ParamDesignation {
 /// - `skew < 1` weights the curve toward `min` (small real values cover more
 ///   of the [0, 1] domain — e.g. a frequency knob where the low end gets more
 ///   resolution). `skew > 1` weights toward `max`.
-/// - `symmetric_skew == true` mirrors the curve around the centre, so the
+/// - `symmetric_skew == true` mirrors the curve around the center, so the
 ///   midpoint of the normalized domain lands at the midpoint of [min, max] and
 ///   both halves fan out symmetrically. Useful for bipolar parameters (pan,
 ///   detune, balance).
 ///
 /// The shaping convention matches `SkewedRange<T>` below, which shares
-/// the same math. Use `ParamRange::with_centre()` to derive the skew that
+/// the same math. Use `ParamRange::with_center()` to derive the skew that
 /// places a chosen real value at the normalized midpoint (0.5).
 struct ParamRange {
     float min = 0.0f;
@@ -97,7 +97,7 @@ struct ParamRange {
     float default_value = 0.0f;
     float step = 0.0f;           ///< Quantization step. 0 = continuous.
     float skew = 1.0f;           ///< 1 = linear, <1 weights min, >1 weights max.
-    bool symmetric_skew = false; ///< Mirror the curve around the centre (bipolar).
+    bool symmetric_skew = false; ///< Mirror the curve around the center (bipolar).
 
     /// Build a linear range covering [lo, hi] with the given default and step.
     /// Provided so call sites can be explicit about the linear case alongside
@@ -107,15 +107,23 @@ struct ParamRange {
         return ParamRange{lo, hi, def, step_value, 1.0f, false};
     }
 
-    /// Build a shaped range whose normalized midpoint (0.5) maps to @p centre.
-    /// Equivalent to choosing the skew that satisfies denormalize(0.5) == centre.
-    /// Falls back to a linear range when @p centre is not strictly inside the
+    /// Build a shaped range whose normalized midpoint (0.5) maps to @p center.
+    /// Equivalent to choosing the skew that satisfies denormalize(0.5) == center.
+    /// Falls back to a linear range when @p center is not strictly inside the
     /// open interval (min, max).
-    static ParamRange with_centre(float lo, float hi, float centre,
+    /// Deprecated spelling. The codebase is US-English throughout; this keeps
+    /// existing callers compiling.
+    [[deprecated("renamed to with_center()")]]
+    static ParamRange with_centre(float lo, float hi, float center,
+                                  float def = 0.0f, float step_value = 0.0f) {
+        return with_center(lo, hi, center, def, step_value);
+    }
+
+    static ParamRange with_center(float lo, float hi, float center,
                                   float def = 0.0f, float step_value = 0.0f) {
         ParamRange r{lo, hi, def, step_value, 1.0f, false};
-        if (hi > lo && centre > lo && centre < hi) {
-            const float proportion = (centre - lo) / (hi - lo);
+        if (hi > lo && center > lo && center < hi) {
+            const float proportion = (center - lo) / (hi - lo);
             r.skew = std::log(0.5f) / std::log(proportion);
         }
         return r;
@@ -136,9 +144,9 @@ struct ParamRange {
         }
         float proportion = std::clamp((value - min) / (max - min), 0.0f, 1.0f);
         if (symmetric_skew) {
-            const float centred = (proportion * 2.0f) - 1.0f; // [-1, 1]
-            const float magnitude = std::pow(std::abs(centred), skew);
-            const float signed_mag = centred < 0.0f ? -magnitude : magnitude;
+            const float centerd = (proportion * 2.0f) - 1.0f; // [-1, 1]
+            const float magnitude = std::pow(std::abs(centerd), skew);
+            const float signed_mag = centerd < 0.0f ? -magnitude : magnitude;
             return (signed_mag + 1.0f) * 0.5f;
         }
         return std::pow(proportion, skew);
@@ -160,9 +168,9 @@ struct ParamRange {
         normalized = std::clamp(normalized, 0.0f, 1.0f);
         float proportion;
         if (symmetric_skew) {
-            const float centred = (normalized * 2.0f) - 1.0f; // [-1, 1]
-            const float magnitude = std::pow(std::abs(centred), 1.0f / skew);
-            const float signed_mag = centred < 0.0f ? -magnitude : magnitude;
+            const float centerd = (normalized * 2.0f) - 1.0f; // [-1, 1]
+            const float magnitude = std::pow(std::abs(centerd), 1.0f / skew);
+            const float signed_mag = centerd < 0.0f ? -magnitude : magnitude;
             proportion = (signed_mag + 1.0f) * 0.5f;
         } else {
             proportion = std::pow(normalized, 1.0f / skew);
@@ -175,7 +183,7 @@ struct ParamRange {
     }
 };
 
-/// Skew-aware normalized range with optional symmetric centre.
+/// Skew-aware normalized range with optional symmetric center.
 ///
 /// `SkewedRange<T>` extends `ParamRange` with a non-linear mapping
 /// between the [0, 1] host-automation domain and the [min, max] parameter
@@ -183,8 +191,8 @@ struct ParamRange {
 ///
 /// - `skew`: <1 weights toward `min`, >1 weights toward `max`, 1 = linear.
 ///   Conventionally, a skew of `log(0.5) / log((mid - min) / (max - min))`
-///   places `mid` at the centre (0.5) of the normalized range.
-/// - `symmetric_skew`: when true, the curve is mirrored around the centre,
+///   places `mid` at the center (0.5) of the normalized range.
+/// - `symmetric_skew`: when true, the curve is mirrored around the center,
 ///   so values near 0.5 in normalized space land near the midpoint and
 ///   values near the edges fan out symmetrically. Useful for bipolar
 ///   parameters like pan, balance, detune.
@@ -192,7 +200,7 @@ struct ParamRange {
 /// Step quantization is honored on denormalize (matches `ParamRange::step`).
 ///
 /// @code
-/// // Frequency knob: 20 Hz at min, 20 kHz at max, 1 kHz at centre.
+/// // Frequency knob: 20 Hz at min, 20 kHz at max, 1 kHz at center.
 /// pulp::state::SkewedRange<float> freq{20.0f, 20000.0f, 1000.0f};
 /// float normalized = freq.normalize(1000.0f); // ~= 0.5
 /// float hz         = freq.denormalize(0.5f);  // ~= 1000.0f
@@ -212,13 +220,13 @@ struct SkewedRange {
           skew(skew_value), symmetric_skew(symmetric) {}
 
     /// Build a SkewedRange whose normalised midpoint maps to the
-    /// supplied real-valued centre. Equivalent to choosing the skew that
-    /// satisfies denormalize(0.5) == centre.
-    static SkewedRange with_centre(T lo, T hi, T centre, T step = T(0)) {
+    /// supplied real-valued center. Equivalent to choosing the skew that
+    /// satisfies denormalize(0.5) == center.
+    static SkewedRange with_center(T lo, T hi, T center, T step = T(0)) {
         SkewedRange r{lo, hi, step};
-        if (hi > lo && centre > lo && centre < hi) {
-            const T proportion = (centre - lo) / (hi - lo);
-            // log(0.5) / log(proportion) gives the skew that lands `centre` at 0.5.
+        if (hi > lo && center > lo && center < hi) {
+            const T proportion = (center - lo) / (hi - lo);
+            // log(0.5) / log(proportion) gives the skew that lands `center` at 0.5.
             r.skew = std::log(T(0.5)) / std::log(proportion);
         }
         return r;
@@ -234,9 +242,9 @@ struct SkewedRange {
         T proportion = (value - min) / (max - min);
         proportion = std::clamp(proportion, T(0), T(1));
         if (symmetric_skew) {
-            const T centred = (proportion * T(2)) - T(1); // [-1, 1]
-            const T magnitude = std::pow(std::abs(centred), skew);
-            const T signed_mag = centred < T(0) ? -magnitude : magnitude;
+            const T centerd = (proportion * T(2)) - T(1); // [-1, 1]
+            const T magnitude = std::pow(std::abs(centerd), skew);
+            const T signed_mag = centerd < T(0) ? -magnitude : magnitude;
             return (signed_mag + T(1)) * T(0.5);
         }
         return std::pow(proportion, skew);
@@ -248,9 +256,9 @@ struct SkewedRange {
         normalized = std::clamp(normalized, T(0), T(1));
         T proportion;
         if (symmetric_skew) {
-            const T centred = (normalized * T(2)) - T(1); // [-1, 1]
-            const T magnitude = std::pow(std::abs(centred), T(1) / skew);
-            const T signed_mag = centred < T(0) ? -magnitude : magnitude;
+            const T centerd = (normalized * T(2)) - T(1); // [-1, 1]
+            const T magnitude = std::pow(std::abs(centerd), T(1) / skew);
+            const T signed_mag = centerd < T(0) ? -magnitude : magnitude;
             proportion = (signed_mag + T(1)) * T(0.5);
         } else {
             proportion = std::pow(normalized, T(1) / skew);

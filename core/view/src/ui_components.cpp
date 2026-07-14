@@ -130,7 +130,7 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     }
 
     // Dropdown chevron — vertically centered on the field so it lines up with
-    // the field text's optical centre (which sits at base_h*0.5). The V's
+    // the field text's optical center (which sits at base_h*0.5). The V's
     // bounding box is symmetric about `ay`; lift it 1px to compensate for the
     // downward point's optical weight, which otherwise reads as sitting low.
     float ax = b.width - 16;
@@ -594,7 +594,7 @@ void Tooltip::paint(canvas::Canvas& canvas) {
     canvas.set_font("system", 11);
     canvas.set_fill_color(canvas::Color::rgba8(0xe0, 0xe0, 0xe0, alpha));
     // Center the label on the bubble's vertical midline (GlyphCenter anchors
-    // on the glyph's optical centre, not the baseline) with an 8px left pad,
+    // on the glyph's optical center, not the baseline) with an 8px left pad,
     // instead of a fixed baseline that left the text sitting low.
     canvas.set_text_align(canvas::TextAlign::left);
     canvas.fill_text_anchored(text_, b.x + 8, b.y + b.height * 0.5f,

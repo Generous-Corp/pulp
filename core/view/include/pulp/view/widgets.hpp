@@ -876,7 +876,7 @@ public:
     // rect so it doesn't read as a flat dark slab.
     void set_skin_track_border_color(canvas::Color c) { track_border_color_ = c; has_skin_track_border_ = true; request_repaint(); }
     // Derived thin track width (logical px). When set, the skinned fader draws
-    // its track / fill at exactly this width (centred) instead of a fraction of
+    // its track / fill at exactly this width (centerd) instead of a fraction of
     // the widget box, matching the captured art's narrow track.
     void set_skin_track_width(float w) {
         if (w > 0.0f) { skin_track_width_ = w; has_skin_track_width_ = true; request_repaint(); }
@@ -1532,9 +1532,9 @@ private:
 //                         existing behaviour, used by oscilloscope-style
 //                         displays of live audio.
 //   set_thumbnail(...)  — points the widget at a pre-decoded
-//                         `pulp::audio::AudioThumbnail`. Paint reads peak
+//                         `pulp::audio::WaveformOverview`. Paint reads peak
 //                         pairs from the cached level instead of decoding
-//                         per redraw, wiring AudioThumbnail into the existing
+//                         per redraw, wiring WaveformOverview into the existing
 //                         WaveformView without inventing a new widget.
 //
 // This remains a display-only waveform widget. Sampler/editor behaviors
@@ -1543,7 +1543,7 @@ private:
 // that compose this renderer instead of expanding WaveformView itself.
 
 }  // namespace pulp::view
-namespace pulp::audio { class AudioThumbnail; }
+namespace pulp::audio { class WaveformOverview; }
 namespace pulp::view {
 
 class WaveformView : public View {
@@ -1567,26 +1567,26 @@ public:
     void set_data(std::vector<float> samples);
 
     // Wire the widget to read peak (min, max) pairs from a pre-decoded
-    // `AudioThumbnail`. The shared_ptr overload is the
+    // `WaveformOverview`. The shared_ptr overload is the
     // editor/cache-safe path: the widget retains the CPU thumbnail summary
     // while it may paint from it. Setting a thumbnail clears any raw sample
     // buffer.
     //
     // `channel == UINT32_MAX` folds all channels into one display row.
-    void set_thumbnail(std::shared_ptr<const pulp::audio::AudioThumbnail> thumb,
+    void set_thumbnail(std::shared_ptr<const pulp::audio::WaveformOverview> thumb,
                        uint32_t channel = static_cast<uint32_t>(-1));
-    [[deprecated("set_thumbnail(const AudioThumbnail*) is borrowed; prefer shared_ptr overload or set_thumbnail_borrowed()")]]
-    void set_thumbnail(const pulp::audio::AudioThumbnail* thumb,
+    [[deprecated("set_thumbnail(const WaveformOverview*) is borrowed; prefer shared_ptr overload or set_thumbnail_borrowed()")]]
+    void set_thumbnail(const pulp::audio::WaveformOverview* thumb,
                        uint32_t channel = static_cast<uint32_t>(-1));
     // Explicit borrowed escape hatch for stack-owned tests or owners that
     // manage lifetime externally. Prefer set_thumbnail(shared_ptr) for editor
     // code and cache-backed thumbnails.
-    void set_thumbnail_borrowed(const pulp::audio::AudioThumbnail* thumb,
+    void set_thumbnail_borrowed(const pulp::audio::WaveformOverview* thumb,
                                 uint32_t channel = static_cast<uint32_t>(-1));
     void clear_thumbnail();
 
     bool has_thumbnail() const noexcept { return thumbnail_ != nullptr; }
-    const pulp::audio::AudioThumbnail* thumbnail() const noexcept { return thumbnail_; }
+    const pulp::audio::WaveformOverview* thumbnail() const noexcept { return thumbnail_; }
 
     size_t sample_count() const { return samples_.size(); }
 
@@ -1613,8 +1613,8 @@ private:
     TriggerMode trigger_mode_ = TriggerMode::free_run;
     PreviewShape preview_shape_ = PreviewShape::none;
 
-    std::shared_ptr<const pulp::audio::AudioThumbnail> thumbnail_owner_;
-    const pulp::audio::AudioThumbnail* thumbnail_ = nullptr;
+    std::shared_ptr<const pulp::audio::WaveformOverview> thumbnail_owner_;
+    const pulp::audio::WaveformOverview* thumbnail_ = nullptr;
     std::vector<float> thumbnail_min_max_;
     std::vector<float> thumbnail_envelope_;
     uint32_t thumbnail_channel_ = static_cast<uint32_t>(-1);

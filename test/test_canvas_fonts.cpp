@@ -722,10 +722,10 @@ TEST_CASE("SkiaCanvas draws images with no GPU upload context attached",
     SkBitmap read;
     REQUIRE(read.tryAllocPixels(info));
     REQUIRE(surface->readPixels(read, 0, 0));
-    const SkColor centre = read.getColor(4, 4);
-    REQUIRE(SkColorGetR(centre) > 200);
-    REQUIRE(SkColorGetG(centre) < 50);
-    REQUIRE(SkColorGetB(centre) < 50);
+    const SkColor center = read.getColor(4, 4);
+    REQUIRE(SkColorGetR(center) > 200);
+    REQUIRE(SkColorGetG(center) < 50);
+    REQUIRE(SkColorGetB(center) < 50);
 }
 
 #endif  // PULP_HAS_SKIA

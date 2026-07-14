@@ -91,7 +91,7 @@ TEST_CASE("PanControl clamps and maps x to a bipolar value", "[view][gap][pan]")
     REQUIRE(p.value() == -1.0f);
     p.on_mouse_down({200, 9});     // far right
     REQUIRE(p.value() == 1.0f);
-    p.on_mouse_down({100, 9});     // centre
+    p.on_mouse_down({100, 9});     // center
     REQUIRE(p.value() == 0.0f);
 }
 

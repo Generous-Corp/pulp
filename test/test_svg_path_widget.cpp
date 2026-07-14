@@ -9,7 +9,7 @@
 //   * paint() emits begin_path → path commands → fill / stroke in the
 //     correct order, gated on has_fill_ / has_stroke_.
 //   * viewBox-to-bounds scale: a unit-square path inside a 10x10
-//     viewBox lands at the centre of a 20x20 widget when set_viewbox
+//     viewBox lands at the center of a 20x20 widget when set_viewbox
 //     and set_bounds disagree (xMidYMid meet).
 
 #include <catch2/catch_test_macros.hpp>
@@ -419,7 +419,7 @@ TEST_CASE("SvgPathWidget viewBox is mapped onto widget bounds with xMidYMid meet
           "[svg_path][issue-965]") {
     // Widget bounds 20x20, viewBox 10x10. Scale factor = 2. With a unit
     // square path at (0,0)-(1,1) in viewBox space, the scaled translate
-    // brings it into the widget. Aspect-preserved, centred.
+    // brings it into the widget. Aspect-preserved, centerd.
     SvgPathWidget w;
     w.set_bounds({0, 0, 20, 20});
     w.set_viewbox(10, 10);

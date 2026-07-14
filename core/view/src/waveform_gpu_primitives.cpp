@@ -29,7 +29,7 @@ std::int32_t quantize_milli_px(float value) noexcept {
     return static_cast<std::int32_t>(scaled);
 }
 
-WaveformViewport normalized_viewport_for_thumbnail(const pulp::audio::AudioThumbnail& thumbnail,
+WaveformViewport normalized_viewport_for_thumbnail(const pulp::audio::WaveformOverview& thumbnail,
                                                    const WaveformViewport& viewport) {
     auto normalized = viewport;
     const auto info = thumbnail.info();
@@ -68,7 +68,7 @@ bool read_peak(const pulp::audio::ThumbnailLevel& level,
                float& max_value) noexcept {
     if (peak_index >= level.peaks_per_channel) return false;
 
-    if (channel == pulp::audio::AudioThumbnail::kAllChannels) {
+    if (channel == pulp::audio::WaveformOverview::kAllChannels) {
         if (level.peaks.empty()) return false;
         min_value = 1.0f;
         max_value = -1.0f;
@@ -124,7 +124,7 @@ bool operator!=(const WaveformGpuUploadKey& a,
 }
 
 WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformViewport& viewport,
     const WaveformGpuLayerConfig& config) {
     WaveformGpuStaticLayerPlan plan;
@@ -137,7 +137,7 @@ WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
         info.num_channels == 0 || thumbnail.num_levels() == 0) {
         return plan;
     }
-    if (config.channel != pulp::audio::AudioThumbnail::kAllChannels &&
+    if (config.channel != pulp::audio::WaveformOverview::kAllChannels &&
         config.channel >= info.num_channels) {
         return plan;
     }
@@ -195,7 +195,7 @@ WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
 }
 
 WaveformGpuLayerPlan build_waveform_gpu_layer_plan(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformViewport& viewport,
     int64_t playhead_sample,
     const WaveformGpuLayerConfig& config,
@@ -212,7 +212,7 @@ WaveformGpuLayerPlan build_waveform_gpu_layer_plan(
 }
 
 std::size_t fill_waveform_peak_vertices(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformGpuStaticLayerPlan& plan,
     std::span<WaveformPeakVertex> dst) noexcept {
     if (!plan.valid || !plan.upload_key.valid() || dst.empty()) return 0;

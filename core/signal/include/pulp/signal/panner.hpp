@@ -9,11 +9,11 @@ namespace pulp::signal {
 ///
 /// `Sin3dB` and `EqualPower` are aliases.
 /// Each law hits hard-left at pan=-1 and hard-right at pan=+1; they
-/// differ in the centre behavior:
-/// - `Linear`:      additive law. Constant amplitude sum, -6 dB notch at centre.
-/// - `Balanced`:    full level on the panned-toward side until centre,
+/// differ in the center behavior:
+/// - `Linear`:      additive law. Constant amplitude sum, -6 dB notch at center.
+/// - `Balanced`:    full level on the panned-toward side until center,
 ///                  then ramp. Useful as a stereo *balance* control.
-/// - `Sin3dB`:      sin/cos law. Constant power, -3 dB notch at centre.
+/// - `Sin3dB`:      sin/cos law. Constant power, -3 dB notch at center.
 /// - `Sin4_5dB`:    sin/cos law shaped by exponent 1.5 → -4.5 dB notch.
 /// - `Sin6dB`:      sin/cos law squared → -6 dB notch.
 /// - `Sqrt3dB`:     sqrt law → -3 dB notch.
@@ -30,7 +30,7 @@ enum class PanLaw {
 };
 
 // Stereo panner with selectable pan law.
-// pan = -1 (full left), 0 (centre), +1 (full right)
+// pan = -1 (full left), 0 (center), +1 (full right)
 //
 // RT contract: setters, gain computation, and process paths are scalar-only and
 // allocate no memory.
@@ -119,7 +119,7 @@ private:
                 break;
             case PanLaw::Sqrt4_5dB:
                 // -4.5 dB = geometric mean of -3 dB sqrt and -6 dB linear
-                // → exponent 0.75. At centre yields 0.5^0.75 ≈ 0.5946
+                // → exponent 0.75. At center yields 0.5^0.75 ≈ 0.5946
                 // ≈ -4.51 dB per channel, matching the documented notch.
                 l_gain = std::pow(SampleType{1.0f} - position, SampleType{0.75f});
                 r_gain = std::pow(position, SampleType{0.75f});

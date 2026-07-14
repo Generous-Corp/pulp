@@ -110,7 +110,7 @@ struct MeterSkin {
 };
 
 /// Sample a captured fader PNG → FaderSkin. Locates the widget art (tallest
-/// opaque vertical run in the centre column), then recovers the dark track,
+/// opaque vertical run in the center column), then recovers the dark track,
 /// the saturated fill, the bright thumb body, and its bevel edge.
 FaderSkin derive_fader_skin(const SkinImage& img);
 

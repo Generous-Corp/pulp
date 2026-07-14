@@ -1782,20 +1782,20 @@ TEST_CASE("OSC address pattern covers boundary backtracking failures",
 TEST_CASE("OSC encode/decode round-trips RGBA colour 'r' tag",
           "[osc][colour]") {
     Message msg("/light/colour");
-    msg.add(ColourRgba{0x11, 0x22, 0x33, 0x44});
+    msg.add(ColorRgba{0x11, 0x22, 0x33, 0x44});
 
     auto bytes = encode(msg);
     auto decoded = decode(bytes.data(), bytes.size());
     REQUIRE(decoded.address == "/light/colour");
     REQUIRE(decoded.args.size() == 1);
-    auto* c = std::get_if<ColourRgba>(&decoded.args[0]);
+    auto* c = std::get_if<ColorRgba>(&decoded.args[0]);
     REQUIRE(c != nullptr);
     REQUIRE(c->r == 0x11);
     REQUIRE(c->g == 0x22);
     REQUIRE(c->b == 0x33);
     REQUIRE(c->a == 0x44);
 
-    REQUIRE(decoded.get_colour(0) == ColourRgba{0x11, 0x22, 0x33, 0x44});
+    REQUIRE(decoded.get_colour(0) == ColorRgba{0x11, 0x22, 0x33, 0x44});
     // Default fallback when wrong index or wrong type.
     REQUIRE(decoded.get_colour(5).a == 0xff);
 }
@@ -1804,13 +1804,13 @@ TEST_CASE("OSC mixes RGBA colour with other arg types",
           "[osc][colour]") {
     Message msg("/scene/set");
     msg.add(int32_t(7));
-    msg.add(ColourRgba{255, 0, 0, 255});
+    msg.add(ColorRgba{255, 0, 0, 255});
     msg.add(std::string("red"));
 
     auto bytes = encode(msg);
     auto decoded = decode(bytes.data(), bytes.size());
     REQUIRE(decoded.args.size() == 3);
     REQUIRE(decoded.get_int(0) == 7);
-    REQUIRE(decoded.get_colour(1) == ColourRgba{255, 0, 0, 255});
+    REQUIRE(decoded.get_colour(1) == ColorRgba{255, 0, 0, 255});
     REQUIRE(decoded.get_string(2) == "red");
 }

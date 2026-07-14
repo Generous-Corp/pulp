@@ -3214,7 +3214,7 @@ TEST_CASE("VST3 IMidiMapping decodes pitch bend to a 14-bit message",
     REQUIRE(s.processor.getMidiControllerAssignment(
                 0, 3, VstCtrl::kPitchBend, pb_id) == Steinberg::kResultTrue);
 
-    // Centre (0.5) → 8192 (half of 16383, rounded).
+    // Center (0.5) → 8192 (half of 16383, rounded).
     s.run_one(pb_id, 9, 0.5);
     REQUIRE(s.test_processor->last_midi_in_size == 1);
     {
@@ -4322,7 +4322,7 @@ TEST_CASE("VST3 IMidiMapping pitch bend and note-expression tuning coexist on mi
     REQUIRE(events.addEvent(on) == Steinberg::kResultOk);
     REQUIRE(events.addEvent(expr) == Steinberg::kResultOk);
 
-    // IMidiMapping pitch bend to centre (0.5 -> 8192 -> 0 semitones) at a LATER
+    // IMidiMapping pitch bend to center (0.5 -> 8192 -> 0 semitones) at a LATER
     // offset, so in sorted order it is the last bend the tracker sees.
     Steinberg::Vst::ParameterChanges params(1);
     Steinberg::int32 pidx = 0;
@@ -4334,7 +4334,7 @@ TEST_CASE("VST3 IMidiMapping pitch bend and note-expression tuning coexist on mi
     s.run(&events, &params);
 
     // Both per-note input sources were consumed: there is at least one pitch
-    // bend, and the final bend state is the IMidiMapping centre (0 st), proving
+    // bend, and the final bend state is the IMidiMapping center (0 st), proving
     // deterministic sample-ordered interleave (the later controller wins).
     REQUIRE(count_mpe(s.test_processor->last_mpe_events,
                       pulp::midi::MpeExpressionEvent::Kind::PitchBend) >= 1);

@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/events/events.hpp>
-#include <pulp/events/async_updater.hpp>
+#include <pulp/events/coalesced_updater.hpp>
 #include <pulp/events/child_process_manager.hpp>
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
@@ -1143,42 +1143,42 @@ TEST_CASE("EventLoop destructor tolerates pending dispatches",
     SUCCEED("EventLoop destructor completed with pending work queued");
 }
 
-// ── AsyncUpdater coalescing contract ────────────────────────────────────
+// ── CoalescedUpdater coalescing contract ────────────────────────────────────
 
-TEST_CASE("AsyncUpdater coalesces rapid triggers into one handle call",
-          "[events][async_updater][coalesce]") {
-    // The whole point of AsyncUpdater is that trigger_async_update()
+TEST_CASE("CoalescedUpdater coalesces rapid triggers into one handle call",
+          "[events][coalesced_updater][coalesce]") {
+    // The whole point of CoalescedUpdater is that request_update()
     // from any thread between process_pending() calls collapses to a
-    // single handle_async_update() dispatch.
+    // single on_update() dispatch.
     std::atomic<int> handles{0};
-    LambdaAsyncUpdater u([&] { handles.fetch_add(1); });
+    LambdaCoalescedUpdater u([&] { handles.fetch_add(1); });
 
-    for (int i = 0; i < 1000; ++i) u.trigger_async_update();
-    REQUIRE(u.is_update_pending());
+    for (int i = 0; i < 1000; ++i) u.request_update();
+    REQUIRE(u.update_pending());
 
     u.process_pending();
     REQUIRE(handles.load() == 1);
-    REQUIRE_FALSE(u.is_update_pending());
+    REQUIRE_FALSE(u.update_pending());
 }
 
-TEST_CASE("AsyncUpdater cancel_pending_update drops the queued handle",
-          "[events][async_updater][cancel]") {
+TEST_CASE("CoalescedUpdater cancel_update drops the queued handle",
+          "[events][coalesced_updater][cancel]") {
     std::atomic<int> handles{0};
-    LambdaAsyncUpdater u([&] { handles.fetch_add(1); });
+    LambdaCoalescedUpdater u([&] { handles.fetch_add(1); });
 
-    u.trigger_async_update();
-    REQUIRE(u.is_update_pending());
-    u.cancel_pending_update();
-    REQUIRE_FALSE(u.is_update_pending());
+    u.request_update();
+    REQUIRE(u.update_pending());
+    u.cancel_update();
+    REQUIRE_FALSE(u.update_pending());
 
     u.process_pending();
     REQUIRE(handles.load() == 0);
 }
 
-TEST_CASE("AsyncUpdater trigger then process_pending runs once even from N threads",
-          "[events][async_updater][threading]") {
+TEST_CASE("CoalescedUpdater trigger then process_pending runs once even from N threads",
+          "[events][coalesced_updater][threading]") {
     std::atomic<int> handles{0};
-    LambdaAsyncUpdater u([&] { handles.fetch_add(1); });
+    LambdaCoalescedUpdater u([&] { handles.fetch_add(1); });
 
     constexpr int kWorkers = 8;
     constexpr int kTriggersPerWorker = 500;
@@ -1187,7 +1187,7 @@ TEST_CASE("AsyncUpdater trigger then process_pending runs once even from N threa
     for (int t = 0; t < kWorkers; ++t) {
         threads.emplace_back([&] {
             for (int i = 0; i < kTriggersPerWorker; ++i) {
-                u.trigger_async_update();
+                u.request_update();
             }
         });
     }
@@ -1199,29 +1199,29 @@ TEST_CASE("AsyncUpdater trigger then process_pending runs once even from N threa
     // or 1 (at least one trigger landed). It CANNOT exceed 1.
     REQUIRE(handles.load() <= 1);
     REQUIRE(handles.load() >= 1);   // there were definitely triggers
-    REQUIRE_FALSE(u.is_update_pending());
+    REQUIRE_FALSE(u.update_pending());
 }
 
-TEST_CASE("AsyncUpdater re-arms after process_pending and fires again",
-          "[events][async_updater][rearm]") {
+TEST_CASE("CoalescedUpdater re-arms after process_pending and fires again",
+          "[events][coalesced_updater][rearm]") {
     std::atomic<int> handles{0};
-    LambdaAsyncUpdater u([&] { handles.fetch_add(1); });
+    LambdaCoalescedUpdater u([&] { handles.fetch_add(1); });
 
-    u.trigger_async_update();
+    u.request_update();
     u.process_pending();
     REQUIRE(handles.load() == 1);
 
     // Second trigger after handling must not be ignored.
-    u.trigger_async_update();
-    REQUIRE(u.is_update_pending());
+    u.request_update();
+    REQUIRE(u.update_pending());
     u.process_pending();
     REQUIRE(handles.load() == 2);
 }
 
-TEST_CASE("AsyncUpdater process_pending with no trigger is a no-op",
-          "[events][async_updater][idempotence]") {
+TEST_CASE("CoalescedUpdater process_pending with no trigger is a no-op",
+          "[events][coalesced_updater][idempotence]") {
     std::atomic<int> handles{0};
-    LambdaAsyncUpdater u([&] { handles.fetch_add(1); });
+    LambdaCoalescedUpdater u([&] { handles.fetch_add(1); });
 
     u.process_pending();
     u.process_pending();
@@ -1229,19 +1229,19 @@ TEST_CASE("AsyncUpdater process_pending with no trigger is a no-op",
     REQUIRE(handles.load() == 0);
 }
 
-TEST_CASE("LambdaAsyncUpdater tolerates an empty callback",
-          "[events][async_updater][issue-642]") {
-    LambdaAsyncUpdater u(nullptr);
+TEST_CASE("LambdaCoalescedUpdater tolerates an empty callback",
+          "[events][coalesced_updater][issue-642]") {
+    LambdaCoalescedUpdater u(nullptr);
 
-    u.trigger_async_update();
-    REQUIRE(u.is_update_pending());
+    u.request_update();
+    REQUIRE(u.update_pending());
 
     u.process_pending();
-    REQUIRE_FALSE(u.is_update_pending());
+    REQUIRE_FALSE(u.update_pending());
 }
 
 TEST_CASE("MultiTimer tracks timer lifecycle by id",
-          "[events][async_updater][multi_timer]") {
+          "[events][coalesced_updater][multi_timer]") {
     RecordingMultiTimer timers;
 
     REQUIRE_FALSE(timers.is_timer_running(1));
@@ -1264,7 +1264,7 @@ TEST_CASE("MultiTimer tracks timer lifecycle by id",
 }
 
 TEST_CASE("MultiTimer stop_all_timers clears every active timer",
-          "[events][async_updater][multi_timer]") {
+          "[events][coalesced_updater][multi_timer]") {
     RecordingMultiTimer timers;
 
     timers.start_timer(1, 20);
@@ -1281,7 +1281,7 @@ TEST_CASE("MultiTimer stop_all_timers clears every active timer",
 }
 
 TEST_CASE("ActionBroadcaster adds, removes, and notifies listeners",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -1310,7 +1310,7 @@ TEST_CASE("ActionBroadcaster adds, removes, and notifies listeners",
 }
 
 TEST_CASE("ActionBroadcaster skips empty callbacks",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -1328,7 +1328,7 @@ TEST_CASE("ActionBroadcaster skips empty callbacks",
 }
 
 TEST_CASE("ActionBroadcaster skips callbacks removed during dispatch",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int first_id = -1;
@@ -1376,7 +1376,7 @@ TEST_CASE("MountedVolumeListChangeDetector polls once before stop",
 }
 
 TEST_CASE("ScopedLowPowerModeDisabler is constructible as an RAII guard",
-          "[events][async_updater][power]") {
+          "[events][coalesced_updater][power]") {
     {
         ScopedLowPowerModeDisabler guard;
         SUCCEED("construction completed");

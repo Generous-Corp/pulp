@@ -265,7 +265,7 @@ void Path::append_svg_arc(Point2D from, float rx, float ry,
         ry2 = ry * ry;
     }
 
-    // Step 3: the centre, in primed space.
+    // Step 3: the center, in primed space.
     float num = rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2;
     const float den = rx2 * y1p2 + ry2 * x1p2;
     if (den <= 0.0f) {  // both endpoints coincide in primed space
@@ -334,13 +334,13 @@ Path& Path::arc_to(float x1, float y1, float x2, float y2, float radius) {
     const Point2D t1{p1.x + v1x * tan_dist, p1.y + v1y * tan_dist};
     const Point2D t2{p1.x + v2x * tan_dist, p1.y + v2y * tan_dist};
 
-    // Centre lies along the angle bisector, radius / sin(theta/2) from P1.
+    // Center lies along the angle bisector, radius / sin(theta/2) from P1.
     float bx = v1x + v2x, by = v1y + v2y;
     const float bl = std::sqrt(bx * bx + by * by);
     if (bl < 1e-6f) return line_to(x1, y1);
     bx /= bl; by /= bl;
-    const float centre_dist = radius / std::sin(theta * 0.5f);
-    const Point2D c{p1.x + bx * centre_dist, p1.y + by * centre_dist};
+    const float center_dist = radius / std::sin(theta * 0.5f);
+    const Point2D c{p1.x + bx * center_dist, p1.y + by * center_dist};
 
     line_to(t1.x, t1.y);
 
@@ -497,7 +497,7 @@ AffineTransform Path::transform_to_fit(float x, float y, float w, float h,
         sx = sy = std::min(sx, sy);
     }
 
-    // Centre the scaled bounds inside the target rect. When proportions are
+    // Center the scaled bounds inside the target rect. When proportions are
     // preserved, exactly one axis binds and the other has slack; the slack is
     // split evenly. (When they are not preserved both terms are zero.)
     const float tx = x + (w - b.width * sx) * 0.5f;

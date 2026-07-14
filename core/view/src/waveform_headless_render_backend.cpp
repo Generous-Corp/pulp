@@ -33,7 +33,7 @@ bool WaveformHeadlessRenderBackend::prepare(WaveformHeadlessRenderConfig config)
 }
 
 WaveformHeadlessRenderFrame WaveformHeadlessRenderBackend::render(
-    const pulp::audio::AudioThumbnail& thumbnail,
+    const pulp::audio::WaveformOverview& thumbnail,
     const WaveformGpuLayerPlan& plan,
     const WaveformGpuRenderContext& context) {
     const auto decision = controller_.plan_render(

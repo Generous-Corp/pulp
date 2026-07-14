@@ -33,9 +33,9 @@ TEST_CASE("SkewedRange skew weights low end", "[state][skewed-range]") {
     REQUIRE(std::abs(r.normalize(mid) - 0.5f) < 1e-5f);
 }
 
-TEST_CASE("SkewedRange with_centre places midpoint at 0.5", "[state][skewed-range]") {
-    // Classic frequency knob: 20 Hz min, 20000 Hz max, 1000 Hz centre.
-    auto r = SkewedRange<float>::with_centre(20.0f, 20000.0f, 1000.0f);
+TEST_CASE("SkewedRange with_center places midpoint at 0.5", "[state][skewed-range]") {
+    // Classic frequency knob: 20 Hz min, 20000 Hz max, 1000 Hz center.
+    auto r = SkewedRange<float>::with_center(20.0f, 20000.0f, 1000.0f);
     const float at_half = r.denormalize(0.5f);
     REQUIRE(std::abs(at_half - 1000.0f) < 0.5f);
     // Endpoints still snap.
@@ -118,7 +118,7 @@ TEST_CASE("ParamRange linear is bit-identical to the legacy affine map",
 TEST_CASE("ParamRange skew round-trips monotonically with exact endpoints",
           "[state][range][shaped]") {
     // Frequency-style knob: low end gets more resolution (skew < 1).
-    auto range = ParamRange::with_centre(20.0f, 20000.0f, 1000.0f);
+    auto range = ParamRange::with_center(20.0f, 20000.0f, 1000.0f);
     REQUIRE_FALSE(range.is_linear());
 
     // Endpoints are exact regardless of the curve.
@@ -127,7 +127,7 @@ TEST_CASE("ParamRange skew round-trips monotonically with exact endpoints",
     REQUIRE(range.normalize(20.0f) == 0.0f);
     REQUIRE(range.normalize(20000.0f) == 1.0f);
 
-    // Known midpoint: 0.5 normalized lands at the chosen 1 kHz centre.
+    // Known midpoint: 0.5 normalized lands at the chosen 1 kHz center.
     REQUIRE(std::abs(range.denormalize(0.5f) - 1000.0f) < 0.5f);
 
     // Monotonic across the whole normalized domain, with a coarse round-trip
@@ -162,9 +162,9 @@ TEST_CASE("ParamRange symmetric skew is bipolar and mirrored",
 
     REQUIRE(std::abs(range.denormalize(0.0f) - (-1.0f)) < 1e-5f);
     REQUIRE(std::abs(range.denormalize(1.0f) - 1.0f) < 1e-5f);
-    REQUIRE(std::abs(range.denormalize(0.5f)) < 1e-5f); // centre at midpoint
+    REQUIRE(std::abs(range.denormalize(0.5f)) < 1e-5f); // center at midpoint
 
-    // Mirror symmetry about the centre.
+    // Mirror symmetry about the center.
     const float plus = range.denormalize(0.7f);
     const float minus = range.denormalize(0.3f);
     REQUIRE(std::abs(plus + minus) < 1e-5f);
@@ -176,14 +176,14 @@ TEST_CASE("ParamRange symmetric skew is bipolar and mirrored",
     }
 }
 
-TEST_CASE("ParamRange with_centre falls back to linear for degenerate centre",
+TEST_CASE("ParamRange with_center falls back to linear for degenerate center",
           "[state][range][shaped]") {
-    // Centre outside the open interval ⇒ no skew (stays linear, exact).
-    auto on_edge = ParamRange::with_centre(0.0f, 10.0f, 0.0f);
+    // Center outside the open interval ⇒ no skew (stays linear, exact).
+    auto on_edge = ParamRange::with_center(0.0f, 10.0f, 0.0f);
     REQUIRE(on_edge.is_linear());
     REQUIRE(on_edge.denormalize(0.5f) == 5.0f);
 
-    auto inverted = ParamRange::with_centre(10.0f, 0.0f, 5.0f);
+    auto inverted = ParamRange::with_center(10.0f, 0.0f, 5.0f);
     REQUIRE(inverted.is_linear());
 }
 
