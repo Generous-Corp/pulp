@@ -815,14 +815,11 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   let audioContext = null;
   let engineIsGpu = false;   // is the GPU the engine that is EMITTING? (see the status poll)
 
-  // The ONE place the engine is decided — and the only one that tells the worker whether to
-  // do any GPU work at all. Before this, the worker convolved every block in BOTH engines:
-  // measured with the select on CPU, ~100 queue submits a second producing a wet stream that
-  // was then thrown away. "Engine: CPU" now means the GPU is idle, not merely ignored.
-  const setEngineGpu = (on) => {
-    engineIsGpu = !!on;
-    try { if (lane && lane.setEngine) lane.setEngine(engineIsGpu); } catch { /* lane is optional */ }
-  };
+  // For the READOUT only. Whether the GPU does any work is decided by the plugin's Engine
+  // parameter, on the audio thread, inside the worklet — deliberately NOT here. A page that
+  // forgot to tell the worker would leave the GPU engine silent, and the first version of this
+  // was wired page-side and did exactly that to the engine-proof fixture.
+  const setEngineGpu = (on) => { engineIsGpu = !!on; };
 
   mountDemo({
     root: document.getElementById("app"),
