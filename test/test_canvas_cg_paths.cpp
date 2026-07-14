@@ -18,6 +18,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
 #include <array>
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -427,6 +428,68 @@ TEST_CASE("CoreGraphicsCanvas path calls survive degenerate input",
 
     // Nothing was drawn: the bitmap is still the cleared background.
     for (uint8_t px : pixels) REQUIRE(px == 0u);
+}
+
+// fill_path had NO FillRule parameter, so a two-contour ring point array
+// always rendered as a filled disc (CGContextFillPath, nonzero) — there was no
+// way to ask for the hole. CG splits the rules at the API surface
+// (CGContextEOFillPath), the same way fill_current_path already did.
+TEST_CASE("CoreGraphicsCanvas::fill_path honors FillRule -- evenodd rings",
+          "[canvas][cg][fill-rule]") {
+    constexpr int W = 48;
+    constexpr int H = 48;
+
+    // Outer + inner circle in ONE point array, both wound the same direction
+    // and both starting at angle 0 so their bridge segments are collinear.
+    std::vector<Canvas::Point2D> pts;
+    for (float r : {20.0f, 10.0f}) {
+        for (int i = 0; i < 64; ++i) {
+            const float t = 2.0f * 3.14159265358979f * (static_cast<float>(i) / 64.0f);
+            pts.push_back({24.0f + r * std::cos(t), 24.0f + r * std::sin(t)});
+        }
+    }
+
+    auto render = [&](FillRule rule) {
+        std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        REQUIRE(cs != nullptr);
+        const uint32_t bitmap_info =
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+        CGContextRef ctx = CGBitmapContextCreate(
+            pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+        CGColorSpaceRelease(cs);
+        REQUIRE(ctx != nullptr);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));  // green
+            canvas.fill_path(pts.data(), pts.size(), rule);
+        }
+        CGContextRelease(ctx);
+        return pixels;
+    };
+    auto alpha_at = [&](const std::vector<uint8_t>& px, int x, int y) {
+        return px[(static_cast<size_t>(y) * W + x) * 4u + 3u];
+    };
+
+    const auto eo = render(FillRule::evenodd);
+    const auto nz = render(FillRule::nonzero);
+
+    // Centre of the hole: transparent under even-odd, painted under nonzero.
+    INFO("evenodd centre a=" << int(alpha_at(eo, 24, 24))
+         << " nonzero centre a=" << int(alpha_at(nz, 24, 24)));
+    REQUIRE(alpha_at(eo, 24, 24) < 20u);
+    REQUIRE(alpha_at(nz, 24, 24) > 200u);
+
+    // The ring band (r = 15 above the centre) is painted under BOTH rules —
+    // even-odd punches the hole, it does not blank the shape.
+    REQUIRE(alpha_at(eo, 24, 9) > 200u);
+    REQUIRE(alpha_at(nz, 24, 9) > 200u);
+
+    // Outside the outer circle stays background under both.
+    REQUIRE(alpha_at(eo, 1, 1) < 20u);
+    REQUIRE(alpha_at(nz, 1, 1) < 20u);
 }
 
 TEST_CASE("CoreGraphicsCanvas::fill_path honors active linear gradient",

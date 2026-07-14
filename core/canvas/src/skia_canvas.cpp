@@ -751,17 +751,21 @@ void SkiaCanvas::stroke_path(const Point2D* points, size_t count) {
     canvas_->drawPath(builder.detach(), paint);
 }
 
-// Fill a closed polygon as ONE SkPath. The base-class default is a silent
-// no-op, so a filled polygon simply never appeared on the Skia backend.
-// Building a single closed SkPath and filling it via current_fill_paint()
-// mirrors the CoreGraphics backend and honors the active fill colour /
-// gradient, blend mode, shadow, and filter. Degenerate input (null, or fewer
+// Fill a closed polygon as ONE SkPath. Building a single closed SkPath and
+// filling it via current_fill_paint() mirrors the CoreGraphics backend and
+// honors the active fill colour / gradient, blend mode, shadow, and filter.
+// `rule` maps onto the path's fill type, so a compound point array (outer
+// contour + inner contour, same winding) fills as a ring under
+// FillRule::evenodd and as a disc under FillRule::nonzero — the same split
+// fill_current_path() has always honored. Degenerate input (null, or fewer
 // than three points — no enclosed area) draws nothing, matching
 // CgCanvas::fill_path.
-void SkiaCanvas::fill_path(const Point2D* points, size_t count) {
+void SkiaCanvas::fill_path(const Point2D* points, size_t count, FillRule rule) {
     GUARD_CANVAS;
     if (!points || count < 3) return;
     SkPathBuilder builder;
+    builder.setFillType(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
+                                                  : SkPathFillType::kWinding);
     builder.moveTo(points[0].x, points[0].y);
     for (size_t i = 1; i < count; ++i)
         builder.lineTo(points[i].x, points[i].y);

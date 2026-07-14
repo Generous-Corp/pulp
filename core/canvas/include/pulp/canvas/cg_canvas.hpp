@@ -119,7 +119,11 @@ public:
                    float start_angle, float end_angle) override;
     void stroke_line(float x0, float y0, float x1, float y1) override;
     void stroke_path(const Point2D* points, size_t count) override;
-    void fill_path(const Point2D* points, size_t count) override;
+    // `rule` splits nonzero (CGContextFillPath / CGContextClip) from even-odd
+    // (CGContextEOFillPath / CGContextEOClip), the same split
+    // fill_current_path() honors.
+    void fill_path(const Point2D* points, size_t count,
+                   FillRule rule = FillRule::nonzero) override;
 
     // Canvas2D-style path building.
     void begin_path() override;

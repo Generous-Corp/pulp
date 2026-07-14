@@ -500,8 +500,10 @@ void CoreGraphicsCanvas::stroke_path(const Point2D* points, size_t count) {
     reset_line_dash_on_ctx();
 }
 
-void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
+void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count,
+                                   FillRule rule) {
     if (points == nullptr || count < 3) return;
+    const bool eo = (rule == FillRule::evenodd);
     CGContextSetShouldAntialias(ctx_, true);
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, points[0].x, points[0].y);
@@ -512,13 +514,22 @@ void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
     // parallel of SkiaCanvas::fill_path.
     if (has_gradient_) {
         CGContextSaveGState(ctx_);
-        CGContextClip(ctx_);  // clip to the path we just built
+        // Clip to the path we just built, under the requested winding rule.
+        if (eo) {
+            CGContextEOClip(ctx_);
+        } else {
+            CGContextClip(ctx_);
+        }
         fill_with_active_paint();
         CGContextRestoreGState(ctx_);
         return;
     }
     apply_fill_color();
-    CGContextFillPath(ctx_);
+    if (eo) {
+        CGContextEOFillPath(ctx_);
+    } else {
+        CGContextFillPath(ctx_);
+    }
 }
 
 void CoreGraphicsCanvas::set_opacity(float alpha) {

@@ -73,8 +73,66 @@ TEST_CASE("Canvas::stroke_path fallback survives degenerate input",
     rc.stroke_path(pts, 3);
     REQUIRE(rc.count(DrawCommand::Type::stroke_line) == 2);
 
-    // fill_path's fallback draws nothing, and must not read the array either.
+    // fill_path's fallback must not read the array on degenerate input, and
+    // must not emit any path commands for it either.
+    rc.clear();
     rc.fill_path(nullptr, 4);
+    rc.fill_path(pts, 0);
+    rc.fill_path(pts, 2);  // < 3 points: no enclosed area
+    REQUIRE(rc.command_count() == 0);
+}
+
+// The base-class fill_path used to be `{}` — a SILENT NO-OP. Every Canvas
+// subclass that did not override it (i.e. everything but SkiaCanvas and
+// CoreGraphicsCanvas) drew nothing at all, with no diagnostic. The base now
+// synthesizes the polygon through the path API that every backend already
+// implements, so a non-overriding backend draws the polygon instead of
+// dropping it.
+TEST_CASE("Canvas::fill_path fallback draws the polygon (no silent no-op)",
+          "[canvas][regression]") {
+    RecordingCanvas rc;
+    const Canvas::Point2D tri[3] = {{0, 0}, {10, 0}, {5, 10}};
+
+    rc.fill_path(tri, 3);
+
+    using T = DrawCommand::Type;
+    REQUIRE(rc.count(T::begin_path) == 1);
+    REQUIRE(rc.count(T::move_to) == 1);
+    REQUIRE(rc.count(T::line_to) == 2);
+    REQUIRE(rc.count(T::close_path) == 1);
+    REQUIRE(rc.count(T::fill_current_path) == 1);
+
+    // The synthesized subpath carries the caller's geometry, in order.
+    const auto& cmds = rc.commands();
+    REQUIRE(cmds[1].type == T::move_to);
+    REQUIRE(cmds[1].f[0] == 0.0f);
+    REQUIRE(cmds[1].f[1] == 0.0f);
+    REQUIRE(cmds[2].type == T::line_to);
+    REQUIRE(cmds[2].f[0] == 10.0f);
+    REQUIRE(cmds[3].type == T::line_to);
+    REQUIRE(cmds[3].f[0] == 5.0f);
+    REQUIRE(cmds[3].f[1] == 10.0f);
+
+    // Default rule is nonzero (f[0] == 0 in the recorded fill_current_path).
+    for (const auto& c : cmds)
+        if (c.type == T::fill_current_path) REQUIRE(c.f[0] == 0.0f);
+}
+
+// The FillRule argument threads all the way through the fallback: without it
+// a compound point array could only ever fill nonzero (a disc), never even-odd
+// (a ring).
+TEST_CASE("Canvas::fill_path fallback threads the FillRule",
+          "[canvas][regression]") {
+    RecordingCanvas rc;
+    const Canvas::Point2D tri[3] = {{0, 0}, {10, 0}, {5, 10}};
+
+    rc.fill_path(tri, 3, FillRule::evenodd);
+
+    const auto& cmds = rc.commands();
+    REQUIRE(!cmds.empty());
+    const auto& fill = cmds.back();
+    REQUIRE(fill.type == DrawCommand::Type::fill_current_path);
+    REQUIRE(fill.f[0] == 1.0f);  // 1 = evenodd
 }
 
 TEST_CASE("RecordingCanvas shapes", "[canvas]") {

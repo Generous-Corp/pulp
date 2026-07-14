@@ -123,10 +123,13 @@ public:
     // ── Polyline / polygon ───────────────────────────────────────────────
     // Build one SkPath and paint it once. The base-class stroke_path fallback
     // degrades to N independent stroke_line calls (each with its own caps and
-    // no joins, which beads a dense curve), and the base fill_path is a silent
-    // no-op. Overriding both keeps the Skia backend at parity with CgCanvas.
+    // no joins, which beads a dense curve), and the base fill_path round-trips
+    // through the path-recording state. Overriding both keeps the Skia backend
+    // at parity with CgCanvas. fill_path maps `rule` onto the SkPath fill type
+    // (kEvenOdd / kWinding).
     void stroke_path(const Point2D* points, size_t count) override;
-    void fill_path(const Point2D* points, size_t count) override;
+    void fill_path(const Point2D* points, size_t count,
+                   FillRule rule = FillRule::nonzero) override;
 
     // ── Text ─────────────────────────────────────────────────────────────
     void set_font(const std::string& family, float size) override;

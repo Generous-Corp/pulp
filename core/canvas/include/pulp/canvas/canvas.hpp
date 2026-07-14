@@ -598,8 +598,36 @@ public:
             stroke_line(points[i-1].x, points[i-1].y, points[i].x, points[i].y);
     }
 
-    /// Fill a closed polygon defined by points. The fallback draws nothing.
-    virtual void fill_path(const Point2D*, size_t) {}
+    /// Fill a closed polygon defined by `points`, honoring `rule`.
+    ///
+    /// `rule` selects nonzero vs even-odd winding, exactly as
+    /// `fill_current_path(rule)` / Canvas2D `ctx.fill('evenodd')` do. Without
+    /// it a compound point array (an outer contour followed by an inner one)
+    /// could only ever fill as a solid disc — there was no way to punch the
+    /// hole that makes it a ring.
+    ///
+    /// The default is NOT a no-op. It synthesizes the polygon through the
+    /// path API — `begin_path` / `move_to` / `line_to` / `close_path` /
+    /// `fill_current_path(rule)` — which every backend already implements, so
+    /// a `Canvas` subclass that does not override `fill_path` still draws the
+    /// polygon instead of silently dropping it. Backends override only to skip
+    /// the state round-trip (SkiaCanvas builds one SkPath; CoreGraphicsCanvas
+    /// one CGPath).
+    ///
+    /// Note the default resets the current path (begin_path), matching the
+    /// Canvas2D convention that a shape-drawing call owns the path it builds.
+    /// Degenerate input (null array, or fewer than three points — no enclosed
+    /// area) draws nothing and never reads the array.
+    virtual void fill_path(const Point2D* points, size_t count,
+                           FillRule rule = FillRule::nonzero) {
+        if (points == nullptr || count < 3) return;
+        begin_path();
+        move_to(points[0].x, points[0].y);
+        for (size_t i = 1; i < count; ++i)
+            line_to(points[i].x, points[i].y);
+        close_path();
+        fill_current_path(rule);
+    }
 
     /// Draw an image identified by an opaque, platform-specific handle
     /// into the rectangle (x, y, w, h). The handle is the \c native_handle
