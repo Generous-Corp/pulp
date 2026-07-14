@@ -68,8 +68,15 @@ struct Rect {
     constexpr bool contains(float px, float py) const {
         return px >= x && px < right() && py >= y && py < bottom();
     }
-    /// Whole-rect containment (not point containment).
-    constexpr bool contains(const Rect& r) const {
+    /// Whole-rect containment: does this rect fully enclose `r`?
+    ///
+    /// NOT an overload of `contains`, on purpose. `Rect` has default member
+    /// initializers, so a braced `{50, 30}` is a valid two-field `Rect` as well
+    /// as a valid `Point` — which makes the natural, idiomatic
+    /// `r.contains({50, 30})` ambiguous at EVERY call site the moment a
+    /// `contains(const Rect&)` overload exists. A distinct name is the fix;
+    /// `encloses` also says what it does more plainly than a third `contains`.
+    constexpr bool encloses(const Rect& r) const {
         return r.x >= x && r.y >= y && r.right() <= right() && r.bottom() <= bottom();
     }
 

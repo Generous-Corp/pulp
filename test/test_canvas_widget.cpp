@@ -724,9 +724,13 @@ TEST_CASE("CanvasWidget fill_rect with use_active_style preserves active gradien
     CanvasWidget cw;
     cw.set_bounds({0, 0, 100, 100});
 
-    // Active fill = linear gradient red→blue. RecordingCanvas's default
-    // overload of set_fill_gradient_linear records a set_fill_color of the
-    // first stop (red).
+    // Active fill = linear gradient red→blue.
+    //
+    // This used to lean on a weakness: RecordingCanvas inherited the base-class
+    // fallback, which DEGRADES a gradient to a solid set_fill_color of its first
+    // stop, so "the active fill is red" stood in for "the gradient is active".
+    // RecordingCanvas records the gradient itself now, so the invariant is
+    // asserted directly below.
     CanvasDrawCmd grad;
     grad.type = CanvasDrawCmd::Type::set_fill_gradient_linear;
     grad.x = 0; grad.y = 0; grad.x2 = 100; grad.y2 = 0;
@@ -744,30 +748,36 @@ TEST_CASE("CanvasWidget fill_rect with use_active_style preserves active gradien
 
     cw.paint(rc);
 
-    // The active fill at draw time must still be the gradient's first stop
-    // (red) — NOT white, which is what would have been overwritten if the
-    // paint loop had called set_fill_color(cmd.color) before fill_rect.
-    pulp::canvas::Color active_fill{};
+    // The gradient must STILL be the active fill style at draw time. A
+    // set_fill_color(cmd.color) emitted by the paint loop before the fill_rect
+    // would have replaced it — that is the bug — and the rect would paint flat.
+    DrawCommand::Type active_style = DrawCommand::Type::set_fill_color;
+    pulp::canvas::Color active_first_stop{};
     bool saw_fill_rect = false;
-    pulp::canvas::Color fill_at_draw{};
+    DrawCommand::Type style_at_draw = DrawCommand::Type::set_fill_color;
+    pulp::canvas::Color first_stop_at_draw{};
+
     for (const auto& cmd : rc.commands()) {
-        if (cmd.type == DrawCommand::Type::set_fill_color) {
-            active_fill = cmd.color;
+        if (cmd.type == DrawCommand::Type::set_fill_color
+            || cmd.type == DrawCommand::Type::set_fill_gradient_linear) {
+            active_style = cmd.type;
+            active_first_stop = cmd.color;
             continue;
         }
-        if (cmd.type == DrawCommand::Type::fill_rect) {
-            const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
-                                  cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
-            if (matches) {
-                saw_fill_rect = true;
-                fill_at_draw = active_fill;
-            }
+        if (cmd.type == DrawCommand::Type::fill_rect
+            && cmd.f[0] == 10.0f && cmd.f[1] == 10.0f
+            && cmd.f[2] == 50.0f && cmd.f[3] == 50.0f) {
+            saw_fill_rect = true;
+            style_at_draw = active_style;
+            first_stop_at_draw = active_first_stop;
         }
     }
+
     REQUIRE(saw_fill_rect);
-    const bool is_red = (fill_at_draw.r8() == 255 && fill_at_draw.g8() == 0
-                      && fill_at_draw.b8() == 0 && fill_at_draw.a8() == 255);
-    REQUIRE(is_red);
+    REQUIRE(style_at_draw == DrawCommand::Type::set_fill_gradient_linear);
+    REQUIRE(first_stop_at_draw.r8() == 255);
+    REQUIRE(first_stop_at_draw.g8() == 0);
+    REQUIRE(first_stop_at_draw.b8() == 0);
 }
 
 // Case 4 — stroke_rect mirrors fill_rect: with use_active_style the prior

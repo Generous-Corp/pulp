@@ -346,8 +346,40 @@ TEST_CASE("Canvas fallback helpers record CPU-safe commands", "[canvas]") {
     REQUIRE(fill_rect.f[3] == Catch::Approx(7.0f));
 }
 
+namespace {
+
+/// A canvas with NO gradient support, so the base-class fallbacks run.
+///
+/// RecordingCanvas records fill gradients faithfully now, which is what we want
+/// of it — but that makes it the wrong probe for the FALLBACK contract. This
+/// subclass hands each gradient call straight back to `Canvas`, restoring the
+/// degrade-to-first-stop path that a backend without gradient support relies on,
+/// while still recording the `set_fill_color` the fallback emits.
+struct NoGradientCanvas : RecordingCanvas {
+    void set_fill_gradient_linear(float x0, float y0, float x1, float y1,
+                                  const Color* colors, const float* positions,
+                                  int count) override {
+        Canvas::set_fill_gradient_linear(x0, y0, x1, y1, colors, positions, count);
+    }
+    void set_fill_gradient_radial(float cx, float cy, float radius,
+                                  const Color* colors, const float* positions,
+                                  int count) override {
+        Canvas::set_fill_gradient_radial(cx, cy, radius, colors, positions, count);
+    }
+    void set_fill_gradient_conic(float cx, float cy, float start_angle,
+                                 const Color* colors, const float* positions,
+                                 int count) override {
+        Canvas::set_fill_gradient_conic(cx, cy, start_angle, colors, positions, count);
+    }
+};
+
+} // namespace
+
 TEST_CASE("Canvas gradient fallbacks use first stop when present", "[canvas]") {
-    RecordingCanvas canvas;
+    // The contract for a backend that cannot draw gradients: degrade to a solid
+    // fill of the first stop rather than draw nothing. A zero-stop gradient has
+    // no colour to fall back TO, so it emits nothing at all.
+    NoGradientCanvas canvas;
     const Color colors[] = {
         Color::rgba8(12, 34, 56, 78),
         Color::rgba8(90, 100, 110, 120),
@@ -357,13 +389,38 @@ TEST_CASE("Canvas gradient fallbacks use first stop when present", "[canvas]") {
     canvas.set_fill_gradient_linear(0, 0, 10, 10, colors, positions, 2);
     canvas.set_fill_gradient_radial(5, 5, 4, colors, positions, 2);
     canvas.set_fill_gradient_conic(5, 5, 1.0f, colors, positions, 2);
-    canvas.set_fill_gradient_linear(0, 0, 10, 10, colors, positions, 0);
+    canvas.set_fill_gradient_linear(0, 0, 10, 10, colors, positions, 0);  // no stops
 
     REQUIRE(canvas.count(DrawCommand::Type::set_fill_color) == 3);
     for (const auto& command : canvas.commands()) {
         REQUIRE(command.type == DrawCommand::Type::set_fill_color);
         REQUIRE(command.color == colors[0]);
     }
+}
+
+TEST_CASE("RecordingCanvas records a fill gradient instead of degrading it",
+          "[canvas]") {
+    // The reason the test above needed its own canvas. RecordingCanvas used to
+    // inherit the fallback, so it captured a SOLID FILL for every fill gradient —
+    // and a headless test could assert "the fill is #0C2238" and pass whether the
+    // gradient plumbing worked or had been ripped out entirely. It records the
+    // gradient itself now, stops and all.
+    RecordingCanvas canvas;
+    const Color colors[] = {
+        Color::rgba8(12, 34, 56, 78),
+        Color::rgba8(90, 100, 110, 120),
+    };
+    const float positions[] = {0.0f, 1.0f};
+
+    canvas.set_fill_gradient_linear(0, 0, 10, 10, colors, positions, 2);
+
+    REQUIRE(canvas.count(DrawCommand::Type::set_fill_gradient_linear) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::set_fill_color) == 0);  // NOT degraded
+
+    const auto& cmd = canvas.commands().front();
+    REQUIRE(cmd.f[0] == Catch::Approx(0.0f));
+    REQUIRE(cmd.f[2] == Catch::Approx(10.0f));
+    REQUIRE(cmd.color == colors[0]);
 }
 
 TEST_CASE("fill_text_sdf falls back to fill_text on RecordingCanvas", "[canvas][sdf]") {
@@ -733,7 +790,7 @@ TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
 }
 
 TEST_CASE("Canvas fallback gradients apply first stop only", "[canvas][fallback]") {
-    RecordingCanvas rc;
+    NoGradientCanvas rc;   // the FALLBACK is the subject here — see the type's doc
     Color colors[] = {
         Color::rgba8(10, 20, 30, 255),
         Color::rgba8(200, 210, 220, 255),
