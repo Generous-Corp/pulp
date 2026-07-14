@@ -239,7 +239,14 @@ std::vector<float> render_mono(SuperConvolverProcessor& proc, std::size_t block,
 std::vector<float> measured_ir(SuperConvolverProcessor& proc, std::size_t block,
                                double sr, std::size_t want) {
     const std::size_t lat = static_cast<std::size_t>(proc.latency_samples());
-    const int settle = static_cast<int>((lat + 2 * SuperConvolverProcessor::kInternalBlock)
+    // Wait out the IR CROSSFADE, not just a couple of internal blocks. For
+    // kIrCrossfadeSeconds after a swap the output is a BLEND of the old IR and the new one,
+    // so measuring inside that window recovers neither. (This settle was sized for an 11 ms
+    // fade; when the fade grew to 150 ms — because a cold convolver needs that long to build
+    // up, see kIrCrossfadeSeconds — these tests started measuring the blend and failed. That
+    // was the tests being right.)
+    const std::size_t fade = static_cast<std::size_t>(sr * SuperConvolverProcessor::kIrCrossfadeSeconds);
+    const int settle = static_cast<int>((lat + fade + 2 * SuperConvolverProcessor::kInternalBlock)
                                         / block) + 2;
     render_mono(proc, block, sr, settle, [](std::size_t) { return 0.0f; });
 
@@ -1493,4 +1500,123 @@ TEST_CASE("SuperConvolver's host tick defers to the background worker",
     store.set_value(kSize, 0.5f);
     CHECK_FALSE(proc.non_realtime_tick_pending());
     proc.release();
+}
+
+// ── Bypass must not CLICK ────────────────────────────────────────────────────────
+//
+// Dry/wet used to be a per-block constant: `out = (1-mix)*dry + mix*gain*wet`, with mix
+// jumping straight to its new value at the block boundary. Toggling Bypass therefore slammed
+// mix from (say) 1.0 to 0 between one sample and the next — a step discontinuity, which is
+// audible as a click. The same edge gave Mix and Gain zipper noise on a fast drag.
+//
+// The output is now ramped across the block. This asserts the thing the ear actually objects
+// to: the largest jump between ADJACENT SAMPLES around the toggle. A step would be a large
+// fraction of the signal; a ramp over 512 samples is ~1/512th of it per step.
+//
+// A constant (DC) input is used deliberately — with a moving signal a genuine step is hidden
+// inside the waveform's own slope, and the test would pass on broken code.
+TEST_CASE("SuperConvolver: toggling Bypass ramps instead of stepping", "[super-convolver][bypass]") {
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = 512;
+
+    pulp::state::StateStore store;
+    SuperConvolverProcessor proc;
+    configure(proc, store, /*size=*/0.5f, /*mix=*/100.0f, /*engine=*/0, /*rooms=*/1);
+    proc.prepare(prep_ctx(SR, BLOCK));
+
+    Driver d(proc, BLOCK, SR);
+    const auto dc = [](std::size_t) { return 0.5f; };   // any step shows up plainly
+    std::vector<float> l, r;
+
+    // Settle: let the convolver's tail fill so the wet path is genuinely live.
+    for (int b = 0; b < 8; ++b)
+        d.block_io(static_cast<std::size_t>(b) * BLOCK, dc,
+                   pulp::format::ProcessMode::Offline, 0, l, r);
+    const float before = l.back();
+
+    store.set_value(kBypass, 1.0f);                     // <- the toggle
+    d.block_io(8 * BLOCK, dc, pulp::format::ProcessMode::Offline, 0, l, r);
+
+    float worst = std::fabs(l.front() - before);        // the block boundary itself
+    for (std::size_t i = 1; i < l.size(); ++i)          // and inside the ramp
+        worst = std::max(worst, std::fabs(l[i] - l[i - 1]));
+
+    INFO("largest adjacent-sample jump across a Bypass toggle: " << worst);
+    REQUIRE(worst < 0.02f);
+}
+
+// ── Dragging Size must not CRACKLE ───────────────────────────────────────────────
+//
+// A live Size change rebuilds the IR and swaps it into the convolver. On the crossfade path
+// ConvolverIrSwapper does NOT carry the input delay line into the incoming IR (the displaced
+// one is still rendering from it in parallel), so the new convolver starts COLD: its output
+// must build up from silence over the IR's own length.
+//
+// The fade used to be 512 samples (~11 ms). Fading a full old tail into a cold new one that
+// fast is not a transition, it is a DIP — the wet drops out and climbs back — and one of those
+// per rebuild is what a Size drag sounds like. The fade is now ~150 ms.
+//
+// This asserts the thing the ear objects to: the ENVELOPE must not collapse across the swap.
+// A steady tone in means steady energy out; a dip shows up as a block whose RMS falls far
+// below its neighbours. Deliberately measured per-block, not per-sample: the artefact here is
+// an envelope hole, not a single-sample step (that is the Bypass test).
+TEST_CASE("SuperConvolver: a live Size change does not punch a hole in the output",
+          "[super-convolver][size-drag]") {
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = 512;
+
+    pulp::state::StateStore store;
+    SuperConvolverProcessor proc;
+    configure(proc, store, /*size=*/1.5f, /*mix=*/100.0f, /*engine=*/0, /*rooms=*/1);
+    proc.prepare(prep_ctx(SR, BLOCK));
+
+    Driver d(proc, BLOCK, SR);
+    const auto tone = [](std::size_t i) {
+        return 0.5f * std::sin(2.f * 3.14159265f * 220.f * static_cast<float>(i) / 48000.f);
+    };
+    // 64-sample envelope windows, not per-block. The artefact is a short HOLE in the
+    // envelope; a 512-sample RMS averages an 11 ms dip away and the test passes on broken
+    // code (it did — that is why the window is this size).
+    const auto win_rms = [](const std::vector<float>& v, std::size_t w0, std::size_t w) {
+        double a = 0.0;
+        for (std::size_t i = w0; i < w0 + w && i < v.size(); ++i) a += double(v[i]) * double(v[i]);
+        return std::sqrt(a / double(w));
+    };
+    const auto envelope = [&](const std::vector<float>& v, std::vector<double>& out) {
+        for (std::size_t w = 0; w + 64 <= v.size(); w += 64) out.push_back(win_rms(v, w, 64));
+    };
+
+    std::vector<float> l, r;
+    std::vector<double> env;
+    // Settle: fill the convolver's tail so the wet is at full strength.
+    for (int b = 0; b < 60; ++b) {
+        d.block_io(static_cast<std::size_t>(b) * BLOCK, tone,
+                   pulp::format::ProcessMode::Offline, 0, l, r);
+        proc.service_ir_rebuild();
+        envelope(l, env);
+    }
+    const std::size_t mark = env.size();
+    double settled = 0.0;
+    for (std::size_t i = mark - 16; i < mark; ++i) settled += env[i];
+    settled /= 16.0;
+    REQUIRE(settled > 0.01);                    // the wet really is live
+
+    store.set_value(kSize, 0.6f);               // <- the Size change
+
+    for (int b = 0; b < 80; ++b) {
+        d.block_io(static_cast<std::size_t>(60 + b) * BLOCK, tone,
+                   pulp::format::ProcessMode::Offline, 0, l, r);
+        proc.service_ir_rebuild();              // drive the off-thread rebuild
+        envelope(l, env);
+    }
+
+    double lowest = settled;
+    for (std::size_t i = mark; i < env.size(); ++i) lowest = std::min(lowest, env[i]);
+
+    INFO("settled envelope " << settled << ", lowest across the swap " << lowest
+         << " (ratio " << (lowest / settled) << ")");
+    // A HOLE takes the wet to a small fraction of its settled level. A blend between two IRs
+    // of different length legitimately changes the level somewhat — this is a "did the sound
+    // drop out" gate, not a level-match gate.
+    REQUIRE(lowest > settled * 0.35);
 }

@@ -30,7 +30,19 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
     const createModule = (await import(moduleUrl)).default;
 
     T("adapter.getParameterInfo()");
-    const params = (await adapter.getParameterInfo()) || [];
+    const allParams = (await adapter.getParameterInfo()) || [];
+
+    // Parameters the PAGE owns, and the plugin's UI must therefore not also draw.
+    //
+    // The GPU page renders Engine as a <select> and "GPU only" as a checkbox — real
+    // controls, with words on them, that say what they do. Drawing the same two params as
+    // KNOBS inside the plugin gives you two controls for one parameter, and the knob is
+    // the worse of the two: a continuous dial for a switch, with no detents and no labels,
+    // and the page had one dial reading "0.00" whose meaning you could not possibly guess.
+    // (The plugin now declares them ParamKind::Toggle, which fixes how a DAW draws them;
+    // this fixes the duplicate.)
+    const hidden = new Set((opts.hideParams || []).map((n) => String(n).toLowerCase()));
+    const params = allParams.filter((p) => !hidden.has(String(p.label || "").toLowerCase()));
 
     T(`got ${params.length} params; createModule()`);
     const Module = await createModule({ canvas: canvasEl });
@@ -42,22 +54,48 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
         slotOf.set(p.id, slot);
         const name = cstr(p.label || `Param ${p.id}`);
         const unit = cstr(p.unit || "");
+        // An ON/OFF parameter: stepped, and its whole range is 0..1. The plugin declares it
+        // ParamKind::Toggle; CLAP carries that as IS_STEPPED, and the adapter surfaces it as
+        // step === 1. It gets a switch in the UI, not a knob — a dial for a two-state value
+        // has no detents and no on/off affordance, and Bypass shipped exactly that way.
+        const min = typeof p.minValue === "number" ? p.minValue : 0;
+        const max = typeof p.maxValue === "number" ? p.maxValue : 1;
+        const isToggle = p.step === 1 && min === 0 && max === 1;
         Module._pulp_ui_add_param(
             slot,
             name,
-            typeof p.minValue === "number" ? p.minValue : 0,
-            typeof p.maxValue === "number" ? p.maxValue : 1,
+            min,
+            max,
             typeof p.defaultValue === "number" ? p.defaultValue : 0,
             unit,
+            isToggle ? 1 : 0,
         );
         Module._free(name);
         Module._free(unit);
     });
 
+    // The live value of every param the ADAPTER knows about — including the ones the editor
+    // does not draw. The re-emit below has to be shaped exactly like a host echo, and a host
+    // echo carries the whole list.
+    const indexOfId = new Map(allParams.map((p, i) => [p.id, i]));
+    const liveValues = allParams.map((p) => (typeof p.defaultValue === "number" ? p.defaultValue : 0));
+
     // UI -> host.
     Module.onParamChange = (slot, value) => {
         const p = params[slot];
-        if (p) adapter.setParameterValue(p.id, value);
+        if (!p) return;
+        adapter.setParameterValue(p.id, value);
+
+        // A UI-INITIATED WRITE GETS NO ECHO BACK. The plugin only reports a parameter it
+        // moved itself (preset, automation), so anything listening on the adapter's param
+        // feed goes stale the instant the user touches a knob — the page's own chrome, and
+        // the IR blurb that says how Size is cutting the impulse, both froze at their last
+        // host-sent value while the knob turned underneath them. The feed is the page's only
+        // view of parameter state; it has to be true no matter who moved the value. So say
+        // it: re-emit, in the host's shape.
+        const i = indexOfId.get(p.id);
+        if (i != null) liveValues[i] = value;
+        if (adapter.onParamsChanged) adapter.onParamsChanged(liveValues.slice(), allParams);
     };
     Module.onGestureBegin = (slot) => {
         const p = params[slot];
@@ -95,9 +133,15 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
     if (!width || width === CANVAS_DEFAULT_W) {
         width = Math.round(parentRect?.width || canvasEl.clientWidth || 640);
     }
+    // The CSS box is `aspect-ratio` AND `min-height`, so its used height is the LARGER of
+    // the two. Deriving the fallback from the ratio alone hands the module a 115px backing
+    // store for a box the browser then paints 250px tall — and every knob comes out an
+    // OVAL, with the labels sheared through each other. It shipped that way on a phone,
+    // where the ratio's height is smallest and the floor always wins.
+    const minH = parseFloat(getComputedStyle(canvasEl).minHeight) || 0;
     let height = Math.round(rect.height);
     if (!height || height === CANVAS_DEFAULT_H) {
-        height = Math.round(width / declaredRatio);
+        height = Math.round(Math.max(width / declaredRatio, minH));
     }
     width = Math.max(1, width);
     height = Math.max(1, height);
@@ -114,8 +158,15 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
     adapter.onParamsChanged = (values, infos) => {
         const list = infos && infos.length ? infos : params;
         for (let i = 0; i < list.length && i < values.length; i++) {
-            const slot = slotOf.has(list[i].id) ? slotOf.get(list[i].id) : i;
-            Module._pulp_ui_set_param(slot, values[i]);
+            const id = list[i].id;
+            const j = indexOfId.get(id);
+            if (j != null) liveValues[j] = values[i];
+            // Only params the editor DRAWS have a slot. Falling back to the array index for
+            // the others sends a hidden param's value into whatever knob happens to sit at
+            // that index — with Engine and GPU-only hidden on the GPU page, a host echo would
+            // have jammed Mix full of Engine's value.
+            if (!slotOf.has(id)) continue;
+            Module._pulp_ui_set_param(slotOf.get(id), values[i]);
         }
         if (previousOnParamsChanged) previousOnParamsChanged(values, infos);
     };
@@ -133,9 +184,21 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
     };
     const observer = new ResizeObserver((entries) => {
         for (const entry of entries) {
-            const box = entry.contentRect;
-            if (entry.target === canvasEl) applySize(box.width, box.height);
-            else applySize(box.width, box.width / declaredRatio);        // the parent: derive the height
+            if (entry.target === canvasEl) {
+                const box = entry.contentRect;
+                applySize(box.width, box.height);
+            } else {
+                // The PARENT resized. Do NOT derive the canvas height from the aspect ratio
+                // here: the box is `aspect-ratio` AND `min-height`, so its used height is the
+                // larger of the two, and deriving from the ratio alone overwrites a correct
+                // 250px box with a 115px one. The backing store then no longer matches what
+                // the browser paints, and every knob renders as an OVAL with the labels
+                // sheared through each other — on a phone, where the floor always wins.
+                //
+                // Ask the canvas what it actually is.
+                const r = canvasEl.getBoundingClientRect();
+                applySize(r.width, r.height);
+            }
         }
     });
     observer.observe(canvasEl);

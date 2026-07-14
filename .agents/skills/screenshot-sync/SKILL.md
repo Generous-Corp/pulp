@@ -281,6 +281,29 @@ own layout.
   that same grid at runtime. So before re-shooting a demo, confirm which UI the
   page actually mounted; otherwise you will capture the parameter grid, commit it
   as the plugin's og.png, and have "wrong" screenshots with a green build.
+- **Wait for the player's SETTLE signal, not for the canvas element.**
+  `mountPulpUi` appends the canvas immediately and *then* fetches the wasm module,
+  so "the canvas exists" is true a full second before anything is drawn on it.
+  Waiting on it shoots the loading screen. The real signal is the loading class
+  being **gone** (`.pw-customui-loading`). `gen-og-images.mjs` additionally
+  **refuses to shoot** if that class is still present at timeout — a card is
+  worse than no card, because a blank unfurl looks like a broken product and
+  nothing in the build is red.
+- **Check the og.png's PIXELS, not its existence.** A loading-screen card is a
+  well-formed PNG of the right size; only its content is wrong. `check-og-images.mjs`
+  decodes it and requires ≥2% bright pixels in the control band — the live broken
+  card measured **0.60%**, every real one 4.2–7.0%. And note Cloudflare serves a
+  **missing** asset as its 404 page with **HTTP 200**, so a fetch-and-check-status
+  probe confirms the lie; you have to look at the bytes.
+- **The shot is expensive; cache it on a content hash.** Hash the page dir (plus
+  the player bundle) into `og.png.key` and skip when it matches: 78 s → 2 s across
+  a 30-page site when nothing moved. Verify the invalidation too — a cache that
+  never busts silently ships yesterday's UI.
+- **A brotli `Content-Encoding` on a plain-copied file breaks the page, not just
+  the byte count.** The GPU page's 10.4 MB `.data` was copied raw while `_headers`
+  claimed brotli; the browser failed to decode it, the UI module never loaded, and
+  the only symptom anyone saw was an OG card reading "Loading editor…". One shared
+  `copyUiFile()` compresses every page's copy — don't hand-roll a second copy path.
 - **CoreGraphics can't composite file images** → filename-as-text placeholders;
   use the Skia backend for anything with assets.
 - **Headless GPU** → the offscreen `gpu` backend, not the live host (which hangs
