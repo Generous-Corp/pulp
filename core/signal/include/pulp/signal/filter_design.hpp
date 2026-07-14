@@ -30,10 +30,11 @@ namespace pulp::signal {
 struct FilterDesign {
 
     /// Biquad coefficient set (normalized: a0 = 1).
-    struct Coefficients {
-        float b0 = 1, b1 = 0, b2 = 0;
-        float a1 = 0, a2 = 0;
-    };
+    ///
+    /// Alias of the canonical exchange type in biquad.hpp, so a designed
+    /// section can be loaded straight into a BiquadT and evaluated by
+    /// frequency_response.hpp without a conversion step.
+    using Coefficients = BiquadCoefficients;
 
     // ── Standard biquad types (Audio EQ Cookbook) ────────────────────────
 

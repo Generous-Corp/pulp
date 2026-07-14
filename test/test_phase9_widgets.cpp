@@ -9,9 +9,13 @@
 #include <pulp/view/property_list.hpp>
 #include <pulp/view/breadcrumb.hpp>
 #include <pulp/view/theme_editor.hpp>
+#include <pulp/view/graph_scale.hpp>
+#include <pulp/signal/frequency_response.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <string_view>
+#include <vector>
 
 using namespace pulp::view;
 using pulp::canvas::DrawCommand;
@@ -39,6 +43,133 @@ bool has_fill_color(const RecordingCanvas& canvas, Color color) {
 }
 
 } // namespace
+
+// ── EqCurveView: the drawn curve ────────────────────────────────────────────
+//
+// The band-management tests below never look at the curve, which is how this
+// widget shipped for months drawing a Gaussian bell for EVERY band type — a
+// low-pass rendered as a symmetric bump. These assert the shape.
+
+TEST_CASE("EqCurveView draws the true response, not a bell", "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_sample_rate(48000.0f);
+
+    SECTION("low-pass rolls off instead of peaking") {
+        eq.set_bands({{1000.0f, 0.0f, 0.707f, EqCurveView::FilterType::low_pass, true}});
+
+        // Flat below cutoff, -3 dB at it, and falling monotonically above —
+        // none of which a symmetric bell centered on 1 kHz could produce.
+        REQUIRE_THAT(eq.magnitude_db_at(100.0f), WithinAbs(0.0, 0.5));
+        REQUIRE_THAT(eq.magnitude_db_at(1000.0f), WithinAbs(-3.0, 0.5));
+        REQUIRE(eq.magnitude_db_at(4000.0f) < -20.0f);
+        REQUIRE(eq.magnitude_db_at(4000.0f) > eq.magnitude_db_at(12000.0f));
+    }
+
+    SECTION("notch cuts a null at its center") {
+        eq.set_bands({{1000.0f, 8.0f, 8.0f, EqCurveView::FilterType::notch, true}});
+        REQUIRE(eq.magnitude_db_at(1000.0f) < -30.0f);
+        REQUIRE_THAT(eq.magnitude_db_at(100.0f), WithinAbs(0.0, 0.5));
+    }
+
+    SECTION("low shelf plateaus down to DC") {
+        eq.set_bands({{500.0f, 6.0f, 0.707f, EqCurveView::FilterType::low_shelf, true}});
+        // Still boosted at 20 Hz — a bell would have decayed back to 0 dB.
+        REQUIRE_THAT(eq.magnitude_db_at(20.0f), WithinAbs(6.0, 0.6));
+        REQUIRE_THAT(eq.magnitude_db_at(18000.0f), WithinAbs(0.0, 0.5));
+    }
+
+    SECTION("peak boosts at its center") {
+        eq.set_bands({{1000.0f, 6.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+        REQUIRE_THAT(eq.magnitude_db_at(1000.0f), WithinAbs(6.0, 0.2));
+    }
+
+    SECTION("bands sum, and disabled bands are excluded") {
+        eq.set_bands({{1000.0f, 6.0f, 4.0f, EqCurveView::FilterType::peak, true},
+                      {1000.0f, 3.0f, 4.0f, EqCurveView::FilterType::peak, true}});
+        REQUIRE_THAT(eq.magnitude_db_at(1000.0f), WithinAbs(9.0, 0.3));
+
+        auto bands = eq.bands();
+        bands[1].enabled = false;
+        eq.set_bands(bands);
+        REQUIRE_THAT(eq.magnitude_db_at(1000.0f), WithinAbs(6.0, 0.3));
+    }
+
+    SECTION("no bands is a flat 0 dB line") {
+        eq.set_bands({});
+        REQUIRE_THAT(eq.magnitude_db_at(1000.0f), WithinAbs(0.0, 1e-5));
+    }
+}
+
+TEST_CASE("EqCurveView response depends on sample rate", "[view][eq_curve]") {
+    // The same 15 kHz low-pass is a mild tilt at 96 kHz but nearly at Nyquist
+    // on a 44.1 kHz session. A curve drawn without a sample rate is guesswork.
+    EqCurveView a, b;
+    const EqCurveView::Band band{15000.0f, 0.0f, 0.707f, EqCurveView::FilterType::low_pass, true};
+
+    a.set_sample_rate(44100.0f);
+    a.set_bands({band});
+    b.set_sample_rate(96000.0f);
+    b.set_bands({band});
+
+    REQUIRE(std::abs(a.magnitude_db_at(19000.0f) - b.magnitude_db_at(19000.0f)) > 1.0f);
+}
+
+TEST_CASE("EqCurveView axes are shared and invertible", "[view][eq_curve][graph_scale]") {
+    EqCurveView eq;
+    eq.set_bounds({0.0f, 0.0f, 800.0f, 400.0f});
+    eq.set_frequency_range(20.0f, 20000.0f);
+    eq.set_gain_range(-24.0f, 24.0f);
+
+    auto freq = eq.frequency_scale();
+    auto gain = eq.gain_scale();
+
+    // Endpoints land on the edges.
+    REQUIRE_THAT(freq.to_x(20.0f), WithinAbs(0.0, 0.01));
+    REQUIRE_THAT(freq.to_x(20000.0f), WithinAbs(800.0, 0.01));
+
+    // Logarithmic: 200 Hz and 2 kHz are one decade apart, so they must be the
+    // same pixel distance apart as 2 kHz and 20 kHz.
+    const float d1 = freq.to_x(2000.0f) - freq.to_x(200.0f);
+    const float d2 = freq.to_x(20000.0f) - freq.to_x(2000.0f);
+    REQUIRE_THAT(d1, WithinAbs(d2, 0.01));
+
+    // Round trips.
+    REQUIRE_THAT(freq.to_frequency(freq.to_x(1000.0f)), WithinAbs(1000.0, 0.1));
+    REQUIRE_THAT(gain.to_decibels(gain.to_y(-6.0f)), WithinAbs(-6.0, 0.01));
+
+    // dB grows upward on screen: 0 dB is the vertical center, +24 at the top.
+    REQUIRE_THAT(gain.to_y(0.0f), WithinAbs(200.0, 0.01));
+    REQUIRE(gain.to_y(12.0f) < gain.to_y(-12.0f));
+}
+
+TEST_CASE("spectrum bins resample onto the log axis", "[view][eq_curve][graph_scale]") {
+    // 513 bins = a 1024-point real FFT at 48 kHz: bin k is centered at
+    // k * 24000 / 512 Hz. Put a spike in one bin and assert it lands at that
+    // bin's TRUE frequency — the old code spread bins linearly across the
+    // 20 Hz–20 kHz display range, which put every one of them in the wrong place.
+    std::vector<float> bins(513, -100.0f);
+    constexpr size_t spike_bin = 128;             // 128 * 24000/512 = 6000 Hz
+    bins[spike_bin] = 0.0f;
+
+    LogFrequencyScale scale{20.0f, 20000.0f, 0.0f, 1000.0f};
+    std::vector<float> out(1000);
+    resample_spectrum_log(bins, 48000.0f, scale, out);
+
+    // The peak of the resampled curve sits at the pixel for 6 kHz.
+    const auto peak = std::distance(out.begin(), std::max_element(out.begin(), out.end()));
+    const float peak_hz = scale.to_frequency(static_cast<float>(peak));
+    REQUIRE_THAT(peak_hz, WithinAbs(6000.0, 60.0));
+
+    // Every column has a value — the old bar-per-bin drawing left the bottom
+    // decade full of holes because linear bins are sparse there on a log axis.
+    REQUIRE(std::none_of(out.begin(), out.end(), [](float v) { return std::isnan(v); }));
+
+    // Above Nyquist there is no data; report the floor rather than a phantom shelf.
+    LogFrequencyScale wide{20.0f, 20000.0f, 0.0f, 100.0f};
+    std::vector<float> narrow(100);
+    resample_spectrum_log(bins, 8000.0f, wide, narrow); // Nyquist = 4 kHz
+    REQUIRE(narrow.back() <= pulp::signal::min_response_db);
+}
 
 // ── EqCurveView ─────────────────────────────────────────────────────────────
 
