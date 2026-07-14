@@ -4,7 +4,7 @@
 // allocations across N analyze_output() calls after prepare(). Plus correctness
 // for peak/RMS/clip/NaN/silence counting, snapshot sequence monotonicity +
 // stale/drop detection, TripleBuffer publish/read coherence, the capture
-// AbstractFifo's drop accounting, AudioStats device-counter mirroring, and the
+// SpscRingIndex's drop accounting, AudioStats device-counter mirroring, and the
 // complaint-oriented boundary report.
 
 #include "harness/rt_allocation_probe.hpp"

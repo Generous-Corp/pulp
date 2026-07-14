@@ -5,7 +5,9 @@
 //     and action routing to HostActionSurface.
 //   - A framework-agnostic FakeHostParamSurface proves a view binds against the
 //     interface, not the StateStore concretely (the "port once, three hosts"
-//     ratchet, exercised here with a fake stand-in for the JUCE/iPlug backings).
+//     ratchet). The fake stands in for any non-Pulp parameter store a host or
+//     an existing plugin codebase brings with it: if the view only ever touches
+//     HostParamSurface, that store can be swapped without touching the view.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -244,11 +246,11 @@ TEST_CASE("DesignFrameView routes user gestures to the surface when enabled",
 }
 
 namespace {
-// A foreign-host adapter (a JUCE/iPlug2 fork or a headless QA harness) subclasses
-// DesignFrameView to drive the editor from its own automation layer, calling the
-// protected emit_* funnel so synthetic input travels the SAME path a pointer
-// gesture does. Making emit_* protected upstream removes the need to patch the
-// header downstream.
+// A foreign-host adapter — an existing plugin codebase embedding a Pulp editor,
+// or a headless QA harness — subclasses DesignFrameView to drive the editor from
+// its own automation layer, calling the protected emit_* funnel so synthetic
+// input travels the SAME path a pointer gesture does. emit_* is protected (not
+// private) precisely so that adapter never has to patch the header to get in.
 class ForeignHostDrivenFrameView : public DesignFrameView {
 public:
     using DesignFrameView::DesignFrameView;

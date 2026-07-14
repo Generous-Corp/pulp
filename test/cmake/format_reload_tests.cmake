@@ -390,5 +390,7 @@ catch_discover_tests(pulp-test-xcode-developer-path)
 
 # StepSequencer end-to-end proof: a StepGridView (UI) submits a cell edit through
 # a SequencerStateChannel, the Processor drains it and republishes state, and the
-# view reflects it — the synth-class non-param control path without APVTS.
+# view reflects it. This is the synth-class control path for state that is NOT a
+# host parameter — a step grid is too big and too structured to expose as one
+# automatable param per cell, so it travels its own channel instead.
 pulp_add_test_suite(pulp-test-step-sequencer-roundtrip LIBRARIES pulp::view pulp::state pulp::format pulp::midi pulp::audio)

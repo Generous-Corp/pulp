@@ -852,23 +852,30 @@ helper and call `add_plugin_node` directly; the unresolved-fallback
 path is what keeps `.pulpgraph` round-trips honest when a plugin
 binary disappears between sessions.
 
-## ExtensionsVisitor — typed access to format-specific extensions
+## NativeHandleVisitor — typed access to a plugin's native handle
 
-Hosts that need to reach a format-specific extension (CLAP note ports,
+Hosts that need to reach a format-specific handle (CLAP note ports,
 VST3 IMidiMapping, AU AudioUnit property, LV2 instance) subclass
-`ExtensionsVisitor`, override the `visit_*` methods they care about,
-and call `slot.accept(visitor)`. Default `visit_*` fall through to
+`NativeHandleVisitor` (`<pulp/host/native_handle_visitor.hpp>`),
+override the `visit_*` methods they care about, and call
+`slot.accept(visitor)`. Default `visit_*` fall through to
 `visit_unknown` so a visitor that only cares about one format ignores
 the rest automatically. The base `PluginSlot` dispatches to
 `visit_unknown` for placeholder / unresolved slots so they degrade
 gracefully.
 
-Format-specific `*Extension` structs deliberately expose handles as
+Format-specific `*NativeHandle` structs deliberately expose handles as
 `void*` so they don't pull SDK headers into client code. Callers that
 *do* link the SDK `static_cast` back to the concrete type. Wired in
 `ClapSlot`, `Vst3Slot`, `AuSlot`, `Lv2Slot`. Tests in
-`pulp-test-extensions-visitor` pin the visit dispatch + the
-`ExtensionFormat` enumerator values (the latter is a reorder-detector).
+`pulp-test-native-handle-visitor` pin the visit dispatch + the
+`NativeHandleFormat` enumerator values (the latter is a
+reorder-detector).
+
+The pre-rename spellings (`ExtensionsVisitor`, `*Extension`,
+`ExtensionFormat`, and the `<pulp/host/extensions_visitor.hpp>` include
+path) still resolve via deprecated aliases, so existing host code keeps
+compiling — but new code should use the `NativeHandle*` names.
 
 ## Scanner identity rules
 

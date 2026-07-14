@@ -359,9 +359,11 @@ TEST_CASE("SvgPathWidget fill-rule defaults to nonzero and round-trips",
 
 TEST_CASE("SvgPathWidget paint threads fill-rule to fill_current_path",
           "[svg_path][issue-3656]") {
-    // A compound annular path (outer + inner subpath, the shape JUCE's
-    // SVGGraphicsContext emits for a stroked ellipse). Under nonzero the
-    // inner subpath fills solid; under even-odd it cuts the ring's hole.
+    // An annular (ring) path: ONE path, two closed subpaths — outer then
+    // inner. This is the shape a vector exporter emits for a stroked
+    // ellipse. Under nonzero the inner subpath adds to the winding count
+    // and the hole fills solid; under even-odd it cancels and cuts the
+    // ring's hole.
     // The widget itself just has to forward the rule — RecordingCanvas
     // captures it in fill_current_path's f[0] (0 = nonzero, 1 = evenodd).
     const char* annulus =

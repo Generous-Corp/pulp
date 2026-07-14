@@ -237,6 +237,17 @@ jobs:
         run: |
           python3 tools/scripts/conflict_marker_check.py
 
+      - name: Framework-neutrality guard
+        # Whole-tree invariant: Pulp's own source (core/inspect/ship/packages/
+        # experimental/test/apple) names no other framework, and adopts none of
+        # their class names into its API. Pulp is MIT and public — a comment
+        # that says "mirrors the X class of the same name" is a written
+        # admission of derivation, and an adopted type name is that same
+        # admission shipped in a public header. docs/, tools/, and .agents/
+        # legitimately DISCUSS interop and are out of scope. Hard-fail.
+        run: |
+          python3 tools/scripts/framework_neutrality_check.py
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
@@ -256,3 +267,4 @@ jobs:
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest
+          python3 tools/scripts/framework_neutrality_check.py --selftest

@@ -568,11 +568,11 @@ export interface SvgPathProps extends BaseProps {
     fill?: string;
     /// Fill winding rule, mirroring SVG's `fill-rule`. Defaults to
     /// `"nonzero"` (SVG / Canvas2D default). Use `"evenodd"` for
-    /// compound annular paths — e.g. a stroked ellipse that a framework
-    /// has lowered to a two-subpath `M…Z M…Z` fill (JUCE's
-    /// `SVGGraphicsContext` does this for `Graphics::drawEllipse`); only
-    /// even-odd winding renders the ring's hole, where nonzero paints a
-    /// solid disc.
+    /// annular (ring) shapes — a ring arrives as ONE path with two closed
+    /// subpaths, `M…Z M…Z` (outer then inner), which is how vector
+    /// exporters lower a stroked ellipse. Under nonzero the inner subpath
+    /// adds to the winding count and the hole fills in, painting a solid
+    /// disc; only even-odd cancels it and leaves the hole.
     fillRule?: 'nonzero' | 'evenodd';
     /// Gradient fill as a CSS `linear-gradient(...)` string — e.g.
     /// `"linear-gradient(to bottom, #ff0000, #0000ff)"`. When set

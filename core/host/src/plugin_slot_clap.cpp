@@ -429,8 +429,8 @@ public:
     // Typed plugin introspection surfaces the underlying `const clap_plugin_t*`
     // and host struct so callers can reach into CLAP-specific extensions
     // without round-tripping through `void*`.
-    void accept(ExtensionsVisitor& visitor) const override {
-        ClapExtension ext;
+    void accept(NativeHandleVisitor& visitor) const override {
+        ClapNativeHandle ext;
         ext.plugin = const_cast<clap_plugin_t*>(plugin_);
         ext.host = const_cast<clap_host_t*>(&host_);
         if (plugin_ && plugin_->desc && plugin_->desc->id) {

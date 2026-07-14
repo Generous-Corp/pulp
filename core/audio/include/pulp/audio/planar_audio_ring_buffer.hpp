@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <pulp/audio/buffer.hpp>
-#include <pulp/runtime/abstract_fifo.hpp>
+#include <pulp/runtime/spsc_ring_index.hpp>
 
 namespace pulp::audio {
 
@@ -64,7 +64,7 @@ private:
     std::uint64_t write_impl(BufferView<SampleType> source, std::uint64_t frames) noexcept;
 
     std::vector<float> storage_;
-    std::unique_ptr<runtime::AbstractFifo> fifo_;
+    std::unique_ptr<runtime::SpscRingIndex> fifo_;
     std::uint32_t num_channels_ = 0;
     std::uint64_t usable_capacity_frames_ = 0;
     std::uint64_t internal_capacity_frames_ = 0;

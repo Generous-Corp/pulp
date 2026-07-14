@@ -1776,13 +1776,16 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // ── Gesture-phase resolution ──────────────────────────────────
     // The move/resize gesture machines below need to distinguish a
     // PRESS (begin), a DRAG TICK (live update), and a RELEASE (commit).
-    // Two callers feed events with OPPOSITE is_down conventions:
-    //   * headless tests + any JUCE-style host: press=is_down, drag=
-    //     !is_down, release=is_down (no explicit phase set).
-    //   * the mac platform host: press=down, drag=down, release=up,
-    //     and now also sets MouseEvent::phase explicitly.
-    // Trust the explicit phase when present; otherwise keep the legacy
-    // inference so existing tests and JUCE-style hosts are unchanged.
+    // Two callers feed events with OPPOSITE is_down conventions,
+    // because they disagree about what is_down MEANS:
+    //   * headless tests, and any caller for which is_down means "the
+    //     button state CHANGED": press=is_down, drag=!is_down,
+    //     release=is_down. No explicit phase is set.
+    //   * the mac platform host, for which is_down means "the button is
+    //     currently HELD": press=down, drag=down, release=up. It also
+    //     sets MouseEvent::phase explicitly.
+    // Trust the explicit phase when present; otherwise fall back to the
+    // state-CHANGED inference so those callers are unchanged.
     //
     // `gesture_active` is whether a move OR resize is already in flight;
     // it decides how the legacy is_down value is read for THIS event.
@@ -1895,9 +1898,9 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     }
 
     // ── Drag-handle gesture state machine ─────────────────────────
-    // The Pulp MouseEvent model uses is_down=true ONLY for the
-    // initial press; subsequent moves AND the release both arrive
-    // as is_down=false (JUCE convention). Without a distinct
+    // Under the state-CHANGED convention above, is_down=true arrives
+    // ONLY for the initial press; subsequent moves AND the release
+    // both arrive as is_down=false. Without a distinct
     // release flag we adopt: down on a handle starts the drag,
     // every is_down=false event live-resizes + overwrites the
     // tweak, and the NEXT is_down=true event ends the drag (acts

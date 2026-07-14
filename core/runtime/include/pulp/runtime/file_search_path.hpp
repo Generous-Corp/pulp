@@ -1,7 +1,7 @@
 #pragma once
 
 // FileSearchPath — ordered list of directories to scan when resolving a
-// file by relative name. Mirrors the JUCE class of the same name.
+// file by relative name.
 //
 // Typical use: a plugin needs to locate a "preset.xml" or a font file that
 // might live in any of several user-/installer-/bundle-supplied roots, and
@@ -10,6 +10,10 @@
 // match, optionally finds all matches across all roots, and can serialize
 // to / from the platform's PATH-style separator (`:` on POSIX, `;` on
 // Windows) so it round-trips through `PropertiesFile` cleanly.
+//
+// Order is the whole point: the FIRST root that contains the name wins, so
+// callers express precedence (user override before installed default before
+// bundled fallback) simply by the order in which they add roots.
 
 #include <filesystem>
 #include <optional>

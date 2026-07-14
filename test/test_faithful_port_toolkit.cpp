@@ -80,7 +80,7 @@ DesignFrameView make_knob_view() {
 // ── SVG fragment handles ─────────────────────────────────────────────────────
 
 TEST_CASE("FragmentTransform emits composed SVG transform attribute",
-          "[view][fragment][issue-juce-port]") {
+          "[view][fragment][issue-port-fidelity]") {
     // Pure math — no canvas.
     SECTION("identity emits nothing") {
         FragmentTransform id;
@@ -112,7 +112,7 @@ TEST_CASE("FragmentTransform emits composed SVG transform attribute",
 }
 
 TEST_CASE("extract_svg_fragment pulls the marker's element out whole",
-          "[view][fragment][issue-juce-port]") {
+          "[view][fragment][issue-port-fidelity]") {
     SECTION("self-closing element by its path d marker") {
         const std::string frag =
             pulp::view::extract_svg_fragment(kFrameSvg, "M100 100 L100 75");
@@ -133,7 +133,7 @@ TEST_CASE("extract_svg_fragment pulls the marker's element out whole",
 }
 
 TEST_CASE("svg_open_tag preserves the coordinate-space header",
-          "[view][fragment][issue-juce-port]") {
+          "[view][fragment][issue-port-fidelity]") {
     const std::string header = pulp::view::svg_open_tag(kFrameSvg);
     CHECK(header.find("width=\"200\"") != std::string::npos);
     CHECK(header.find("viewBox=\"0 0 200 200\"") != std::string::npos);
@@ -142,7 +142,7 @@ TEST_CASE("svg_open_tag preserves the coordinate-space header",
 }
 
 TEST_CASE("recolor_svg_fragment rewrites paint values, leaves none alone",
-          "[view][fragment][issue-juce-port]") {
+          "[view][fragment][issue-port-fidelity]") {
     const std::string frag =
         "<path d=\"X\" stroke=\"#39ff64\" fill=\"none\"/>";
     SECTION("fill=none is preserved; stroke opt-in recolors") {
@@ -162,7 +162,7 @@ TEST_CASE("recolor_svg_fragment rewrites paint values, leaves none alone",
 }
 
 TEST_CASE("build_svg_fragment_document composites one fragment in the source space",
-          "[view][fragment][issue-juce-port]") {
+          "[view][fragment][issue-port-fidelity]") {
     const std::string frag =
         pulp::view::extract_svg_fragment(kFrameSvg, "M100 100 L100 75");
     REQUIRE_FALSE(frag.empty());
@@ -197,7 +197,7 @@ TEST_CASE("build_svg_fragment_document composites one fragment in the source spa
 }
 
 TEST_CASE("DesignFrameView::draw_fragment issues one draw_svg over the panel box",
-          "[view][fragment][issue-juce-port]") {
+          "[view][fragment][issue-port-fidelity]") {
     // Mode: RecordingCanvas capture of the draw_svg op (no Skia raster in this
     // GPU-OFF build), asserting the mini-document + draw box are correct.
     DesignFrameView v = make_knob_view();
@@ -243,7 +243,7 @@ TEST_CASE("DesignFrameView::draw_fragment issues one draw_svg over the panel box
 }
 
 TEST_CASE("DesignFrameView hover/bypass restyle rides draw_fragment",
-          "[view][fragment][issue-juce-port]") {
+          "[view][fragment][issue-port-fidelity]") {
     // paint() draws the full frame then, for elements with a fragment handle,
     // redraws that fragment brightened (hovered) or desaturated (disabled). We
     // assert the EXTRA draw_svg calls beyond the one full-frame draw.
@@ -282,7 +282,7 @@ const Rect kWindow{0, 0, kWinW, kWinH};
 }  // namespace
 
 TEST_CASE("place_callout keeps the preferred side when it fits",
-          "[view][callout][issue-juce-port]") {
+          "[view][callout][issue-port-fidelity]") {
     // Anchor mid-window: everything fits, so preferred survives.
     const Rect anchor{190, 190, 20, 20};
     auto p = pulp::view::place_callout(anchor, 120, 80, kWindow, CalloutSide::below);
@@ -293,7 +293,7 @@ TEST_CASE("place_callout keeps the preferred side when it fits",
 }
 
 TEST_CASE("place_callout auto-flips when the preferred side would clip",
-          "[view][callout][issue-juce-port]") {
+          "[view][callout][issue-port-fidelity]") {
     CalloutStyle style;  // defaults
     SECTION("near top edge, prefer above -> flips below") {
         const Rect anchor{190, 4, 20, 20};
@@ -326,7 +326,7 @@ TEST_CASE("place_callout auto-flips when the preferred side would clip",
 }
 
 TEST_CASE("place_callout clamps the body inside the window margins",
-          "[view][callout][issue-juce-port]") {
+          "[view][callout][issue-port-fidelity]") {
     CalloutStyle style;  // margin = 8
     // Anchor hugging the left edge with a wide body: centering would push the body
     // off the left of the window, so the cross axis clamps to the margin.
@@ -338,7 +338,7 @@ TEST_CASE("place_callout clamps the body inside the window margins",
 }
 
 TEST_CASE("place_callout arrow tracks the anchor and stays on the body edge",
-          "[view][callout][issue-juce-port]") {
+          "[view][callout][issue-port-fidelity]") {
     CalloutStyle style;
     SECTION("centered anchor: arrow tip aligns with the anchor center") {
         const Rect anchor{190, 190, 20, 20};
@@ -370,7 +370,7 @@ TEST_CASE("place_callout arrow tracks the anchor and stays on the body edge",
 }
 
 TEST_CASE("AnchoredCallout hosts content and mounts as an overlay",
-          "[view][callout][issue-juce-port]") {
+          "[view][callout][issue-port-fidelity]") {
     // View-level: mode is geometry assertion (no Skia raster in this build).
     auto root = std::make_unique<pulp::view::View>();
     root->set_bounds({0, 0, kWinW, kWinH});
@@ -401,7 +401,7 @@ TEST_CASE("AnchoredCallout hosts content and mounts as an overlay",
 using pulp::view::ReorderList;
 
 TEST_CASE("reorder_target_index rounds the drag offset to a slot",
-          "[view][reorder][issue-juce-port]") {
+          "[view][reorder][issue-port-fidelity]") {
     const float pitch = 46.0f;  // extent 40 + gap 6
     SECTION("no offset keeps the source index") {
         CHECK(pulp::view::reorder_target_index(1, 0.0f, pitch, 4) == 1);
@@ -440,7 +440,7 @@ std::unique_ptr<ReorderList> make_reorder_list(std::vector<pulp::view::View*>& o
 }  // namespace
 
 TEST_CASE("ReorderList commits a drag that moves item 0 past item 2",
-          "[view][reorder][issue-juce-port]") {
+          "[view][reorder][issue-port-fidelity]") {
     std::vector<pulp::view::View*> original;
     auto list = make_reorder_list(original);
 
@@ -463,7 +463,7 @@ TEST_CASE("ReorderList commits a drag that moves item 0 past item 2",
 }
 
 TEST_CASE("ReorderList no-op drop does not fire on_reorder",
-          "[view][reorder][issue-juce-port]") {
+          "[view][reorder][issue-port-fidelity]") {
     std::vector<pulp::view::View*> original;
     auto list = make_reorder_list(original);
     bool fired = false;
@@ -476,7 +476,7 @@ TEST_CASE("ReorderList no-op drop does not fire on_reorder",
 }
 
 TEST_CASE("ReorderList opens a gap for the lifted item during a drag",
-          "[view][reorder][issue-juce-port]") {
+          "[view][reorder][issue-port-fidelity]") {
     std::vector<pulp::view::View*> original;
     auto list = make_reorder_list(original);
     const float pitch = list->pitch();
@@ -519,7 +519,7 @@ const pulp::canvas::DrawCommand* last_rrect(const pulp::canvas::RecordingCanvas&
 }  // namespace
 
 TEST_CASE("paint_mod_ring_knob active arc sweep grows with value",
-          "[view][painters][issue-juce-port]") {
+          "[view][painters][issue-port-fidelity]") {
     const pulp::view::Rect r{0, 0, 80, 80};
     pulp::canvas::RecordingCanvas lo, hi;
     paint::paint_mod_ring_knob(lo, r, 0.25f);
@@ -536,7 +536,7 @@ TEST_CASE("paint_mod_ring_knob active arc sweep grows with value",
 }
 
 TEST_CASE("paint_level_fader thumb tracks the value",
-          "[view][painters][issue-juce-port]") {
+          "[view][painters][issue-port-fidelity]") {
     const pulp::view::Rect r{10, 10, 20, 200};
     SECTION("vertical: higher value -> thumb higher (smaller y)") {
         pulp::canvas::RecordingCanvas lo, hi;
@@ -558,7 +558,7 @@ TEST_CASE("paint_level_fader thumb tracks the value",
 }
 
 TEST_CASE("paint_range_slider draws two thumbs spanning [lo,hi]",
-          "[view][painters][issue-juce-port]") {
+          "[view][painters][issue-port-fidelity]") {
     pulp::canvas::RecordingCanvas c;
     paint::paint_range_slider(c, {0, 0, 200, 20}, 0.25f, 0.75f);
     // Two thumb circles.
@@ -586,7 +586,7 @@ TEST_CASE("paint_range_slider draws two thumbs spanning [lo,hi]",
 }
 
 TEST_CASE("paint_toggle knob moves with state",
-          "[view][painters][issue-juce-port]") {
+          "[view][painters][issue-port-fidelity]") {
     const pulp::view::Rect r{0, 0, 48, 24};
     pulp::canvas::RecordingCanvas off, on;
     paint::paint_toggle(off, r, false);
@@ -601,7 +601,7 @@ TEST_CASE("paint_toggle knob moves with state",
 }
 
 TEST_CASE("paint_waveform strokes one segment per sample gap",
-          "[view][painters][issue-juce-port]") {
+          "[view][painters][issue-port-fidelity]") {
     const float samples[5] = {0.0f, 1.0f, -1.0f, 0.5f, 0.0f};
     pulp::canvas::RecordingCanvas c;
     paint::paint_waveform(c, {0, 0, 100, 40}, samples, 5);
@@ -648,7 +648,7 @@ const char* kManifestJson = R"JSON({
 }  // namespace
 
 TEST_CASE("parse_annotated_manifest builds the typed element table",
-          "[view][annotated-capture][issue-juce-port]") {
+          "[view][annotated-capture][issue-port-fidelity]") {
     impd::AnnotatedCaptureManifest m;
     std::string err;
     REQUIRE(impd::parse_annotated_manifest(kManifestJson, m, err));
@@ -685,7 +685,7 @@ TEST_CASE("parse_annotated_manifest builds the typed element table",
 }
 
 TEST_CASE("parse_annotated_manifest reports errors",
-          "[view][annotated-capture][issue-juce-port]") {
+          "[view][annotated-capture][issue-port-fidelity]") {
     impd::AnnotatedCaptureManifest m;
     std::string err;
     SECTION("invalid JSON") {
@@ -704,13 +704,13 @@ TEST_CASE("parse_annotated_manifest reports errors",
 }
 
 TEST_CASE("snake_case matches the generated-file convention",
-          "[view][annotated-capture][issue-juce-port]") {
+          "[view][annotated-capture][issue-port-fidelity]") {
     CHECK(impd::snake_case("ReverbPanelView") == "reverb_panel_view");
     CHECK(impd::snake_case("MyView") == "my_view");
 }
 
 TEST_CASE("generate_view_header emits a DesignFrameView subclass",
-          "[view][annotated-capture][issue-juce-port]") {
+          "[view][annotated-capture][issue-port-fidelity]") {
     impd::AnnotatedCaptureManifest m;
     std::string err;
     REQUIRE(impd::parse_annotated_manifest(kManifestJson, m, err));
@@ -723,7 +723,7 @@ TEST_CASE("generate_view_header emits a DesignFrameView subclass",
 }
 
 TEST_CASE("generate_view_source emits the element table + host-param wiring",
-          "[view][annotated-capture][issue-juce-port]") {
+          "[view][annotated-capture][issue-port-fidelity]") {
     impd::AnnotatedCaptureManifest m;
     std::string err;
     REQUIRE(impd::parse_annotated_manifest(kManifestJson, m, err));
@@ -756,7 +756,7 @@ TEST_CASE("generate_view_source emits the element table + host-param wiring",
 }
 
 TEST_CASE("generate_view_source omits host-param wiring when no keys are bound",
-          "[view][annotated-capture][issue-juce-port]") {
+          "[view][annotated-capture][issue-port-fidelity]") {
     impd::AnnotatedCaptureManifest m;
     std::string err;
     REQUIRE(impd::parse_annotated_manifest(

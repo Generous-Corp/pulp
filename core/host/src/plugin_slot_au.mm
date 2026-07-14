@@ -315,8 +315,8 @@ public:
     // Typed plugin introspection surfaces the AudioUnit instance and its
     // component description so callers can talk directly to AudioToolbox or
     // use vendor-specific properties.
-    void accept(ExtensionsVisitor& visitor) const override {
-        AudioUnitExtension ext;
+    void accept(NativeHandleVisitor& visitor) const override {
+        AudioUnitNativeHandle ext;
         ext.component_instance = au_;
         // Re-parse the 'TYPE:SUBT:MANU' triplet we stored at load time.
         // parse_4cc_triplet lives in this file's anonymous namespace.

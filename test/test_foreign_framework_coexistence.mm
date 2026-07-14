@@ -1,11 +1,13 @@
 // Foreign-framework coexistence (PAM WS-6 / G8).
 //
 // Pulp is designed to share a process with a SECOND native UI framework (a
-// JUCE plugin, a host's own AppKit UI, another SDK) when it is embedded via
-// PluginViewHost. This test pins the behaviors that make that safe on macOS,
-// using a plain non-Pulp NSWindow as the "foreign framework" stand-in — a raw
-// NSWindow exercises exactly the AppKit run-loop surfaces (modal/tracking
-// modes, focus changes, resize, teardown) a JUCE editor window would.
+// host's own AppKit UI, an existing plugin's editor, another SDK) when it is
+// embedded via PluginViewHost. This test pins the behaviors that make that safe
+// on macOS, using a plain non-Pulp NSWindow as the "foreign framework" stand-in.
+// A raw NSWindow is the right stand-in because the hazards are AppKit-level, not
+// framework-level: whatever the other framework is, its editor window puts the
+// run loop into the same modal/tracking modes, takes and drops first-responder
+// focus the same way, resizes the same way, and tears down the same way.
 //
 // See docs/guides/foreign-framework-coexistence.md for the full contract.
 //

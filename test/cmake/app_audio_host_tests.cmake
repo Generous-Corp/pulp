@@ -286,11 +286,11 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
-# ExtensionsVisitor pure-header pattern test. No plugin loading
+# NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
-add_executable(pulp-test-extensions-visitor test_extensions_visitor.cpp)
-target_link_libraries(pulp-test-extensions-visitor PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-extensions-visitor)
+add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)
+target_link_libraries(pulp-test-native-handle-visitor PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-native-handle-visitor)
 
 # Opt-in real-plugin integration runner. Builds only when
 # PULP_REAL_PLUGIN_TESTS=ON. Even when built, individual TEST_CASEs SKIP

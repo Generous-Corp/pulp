@@ -1,4 +1,4 @@
-// Tests for pulp::runtime::AbstractFifo — wrap-around correctness,
+// Tests for pulp::runtime::SpscRingIndex — wrap-around correctness,
 // capacity/empty/full boundaries, prepare/finish contract, and an SPSC
 // hammer that drives the producer + consumer on separate threads to assert
 // every item arrives in order with no loss or duplication.
@@ -8,15 +8,15 @@
 #include <thread>
 #include <vector>
 
-#include <pulp/runtime/abstract_fifo.hpp>
+#include <pulp/runtime/spsc_ring_index.hpp>
 
-using pulp::runtime::AbstractFifo;
+using pulp::runtime::SpscRingIndex;
 
 namespace {
 
 // Convenience: write `count` items (values starting at `seed`) into `buf` via
 // the fifo, return how many were actually written (free space may clamp it).
-int write_via_fifo(AbstractFifo& fifo, std::vector<int>& buf,
+int write_via_fifo(SpscRingIndex& fifo, std::vector<int>& buf,
                    int count, int seed) {
     int s1 = 0, n1 = 0, s2 = 0, n2 = 0;
     fifo.prepare_to_write(count, s1, n1, s2, n2);
@@ -27,7 +27,7 @@ int write_via_fifo(AbstractFifo& fifo, std::vector<int>& buf,
 }
 
 // Convenience: read up to `count` items into `out`. Returns # read.
-int read_via_fifo(AbstractFifo& fifo, const std::vector<int>& buf,
+int read_via_fifo(SpscRingIndex& fifo, const std::vector<int>& buf,
                   std::vector<int>& out, int count) {
     int s1 = 0, n1 = 0, s2 = 0, n2 = 0;
     fifo.prepare_to_read(count, s1, n1, s2, n2);
@@ -39,17 +39,17 @@ int read_via_fifo(AbstractFifo& fifo, const std::vector<int>& buf,
 
 }  // namespace
 
-TEST_CASE("AbstractFifo starts empty with full free_space minus reserved slot",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(8);
+TEST_CASE("SpscRingIndex starts empty with full free_space minus reserved slot",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(8);
     REQUIRE(fifo.capacity() == 8);
     REQUIRE(fifo.num_ready() == 0);
     REQUIRE(fifo.free_space() == 7);  // one slot reserved as sentinel
 }
 
-TEST_CASE("AbstractFifo prepare_to_write within contiguous range",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(8);
+TEST_CASE("SpscRingIndex prepare_to_write within contiguous range",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(8);
     int s1 = -1, n1 = -1, s2 = -1, n2 = -1;
     fifo.prepare_to_write(3, s1, n1, s2, n2);
     REQUIRE(s1 == 0);
@@ -57,9 +57,9 @@ TEST_CASE("AbstractFifo prepare_to_write within contiguous range",
     REQUIRE(n2 == 0);
 }
 
-TEST_CASE("AbstractFifo prepare_to_write wraps around the buffer end",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(8);
+TEST_CASE("SpscRingIndex prepare_to_write wraps around the buffer end",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(8);
     std::vector<int> buf(8, 0);
 
     // Push the write cursor to position 6, then drain reads so free space
@@ -78,9 +78,9 @@ TEST_CASE("AbstractFifo prepare_to_write wraps around the buffer end",
     REQUIRE(n2 == 3);   // wraps to 0, 1, 2
 }
 
-TEST_CASE("AbstractFifo full state clamps writes to zero",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(4);
+TEST_CASE("SpscRingIndex full state clamps writes to zero",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(4);
     std::vector<int> buf(4, 0);
     REQUIRE(write_via_fifo(fifo, buf, 3, 100) == 3);
     REQUIRE(fifo.num_ready() == 3);
@@ -92,25 +92,25 @@ TEST_CASE("AbstractFifo full state clamps writes to zero",
     REQUIRE(n2 == 0);
 }
 
-TEST_CASE("AbstractFifo prepare_to_write clamps overshoot to free_space",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(8);
+TEST_CASE("SpscRingIndex prepare_to_write clamps overshoot to free_space",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(8);
     std::vector<int> buf(8, 0);
     REQUIRE(write_via_fifo(fifo, buf, 100, 0) == 7);  // capacity-1
 }
 
-TEST_CASE("AbstractFifo empty state clamps reads to zero",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(8);
+TEST_CASE("SpscRingIndex empty state clamps reads to zero",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(8);
     int s1 = -1, n1 = -1, s2 = -1, n2 = -1;
     fifo.prepare_to_read(4, s1, n1, s2, n2);
     REQUIRE(n1 == 0);
     REQUIRE(n2 == 0);
 }
 
-TEST_CASE("AbstractFifo write+read round-trip preserves order across a wrap",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(6);
+TEST_CASE("SpscRingIndex write+read round-trip preserves order across a wrap",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(6);
     std::vector<int> buf(6, 0);
     std::vector<int> out;
 
@@ -127,9 +127,9 @@ TEST_CASE("AbstractFifo write+read round-trip preserves order across a wrap",
     REQUIRE(out == std::vector<int>{100, 101, 102, 103});
 }
 
-TEST_CASE("AbstractFifo finish_* with non-positive args is a no-op",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(4);
+TEST_CASE("SpscRingIndex finish_* with non-positive args is a no-op",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(4);
     fifo.finish_write(0);
     fifo.finish_write(-5);
     fifo.finish_read(0);
@@ -144,10 +144,10 @@ TEST_CASE("AbstractFifo finish_* with non-positive args is a no-op",
 // coherent") would leave the cursor out of range, and the next prepare_to_* call
 // would return invalid indices into the caller-owned buffer. True modulo wrap
 // fixes that.
-TEST_CASE("AbstractFifo finish_write clamps overshoot to a valid cursor "
+TEST_CASE("SpscRingIndex finish_write clamps overshoot to a valid cursor "
           "(regression coverage)",
-          "[runtime][abstract_fifo][issue-2985]") {
-    AbstractFifo fifo(8);
+          "[runtime][spsc-ring-index][issue-2985]") {
+    SpscRingIndex fifo(8);
     // Even with a far-too-large finish, the resulting prepare must
     // return offsets STRICTLY within [0, capacity).
     fifo.finish_write(/*num_written=*/100);  // 100 % 8 = 4
@@ -159,10 +159,10 @@ TEST_CASE("AbstractFifo finish_write clamps overshoot to a valid cursor "
     REQUIRE(s2 < fifo.capacity());
 }
 
-TEST_CASE("AbstractFifo finish_read clamps overshoot to a valid cursor "
+TEST_CASE("SpscRingIndex finish_read clamps overshoot to a valid cursor "
           "(regression coverage)",
-          "[runtime][abstract_fifo][issue-2985]") {
-    AbstractFifo fifo(8);
+          "[runtime][spsc-ring-index][issue-2985]") {
+    SpscRingIndex fifo(8);
     fifo.finish_read(/*num_read=*/100);  // 100 % 8 = 4
     int s1 = -1, n1 = -1, s2 = -1, n2 = -1;
     fifo.prepare_to_read(1, s1, n1, s2, n2);
@@ -172,9 +172,9 @@ TEST_CASE("AbstractFifo finish_read clamps overshoot to a valid cursor "
     REQUIRE(s2 < fifo.capacity());
 }
 
-TEST_CASE("AbstractFifo reset returns cursors to zero",
-          "[runtime][abstract_fifo]") {
-    AbstractFifo fifo(8);
+TEST_CASE("SpscRingIndex reset returns cursors to zero",
+          "[runtime][spsc-ring-index]") {
+    SpscRingIndex fifo(8);
     std::vector<int> buf(8, 0);
     REQUIRE(write_via_fifo(fifo, buf, 4, 1) == 4);
     REQUIRE(fifo.num_ready() == 4);
@@ -183,12 +183,12 @@ TEST_CASE("AbstractFifo reset returns cursors to zero",
     REQUIRE(fifo.free_space() == 7);
 }
 
-TEST_CASE("AbstractFifo SPSC hammer — one producer, one consumer",
-          "[runtime][abstract_fifo][hammer]") {
+TEST_CASE("SpscRingIndex SPSC hammer — one producer, one consumer",
+          "[runtime][spsc-ring-index][hammer]") {
     constexpr int kCapacity = 64;
     constexpr int kTotal = 200'000;
 
-    AbstractFifo fifo(kCapacity);
+    SpscRingIndex fifo(kCapacity);
     std::vector<int> buf(kCapacity, 0);
     std::atomic<bool> producer_done{false};
 

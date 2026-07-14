@@ -784,7 +784,7 @@ TEST_CASE("StateTree structured PropertyValue equality is structural",
     REQUIRE(left != different);
 }
 
-TEST_CASE("StateTree import-shaped JUCE var-style array/object maps to PropertyValue leaves",
+TEST_CASE("StateTree import-shaped dynamic array/object maps to PropertyValue leaves",
           "[state][tree][json][import]") {
     auto imported = StateTree::from_json(R"JSON({
         "type": "plugin-state",
@@ -812,9 +812,9 @@ TEST_CASE("StateTree import-shaped JUCE var-style array/object maps to PropertyV
     REQUIRE_THAT(std::get<double>(macro.values.at("value")), WithinAbs(0.75, 1e-9));
 }
 
-TEST_CASE("StateTree import-shaped ValueTree records use children for owned nodes",
+TEST_CASE("StateTree import-shaped records use children for owned nodes",
           "[state][tree][json][import]") {
-    auto root = StateTree::create("ValueTreeLikePluginState");
+    auto root = StateTree::create("ImportedPluginState");
     root->set("leafData", make_property_object({
         {"ui", make_property_object({{"theme", std::string("dark")}, {"zoom", 1.25}})},
     }));

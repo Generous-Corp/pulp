@@ -22,7 +22,7 @@
 #include <pulp/audio/audio_probe_snapshot.hpp>
 #include <pulp/audio/audio_stats.hpp>
 #include <pulp/audio/buffer.hpp>
-#include <pulp/runtime/abstract_fifo.hpp>
+#include <pulp/runtime/spsc_ring_index.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 
 #include <cstdint>
@@ -138,13 +138,13 @@ private:
 
     runtime::TripleBuffer<AudioProbeSnapshot> summary_buf_;
 
-    // Optional last-N capture: AbstractFifo over preallocated, probe-owned
+    // Optional last-N capture: SpscRingIndex over preallocated, probe-owned
     // storage. The FIFO indexes frames; storage is channel-major with
     // `capture_storage_channels_` lanes, each `capture_frames_ + 1` samples
     // long. The ring is sized at prepare(); analyze_output() never resizes it.
     std::vector<float> capture_storage_;
     int capture_storage_channels_ = 0;
-    std::unique_ptr<runtime::AbstractFifo> capture_fifo_;
+    std::unique_ptr<runtime::SpscRingIndex> capture_fifo_;
 };
 
 }  // namespace pulp::audio

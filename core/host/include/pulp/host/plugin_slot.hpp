@@ -12,7 +12,7 @@
 
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/parameter_event_queue.hpp>
-#include <pulp/host/extensions_visitor.hpp>
+#include <pulp/host/native_handle_visitor.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/format/process_block.hpp>
 #include <pulp/state/parameter.hpp>
@@ -188,9 +188,9 @@ public:
         QueryFailed,  ///< The backend asked and the plugin errored.
     };
 
-    // Extensions visitor.
+    // Native-handle visitor.
     //
-    // Typed plugin introspection: subclass ExtensionsVisitor, override
+    // Typed plugin introspection: subclass NativeHandleVisitor, override
     // the visit_* methods you care about, then call
     //   slot.accept(visitor)
     // The slot dispatches to the matching visit_* overload (visit_clap,
@@ -198,8 +198,8 @@ public:
     // implementation here calls visit_unknown so placeholder/unresolved
     // slots and slots whose format adapter was not compiled in degrade
     // gracefully without leaking a stale handle.
-    virtual void accept(ExtensionsVisitor& visitor) const {
-        visitor.visit_unknown(*this, ExtensionFormat::Unknown);
+    virtual void accept(NativeHandleVisitor& visitor) const {
+        visitor.visit_unknown(*this, NativeHandleFormat::Unknown);
     }
 
     // Additive host-side multi-bus processing entry point. Keep appended to

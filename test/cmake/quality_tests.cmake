@@ -16,6 +16,16 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME token-key-correctness COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_key_check.py")
 
+    # Framework neutrality: fail on a foreign framework named in Pulp's own
+    # source, or on a foreign class name adopted into Pulp's API. The selftest
+    # seeds a violation of each half and asserts the checker flags it — a gate
+    # that cannot fail is not a gate.
+    add_test(NAME framework-neutrality COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/framework_neutrality_check.py")
+    add_test(NAME framework-neutrality-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/framework_neutrality_check.py"
+        --selftest)
+
     # Thread-safe assertions: fail on a Catch2 assertion macro invoked inside a
     # worker-thread lambda. Catch2 3.7.1's macros aren't thread-safe; off-main
     # assertions are UB that bare metal tolerates but VM scheduler timing trips.

@@ -171,9 +171,10 @@ if(PULP_HAS_AUSDK)
     # .cpp sources, so it needs the headers at build time but must NOT export
     # external/AudioUnitSDK/include onto every consumer of pulp::format. A
     # PUBLIC link leaked ausdk's $<INSTALL_INTERFACE:external/AudioUnitSDK/include>
-    # to anything linking pulp::format (e.g. a JUCE plugin embedding Pulp via
-    # pulp-view-embed), colliding with the host's OWN vendored, differently-
-    # versioned AudioUnitSDK. Pulp's own AU plugins don't rely on this
+    # to anything linking pulp::format (e.g. an existing plugin that embeds a
+    # Pulp view via pulp-view-embed), colliding with that consumer's OWN
+    # vendored, differently-versioned AudioUnitSDK. Pulp's own AU plugins
+    # don't rely on this
     # propagation — _pulp_add_au links ausdk PRIVATE directly to the AU target,
     # and the only public headers that pull AudioUnitSDK (au_v2_entry.hpp et al)
     # are opt-in, compiled solely into an AU plugin entry point. Static-lib link

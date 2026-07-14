@@ -88,7 +88,7 @@ enum class ParamDesignation {
 ///   both halves fan out symmetrically. Useful for bipolar parameters (pan,
 ///   detune, balance).
 ///
-/// The shaping convention matches `NormalisableRange<T>` below, which shares
+/// The shaping convention matches `SkewedRange<T>` below, which shares
 /// the same math. Use `ParamRange::with_centre()` to derive the skew that
 /// places a chosen real value at the normalized midpoint (0.5).
 struct ParamRange {
@@ -177,7 +177,7 @@ struct ParamRange {
 
 /// Skew-aware normalized range with optional symmetric centre.
 ///
-/// `NormalisableRange<T>` extends `ParamRange` with a non-linear mapping
+/// `SkewedRange<T>` extends `ParamRange` with a non-linear mapping
 /// between the [0, 1] host-automation domain and the [min, max] parameter
 /// domain. Two shape controls:
 ///
@@ -193,29 +193,29 @@ struct ParamRange {
 ///
 /// @code
 /// // Frequency knob: 20 Hz at min, 20 kHz at max, 1 kHz at centre.
-/// pulp::state::NormalisableRange<float> freq{20.0f, 20000.0f, 1000.0f};
+/// pulp::state::SkewedRange<float> freq{20.0f, 20000.0f, 1000.0f};
 /// float normalized = freq.normalize(1000.0f); // ~= 0.5
 /// float hz         = freq.denormalize(0.5f);  // ~= 1000.0f
 /// @endcode
 template<typename T = float>
-struct NormalisableRange {
+struct SkewedRange {
     T min = T(0);
     T max = T(1);
     T interval = T(0);          ///< Step size. 0 = continuous.
     T skew = T(1);              ///< 1 = linear, <1 weights min, >1 weights max.
     bool symmetric_skew = false;
 
-    constexpr NormalisableRange() = default;
-    constexpr NormalisableRange(T lo, T hi, T step = T(0), T skew_value = T(1),
+    constexpr SkewedRange() = default;
+    constexpr SkewedRange(T lo, T hi, T step = T(0), T skew_value = T(1),
                                 bool symmetric = false)
         : min(lo), max(hi), interval(step),
           skew(skew_value), symmetric_skew(symmetric) {}
 
-    /// Build a NormalisableRange whose normalised midpoint maps to the
+    /// Build a SkewedRange whose normalised midpoint maps to the
     /// supplied real-valued centre. Equivalent to choosing the skew that
     /// satisfies denormalize(0.5) == centre.
-    static NormalisableRange with_centre(T lo, T hi, T centre, T step = T(0)) {
-        NormalisableRange r{lo, hi, step};
+    static SkewedRange with_centre(T lo, T hi, T centre, T step = T(0)) {
+        SkewedRange r{lo, hi, step};
         if (hi > lo && centre > lo && centre < hi) {
             const T proportion = (centre - lo) / (hi - lo);
             // log(0.5) / log(proportion) gives the skew that lands `centre` at 0.5.
@@ -269,6 +269,12 @@ struct NormalisableRange {
         return std::clamp(snapped, min, max);
     }
 };
+
+/// Deprecated spelling of `SkewedRange<T>`. Kept so existing code keeps
+/// compiling; the type is identical. Prefer `SkewedRange<T>` — it names the
+/// thing the type actually is (a min/max range plus a skew curve).
+template<typename T = float>
+using NormalisableRange [[deprecated("renamed to pulp::state::SkewedRange")]] = SkewedRange<T>;
 
 /// Immutable parameter metadata, registered once at plugin initialization.
 ///
