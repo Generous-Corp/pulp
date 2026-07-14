@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06690"></a>
+## [0.669.0] - 2026-07-14
+
+- fix(view): draw the true EQ response instead of a Gaussian bell ([#6121](https://github.com/danielraffel/pulp/pull/6121))
+- audit/license diligence 20260714 ([#6120](https://github.com/danielraffel/pulp/pull/6120))
+- fix(web-demos): idle the GPU on Engine=CPU; unbreak the UI fixture and the OG bake ([#6119](https://github.com/danielraffel/pulp/pull/6119))
+- fix(super-convolver): stop the Bypass click and the Size-drag crackle ([#6117](https://github.com/danielraffel/pulp/pull/6117))
+- ci: guard the non-Skia build that broke main twice (#6087) ([#6112](https://github.com/danielraffel/pulp/pull/6112))
+- fix(skill): pulp-web-demo — og:image must exist AND be a real PNG (a 200 can lie) ([#6113](https://github.com/danielraffel/pulp/pull/6113))
+- fix(skill): pulp-web-demo example pins 0.2.1 (0.1.0 has no fileUpload) ([#6111](https://github.com/danielraffel/pulp/pull/6111))
+
 <a id="v06680"></a>
 ## [0.668.0] - 2026-07-13
 
@@ -6374,6 +6385,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.669.0]: https://github.com/danielraffel/pulp/releases/tag/v0.669.0
 [0.668.0]: https://github.com/danielraffel/pulp/releases/tag/v0.668.0
 [0.665.0]: https://github.com/danielraffel/pulp/releases/tag/v0.665.0
 [0.664.0]: https://github.com/danielraffel/pulp/releases/tag/v0.664.0
