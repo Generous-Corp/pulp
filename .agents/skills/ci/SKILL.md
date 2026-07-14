@@ -543,6 +543,14 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `release-dry-run.yml`, `sign-and-release.yml`, `release-cli-local.sh`, and
   checkout-backed SDK configure paths aligned when touching release CMake
   flags.
+- **The install-consumer smoke must compile against the installed prefix, not
+  the source tree.** When an exported SDK target gains or exposes public
+  headers, add representative `include/pulp/...` existence checks and include
+  those headers from the generated consumer probe. Link the exported targets
+  that own the APIs as well. This catches a target such as `Pulp::host` being
+  exported with a library while its public headers are accidentally omitted
+  from the install manifest. Keep `tools/validation/sdk-smoke` in sync so the
+  same proof is runnable locally without GitHub Actions.
 - **`sign-and-release.yml` does NOT wait on the release any more — do not add the
   poll back.** It used to poll `gh release view "$TAG"` until release-cli created
   the release, so it could attach `appcast.xml`. That poll ran on the macOS
