@@ -124,6 +124,32 @@ try {
                   "(i.e. play no reverb at all). The handoff is broken.");
   if (!toggled) throw new Error("the IR handoff did not complete on the page");
 
+  // ── Engine=CPU means the GPU IS IDLE. ────────────────────────────────────────────────
+  //
+  // Not "its output is ignored" — IDLE. The page is still on CPU here (the default), and the
+  // plugin is pushing every block across the xfer seam exactly as it does on GPU, so a worker
+  // that convolves whatever it is handed will happily burn the GPU for audio nobody hears.
+  // That is what it did: measured at ~100 queue submits per second with the select on CPU,
+  // which is a pegged GPU meter and a drained battery for nothing. Read the worker's OWN
+  // submit counter — the one number that cannot be talked out of the truth.
+  const sampleStats = () => page.evaluate(() => {
+    const st = window.__gpuStats;      // the worker's own counters, out of the SAB
+    return st ? { produced: st.produced || 0, expired: st.expired || 0,
+                  queueSubmits: st.queueSubmits || 0, primed: st.primed || 0 } : null;
+  });
+
+  const cpuBefore = await sampleStats();
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 2000)));
+  const cpuAfter = await sampleStats();
+  const cpuSubmits = (cpuAfter?.queueSubmits || 0) - (cpuBefore?.queueSubmits || 0);
+  check("Engine=CPU does NO GPU work — not one dispatch",
+        cpuSubmits === 0,
+        cpuSubmits === 0
+          ? "0 queue submits over 2 s on CPU (the worker drains the input ring into plain " +
+            "memory and submits nothing)"
+          : `${cpuSubmits} queue submits over 2 s while the engine is CPU — the GPU is ` +
+            `convolving audio the user switched off`);
+
   // Flip to GPU and let it run. Read the worker's OWN counters from the SAB — not a
   // label the page prints, which could say anything.
   await page.selectOption("#engine", "1");
@@ -133,6 +159,17 @@ try {
     const st = window.__gpuStats;      // published by the page's own 10 Hz poll
     return st ? { produced: st.produced || 0, expired: st.expired || 0 } : null;
   });
+
+  // The flip must also be CORRECT, not merely live. While the engine was CPU the worker did
+  // no GPU work, so the convolver's frequency-domain delay line — where the reverb tail comes
+  // from — went stale. Resuming with a stale line would smear a ghost of pre-flip audio under
+  // the new material. The worker instead replays the input it buffered while idle, rebuilding
+  // exactly the line it would have had. If this counter is 0, that replay did not happen and
+  // the first ~IR-length after every flip is wrong.
+  const flipped = await sampleStats();
+  check("the flip to GPU PRIMED the convolver's delay line (no ghost of the CPU stretch)",
+        (flipped?.primed || 0) > 0,
+        `${flipped?.primed || 0} blocks replayed to rebuild the delay line`);
 
   // Sample a WINDOW, not a total. Cumulative counters cannot answer "is the GPU carrying
   // the audio", and on this page they are actively misleading: some blocks are SUPPOSED

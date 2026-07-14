@@ -98,16 +98,12 @@ public:
         row->flex().gap = 16;
         // NOT flex_grow — the knob row must size to its CONTENT.
         //
-        // With flex_grow = 1 the row absorbed every spare pixel of the canvas and shoved
-        // the status line to the very bottom, leaving a large empty band between the knobs
-        // and the one line of text that explains which engine you are hearing. The two
-        // belong together: the status is ABOUT the controls above it.
-        //
-        // Do not "fix" that gap by shrinking the canvas instead — this view lays out
-        // proportionally, so a shorter box squeezes the rows into each other and the status
-        // line lands on top of the knob labels (measured at 8/2.75 and 8/2.4; both collide).
-        // Size the row to content, and the spare space collects at the BOTTOM where the
-        // canvas can simply be shorter.
+        // With flex_grow = 1 the row absorbs every spare pixel of the canvas, which spreads
+        // the controls apart and leaves a large dead band inside the panel. Do not "fix"
+        // that gap by shrinking the canvas either — this view lays out proportionally, so a
+        // shorter box squeezes the rows into each other until they collide (measured at
+        // 8/2.75 and 8/2.4). Size the row to content, and the spare space collects at the
+        // BOTTOM, where the canvas can simply be shorter.
         row->flex().flex_grow = 0;
         auto* row_ptr = row.get();
         add_child(std::move(row));
@@ -223,18 +219,6 @@ public:
         cell->value_label->set_text(format_value(cell->spec, real_value));
     }
 
-    /// Host -> UI. Replaces the status line under the knobs.
-    void set_status(const std::string& text) {
-        if (status_) status_->set_text(text.empty() ? kDefaultStatus : text);
-    }
-
-    /// Bounds of the status Label in root coordinates.
-    bool status_bounds(vw::Rect* out) const {
-        if (!status_) return false;
-        if (out) *out = absolute_bounds(*status_);
-        return true;
-    }
-
     /// Real-unit value currently shown for `index`; NaN when unknown.
     float param_value(int index) const {
         for (const auto& cell : cells_) {
@@ -272,9 +256,6 @@ private:
     static constexpr float kCellHeight = 128;
     static constexpr float kKnobSize = 72;
     static constexpr float kLabelHeight = 16;
-    static constexpr float kStatusHeight = 34;   // two wrapped lines at 12 px
-    static constexpr const char* kDefaultStatus =
-        "Engine: CPU";
 
     struct Cell {
         ParamSpec spec;
@@ -327,7 +308,6 @@ private:
     }
 
     vw::Label* title_ = nullptr;
-    vw::Label* status_ = nullptr;
     std::vector<Cell> cells_;
 };
 

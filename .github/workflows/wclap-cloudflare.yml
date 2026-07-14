@@ -229,8 +229,20 @@ jobs:
       - name: Render OG preview images (per page, from the started plugin)
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: |
+          set -euo pipefail
           node gen-og-images.mjs
-          node assemble-gallery.mjs
+          # The second pass MUST get the same build trees as the first. Run bare, it cannot
+          # find them, SKIPS every page that needs one — /super-convolver-gpu/ among them —
+          # and therefore never rewrites that page's HTML, which is the only thing this pass
+          # exists to do. The og.png was shot correctly and then never referenced: the page
+          # shipped with no og:image at all and unfurled bare.
+          gpu_args=""
+          [ -d "$GITHUB_WORKSPACE/build-gpu-dsp" ] && gpu_args="--gpu-build $GITHUB_WORKSPACE/build-gpu-dsp"
+          # shellcheck disable=SC2086
+          node assemble-gallery.mjs \
+            --wam-build "$GITHUB_WORKSPACE/examples/web-demos/wasm-build/build" \
+            --ui-build  "$GITHUB_WORKSPACE/build-webui" \
+            $gpu_args
 
       - name: Guard — every demo page has a fresh OG image
         working-directory: examples/web-demos/wclap-build/cloudflare

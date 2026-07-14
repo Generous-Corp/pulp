@@ -40,7 +40,7 @@
 
 import {
   attach as attachRing,
-  FLAG_WORKER_READY, FLAG_DEVICE_LOST, FLAG_SHUTDOWN,
+  FLAG_WORKER_READY, FLAG_DEVICE_LOST, FLAG_SHUTDOWN, FLAG_ENGINE_GPU,
   STATE_READY, STATE_DEVICE_LOST, STATE_FAILED,
 } from "./gpu-ring.mjs";
 
@@ -58,6 +58,7 @@ let pendingIr = null;
 // What pulp_gpu_prepare needs to be re-called with. Captured at bring-up so an IR swap
 // re-prepares against exactly the same stream geometry the ring was built for.
 let prepared = null;   // { sampleRate, blockSize, channels }
+let irFrames = 0;      // length of the IR the module is currently prepared with
 
 const state = {
   produced: 0, expired: 0, queueSubmits: 0, mapResolves: 0, gpuNsLast: 0,
@@ -160,6 +161,33 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
   let nextPublish = 0;                 // the id the OUT ring is waiting for
   let lastStats = 0;
 
+  // ── Engine=CPU: the GPU does NOTHING. ──────────────────────────────────────
+  //
+  // The plugin keeps calling the xfer seam on every block in both engines (that is what
+  // advances the shared block timeline), so this worker keeps SEEING every input block —
+  // but seeing one and convolving it are different things, and convolving a block nobody
+  // will hear is exactly what "Engine: CPU" must not do. Measured before this gate: with
+  // the page's Engine select on CPU, the worker still issued ~100 queue submits per second
+  // and produced a full wet stream that was thrown away. That is a GPU meter pegged, and a
+  // battery drained, by an engine the user switched off.
+  //
+  // Why the history exists. The convolver's tail comes from a frequency-domain delay line
+  // of recent input spectra, and updating that line IS the GPU work (the forward FFT is a
+  // dispatch) — so an idle GPU is a GPU whose memory of the recent past goes stale. Flip
+  // back with a stale line and the tail partitions still hold audio from BEFORE the CPU
+  // stretch: you would hear a ghost of old material smeared under the new. So while idle we
+  // keep the raw input blocks in plain CPU memory (a memcpy, no GPU), and on the flip to GPU
+  // we REPLAY them — oldest first, outputs discarded — which rebuilds exactly the delay line
+  // the GPU would have had if it had been running. One priming burst, then live.
+  //
+  // The history is as long as the convolver's memory (ceil(irFrames / block) + 1) and no
+  // longer: replaying more blocks than there are partitions just overwrites the same slots.
+  const historyCap = () => Math.max(1, Math.min(512,
+      Math.ceil((irFrames || ring.blockSize) / ring.blockSize) + 1));
+  const history = [];                  // rolling raw input blocks, oldest → newest
+  let engineWasGpu = (ring.flags() & FLAG_ENGINE_GPU) !== 0;
+  const warmup = [];                   // blocks queued to prime the delay line on a flip
+
   // Publish everything that is now contiguous from nextPublish. An abandoned id is
   // SKIPPED (never published): the worklet's pop() then sees the next wet's seq run
   // PAST the block it wants, misses that one slot, and the plugin's CPU net covers
@@ -170,6 +198,10 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
       if (abandoned.has(nextPublish)) { abandoned.delete(nextPublish); nextPublish++; continue; }
       const rec = stash.get(nextPublish);
       if (!rec) break;
+      // A PRIMING block (blockSeq < 0). It was replayed to rebuild the delay line after an
+      // idle stretch; the worklet is not waiting for it and never asked for it. Drop it —
+      // publishing it would put a wet the plugin never pushed into the timeline.
+      if (rec.blockSeq < 0) { stash.delete(nextPublish); nextPublish++; continue; }
       if (ring.outputFull()) break;    // worklet is not draining; try again next tick
       ring.publishOutput(rec.buf, 0, rec.blockSeq);
       stash.delete(nextPublish);
@@ -218,6 +250,19 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
   while (running) {
     if (ring.flags() & FLAG_SHUTDOWN) break;
 
+    const engineGpu = (ring.flags() & FLAG_ENGINE_GPU) !== 0;
+    if (engineGpu && !engineWasGpu) {
+      // CPU → GPU. Prime the delay line with everything that played while we were idle,
+      // oldest first, so the first live block convolves against the same recent past the
+      // CPU engine has been hearing. These are submitted like any other block and then
+      // discarded on completion (blockSeq -1).
+      warmup.length = 0;
+      for (const b of history) warmup.push(b);
+    } else if (!engineGpu && engineWasGpu) {
+      warmup.length = 0;               // no point priming for an engine nobody is listening to
+    }
+    engineWasGpu = engineGpu;
+
     // 0. A NEW IR. The plugin rebuilt its impulse response (the user moved Size, or
     //    uploaded one), so the kernel this worker convolves with is now the wrong one
     //    and every block it produces from here is a different reverb than the CPU
@@ -245,6 +290,7 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
         try {
           const p = gpu.malloc(ir.length * 4);
           gpu.heapF32().set(ir, p >> 2);
+          irFrames = ir.length;
           if (!(await gpu.api.prepare(prepared.sampleRate, prepared.blockSize,
                                       prepared.channels, p, ir.length, 1))) {
             throw new Error("pulp_gpu_prepare(ir) returned 0");
@@ -274,13 +320,46 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
       }
     }
 
+    // 1b. Engine=CPU: DRAIN, do not convolve.
+    //
+    //     The blocks still arrive — the plugin pushes on every block in both engines — so
+    //     they must still be taken, or the input ring backs up and the worklet's pushes
+    //     start dropping. Take them into plain CPU memory and submit NOTHING: no dispatch,
+    //     no readback, no GPU. The plugin's pops find an empty output ring, count a miss,
+    //     and its CPU convolver covers — which is not a fallback here, it is the engine the
+    //     user asked for.
+    if (!engineGpu) {
+      const cap = historyCap();
+      while (ring.inputDepth() > 0) {
+        const buf = new Float32Array(blockFloats);
+        const blockSeq = ring.takeInput(buf, 0);
+        if (blockSeq === null) break;
+        history.push(buf);
+        while (history.length > cap) history.shift();
+      }
+      drainPublishable();              // let anything still in flight from before the flip land
+      await tick(IDLE_WAIT_MS);
+      if (now - lastStats > STATS_PERIOD_MS) { ring.publishStats(state); lastStats = now; }
+      continue;
+    }
+
     // 2. Submit every ready input block we have capacity for. Never run ahead of
     //    what the output ring can hold, or we burn GPU work we cannot publish.
+    //    PRIMING blocks (replayed history after an idle stretch) go first: they rebuild the
+    //    delay line the live blocks are about to convolve against, so they must precede them.
     while (inFlight.size < MAX_IN_FLIGHT &&
-           ring.inputDepth() > 0 &&
+           (warmup.length > 0 || ring.inputDepth() > 0) &&
            (ring.outputDepth() + inFlight.size + stash.size) < ring.slots) {
       const dst = heap();
-      const blockSeq = ring.takeInput(dst, inPtr >> 2);
+      let blockSeq;
+      if (warmup.length > 0) {
+        const buf = warmup.shift();
+        dst.set(buf, inPtr >> 2);
+        blockSeq = -1;                 // priming: advance the delay line, publish nothing
+        state.primed = (state.primed || 0) + 1;
+      } else {
+        blockSeq = ring.takeInput(dst, inPtr >> 2);
+      }
       if (blockSeq === null) break;
       const t0 = performance.now();
       // The block is needed in the OUT ring `latencyBlocks` block-periods after
@@ -297,6 +376,15 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
         abandoned.set(nextSubmit, blockSeq); state.expired++; nextSubmit++; break;
       }
       inFlight.set(nextSubmit, { deadline, t0, blockSeq });
+      if (blockSeq >= 0) {
+        // Keep the history warm while the GPU is live too — a flip to CPU can come at any
+        // moment, and the history is what makes the flip BACK correct.
+        const buf = new Float32Array(blockFloats);
+        buf.set(dst.subarray(inPtr >> 2, (inPtr >> 2) + blockFloats));
+        history.push(buf);
+        const cap = historyCap();
+        while (history.length > cap) history.shift();
+      }
       state.queueSubmits++;
       nextSubmit++;
     }
@@ -399,6 +487,7 @@ async function bringUp(msg) {
   }
 
   prepared = { sampleRate: msg.sampleRate, blockSize, channels };
+  irFrames = (msg.ir && msg.ir.length) ? (msg.ir.length / (msg.irChannels || 1)) : 0;
 
   state.state = STATE_READY;
   ring.setFlag(FLAG_WORKER_READY);

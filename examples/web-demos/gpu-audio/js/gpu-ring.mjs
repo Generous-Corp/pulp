@@ -75,6 +75,12 @@ const CTRL_RESYNC = 56;
 const FLAG_WORKER_READY = 1 << 0;
 const FLAG_DEVICE_LOST = 1 << 1;
 const FLAG_SHUTDOWN = 1 << 2;
+// Is the GPU the engine the plugin is actually LISTENING to? Set by the main thread
+// from the plugin's Engine parameter. The worker does no GPU work while it is clear —
+// convolving blocks nobody will hear is exactly what "Engine: CPU" must not do. It is a
+// flag rather than a message because the worker reads it once per loop tick and a message
+// would need draining on a thread whose whole job is to not stall.
+const FLAG_ENGINE_GPU = 1 << 3;
 
 // stats — Float64Array(16) over bytes [256,384), written by the worker under the
 // CTRL_STATS_SEQ seqlock, read by the page at ~10 Hz.
@@ -89,6 +95,11 @@ const STAT_GPU_NS_LAST = 7;        // GPU timestamp-query span, 0 when unsupport
 const STAT_QUEUE_SUBMITS = 8;
 const STAT_MAP_RESOLVES = 9;
 const STAT_STATE = 10;             // 0 init, 1 ready, 2 device-lost, 3 failed
+// Blocks replayed to rebuild the convolver's delay line after an Engine=CPU stretch, during
+// which the worker does no GPU work and the line therefore goes stale. Observable on purpose:
+// "the GPU is idle on CPU" and "the flip back is still correct" are two claims, and this is
+// the evidence for the second one.
+const STAT_PRIMED = 11;
 const STATS_DOUBLES = 16;
 
 const STATE_INIT = 0;
@@ -329,6 +340,7 @@ class GpuRing {
     st[STAT_QUEUE_SUBMITS] = s.queueSubmits || 0;
     st[STAT_MAP_RESOLVES] = s.mapResolves || 0;
     st[STAT_STATE] = s.state == null ? STATE_INIT : s.state;
+    st[STAT_PRIMED] = s.primed || 0;
     Atomics.add(c, CTRL_STATS_SEQ, 1);           // even: snapshot complete
   }
 
@@ -345,6 +357,7 @@ class GpuRing {
         lastBlockUs: st[STAT_LAST_BLOCK_US], avgBlockUs: st[STAT_AVG_BLOCK_US],
         gpuNsLast: st[STAT_GPU_NS_LAST], queueSubmits: st[STAT_QUEUE_SUBMITS],
         mapResolves: st[STAT_MAP_RESOLVES], state: st[STAT_STATE],
+        primed: st[STAT_PRIMED],
       };
       if (Atomics.load(c, CTRL_STATS_SEQ) === seq) return snap;
     }
@@ -360,7 +373,7 @@ export {
   gpuRingAttach as attach,
   GPU_RING_DEFAULTS,
   PGR_MAGIC, PGR_VERSION,
-  FLAG_WORKER_READY, FLAG_DEVICE_LOST, FLAG_SHUTDOWN,
+  FLAG_WORKER_READY, FLAG_DEVICE_LOST, FLAG_SHUTDOWN, FLAG_ENGINE_GPU,
   STATE_INIT, STATE_READY, STATE_DEVICE_LOST, STATE_FAILED,
   CTRL_FLAGS, CTRL_IN_WRITE, CTRL_IN_READ, CTRL_OUT_WRITE, CTRL_OUT_READ,
   CTRL_MISS, CTRL_DROPPED, CTRL_RESYNC, CTRL_STATS_SEQ,
