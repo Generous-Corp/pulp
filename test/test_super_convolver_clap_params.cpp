@@ -66,9 +66,12 @@ TEST_CASE("SuperConvolver's CLAP value_to_text renders each parameter's unit",
     CHECK(fx.text(pulp::examples::kSize, 0.05) == "0.05 s");
     CHECK(fx.text(pulp::examples::kGain, -6.5) == "-6.50 dB");
 
-    // A parameter declared with an empty unit renders the bare number — no
-    // stray trailing space for a host to show.
-    CHECK(fx.text(pulp::examples::kBypass, 0.0) == "0.00");
+    // Bypass is a SWITCH, and it says so: ParamKind::Toggle plus value_labels.
+    // A host therefore renders it "Off"/"On" and never the bare "0.00" a
+    // continuous parameter would produce — a number is not a state, and a DAW
+    // showing "0.00" for bypass tells the user nothing.
+    CHECK(fx.text(pulp::examples::kBypass, 0.0) == "Off");
+    CHECK(fx.text(pulp::examples::kBypass, 1.0) == "On");
 }
 
 TEST_CASE("SuperConvolver's CLAP params round-trip display text back to a value",
@@ -85,4 +88,13 @@ TEST_CASE("SuperConvolver's CLAP params round-trip display text back to a value"
     REQUIRE(pulp::format::clap_generic::params_text_to_value(
         &fx.self->plugin, static_cast<clap_id>(pulp::examples::kGain), "-6.50 dB", &value));
     CHECK(value == -6.5);
+
+    // The switch round-trips through its LABEL, not through a number: the host
+    // displayed "On", so "On" is what it hands back on a typed edit.
+    REQUIRE(pulp::format::clap_generic::params_text_to_value(
+        &fx.self->plugin, static_cast<clap_id>(pulp::examples::kBypass), "On", &value));
+    CHECK(value == 1.0);
+    REQUIRE(pulp::format::clap_generic::params_text_to_value(
+        &fx.self->plugin, static_cast<clap_id>(pulp::examples::kBypass), "Off", &value));
+    CHECK(value == 0.0);
 }

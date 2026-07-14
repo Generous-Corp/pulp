@@ -3964,3 +3964,29 @@ The deeper failure it addresses: when the only build signal is the flaky self-ho
 lane, a *real* failure is indistinguishable from noise — #5958's genuine compile error was
 waved through as flake for exactly that reason. This guard is fast (~7 min) and deterministic
 so the signal is believable. **Make it a required check** (#6087); that is the actual fix.
+## Gotcha: a second job that builds the same target needs the same SETUP
+
+Web lanes build the Pulp UI wasm module in more than one job (`web-plugins.yml`
+builds it for the browser fixture *and* for the GPU-audio proof;
+`wclap-cloudflare.yml` builds it for the deploy). Each job is a fresh runner with
+its own `$GITHUB_ENV` — nothing is inherited. The GPU-audio-proof job configured
+`build-webui` **without** `-DPULP_WEBUI_CHOC_INCLUDE` and never ran a "vendor
+choc" step, because choc is FetchContent'd and its Linux twin *did*. Result:
+CMake hard-failed at configure, ~30 s in, so the job never reached the thing it
+exists to prove — and the failure read as "GPU audio proof failed," which points
+at the GPU and not at a missing header path.
+
+When you add a job that builds an existing target, diff its steps against the job
+that already builds it. If one vendors a dependency or exports an env var, yours
+needs it too. Guard the clone (`[ -d "$HOME/x" ] ||`) — self-hosted runners keep
+`$HOME` between jobs, so an unguarded `git clone` fails on the second run.
+
+## Gotcha: never commit a symlink into a build directory
+
+A convenience symlink (`examples/web-demos/wclap-build/build` → a local build dir)
+got swept up by a broad `git add`. CI then ran `cmake -B` at that path, could not
+create `CMakeFiles/pkgRedirects` through a link to a directory that does not exist
+on the runner, and **two** lanes — WebCLAP and the Cloudflare deploy — died in
+~30 s with a message about the *build directory* being unwritable, which sounds
+like a runner-permissions problem and is not one. Check `git status` before an
+`add -A` in a tree where you have made local build symlinks.

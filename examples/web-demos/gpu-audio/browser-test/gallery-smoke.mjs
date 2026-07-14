@@ -68,9 +68,9 @@ const normalize = (html) => html.replace(CACHEBUST, "?v=<player>");
 // pin exists to catch. Re-do it, do not just paste the new value.
 const SHIPPED = {
   "super-convolver/wam/index.html":
-    "c4f7cf5810a2a9de844bf7dba17f989193975b632bdfc7edefb110211e199c3a",
+    "0d5e576326bb5268a347ec121b59a4fe3bf67073843eb4c823cc949ccfd4f79d",
   "super-convolver/wclap/index.html":
-    "060bb95a976d8373050e11b2cafdd2d88b37f81db083506f3ba0879a5eca65d0",
+    "7f4e977e0f6ed025067aee0cba535978da53022f31fdbd846e8c7b7c05304c97",
 };
 
 const steps = [];
@@ -161,10 +161,15 @@ try {
           "mountEngineToggle() is called from the IR handler and nowhere else — a toggle " +
           "offered earlier would switch the audio to a GPU still convolving with the unit " +
           "impulse it was self-tested with, and the reverb would audibly vanish");
+    // The DISCLAIMER must be present and no speed claim may be. The exact wording is allowed
+    // to change — the copy got shorter because the long version pushed the plugin below the
+    // fold on a phone — but "not faster than the CPU" is the one sentence that cannot be
+    // edited out, so match the CLAIM, not a fixed string.
+    const disclaimer = /not faster(?: than the CPU)?/i;
     check("the copy makes no speed claim",
-          /not faster than the CPU path/.test(html) &&
-            !/(faster than|speed-?up|[0-9]x faster)/i.test(html.replace(/not faster than the CPU path/g, "")),
-          "'It is not faster than the CPU path' is present; no speed claim is");
+          disclaimer.test(html) &&
+            !/(faster than|speed-?up|[0-9]x faster)/i.test(html.replace(/not faster(?: than the CPU)?[a-z ]*/gi, "")),
+          "a 'not faster than the CPU' disclaimer is present; no speed claim is");
     check("the status poll is a setInterval, not requestAnimationFrame",
           html.includes("setInterval(") && !/requestAnimationFrame\s*\(/.test(html),
           "rAF is throttled in a background tab — exactly when misses matter");

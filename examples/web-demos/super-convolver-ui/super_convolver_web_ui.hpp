@@ -39,6 +39,13 @@ struct ParamSpec {
     float max_value = 1.0f;
     float default_value = 0.0f;
     std::string unit;
+    /// An ON/OFF parameter (the plugin declares it ParamKind::Toggle, which reaches us as
+    /// a stepped 0..1). It gets a SWITCH, not a knob.
+    ///
+    /// A knob for a two-state value is simply the wrong control: it has no detents, no
+    /// on/off affordance, and it renders as a dial reading "0.00" whose meaning nobody can
+    /// guess. Bypass shipped that way. The rule is: if it is on/off, it is a switch.
+    bool is_toggle = false;
 };
 
 class SuperConvolverWebUi : public vw::View {
@@ -49,6 +56,15 @@ public:
     std::function<void(int)> on_gesture_end;
 
     explicit SuperConvolverWebUi(std::vector<ParamSpec> params) {
+        // WITHOUT THIS, ANIMATIONS DRAW EXACTLY ONE FRAME AND STOP.
+        //
+        // The view only repaints when something marks it dirty. Toggle::on_mouse_down flips
+        // the state and ANIMATES the thumb to its new position — an animation needs a stream
+        // of frames to advance through. It got one: the frame that the value label's text
+        // change happened to trigger. So Bypass read "On" while its thumb sat in the OFF
+        // position, which is the worst possible state for a switch — the control and the
+        // label disagreeing about what the plugin is doing.
+        set_continuous_repaint(true);
         vw::Theme theme;
         if (const auto* preset = vw::find_preset("ink-signal"))
             theme = vw::theme_from_preset(*preset, /*dark=*/true);
@@ -80,27 +96,30 @@ public:
         row->flex().justify_content = vw::FlexJustify::start;
         row->flex().align_items = vw::FlexAlign::start;
         row->flex().gap = 16;
-        row->flex().flex_grow = 1;
+        // NOT flex_grow — the knob row must size to its CONTENT.
+        //
+        // With flex_grow = 1 the row absorbed every spare pixel of the canvas and shoved
+        // the status line to the very bottom, leaving a large empty band between the knobs
+        // and the one line of text that explains which engine you are hearing. The two
+        // belong together: the status is ABOUT the controls above it.
+        //
+        // Do not "fix" that gap by shrinking the canvas instead — this view lays out
+        // proportionally, so a shorter box squeezes the rows into each other and the status
+        // line lands on top of the knob labels (measured at 8/2.75 and 8/2.4; both collide).
+        // Size the row to content, and the spare space collects at the BOTTOM where the
+        // canvas can simply be shorter.
+        row->flex().flex_grow = 0;
         auto* row_ptr = row.get();
         add_child(std::move(row));
 
-        // One status line under the knobs. It is the ONLY surface in this view
-        // that is not a parameter: the host pushes a formatted engine/miss/
-        // budget string into it (pulp_ui_set_gpu_status). It carries no speed
-        // claim — the GPU path is a capability demonstration, not a faster one.
-        auto status = std::make_unique<vw::Label>(kDefaultStatus);
-        status->set_font_size(12);
-        status->set_text_color(text_dim);
-        status->set_text_align(vw::LabelAlign::left);
-        // The GPU line is long by design (engine, backend, block counts, the
-        // µs-per-block against the real-time budget). Soft-wrap it: a single-line
-        // Label would clip the budget figure off the right edge at demo widths,
-        // and a truncated honesty statement is not one.
-        status->set_multi_line(true);
-        status->set_line_clamp(2);
-        status->flex().preferred_height = kStatusHeight;
-        status_ = status.get();
-        add_child(std::move(status));
+        // NO status line in the plugin.
+        //
+        // The page renders an Engine <select> directly beneath this canvas — it says which
+        // engine is selected, in words, and it is the control that changes it. Restating
+        // that inside the view tree was duplicate chrome, and it was ALSO the element that
+        // sheared through the knob labels at narrow widths, because a label whose text
+        // changes on a timer is a layout event on a timer. The live numbers live in DOM
+        // slots on the page (fixed widths, tabular figures). Nothing here has to move.
 
         cells_.reserve(params.size());
         for (auto& spec : params) {
@@ -111,13 +130,27 @@ public:
             cell->flex().preferred_width = kCellWidth;
             cell->flex().preferred_height = kCellHeight;
 
-            auto knob = std::make_unique<vw::Knob>();
-            knob->flex().preferred_width = kKnobSize;
-            knob->flex().preferred_height = kKnobSize;
-            knob->set_show_label(false);
-            knob->set_value(normalize(spec, spec.default_value));
-            knob->set_default_value(normalize(spec, spec.default_value));
-            auto* knob_ptr = knob.get();
+            // ON/OFF -> a switch. Everything else -> a knob. (See ParamSpec::is_toggle.)
+            vw::Knob* knob_ptr = nullptr;
+            vw::Toggle* toggle_ptr = nullptr;
+            std::unique_ptr<vw::View> control;
+            if (spec.is_toggle) {
+                auto sw = std::make_unique<vw::Toggle>();
+                sw->flex().preferred_width = kKnobSize;
+                sw->flex().preferred_height = kKnobSize;
+                sw->set_on(spec.default_value >= 0.5f, false);
+                toggle_ptr = sw.get();
+                control = std::move(sw);
+            } else {
+                auto knob = std::make_unique<vw::Knob>();
+                knob->flex().preferred_width = kKnobSize;
+                knob->flex().preferred_height = kKnobSize;
+                knob->set_show_label(false);
+                knob->set_value(normalize(spec, spec.default_value));
+                knob->set_default_value(normalize(spec, spec.default_value));
+                knob_ptr = knob.get();
+                control = std::move(knob);
+            }
 
             auto name = std::make_unique<vw::Label>(spec.name);
             name->set_font_size(13);
@@ -135,23 +168,48 @@ public:
             value->flex().preferred_height = kLabelHeight;
             auto* value_ptr = value.get();
 
-            cell->add_child(std::move(knob));
+            cell->add_child(std::move(control));
             cell->add_child(std::move(name));
             cell->add_child(std::move(value));
             row_ptr->add_child(std::move(cell));
 
             const int slot = static_cast<int>(cells_.size());
-            knob_ptr->on_change = [this, slot](float normalized) {
-                on_knob_change(slot, normalized);
-            };
-            knob_ptr->on_gesture_begin = [this, slot]() {
-                if (on_gesture_begin) on_gesture_begin(cells_[slot].spec.index);
-            };
-            knob_ptr->on_gesture_end = [this, slot]() {
-                if (on_gesture_end) on_gesture_end(cells_[slot].spec.index);
-            };
+            if (knob_ptr) {
+                knob_ptr->on_change = [this, slot](float normalized) {
+                    on_knob_change(slot, normalized);
+                };
+                knob_ptr->on_gesture_begin = [this, slot]() {
+                    if (on_gesture_begin) on_gesture_begin(cells_[slot].spec.index);
+                };
+                knob_ptr->on_gesture_end = [this, slot]() {
+                    if (on_gesture_end) on_gesture_end(cells_[slot].spec.index);
+                };
+            } else if (toggle_ptr) {
+                // A switch is one gesture: press = the whole edit. Bracket it so the host
+                // groups it as a single undo step, exactly like a knob drag.
+                toggle_ptr->on_toggle = [this, slot, toggle_ptr](bool on) {
+                    const auto& sp = cells_[slot].spec;
+                    // SNAP THE THUMB. Toggle::on_mouse_down flips the state and ANIMATES the
+                    // thumb toward its new position — and an animation only advances if
+                    // frames keep coming. A UI-initiated write also gets no echo back from
+                    // the plugin (a CLAP plugin does not re-emit a parameter it was handed),
+                    // so nothing else ever reconciles it either. The result was a switch
+                    // whose label read "On" while its thumb sat in the OFF position — the
+                    // control and the label disagreeing about what the plugin is doing.
+                    //
+                    // set_on(v, /*animate=*/false) with the state already flipped takes the
+                    // reconcile path: it drives the thumb straight to its target and repaints.
+                    // No dependency on a frame stream.
+                    toggle_ptr->set_on(on, false);
+                    if (on_gesture_begin) on_gesture_begin(sp.index);
+                    if (on_param_change) on_param_change(sp.index, on ? sp.max_value : sp.min_value);
+                    if (on_gesture_end) on_gesture_end(sp.index);
+                    if (cells_[slot].value_label)
+                        cells_[slot].value_label->set_text(format_value(sp, on ? sp.max_value : sp.min_value));
+                };
+            }
 
-            cells_.push_back(Cell{std::move(spec), knob_ptr, name_ptr, value_ptr});
+            cells_.push_back(Cell{std::move(spec), knob_ptr, toggle_ptr, name_ptr, value_ptr});
         }
     }
 
@@ -160,7 +218,8 @@ public:
     void set_param(int index, float real_value) {
         Cell* cell = find(index);
         if (!cell) return;
-        cell->knob->set_value(normalize(cell->spec, real_value));
+        if (cell->knob) cell->knob->set_value(normalize(cell->spec, real_value));
+        else if (cell->toggle) cell->toggle->set_on(real_value >= 0.5f, false);
         cell->value_label->set_text(format_value(cell->spec, real_value));
     }
 
@@ -215,11 +274,12 @@ private:
     static constexpr float kLabelHeight = 16;
     static constexpr float kStatusHeight = 34;   // two wrapped lines at 12 px
     static constexpr const char* kDefaultStatus =
-        "Engine: CPU — convolution on the CPU (PartitionedConvolver)";
+        "Engine: CPU";
 
     struct Cell {
         ParamSpec spec;
-        vw::Knob* knob = nullptr;
+        vw::Knob* knob = nullptr;       ///< set for a continuous parameter
+        vw::Toggle* toggle = nullptr;   ///< set for an ON/OFF parameter
         vw::Label* name_label = nullptr;
         vw::Label* value_label = nullptr;
     };
@@ -235,6 +295,8 @@ private:
     }
 
     static std::string format_value(const ParamSpec& s, float real) {
+        // A switch reads Off/On. "0.00" under a toggle is a number pretending to be a state.
+        if (s.is_toggle) return real >= 0.5f ? "On" : "Off";
         char buf[64];
         std::snprintf(buf, sizeof(buf), "%.2f%s%s", real,
                       s.unit.empty() ? "" : " ", s.unit.c_str());

@@ -339,6 +339,19 @@ public:
     // re-block FIFO adds this much latency, reported for host PDC.
     static constexpr std::size_t kInternalBlock = 512;
 
+    /// How long a live IR swap takes to BLEND. Public because it is part of the contract: for
+    /// this long after a Size change or an IR upload the output is a MIX of the old IR and the
+    /// new one, so anything measuring the IR must wait it out first.
+    ///
+    /// 150 ms, not 11 ms, because the incoming IR starts with an EMPTY delay line on the
+    /// crossfade path — ConvolverIrSwapper skips the history carry there, since the displaced
+    /// IR is still rendering from that history in parallel. A cold convolver has to build its
+    /// output up from silence over the IR's own length, so a fade shorter than that build-up
+    /// is heard as a HOLE in the sound rather than as a transition. Measured across a Size
+    /// change: at 11 ms the envelope collapsed to 8.5% of its settled level; at 150 ms it
+    /// stays above 65%. That hole, once per rebuild while dragging Size, was the crackle.
+    static constexpr double kIrCrossfadeSeconds = 0.15;
+
     // Round-trip latency of the browser GPU engine, in internal blocks. Each pop
     // from the SharedArrayBuffer ring asks for the wet of the block this many
     // blocks ago, giving the WebGPU worker that long to turn a block around before
@@ -395,7 +408,9 @@ public:
         store.add_parameter({.id = kGain, .name = "Gain", .unit = "dB",
                              .range = {-24.0f, 24.0f, 0.0f, 0.0f}});
         store.add_parameter({.id = kBypass, .name = "Bypass", .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .kind = state::ParamKind::Toggle,
+                             .value_labels = {"Off", "On"}});
 
         // ── GPU-engine parameters — NOT DECLARED ON THE WEB LANES. ─────────────
         // The whole GPU stack is `#if !defined(PULP_WASM)`, so in a WAM/WebCLAP
@@ -415,7 +430,9 @@ public:
         // Engine: 0 = CPU PartitionedConvolver (default), 1 = GPU runtime.
         // CPU is the default — the live GPU path is opt-in by governance.
         store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .kind = state::ParamKind::Toggle,
+                             .value_labels = {"CPU", "GPU"}});
         // Rooms: with Engine=GPU and Rooms>1, the input is convolved against
         // this many DISTINCT impulse responses ("rooms"), each panned to its own
         // stereo position, in ONE batched GPU submit per block — a dense
@@ -447,7 +464,9 @@ public:
         // path in the worker. CPU is the default and stays a working fallback —
         // GPU is never a correctness dependency, and is NOT a speed claim.
         store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .kind = state::ParamKind::Toggle,
+                             .value_labels = {"CPU", "GPU"}});
         // GPU only (no CPU safety net): with Engine=GPU, a block the GPU worker
         // misses is normally covered by the latency-aligned CPU wet, so a miss is
         // inaudible — which also means the ear cannot tell whether the GPU is
@@ -456,7 +475,9 @@ public:
         // affordance, not a hidden test hook: background the tab with it on and
         // the audio drops out, which is the honest demonstration.
         store.add_parameter({.id = kGpuOnly, .name = "GPU only", .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .kind = state::ParamKind::Toggle,
+                             .value_labels = {"Off", "On"}});
 #endif
 
         // Rooms/Flow are deliberately NOT offered on the web GPU lane.
@@ -753,6 +774,8 @@ public:
     }
 
     void prepare(const format::PrepareContext& ctx) override {
+        // Re-seed the ramps from the live parameter values on the next block (see mix_z_).
+        ramp_primed_ = false;
         stop_worker();
         rebuild_job_.cancel();   // worker stopped: nothing else can be mid-rebuild
         job_size_ = -1.0f;
@@ -801,16 +824,26 @@ public:
         // silence, which the host's PDC accounts for; after that, wet.)
         rebuild_ir_inline(current_size());   // first IR loaded synchronously (CPU)
 
-        // Crossfade every LIVE IR swap. Without this a Size change is a hard cut
-        // between two IRs: the old tail stops mid-flight and the new one starts
-        // from the carried history, which clicks. With it, the displaced IR keeps
-        // rendering from its own history in parallel and the two are blended, so
-        // dragging Size sounds like the room changing size rather than like a
-        // switch being thrown. kInternalBlock (512 ≈ 11 ms at 48 kHz) is two
-        // internal blocks of blend — long enough to be inaudible as a transition,
-        // short enough that the doubled render cost is a blip. Applies to BOTH
-        // lanes: the native worker's swaps go through the same try_swap_ir().
-        for (auto& c : conv_) c.set_crossfade(kInternalBlock);
+        // Crossfade every LIVE IR swap, and give it TIME.
+        //
+        // This used to be kInternalBlock — 512 samples, ~11 ms — justified as "long enough to
+        // be inaudible as a transition". That reasoning assumed the incoming IR starts from
+        // the CARRIED input history. On the crossfade path it does NOT: ConvolverIrSwapper
+        // deliberately skips the carry there, because the displaced IR is still rendering
+        // from that history in parallel and carrying it would swap it out from under the
+        // fade-out. So the new convolver starts COLD — its frequency-domain delay line is
+        // empty, and its output has to build up from silence over the IR's own length.
+        //
+        // Fading a full old tail into a cold new one in 11 ms is therefore not a transition,
+        // it is a DIP: the wet drops out and climbs back. Drag Size and you get one of those
+        // per completed rebuild — which is exactly the crackle a user hears.
+        //
+        // The fix is to let the fade last long enough that the incoming IR has meaningfully
+        // filled its delay line while the outgoing one is still carrying the sound. ~150 ms
+        // is the usual figure for morphing convolution IRs and it is what this uses. The cost
+        // is a doubled convolution for that window, which is a blip against a knob drag.
+        const auto fade_len = static_cast<std::size_t>(sample_rate_ * kIrCrossfadeSeconds);
+        for (auto& c : conv_) c.set_crossfade(std::max<std::size_t>(kInternalBlock, fade_len));
 
         const float init_size = current_size();
         gpu_extra_ = 0;
@@ -1217,9 +1250,27 @@ public:
         const std::size_t n = output.num_samples();
         const std::size_t ch_count = output.num_channels();
 
+        // MIX AND GAIN ARE RAMPED, NOT STEPPED.
+        //
+        // These used to be per-block constants: `out = (1-mix)*dry + mix*gain*wet` with mix
+        // jumping straight to its new value at the block boundary. Toggling Bypass therefore
+        // slammed mix from (say) 0.35 to 0 between one sample and the next — a step
+        // discontinuity in the output, which is audible as a CLICK. The same edge gives Mix
+        // and Gain zipper noise on a fast drag.
+        //
+        // So each block interpolates from where the last one ended to where this one wants to
+        // be. One block at 512 frames / 48 kHz is ~10.7 ms — long enough that the transition
+        // is inaudible, short enough that the control still feels immediate.
         const bool bypass = state().get_value(kBypass) >= 0.5f;
-        const float mix = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
-        const float gain = std::pow(10.0f, state().get_value(kGain) / 20.0f);
+        const float mix_target = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
+        const float gain_target = std::pow(10.0f, state().get_value(kGain) / 20.0f);
+        if (!ramp_primed_) {   // first block after prepare(): start AT the target, not at 0
+            mix_z_ = mix_target;
+            gain_z_ = gain_target;
+            ramp_primed_ = true;
+        }
+        const float mix_step = n > 0 ? (mix_target - mix_z_) / static_cast<float>(n) : 0.0f;
+        const float gain_step = n > 0 ? (gain_target - gain_z_) / static_cast<float>(n) : 0.0f;
 
         // Publish the desired live config to the IR/engine rebuild (cheap atomic
         // stores, no alloc). The rebuild runs off the audio thread; the audio
@@ -1302,18 +1353,27 @@ public:
             float* out = output.channel(ch).data();
             const std::size_t avail = out_len_[ch];
             const std::size_t delay = dry_ring_[ch].size();
+            // Every channel walks the SAME ramp, so it starts from the block-entry value
+            // rather than from wherever the previous channel left off.
+            float mix = mix_z_, gain = gain_z_;
             for (std::size_t i = 0; i < n; ++i) {
                 const float wet_i = i < avail ? out_buf_[ch][i] : 0.0f;
                 const float dry_i = dry_ring_[ch][dry_pos_[ch]];
                 dry_ring_[ch][dry_pos_[ch]] = in ? in[i] : 0.0f;
                 dry_pos_[ch] = (dry_pos_[ch] + 1) % delay;
                 out[i] = (1.0f - mix) * dry_i + mix * gain * wet_i;
+                mix += mix_step;
+                gain += gain_step;
             }
             const std::size_t consumed = n < avail ? n : avail;
             std::memmove(out_buf_[ch].data(), out_buf_[ch].data() + consumed,
                          (out_len_[ch] - consumed) * sizeof(float));
             out_len_[ch] -= consumed;
         }
+        // Land exactly on the target: accumulating `+= step` n times drifts in float, and a
+        // ramp that never quite arrives is a ramp that is still moving on the next block.
+        mix_z_ = mix_target;
+        gain_z_ = gain_target;
 
         if (ch_count > 0) publish_spectrum(output.channel(0).data(), static_cast<int>(n));
     }
@@ -2235,6 +2295,14 @@ private:
     std::uint32_t job_gen_ = 0;
 
     // UI display snapshot (UI + worker thread only; never audio thread).
+    // Dry/wet and output gain, ramped per-sample across a block so Bypass does not click and
+    // a fast Mix/Gain drag does not zipper. `ramp_primed_` makes the first block after
+    // prepare() start AT the target rather than sliding up from zero (which would fade the
+    // plugin in every time the host re-prepares it).
+    float mix_z_ = 0.0f;
+    float gain_z_ = 1.0f;
+    bool ramp_primed_ = false;
+
     mutable std::mutex ir_display_mutex_;
     std::vector<float> ir_display_;
     std::atomic<std::uint32_t> ir_generation_{0};

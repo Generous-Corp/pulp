@@ -229,6 +229,11 @@ function injectStyles(skin = {}) {
   .pp-fu-hint{font-size:12px;color:var(--text-secondary);flex:1;min-width:0}
   .pp-fu-msg{flex-basis:100%;font-size:12px;color:var(--text-secondary);line-height:1.5}
   .pp-fu-msg:empty{display:none}
+  /* The loaded-file line: the NAME is the thing the user just did, so it leads and it is
+     legible; the file's data is supporting detail and reads quieter underneath.
+     NOTE: no backticks anywhere in this block — it lives inside a JS template literal. */
+  .pp-fu-msg .sc-ir-name{color:var(--text-primary);font-weight:600}
+  .pp-fu-msg .sc-ir-facts{opacity:.8}
   .pp-note{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;
            background:var(--bg-surface);border:1px solid var(--control-border);border-radius:8px;padding:14px}
   .pp-note .big{font-size:30px;font-weight:700;color:var(--accent-primary);font-variant-numeric:tabular-nums}

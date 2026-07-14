@@ -89,18 +89,19 @@ std::string format_gpu_status(const char* json) {
 
         if (engine == "gpu") {
             const std::string backend = text("backend");
-            char buf[320];
-            std::snprintf(
-                buf, sizeof(buf),
-                "Engine: GPU — WGSL compute%s%s · %s blocks on GPU · %s covered by CPU"
-                " · %.0f µs/block (%.1f%% of the %s µs real-time budget)",
-                backend.empty() ? "" : " on ", backend.c_str(),
-                group_thousands(number("produced")).c_str(),
-                group_thousands(number("covered")).c_str(), number("avg_us"),
-                number("rt_percent"), group_thousands(number("budget_us")).c_str());
+            // IDENTITY ONLY — no live numbers in the view tree.
+            //
+            // The metrics now live in DOM slots on the page, each with a fixed width and
+            // tabular figures. They were here, inside the canvas, and every time a counter
+            // gained a digit the whole line re-laid out: it wrapped to two lines, and at
+            // phone width it sheared straight through the knob labels above it. A view-tree
+            // label that changes width on a 10 Hz timer is a layout event on a 10 Hz timer.
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "Engine: GPU — WGSL compute%s%s",
+                          backend.empty() ? "" : " on ", backend.c_str());
             line = buf;
         } else {
-            line = "Engine: CPU — real-FFT PartitionedConvolver (the default, and always the fallback)";
+            line = "Engine: CPU";
         }
         if (!note.empty()) line += " · " + note;
         return line;
@@ -127,7 +128,8 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
 void pulp_ui_add_param(int index, const char* name, float min_value,
-                       float max_value, float default_value, const char* unit) {
+                       float max_value, float default_value, const char* unit,
+                       int is_toggle) {
     ParamSpec spec;
     spec.index = index;
     spec.name = name ? name : "";
@@ -135,6 +137,8 @@ void pulp_ui_add_param(int index, const char* name, float min_value,
     spec.max_value = max_value;
     spec.default_value = default_value;
     spec.unit = unit ? unit : "";
+    // ON/OFF gets a switch, not a dial — see ParamSpec::is_toggle.
+    spec.is_toggle = is_toggle != 0;
     pending_params().push_back(std::move(spec));
 }
 

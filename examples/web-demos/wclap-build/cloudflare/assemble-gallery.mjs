@@ -435,6 +435,23 @@ async function playerVersion() {
   return h.digest("hex").slice(0, 8);
 }
 
+// ── The plugin canvas box ───────────────────────────────────────────────────────
+//
+// 8:3, and it is a FLOOR, not a preference. The editor's content — title, one row of
+// knobs, their labels and values — ends around 190px at a 590px width, so an 8:5 box
+// left a third of the panel as dead space under the controls. But do NOT keep shrinking
+// it to close the gap: the editor lays out PROPORTIONALLY to the canvas, so a shorter box
+// does not crop the empty bottom — it squeezes every row together, and the status line
+// lands ON TOP of the knob labels. Measured at 8/2.75 and 8/2.4; both collide. The gap is
+// closed the right way instead, by putting the file-upload slot ABOVE the scope+meter
+// (shell.js) so the loader sits directly under the controls.
+//
+// THIS NOTE LIVES HERE, NOT IN THE EMITTED PAGE. Comments written inside the page template
+// are shipped to users inside index.html — and gallery-smoke.mjs asserts that the two
+// SuperConvolver pages carry no GPU/Engine surface at all, by grepping the shipped HTML.
+// A comment mentioning the engine status line trips that check: the page does not advertise
+// a GPU engine, but the grep cannot tell prose from product, and it should not have to. Keep
+// the reasoning in the assembler; keep the artifact clean.
 function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
   const isWam = abi === "wam";
   const adapterMod = isWam ? "wam.js" : "wclap.js";
@@ -486,20 +503,16 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
     customUi: (container, adapter) => {
       const canvas = document.createElement("canvas");
       canvas.id = "pulp-ui-canvas";
-      // 8:3, not 8:5. The editor's content — title, one row of knobs, their labels
-      // and values — ends around 190px at a 590px width, so an 8:5 box (369px) left
-      // a third of the panel as dead space under the controls. This hugs the
-      // content with a little breathing room; the view tree is top-aligned, so the
-      // shorter box crops nothing.
-      // 8/3 is a FLOOR, not a preference — do not "tighten" it to close the gap under the
-      // knobs. The editor lays out PROPORTIONALLY to the canvas, so a shorter box does not
-      // crop the empty bottom: it squeezes every row together, and the engine status line
-      // lands ON TOP of the knob labels. Measured at 8/2.75 and 8/2.4; both collide.
+      // Canvas box: see CANVAS_ASPECT in this assembler. Do not tighten it here.
+      // A FIXED height, not an aspect ratio.
       //
-      // The gap is closed the right way instead — by moving the file-upload slot ABOVE the
-      // scope+meter (shell.js), so the loader sits directly under the controls and the two
-      // read as one unit.
-      canvas.style.cssText = "width:100%;aspect-ratio:8/3;display:block";
+      // The plugin's content height does not depend on its width: 20px of padding, a 26px
+      // title, a 16px gap, and one 128px row of controls. 210px, at every width. An
+      // aspect-ratio makes the box a function of the WIDTH instead — so it left a dead band
+      // under the knobs on a desktop and collapsed to ~100px on a phone (where the view
+      // then sheared its own labels through each other). Neither was a tuning problem; the
+      // measurement was simply of the wrong thing.
+      canvas.style.cssText = "width:100%;height:210px;display:block";
       container.appendChild(canvas);
       const pending = mountPulpUi(canvas, adapter, { moduleUrl: "./${UI_MODULE}.js" });
       // The shell handles the rejection (it restores the grid); this keeps the
@@ -521,7 +534,7 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
        Keep it in step with the canvas's 8:3 box (see the customUi factory above):
        reserve MORE and a gap opens under the placeholder, reserve LESS and the
        panel still jumps when the editor arrives. */
-    :root{--pw-customui-h:230px}
+    :root{--pw-customui-h:210px}
   </style>
   <meta name="description" content="${attr(SC_SUBTITLE)}">
   <meta name="pulp:source" content="${attr(SC_SRC)}">
@@ -558,7 +571,7 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
     fileUpload: irFileUpload(),
   });
 </script>
-<p style="max-width:860px;margin:0 auto;padding:0 20px 40px;
+<p style="max-width:640px;margin:0 auto;padding:0 20px 40px;
           font:13px/1.6 system-ui;color:#8b96a3">
   This is the <b>${hostLabel}</b> build. The same plugin also runs as
   <a href="${other}" style="color:#2bd4be">${otherLabel} &rarr;</a> — same player, same UI, same audio.
@@ -694,10 +707,17 @@ const GPU_TARGET = "SuperConvolverGpu";       // super_convolver_gpu_wclap
 const GPU_IR_HANDOFF_WIRED = true;
 
 const GPU_TITLE = "SuperConvolver — GPU engine";
+// Short on purpose. "Not faster than the CPU" is NOT optional — it is the one claim this
+// page must not overstate — but it fits in a clause, not a paragraph. The long version
+// pushed the plugin below the fold on a phone.
+// Say what the page IS. "The same reverb" meant nothing to anyone who had not just read the
+// other page — it is a comparison against something they cannot see. The point is: one
+// plugin, two engines, pick either and hear that they match. And "not faster than the CPU"
+// stays, because it is the one claim this page must not overstate.
 const GPU_SUBTITLE =
-  "The same convolution reverb, with its FFT convolution running as a WebGPU compute " +
-  "shader in your browser tab. It is not faster than the CPU path — a competent real-FFT " +
-  "CPU convolver matches or beats it. CPU is the default and always the fallback.";
+  "A convolution reverb that can run its maths on your CPU or, as a WebGPU compute shader, " +
+  "on your GPU. Switch between them and hear that they sound the same. The GPU is not " +
+  "faster — it is just a different place to run it.";
 
 function superConvolverGpuPage(pageUrl, hasOgImage, v) {
   return `<!doctype html>
@@ -715,12 +735,20 @@ function superConvolverGpuPage(pageUrl, hasOgImage, v) {
 ${ogUrlAndImage(pageUrl, hasOgImage)}
   <link rel="icon" href="data:,">
   <style>
-    .engine-row{max-width:860px;margin:0 auto 10px;display:flex;align-items:center;gap:10px;
+    .engine-row{max-width:640px;margin:0 auto 10px;display:flex;align-items:center;gap:10px;
                 font:13px/1.5 system-ui;color:#cdd6e3}
     .engine-row select{background:#0c1116;color:#cdd6e3;border:1px solid #2a3340;border-radius:6px;
                        padding:4px 8px;font:13px system-ui}
-    .engine-note{max-width:860px;margin:0 auto 14px;font:12.5px/1.6 system-ui;color:#8b96a3}
-    .engine-off{max-width:860px;margin:0 auto 14px;font:13px/1.6 system-ui;color:#e0b070}
+    .engine-note{max-width:640px;margin:0 auto 14px;font:12.5px/1.6 system-ui;color:#8b96a3}
+    /* Fixed-width slots + tabular figures: the labels and separators never move, only the
+       digits inside each box change. A concatenated sentence re-flows on every tick. */
+    .engine-stats{max-width:640px;margin:0 auto 10px;font:12.5px/1.7 system-ui;color:#8b96a3}
+    .engine-stats .es-num{display:inline-block;text-align:right;color:#c9d1d9;
+                          font-variant-numeric:tabular-nums;min-width:5.5ch}
+    .engine-stats .es-pct{min-width:5ch}
+    .engine-stats .es-eng{display:inline-block;min-width:3.5ch;color:#2bd4be;font-weight:600}
+    .engine-stats .es-sep{opacity:.55}
+    .engine-off{max-width:640px;margin:0 auto 14px;font:13px/1.6 system-ui;color:#e0b070}
   </style>
 </head>
 <body>
@@ -730,6 +758,7 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   import { createWclapAdapter } from "../vendor-player/adapters/wclap.js?v=${v}";
   import { mountPulpUi } from "./pulp-ui.js?v=${v}";
   import { probe, startGpuLane } from "./gpu-bridge.mjs";
+  import { irFileUpload } from "./ir-source.js?v=${v}";
 
   // Both constants are the plugin's, restated here because the ring is allocated
   // on this side: kInternalBlock and kWebGpuLatencyBlocks in
@@ -784,6 +813,7 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   const backend = [info.vendor, info.architecture].filter(Boolean).join(" / ");
 
   let audioContext = null;
+  let engineIsGpu = false;   // is the GPU the engine that is EMITTING? (see the status poll)
 
   mountDemo({
     root: document.getElementById("app"),
@@ -837,16 +867,37 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           '<label for="engine">Engine</label>' +
           '<select id="engine"><option value="0">CPU</option>' +
           '<option value="1">GPU (WebGPU compute)</option></select>';
+
+        // THE LIVE METRICS, as separate elements with FIXED-WIDTH numeric slots.
+        //
+        // Built as spans, not a concatenated sentence. A sentence re-flows every time a
+        // number gains a digit — the labels and separators shuffle, and on a narrow screen
+        // the whole line rewraps several times a second. Each number gets its own slot,
+        // sized for its widest plausible value, with tabular figures so the digits are all
+        // the same width. It reads as one sentence and nothing moves but the digits.
+        const stats = document.createElement("div");
+        stats.className = "engine-stats";
+        stats.innerHTML =
+          '<span id="es-cpu">Convolving on the CPU — a real-FFT partitioned convolver.</span>' +
+          '<span id="es-gpu" hidden>' +
+            '<span class="es-num" id="es-blocks">—</span><span class="es-lab"> blocks on the GPU</span>' +
+            '<span class="es-sep"> · </span>' +
+            '<span class="es-num" id="es-covered">—</span><span class="es-lab"> covered by the CPU</span>' +
+            '<span class="es-sep"> · </span>' +
+            '<span class="es-num" id="es-us">—</span><span class="es-lab"> µs/block</span>' +
+            '<span class="es-sep"> · </span>' +
+            '<span class="es-num es-pct" id="es-pct">—</span><span class="es-lab"> of the real-time budget</span>' +
+          '</span>';
+
         const note = document.createElement("p");
         note.className = "engine-note";
         note.textContent =
-          "On GPU, this convolution is running as a WebGPU compute shader in your browser " +
-          "tab. It is not faster than the CPU path — a competent real-FFT CPU convolver " +
-          "matches or beats it. CPU is the default and always the fallback: a GPU block " +
-          "that misses its deadline is covered by the CPU convolver, which runs primed the " +
-          "whole time.";
+          "CPU is the default and always the fallback — a GPU block that misses its " +
+          "deadline is covered, so you never hear a gap.";
         container.appendChild(row);
+        container.appendChild(stats);
         container.appendChild(note);
+
         const select = row.querySelector("select");
         select.addEventListener("change", async () => {
           const params = (await adapter.getParameterInfo()) || [];
@@ -854,6 +905,11 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           if (engine) adapter.setParameterValue(engine.id, Number(select.value));
         });
         window.__engineSelect = select;
+
+        // Which engine is actually EMITTING. Kept in sync from both directions: this
+        // control, and the plugin itself (a preset or a host can move the parameter).
+        engineIsGpu = Number(select.value) >= 1;
+        select.addEventListener("change", () => { engineIsGpu = Number(select.value) >= 1; });
       };
 
       // What the page says while there is no working GPU lane — and what it keeps saying
@@ -866,6 +922,23 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           ? "GPU engine unavailable (no-gpu-lane-in-worklet) — running the CPU convolver."
           : "GPU engine starting — waiting for the plugin's impulse response. Running the CPU convolver.";
       container.appendChild(offNote);
+
+      // The plugin can move Engine without going through the control above (a preset, a
+      // host automation lane). Follow it, or the status line and the audio disagree — which
+      // is the same lie, just arrived at from the other side.
+      const prevParamsChanged = adapter.onParamsChanged;
+      adapter.onParamsChanged = (values, infos) => {
+        try {
+          const list = infos || [];
+          const e = list.find((x) => /^engine$/i.test(x.label || ""));
+          if (e && values && typeof values[e.id] === "number") {
+            engineIsGpu = values[e.id] >= 0.5;
+            const sel = document.querySelector("#engine");
+            if (sel) sel.value = engineIsGpu ? "1" : "0";
+          }
+        } catch (err) { /* a readout must never take the audio down */ }
+        if (prevParamsChanged) prevParamsChanged(values, infos);
+      };
 
       // The plugin's live IR → the worker. Assigning this handler REPLAYS the latest IR
       // if the plugin already published one (the adapter latches it), so a handler that
@@ -882,10 +955,26 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
 
       const canvas = document.createElement("canvas");
       canvas.id = "pulp-ui-canvas";
-      canvas.style.cssText = "width:100%;aspect-ratio:8/5;display:block";
+      // Same box as the CPU pages (see CANVAS_ASPECT). 8/5 left a third of the panel as
+      // dead space between the last knob and the Engine control below it.
+      // A FIXED height, not an aspect ratio.
+      //
+      // The plugin's content height does not depend on its width: 20px of padding, a 26px
+      // title, a 16px gap, and one 128px row of controls. 210px, at every width. An
+      // aspect-ratio makes the box a function of the WIDTH instead — so it left a dead band
+      // under the knobs on a desktop and collapsed to ~100px on a phone (where the view
+      // then sheared its own labels through each other). Neither was a tuning problem; the
+      // measurement was simply of the wrong thing.
+      canvas.style.cssText = "width:100%;height:210px;display:block";
       container.appendChild(canvas);
 
-      const pending = mountPulpUi(canvas, adapter, { moduleUrl: "./${UI_MODULE}.js" });
+      // Engine and "GPU only" are rendered BELOW as a <select> and a checkbox — real
+      // controls with words on them. Drawing them again as knobs would be two controls for
+      // one parameter, and a continuous dial is the wrong shape for a switch anyway.
+      const pending = mountPulpUi(canvas, adapter, {
+        moduleUrl: "./${UI_MODULE}.js",
+        hideParams: ["Engine", "GPU only"],
+      });
       pending.catch((err) => { console.warn("Pulp UI failed to mount:", err); });
 
       // 10 Hz, on a setInterval and NOT requestAnimationFrame: a backgrounded tab
@@ -905,22 +994,44 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           // 100 % of what you hear.
           const producedNow = (stats.produced || 0) > lastProduced;
           lastProduced = stats.produced || 0;
+
+          // AND the engine must actually BE the GPU. The worker keeps turning under
+          // Engine=CPU — deliberately: the plugin drives the ring on every block so the
+          // shared block timeline stays aligned, and a ring that idled through a CPU
+          // stretch would hand the first pops after a flip back to GPU a pile of stale
+          // audio. Those blocks are produced and then DISCARDED.
+          //
+          // So "blocks are advancing" is not the question. It reported "Engine: GPU —
+          // 10,425 blocks on GPU" while the selector said CPU and not one sample of what
+          // you were hearing came from the shader. The readout must describe the audio
+          // that is being EMITTED, not the work that is being thrown away — a status line
+          // that overstates the GPU is the exact failure this whole demo exists to avoid.
+          const gpuIsCarrying = engineIsGpu && producedNow;
           // budget_us and rt_percent are derived HERE, by the same arithmetic
           // native gpu_status() uses (super_convolver.hpp), so the browser and
           // the native build print the same numbers computed the same way.
           const sampleRate = (audioContext && audioContext.sampleRate) || 48000;
           const budget_us = (INTERNAL_BLOCK / sampleRate) * 1e6;
           const avg_us = stats.avgBlockUs || 0;
-          ui.setGpuStatus({
-            engine: producedNow ? "gpu" : "cpu",
-            backend,
-            produced: stats.produced || 0,
-            covered: stats.miss || 0,   // covered by the CPU net — never "produced"
-            avg_us,
-            budget_us,
-            rt_percent: budget_us > 0 ? (avg_us / budget_us) * 100 : 0,
-            note: stats.deviceLost ? "device lost — the CPU convolver is covering every block" : "",
-          });
+          // Nothing to write into the canvas: the plugin no longer carries a status line.
+          // The Engine <select> below says which engine is selected, and these DOM slots say
+          // what it is doing.
+
+          const pct = budget_us > 0 ? (avg_us / budget_us) * 100 : 0;
+          const put = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+          const show = (id, on) => { const e = document.getElementById(id); if (e) e.hidden = !on; };
+
+          // Show the GPU figures ONLY while the GPU is the engine that is emitting. The worker
+          // keeps producing blocks under Engine=CPU and they are all discarded; printing them
+          // there describes work you cannot hear, beside a control that says CPU.
+          show("es-cpu", !gpuIsCarrying);
+          show("es-gpu", gpuIsCarrying);
+          if (gpuIsCarrying) {
+            put("es-blocks", (stats.produced || 0).toLocaleString());
+            put("es-covered", (stats.miss || 0).toLocaleString());
+            put("es-us", Math.round(avg_us).toLocaleString());
+            put("es-pct", pct.toFixed(1) + "%");
+          }
           window.__gpuStats = stats;
         }, 100);
       }, () => {});
@@ -942,9 +1053,16 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
         ? { gpuSab: lane.sab, gpuLatencyBlocks: lane.latencyBlocks }
         : {});
     },
+    // The same uploader the CPU pages get. It is the same plugin and it takes the same
+    // impulse response — and on THIS page it does more than on the others: the plugin
+    // republishes its rebuilt IR (pulp_ir_*), the page forwards it with lane.setIr(), and
+    // the GPU worker re-prepares. So dropping a file here changes the kernel the compute
+    // shader is convolving with, live. Withholding the control on the one page where it is
+    // most interesting would have been an odd place to stop.
+    fileUpload: irFileUpload(),
   });
 </script>
-<p style="max-width:860px;margin:0 auto;padding:0 20px 40px;
+<p style="max-width:640px;margin:0 auto;padding:0 20px 40px;
           font:13px/1.6 system-ui;color:#8b96a3">
   The CPU-only builds of the same plugin are at
   <a href="../super-convolver/" style="color:#2bd4be">SuperConvolver (WAM &amp; WebCLAP) &rarr;</a>.
@@ -957,6 +1075,34 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
 // The Pulp UI module trio (.js/.wasm/.data — the .data carries icudtl.dat, which
 // SkUnicode needs or every Label shapes to zero width).
 const UI_FILES = [`${UI_MODULE}.js`, `${UI_MODULE}.wasm`, `${UI_MODULE}.data`];
+
+
+// Copy one Pulp-UI file into a page dir, PRE-COMPRESSING the .data MEMFS image.
+//
+// _headers declares `Content-Encoding: br` for every .data (Cloudflare does not auto-compress
+// application/octet-stream, and this is the largest asset on the site). So the bytes on disk
+// MUST actually be brotli. Plain-copying it ships raw bytes under a header that says brotli —
+// the browser fails to decode, the UI module never loads, and the page sits on "Loading
+// editor…" forever. The GPU page did exactly that, and its share card was a screenshot of
+// that loading screen.
+//
+// One function, used by every page that carries the UI module, so the two cannot drift again.
+async function copyUiFile(f, srcDir, destDir) {
+  if (!f.endsWith(".data")) {
+    await copyFile(join(srcDir, f), join(destDir, f));
+    return;
+  }
+  const raw = await readFile(join(srcDir, f));
+  const packed = brotliCompressSync(raw, {
+    params: {
+      [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+      [zlibConstants.BROTLI_PARAM_SIZE_HINT]: raw.length,
+    },
+  });
+  await writeFile(join(destDir, f), packed);
+  console.log(`  ${f}  ${(raw.length / 1048576).toFixed(1)} MB → ` +
+              `${(packed.length / 1048576).toFixed(1)} MB (brotli, pre-compressed)`);
+}
 
 async function emitSuperConvolverGpu() {
   if (!GPU_IR_HANDOFF_WIRED) {
@@ -990,8 +1136,12 @@ async function emitSuperConvolverGpu() {
                                         existsSync(join(dir, "og.png")), v));
   await copyFile(gpuWasm, join(dir, `${GPU_TARGET}.wasm`));
   await copyFile(cpuWasm, join(dir, "SuperConvolver.wasm"));
-  for (const f of UI_FILES) await copyFile(join(UI_BUILD, f), join(dir, f));
+  for (const f of UI_FILES) await copyUiFile(f, UI_BUILD, dir);
   await copyFile(join(UI_SRC, "pulp-ui.js"), join(dir, "pulp-ui.js"));
+  // The GPU page offers the same IR uploader as the CPU pages, and pulp-ui.js's sibling
+  // import of it is relative — so it has to live in THIS directory too, not just the
+  // super-convolver one. Without it the page 404s on ir-source.js and never mounts at all.
+  await copyFile(join(UI_SRC, "ir-source.js"), join(dir, "ir-source.js"));
   for (const f of GPU_BRIDGE_FILES) await copyFile(join(GPU_SRC, f), join(dir, f));
   for (const f of GPU_DSP_FILES) await copyFile(join(GPU_DSP_BUILD, f), join(dir, f));
   console.log("  super-convolver-gpu/**     (WebGPU compute engine offered; CPU is the default " +
@@ -1035,26 +1185,7 @@ async function emitSuperConvolver() {
     await copyFile(join(UI_SRC, "ir-source.js"), join(pdir, "ir-source.js"));
     if (withUi) {
       for (const f of uiFiles) {
-        // The .data MEMFS image ships PRE-COMPRESSED (see _headers). Cloudflare
-        // does not auto-compress application/octet-stream, so this file — the
-        // LARGEST asset on the site — was going out at 10.4 MB raw while the 8.5 MB
-        // wasm beside it arrived brotli'd at 3.3 MB. Compress it here and let the
-        // header declare the encoding; the browser inflates it transparently and
-        // the Emscripten loader reads the same bytes.
-        if (f.endsWith(".data")) {
-          const raw = await readFile(join(UI_BUILD, f));
-          const packed = brotliCompressSync(raw, {
-            params: {
-              [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
-              [zlibConstants.BROTLI_PARAM_SIZE_HINT]: raw.length,
-            },
-          });
-          await writeFile(join(pdir, f), packed);
-          console.log(`  ${f}  ${(raw.length / 1048576).toFixed(1)} MB → ` +
-                      `${(packed.length / 1048576).toFixed(1)} MB (brotli, pre-compressed)`);
-        } else {
-          await copyFile(join(UI_BUILD, f), join(pdir, f));
-        }
+        await copyUiFile(f, UI_BUILD, pdir);
       }
       await copyFile(join(UI_SRC, "pulp-ui.js"), join(pdir, "pulp-ui.js"));
     }

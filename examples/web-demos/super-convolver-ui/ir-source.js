@@ -212,25 +212,32 @@ export function irFileUpload() {
 
   // What Size is doing to THIS impulse, right now.
   //
-  // Size only trims an impulse that is LONGER than it (window_ir_to_length:
-  // `if (ir.size() <= target_len) return ir;`). So for a 0.5 s cabinet IR a Size of
-  // 1.5 s does nothing at all — which is genuinely confusing if the copy just says
-  // "Size windows this space". Say which of the three cases the user is actually in.
+  // Say the two things a reader actually needs and nothing else: HOW LONG their file is, and
+  // WHAT THE KNOB DOES IN EACH DIRECTION. Earlier drafts said "Size trims the tail. Now: the
+  // full 0.73 s. Below 0.73 s it shortens." — which names two durations, explains neither,
+  // and never says what happens if you turn it UP. (Nothing happens. That is worth saying:
+  // silence about it reads as a bug.)
+  //
+  // The mechanism, once: an impulse response is a RECORDING of a real space decaying. Size
+  // can cut that recording short, but there is nothing past the end of the file to extend
+  // into — inventing tail would be a different room. So above the file's length the knob
+  // genuinely does nothing.
   const sizeLine = () => {
     if (!loaded || !(sizeSeconds > 0)) return "";
     const ir = loaded.seconds;
+    const f = (n) => n.toFixed(2);
     if (ir <= sizeMin) {
-      // The knob physically cannot reach below this impulse, so it can never trim it.
-      // Say that, rather than inviting someone to turn Size somewhere it does not go.
-      return `<br>This impulse (${ir.toFixed(2)} s) is shorter than <b>Size</b>'s minimum ` +
-             `(${sizeMin.toFixed(2)} s), so Size cannot trim it — you always hear all of it.`;
+      // Size cannot physically reach below this file, so it can never cut it.
+      return `<br>Your impulse is <b>${f(ir)} s</b> long — shorter than Size goes, ` +
+             `so Size never cuts it. You always hear all of it.`;
     }
     if (sizeSeconds >= ir) {
-      return `<br><b>Size ${sizeSeconds.toFixed(2)} s</b> is longer than this ${ir.toFixed(2)} s ` +
-             `impulse, so you are hearing all of it. Turn Size below ${ir.toFixed(2)} s to shorten it.`;
+      return `<br>Your impulse is <b>${f(ir)} s</b> long. Size is ${f(sizeSeconds)} s — ` +
+             `above it, so you hear all of it. Turning Size higher changes nothing; ` +
+             `below ${f(ir)} s it cuts the tail short.`;
     }
-    return `<br><b>Size ${sizeSeconds.toFixed(2)} s</b> is trimming this ${ir.toFixed(2)} s ` +
-           `impulse to ${sizeSeconds.toFixed(2)} s, with a short fade at the cut.`;
+    return `<br>Your impulse is <b>${f(ir)} s</b> long. Size is ${f(sizeSeconds)} s — ` +
+           `you hear only the first ${f(sizeSeconds)} s, with a quick fade at the cut.`;
   };
 
   const render = () => { if (ui && loaded) ui.setMessage(loaded.facts + sizeLine()); };
@@ -323,5 +330,9 @@ function describeIr(file, ir) {
 
   // Facts only. What Size is DOING to this impulse is a live thing — it follows the
   // knob — so it lives in the #sc-ir-size line, not baked into this one-shot string.
-  return `<span class="sc-ir-name">${esc(file.name)}</span> — ${facts.join(" · ")}.`;
+  // Two lines, not one run-on. First: WHAT is loaded — that is the thing the user just did
+  // and the thing they want confirmed. Then the file's data underneath it, where it reads as
+  // supporting detail rather than as part of the sentence.
+  return `Using <span class="sc-ir-name">${esc(file.name)}</span>` +
+         `<br><span class="sc-ir-facts">${facts.join(" · ")}</span>`;
 }

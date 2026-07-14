@@ -433,6 +433,20 @@ jobs:
           repository: danielraffel/pulp-classic-effects
           path: _ext/pulp-classic-effects
 
+      # The UI module reads its theme JSON through choc, and choc is FetchContent'd —
+      # so a fresh checkout has no copy and PulpWebUi.cmake's fallback search (which
+      # looks in build/_deps) finds nothing. The Linux lane vendors it; this lane did
+      # not, and configured build-webui without the flag, so it failed at CMake time
+      # long before it could prove anything about the GPU.
+      - name: Vendor choc for the UI build
+        run: |
+          set -euo pipefail
+          # Self-hosted runners keep $HOME between jobs — a bare clone would fail on the
+          # second run.
+          [ -d "$HOME/choc-src" ] || git clone --depth 1 --branch pulp-webview-dnd-poc1 \
+            https://github.com/danielraffel/choc.git "$HOME/choc-src"
+          echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
+
       - name: Assemble the GPU demo page (the real one, from the real modules)
         run: |
           set -euo pipefail
@@ -454,7 +468,8 @@ jobs:
           # The page's status strip is a Label in Pulp's own view tree, so the GPU page
           # cannot be assembled without the UI module — there is nothing to report into.
           emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
-            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm"
+            -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm" \
+            -DPULP_WEBUI_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
           cmake --build build-webui -j"$(sysctl -n hw.ncpu)"
 
           # Every gallery plugin, so the assembler can run at all (see the checkouts above).

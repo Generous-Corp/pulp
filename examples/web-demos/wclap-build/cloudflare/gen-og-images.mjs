@@ -22,7 +22,8 @@
 // short list of common install paths (mirrors the SDK web-plugins lane). Requires
 // playwright-core on the module path (CI: `npm install --no-save playwright-core`).
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -115,6 +116,7 @@ const browser = await chromium.launch({
 const OG_RATIO = 1200 / 630;   // 1.905
 
 let failed = 0;
+let skipped = 0;
 async function attempt(pageUrl, selector, outPath, label, start) {
   const context = await browser.newContext({
     viewport: { width: 960, height: 1200 },
@@ -133,7 +135,32 @@ async function attempt(pageUrl, selector, outPath, label, start) {
       await page.waitForFunction(() => typeof window.__start === "function", null, { timeout: 20000 });
       await page.evaluate(() => { window.__start(); });
       await page.waitForFunction(() => window.__demo && window.__demo.started === true, null, { timeout: 25000 });
-      await sleep(800);   // let the scope/meter/widgets settle into first paint
+
+      // "started" is the SHELL's state, not the PLUGIN's — and neither is "the canvas
+      // exists". A wasm editor's canvas element is created IMMEDIATELY and only then does the
+      // module get fetched and instantiated, so waiting for the element waits for nothing:
+      // the card came out reading "Loading editor…", which is what the player paints INTO
+      // that canvas's slot while the plugin is still coming up. It shipped that way, twice —
+      // first as a black rectangle, then as a loading message.
+      //
+      // The player already publishes the correct signal. It shows `.pw-customui-loading`
+      // while the editor is mounting and REMOVES it when the editor has settled. Wait for
+      // that to be gone, not for a box to exist.
+      await page.waitForFunction(() => {
+        if (document.querySelector(".pw-customui-loading")) return false;   // still mounting
+        const c = document.querySelector("#pulp-ui-canvas, #custom-ui canvas");
+        if (c) return c.width > 0 && c.height > 0;
+        return !!document.querySelector("#params .pw-cell");                // no custom UI
+      }, null, { timeout: 45000 }).catch(() => {});
+      await sleep(2200);  // let the editor, scope, meter and live values settle into paint
+
+      // AND REFUSE TO SHIP A CARD OF THE LOADING SCREEN. Every wait above is a claim about
+      // when the plugin is ready; this is the check that the claim held. Cheap, and it is the
+      // only thing standing between a wrong wait and a wrong picture on every share link.
+      const stillLoading = await page.evaluate(() =>
+        !!document.querySelector(".pw-customui-loading") ||
+        /Loading editor/i.test(document.body.innerText));
+      if (stillLoading) throw new Error("the editor had not finished mounting — refusing to shoot the loading screen");
     }
     const el = await page.$(selector);
     if (!el) throw new Error(`selector ${selector} not found`);
@@ -182,9 +209,54 @@ async function attempt(pageUrl, selector, outPath, label, start) {
 
 // One retry absorbs transient headless worklet-load timing without weakening the
 // "every page must produce an image" guarantee.
+// ── Don't re-shoot a page that has not changed ──────────────────────────────────
+//
+// A shot is EXPENSIVE: launch a context, load the page, instantiate a multi-megabyte wasm
+// plugin, wait for it to settle, screenshot. Thirty of those on every deploy — including the
+// twenty-odd pages nobody touched — is minutes of CI, and battery, spent redrawing pictures
+// that are already correct.
+//
+// So each og.png is keyed to the things that can actually change it: the page's own HTML,
+// and every asset that page loads from this site (its wasm module, the player, pulp-ui.js).
+// Same inputs -> same picture -> skip. The key is stored NEXT TO the image, so a missing or
+// hand-deleted png always re-shoots, and a changed plugin always re-shoots.
+//
+// Deliberately keyed on CONTENT, not mtimes: a rebuild touches every file, and an mtime
+// cache would then be a cache that never hits.
+const KEY_SUFFIX = ".key";
+
+async function shotKey(pageDir) {
+  const h = createHash("sha256");
+  const walk = async (dir) => {
+    for (const e of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name.endsWith(".png") || e.name.endsWith(KEY_SUFFIX)) continue;   // the output, not an input
+      const full = join(dir, e.name);
+      if (e.isDirectory()) { await walk(full); continue; }
+      h.update(e.name);
+      h.update(await readFile(full));
+    }
+  };
+  try { await walk(pageDir); } catch { return null; }
+  // The shared player is loaded by every page and is NOT in the page's own directory.
+  try { await walk(join(OUT, "vendor-player")); } catch { /* the standalone pages have none */ }
+  return h.digest("hex");
+}
+
 async function shoot(pageUrl, selector, outPath, label, start) {
+  const pageDir = dirname(outPath);
+  const keyPath = outPath + KEY_SUFFIX;
+  const key = await shotKey(pageDir);
+  if (key && existsSync(outPath)) {
+    const prev = await readFile(keyPath, "utf8").catch(() => null);
+    if (prev === key) { skipped++; console.log(`  skip ${label} (unchanged)`); return; }
+  }
+
   for (let tryNo = 1; tryNo <= 2; tryNo++) {
-    try { await attempt(pageUrl, selector, outPath, label, start); return; }
+    try {
+      await attempt(pageUrl, selector, outPath, label, start);
+      if (key) await writeFile(keyPath, key);
+      return;
+    }
     catch (e) {
       if (tryNo === 2) { failed++; console.log(`  FAIL ${label}: ${e && e.message ? e.message : e}`); }
       else { console.log(`  retry ${label} (${e && e.message ? e.message : e})`); await sleep(600); }
