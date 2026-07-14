@@ -1,16 +1,93 @@
 # Custom Rendering
 
-Pulp provides three layers of custom rendering, from simple JS draw commands to full GPU shader access. Choose the layer that matches your needs.
+Pulp provides four layers of custom rendering, from re-skinning the stock widgets to full GPU shader access. Choose the layer that matches your needs.
 
 ## When to Use Each Layer
 
 | Layer | API | Language | GPU-Accelerated | Best For |
 |-------|-----|----------|-----------------|----------|
+| **A** — Paint / metrics delegates | `WidgetPainter`, `WidgetMetrics` | C++ | Yes (via Skia) | Re-skinning the **stock** widgets without subclassing them |
 | **B** — CanvasWidget | JS bridge canvas functions | JavaScript | Yes (via Skia) | Custom meters, visualizations, simple graphics |
 | **C** — Canvas API | `Canvas` abstract interface | C++ | Yes (via Skia) | Custom `View` subclasses, complex procedural drawing |
 | **C+** — Dawn/WebGPU | WebGPU render pipeline | C++ / WGSL | Direct GPU | Shader-driven visuals, particle systems, spectrograms |
 
-Start with Layer B. Move to Layer C when you need C++ performance or complex state. Move to C+ when you need custom shaders.
+Start with Layer A if the widget you want already exists and you only want it to
+*look* different. Move to Layer B for a bespoke visual. Move to Layer C when you
+need C++ performance or complex state, and to C+ when you need custom shaders.
+
+---
+
+## Layer A: skin the stock widgets — `WidgetPainter` / `WidgetMetrics`
+
+Two independent delegates let you restyle and re-size Pulp's stock widgets
+**without subclassing any of them**:
+
+| Delegate | Answers | Installed with |
+|---|---|---|
+| `WidgetPainter` (`pulp/view/widget_painter.hpp`) | *what pixels?* | `View::set_painter(...)` |
+| `WidgetMetrics` (`pulp/view/widget_metrics.hpp`)  | *how big?*     | `View::set_metrics(...)` |
+
+They are deliberately **separate objects**, because they run at different times.
+Metrics is consulted during **layout** — with no canvas, possibly many times per
+frame. Painting happens once, afterwards. Fusing them would drag every skin that
+only wants to restyle into the layout pass.
+
+```cpp
+struct MySkin : pulp::view::WidgetPainter {
+    bool paint_rotary(pulp::canvas::Canvas& c,
+                      const pulp::view::RotaryPaintState& s,
+                      pulp::view::View& v) override {
+        // s.position is 0..1
+        draw_my_knob(c, s.bounds, s.position, s.hovered, s.enabled);
+        return true;                       // claimed — the stock look does NOT also draw
+    }
+    // every other hook is left alone, and keeps the stock look
+};
+
+panel.set_painter(std::make_shared<MySkin>());   // applies to the whole subtree
+```
+
+**Three properties make this usable, and all three are load-bearing:**
+
+- **It cascades.** A delegate installed on a view applies to that view *and its
+  whole subtree*, so you can skin a panel in one call. A descendant that installs
+  its own wins for its own subtree; clearing falls back to the nearest ancestor.
+- **Every hook declines by default.** Each returns `false` — "no opinion, use the
+  stock look" — so a delegate that restyles one knob is never conscripted into
+  reimplementing the entire widget set. Return `true` to claim a hook, and the
+  widget will not also draw over you.
+- **The units are the ones each shape actually reasons in**, and mixing them up
+  renders *plausibly* while being wrong at every value:
+  - a **rotary** hook gets a normalized `position` (0..1) — it reasons in sweep angle;
+  - a **linear / scroll-bar** hook gets `thumb_pos` and `thumb_size` in **pixels**,
+    plus the value and its range in your own units.
+
+`WidgetMetrics` works identically, and feeds the same `intrinsic_width()` /
+`intrinsic_height()` the layout engine already calls — there is no second measure
+protocol. A widget that positions itself rather than being laid out (a
+`ContextMenu`) asks the delegate directly, and `ContextMenu::layout()` will compute
+its whole geometry **with no canvas and no paint**, so you can ask a menu how big it
+wants to be before it is ever shown.
+
+### `SliderCore` — the value engine
+
+If you are building a *custom* continuous control and want Pulp's exact behaviour,
+use `pulp::view::SliderCore` (`pulp/view/slider_core.hpp`) rather than
+reimplementing it: range, quantization interval, skew (including
+`set_skew_from_midpoint`), the absolute drag law, fine-drag, default/reset, and
+edge-triggered gesture bracketing.
+
+Its writes take a notification mode:
+
+```cpp
+core.set_value(v, Notify::none);   // change the value, tell nobody
+core.set_value(v, Notify::sync);   // fire on_value_change now  (default)
+core.set_value(v, Notify::async);  // defer to flush_async_notifications()
+```
+
+`Notify::none` is what stops a programmatic sync from echoing a change back at
+whatever just made it. Gesture begin/end is **edge-triggered**, so a widget that
+funnels two event sources into one handler still records **one** host edit, not two.
 
 ---
 

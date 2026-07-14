@@ -394,6 +394,7 @@ Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas
 | SeqLock (coherent multi-field reads) | stable | [runtime](modules.md#runtime) | [architecture](../concepts/architecture.md) |
 | TripleBuffer (latest-value publication) | stable | [runtime](modules.md#runtime) | [architecture](../concepts/architecture.md) |
 | SPSCQueue (single-producer single-consumer FIFO) | stable | [runtime](modules.md#runtime) | |
+| SpscRingIndex (lock-free ring index; the `<pulp/runtime/spsc_ring_index.hpp>` type behind a ring buffer) | stable | [runtime](modules.md#runtime) | |
 | ScopeGuard | stable | [runtime](modules.md#runtime) | |
 | Logging | stable | [runtime](modules.md#runtime) | |
 | Assertions | stable | [runtime](modules.md#runtime) | |

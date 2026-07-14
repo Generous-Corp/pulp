@@ -198,3 +198,39 @@ console.log(resp);   // {"ok":true}
   scaffold (`pulp import-design --from claude --file <path>`)
 - `core/format/include/pulp/format/view_bridge.hpp` — the lifecycle
   bridge that wraps `Processor::create_view()`
+
+
+## Host parameters — `HostParamSurface`
+
+A view can bind directly to a framework-agnostic parameter surface
+(`View::host_params()`), which hides *which* parameter system is underneath — an
+embedding framework's parameter tree, or Pulp's own `StateStore` — so one view runs
+unchanged in either.
+
+```cpp
+view.set_host_params(&surface);
+view.route_changes_to_host_params(true);   // OFF by default
+```
+
+With routing on, a user gesture on a key-tagged control drives the surface directly
+(`begin_gesture` / `set_param` / `end_gesture`), and `sync_from_host_params()` pulls
+current values and display text back at tick.
+
+> ### ⚠️ Pick exactly ONE path — wiring both double-writes
+>
+> There are two ways a control's value can reach the host, and they are **not**
+> alternatives you can safely have both of:
+>
+> - **The binder:** you wire `on_element_changed` and forward it into the parameter
+>   store yourself.
+> - **The surface:** the view drives it for you (above).
+>
+> `on_element_changed` **keeps firing when routing is on.** That is free for a
+> consumer that merely *observes* it, and a **double write** for one that *writes*
+> from it. Enable routing without deleting the write side of your handler and the
+> host receives every value — **and every gesture bracket** — twice: a doubled
+> automation write and an unbalanced begin/end pair.
+>
+> Routing is **off by default**, and that default is what keeps every existing embed
+> correct. Moving to the surface? Turn routing on **and** drop the write side of
+> `on_element_changed`, keeping it only for observation.
