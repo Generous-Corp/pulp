@@ -16,10 +16,11 @@ namespace pulp::view {
 /// A framework-agnostic, native-view-facing runtime parameter accessor.
 ///
 /// This is the SINGLE host surface a view binds against — defined once in the
-/// SDK so that a view written against it runs unchanged in three hosts:
-///   (a) embedded in JUCE   — backed by APVTS over the pulp-view-embed C ABI,
-///   (b) embedded in iPlug2 — backed by IParams over the same ABI,
-///   (c) native Pulp        — backed by StateStore (see StateStoreHostParamSurface).
+/// SDK, so the same view can be driven by whichever parameter system its host
+/// happens to own, and never knows which:
+///   (a) embedded in a third-party plug-in framework — backed by that
+///       framework's own parameter tree over the pulp-view-embed C ABI,
+///   (b) native Pulp — backed by StateStore (see StateStoreHostParamSurface).
 ///
 /// Unlike the bind-once path (NativeImportBindingContext / DesignFrameView's
 /// element_for_param_key push), this resolves keys LIVE, so dynamic/paged

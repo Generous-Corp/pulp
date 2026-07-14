@@ -606,7 +606,10 @@ void DesignFrameView::set_element_param_key(int i, std::string key) {
     if (elements_[i].param_key == key) return;
     // Release the old key's gesture ONLY if one is actually open on this element
     // (i.e. it is the element currently being dragged). Ending an idle param's
-    // gesture sends an unbalanced end_gesture — JUCE APVTS asserts on that.
+    // gesture emits an end_gesture with no matching begin_gesture. Gesture
+    // brackets are a strict protocol on every host parameter surface — an
+    // unbalanced end may assert, drop the automation write, or leave the host's
+    // undo grouping open — so only close a gesture this view actually opened.
     if (drag_ == i) {
         if (HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
             hp && !elements_[i].param_key.empty() && hp->has_param(elements_[i].param_key)) {

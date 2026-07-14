@@ -2,8 +2,9 @@
 
 /// @file parameter_binding.hpp
 /// Two-way binding between a standard widget and a store parameter, with
-/// host automation gestures — the equivalent of a JUCE
-/// `AudioProcessorValueTreeState` attachment.
+/// host automation gestures. One call replaces the hand-written
+/// widget-callback ↔ parameter-listener pair an editor would otherwise
+/// maintain per control.
 ///
 /// `bind_parameter(widget, store, id)` wires:
 ///   - widget interaction → host gesture (begin on press, end on release)
@@ -12,9 +13,10 @@
 ///   - store changes (e.g. automation playback, preset load) → the widget's
 ///     displayed value.
 ///
-/// It returns a `ParameterBinding` that owns the store listener; keep it
-/// alive for as long as the widget is bound (typically a member of the
-/// editor), exactly like a JUCE attachment. Dropping it unbinds.
+/// It returns a `ParameterBinding` that owns the store listener. The binding
+/// is lifetime-scoped: keep it alive for as long as the widget is bound
+/// (typically as a member of the editor, so it dies with the widget), and
+/// dropping it unbinds — there is no separate detach call.
 ///
 /// Without this, a widget changes the parameter audibly but the host does
 /// not record the move, because the raw value write is not bracketed in a

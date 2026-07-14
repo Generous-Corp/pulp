@@ -434,12 +434,13 @@ public:
     // (octave/velocity/sustain/pitch-bend). UI thread.
     std::function<void(const std::string& action)> on_action;
 
-    // ── Runtime host-parameter surface (the "port once, three hosts" path) ──
+    // ── Runtime host-parameter surface (the "port once, any host" path) ──
     // Beyond the bind-once path (a consumer wiring on_element_changed +
     // element_for_param_key), a DesignFrameView can bind DIRECTLY to the SDK's
-    // framework-agnostic HostParamSurface (View::host_params()). This is what
-    // lets one view run unchanged embedded in JUCE (APVTS-backed), embedded in
-    // iPlug2 (IParams-backed), or native (StateStore-backed).
+    // framework-agnostic HostParamSurface (View::host_params()). The surface
+    // hides WHICH parameter system is underneath — an embedding plug-in
+    // framework's parameter tree, or Pulp's own StateStore — so one view runs
+    // unchanged in every one of them.
     //
     // Enable with route_changes_to_host_params(true): thereafter a user gesture
     // on a param_key-tagged element drives host_params() directly
@@ -583,9 +584,10 @@ protected:
     // on_element_changed / on_gesture_* callback. Single funnel so every
     // value-bearing gesture path stays consistent.
     //
-    // These are the supported subclass extension point. A foreign-host adapter
-    // (e.g. a JUCE/iPlug2 fork that drives the editor from its own automation or
-    // a headless QA harness) can call these to push a synthetic value or bracket
+    // These are the supported subclass extension point. An adapter that drives
+    // the editor from something other than a pointer (an embedding host pushing
+    // its own automation, or a headless QA harness) can call these to push a
+    // synthetic value or bracket
     // a gesture through the *same* funnel a real pointer gesture uses — so
     // host-param routing, the public callbacks, and undo bracketing all stay
     // consistent with hand-driven input. `i` is an active-frame element index:

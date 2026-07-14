@@ -23,8 +23,8 @@ namespace pulp::state {
 /// StateTree node references: embedding nodes as property values would create
 /// ambiguous ownership, hidden aliasing, and potential cycles with parent/child
 /// links. Represent tree shape with StateTree children; use PropertyArray /
-/// PropertyObject for structured leaf data imported from frameworks such as
-/// JUCE var or custom/iPlug2 state blobs.
+/// PropertyObject for structured leaf data imported from a foreign state blob
+/// (a host or framework's own dynamic-value / property-bag representation).
 struct PropertyArray;
 struct PropertyObject;
 

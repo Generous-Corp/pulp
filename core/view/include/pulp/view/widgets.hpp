@@ -883,11 +883,12 @@ public:
     void set_track_thickness(float t) { track_thickness_ = std::max(1.0f, t); }
     float track_thickness() const { return track_thickness_; }
 
-    /// Skew / response curve. skew == 1 is linear (default). The drawn thumb
-    /// position is pow(valueProportion, skew); dragging is the inverse, so a
-    /// linear drag yields a perceptually non-linear value. skew < 1 gives more
-    /// travel (finer control) at the low end — the law a frequency or time
-    /// control wants. Matches JUCE's NormalisableRange skew convention.
+    /// Skew / response curve, shaping the mapping between track position and
+    /// value. skew == 1 is linear (default). The drawn thumb position is
+    /// pow(valueProportion, skew); dragging is the inverse, so a linear drag
+    /// yields a non-linear value. skew < 1 spends more travel (finer control)
+    /// near the minimum — the law a frequency or time control wants; skew > 1
+    /// biases resolution toward the maximum.
     void set_skew(float s) { skew_ = std::max(0.0001f, s); }
     float skew() const { return skew_; }
     /// Choose skew so `mid_value` lands at the middle of the track (position
@@ -1082,8 +1083,9 @@ public:
     /// Radio-group id (0 = independent toggle, the default). Sibling
     /// ToggleButtons under the same parent that share a non-zero id are
     /// mutually exclusive: clicking one turns it on and the others off, and
-    /// clicking the already-on one is a no-op (it stays selected). Matches
-    /// JUCE setRadioGroupId semantics (grouping is by shared parent).
+    /// clicking the already-on one is a no-op (it stays selected). Grouping is
+    /// by shared parent: the id is only compared against siblings, so the same
+    /// id under a different parent forms an independent group.
     void set_radio_group(int id) { radio_group_ = id; }
     int radio_group() const { return radio_group_; }
 

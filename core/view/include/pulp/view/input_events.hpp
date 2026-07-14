@@ -82,8 +82,9 @@ enum class PointerType : uint8_t {
 ///
 /// `MouseEvent::is_down` alone is ambiguous for a multi-event gesture: the
 /// historical headless convention is press=`is_down=true`, drag-tick=
-/// `is_down=false`, release=`is_down=true` (JUCE-style), while a real
-/// platform host naturally delivers press=down, drag=down, release=up. A
+/// `is_down=false`, release=`is_down=true` (is_down means "the button state
+/// CHANGED"), while a real platform host naturally delivers press=down,
+/// drag=down, release=up (is_down means "the button is currently held"). A
 /// consumer that infers press/drag/release from `is_down` alone therefore
 /// behaves OPPOSITELY between the two callers: a live mac drag ended its
 /// move/resize gesture on the FIRST drag tick and fell through to
@@ -135,9 +136,9 @@ struct MouseEvent {
     // When `phase` is set explicitly (a real platform host), use it.
     // When it is `automatic` (legacy / headless callers that only set
     // `is_down`), keep the historical inference: `is_down` events that
-    // begin a gesture read as a press; a host that follows the JUCE
-    // drag-tick convention (drag=is_down=false, release=is_down=true)
-    // is unchanged because those callers leave `phase == automatic`.
+    // begin a gesture read as a press. Callers on the button-state-CHANGED
+    // convention (drag=is_down=false, release=is_down=true) are unchanged
+    // because they leave `phase == automatic`.
     /// True for the initial button-down that begins a gesture.
     bool isPress() const {
         return phase == MousePhase::automatic ? is_down

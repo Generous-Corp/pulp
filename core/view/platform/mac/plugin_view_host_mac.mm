@@ -1041,8 +1041,8 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
         // The hover tracking area installed in -updateTrackingAreas carries
         // NSTrackingMouseMoved, but a tracking area only fans -mouseMoved: out to
         // its owner when the window itself accepts mouse-moved events, and NSWindow
-        // defaults that flag to NO. This window is owned by the foreign host (a DAW,
-        // or a JUCE/iPlug2 embed), not by Pulp, so nothing sets the flag for us and
+        // defaults that flag to NO. This window is owned by the host (a DAW, or an
+        // embedding plug-in framework), not by Pulp, so nothing sets the flag for us and
         // -mouseMoved: never arrives — CSS :hover / on_hover_enter / on_hover_leave
         // stay dead in a hosted editor even though the same tree hovers correctly in
         // the standalone window. Opt the host window into mouse-moved delivery so the
