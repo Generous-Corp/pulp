@@ -986,7 +986,12 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
         if (!ui) return;
         timer = setInterval(() => {
           const stats = laneAttached && lane ? lane.pollStats() : null;
-          if (!stats) { ui.setGpuStatus({ engine: "cpu" }); return; }
+          // No lane, no stats — and nothing to say. The engine is named by the <select>
+          // right below the canvas, which is also the control that changes it; the plugin's
+          // view tree carries no status line to update (a label whose text changes on a
+          // 10 Hz timer is a layout event on a 10 Hz timer, and at phone width it sheared
+          // through the knob labels).
+          if (!stats) return;
           // "Is the GPU carrying the audio RIGHT NOW" — a RECENT-WINDOW test, not a
           // cumulative one. A "produced > 0" test would latch on the first block made
           // and then read "Engine: GPU" forever, including while a backgrounded tab

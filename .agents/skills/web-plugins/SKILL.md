@@ -339,3 +339,28 @@ COOP/COEP) is the `screenshot-sync` skill plus the personal `pulp-web-demo`
 standard. The one rule worth repeating here because it silently kills audio:
 **never cache-bust the worklet processor URL** — the registered processor name is
 derived from it, so a `?v=` forks the name and the node never constructs.
+
+## Landmine: the OG bake is a TWO-PASS assemble — the second pass needs the same args
+
+`gen-og-images.mjs` shoots each page, then `assemble-gallery.mjs` runs **again** to bake the
+`og:image` / twitter block into the HTML — a page's tags are emitted only when its `og.png`
+already exists on disk, which is only true on that second pass.
+
+Run the second pass **bare** (`node assemble-gallery.mjs` with no `--wam-build` / `--ui-build`
+/ `--gpu-build`) and the assembler cannot find the build trees, so it **skips** every page that
+needs one. It skips them quietly — a one-line note — and therefore never rewrites their HTML,
+which is the only thing that pass exists to do. `/super-convolver-gpu/`'s og.png was shot
+perfectly and then never referenced: the page shipped with **no `og:image` at all** and
+unfurled bare. Pass the same trees to both passes.
+
+## The page owns the engine readout, not the view tree
+
+A status line *inside* the plugin canvas that the page refreshes on a timer is a layout event
+on a timer: every time a counter gains a digit the label re-measures, and at phone width it
+sheared straight through the knob labels above it. It was also duplicate chrome — the page
+already renders an Engine `<select>` directly under the canvas, which both names the engine and
+is the control that changes it.
+
+Put live metrics in **DOM slots** beside that control, each with a fixed width and
+`font-variant-numeric: tabular-nums`, so a changing number never moves the layout. The view
+tree carries the controls; the page carries the readout.

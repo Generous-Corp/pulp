@@ -142,7 +142,7 @@ const check = (name, pass, detail = "") => {
 const EXPECTED_EXPORTS = [
   "_malloc", "_free",
   "_pulp_ui_add_param", "_pulp_ui_init", "_pulp_ui_resize",
-  "_pulp_ui_set_param", "_pulp_ui_get_param", "_pulp_ui_set_gpu_status",
+  "_pulp_ui_set_param", "_pulp_ui_get_param",
   "_pulp_ui_repaint", "_pulp_ui_gpu_available", "_pulp_ui_widget_rect",
   "_pulp_ui_capture_png", "_pulp_ui_shutdown",
 ];
@@ -183,28 +183,13 @@ try {
         missingExports.length ? "missing: " + missingExports.join(", ")
                               : `${EXPECTED_EXPORTS.length} exports`);
 
-  // The status line is the one non-parameter surface: the GPU demo page pushes a
-  // stats blob into it at 10 Hz. Its formatting lives in the module, so a blob in
-  // must produce ink in the status region.
-  const status = await page.evaluate(() => {
-    const M = window.__ui.module;
-    const json = JSON.stringify({
-      engine: "gpu", backend: "apple / metal-3", produced: 12480, covered: 3,
-      avg_us: 214, budget_us: 10667, rt_percent: 2.0,
-    });
-    const p = M.stringToNewUTF8(json);
-    M._pulp_ui_set_gpu_status(p);
-    M._free(p);
-    M._pulp_ui_repaint();
-    const rp = M._malloc(16);
-    const ok = M._pulp_ui_widget_rect(0, 2, rp);   // kind 2 = the status line
-    const rect = ok ? Array.from(M.HEAPF32.subarray(rp >> 2, (rp >> 2) + 4)) : null;
-    M._free(rp);
-    return { rect };
-  });
-  check("the status line has bounds in the view tree",
-        !!status.rect && status.rect[2] > 0 && status.rect[3] > 0,
-        status.rect ? `[${status.rect.map(Math.round).join(",")}]` : "no status rect");
+  // NO status-line assertions here, deliberately. The view tree used to carry a status
+  // label that the page pushed GPU stats into at 10 Hz; it is gone. The page names the
+  // engine in a <select> directly under the canvas — the same control that changes it —
+  // and the live counters live in fixed-width DOM slots beside it. A label inside the
+  // canvas whose text changed on a timer re-laid the view out on that timer, and at phone
+  // width it sheared straight through the knob labels. What replaced it is DOM, and the
+  // page fixtures cover it.
 
   // 1 — WebGL2 context. Fail loudly rather than silently rendering nothing.
   const glInfo = await page.evaluate(() => {
@@ -245,8 +230,6 @@ try {
       knob: rect(0, 0),
       label: rect(0, 1),
       labelInk: raster.width ? regionInk(raster, rect(0, 1)) : 0,
-      status: rect(0, 2),
-      statusInk: raster.width ? regionInk(raster, rect(0, 2)) : 0,
       pngBase64: toBase64(png),
     };
 
@@ -337,11 +320,6 @@ try {
   check("label region contains text ink",
         !!probe.label && probe.labelInk > 20,
         probe.label ? `${probe.labelInk} ink px in [${probe.label.map(Math.round).join(",")}]` : "no label rect");
-
-  // The GPU status blob pushed in step 0 must have rendered as real text.
-  check("the GPU status line renders the pushed stats",
-        !!probe.status && probe.statusInk > 20,
-        probe.status ? `${probe.statusInk} ink px in [${probe.status.map(Math.round).join(",")}]` : "no status rect");
 
   // 3 — a real pointer gesture on a real knob.
   const box = await page.evaluate(() => {
