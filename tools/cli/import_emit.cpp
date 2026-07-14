@@ -9,7 +9,7 @@ using pulp::cli::pkg::JsonValue;
 
 namespace {
 
-// Re-serialise a parsed JsonValue back to compact text (the registry parser
+// Re-serialize a parsed JsonValue back to compact text (the registry parser
 // keeps no source spans). Used to hand the migration_status object back to the
 // SDK writer verbatim.
 void escape(const std::string& s, std::string& out) {
@@ -189,7 +189,7 @@ Manifest parse_manifest(const std::string& result_json) {
 
 namespace {
 
-// A normalised, output-dir-relative path is safe when it neither is absolute
+// A normalized, output-dir-relative path is safe when it neither is absolute
 // nor traverses above the output dir via `..`.
 bool is_safe_relative(const fs::path& rel) {
     if (rel.is_absolute()) return false;

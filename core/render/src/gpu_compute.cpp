@@ -1116,7 +1116,7 @@ public:
                 runtime::log_error("GpuCompute: WebGPU error ({}): {}",
                     static_cast<int>(type), std::string(msg.data, msg.length));
             });
-        // Device loss is normal behaviour, not an init failure: a browser tab can
+        // Device loss is normal behavior, not an init failure: a browser tab can
         // lose its device at any moment, and a native driver reset does the same.
         // Every in-flight readback is completed as Failed rather than left to
         // expire block after block with no way back.

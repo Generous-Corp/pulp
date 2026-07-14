@@ -738,7 +738,7 @@ std::optional<GradientResult> swift_linear_gradient_expr(std::string_view value)
     std::vector<std::string> colors;
     bool dropped = false;
     for (std::size_t i = first_stop; i < parts.size(); ++i) {
-        // A stop is "<color> [<position>]". The colour itself may contain spaces
+        // A stop is "<color> [<position>]". The color itself may contain spaces
         // when it is a function — rgb(0, 0, 0) / rgba(0, 0, 0, 0.5) — so split on
         // the function's matching paren, not the first space.
         const std::string& tok = parts[i];
@@ -752,7 +752,7 @@ std::optional<GradientResult> swift_linear_gradient_expr(std::string_view value)
                 else if (tok[k] == ')' && --d == 0) { close = k; break; }
             }
             col = (close == std::string::npos) ? tok : tok.substr(0, close + 1);
-            // Anything non-blank after the colour function is an explicit stop.
+            // Anything non-blank after the color function is an explicit stop.
             if (close != std::string::npos &&
                 tok.find_first_not_of(" \t", close + 1) != std::string::npos)
                 dropped = true;
@@ -855,12 +855,12 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
             filled = true;
             if (g->dropped_positions)
                 push_fidelity(ctx, node, "swiftui-gradient-stops",
-                              "linear-gradient explicit colour-stop positions dropped; "
+                              "linear-gradient explicit color-stop positions dropped; "
                               "SwiftUI spaces stops evenly", /*informational=*/true);
         } else {
             push_fidelity(ctx, node, "swiftui-gradient",
                           "background gradient `" + *st.background_gradient +
-                          "` is not a 2-colour linear-gradient; using flat fill",
+                          "` is not a 2-color linear-gradient; using flat fill",
                           /*informational=*/true);
         }
     }
@@ -895,10 +895,10 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
         emit_line(out, depth + 1, s, ".cornerRadius(" + format_float(radius) + ")");
 
     // Border → an overlay stroke following the corner radius. SwiftUI's stroke
-    // is uniform; a border whose WIDTH or COLOUR differs per side genuinely
+    // is uniform; a border whose WIDTH or COLOR differs per side genuinely
     // loses a side's appearance, so it is a hard divergence (not advisory): we
-    // approximate with the heaviest side's width + the first declared colour.
-    // Compute the EFFECTIVE per-side width/colour: a side falls back to the
+    // approximate with the heaviest side's width + the first declared color.
+    // Compute the EFFECTIVE per-side width/color: a side falls back to the
     // `border-width`/`border-color` shorthand when it has no override. Comparing
     // effective values (not just the side overrides among themselves) catches a
     // single side overriding the shorthand — e.g. `border-color:#fff` +
@@ -927,7 +927,7 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
     std::string border_color_tok;
     std::optional<std::string> c_first;
     for (const auto& c : ec) if (c) {
-        if (border_color_tok.empty()) border_color_tok = *c;  // first effective colour
+        if (border_color_tok.empty()) border_color_tok = *c;  // first effective color
         if (!c_first) c_first = *c;
         else if (*c != *c_first) per_side = true;
     }
@@ -943,8 +943,8 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
                       ", lineWidth: " + format_float(border_w) + "))");
             if (per_side)
                 push_fidelity(ctx, node, "swiftui-per-side-border",
-                              "per-side border width/colour differs; SwiftUI overlay stroke "
-                              "is uniform, using the heaviest side + first colour",
+                              "per-side border width/color differs; SwiftUI overlay stroke "
+                              "is uniform, using the heaviest side + first color",
                               /*informational=*/false);
         }
     }
@@ -1053,7 +1053,7 @@ std::string text_segment_expr(std::string_view slice,
 
 // Emit a text node. With per-range `text_runs` it becomes a concatenation of
 // styled Text segments; without them it is the simple single Text + dominant
-// style (B1 behaviour). Run byte offsets index into node.text_content.
+// style (B1 behavior). Run byte offsets index into node.text_content.
 void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
                     const IRNode& node, const ResolvedNativeNode& resolved, int depth) {
     const int s = ctx.opts.indent_spaces;
@@ -1149,7 +1149,7 @@ std::string stack_alignment_token(bool row, LayoutAlign align, bool* stretch) {
 // (recursively), so `repeat(2, 1fr) 2fr` is 3, not 2. A non-integer repeat
 // count (`auto-fill`/`auto-fit`, viewport-dependent and unknowable at codegen)
 // falls back to the pattern's own count. Clamped to ≥1. Exact track SIZING is
-// not modelled — B5 maps only the column COUNT onto equal flexible GridItems.
+// not modeled — B5 maps only the column COUNT onto equal flexible GridItems.
 int grid_column_count(const std::string& tracks, int recursion_depth = 0) {
     // CSS forbids nested repeat(), but the IR can carry arbitrary text from a
     // non-CSS source; cap recursion so a pathological repeat(repeat(repeat(…)))
@@ -1568,7 +1568,7 @@ std::string emit_binding_manifest(const IRNode& root, const ResolvedNativeNode& 
     out << "  \"schema\": \"pulp-native-swiftui-binding-manifest-v1\",\n";
     out << "  \"resolution\": { \"strategy\": \"pulp_parameter_name_exact\", "
            "\"source_field\": \"resolve_name\" },\n";
-    // The convention the generated controls honour (mirrors PulpViews.swift):
+    // The convention the generated controls honor (mirrors PulpViews.swift):
     // gesture-grouped writes (beginGesture/endGesture), normalized 0…1 range
     // mapped to [minValue, maxValue], and host-automation pickup via poll().
     out << "  \"conventions\": { \"gesture_grouping\": true, "

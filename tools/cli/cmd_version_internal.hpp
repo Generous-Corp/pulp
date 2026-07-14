@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 // overwrites an existing target. A symlink AT `path` is replaced by a regular
 // file (rename targets the link itself, not its referent) — the old in-place
 // `ofstream` wrote *through* the link instead; this matches the core/state
-// temp+rename writers' behaviour and is fine for a VCS-tracked build file.
+// temp+rename writers' behavior and is fine for a VCS-tracked build file.
 // This is a flush-to-OS check, not an fsync durability fence — a delayed-
 // allocation ENOSPC committed after close() can still slip through; sufficient
 // for a dev-time version bump.

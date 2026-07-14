@@ -187,7 +187,7 @@ PATTERNS = [(p, w, "prose") for p, w in PROSE_PATTERNS] + \
 # compiling. That is the one legitimate way a foreign name may appear.
 
 SUGGESTION = """
-  PROSE — describe the behaviour, not its ancestry. Instead of:
+  PROSE — describe the behavior, not its ancestry. Instead of:
       // Usage mirrors <Framework>'s AbstractFifo
   write what it actually does, in units a Pulp reader can act on:
       /// Tracks read/write cursors in a ring buffer the CALLER owns; returns

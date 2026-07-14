@@ -9,7 +9,7 @@
 //     the step it started on: thirty notches moved the value by exactly zero.
 //   * A text field had no intrinsic height, so a layout engine gave it none. The
 //     field collapsed to zero height inside ANY flex tree and simply vanished.
-//   * The caret and selection colours resolved keys the theme did not define, so
+//   * The caret and selection colors resolved keys the theme did not define, so
 //     all three silently fell back to a literal and no skin could touch them.
 //     The selection band was worse: its alpha was overwritten AFTER resolution,
 //     so a theme asking for a translucent band got whatever the field decided.
@@ -113,7 +113,7 @@ TEST_CASE("a text field's intrinsic height tracks its font size",
     REQUIRE(large.intrinsic_height() > small.intrinsic_height());
 }
 
-TEST_CASE("the caret and selection colours are real theme tokens",
+TEST_CASE("the caret and selection colors are real theme tokens",
           "[view][regression][theme]") {
     // All three used to resolve keys the theme did not define, so each silently
     // fell back to a literal and no skin could reach them.
@@ -138,7 +138,7 @@ TEST_CASE("the selection band carries its alpha as authored",
         REQUIRE(band.a < 1.0f);   // the default IS translucent, and stays that way
 
         // And the text drawn on top of the band is a real, distinct token --
-        // not the same colour as the body text, which would make a selected run
+        // not the same color as the body text, which would make a selected run
         // unreadable.
         const auto selected = t.colors.at("text.selected");
         const auto primary  = t.colors.at("text.primary");

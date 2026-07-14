@@ -347,7 +347,7 @@ std::string build_emit_payload(const ImportOptions& o, const std::string& ir_jso
     return p;
 }
 
-// Serialise the SDK-written provenance marker. Records importer identity, the
+// Serialize the SDK-written provenance marker. Records importer identity, the
 // framework, the SPI version this SDK spoke, the caller-supplied timestamp, and
 // a hash of the source tree. JSON hand-built (small, fixed shape).
 std::string build_provenance_marker(const ie::Manifest& m,

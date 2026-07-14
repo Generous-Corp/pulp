@@ -338,7 +338,7 @@ struct MultiBackendFft::Impl {
         if (b.create(&mkl_desc, mkl_dyn::DFTI_SINGLE, mkl_dyn::DFTI_COMPLEX,
                      1, static_cast<mkl_dyn::MKL_LONG>(size)) != 0)
             throw std::runtime_error("MultiBackendFft: DftiCreateDescriptor failed");
-        // Inverse normalisation: 1/N scale.
+        // Inverse normalization: 1/N scale.
         //
         // DftiSetValue is variadic — for a single-precision descriptor the
         // expected trailing argument is `float`. We pass the float through

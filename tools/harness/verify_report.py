@@ -3,7 +3,7 @@
 
 Focused validator-report module for the harness coverage matrix. Turns the
 per-surface :class:`~tools.harness.adapters.base.Result` lists into the two
-artefacts the harness publishes:
+artifacts the harness publishes:
 
 * :func:`render_markdown` — the human-readable coverage matrix mirrored to
   ``build/harness-coverage.md`` and ``docs/reports/harness-coverage.md``.

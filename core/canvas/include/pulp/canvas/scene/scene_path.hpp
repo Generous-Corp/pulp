@@ -2,7 +2,7 @@
 //
 // The geometry itself lives in `pulp::canvas::Path` (see
 // <pulp/canvas/path.hpp>) — the retained path VALUE type. ScenePath adds what
-// a scene node needs on top of that value: paint style (fill / stroke colours,
+// a scene node needs on top of that value: paint style (fill / stroke colors,
 // widths, fill rule), dirty tracking, and a place in the node hierarchy.
 //
 // Path and ScenePath are deliberately not the same thing, and the split matters:

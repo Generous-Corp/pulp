@@ -408,7 +408,7 @@ bool match_clause(const FingerprintClause& clause, const InputSnapshot& snap) {
         }
         case FingerprintClause::Kind::filename: {
             if (clause.regex.empty() || snap.filename.empty()) return false;
-            // Honour leading `(?i)` as a case-insensitive flag rather than
+            // Honor leading `(?i)` as a case-insensitive flag rather than
             // an inline group — libc++'s ECMAScript engine handles
             // `(?i)` unevenly across versions, and this is the only
             // flag DESIGN.md's fingerprint needs.

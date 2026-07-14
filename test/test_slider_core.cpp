@@ -1,7 +1,7 @@
 // Tests for pulp::view::SliderCore — the value engine the continuous controls
 // share.
 //
-// Each case below pins a behaviour a control genuinely depends on, and several
+// Each case below pins a behavior a control genuinely depends on, and several
 // pin a bug that shipped:
 //
 //   * A wheel notch on a quantized control used to nudge the NORMALIZED value by

@@ -64,7 +64,7 @@ constexpr bool is_emoji_presentation_default(char32_t cp) {
     return is_in_range(cp, 0x1F300, 0x1F5FF) ||  // Misc symbols / pictographs
            is_in_range(cp, 0x1F600, 0x1F64F) ||  // Emoticons
            is_in_range(cp, 0x1F680, 0x1F6FF) ||  // Transport / map
-           is_in_range(cp, 0x1F7E0, 0x1F7EB) ||  // Coloured circles / squares
+           is_in_range(cp, 0x1F7E0, 0x1F7EB) ||  // Colored circles / squares
            is_in_range(cp, 0x1F7F0, 0x1F7F0) ||  // Heavy equals
            is_in_range(cp, 0x1F900, 0x1F9FF) ||  // Supplemental symbols
            is_in_range(cp, 0x1FA70, 0x1FAFF) ||  // Symbols ext-A (subset)

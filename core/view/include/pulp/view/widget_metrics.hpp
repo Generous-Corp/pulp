@@ -74,7 +74,7 @@ struct MenuItemMetricsQuery {
     bool ticked = false;
     bool has_submenu = false;
     /// The height the widget would use if the delegate declines — passed so a
-    /// delegate can honour a caller-requested row height instead of forcing
+    /// delegate can honor a caller-requested row height instead of forcing
     /// its own.
     float standard_height = 0.0f;
 };

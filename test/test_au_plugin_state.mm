@@ -1782,10 +1782,10 @@ TEST_CASE("current_auv3_wrapper_identifier — AU_HOST_BUNDLE_ID env wins",
     // test confirms the env-var override the fix preserves.
 }
 
-TEST_CASE("detect_host_type — wrapper id wins when wrapper is recognised",
+TEST_CASE("detect_host_type — wrapper id wins when wrapper is recognized",
           "[au][auv3][host-detection][item-3.1]") {
     // `detect_host_type()` consults `current_auv3_wrapper_identifier()`
-    // first on Apple platforms; when that returns a recognised id, the
+    // first on Apple platforms; when that returns a recognized id, the
     // wrapper-side wins. When unrecognised (or empty), it falls back to
     // the executable-path heuristic. The classifier-level pieces are
     // pinned above; this test only checks that `detect_host_type()` is

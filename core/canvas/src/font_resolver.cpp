@@ -312,7 +312,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
         }
 
         // A variable font registered/resolved at its default instance
-        // (e.g. Funnel Display @ 400) must honour `font-weight: 700` by
+        // (e.g. Funnel Display @ 400) must honor `font-weight: 700` by
         // instancing its `wght` axis, not by falling back to a heavier
         // system face. Only synthesize when:
         //   * the face actually exposes a `wght` axis,

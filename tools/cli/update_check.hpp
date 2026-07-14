@@ -79,7 +79,7 @@ CacheEntry parse_cache_json(const std::string& json);
 // Serialize to a human-readable, stable JSON shape. Writes are never
 // streamed — callers buffer then fs::rename to make the swap atomic on
 // POSIX (Windows writes directly; a torn write would just force a
-// re-fetch on the next invocation, not corrupt behaviour).
+// re-fetch on the next invocation, not corrupt behavior).
 std::string serialize_cache_json(const CacheEntry& entry);
 
 // Best-effort read of ~/.pulp/update-cache.json. Returns nullopt only
@@ -215,7 +215,7 @@ struct ResolvedLatest {
 // the result to `cache_path` (best-effort). Returns the resolved value.
 //
 // Shared by cmd_upgrade.cpp's check-only and upgrade paths so fallback
-// behaviour is directly unit-testable. The on-every-invocation detached
+// behavior is directly unit-testable. The on-every-invocation detached
 // refresh in pulp_cli.cpp cannot be relied on for short-lived commands
 // — it gets reaped at process exit before curl returns (#1599) — so the
 // upgrade surfaces refresh synchronously.

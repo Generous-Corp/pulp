@@ -9,7 +9,7 @@
 //
 // Design:
 //   * One WaveformOverview per source. Peaks are stored per channel as
-//     interleaved (min, max) int8 samples normalised to [-1, 1]. A single
+//     interleaved (min, max) int8 samples normalized to [-1, 1]. A single
 //     int8-pair costs 2 bytes per channel per peak — tens of thousands of
 //     peaks fit in a few KB.
 //   * Higher zoom levels are decimations of the level below. We build the
@@ -28,7 +28,7 @@
 //     ignored.
 //
 // Wired into core/view::WaveformView so that callers may pass either a raw
-// sample buffer (existing behaviour) or an WaveformOverview* (new behaviour
+// sample buffer (existing behavior) or an WaveformOverview* (new behavior
 // — peaks render straight from the cached table).
 
 #include <atomic>
@@ -48,7 +48,7 @@
 namespace pulp::audio {
 
 // A single (min, max) pair at one peak slot for one channel.
-// Stored normalised to [-1, 1]. int8 is plenty for waveform display
+// Stored normalized to [-1, 1]. int8 is plenty for waveform display
 // (256 levels per axis) and keeps peak tables small.
 struct AudioPeak {
     int8_t min_q7 = 0;

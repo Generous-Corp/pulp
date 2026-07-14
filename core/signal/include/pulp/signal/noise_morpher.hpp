@@ -19,7 +19,7 @@
 /// magnitude is the (interpolated) noise envelope and whose phase is fresh
 /// random — a magnitude-locked white-noise excitation. Fed through
 /// SpectralFrameEngine's overlap-add synthesis, successive random-phase
-/// frames sum to decorrelated noise of the right colour, stretching
+/// frames sum to decorrelated noise of the right color, stretching
 /// transparently at any ratio. Deterministic (seeded xorshift); no
 /// allocation after prepare().
 

@@ -31,7 +31,7 @@ use crate::pkg::registry::{LockFile, PackageDescriptor, Registry};
 /// Render `cmake/pulp-packages.cmake` from `lock` + `reg`.
 ///
 /// Packages in the lock file that aren't in the registry are skipped
-/// (matches C++ behaviour). Ordering follows the lock file's
+/// (matches C++ behavior). Ordering follows the lock file's
 /// `BTreeMap` natural order — alphabetical by id.
 #[must_use]
 pub fn generate_packages_cmake(lock: &LockFile, reg: &Registry) -> String {

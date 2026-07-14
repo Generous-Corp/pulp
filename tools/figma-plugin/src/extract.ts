@@ -76,7 +76,7 @@ export interface ExtractResult {
   font_family_assets: FontFamilyAsset[];
 }
 
-/// One row in the deduplicated font catalogue carried on the envelope's
+/// One row in the deduplicated font catalog carried on the envelope's
 /// top-level `font_family_assets` field. See ExtractResult for context.
 export interface FontFamilyAsset {
   /// Figma font family — e.g. "Inter", "Clash Grotesk".
@@ -139,7 +139,7 @@ export async function extractScene(
 
   // Collect the unique font-family/style/weight tuples used by text
   // nodes in the extracted tree. Runs after the walk because every text
-  // node has already had its style normalised via extractTextStyle.
+  // node has already had its style normalized via extractTextStyle.
   const fontFamilyAssets = collectFontFamilyAssets(roots);
 
   return {
@@ -153,7 +153,7 @@ export async function extractScene(
   };
 }
 
-/// Walk the extracted IR once and produce a deduplicated catalogue of
+/// Walk the extracted IR once and produce a deduplicated catalog of
 /// every (family, style, weight, italic) tuple referenced by text nodes.
 /// Order is stable: families appear in first-encounter order, styles
 /// within a family in first-encounter order. That stability matters for
@@ -295,7 +295,7 @@ async function walk(
       }
     }
 
-    // When recognised, extract the structured property values (label /
+    // When recognized, extract the structured property values (label /
     // min / max / value / units / binding) from componentProperties so
     // the downstream serializer can emit them at the IR node root for
     // design_import.cpp::parse_ir_node to pick up.
@@ -518,7 +518,7 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
         // Store the flat fallback as background_color, NOT background_gradient.
         // The codegen routes background_gradient through setBackgroundGradient,
         // which expects a linear-gradient(...) string and fails to parse a
-        // bare hex/rgba value — visible effect: the colour never paints.
+        // bare hex/rgba value — visible effect: the color never paints.
         // Subregion tints inside ELYSIUM cells (Frame 482 #2d2d2d) were lost
         // this way until the fix.
         s.background_color = gradientFallbackFlat(first as GradientPaint);

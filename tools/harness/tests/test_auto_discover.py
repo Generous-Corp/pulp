@@ -1,12 +1,12 @@
 """Tests for adapter auto-discovery — pulp #1401.
 
 The harness used to require editing ``verifier.py`` for every new surface
-adapter, which serialised parallel work and forced sequential rebases on
+adapter, which serialized parallel work and forced sequential rebases on
 sibling PRs (#1395 / #1396 / #1397 / #1398 / #1399). The fix replaces the
 manual ``ADAPTERS = {...}`` registry with a decorator + ``pkgutil.iter_modules``
 walk over ``tools/harness/adapters/``.
 
-These tests pin down the three behaviours the issue's test plan calls out:
+These tests pin down the three behaviors the issue's test plan calls out:
 
 1. A new adapter file dropped into ``tools/harness/adapters/`` is picked up
    without ``verifier.py`` edits.

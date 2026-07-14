@@ -836,7 +836,7 @@ void Knob::paint(canvas::Canvas& canvas) {
                 float hi_a = knob_value_to_angle(hi);
 
                 // Faint full track + the colored range arc.
-                canvas.set_stroke_color(canvas::Color::rgba(m.color.r, m.color.g, m.color.b, 0.22f));  // token-lint:allow (per-source mod colour)
+                canvas.set_stroke_color(canvas::Color::rgba(m.color.r, m.color.g, m.color.b, 0.22f));  // token-lint:allow (per-source mod color)
                 canvas.set_line_width(g.mod_w);
                 canvas.stroke_arc(g.cx, g.cy, mod_r, start_angle, end_angle);
                 canvas.set_stroke_color(m.color);
@@ -846,7 +846,7 @@ void Knob::paint(canvas::Canvas& canvas) {
                 // indicator dot below is drawn, riding between the two ends.
 
                 // Live modulated-value indicator: bright dot ringed in the
-                // source colour, riding the arc at base + depth·phase.
+                // source color, riding the arc at base + depth·phase.
                 float la = knob_value_to_angle(modulated_value(i));
                 float lx = g.cx + mod_r * std::cos(la), ly = g.cy + mod_r * std::sin(la);
                 auto ind = resolve_color("knob.thumb", canvas::Color::rgba8(235, 235, 235));
@@ -939,8 +939,8 @@ void Fader::paint(canvas::Canvas& canvas) {
         const float pos = position_for_value();
 
         // ── Per-widget skin overrides (figma-plugin import) ────────────────
-        // When the importer derived track / fill / thumb colours from the
-        // captured design, honour them here and force a rounded-rect thumb so
+        // When the importer derived track / fill / thumb colors from the
+        // captured design, honor them here and force a rounded-rect thumb so
         // the look matches the captured art — but keep the position
         // value-driven (the thumb still moves with value_), unlike a baked
         // full-image sprite. Falls back to theme tokens when unset.
@@ -954,7 +954,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({track_color.r, track_color.g, track_color.b, track_color.a});
 
         // Track thickness. When the importer derived the captured track width,
-        // honour it exactly (clamped to the widget box) so the track is the
+        // honor it exactly (clamped to the widget box) so the track is the
         // narrow line the art shows — not a fraction of the box, which
         // over-wide widget bounds would balloon. Otherwise fall back to the
         // default heuristic (skinned: ~18% of box; default: 4px line).
@@ -974,7 +974,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.fill_rounded_rect(track_x, track_y, track_w, track_h, track_radius);
 
         // Track outline. The captured empty track has a visible lighter edge
-        // around the dark channel. When the importer derived that edge colour
+        // around the dark channel. When the importer derived that edge color
         // from the art, stroke the track rect so the empty portion above the
         // thumb doesn't read as a flat dark slab. Drawn before the fill/thumb
         // so they sit on top, matching the captured layering.
@@ -1201,7 +1201,7 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
                                  horiz ? std::max(b.height, 1.0f)
                                        : std::max(b.width,  1.0f));
 
-    // Normalised position along the track, taking the (possibly-collapsed)
+    // Normalized position along the track, taking the (possibly-collapsed)
     // [min,max] range and the skew curve into account.
     float lo = min_;
     float hi = std::max(min_, max_);

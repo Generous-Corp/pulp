@@ -265,7 +265,7 @@ try {
       }
       return seen.size;
     }
-    // The themed root fill is the modal colour; anything else is drawn content.
+    // The themed root fill is the modal color; anything else is drawn content.
     function nonBackground(px) {
       const hist = new Map();
       for (let i = 0; i < px.length; i += 4) {
@@ -289,7 +289,7 @@ try {
           hist.set(at(px, py), (hist.get(at(px, py)) || 0) + 1);
       let total = 0, best = 0;
       for (const n of hist.values()) { total += n; if (n > best) best = n; }
-      return total - best;  // pixels that are not the region's dominant (background) colour
+      return total - best;  // pixels that are not the region's dominant (background) color
     }
     // Same shape as HeadlessSurface::rgba_fingerprint: FNV-1a 64 over the
     // dimensions then the pixel bytes.
@@ -308,12 +308,12 @@ try {
   const gpuOk = probe.gpu.nonBg > 2000 && probe.gpu.distinct > 4;
   check("GPU canvas is not blank",
         gpuOk,
-        `${probe.gpu.nonBg} non-background px, ${probe.gpu.distinct} distinct colours (${probe.gpu.w}x${probe.gpu.h})`);
+        `${probe.gpu.nonBg} non-background px, ${probe.gpu.distinct} distinct colors (${probe.gpu.w}x${probe.gpu.h})`);
 
   const rasterOk = probe.raster.nonBg > 2000 && probe.raster.distinct > 4;
   check("Skia raster capture is not blank",
         rasterOk,
-        `${probe.raster.nonBg} non-background px, ${probe.raster.distinct} distinct colours`);
+        `${probe.raster.nonBg} non-background px, ${probe.raster.distinct} distinct colors`);
 
   // 2b — text presence. A null SkFontMgr / zero-width shaping leaves the label
   // region a flat fill; that is exactly what this catches.
@@ -432,7 +432,7 @@ try {
   // these three shipped broken and was reported from a real page: a knob drag
   // selected page text, a drag panned the page, and focus() on pointerdown
   // scrolled the canvas into view — yanking the page out from under the pointer
-  // mid-drag. Assert the styles AND the scroll behaviour, because the styles are
+  // mid-drag. Assert the styles AND the scroll behavior, because the styles are
   // what the browser consults before it decides a gesture is a scroll.
   const hygiene = await page.evaluate(async () => {
     // Whichever canvas the module bound to — the harness page and the deployed

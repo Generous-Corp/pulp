@@ -8,7 +8,7 @@ body is gated by `#if PULP_DSP_ENABLE_SNAP_TO_ZERO`. A test TU did
 `#define PULP_DSP_ENABLE_SNAP_TO_ZERO 0` before including that header. Every filter
 that calls it (`Svf::process`, `DcBlocker<float>::process`, `Reverb::process`) is
 also header-defined with external linkage. So two translation units emitted the SAME
-mangled symbols with DIFFERENT bodies. That is undefined behaviour.
+mangled symbols with DIFFERENT bodies. That is undefined behavior.
 
 What the optimizer does with it is the entire point:
 

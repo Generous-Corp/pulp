@@ -290,7 +290,7 @@ pub const EXAMPLES: &[&str] = &[
     "  pulp status             # Show project info",
 ];
 
-/// Every subcommand name the CLI recognises, in display order. Used
+/// Every subcommand name the CLI recognizes, in display order. Used
 /// by the fuzzy suggester so it walks the full surface, not just
 /// native-Rust ports.
 #[must_use]

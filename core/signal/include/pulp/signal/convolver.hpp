@@ -131,7 +131,7 @@ public:
                 // no per-sample copy — then park the displaced IR. The faded path
                 // above needs no carry: the parallel fade-out render IS the
                 // continuity, and carrying would swap away the history it renders.
-                // Pre-checked capacity above; the false branch is defence-in-
+                // Pre-checked capacity above; the false branch is defense-in-
                 // depth — leaks rather than freeing on RT.
                 partition_index_ =
                     detail::carry_input_history(*previous, *state_, prev_partition);

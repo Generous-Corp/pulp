@@ -46,7 +46,7 @@ std::unique_ptr<Processor> make_null() {
 
 } // namespace
 
-TEST_CASE("CLAP get_extension returns expected ARA-factory behaviour per build",
+TEST_CASE("CLAP get_extension returns expected ARA-factory behavior per build",
           "[ara][clap][live]") {
     pulp::format::clap_adapter::PulpClapPlugin plugin;
     plugin.factory = make_null;

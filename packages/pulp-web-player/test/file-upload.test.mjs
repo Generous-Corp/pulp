@@ -2,7 +2,7 @@
 // file-upload.test.mjs — the guard for mountDemo({ fileUpload }).
 //
 // The drop zone lives in the SHARED shell, so a WAM demo and a WebCLAP demo get it
-// from one code path and cannot drift. These tests pin the six behaviours that,
+// from one code path and cannot drift. These tests pin the six behaviors that,
 // each one skipped, make a drop zone feel broken — and in particular the two that
 // are easy to get subtly wrong and impossible to notice in review:
 //
@@ -15,7 +15,7 @@
 // crosses from the zone into a child of the zone is `dragenter` on the NEW target
 // and THEN `dragleave` on the OLD one. A test that fires a bare `dragleave` is not
 // reproducing a browser; it will "find" a flicker bug that does not exist. Every
-// crossing below is modelled in the real order.
+// crossing below is modeled in the real order.
 import { document, ok, failed, audioNode } from "./dom-shim.mjs";
 
 const { mountDemo } = await import("../src/shell.js");

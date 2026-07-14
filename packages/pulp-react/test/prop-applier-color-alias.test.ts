@@ -1,7 +1,7 @@
 // CSS-canonical `color` must fan out to the same setTextColor bridge
 // call as the RN-canonical `textColor`. JSX styles authored by every
 // HTML/Tailwind/design-tool export use `color`; without the alias those
-// props silently drop at the prop-applier and text keeps the default colour.
+// props silently drop at the prop-applier and text keeps the default color.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';

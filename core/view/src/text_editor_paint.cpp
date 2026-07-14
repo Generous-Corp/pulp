@@ -386,7 +386,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     // Horizontal alignment. Only meaningful when the run FITS: a run wider than
     // the field is scrolled, and scrolling already owns the origin, so a center
     // alignment there would fight the caret-follow. Slack is therefore clamped
-    // at zero and a long string keeps the left-aligned scrolled behaviour.
+    // at zero and a long string keeps the left-aligned scrolled behavior.
     if (text_align_ != canvas::TextAlign::left) {
         const float slack = std::max(0.0f, text_inner_w - total_text_w);
         text_x += (text_align_ == canvas::TextAlign::center) ? slack * 0.5f : slack;
@@ -400,9 +400,9 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
     auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
     auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
-    // The selection band's colour is a token in its own right, honoured exactly
-    // as authored — alpha included. Falling back to the accent colour with a
-    // forced alpha (the old behaviour) meant a skin could never choose the
+    // The selection band's color is a token in its own right, honoured exactly
+    // as authored — alpha included. Falling back to the accent color with a
+    // forced alpha (the old behavior) meant a skin could never choose the
     // selection's transparency: whatever it set was overwritten.
     auto accent = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
     accent.a = 168;

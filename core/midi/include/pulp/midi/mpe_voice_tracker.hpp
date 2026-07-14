@@ -33,7 +33,7 @@ namespace pulp::midi {
 
 /// Per-note state maintained by `MpeVoiceTracker`.
 ///
-/// Expression values are normalised:
+/// Expression values are normalized:
 ///   - `pitch_bend_semitones` — absolute bend in semitones (member range applied)
 ///   - `pressure` — 0..1 from channel pressure (Dx status)
 ///   - `timbre` — 0..1 from CC 74 (aliased as `slide`)

@@ -7,7 +7,7 @@ target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
 if(Python3_Interpreter_FOUND)
-    # Reskinnability ratchet: fail on a NEW hardcoded theme colour.
+    # Reskinnability ratchet: fail on a NEW hardcoded theme color.
     add_test(NAME token-coverage-ratchet COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_coverage_check.py")
 

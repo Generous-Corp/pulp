@@ -954,7 +954,7 @@ TEST_CASE("Codegen emits setFaderSkin from derived skin attributes",
     REQUIRE(js.find("setFaderSkin(") != std::string::npos);
     REQUIRE(js.find("'#1f2129'") != std::string::npos);
     REQUIRE(js.find("'#3677cf'") != std::string::npos);
-    // The captured value is normalised into [0,1] (≈0.909), not emitted raw.
+    // The captured value is normalized into [0,1] (≈0.909), not emitted raw.
     REQUIRE(js.find("setValue(") != std::string::npos);
     REQUIRE(js.find("setValue('Fader__Master2', 0)") == std::string::npos);
 
@@ -992,7 +992,7 @@ TEST_CASE("Codegen emits setMeterColors + normalized level from derived skin",
 
     REQUIRE(js.find("setMeterColors(") != std::string::npos);
     REQUIRE(js.find("#33a74d,#ffab33,#ff6b66") != std::string::npos);
-    // Level normalised to 0.9, not emitted as a raw dB value.
+    // Level normalized to 0.9, not emitted as a raw dB value.
     REQUIRE(js.find("setMeterLevel(") != std::string::npos);
     REQUIRE(js.find("0.9") != std::string::npos);
 
@@ -1336,7 +1336,7 @@ TEST_CASE("kitchen-sink envelope parses all 6 Pulp Library widgets from one root
     //     `[binding-wireup]` per-widget tests); the meter's `binding`
     //     lowers to a meter source/channel (NOT a pulpParamKey). This
     //     test asserts only that both wire-up flavours coexist on one
-    //     envelope without interference — full coverage of each flavour
+    //     envelope without interference — full coverage of each flavor
     //     is in the dedicated binding-wireup tests above.
     REQUIRE(knob.attributes.at("pulpParamKey") == "filter.cutoff_hz");
     REQUIRE(meter.attributes.count("pulpParamKey") == 0);

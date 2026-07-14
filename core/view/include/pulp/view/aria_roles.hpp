@@ -69,7 +69,7 @@ inline View::AccessRole access_role_from_aria(std::string_view role) {
     if (role == "text" || role == "paragraph" ||
         role == "caption")                       return R::label;
 
-    // Container-ish and not-yet-modelled roles: expose as a generic group.
+    // Container-ish and not-yet-modeled roles: expose as a generic group.
     return R::group;
 }
 

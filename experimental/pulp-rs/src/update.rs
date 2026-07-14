@@ -58,7 +58,7 @@ pub struct CacheEntry {
     /// `0` means "never checked".
     #[serde(default)]
     pub last_check_epoch_sec: i64,
-    /// Normalised semver triple, e.g. `0.40.0`. Empty when the last
+    /// Normalized semver triple, e.g. `0.40.0`. Empty when the last
     /// check failed and we have no prior known latest.
     #[serde(default)]
     pub latest_version: String,
@@ -188,7 +188,7 @@ pub fn is_newer(installed: &str, latest: &str) -> bool {
 /// Result of a single "fetch the latest release" call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchResult {
-    /// Normalised version (no leading `v`). Empty on failure.
+    /// Normalized version (no leading `v`). Empty on failure.
     pub latest_version: String,
     /// HTML URL of the release. Empty on failure.
     pub release_notes_url: String,

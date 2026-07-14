@@ -52,7 +52,7 @@ struct TempDir {
         // macOS's /var → /private/var symlink means the raw tmpdir
         // path won't equality-compare against the results of
         // scan_parent_pulp_projects (which canonicalises internally).
-        // Normalise once up front so tests can compare paths directly.
+        // Normalize once up front so tests can compare paths directly.
         std::error_code ec;
         auto canon = fs::weakly_canonical(path, ec);
         if (!ec) path = canon;
@@ -312,7 +312,7 @@ TEST_CASE("scan_parent_pulp_projects surfaces both nested projects (parent + chi
           "[projects-registry][issue-552]") {
     // Locked-in design: both parent and child appear in the scan. The
     // caller (cmd_doctor) can dedupe against the active project. This
-    // test documents that behaviour explicitly so the answer to "which
+    // test documents that behavior explicitly so the answer to "which
     // wins, nested parent or child?" is visible in CI.
     TempDir tmp;
     auto parent = tmp.path / "parent";

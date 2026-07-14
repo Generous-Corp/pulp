@@ -82,7 +82,7 @@ struct ScriptedBridge {
 // The catalog marks canvas2d/fillText and canvas2d/strokeText as supported.
 // The JS shim must forward `maxWidth` and route `strokeText` through the
 // dedicated stroke path; rerouting through `fillText` with strokeStyle as the
-// fill colour is visually approximate but spec-incompatible (no real outlined
+// fill color is visually approximate but spec-incompatible (no real outlined
 // glyphs, no horizontal squeeze).
 //
 // These tests cover the full JS → bridge → CanvasDrawCmd surface that backs

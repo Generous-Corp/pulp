@@ -795,7 +795,7 @@ static void install_app_menu(NSString* appName) {
                 // `_dragTarget` silently drops the click.
                 // Walk up the parent chain to find the nearest ancestor
                 // (including `_dragTarget` itself) with a registered
-                // handler — mirrors the browser behaviour @pulp/react users
+                // handler — mirrors the browser behavior @pulp/react users
                 // expect.
                 pulp::view::View* click_target = _dragTarget;
                 while (click_target && !click_target->on_click) {
@@ -804,7 +804,7 @@ static void install_app_menu(NSString* appName) {
                 auto click_handler = click_target ? click_target->on_click : std::function<void()>{};
                 auto global_click = self.rootView ? self.rootView->on_global_click : std::function<void(const std::string&, uint16_t)>{};
                 // global_click reports the immediate hit (matches existing
-                // inspect-click behaviour: Cmd-click on a text label tells
+                // inspect-click behavior: Cmd-click on a text label tells
                 // the inspector exactly which view was hit, not the
                 // bubbled-to ancestor).
                 auto clicked_id = _dragTarget->id();
@@ -2459,7 +2459,7 @@ private:
     // Tracks per-frame invalidations
     // pushed by repaint() and the animation / FrameClock pump. The
     // render gate still uses the existing needs_repaint_/animation
-    // flags so observable behaviour does not change yet:
+    // flags so observable behavior does not change yet:
     // the tracker is plumbed-but-non-authoritative. Debug-printed once
     // per painted frame when PULP_PARTIAL_RENDERING_DEBUG=1 in the
     // environment so we can audit "the dirty rect we would have

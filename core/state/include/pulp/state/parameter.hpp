@@ -211,7 +211,7 @@ struct SkewedRange {
         : min(lo), max(hi), interval(step),
           skew(skew_value), symmetric_skew(symmetric) {}
 
-    /// Build a SkewedRange whose normalised midpoint maps to the
+    /// Build a SkewedRange whose normalized midpoint maps to the
     /// supplied real-valued center. Equivalent to choosing the skew that
     /// satisfies denormalize(0.5) == center.
     static SkewedRange with_center(T lo, T hi, T center, T step = T(0)) {

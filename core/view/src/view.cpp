@@ -780,7 +780,7 @@ void View::paint_all(canvas::Canvas& canvas) {
             const float px     = bounds_.width - pill_w - kMargin;
             const float py     = kMargin;
             // High-contrast: near-black translucent pill, bright amber glyph.
-            // Fixed diagnostic-overlay colours by design — this dev-only tracing
+            // Fixed diagnostic-overlay colors by design — this dev-only tracing
             // badge is deliberately not themeable, so the literals are not routed
             // through resolve_color.
             canvas.set_fill_color(canvas::Color::rgba8(20, 20, 24, 220));  // token-lint:allow

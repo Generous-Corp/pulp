@@ -52,7 +52,7 @@ HostType host_type_from_process_name(std::string_view process_name);
 /// available through `[NSProcessInfo processInfo].processName` (the
 /// wrapper executable name, prefixed with the host bundle id) or the
 /// `auHostIdentifier` user-info key on some wrappers. This helper
-/// normalises any such identifier to a `HostType`.
+/// normalizes any such identifier to a `HostType`.
 ///
 /// The function is platform-independent so it can be unit-tested without
 /// having to run inside a real AU extension. The Apple-only

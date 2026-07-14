@@ -567,7 +567,7 @@ public:
         // endpoints sort themselves, so the two may cross without breaking paint.
         float lo = 0.0f;             ///< low-end offset from base (−1..1)
         float hi = 0.0f;             ///< high-end offset from base (−1..1)
-        canvas::Color color;         ///< per-source colour
+        canvas::Color color;         ///< per-source color
     };
     void set_modulation_rings(std::vector<ModulationRing> rings) {
         mod_rings_ = std::move(rings);
@@ -864,9 +864,9 @@ public:
     // Per-widget appearance, generalising the knob sprite-strip path to the
     // fader: instead of baking the captured Figma art (which would freeze the
     // thumb at its captured value), the importer derives the track / fill /
-    // thumb colours from the design and the widget redraws them procedurally
+    // thumb colors from the design and the widget redraws them procedurally
     // so the thumb still MOVES with set_value(). Unset → today's theme-token
-    // behaviour (back-compat). Mirrors RangeSlider's accent override.
+    // behavior (back-compat). Mirrors RangeSlider's accent override.
     void set_skin_track_color(canvas::Color c) { track_color_ = c; has_skin_track_ = true; request_repaint(); }
     void set_skin_fill_color(canvas::Color c)  { fill_color_  = c; has_skin_fill_  = true; request_repaint(); }
     void set_skin_thumb_color(canvas::Color c) { thumb_color_ = c; has_skin_thumb_ = true; request_repaint(); }
@@ -923,7 +923,7 @@ private:
 // ── RangeSlider ──────────────────────────────────────────────────────────────
 // Generic min/max/step slider mapped to HTML <input type="range">.
 //
-// Distinct from Knob (rotary, normalised 0..1) and Fader (DSP linear with
+// Distinct from Knob (rotary, normalized 0..1) and Fader (DSP linear with
 // decorative track + large thumb). RangeSlider is the plain rectangular
 // track + circular handle the web uses for volume / morph / scrubber UIs.
 // Caller-supplied min/max/step are honoured natively — the bridge does
@@ -959,7 +959,7 @@ public:
     float min_value() const { return min_; }
 
     /// Inclusive upper bound (default 1). If max < min, value falls
-    /// back to min — matches HTMLInputElement behaviour for invalid ranges.
+    /// back to min — matches HTMLInputElement behavior for invalid ranges.
     void set_max(float v) { max_ = v; clamp_and_quantize_(); }
     float max_value() const { return max_; }
 
@@ -1280,7 +1280,7 @@ public:
     ImageView() {}
 
     /// Legacy API: filesystem path. Internally routed to set_image_source
-    /// as `file://<path>` so the cache can normalise keys.
+    /// as `file://<path>` so the cache can normalize keys.
     void set_image_path(const std::string& path) {
         set_image_source(path.empty() ? std::string{} : "file://" + path);
     }
@@ -1422,7 +1422,7 @@ public:
     // that gradient procedurally, CLIPPED to the current level, so the fill
     // still animates with set_level()/update() instead of freezing the
     // captured image. Stops are ordered low→high (bottom→top for vertical).
-    // Unset → today's theme-token threshold behaviour (back-compat).
+    // Unset → today's theme-token threshold behavior (back-compat).
     void set_skin_gradient(std::vector<canvas::Color> stops) {
         gradient_stops_ = std::move(stops);
         request_repaint();
@@ -1438,8 +1438,8 @@ public:
         bar_fill_ratio_ = 1.0f;
         request_repaint();
     }
-    // Fraction of the widget's cross-axis width occupied by the coloured bar
-    // (0..1). The captured meter draws a narrow coloured fill recessed inside a
+    // Fraction of the widget's cross-axis width occupied by the colored bar
+    // (0..1). The captured meter draws a narrow colored fill recessed inside a
     // wider dark housing slot; this ratio reproduces that inset so the rendered
     // bar isn't edge-to-edge paint. Derived from the captured asset
     // (colored-bar width / housing width); defaults to 1.0 (full width) when the
@@ -1528,8 +1528,8 @@ private:
 //
 // Two backing sources are supported:
 //
-//   set_data(...)       — raw normalised samples, redrawn directly. The
-//                         existing behaviour, used by oscilloscope-style
+//   set_data(...)       — raw normalized samples, redrawn directly. The
+//                         existing behavior, used by oscilloscope-style
 //                         displays of live audio.
 //   set_thumbnail(...)  — points the widget at a pre-decoded
 //                         `pulp::audio::WaveformOverview`. Paint reads peak

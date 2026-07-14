@@ -47,7 +47,7 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
   binder owns reconciliation into the Pulp runtime on the correct thread.
 - **Base/effective parameter semantics** are explicit. Importers record whether
   a parameter has a native base + modulation split, a synthesized zero-modulation
-  split (`effective == base`), or a destructive source behaviour that requires
+  split (`effective == base`), or a destructive source behavior that requires
   manual migration before mod rings/meters can bind faithfully.
 - **`extraction_context`** records the parse environment (compile-db source,
   includes, parser version) so format-conditional or build-conditional

@@ -105,7 +105,7 @@ static YGJustify to_yg_justify(FlexJustify j) {
 // must not consume "remaining space" on the parent's flex line. Pulp's
 // FlexStyle defaults (flex_shrink = 1) would otherwise leak in and let
 // Yoga shrink an absolute-with-explicit-dimension child to fit a flex
-// neighbour's slot. Direction / align / justify still describe the absolute
+// neighbor's slot. Direction / align / justify still describe the absolute
 // box's own inner layout, so those stay.
 static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolute) {
     YGNodeStyleSetFlexDirection(node, to_yg_direction(f.direction));

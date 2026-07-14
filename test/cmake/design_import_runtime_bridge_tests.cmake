@@ -187,7 +187,7 @@ target_link_libraries(pulp-test-web-compat-react-shims PRIVATE pulp::view Catch2
 # CI runners and sanitizer builds. Default discover timeout is too tight
 # when a regression of the bound would hang indefinitely. Other shim
 # scenarios in this binary stay in fast-CI — they're cheap and
-# important — so this binary is *not* labelled `slow` even though one
+# important — so this binary is *not* labeled `slow` even though one
 # of its tests pays a 1-3 sec wall cost.
 catch_discover_tests(pulp-test-web-compat-react-shims
     PROPERTIES TIMEOUT 180

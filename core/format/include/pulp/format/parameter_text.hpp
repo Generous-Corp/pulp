@@ -58,7 +58,7 @@ inline std::optional<float> parse_parameter_text(const state::ParamInfo& info,
         }
     }
 
-    if (auto labelled = state::param_value_for_label(info, text)) return labelled;
+    if (auto labeled = state::param_value_for_label(info, text)) return labeled;
     if (info.kind == state::ParamKind::Toggle || info.kind == state::ParamKind::Enum)
         return std::nullopt;
 

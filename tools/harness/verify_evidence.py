@@ -141,7 +141,7 @@ def _validate_test_ref(repo_root: Path, ref: str) -> tuple[bool, str]:
             if prefix == "cannot-validate:":
                 return True, ""
             body = stripped[len(prefix):].strip()
-            # Heuristic: bodies with a `/` AND a recognised test-source
+            # Heuristic: bodies with a `/` AND a recognized test-source
             # extension are paths (test/foo.cpp, packages/x/foo.test.ts).
             # Anything else is a fixture id we can't validate from here.
             looks_like_path = "/" in body and any(

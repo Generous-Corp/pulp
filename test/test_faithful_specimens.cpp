@@ -37,7 +37,7 @@ TEST_CASE("Faithful specimens load + render", "[view][faithful]") {
     check_loads_and_renders<WaveformRecorderView>();
 }
 
-TEST_CASE("Faithful specimens are catalogued", "[design][catalog]") {
+TEST_CASE("Faithful specimens are cataloged", "[design][catalog]") {
     for (const char* name : {"Range Slider", "Inline Value Editor", "Property Panel",
                              "Group Box", "Number Box", "Knob Modulation", "Waveform Recorder"}) {
         INFO(name);

@@ -8,7 +8,7 @@
 // might want to surface the `clap_plugin_id`, a debugger might want the
 // VST3 `IComponent*`, a CoreAudio-aware UI might want the `AudioComponent`.
 // Punching that out with a `void*` getter would leak the abstraction and
-// invite undefined behaviour the moment a caller cast the wrong way.
+// invite undefined behavior the moment a caller cast the wrong way.
 //
 // So the escape hatch is a double-dispatch visitor instead. Host code
 // subclasses `NativeHandleVisitor`, overrides only the `visit_*` methods for

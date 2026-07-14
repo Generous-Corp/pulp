@@ -5,7 +5,7 @@
 //! The `semver` crate parses `0.24.0-dev` as a valid pre-release. The
 //! C++ `version_diag` deliberately treats anything with a suffix as
 //! *non-comparable* so the skew analyser silently skips untagged dev
-//! builds. Matching that behaviour requires a purpose-built wrapper.
+//! builds. Matching that behavior requires a purpose-built wrapper.
 //!
 //! # Invariants
 //!
@@ -81,7 +81,7 @@ impl SemverCompat {
         if let Some(caps) = triple_re().captures(body) {
             // SAFETY: the regex guarantees three decimal-digit groups
             // of at most 10 digits each, comfortably within u32 for
-            // every realistic version. The `.unwrap_or(0)` is defence
+            // every realistic version. The `.unwrap_or(0)` is defense
             // in depth.
             let major = caps[1].parse().unwrap_or(0);
             let minor = caps[2].parse().unwrap_or(0);

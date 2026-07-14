@@ -3,7 +3,7 @@
 // validate-gpu.mjs proves the ENGINE. It does not, and cannot, prove the PAGE: it
 // sidesteps the IR handoff entirely by measuring the impulse response on the CPU engine
 // in one run and handing it to the worker in the next. A real visitor gets no such
-// favour. Everything between the plugin's IR and the worker's kernel — the wasm exports,
+// favor. Everything between the plugin's IR and the worker's kernel — the wasm exports,
 // the worklet poll, the adapter latch, lane.setIr(), the worker's re-prepare — is
 // UNCOVERED by that fixture, and every link in it can fail silently: the page would load,
 // the CPU convolver would play, and the GPU engine would simply never appear.

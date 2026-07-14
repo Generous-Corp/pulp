@@ -4409,7 +4409,7 @@ TEST_CASE("VST3 expression before its note-on at the same offset is dropped (eve
 // free to hand us AudioBusBuffers whose silenceFlags carry its inbound
 // silence, and to act on whatever we leave there. The adapter never wrote the
 // field, so a generator / oscillator / DC-control-voltage source that
-// synthesizes output from a silent input returned a full buffer still labelled
+// synthesizes output from a silent input returned a full buffer still labeled
 // silent. Assert we retract the claim on every rendered output bus.
 TEST_CASE("VST3 clears output silenceFlags after an active render",
           "[vst3][audio][silence][dc]") {
@@ -4445,7 +4445,7 @@ TEST_CASE("VST3 clears output silenceFlags after an active render",
     audio_outputs[0].numChannels = 2;
     audio_outputs[0].channelBuffers32 = main_outputs;
     // ...and propagates that claim into the output buffers it hands us, which
-    // is exactly what a silence-optimising host does.
+    // is exactly what a silence-optimizing host does.
     audio_outputs[0].silenceFlags = 0x3;
 
     Steinberg::Vst::ProcessData data{};

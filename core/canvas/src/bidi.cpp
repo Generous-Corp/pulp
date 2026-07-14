@@ -109,7 +109,7 @@ BidiParagraph BidiAnalyzer::analyze(std::string_view text,
         }
 
         // SBLineGetRunsPtr already returns runs in visual order
-        // (L1-L2 applied). To honour the API contract — `analyze()`
+        // (L1-L2 applied). To honor the API contract — `analyze()`
         // returns logical order — re-sort by byte offset.
         std::sort(out.runs.begin(), out.runs.end(),
                   [](const BidiRun& a, const BidiRun& b) {

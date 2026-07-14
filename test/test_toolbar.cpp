@@ -46,7 +46,7 @@ TEST_CASE("Toolbar hit-tests items positioned after a wide custom item",
     tb.set_bounds({0, 0, 200, 36});
 
     // The custom item spans [4, 74); the button therefore starts at ~78. A
-    // click at x=85 lands on the button only if paint/hit-test honour the
+    // click at x=85 lands on the button only if paint/hit-test honor the
     // custom item's full width (not the square item_size_ = 28).
     tb.on_mouse_down({85.0f, 18.0f});
     REQUIRE(fired);

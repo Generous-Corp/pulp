@@ -319,8 +319,8 @@ convolution really is running as WebGPU compute shaders in a browser tab. CPU
 remains the default and the always-available fallback.
 
 **Not yet measured:** the miss-rate curve at `latencyBlocks = 1/2/3` (L=2 is still
-an engineering guess — see `kWebGpuLatencyBlocks`), behaviour in a backgrounded
-tab, and behaviour on a non-Apple GPU. Note what that means for the fixture's
+an engineering guess — see `kWebGpuLatencyBlocks`), behavior in a backgrounded
+tab, and behavior on a non-Apple GPU. Note what that means for the fixture's
 headline: this run never entered the miss / drop / throttle regime, so it is NOT
 evidence that the drop and expiry paths behave — those are proved by
 `js/gpu-ring.test.mjs` (a real SAB, a stalled worker that forces drops, an

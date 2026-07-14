@@ -198,7 +198,7 @@ void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
 void CoreGraphicsCanvas::clip(FillRule rule) {
     if (!path_) return;
     CGContextAddPath(ctx_, path_);
-    // Honour the JS-supplied fillRule arg (`ctx.clip('evenodd')`). CG
+    // Honor the JS-supplied fillRule arg (`ctx.clip('evenodd')`). CG
     // distinguishes between CGContextClip (nonzero winding) and
     // CGContextEOClip (even-odd) at the API surface.
     if (rule == FillRule::evenodd) {
@@ -678,7 +678,7 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
                                       float max_width) {
     // True outlined-glyph rendering via CoreText. We swap the text drawing
     // mode to `kCGTextStroke` so each glyph outline is honoured with the
-    // active stroke colour + line width.
+    // active stroke color + line width.
     @autoreleasepool {
         if (text.empty()) return;
         NSString* ns_text = ns_string_never_nil(text);
@@ -764,7 +764,7 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
             CGPathRelease(glyph_path);
             stroke_with_active_paint();
         } else {
-            // Stroke mode + active stroke colour. The line width was set by
+            // Stroke mode + active stroke color. The line width was set by
             // a prior set_line_width() call and is preserved by the GState
             // we just saved — no need to mirror it here.
             CGContextSetRGBStrokeColor(ctx_,
@@ -912,7 +912,7 @@ void CoreGraphicsCanvas::close_path() {
 
 void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
     if (!path_) return;
-    // Honour the JS-supplied fillRule arg (`ctx.fill('evenodd')`). CG splits
+    // Honor the JS-supplied fillRule arg (`ctx.fill('evenodd')`). CG splits
     // nonzero (CGContextFillPath / CGContextClip) and even-odd
     // (CGContextEOFillPath / CGContextEOClip) at the API surface.
     const bool eo = (rule == FillRule::evenodd);
@@ -1209,7 +1209,7 @@ void CoreGraphicsCanvas::set_stroke_pattern(const std::string& image_src,
 // Canvas2D ctx.miterLimit.
 // CGContextSetMiterLimit attaches the value to the current GState, so
 // save()/restore() snapshots and pops it naturally. Spec: non-positive
-// or non-finite values are silently ignored (matches CG behaviour for
+// or non-finite values are silently ignored (matches CG behavior for
 // the "set" itself — CG would clamp to its internal minimum, but we
 // short-circuit to keep the recording-canvas test surface deterministic).
 void CoreGraphicsCanvas::set_miter_limit(float limit) {
@@ -1243,7 +1243,7 @@ void CoreGraphicsCanvas::set_image_smoothing(bool enabled,
     CGContextSetInterpolationQuality(ctx_, cg_q);
 }
 
-// Sample the active conic colour stops at angle `t` in [0, 1],
+// Sample the active conic color stops at angle `t` in [0, 1],
 // where t=0 corresponds to start_angle and t=1 wraps back to start_angle + 2π.
 // Returns four CGFloat RGBA components in straight (un-premultiplied) space.
 static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
@@ -1271,7 +1271,7 @@ static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
         return;
     }
     // Find the interval [positions[i], positions[i+1]] enclosing t and
-    // linearly interpolate the colour.
+    // linearly interpolate the color.
     for (size_t i = 0; i + 1 < n; ++i) {
         if (t >= positions[i] && t <= positions[i + 1]) {
             const double span = std::max<double>(positions[i + 1] - positions[i], 1e-9);
@@ -1284,7 +1284,7 @@ static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
             return;
         }
     }
-    // Defensive: last-stop colour.
+    // Defensive: last-stop color.
     out_rgba[0] = colors[n - 1].r;
     out_rgba[1] = colors[n - 1].g;
     out_rgba[2] = colors[n - 1].b;

@@ -12,7 +12,7 @@ void WidgetBridge::register_widget_value_controls_api() {
     BridgeApiContext api{engine_};
 
     // setValue(id, value) -> set widget value
-    // For Knob / Fader / Toggle this is normalised 0..1.
+    // For Knob / Fader / Toggle this is normalized 0..1.
     // For RangeSlider it's the raw value in [min,max]; the widget clamps
     // and quantises against its own configured range.
     register_bridge_function(api, "setValue", [this](choc::javascript::ArgumentList args) {
@@ -42,7 +42,7 @@ void WidgetBridge::register_widget_value_controls_api() {
         return choc::value::Value();
     });
 
-    // getValue(id) -> get widget value (normalised for Knob/Fader/Toggle,
+    // getValue(id) -> get widget value (normalized for Knob/Fader/Toggle,
     // raw for RangeSlider).
     register_bridge_function(api, "getValue", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

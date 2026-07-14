@@ -1,6 +1,6 @@
 """HTML rendering for desktop automation publish reports.
 
-Optimised for a reviewer skimming proofs (often on mobile Safari): each run
+Optimized for a reviewer skimming proofs (often on mobile Safari): each run
 leads with a verdict + the visual proof above the fold, keeps the
 "what to verify" notes compact, and tucks secondary metadata + the review
 storyboard into a collapsible block. Self-contained, offline-friendly: all

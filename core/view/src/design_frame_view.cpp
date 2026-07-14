@@ -267,7 +267,7 @@ DesignFrameView::Frame DesignFrameView::build_frame(
         // consistent renderer of them. Otherwise the live labels paint over the
         // baked ones — two slightly different glyphs (the design font vs the
         // overlay font) → a faint "doubled" look — and the baked SELECTED digit
-        // keeps its glow + bright colour stuck in place when the live pill moves.
+        // keeps its glow + bright color stuck in place when the live pill moves.
         // Per slot, remove the baked glyph: the selected one is a glow filter
         // group, the rest are plain <path>s; try the group first, then the path.
         for (int slot = 0; slot < n; ++slot) {
@@ -841,7 +841,7 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // so the S/M/icon label shows through.
     for (const auto& e : elements_) {
         if (e.kind != DesignFrameElement::Kind::toggle || e.value < 0.5f) continue;
-        // Active tint: the design's own colour when it provides one (keeps
+        // Active tint: the design's own color when it provides one (keeps
         // faithful imports pixel-true), else the theme accent so a reskin
         // recolours unspecified toggles instead of a baked-in default.
         const auto accent = resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166));
@@ -851,8 +851,8 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
             g = std::strtoul(e.bg_color.substr(3, 2).c_str(), nullptr, 16);
             b = std::strtoul(e.bg_color.substr(5, 2).c_str(), nullptr, 16);
         }
-        // r/g/b come from the design colour or the theme accent above; 0x9c is
-        // the translucency over the baked chrome (not a hardcoded theme colour).
+        // r/g/b come from the design color or the theme accent above; 0x9c is
+        // the translucency over the baked chrome (not a hardcoded theme color).
         canvas.set_fill_color(canvas::Color::rgba8(static_cast<uint8_t>(r),  // token-lint:allow
                               static_cast<uint8_t>(g), static_cast<uint8_t>(b), 0x9c));
         canvas.fill_rounded_rect(t.ox + (e.x - panel_x_) * t.scale,
@@ -967,7 +967,7 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         float tw = canvas.measure_text(e.text);
         // Auto-shrink-to-fit: a value wider than its rect (a 3-char reading like
         // "−20" or "C-2" in a box budgeted for a 1–2 char baked glyph) would draw
-        // OVER the neighbouring label or button. Scale the font down so it fits the
+        // OVER the neighboring label or button. Scale the font down so it fits the
         // rect width — the right edge stays put, so the reading never jumps
         // position, only the rare over-wide value renders a touch smaller.
         if (tw > rw && tw > 0.0f) {

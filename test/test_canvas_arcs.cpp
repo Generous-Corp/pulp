@@ -234,7 +234,7 @@ TEST_CASE("SkiaCanvas::arc half circle has endpoints exactly opposite",
                                         pixels[off + 2]};
     };
     // The arc endpoint at angle 0 is (cx + r, cy) = (140, 50). With a
-    // 2px stroke the pixel at exactly y=50, x=140 must be coloured (not
+    // 2px stroke the pixel at exactly y=50, x=140 must be colored (not
     // white). Same for (cx - r, cy) = (60, 50).
     auto p_right = sample(static_cast<int>(cx + r), static_cast<int>(cy));
     auto p_left  = sample(static_cast<int>(cx - r), static_cast<int>(cy));

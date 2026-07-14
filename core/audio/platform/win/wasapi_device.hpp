@@ -26,7 +26,7 @@ namespace pulp::audio::win {
 // A single instance wraps EITHER a render endpoint OR a capture
 // endpoint; the EDataFlow passed at construction selects which path
 // open() / start() take. Duplex callers open two devices and
-// synchronise externally — same model as the rest of the AudioSystem
+// synchronize externally — same model as the rest of the AudioSystem
 // interface, which is direction-agnostic at the device level.
 //
 // ── WASAPI mode coverage ─────────────────────────────────────────────────

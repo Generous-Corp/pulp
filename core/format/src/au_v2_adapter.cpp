@@ -696,7 +696,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // inactive/null: Processor::sidechain_input() returns nullptr gracefully
     // rather than exposing a bus the stock AU-effect render path cannot feed.
     // For the common single-input effect this is exactly one Main view, so the
-    // bus->buffer mapping and behaviour are unchanged. Bus names come from the
+    // bus->buffer mapping and behavior are unchanged. Bus names come from the
     // cached descriptor (build_input_bus_infos), which owns the strings.
     std::array<ProcessBusBufferInfo, 2> in_infos{};
     const std::size_t n_in =
@@ -743,7 +743,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // produced output. A Processor may synthesize output from silence — a
     // generator, an oscillator, a DC/control-voltage source, a reverb tail — and
     // the adapter cannot know whether this one did, so the flag must not survive
-    // an active render. Leaving it set hands the host a full buffer labelled
+    // an active render. Leaving it set hands the host a full buffer labeled
     // silent, and a host that honours the label substitutes digital silence.
     //
     // The bypass path above returns early and deliberately leaves the flag

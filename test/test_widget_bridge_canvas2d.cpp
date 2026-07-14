@@ -494,7 +494,7 @@ TEST_CASE("WidgetBridge requestAnimationFrame triggers a host repaint (issue 921
     WidgetBridge bridge(engine, root, store);
 
     // Snapshot — bridge construction may itself touch the host (it does
-    // not today, but pin behaviour to a delta around the rAF call).
+    // not today, but pin behavior to a delta around the rAF call).
     int repaint_baseline = host.repaint_calls;
 
     bridge.load_script("var __raf_id = window.requestAnimationFrame(function () {});");
@@ -1112,14 +1112,14 @@ TEST_CASE("WidgetBridge canvasPutImageData records pixel buffer for paint replay
 // (dirtyX, dirtyY)→(dirtyX+dirtyW, dirtyY+dirtyH) sub-rect of the source
 // ImageData is written, at destination top-left (dx + dirtyX, dy + dirtyY).
 //
-// Test drives a 4×4 ImageData with a recognisable colour pattern and
+// Test drives a 4×4 ImageData with a recognisable color pattern and
 // asks the shim to write only the 2×2 bottom-right sub-rect at
 // (dx=10, dy=20). The recorded write_pixels command must have:
 //   * width  == 2 (sliced to dirtyW)
 //   * height == 2 (sliced to dirtyH)
 //   * dx     == 10 + 2 == 12 (dx + dirtyX)
 //   * dy     == 20 + 2 == 22 (dy + dirtyY)
-//   * 16 RGBA bytes carrying the bottom-right 2×2 colours.
+//   * 16 RGBA bytes carrying the bottom-right 2×2 colors.
 TEST_CASE("WidgetBridge canvasPutImageData 7-arg sub-rect slices on the JS side",
           "[view][bridge][canvas][issue-916][issue-1737]") {
     ScriptEngine engine;
@@ -1129,8 +1129,8 @@ TEST_CASE("WidgetBridge canvasPutImageData 7-arg sub-rect slices on the JS side"
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    // 4x4 RGBA: every pixel is colour-coded so the slice can be verified
-    // unambiguously. Colour scheme: R = column*64, G = row*64, B = 128.
+    // 4x4 RGBA: every pixel is color-coded so the slice can be verified
+    // unambiguously. Color scheme: R = column*64, G = row*64, B = 128.
     bridge.load_script(R"(
         var c = document.createElement('canvas');
         c.id = 'put-rect-canvas';
@@ -1196,7 +1196,7 @@ TEST_CASE("WidgetBridge canvasPutImageData 7-arg sub-rect slices on the JS side"
 // putImageData with an empty dirty rect (e.g. dirtyW <= 0 after clamping) is a
 // no-op per HTML5 spec. Pre-fix the JS shim dropped the dirty args entirely, so
 // an empty dirty rect would still blast the whole ImageData onto the canvas.
-// Post-fix the shim recognises the empty case and bails before encoding/sending.
+// Post-fix the shim recognizes the empty case and bails before encoding/sending.
 TEST_CASE("WidgetBridge canvasPutImageData 7-arg empty dirty rect is a no-op",
           "[view][bridge][canvas][issue-916][issue-1737]") {
     ScriptEngine engine;

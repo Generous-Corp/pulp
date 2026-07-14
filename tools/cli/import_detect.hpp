@@ -56,7 +56,7 @@ KnownFrameworks load_index(const fs::path& path);
 // nothing and reveals nothing. The SDK cannot say which importers exist, nor whether
 // any given one is public or private, because it genuinely does not know — it knows
 // only the SHAPE of a marker. A user with access and a user without get byte-identical
-// behaviour from the SDK.
+// behavior from the SDK.
 //
 // `tools_root` is `~/.pulp/tools` in production; tests pass a temp dir.
 KnownFrameworks merge_installed_indices(const fs::path& tools_root);
@@ -75,7 +75,7 @@ struct Candidate {
     std::string importer_tool_id;
     int spi_min = 0;
     int spi_max = 0;
-    double confidence = 0.0;            // normalised to [0,1]
+    double confidence = 0.0;            // normalized to [0,1]
     std::vector<std::string> evidence;  // human-facing marker hits
 };
 

@@ -476,7 +476,7 @@ TEST_CASE("SvgPathWidget setFill / clearFill toggles emission",
 // clear_fill_gradient was called by checking that the widget didn't
 // fall back to its solid fill_color on this paint pass.
 
-TEST_CASE("SvgPathWidget fills with the gradient rather than the solid colour",
+TEST_CASE("SvgPathWidget fills with the gradient rather than the solid color",
           "[view][svg-path][issue-932][issue-1737]") {
     using namespace pulp::view;
     using namespace pulp::canvas;
@@ -514,7 +514,7 @@ TEST_CASE("SvgPathWidget fills with the gradient rather than the solid colour",
     REQUIRE(c.g < 0.1f);
     REQUIRE(c.b < 0.1f);  // blue is the SECOND stop
 
-    // And it did not quietly fall through to the solid colour, which was set to a
+    // And it did not quietly fall through to the solid color, which was set to a
     // loud green precisely so that a fall-through could not hide.
     REQUIRE_FALSE(fell_back_to_solid);
 }

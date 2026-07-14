@@ -1,7 +1,7 @@
 // cmd_run_parse.cpp — pure flag parser for `pulp run`.
 //
 // Split out from cmd_run.cpp so test_cli_run_options can link the parser
-// without dragging in cli_common (and its filesystem / colour / project
+// without dragging in cli_common (and its filesystem / color / project
 // resolution helpers). #914.
 
 #include "cmd_run.hpp"

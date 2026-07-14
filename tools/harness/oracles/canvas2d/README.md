@@ -10,7 +10,7 @@ attributes, and Pulp-specific extensions, sourced from:
    `core/view/src/widget_bridge_api_manifest.tsv` as the registration index.
 3. The JS shim at `core/view/js/web-compat-canvas.js` — the layer that
    translates `ctx.fillRect()` etc. into `canvasX(id, ...)` bridge calls.
-4. The hard-won gotchas catalogued in `.agents/skills/import-design/SKILL.md`
+4. The hard-won gotchas cataloged in `.agents/skills/import-design/SKILL.md`
    under "Canvas2D Bridge Gotchas" (#1–#8) — production-debugged deviations
    from spec.
 

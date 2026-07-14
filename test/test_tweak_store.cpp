@@ -832,7 +832,7 @@ TEST_CASE("TweakStore: save -> clear -> load round-trips state",
     REQUIRE(loaded.tweak_count == 3);
     REQUIRE(s.count() == 3);
 
-    // Values restored. choc::json::parse normalises numeric literals
+    // Values restored. choc::json::parse normalizes numeric literals
     // to int64 / double — use getWithDefault to stay agnostic to the
     // serialized width.
     REQUIRE(s.lookup("anchor:a", "layout.padding")->getWithDefault<int64_t>(0) == 12);

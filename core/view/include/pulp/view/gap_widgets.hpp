@@ -40,7 +40,7 @@ private:
 };
 
 // ── InlineBanner ──────────────────────────────────────────────────────────
-// Full-width status message: tone-coloured left bar + bold label + message.
+// Full-width status message: tone-colored left bar + bold label + message.
 class InlineBanner : public View {
 public:
     void set_tone(Tone t) { tone_ = t; }

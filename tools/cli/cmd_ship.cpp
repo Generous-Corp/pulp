@@ -619,7 +619,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         }
         return 0;
 #else
-        // macOS / Linux. On macOS we honour the per-artifact selection:
+        // macOS / Linux. On macOS we honor the per-artifact selection:
         // `.pkg` for AU/VST3/CLAP plugin bundles, `.dmg` for `.app`
         // standalones. `--pkg` and `--dmg` flags override the per-artifact
         // default for the entire run (e.g. `--dmg` wraps even plugin bundles

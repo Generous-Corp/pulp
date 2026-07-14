@@ -43,12 +43,12 @@
 //   descendant    — `a b`     (ancestor anywhere in the chain)
 //   child         — `a > b`   (immediate parent only)
 //
-// Pseudo-classes (`:hover`, `:nth-child`, etc.) are recognised by the
+// Pseudo-classes (`:hover`, `:nth-child`, etc.) are recognized by the
 // tokenizer for forward-compat (so they don't blow up the parser) but
 // are stored unmatched — the gotcha string in compat.json keeps them
 // listed as unsupported.  Sibling combinators (`+`, `~`) are not
 // implemented; selectors that include them silently fall through to
-// no-match (legacy behaviour).
+// no-match (legacy behavior).
 function _parseSelector(str) {
     var result = { tag: null, id: null, classes: [], attrs: [], pseudo: null,
                    parent: null, direct: false };
@@ -128,7 +128,7 @@ function _parseSelector(str) {
         } else if (t[0] === "[") {
             // Strip `[` and `]`
             var inner = t.slice(1, -1);
-            // Recognised operators (longest first so `^=` doesn't eat `=`):
+            // Recognized operators (longest first so `^=` doesn't eat `=`):
             var op = null;
             var opIdx = -1;
             var ops = ["^=", "$=", "*=", "|=", "~=", "="];
@@ -262,7 +262,7 @@ function _matchesSelector(el, parsed) {
 // pseudo-class string (e.g. `disabled`, `checked`, `nth-child(2n+1)`,
 // `not(.foo)`). Unknown / unimplemented forms return false (the broader
 // catalog claim is "no-match rather than throw" — same precedent as the
-// earlier parser-tolerates-but-matcher-ignores behaviour, except now the
+// earlier parser-tolerates-but-matcher-ignores behavior, except now the
 // matcher explicitly rejects so `div:nth-child(2)` no longer leaks to all
 // `div`).
 function _matchesPseudoClass(el, pseudo) {

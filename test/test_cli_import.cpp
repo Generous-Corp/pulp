@@ -363,7 +363,7 @@ TEST_CASE("import inspect end-to-end against a mock responder writes ProjectIR",
 // installed, detection must match nothing and REVEAL nothing — it must not be
 // possible to learn from the SDK which importers exist, or whether any given one
 // is public or private. A user with access to some importer and a user without
-// must get identical behaviour out of the SDK itself.
+// must get identical behavior out of the SDK itself.
 
 TEST_CASE("the SDK ships an EMPTY framework index", "[cli][import][vendor-agnostic]") {
     // If this fails, someone has added a framework's markers to the SDK. The markers

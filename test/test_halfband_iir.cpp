@@ -22,7 +22,7 @@ using Catch::Matchers::WithinAbs;
 //     input rate (i.e. 0.2*Fs in standalone use)
 //   * group delay ~ 6 samples
 //   * sample-rate-invariant by construction (coefficient set is
-//     normalised to Fs, no per-rate retuning)
+//     normalized to Fs, no per-rate retuning)
 //   * stopband attenuation > 80 dB in the *deep stopband* (the
 //     transition-band edge at 0.6*Nyquist sits at ~ -25 dB with the
 //     default 6-per-path coefficients; deeper into the stopband
@@ -38,8 +38,8 @@ using Catch::Matchers::WithinAbs;
 //     attenuation matches the documented design floor.
 //   * DC: drive a constant; confirm output is constant (no inter-
 //     phase wiggle at DC).
-//   * sample-rate invariance: same normalised frequency at two
-//     different "labelled" sample rates produces identical samples.
+//   * sample-rate invariance: same normalized frequency at two
+//     different "labeled" sample rates produces identical samples.
 //   * round-trip: 2x up → 2x down on a passband signal recovers
 //     amplitude within < 0.2 dB.
 // ────────────────────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ float trailing_rms(const std::vector<float>& samples, std::size_t skip) {
 
 float to_db(float lin) { return 20.0f * std::log10(std::max(lin, 1e-30f)); }
 
-// Render a sine wave at normalised frequency `cycles_per_sample`
+// Render a sine wave at normalized frequency `cycles_per_sample`
 // (i.e. f / Fs) for `n` samples, phase 0, amplitude 1.
 std::vector<float> sine(float cycles_per_sample, std::size_t n) {
     std::vector<float> out(n);
@@ -228,8 +228,8 @@ TEST_CASE("HalfBandUpsampler2x preserves passband sine amplitude",
 
 TEST_CASE("HalfBandUpsampler2x sample-rate invariance — identical samples regardless of Fs",
           "[signal][halfband]") {
-    // Half-band coefficients are normalised to Fs, so two instances
-    // driven by the same normalised-frequency sine produce identical
+    // Half-band coefficients are normalized to Fs, so two instances
+    // driven by the same normalized-frequency sine produce identical
     // sample sequences regardless of what physical sample rate the
     // caller is operating at. We can't "tell" the upsampler what Fs
     // is (it doesn't have a set_sample_rate), which is exactly the

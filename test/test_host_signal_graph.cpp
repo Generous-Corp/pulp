@@ -1594,7 +1594,7 @@ public:
                  const pulp::host::ParameterEventQueue& /*pe*/,
                  int n) override {
         // Actually delay the audio by the reported latency samples so PDC
-        // behaviour can be measured end-to-end: the plugin's internal delay
+        // behavior can be measured end-to-end: the plugin's internal delay
         // line and the host's reported-latency view agree.
         if (rings_.size() != (size_t)num_ch_) {
             rings_.assign((size_t)num_ch_,

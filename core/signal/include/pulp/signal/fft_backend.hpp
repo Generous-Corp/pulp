@@ -68,7 +68,7 @@ public:
     /// Construct for a given power-of-2 size. backend=auto_ picks via
     /// resolve_fft_backend(). Throws std::invalid_argument if size is
     /// not a power of two, or std::runtime_error if the requested
-    /// backend cannot be initialised.
+    /// backend cannot be initialized.
     explicit MultiBackendFft(int size, FftBackend backend = FftBackend::auto_);
     ~MultiBackendFft();
 
@@ -83,7 +83,7 @@ public:
     /// Forward complex FFT (in-place).
     void forward(std::complex<float>* data) const;
 
-    /// Inverse complex FFT (in-place), normalised by 1/N.
+    /// Inverse complex FFT (in-place), normalized by 1/N.
     void inverse(std::complex<float>* data) const;
 
 private:

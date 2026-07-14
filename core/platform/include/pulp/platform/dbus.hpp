@@ -234,7 +234,7 @@ public:
     };
 
     /// Handler for incoming method calls on a registered object path. Return
-    /// true if the call was recognised + answered (via ctx.reply()/error()),
+    /// true if the call was recognized + answered (via ctx.reply()/error()),
     /// false to decline — the server then replies UnknownMethod. A call is
     /// NEVER dropped silently.
     using IncomingHandler = std::function<bool(CallContext& ctx)>;

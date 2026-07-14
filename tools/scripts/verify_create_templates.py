@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
 
     all_failures: list[str] = []
     # Use rglob so trees like `standalone/<type>/CMakeLists.txt.template`
-    # are recognised even though their immediate parent has no top-level
+    # are recognized even though their immediate parent has no top-level
     # .template files. Regression: the old top-level glob missed those trees.
     type_dirs = [
         d for d in sorted(templates_root.iterdir())

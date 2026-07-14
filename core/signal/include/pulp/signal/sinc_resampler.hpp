@@ -18,7 +18,7 @@
 /// in the fractional-phase dimension and read with linear interpolation
 /// between phase entries (the standard table-driven resampler). For a
 /// fractional source position `p`, the output is the sum over `2*half`
-/// neighbouring input samples weighted by the kernel evaluated at their
+/// neighboring input samples weighted by the kernel evaluated at their
 /// distance from `p`. Real-time-safe after build(); no allocation in
 /// `read()`.
 ///

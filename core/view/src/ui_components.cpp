@@ -662,9 +662,9 @@ void ThemeModeControl::paint(canvas::Canvas& canvas) {
             }
         } else {
             // Dark: crescent moon (disc minus an offset disc). The carve must
-            // use the OPAQUE colour actually behind the icon so the crescent
+            // use the OPAQUE color actually behind the icon so the crescent
             // shows — on the active segment that's the accent-tinted pill
-            // (accent @0.18 over the surface) composited to a solid colour, not
+            // (accent @0.18 over the surface) composited to a solid color, not
             // the transparent tint itself.
             auto surface = resolve_color("bg.surface", Color::rgba8(30, 30, 46));
             Color carve = surface;

@@ -63,7 +63,7 @@ public:
     // into. Raster-decoded images must be uploaded to a GPU texture before a
     // GPU-backed canvas can draw them — Graphite canvases do that through the
     // recorder passed to the constructor, Ganesh canvases through this context.
-    // Leaving it null keeps the CPU-raster behaviour (the decoded image is
+    // Leaving it null keeps the CPU-raster behavior (the decoded image is
     // drawn as-is), which is correct for raster surfaces and degraded — draws
     // are dropped by the backend — for a GPU surface.
     void set_gpu_upload_context(GrDirectContext* context);

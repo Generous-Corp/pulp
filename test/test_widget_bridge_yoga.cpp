@@ -369,7 +369,7 @@ TEST_CASE("setFlex justify_content accepts the alias set",
 // pulp #1434 Tier 1 (css/alignItems) — `first baseline` is a CSS-spec
 // alternate form of `baseline`. The baseline-set "first" selector is
 // the default Yoga `YGAlignBaseline` already computes, so collapsing it
-// is observable-behaviour-preserving.
+// is observable-behavior-preserving.
 //
 // `last baseline` is NOT aliased because Yoga has no last-baseline
 // support — aliasing would silently misrender multi-line flex

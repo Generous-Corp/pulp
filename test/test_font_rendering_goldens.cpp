@@ -374,7 +374,7 @@ TEST_CASE("font rendering golden: render pipeline is deterministic in-process",
     REQUIRE(pma.rowBytes() == pmb.rowBytes());
 
     // Byte-exact pixel comparison. If this fails, something in
-    // the render pipeline is racy / lazily-initialised / depends
+    // the render pipeline is racy / lazily-initialized / depends
     // on global state. Treat that as a render-pipeline bug; do
     // not paper over by relaxing the golden tolerance, that is a
     // different bug class.

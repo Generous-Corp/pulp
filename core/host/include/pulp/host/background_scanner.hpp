@@ -85,7 +85,7 @@ private:
     std::thread worker_;
     CancelToken token_;
     std::atomic<bool> running_{false};
-    std::mutex start_mutex_;  // serialises start() vs stop_and_join()
+    std::mutex start_mutex_;  // serializes start() vs stop_and_join()
 };
 
 } // namespace pulp::host

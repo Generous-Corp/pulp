@@ -13,7 +13,7 @@ namespace pulp::osc {
 
 // ── OSC Types ────────────────────────────────────────────────────────────────
 
-/// 32-bit RGBA colour — the OSC 1.0 optional `'r'` type tag.
+/// 32-bit RGBA color — the OSC 1.0 optional `'r'` type tag.
 /// Stored as four 8-bit channels in transmission order.
 
 struct ColorRgba {
@@ -31,7 +31,7 @@ struct ColorRgba {
     }
 };
 
-// OSC argument types (OSC 1.0 spec + the optional RGBA colour type).
+// OSC argument types (OSC 1.0 spec + the optional RGBA color type).
 using Argument = std::variant<int32_t, float, std::string,
                               std::vector<uint8_t>, ColorRgba>;
 

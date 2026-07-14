@@ -275,7 +275,7 @@ bool constant_time_equal(const uint8_t* a, const uint8_t* b, size_t size) {
 // TweetNaCl requires an externally-supplied `randombytes()`; we wire it
 // to mbedTLS CTR-DRBG so we share entropy infrastructure with the rest
 // of the runtime. The DRBG is constructed lazily and protected by a
-// std::mutex (initialisation + reseed are not thread-safe by default).
+// std::mutex (initialization + reseed are not thread-safe by default).
 
 namespace ed25519_impl {
 
@@ -329,7 +329,7 @@ inline thread_local std::array<uint8_t, 32> g_randombytes_inject_seed{};
 // verify-mismatch downstream.
 extern "C" void randombytes(unsigned char* buf, unsigned long long n) {
     using namespace pulp::runtime::ed25519_impl;
-    // Honour the deterministic-seed override used by ed25519_keypair_from_seed.
+    // Honor the deterministic-seed override used by ed25519_keypair_from_seed.
     // TweetNaCl asks for exactly 32 bytes here (the seed half of crypto_sign sk).
     if (g_randombytes_inject_active && n == 32) {
         std::memcpy(buf, g_randombytes_inject_seed.data(), 32);

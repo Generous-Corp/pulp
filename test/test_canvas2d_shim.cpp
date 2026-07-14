@@ -17,7 +17,7 @@
 // These tests exercise the full JS → bridge command path for every
 // shim method FilterBank uses, and the [issue-964][skia] case
 // rasterizes the FilterBank sequence onto a Skia raster surface and
-// asserts the resulting pixels match the expected colour.
+// asserts the resulting pixels match the expected color.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -337,7 +337,7 @@ TEST_CASE("Canvas2D shim records full FilterBank-style command sequence",
     REQUIRE(saw_fill_text);
 }
 
-// ── Solid colour fillStyle still works after a gradient ──────────────────
+// ── Solid color fillStyle still works after a gradient ──────────────────
 //
 // Canvas2D spec: assigning a string to fillStyle replaces the previous
 // style outright (including any active gradient). The shim must call
@@ -400,7 +400,7 @@ using pulp::canvas_test::sample_pixel;
 //
 // The full FilterBank-style sequence must record and paint; if the JS
 // snippet aborts on an unsupported Canvas2D method, the center pixel
-// stays the parent's dark navy instead of the gradient fill colour.
+// stays the parent's dark navy instead of the gradient fill color.
 TEST_CASE("Canvas2D shim end-to-end: FilterBank gradient draws onto Skia surface",
           "[view][canvas2d][skia][issue-964]") {
     SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
@@ -445,7 +445,7 @@ TEST_CASE("Canvas2D shim end-to-end: FilterBank gradient draws onto Skia surface
     cw->paint(canvas);
 
     // Center pixel: must be opaque red (the gradient — both stops are red,
-    // so colour-interpolation is irrelevant). If the JS render aborts
+    // so color-interpolation is irrelevant). If the JS render aborts
     // before fillRect runs, this samples the navy parent instead.
     auto px = sample_pixel(surface.get(), 32, 32);
     INFO("Center rgba=(" << int(px.r) << "," << int(px.g) << ","
@@ -456,7 +456,7 @@ TEST_CASE("Canvas2D shim end-to-end: FilterBank gradient draws onto Skia surface
     REQUIRE(px.b == 0);
 }
 
-// ── Skia round-trip: solid fillStyle colours render as expected ──────────
+// ── Skia round-trip: solid fillStyle colors render as expected ──────────
 //
 // Sanity check that the most basic FilterBank-equivalent path —
 // ctx.fillStyle = '#00aaff'; ctx.fillRect(...) — actually paints when
@@ -503,7 +503,7 @@ TEST_CASE("Canvas2D save/restore brackets do not erase fillStyle pixels",
 
 // ── Canvas2D shadow* sticky state ────────────────────────────────────────────
 //
-// These tests cover the JS-side shim behaviour and the bridge route; the
+// These tests cover the JS-side shim behavior and the bridge route; the
 // SkiaCanvas-level pixel verification lives in test_canvas_widget.cpp.
 TEST_CASE("Canvas2D shim exposes shadow* properties as round-trip fields",
           "[view][canvas2d][issue-1434-batch-7]") {
@@ -827,13 +827,13 @@ TEST_CASE("Canvas2D miterLimit ignores non-positive / non-finite assignments",
 
 // ── Skia raster sanity test (gated, runs only with PULP_HAS_SKIA) ─────
 #ifdef PULP_HAS_SKIA
-TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
+TEST_CASE("Canvas2D conic gradient renders distinct colors via Skia sweep",
           "[view][canvas2d][issue-1434][bridge-thin][skia]") {
     // Smoke test: render a conic gradient and confirm the pixels at
     // (right of center) and (below center) differ. With the conic
     // bridge wired, Skia's MakeSweep distributes red→green→blue around
     // the center — so the right and bottom samples should not match.
-    // A degenerate fallback would draw a flat first-stop colour, making
+    // A degenerate fallback would draw a flat first-stop color, making
     // those samples match exactly.
     ScriptedBridge env;
     env.load(R"(
@@ -871,7 +871,7 @@ TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
         return *static_cast<const uint32_t*>(pm.addr(x, y));
     };
     // Two angularly-distinct points around the center. With a real
-    // conic sweep these MUST be different colours; with a flat-first-stop
+    // conic sweep these MUST be different colors; with a flat-first-stop
     // fallback they would match.
     uint32_t right = sample(60, 32);
     uint32_t below = sample(32, 60);
@@ -1309,7 +1309,7 @@ TEST_CASE("Canvas2D ctx.font with em produces correctly-scaled set_font_full siz
 // the shim assigns to fillStyle / strokeStyle. The shim then flushes
 // via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through
 // SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG
-// degrades to the active solid colour (no native pattern shader without
+// degrades to the active solid color (no native pattern shader without
 // a CGPattern callback dance).
 
 TEST_CASE("Canvas2D createPattern returns CanvasPattern with pattern kind",
@@ -1376,7 +1376,7 @@ TEST_CASE("Canvas2D createPattern returns null for empty image source",
 
 TEST_CASE("Canvas2D createPattern accepts image-like objects with .src",
           "[view][canvas2d][issue-1434][bridge-thin]") {
-    // drawImage normalises image arguments by reading .src / ._src;
+    // drawImage normalizes image arguments by reading .src / ._src;
     // createPattern should mirror that so plugins can pass real Image
     // instances or shim DOM image objects interchangeably.
     auto result = run_in_bridge(R"(
@@ -1540,7 +1540,7 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     // With the pattern bridge wired, an unresolvable image source must NOT
     // crash — SkiaCanvas::set_fill_pattern fails the decode and clears
     // the gradient shader so the fill falls back to the previous solid
-    // colour. The fillRect MUST still rasterize successfully (no crash,
+    // color. The fillRect MUST still rasterize successfully (no crash,
     // no exception) and produce SOME painted pixels for the previous
     // solid-fill setting.
     //
@@ -1559,7 +1559,7 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
         ctx.fillRect(0, 0, 32, 32);
         // Now set a pattern with a missing source. Skia clears the
         // gradient shader, fillRect falls back to the previously-set
-        // solid red colour, raster output stays painted.
+        // solid red color, raster output stays painted.
         var p = ctx.createPattern('non-existent-file.png', 'repeat');
         ctx.fillStyle = p;
         ctx.fillRect(0, 0, 32, 32);

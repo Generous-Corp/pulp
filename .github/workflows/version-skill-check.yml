@@ -248,6 +248,14 @@ jobs:
         run: |
           python3 tools/scripts/framework_neutrality_check.py
 
+      - name: US-English guard
+        # House style: Pulp is written in American English, identifiers and prose.
+        # A mixed codebase (color/colour, normalize/normalise) is unguessable and
+        # ungreppable. Contributions in another dialect are rewritten to the US
+        # spelling — run `tools/scripts/us_english_check.py --fix` locally. Hard-fail.
+        run: |
+          python3 tools/scripts/us_english_check.py
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
@@ -268,3 +276,4 @@ jobs:
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest
           python3 tools/scripts/framework_neutrality_check.py --selftest
+          python3 tools/scripts/us_english_check.py --selftest

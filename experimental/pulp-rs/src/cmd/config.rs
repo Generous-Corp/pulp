@@ -5,7 +5,7 @@
 //! - `0` — success.
 //! - `1` — environmental failure (can't resolve `$PULP_HOME`, I/O).
 //! - `2` — unknown subcommand or malformed flags. The C++ side fixed a bug
-//!   where this used to return 0; we match the new behaviour.
+//!   where this used to return 0; we match the new behavior.
 //!
 //! # Subcommand surface
 //!

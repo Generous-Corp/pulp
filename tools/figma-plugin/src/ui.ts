@@ -71,7 +71,7 @@ function extOfMime(m: string): string {
     case "image/webp": return "webp";
     case "image/svg+xml": return "svg";
     // User-supplied font assets ride alongside image assets in the same bundle
-    // list; the zip writer needs to recognise them.
+    // list; the zip writer needs to recognize them.
     case "font/ttf": return "ttf";
     case "font/otf": return "otf";
     case "font/woff": return "woff";

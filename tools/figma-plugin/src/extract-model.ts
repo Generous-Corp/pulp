@@ -58,7 +58,7 @@ export interface ExtractedFigmaNode {
   library_version?: string;
 
   // Structured audio-widget properties. Populated when a Pulp library widget is
-  // recognised; carried into the JSON envelope at the node root so
+  // recognized; carried into the JSON envelope at the node root so
   // design_import.cpp::parse_ir_node maps them onto IRNode.audio_label /
   // audio_min / audio_max / audio_default and the attributes map.
   audio_label?: string;

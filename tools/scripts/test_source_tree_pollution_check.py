@@ -103,7 +103,7 @@ class SourceTreePollutionTests(unittest.TestCase):
 
     def test_fails_closed_on_invalid_git_diff_base(self) -> None:
         """Regression guard for #1761: git diff failures must
-        block the push, not silently succeed. Original behaviour
+        block the push, not silently succeed. Original behavior
         returned an empty list when --base couldn't be resolved,
         defeating the hard-block contract."""
         # Use --mode=push with a base that doesn't exist in this temp

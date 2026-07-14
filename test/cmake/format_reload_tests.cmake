@@ -17,7 +17,7 @@ pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)
 # BLE-MIDI 1.0 packet codec + cross-platform BleMidiCentral factory contract. The
 # CoreBluetooth backend's live discovery / pairing path is exercised
 # manually (requires a real adapter + a paired peripheral); these
-# tests pin the deterministic codec + the stub central behaviour.
+# tests pin the deterministic codec + the stub central behavior.
 # Keeping the codec tests host-independent lets every CI lane validate
 # timestamp/running-status handling without Bluetooth hardware.
 pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)

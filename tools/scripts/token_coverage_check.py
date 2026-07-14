@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""token_coverage_check.py — ratchet guard against NEW hardcoded theme colours.
+"""token_coverage_check.py — ratchet guard against NEW hardcoded theme colors.
 
-Reskinnable widgets must resolve their colours from theme tokens
-(`resolve_color("token", fallback)`); a bare colour literal in paint code can
+Reskinnable widgets must resolve their colors from theme tokens
+(`resolve_color("token", fallback)`); a bare color literal in paint code can
 never be restyled by a theme/token swap.
 
 This is a RATCHET, not an absolute gate. It freezes the current per-file count
-of non-`resolve_color` colour literals in the view layer as a baseline and fails
+of non-`resolve_color` color literals in the view layer as a baseline and fails
 only when a file's count INCREASES. Existing literals — material-effect shadows
 and highlights, legacy paint not yet tokenised — are grandfathered; new ones are
 blocked, so coverage only ever improves. Lowering a count below the baseline
@@ -17,8 +17,8 @@ Conventions:
     `resolve_color` — i.e. it is the fallback argument of a token lookup.
   * Mark an intentional material-effect literal (a drop shadow, a hairline
     highlight) with a trailing `// token-lint:allow` to exclude it.
-  * Colour-authoring files (theme*, design_tokens, color_picker) are excluded —
-    their job is to DEFINE colours, not resolve tokens.
+  * Color-authoring files (theme*, design_tokens, color_picker) are excluded —
+    their job is to DEFINE colors, not resolve tokens.
 
 Usage:
   token_coverage_check.py                 # check against the baseline (exit 1 on regression)
@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_DIR = REPO_ROOT / "core" / "view" / "src"
 BASELINE = Path(__file__).resolve().parent / "token_coverage_baseline.json"
 
-# Files whose purpose is colour authoring, not widget paint — excluded wholesale.
+# Files whose purpose is color authoring, not widget paint — excluded wholesale.
 EXCLUDE_BASENAMES = {
     "theme.cpp",
     "theme_presets.cpp",
@@ -102,7 +102,7 @@ def main() -> int:
             regressions.append((f, allowed, c))
 
     if regressions:
-        print("[token-coverage] RATCHET FAIL — new hardcoded theme colour(s):",
+        print("[token-coverage] RATCHET FAIL — new hardcoded theme color(s):",
               file=sys.stderr)
         for f, allowed, c in regressions:
             print(f"  {f}: {c} literals (baseline {allowed}, +{c - allowed})",

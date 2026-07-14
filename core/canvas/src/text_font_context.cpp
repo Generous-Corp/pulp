@@ -157,7 +157,7 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
     // CSS-weight match. A variable font is registered once at its default
     // instance (Funnel Display defaults to wght 300 — "Light"), so a
     // request for 400/700 would land on the single 300 instance for every
-    // weight. To honour distinct CSS weights we pre-bake one clone per
+    // weight. To honor distinct CSS weights we pre-bake one clone per
     // common weight step across the axis range and register each under the
     // same family alias; `TypefaceFontProvider::matchStyle` then selects
     // the closest baked instance for the requested weight. Cloning sets

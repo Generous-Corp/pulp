@@ -8,7 +8,7 @@
 // unified that logic; this test is its proof-of-correctness.
 //
 // It drives ONE processor's boundary through EVERY format as a matrix column
-// and asserts identical observable behaviour: each format encodes the SAME
+// and asserts identical observable behavior: each format encodes the SAME
 // stimulus in its OWN native representation (CLAP fixed-point beattime, VST3
 // host-supplied bar, AU seconds → samples, block-rate LV2 control ports, …),
 // runs it through the shared boundary core, and must land on identical decoded

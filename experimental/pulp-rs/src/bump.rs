@@ -6,7 +6,7 @@
 //!
 //! # Supported pin shapes
 //!
-//! Three CMake shapes are recognised, in priority order (first-hit
+//! Three CMake shapes are recognized, in priority order (first-hit
 //! wins — the canonical scaffold never writes more than one):
 //!
 //! 1. `FetchContent_Declare(pulp ... GIT_TAG vX.Y.Z)`

@@ -17,11 +17,11 @@
 //     8-bit Grayscale / RGB / RGBA, BitsPerSample=8) into RGBA8. Wider
 //     TIFF coverage (LZW, JPEG-in-TIFF, multi-strip stitching) would
 //     require libtiff which is heavyweight and only ~MIT-compatible
-//     under its custom permissive licence; not pulled in here.
+//     under its custom permissive license; not pulled in here.
 //   • Encodes uncompressed Baseline TIFF (RGB / RGBA) and a static
-//     GIF89a (single global palette, 256-colour quantisation via simple
+//     GIF89a (single global palette, 256-color quantisation via simple
 //     median-cut). Writer paths are intended for editor / asset export
-//     use; not optimised for runtime hot paths.
+//     use; not optimized for runtime hot paths.
 //
 // The codec functions return std::optional<DecodedRaster> on success and
 // std::nullopt on any malformed input — no exceptions thrown, callers
@@ -29,7 +29,7 @@
 //
 // Animation: GifReader::decode_first() decodes a single frame for
 // callers that only want the cover image (matches existing
-// SkImages::DeferredFromEncodedData behaviour). GifReader::decode_all()
+// SkImages::DeferredFromEncodedData behavior). GifReader::decode_all()
 // returns every frame in order plus per-frame delays in milliseconds;
 // the GIF89a wire format stores centi-seconds, which the codec converts.
 
@@ -69,7 +69,7 @@ public:
 
     /// Decode every frame in order. delay_ms is filled from the
     /// Graphic Control Extension when present; absent values default
-    /// to 100 ms to match common browser behaviour.
+    /// to 100 ms to match common browser behavior.
     static std::optional<std::vector<GifFrame>> decode_all(
         const uint8_t* data, std::size_t size);
 
@@ -81,7 +81,7 @@ public:
 };
 
 /// GIF writer. Encodes a single still frame as GIF89a with a
-/// global colour table built via median-cut quantisation. Useful
+/// global color table built via median-cut quantisation. Useful
 /// for editor exports and tests; runtime callers that want
 /// animation should compose multiple frames via a higher-level
 /// helper (not provided here).

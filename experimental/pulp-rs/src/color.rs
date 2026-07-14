@@ -26,7 +26,7 @@ use std::sync::OnceLock;
 /// Cached "should we emit color?" decision.
 ///
 /// Computed once on first access — subsequent calls are a plain atomic
-/// load, so the hot-path cost of a colour escape is negligible.
+/// load, so the hot-path cost of a color escape is negligible.
 fn enabled() -> bool {
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| {

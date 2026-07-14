@@ -158,7 +158,7 @@ catch_discover_tests(pulp-test-canvas-cg-paths)
 add_executable(pulp-test-canvas-fonts test_canvas_fonts.cpp)
 target_link_libraries(pulp-test-canvas-fonts PRIVATE pulp::canvas Catch2::Catch2WithMain)
 # pulp::canvas exports PULP_HAS_SKIA=1 as a PUBLIC compile def when Skia
-# is available, but CMake's optimisation skips re-propagating PUBLIC defs
+# is available, but CMake's optimization skips re-propagating PUBLIC defs
 # to sibling targets that don't trigger a rebuild. Add the define + Skia
 # include path explicitly so the #ifdef PULP_HAS_SKIA blocks register
 # their TEST_CASEs.

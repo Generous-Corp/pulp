@@ -129,7 +129,7 @@ TEST_CASE("extract_claude_classnames matches the expected fixture",
 }
 
 // pulp #1035 — direct unit coverage of the multi-class /
-// hyphen-classname / cascade behaviour the CLI relies on.
+// hyphen-classname / cascade behavior the CLI relies on.
 TEST_CASE("extract_claude_classnames parses the issue body's example", "[cli][import-design][issue-1035]") {
     const std::string html = R"HTML(
         <html><head><style>

@@ -486,7 +486,7 @@ TEST_CASE("ReorderList opens a gap for the lifted item during a drag",
     list->on_mouse_drag({100.0f, 20.0f + pitch * 2.0f});
     CHECK(list->dragging_index() == 0);
     CHECK(list->drop_target_index() == 2);
-    // Neighbour that was at slot 1 slid up toward the gap (y decreased by a pitch).
+    // Neighbor that was at slot 1 slid up toward the gap (y decreased by a pitch).
     const Rect n1 = original[1]->bounds();
     CHECK(n1.y == Approx(1 * pitch - pitch));  // slot 1 shifted to slot 0's y
     // The lifted item tracks the pointer (offset ~2 pitches from its rest slot).

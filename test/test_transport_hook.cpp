@@ -122,7 +122,7 @@ TEST_CASE("exception thrown by transport hook propagates to the caller",
     // Contract: Pulp's base Processor declares the hook as a plain
     // virtual, not noexcept. Callers (format adapters) must be
     // prepared for implementations to throw. This case pins that
-    // behaviour so future changes (e.g. adding noexcept) become
+    // behavior so future changes (e.g. adding noexcept) become
     // intentional.
     class ThrowingProcessor : public PlainProcessor {
     public:

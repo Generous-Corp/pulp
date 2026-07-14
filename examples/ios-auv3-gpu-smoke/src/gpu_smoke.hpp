@@ -14,7 +14,7 @@
 //   - log line: `GpuSurface: created Metal surface from CAMetalLayer`
 //   - log line: `GpuSurface: Dawn initialized`
 //   - log line: `GpuSurface: backend_type=Metal`
-//   - visible animated quad rotating at the centre of the editor.
+//   - visible animated quad rotating at the center of the editor.
 //
 // Use this example to verify that an AUv3 editor can reach the iOS
 // Metal/Dawn path and present visible GPU output inside the host app.

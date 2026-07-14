@@ -185,7 +185,7 @@ void CoreGraphicsCanvas::draw_path_shadow(const Path& path, float dx, float dy,
 
     // The trick that makes this shadow-ONLY: set a CG shadow, then paint the
     // path in FULLY TRANSPARENT ink. CG still casts the shadow (the shadow is
-    // computed from the geometry's coverage, not its colour), but the path
+    // computed from the geometry's coverage, not its color), but the path
     // itself contributes nothing. A transparency layer keeps the shadow from
     // being cast by each subpath independently.
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();

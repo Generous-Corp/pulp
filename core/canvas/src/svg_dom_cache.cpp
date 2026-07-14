@@ -64,7 +64,7 @@ std::uint64_t fnv1a(const std::string& s) noexcept {
 
 // Skia's SVG parser only recognizes the XLink form of the href attribute: the
 // literal name it matches is "xlink:href" (SkSVGImage / SkSVGUse /
-// SkSVGFeImage). SVG 2 deprecated that in favour of a bare `href`, and that is
+// SkSVGFeImage). SVG 2 deprecated that in favor of a bare `href`, and that is
 // what every modern design-tool export emits — Figma's, for one, writes
 // `<image href="data:image/png;base64,...">` with no xlink namespace at all.
 // Skia silently drops the attribute, the IRI stays empty, and the element

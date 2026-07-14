@@ -177,7 +177,7 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 //
 // FillRule is the Canvas2D fill rule for fill() / clip(). It mirrors the
 // spec's ('nonzero' | 'evenodd') string enum; the default 'nonzero' matches
-// CSS behaviour and the JS shim's fillRule==='evenodd'?1:0 mapping in
+// CSS behavior and the JS shim's fillRule==='evenodd'?1:0 mapping in
 // `core/view/js/web-compat-canvas.js`.
 // CSS / RN `text-align: justify`. SkiaCanvas dispatches `kJustify` via
 // SkParagraph when the backend supports it; CG / RecordingCanvas back-ends
@@ -328,7 +328,7 @@ public:
 
     /// Canvas2D `ctx.imageSmoothingEnabled` + `imageSmoothingQuality`.
     /// Sticky paint flag honored by subsequent `drawImage` calls. When
-    /// `enabled` is false the backend uses nearest-neighbour sampling;
+    /// `enabled` is false the backend uses nearest-neighbor sampling;
     /// when true the quality enum picks the resampler. Default no-op so
     /// backends without smoothing support compile; SkiaCanvas
     /// (`SkSamplingOptions`) and CoreGraphicsCanvas
@@ -384,7 +384,7 @@ public:
     // Mirror of the fill-gradient surface for `ctx.strokeStyle =
     // createLinearGradient(...) | createRadialGradient(...) |
     // createConicGradient(...)`. Defaults degrade to the first-stop
-    // colour via `set_stroke_color`; SkiaCanvas overrides with real
+    // color via `set_stroke_color`; SkiaCanvas overrides with real
     // `SkShaders` gradient shaders stored on `stroke_shader_` so subsequent
     // stroke paths
     // (stroke_rect / stroke_current_path / stroke_text) pick the
@@ -709,7 +709,7 @@ public:
     /// This is a shadow-*rendering* primitive, deliberately separate from
     /// `save_layer_with_filters`'s `drop_shadow` filter Kind (which shadows a
     /// whole painted subtree). The split exists because the common case —
-    /// "shadow behind this icon, then the icon on top, in a different colour"
+    /// "shadow behind this icon, then the icon on top, in a different color"
     /// — needs the shadow WITHOUT the source, and a filter chain always
     /// composites the source too.
     ///
@@ -998,7 +998,7 @@ public:
     /// the backend MUST scale the text horizontally so the resulting run
     /// is exactly `max_width` px wide (vertical metrics unchanged). The
     /// default implementation falls through to `fill_text(text, x, y)`,
-    /// preserving legacy behaviour for backends that don't yet honour
+    /// preserving legacy behavior for backends that don't yet honor
     /// the constraint (RecordingCanvas, base mocks). Skia and CoreGraphics
     /// override this to apply an `SkMatrix::Scale(maxWidth/measured, 1)`
     /// (Skia) / `CGContextScaleCTM(scale, 1)` (CG) around the text origin.
@@ -1015,7 +1015,7 @@ public:
     /// True outlined-glyph rendering: builds a stroked paint
     /// (`SkPaint::kStroke_Style` on Skia, CG text drawing mode
     /// kCTLineDrawingModeStroke on CoreGraphics) so the glyph outlines
-    /// honour the current `lineWidth` / `strokeStyle`. The default
+    /// honor the current `lineWidth` / `strokeStyle`. The default
     /// implementation degrades to `fill_text` with the stroke color
     /// pre-set by the caller — visually approximate but spec-incompatible.
     /// Backends override to render real glyph outlines. `max_width`
@@ -1155,8 +1155,8 @@ public:
 
     /// Decoded-image intrinsic dimensions in pixels. Returned via out-params
     /// so backends without image decode just leave them at 0 and callers
-    /// short-circuit to "use destination bounds" (the previous behaviour).
-    /// Used by ImageView::paint to honour CSS object-fit / object-position
+    /// short-circuit to "use destination bounds" (the previous behavior).
+    /// Used by ImageView::paint to honor CSS object-fit / object-position
     /// and by canvas2d sprite sizing. Default returns false; Skia overrides
     /// to consult its decoder.
     virtual bool measure_image_from_file(const std::string& path,
@@ -1533,7 +1533,7 @@ struct DrawCommand {
         fill_path_object,     ///< path `d` in `text`; fill rule in f[0] (0=nonzero, 1=evenodd)
         stroke_path_object,   ///< path `d` in `text`; width f[0], cap f[1], join f[2], miter f[3], dash phase f[4]; dash intervals in `floats`
         clip_path_object,     ///< path `d` in `text`; fill rule in f[0]
-        draw_path_shadow,     ///< path `d` in `text`; dx/dy/blur/spread in f[0..3]; shadow colour in `color`
+        draw_path_shadow,     ///< path `d` in `text`; dx/dy/blur/spread in f[0..3]; shadow color in `color`
         // ── Retained compositing LAYERS (handle-based) ──────────────
         // begin/end bracket the recording of a layer; draw_layer composites
         // a sealed one. The handle id is captured in f[0] so a test can
@@ -1685,7 +1685,7 @@ public:
     // ── FILL gradients ───────────────────────────────────────────────────
     // Previously unrecorded: the base-class no-ops swallowed these, so a
     // headless fill-gradient test was really asserting on the last solid
-    // fill colour. See the DrawCommand::Type comment.
+    // fill color. See the DrawCommand::Type comment.
     void set_fill_gradient_linear(float x0, float y0, float x1, float y1,
                                   const Color* colors, const float* positions,
                                   int count) override;
@@ -1825,7 +1825,7 @@ private:
     std::vector<AffineTransform2x3> ctm_stack_;
 
     // ── Layer bookkeeping ────────────────────────────────────────────────
-    // Modelled faithfully (not stubbed) so that "does this layer survive to
+    // Modeled faithfully (not stubbed) so that "does this layer survive to
     // the next frame?" is testable headlessly. A cacheable layer stays valid
     // until it is explicitly invalidated; a non-cacheable one is dropped as
     // soon as it is drawn, which is exactly the contract the GPU backends

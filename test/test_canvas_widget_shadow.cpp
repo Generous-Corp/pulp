@@ -160,7 +160,7 @@ TEST_CASE("SkiaCanvas honors sticky Canvas2D shadow state on fillRect",
     // active and confirm that pixels OUTSIDE the rect (in the shadow
     // region) are non-transparent — i.e., the DropShadow image filter
     // actually fired. We also verify the inverse: a pixel far from the
-    // shadow's expected reach stays at the cleared background colour.
+    // shadow's expected reach stays at the cleared background color.
     SkImageInfo info = SkImageInfo::Make(64, 64,
                                           kRGBA_8888_SkColorType,
                                           kPremul_SkAlphaType,

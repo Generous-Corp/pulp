@@ -10,9 +10,9 @@ namespace pulp::view {
 namespace {
 using canvas::Color;
 
-// Tone → semantic colour token (derive_theme family), with a sane literal
+// Tone → semantic color token (derive_theme family), with a sane literal
 // fallback for the no-theme case. accent.text resolves the "on bright fill"
-// colour (ink-signal provides it; others fall back to a dark ink).
+// color (ink-signal provides it; others fall back to a dark ink).
 const char* tone_token(Tone t) {
     switch (t) {
         case Tone::info:    return "accent.info";

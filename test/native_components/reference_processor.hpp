@@ -11,7 +11,7 @@
 
 namespace pulp::native_components::test {
 
-// The matrix of behaviours a single reference processor must exhibit identically
+// The matrix of behaviors a single reference processor must exhibit identically
 // across every format. The harness asserts each case; a format that genuinely
 // cannot represent a case records `Unsupported` (an explicit skip), never a
 // silent pass.
@@ -31,8 +31,8 @@ enum class EventCase : std::uint8_t {
 
 // Outcome of running one case against one format.
 enum class CaseOutcome : std::uint8_t {
-    Match,        // behaviour identical to the reference
-    Mismatch,     // behaviour diverged (a parity bug)
+    Match,        // behavior identical to the reference
+    Mismatch,     // behavior diverged (a parity bug)
     Unsupported,  // format cannot represent the case (explicit, recorded skip)
 };
 

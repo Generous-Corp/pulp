@@ -98,7 +98,7 @@ void SkiaCanvas::fill_path(const Path& path, FillRule rule) {
     SkPaint paint;
     paint.setAntiAlias(true);
     // Mirror fill_current_path's paint construction: an active gradient shader
-    // wins over the solid fill colour.
+    // wins over the solid fill color.
     if (has_gradient_ && gradient_shader_) {
         paint.setShader(gradient_shader_);
     } else {

@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use super::findings::{ProjectEntry, Severity};
 use super::VersionDiag;
 
-/// Serialise `diag` as the JSON shape `pulp doctor --versions --json`
+/// Serialize `diag` as the JSON shape `pulp doctor --versions --json`
 /// emits on the C++ side.
 ///
 /// Always succeeds: the construction uses only `json!` macros, which
@@ -75,7 +75,7 @@ fn project_entry_to_json(p: &ProjectEntry) -> Value {
     })
 }
 
-/// Normalise a `Path` to forward-slash form, mirroring
+/// Normalize a `Path` to forward-slash form, mirroring
 /// `fs::path::generic_string()`. Empty paths round-trip as empty
 /// strings.
 fn generic(p: &Path) -> String {

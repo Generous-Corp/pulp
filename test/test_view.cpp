@@ -993,7 +993,7 @@ TEST_CASE("View::paint_all applies transform-origin around concat_transform",
     // When the View has a transform-origin offset and a transform-matrix,
     // paint_all should bracket the concat with translate(ox,oy) and
     // translate(-ox,-oy) so rotation/scale anchor at the requested point
-    // — same behaviour as the CSS-transform path.
+    // — same behavior as the CSS-transform path.
     RecordingCanvas rc;
     View v;
     v.set_bounds({0, 0, 100, 50});

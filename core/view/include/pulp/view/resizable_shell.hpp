@@ -4,7 +4,7 @@
 // and saved-size persistence.
 //
 // Plugin shells (VST3 IPlugViewContentScaleSupport, AU fit-in-window,
-// CLAP clap_plugin_gui.adjust_size) all need the same three behaviours:
+// CLAP clap_plugin_gui.adjust_size) all need the same three behaviors:
 //  1. Clamp requested sizes to a min/max.
 //  2. Optionally lock to an aspect ratio so resize handles move in step.
 //  3. Round-trip the last accepted size across session reloads.
@@ -73,7 +73,7 @@ public:
 
 private:
     // Free-function version of negotiate used by the ctor (negotiate()
-    // depends on cfg_ which isn't initialised yet at member-init time).
+    // depends on cfg_ which isn't initialized yet at member-init time).
     static Size negotiate_static_(const ResizableShellConfig& cfg, Size requested);
 
     ResizableShellConfig cfg_;

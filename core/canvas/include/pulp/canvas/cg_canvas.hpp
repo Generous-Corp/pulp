@@ -100,7 +100,7 @@ public:
 
     // Canvas2D ctx.createPattern. CG fill patterns use a CGPatternRef +
     // tiling callback; stroke patterns remain a graceful fallback to the
-    // active stroke colour.
+    // active stroke color.
     void set_fill_pattern(const std::string& image_src,
                           PatternTileMode tile_x,
                           PatternTileMode tile_y) override;
@@ -258,7 +258,7 @@ private:
 
     // Software-rasterised conic gradient. CG has no native conic shader, so
     // set_fill_gradient_conic walks every pixel of a bounding-box bitmap,
-    // computes the angle from the center, interpolates the colour stops, and
+    // computes the angle from the center, interpolates the color stops, and
     // stores the resulting CGImage here. fill_with_active_paint paints it via
     // CGContextDrawImage inside the active clip. The image is released in
     // clear_fill_gradient / dtor / on next gradient set.

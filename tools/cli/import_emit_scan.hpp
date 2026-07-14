@@ -15,7 +15,7 @@
 // The denylist tokens are runtime DATA. `denylist_from_known_frameworks()`
 // sources them from the known-frameworks index's `content_match` markers — the
 // ONE place real markers live — so the SDK code stays vendor-free while the
-// gate still recognises real framework-source tells.
+// gate still recognizes real framework-source tells.
 #pragma once
 
 #include "import_detect.hpp"

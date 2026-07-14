@@ -11,7 +11,7 @@
 
 // Coverage for GpuSpectralStack — the batched, single-submit engine that
 // superseded (and replaced) the retired per-layer GpuHyperFreeze. These cases
-// mirror the multi-layer stacking / weighted-morph / spectral-smear behaviour
+// mirror the multi-layer stacking / weighted-morph / spectral-smear behavior
 // the hyper-freeze test used to guard, now asserted against the surviving
 // engine directly.
 
@@ -82,7 +82,7 @@ TEST_CASE("GpuSpectralStack smear spreads spectral energy", "[gpu_audio][spectra
     REQUIRE(st.render(dry.data(), nullptr, /*smear=*/0.0f, 0.0f));
     REQUIRE(st.render(wet.data(), nullptr, /*smear=*/0.9f, 0.0f));
 
-    // Smear blurs the sharp peak — energy bleeds into neighbouring bins.
+    // Smear blurs the sharp peak — energy bleeds into neighboring bins.
     REQUIRE(mag_at(wet, K1 + 6) > 3.0f * mag_at(dry, K1 + 6));
     REQUIRE(peak_bin(wet) == K1);  // still centerd on the tone
 }

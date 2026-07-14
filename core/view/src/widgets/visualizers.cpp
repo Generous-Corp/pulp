@@ -102,7 +102,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
     // return false and we fall through to the filename-as-text placeholder
     // so authors can still see what URL is set.
     //
-    // Strip a `file://` prefix if present (set_image_path normalises file
+    // Strip a `file://` prefix if present (set_image_path normalizes file
     // paths to that form so the cache layer above can keep URI-keyed
     // entries; the canvas primitive expects a bare filesystem path).
     auto fs_path = path_;
@@ -111,7 +111,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
         fs_path = fs_path.substr(kFileScheme.size());
     }
 
-    // Honour CSS `object-fit` + `object-position`. Probe intrinsic image
+    // Honor CSS `object-fit` + `object-position`. Probe intrinsic image
     // dimensions; if the backend can't measure (no decode primitive on this
     // platform) fall back to the stretch-to-bounds path (= object-fit: fill).
     float img_w = 0.0f, img_h = 0.0f;
@@ -191,7 +191,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
 
         // Apply `object-position` as a percentage offset. CSS spec lets the
         // value be lengths or percentages; the JS
-        // shim normalises to a `<x>% <y>%` two-token string before
+        // shim normalizes to a `<x>% <y>%` two-token string before
         // routing through setObjectPosition. Anything we can't parse
         // collapses to "50% 50%" (the spec default), which keeps the
         // centerd-by-default `compute_fit` result.

@@ -114,10 +114,10 @@ void WidgetBridge::register_widget_style_interaction_api() {
         // breaks. Per CSS spec, pre MUST preserve newlines as hard
         // breaks; the only thing it disables is SOFT wrapping at word
         // boundaries (long lines overflow). Pulp's Label doesn't have
-        // a separate soft-wrap-vs-hard-break knob today, so we honour
+        // a separate soft-wrap-vs-hard-break knob today, so we honor
         // the spec-critical "preserve newlines" by keeping
         // multi_line=true for `pre`. Long lines overflow horizontally
-        // - a degraded but spec-correct behaviour. Soft-wrap
+        // - a degraded but spec-correct behavior. Soft-wrap
         // suppression for `pre` is not wired yet.
         if (auto* l = dynamic_cast<Label*>(widget(id))) {
             const bool wraps = (mode != M::nowrap);

@@ -815,10 +815,10 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Clear built-in label — use separate Yoga-positioned labels for exact placement
             ss << ind << "setLabel('" << id << "', ' ');\n";
-            // Normalise the captured value to 0..1 — Knob::set_value clamps to
+            // Normalize the captured value to 0..1 — Knob::set_value clamps to
             // [0,1], so a raw audio value (e.g. 880 Hz) would clamp to 1 and
             // park the indicator at the far end. The native silver knob maps
-            // 0..1 linearly to its [-135°,+135°] sweep, so the NORMALISED value
+            // 0..1 linearly to its [-135°,+135°] sweep, so the NORMALIZED value
             // must already encode the parameter taper. For a frequency-unit
             // knob (Hz / kHz) use a LOG taper — that's how audio cutoff/freq
             // controls are laid out (and how Figma's library knob is drawn), so
@@ -993,7 +993,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Fader label overlaps track when rendered inside bounds — use separate label
             ss << ind << "setLabel('" << id << "', ' ');\n";  // Clear built-in label
-            // Normalise the captured value (audio_default, in [audio_min,
+            // Normalize the captured value (audio_default, in [audio_min,
             // audio_max]) to 0..1 so the imported fader's thumb sits where the
             // capture shows it. setValue clamps to [0,1]; a raw value like a dB
             // figure would clamp and mis-position the thumb.
@@ -1011,7 +1011,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 fader_norm = std::clamp(std::stof(pit->second), 0.0f, 1.0f);
             ss << ind << "setValue('" << id << "', " << fader_norm << ");\n";
             // Value-driven skin derived from the captured asset. The importer
-            // sampled the PNG's track/fill/thumb colours; emit setFaderSkin so
+            // sampled the PNG's track/fill/thumb colors; emit setFaderSkin so
             // the native fader renders the captured look while the thumb still
             // moves with setValue(). No per-instance hardcoding: every value
             // comes from node.attributes stamped by the sampler.
@@ -1035,7 +1035,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                     ss << ind << "setFaderTrackWidth('" << id << "', "
                        << node.attributes.at("skin_track_width") << ");\n";
                 }
-                // Derived empty-track outline colour. Strokes the track rect
+                // Derived empty-track outline color. Strokes the track rect
                 // so the empty channel above the thumb shows the captured edge
                 // instead of a flat dark slab.
                 std::string tbo = attr("skin_track_border_color");
@@ -1071,7 +1071,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "createMeter('" << id << "', 'vertical', '" << col_id << "');\n";
             ss << ind << "setFlex('" << id << "', 'width', " << widget_w << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
-            // Initial level: normalise the captured value (audio_default, in
+            // Initial level: normalize the captured value (audio_default, in
             // [audio_min, audio_max]) to 0..1 so the imported meter shows the
             // captured fill. setMeterLevel clamps to [0,1]; a raw dB value
             // (e.g. -6) would clamp to 0 and read empty.
@@ -1352,7 +1352,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
 
-        // Honour the IR-declared height when present; absolute-positioned labels
+        // Honor the IR-declared height when present; absolute-positioned labels
         // that are centered in a slot rely on the emitted height matching that
         // slot rather than being recomputed from font size alone.
         float font_h = node.style.font_size.value_or(14.0f);

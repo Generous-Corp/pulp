@@ -18,7 +18,7 @@ conformance gate at
 [`planning/fixtures/figma-plugin/conformance/`](../../../planning/fixtures/figma-plugin/conformance/)
 catches drift between the two extractors on re-capture.
 
-## REST flavour (production headless path)
+## REST flavor (production headless path)
 
 Set up the token once:
 
@@ -59,7 +59,7 @@ is the simplest reference for that step (it bundles a single TTF
 alongside the envelope; the same pattern works for the REST
 extractor's PNG fallout).
 
-## MCP flavour (conformance oracle + dev exploration)
+## MCP flavor (conformance oracle + dev exploration)
 
 Build the bundle:
 
@@ -97,10 +97,10 @@ The MCP tool result is itself capped at roughly 20 KB. For small-to-
 medium designs (kitchen-sink ≈ 60 nodes ≈ 21 KB pretty-printed
 envelope) this works end-to-end. For large designs (ELYSIUM ≈ 213
 nodes ≈ 200 KB pretty envelope), the response truncates and you'd
-only get the envelope head. Either (a) use the REST flavour above,
+only get the envelope head. Either (a) use the REST flavor above,
 which has no response-size constraint, or (b) reduce the response by
 having the headless bundle return `JSON.stringify(envelope)` (no
-indent) — drops ~60 % of bytes. The REST flavour is the right move
+indent) — drops ~60 % of bytes. The REST flavor is the right move
 in practice.
 
 ## Conformance check (plugin vs REST port)
@@ -133,7 +133,7 @@ constraint above). The REST half can pin arbitrarily large designs.
 | File | Purpose |
 |---|---|
 | `src/headless.ts` | Headless entry point — extractScene + serializeExport with no UI loop. Writes Promise to `globalThis.__pulp_headless_result` for the agent-side tail to await. |
-| `src/extract-pure.ts` | Pure helpers (color/CSS, axis mappers, mapNodeType, font catalogue, vector heuristic). Shared between code.ts + headless.ts, and the canonical mirror for the Python REST port. |
+| `src/extract-pure.ts` | Pure helpers (color/CSS, axis mappers, mapNodeType, font catalog, vector heuristic). Shared between code.ts + headless.ts, and the canonical mirror for the Python REST port. |
 | `scripts/build.mjs` | esbuild driver. `buildHeadless()` asserts the 49 KB size budget. |
 | `scripts/run-headless.mjs` | Node CLI that emits the agent-ready JS payload. |
 | `tools/import-design/figma_rest_export.py` | Python REST port (Agent A's lane). Production headless path. |

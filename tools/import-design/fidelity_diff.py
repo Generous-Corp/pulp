@@ -618,7 +618,7 @@ def detect_widget_region(
 
     Builds the kind's signature mask and returns the bounding box of its
     largest connected component. This naturally excludes the title/label text
-    (different color, not connected to the art blob) and neighbouring widgets
+    (different color, not connected to the art blob) and neighboring widgets
     (different signature)."""
     mask, w, h = _signature_mask(img, kind)
     return _largest_component_bounds(mask, w, h)
@@ -640,7 +640,7 @@ def detect_widget_region(
 # detect_full_widget fixes this: it anchors on the signature blob, then grows
 # the box to include every adjacent non-background pixel (housing, thumb, the
 # rest of the disc). The growth is bounded by the widget's DECLARED box from the
-# scene (seed_bounds) so it cannot bleed into a neighbouring widget or a label.
+# scene (seed_bounds) so it cannot bleed into a neighboring widget or a label.
 
 
 def _foreground_mask(
@@ -678,7 +678,7 @@ def detect_full_widget(
          silver thumb — which are connected to the fill — are absorbed.
       3. Clip the result to ``seed_bounds`` (the declared box, in the same
          coordinate space) when provided, so growth can't escape into a
-         neighbouring widget or a label row.
+         neighboring widget or a label row.
 
     Falls back to the signature blob when no foreground anchor is found.
     """
@@ -920,9 +920,9 @@ def text_run_in_band(
     ]
     if snap:
         # Enumerate contiguous glyph-row clusters (1-row gaps tolerated). When
-        # ``prefer_y`` is given, pick the cluster whose centre is NEAREST the
+        # ``prefer_y`` is given, pick the cluster whose center is NEAREST the
         # predicted text Y — so a tall search window that also overlaps the
-        # neighbouring text line locks onto the right line rather than the one
+        # neighboring text line locks onto the right line rather than the one
         # with the most pixels. Otherwise pick the highest-lit cluster.
         clusters: list[tuple[int, int, int]] = []  # (start, end, lit_sum)
         i = 0
@@ -997,9 +997,9 @@ def estimate_indicator_angle(img: "Image.Image", bg: RGB) -> Optional[float]:
     """Estimate a knob's pointer angle (degrees, 0°=up, +clockwise).
 
     The pointer is the lone dark notch drawn ON the silver disc, running from
-    near the centre outward. We:
+    near the center outward. We:
 
-      1. Locate the silver disc and its centre.
+      1. Locate the silver disc and its center.
       2. Crop the disc and upscale it to a fixed working size, so the estimate
          is stable whether the knob is rendered at 30px (downscaled whole frame)
          or 170px (captured asset).
@@ -1017,7 +1017,7 @@ def estimate_indicator_angle(img: "Image.Image", bg: RGB) -> Optional[float]:
     if radius <= 2:
         return None
     # Upscale only very small discs (tiny whole-frame knob) so the notch survives;
-    # use nearest-neighbour to preserve the dark notch pixels (bicubic would blur
+    # use nearest-neighbor to preserve the dark notch pixels (bicubic would blur
     # them above the darkness threshold).
     crop = img.convert("RGBA").crop(disc.as_tuple())
     if max(crop.size) < 80:
@@ -1159,7 +1159,7 @@ def _ratio_status(measured: float, expected: float, tol: float) -> tuple[float, 
 def _render_full_widget(ctx: Context, w: WidgetSpec) -> Optional[Bounds]:
     """Detect a widget's FULL extent in the render, seeding the flood-fill clip
     with the widget's DECLARED box (mapped into the render panel) so growth
-    cannot bleed into a neighbour. Falls back to an unseeded detection when the
+    cannot bleed into a neighbor. Falls back to an unseeded detection when the
     declared box or panel mapping is unavailable."""
     anchor = detect_widget_region(ctx.render, w.kind, ctx.render_bg)
     if anchor is None:
@@ -1172,7 +1172,7 @@ def _render_full_widget(ctx: Context, w: WidgetSpec) -> Optional[Bounds]:
         cy = (anchor.top + anchor.bottom) // 2
         hw = int(w.declared_width * sx)
         hh = int(w.declared_height * sx)
-        # Generous clip box around the anchor centre (declared box, padded).
+        # Generous clip box around the anchor center (declared box, padded).
         seed = Bounds(cx - hw, cy - hh, cx + hw, cy + hh)
     return detect_full_widget(ctx.render, w.kind, ctx.render_bg, seed_bounds=seed)
 
@@ -1889,7 +1889,7 @@ def heuristic_widget_detail(ctx: Context) -> list[HeuristicResult]:
             # track ABOVE the thumb is not in `crop`. Extend the crop UPWARD to
             # the widget's declared-box top (mapped into the render panel) so the
             # housing-above-thumb is in frame for the stroke test. Bounded by the
-            # declared height so it can't run into a neighbour / the title row.
+            # declared height so it can't run into a neighbor / the title row.
             track_crop = crop
             panel = ctx.render_panel()
             if (w.declared_height and panel is not None and ctx.root_width):
@@ -1968,10 +1968,10 @@ def heuristic_widget_detail(ctx: Context) -> list[HeuristicResult]:
                 )
             )
             # Gradient presence: sample stops over the FILL region (not the full
-            # crop, whose dark housing would dilute the colour stops). A meter
+            # crop, whose dark housing would dilute the color stops). A meter
             # ramps when the TOP is warmer than the BOTTOM — quantified by the
             # red-minus-green balance decreasing top→bottom (warm/red at the top,
-            # cool/green at the bottom). A flat single-colour fill does not.
+            # cool/green at the bottom). A flat single-color fill does not.
             fill_crop = (
                 ctx.render.crop(fill.as_tuple()) if fill is not None else crop
             )

@@ -630,7 +630,7 @@ TEST_CASE("onset sensitivity changes the slice count", "[tempo-sampler]") {
 
 // LOOP acts on currently-HELD notes: press a note, let its one-shot finish, then
 // engage LOOP (without re-pressing) and it loops; disengage LOOP while still held
-// and it stops. Natural expected behaviour.
+// and it stops. Natural expected behavior.
 TEST_CASE("LOOP toggle engages/disengages a currently-held note",
           "[tempo-sampler][issue-loop-held]") {
     Fixture f;
@@ -2390,7 +2390,7 @@ TEST_CASE("WaveformDropView accepts registry-decodable drops (incl. m4a on macOS
 // Fix 2: with a non-"off" modulation latched, the teal highlight FULLY covers the
 // modulation key cell (no black inset) when rendered at the keyboard's panel dims
 // — the exact viewport the live window uses. Proven by sampling the lit cell
-// (mostly teal) vs an unlit neighbour (not teal — the highlight doesn't overflow).
+// (mostly teal) vs an unlit neighbor (not teal — the highlight doesn't overflow).
 TEST_CASE("Fix 2: modulation-key highlight fully covers its cell at panel viewport",
           "[tempo-sampler]") {
     view::MusicalTypingKeyboard kb;
@@ -2413,9 +2413,9 @@ TEST_CASE("Fix 2: modulation-key highlight fully covers its cell at panel viewpo
     // mod button rects (panel coords) from build_typing_frame's append_controls:
     // x = {200,242,284,326,368,410}, y=53, w=36, h=32. mod_3 → x=326 (latched).
     const double lit = teal_fraction(rgba, ow, oh, 326, 53, 36, 32);
-    const double neighbour = teal_fraction(rgba, ow, oh, 200, 53, 36, 32);  // mod_0, cleared
+    const double neighbor = teal_fraction(rgba, ow, oh, 200, 53, 36, 32);  // mod_0, cleared
     CHECK(lit > 0.6);        // highlight covers the cell — no black inset
-    CHECK(neighbour < 0.2);  // unlit neighbour stays dark — no overflow / mis-scale
+    CHECK(neighbor < 0.2);  // unlit neighbor stays dark — no overflow / mis-scale
 }
 
 // Fix 3: clicking the baked 🎹/⌨ toggle switches the rendered frame AND drives the
@@ -2449,7 +2449,7 @@ TEST_CASE("Fix 3: piano toggle swaps frame + fires the resize callback",
     if (rgba.empty()) SKIP("Skia raster screenshot backend unavailable");
     REQUIRE(oh == 176);
     write_png(kb, 732, 176, "/tmp/sampler_mtk_piano_frame.png");
-    // White-key centres along the lower keybed (piano keys y≈62..140).
+    // White-key centers along the lower keybed (piano keys y≈62..140).
     int light = 0;
     for (int x : {44, 76, 141, 269, 365}) if (is_light(pixel_at(rgba, ow, oh, x, 120))) ++light;
     CHECK(light >= 3);   // the full piano keybed rendered (not truncated typing)

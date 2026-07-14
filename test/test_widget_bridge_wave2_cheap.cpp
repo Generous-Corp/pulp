@@ -294,7 +294,7 @@ TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_te
     }
     // Wave 2 cheap wiring confirmation: strokeText must produce a real
     // stroke_text command (true stroked-glyph rendering with kStroke_Style),
-    // NOT a fill_text command using strokeStyle as the fill colour
+    // NOT a fill_text command using strokeStyle as the fill color
     // (the pre-#1525 approximation).
     REQUIRE(strokeTextCount == 1);
     REQUIRE(fillTextCount == 0);

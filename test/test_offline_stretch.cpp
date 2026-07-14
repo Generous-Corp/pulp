@@ -796,7 +796,7 @@ TEST_CASE("invalid fft override is ignored (falls back to default geometry)", "[
 // clean (default) = spectral peak-lock; varispeed = pitch+time-linked resample +
 // speed-scaled tape head EQ; phase_vocoder/granular are reserved modes that
 // currently render as clean. These pin the API contract + the varispeed tape
-// behaviour.
+// behavior.
 TEST_CASE("varispeed: identity at ratio 1, exact length, tape EQ direction", "[offline-stretch]") {
     using pulp::signal::StretchCharacter;
     const double sr = 48000.0;

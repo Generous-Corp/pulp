@@ -25,10 +25,10 @@ Theme derive_theme(const SemanticColors& sc) {
     t.colors["text.link"]      = sc.primary;
     // The insertion caret tracks the text it sits in, so it stays legible on
     // any surface the field is placed on. A theme that wants a caret in an
-    // accent colour overrides just this token.
+    // accent color overrides just this token.
     t.colors["text.caret"]     = sc.foreground;
     // Selection is two tokens, not one: the band drawn behind the selected run,
-    // and the colour the text switches to on top of it. Both carry their alpha
+    // and the color the text switches to on top of it. Both carry their alpha
     // as authored -- a theme asking for a translucent band gets a translucent
     // band, and one asking for a solid band gets a solid one.
     Color selection_band = sc.primary;
@@ -362,7 +362,7 @@ static std::vector<ThemePreset> build_presets() {
         ink.dark  = SC(0x161A21, 0xF3F6F9, 0x1E2530, 0x16DAC2, 0x28303C, 0x2A323D, 0x8B6CF5, 0xFF5C4D, 0x39414A, 0x0E1116, 0xFF5C4D, 0x16DAC2, 0x8B6CF5, 0xF6B847, 0x5E78FF, 0xFF7AA8);
 
         // Brand-faithful overrides shared by both appearances; only the
-        // on-ink text colour differs (text that sits on a bright accent fill).
+        // on-ink text color differs (text that sits on a bright accent fill).
         auto brand = [](uint32_t on_ink) {
             Theme t;
             t.colors["meter.green"]    = hex(0x3FCF77); // ink.leaf
@@ -379,7 +379,7 @@ static std::vector<ThemePreset> build_presets() {
             t.colors["nav.selected.text"] = hex(0x16DAC2); // signal teal
             // Faithful-import surfaces: the dark well behind a DesignFrameView
             // frame and the piano/typing key fills. The baked SVG carries the
-            // pixels; these name the same colours so the catalog's reskin-token
+            // pixels; these name the same colors so the catalog's reskin-token
             // contract resolves (and a future native reskin has anchors).
             t.colors["surface.panel"]  = hex(0x12161C); // faithful frame well
             t.colors["key.white"]      = hex(0xF4F6F8); // keyboard white key

@@ -11,7 +11,7 @@ using namespace pulp::canvas;
 namespace {
 // True if any fill_rect command has the given width (f[2]); used to detect the
 // 3px accent left-edge bar and full-width selection fills without asserting on
-// theme-resolved colours.
+// theme-resolved colors.
 bool has_fill_rect_width(const RecordingCanvas& canvas, float w) {
     for (const auto& c : canvas.commands())
         if (c.type == DrawCommand::Type::fill_rect && c.f[2] == w) return true;

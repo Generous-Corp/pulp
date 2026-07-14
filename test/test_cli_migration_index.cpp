@@ -3,7 +3,7 @@
 // Covers:
 //   - TOML frontmatter parse round-trip via the Python codegen (shell out)
 //   - applies_if evaluator: all six comparison operators, &&, ||, parens
-//   - applies_if fail-closed behaviour on malformed expressions
+//   - applies_if fail-closed behavior on malformed expressions
 //   - entries_for_hop: from-exclusive, to-inclusive bound
 //   - applicable_entries: applies_if filtering layered on top
 //   - render_notes_text: deterministic header + ordering

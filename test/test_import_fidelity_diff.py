@@ -287,7 +287,7 @@ class TestFullWidgetDetection(unittest.TestCase):
 
     def test_full_widget_clipped_to_seed_box(self):
         # Two side-by-side fills; seeding to the left declared box must keep the
-        # full-widget detection from absorbing the right neighbour.
+        # full-widget detection from absorbing the right neighbor.
         im = solid_bg(120, 80)
         d = ImageDraw.Draw(im)
         d.rectangle([10, 20, 30, 60], fill=(72, 132, 232, 255))   # left fader

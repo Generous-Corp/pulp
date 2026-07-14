@@ -69,7 +69,7 @@ constexpr uint32_t role_to_atspi_role(View::AccessRole role) {
         // AT-SPI also has LEVEL_BAR, which is arguably the better fit for a
         // read-only gauge, but its enum number sits past the range this table
         // has verified against the AT-SPI2 IDL, so `meter` keeps PROGRESS_BAR
-        // (unchanged behaviour) until it can be checked against atspi headers.
+        // (unchanged behavior) until it can be checked against atspi headers.
         case View::AccessRole::meter:        return kRoleProgressBar;
         case View::AccessRole::image:        return kRoleImage;
         case View::AccessRole::button:       return kRolePushButton;

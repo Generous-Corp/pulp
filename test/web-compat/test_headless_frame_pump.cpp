@@ -87,7 +87,7 @@ TEST_CASE("headless load loop flushes requestAnimationFrame callbacks",
                         "String(globalThis.__issue542State)") == "starting");
 
     // Servicing frame callbacks drains the pending rAF queue, which is the
-    // behaviour load_demo() in examples/threejs-native-demo/main.cpp now
+    // behavior load_demo() in examples/threejs-native-demo/main.cpp now
     // invokes inside its bounded pump loop.
     bool advanced = false;
     for (int i = 0; i < 16 && !advanced; ++i) {
@@ -148,7 +148,7 @@ TEST_CASE("post-ready microtask drain must not render rAF frames",
 
     // Arm a self-rearming rAF chain. Each tick increments a counter and
     // schedules the next frame — representative of the demo's ticking
-    // behaviour.
+    // behavior.
     env.engine.evaluate(
         "globalThis.__driftFrames = 0;"
         "function __driftTick() {"

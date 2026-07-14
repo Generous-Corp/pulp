@@ -12,7 +12,7 @@ using pulp::canvas::DrawCommand;
 
 namespace {
 
-// Paint `v` into a RecordingCanvas and return every colour passed to
+// Paint `v` into a RecordingCanvas and return every color passed to
 // set_fill_color, in order.
 std::vector<Color> fill_colors(View& v) {
     RecordingCanvas rc;
@@ -28,11 +28,11 @@ bool is_white(Color c) { return c.r8() == 255 && c.g8() == 255 && c.b8() == 255;
 }  // namespace
 
 // Reskinnability regression: the button widgets used to hardcode their
-// colours — and HyperlinkButton/ArrowButton passed 0–255 ints to
+// colors — and HyperlinkButton/ArrowButton passed 0–255 ints to
 // Color::rgba() (which takes 0–1 floats and clamps), so they rendered
 // solid white. These guard the bug fix + token wiring.
 
-TEST_CASE("HyperlinkButton renders its link colour, not clamped white",
+TEST_CASE("HyperlinkButton renders its link color, not clamped white",
           "[view][buttons][reskin]") {
     HyperlinkButton b("docs", "https://example.com");
     b.set_bounds({0, 0, 120, 20});
@@ -43,7 +43,7 @@ TEST_CASE("HyperlinkButton renders its link colour, not clamped white",
     REQUIRE(fills.front().b8() > fills.front().r8());  // blue-dominant link
 }
 
-TEST_CASE("HyperlinkButton link colour follows the theme token",
+TEST_CASE("HyperlinkButton link color follows the theme token",
           "[view][buttons][reskin]") {
     HyperlinkButton b("docs", "https://example.com");
     b.set_bounds({0, 0, 120, 20});
@@ -57,7 +57,7 @@ TEST_CASE("HyperlinkButton link colour follows the theme token",
     REQUIRE(fills.front() == color_from_hex(0x16DAC2));
 }
 
-TEST_CASE("ArrowButton glyph is a real colour, not clamped white",
+TEST_CASE("ArrowButton glyph is a real color, not clamped white",
           "[view][buttons][reskin]") {
     ArrowButton b(ArrowDirection::right);
     b.set_bounds({0, 0, 24, 24});

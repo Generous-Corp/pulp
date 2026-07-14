@@ -222,7 +222,7 @@ TEST_CASE("a menu asks the delegate what KIND of row each one is",
     REQUIRE(m->seen[2].separator);
 
     // And each query carries the height the widget WOULD use, so a delegate can
-    // honour a caller's row height instead of forcing its own.
+    // honor a caller's row height instead of forcing its own.
     REQUIRE(m->seen[1].standard_height > 0.0f);
 }
 

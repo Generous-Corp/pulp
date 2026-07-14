@@ -378,7 +378,7 @@ private:
 
 // ── SegmentedControl ───────────────────────────────────────────────────────
 
-/// Horizontal segmented selector — a row of mutually-exclusive labelled
+/// Horizontal segmented selector — a row of mutually-exclusive labeled
 /// segments sharing one inset track, with the selected segment raised as an
 /// "elevated" pill (the Ink & Signal navigation treatment, Figma 227:1763).
 ///
@@ -539,11 +539,11 @@ View* find_wheel_scroll_view_at(View& root, Point root_point);
 class ListBox : public View {
 public:
     /// Selected-row treatment. `standard` (default) fills the row with
-    /// `bg.elevated` and keeps the normal text colour — the historic look, so
+    /// `bg.elevated` and keeps the normal text color — the historic look, so
     /// every existing list renders identically. `accent` is the Ink & Signal
     /// sidebar-nav treatment (Figma 227:1830): a translucent accent tint
     /// (`nav.selected.bg`) plus a teal left-edge bar, with the label drawn in
-    /// the accent colour (`nav.selected.text`). Opt-in via set_selection_style().
+    /// the accent color (`nav.selected.text`). Opt-in via set_selection_style().
     enum class SelectionStyle { standard, accent };
 
     // No AccessRole::list here, deliberately — same reason as TableListBox:

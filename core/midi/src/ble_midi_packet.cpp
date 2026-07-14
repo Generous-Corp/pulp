@@ -98,7 +98,7 @@ bool BleMidiPacketDecoder::decode(const uint8_t* data, std::size_t size) {
         }
 
         // Timestamp byte: top bit set on a non-status, non-realtime byte
-        // ALSO with top bit set — i.e. we recognise it as a timestamp
+        // ALSO with top bit set — i.e. we recognize it as a timestamp
         // when we are at a message boundary. The simple rule used by
         // the Apple reference: any byte at message-start with 0x80 set
         // is a timestamp byte UNLESS it falls inside an active sysex.
@@ -114,7 +114,7 @@ bool BleMidiPacketDecoder::decode(const uint8_t* data, std::size_t size) {
             // a valid timestamp (we're at the start of a new message),
             // treat it as a timestamp.
             //
-            // The deterministic test: if b is a recognised MIDI status
+            // The deterministic test: if b is a recognized MIDI status
             // (>=0xF0 system) or channel status (0x80..0xEF), and
             // running status is unset, parse as status. Else timestamp.
             const bool looks_like_status =

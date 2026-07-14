@@ -137,7 +137,7 @@ def hex2(v): return format(max(0, min(255, int(round(v)))), "02x")
 def paint_to_color(p):
     c = p["color"]; a = p.get("opacity", 1.0)
     r, g, b = c["r"] * 255, c["g"] * 255, c["b"] * 255
-    # Figma SOLID paint colour alpha lives on color.a; opacity multiplies it.
+    # Figma SOLID paint color alpha lives on color.a; opacity multiplies it.
     ca = c.get("a", 1.0) * a
     if ca >= 1.0: return f"#{hex2(r)}{hex2(g)}{hex2(b)}"
     return f"rgba({int(round(r))}, {int(round(g))}, {int(round(b))}, {ca:.3f})"

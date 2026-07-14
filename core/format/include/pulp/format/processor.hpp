@@ -143,15 +143,15 @@ struct PluginDescriptor {
     bool produces_midi = false;  ///< true if plugin sends MIDI output
 
     /// Opt in to MPE (MIDI Polyphonic Expression). When true, format
-    /// adapters that recognise MPE will run the inbound MIDI stream
+    /// adapters that recognize MPE will run the inbound MIDI stream
     /// through an MpeVoiceTracker, build an MpeBuffer for the block, and
     /// make it available via Processor::mpe_input() during process().
     /// The standard process() signature is unchanged; plugins that don't
-    /// set this flag see no MPE-specific behaviour.
+    /// set this flag see no MPE-specific behavior.
     bool supports_mpe = false;
 
     /// Opt in to the native MIDI 2.0 UMP sidecar. When true, format
-    /// adapters that recognise UMP provide a UmpBuffer of full-resolution
+    /// adapters that recognize UMP provide a UmpBuffer of full-resolution
     /// channel-voice packets (16-bit velocity, per-note pitch bend,
     /// per-note CCs) through Processor::ump_input() during process().
     /// Adapters without native UMP transport synthesise the buffer by
@@ -424,7 +424,7 @@ struct ProcessContext {
     int time_sig_denominator = 4;
 
     // New fields default to "host did not provide" sentinels so adapters that
-    // don't populate them keep the pre-extension behaviour exactly.
+    // don't populate them keep the pre-extension behavior exactly.
 
     /// Bar index derived from `position_beats` + the active time
     /// signature. Hosts may already publish a precomputed bar (VST3
@@ -777,7 +777,7 @@ public:
     ///
     /// Adapters fall back to the descriptor's declared bus count + the
     /// mono/stereo policy when a plugin doesn't override this hook,
-    /// which preserves the prior default-acceptance behaviour exactly.
+    /// which preserves the prior default-acceptance behavior exactly.
     virtual bool is_bus_layout_supported(const BusesLayout& layout) const {
         const auto desc = descriptor();
         if (!desc.supported_bus_layouts.empty()) {

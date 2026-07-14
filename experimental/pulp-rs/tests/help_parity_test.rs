@@ -24,7 +24,7 @@ fn fixture_dir() -> PathBuf {
         .join("help")
 }
 
-/// Normalise Rust banner so it can be diffed against the captured
+/// Normalize Rust banner so it can be diffed against the captured
 /// C++ banner. The flip branch should already use `pulp`; keeping
 /// this helper makes legacy fixture diffs easier to review.
 fn normalise_rust_banner(s: &str) -> String {
@@ -59,10 +59,10 @@ fn help_banner_matches_cpp_output() {
         .expect("run");
     assert!(output.status.success(), "pulp help exited non-zero");
     let stdout = String::from_utf8(output.stdout).expect("utf8");
-    let normalised = normalise_rust_banner(&stdout);
+    let normalized = normalise_rust_banner(&stdout);
     assert!(
-        normalised == expected,
-        "help banner diverged from C++ reference\n--- expected (C++) ---\n{expected}\n--- got (Rust, normalised) ---\n{normalised}"
+        normalized == expected,
+        "help banner diverged from C++ reference\n--- expected (C++) ---\n{expected}\n--- got (Rust, normalized) ---\n{normalized}"
     );
 }
 

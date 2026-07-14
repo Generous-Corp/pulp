@@ -88,7 +88,7 @@ under the SIL Open Font License 1.1; see `LICENSE` and
 `onReady` is the seam for chrome that needs the live `HostAdapter` and/or the
 demo's `AudioContext`, neither of which exists at module scope. (For a *file* affordance
 you no longer need it — use `fileUpload` below, which owns the dialog + drop zone so every
-demo gets identical behaviour instead of hand-rolling one.) It runs after the audio graph
+demo gets identical behavior instead of hand-rolling one.) It runs after the audio graph
 is wired, never gates the demo (a
 throwing `onReady` is logged and the demo keeps running), and its returned handle's
 `destroy()` is called on Stop. It is **not** `customUi`: that one *replaces* the
@@ -126,7 +126,7 @@ mountDemo({
 parameters** — so loading a file never resets the knobs. Omit `onFile` and the player
 writes the file's raw bytes and lets the plugin decode them itself.
 
-The zone implements the behaviours that, each one skipped, make a drop zone feel broken —
+The zone implements the behaviors that, each one skipped, make a drop zone feel broken —
 notably a **document-level guard** (the browser's default action for a file dropped
 anywhere on the page is to *navigate to it*, which would destroy the running demo:
 audio context, loaded state, knob positions) and **depth-counted** `dragenter`/`dragleave`
@@ -298,7 +298,7 @@ vendored player until this package is proven; a later step re-points them here.
   - `adapter-seam.test.mjs` — the shell stays host-agnostic and the WAM adapter exposes the full contract
   - `wclap-adapter.test.mjs` — the WebCLAP adapter + its wasm32 ABI stay in lockstep
   - `custom-ui.test.mjs` — `customUi` replaces the parameter grid and *nothing else*
-  - `file-upload.test.mjs` — the drop zone's six behaviours (incl. the document guard and
+  - `file-upload.test.mjs` — the drop zone's six behaviors (incl. the document guard and
     depth-counted `dragenter`/`dragleave`)
 
   They run the real shell against a mock adapter on a small DOM shim (`test/dom-shim.mjs`).

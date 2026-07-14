@@ -69,7 +69,7 @@ OverrideRegistry& registry() {
 
 }  // namespace
 
-// Internal hook consulted by platform backends to honour PermissionsOverride
+// Internal hook consulted by platform backends to honor PermissionsOverride
 // without duplicating the registry across TUs. Returns std::nullopt when
 // no override is active for `p`.
 namespace detail {

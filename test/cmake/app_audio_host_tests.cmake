@@ -19,7 +19,7 @@ pulp_add_test_suite(pulp-test-widget-painter LIBRARIES pulp::view)
 
 # Bugs that shipped: a button face that never rendered, a wheel notch that moved
 # a quantized control by zero, a field that collapsed to no height in a flex
-# tree, and caret/selection colours no skin could reach.
+# tree, and caret/selection colors no skin could reach.
 pulp_add_test_suite(pulp-test-widget-regressions LIBRARIES pulp::view)
 
 # App framework tests (KeyMapping, MenuBar, Toolbar, AppSettings)

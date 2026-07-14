@@ -117,7 +117,7 @@ struct NodeInstance {
     Comp::Params cmp_p{};
 };
 
-// (Re)initialise a node to its defaults for a fresh plan bind. Alloc-free:
+// (Re)initialize a node to its defaults for a fresh plan bind. Alloc-free:
 // DelayLineT::reset() only zeroes an already-allocated ring.
 inline void init_node(NodeInstance& ni, NodeType t, double sr) {
     switch (t) {

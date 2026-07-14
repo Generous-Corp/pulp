@@ -4,7 +4,7 @@
 //!
 //! - **Human output** diff against `expected_human.txt` captured from
 //!   the C++ `pulp projects list` binary. The `Registry:` path varies
-//!   per machine, so both sides normalise the first line to
+//!   per machine, so both sides normalize the first line to
 //!   `Registry: <REGISTRY>` before diff.
 //! - **JSON output** diff against `expected.json`, which pins the
 //!   shape introduced by the Rust port (C++ has no `--json` flag for

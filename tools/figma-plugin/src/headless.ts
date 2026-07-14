@@ -4,7 +4,7 @@
 // (`code.ts`), but without `figma.showUI()` + the UI <-> sandbox message
 // loop. Designed to be inlined as a single esbuild IIFE bundle and run
 // through Figma MCP's `use_figma` tool by an agent or driver script;
-// the returned value IS the envelope plus serialised asset bytes,
+// the returned value IS the envelope plus serialized asset bytes,
 // suitable for assembling into a `.pulp.zip` outside the sandbox.
 //
 // Purpose: the official REST headless path lives at
@@ -74,7 +74,7 @@ interface HeadlessResult {
 async function run(): Promise<HeadlessResult> {
   // Resolve the selection. Prefer an explicit TARGET_NODE_ID (preferred for
   // agent-driven extraction — deterministic), then fall back to whatever
-  // the user has selected in Figma (matches the UI plugin's behaviour).
+  // the user has selected in Figma (matches the UI plugin's behavior).
   let roots: readonly SceneNode[];
   let resolvedId: string;
 

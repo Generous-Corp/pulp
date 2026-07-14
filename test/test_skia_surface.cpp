@@ -621,7 +621,7 @@ TEST_CASE("SkiaCanvas fill-rule punches an even-odd hole in compound paths",
 // no-op (a filled polygon never appeared).
 #ifdef PULP_HAS_SKIA
 namespace {
-// Render `draw` into a WxH capture, serialize, and sample one pixel colour.
+// Render `draw` into a WxH capture, serialize, and sample one pixel color.
 template <typename DrawFn>
 SkColor4f render_and_sample(int w, int h, DrawFn draw, int x, int y) {
     pulp::render::SkpFrameCapture capture(w, h);

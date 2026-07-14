@@ -46,7 +46,7 @@ TEST_CASE("Badge neutral tone uses the elevated surface", "[view][gap][badge]") 
     REQUIRE(has(fills(b), color_from_hex(0x1E2530)));
 }
 
-TEST_CASE("InlineBanner paints a tone-coloured left bar", "[view][gap][banner]") {
+TEST_CASE("InlineBanner paints a tone-colored left bar", "[view][gap][banner]") {
     InlineBanner b;
     b.set_tone(Tone::success);
     b.set_label("Build succeeded.");

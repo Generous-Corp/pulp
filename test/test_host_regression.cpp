@@ -736,7 +736,7 @@ TEST_CASE("MockStatefulPlugin save_state -> restore_state yields bit-identical o
     pulp::host::ParameterEventQueue pe_b;
     b->process(ov_b, iv_b, mi_b, mo_b, pe_b, n);
 
-    // Bit-identical: saved state fully determines post-restore behaviour.
+    // Bit-identical: saved state fully determines post-restore behavior.
     REQUIRE(std::memcmp(out_a.data(), out_b.data(),
                         sizeof(float) * static_cast<size_t>(n)) == 0);
 
@@ -1165,7 +1165,7 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
 // Regression for #545: sanity-check that `only_extra_paths` actually
 // suppresses the default scan roots. Uses an empty scratch directory so
 // the scanner has nothing legitimate to find — under the fix, the plugin
-// count is zero; under the old behaviour it would happily enumerate every
+// count is zero; under the old behavior it would happily enumerate every
 // user/system CLAP on the dev's machine.
 TEST_CASE("PluginScanner::scan honors only_extra_paths",
           "[host][scanner][issue-545]") {
@@ -1192,7 +1192,7 @@ TEST_CASE("PluginScanner::scan honors only_extra_paths",
     std::filesystem::remove_all(scratch);
 
     // Empty scratch dir + only_extra_paths → zero results. If the old
-    // behaviour leaked back in, this assertion fires because the dev's
+    // behavior leaked back in, this assertion fires because the dev's
     // installed plugins would be picked up.
     REQUIRE(plugins.empty());
 }

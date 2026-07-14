@@ -13,7 +13,7 @@
 // The tests also drive detail::finish_impulse_response() directly. It is the tail
 // BOTH entry points share (resample → drop group delay → clamp → reject non-finite
 // → normalize), and its clamp at the TARGET rate only bites on resampler margin
-// the callers cannot dial in exactly — the one behaviour that cannot be pinned
+// the callers cannot dial in exactly — the one behavior that cannot be pinned
 // deterministically from outside.
 
 #include <catch2/catch_test_macros.hpp>

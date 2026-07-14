@@ -509,12 +509,12 @@ fn effective_installed(args: &UpgradeArgs) -> String {
     crate::build_info::cli_version_string()
 }
 
-/// Normalise an incoming version string so a leading `v` doesn't
+/// Normalize an incoming version string so a leading `v` doesn't
 /// fool the comparison. Public for the CLI binary's use only;
 /// internal code already routes through [`SemverCompat`].
 #[must_use]
 #[allow(dead_code)] // surface-reserving export for external callers
-pub fn normalise(v: &str) -> String {
+pub fn normalize(v: &str) -> String {
     SemverCompat::parse(v).raw
 }
 
@@ -1055,21 +1055,21 @@ mod tests {
 
     #[test]
     fn normalise_returns_raw_after_parse() {
-        // `normalise` returns `SemverCompat::parse(v).raw` — i.e. the
+        // `normalize` returns `SemverCompat::parse(v).raw` — i.e. the
         // raw input as-given when parseable, not a stripped form. The
         // function exists so callers can reject inputs that don't even
         // parse, while preserving the original spelling. (The actual
         // v-prefix-strip happens at compare time inside SemverCompat,
         // not at .raw extraction.)
-        assert_eq!(normalise("1.2.3"), "1.2.3");
-        assert_eq!(normalise("v1.2.3"), "v1.2.3");
+        assert_eq!(normalize("1.2.3"), "1.2.3");
+        assert_eq!(normalize("v1.2.3"), "v1.2.3");
     }
 
     #[test]
     fn normalise_returns_raw_for_non_semver() {
         // SemverCompat::parse leaves raw unchanged when it can't
         // parse a triple — surface the documented passthrough.
-        let got = normalise("not-a-version");
+        let got = normalize("not-a-version");
         // Either empty or echoed back; we just assert no panic.
         let _ = got;
     }

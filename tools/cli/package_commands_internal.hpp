@@ -33,7 +33,7 @@
 
 namespace pulp::cli::pkg {
 
-// ── Shared print / colour helpers ──
+// ── Shared print / color helpers ──
 // (definitions in package_commands_util.cpp; g_color stays a
 //  file-local static there — byte-identical to the original)
 

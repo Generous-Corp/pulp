@@ -75,7 +75,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
             cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
             // When no color arg was passed (or it was the empty
-            // string), honour the active fillStyle (color OR gradient) on
+            // string), honor the active fillStyle (color OR gradient) on
             // the canvas widget. This makes a JS shim like
             //   fillRect(x,y,w,h) { call('canvasFillRect', id, x,y,w,h); }
             // behave like the Canvas2D spec — `ctx.fillRect` paints with
@@ -610,7 +610,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     // Mirror of canvasSetLinearGradient targeting the new
     // `Canvas::set_stroke_gradient_linear` virtual. The JS shim's
     // _applyStrokeStyle dispatches here when the bridge fn is present;
-    // older binaries fall back to the first-stop solid colour without
+    // older binaries fall back to the first-stop solid color without
     // crashing. Stops are color/position pairs starting at arg index 5,
     // matching the fill counterpart so the JS shim shares its packing
     // logic.
@@ -680,7 +680,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // Reset stroke shader → solid stroke colour.
+    // Reset stroke shader → solid stroke color.
     register_bridge_function(api, "canvasClearStrokeGradient", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_stroke_gradient;
@@ -735,7 +735,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
 
     // Stroke counterpart — same shape, different command type. Routes
     // through set_stroke_pattern on the live canvas; CG falls back to
-    // solid stroke colour.
+    // solid stroke color.
     register_bridge_function(api, "canvasSetStrokePattern", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_pattern;

@@ -61,7 +61,7 @@ pub fn collect(cwd: &Path) -> VersionSnapshot {
     // Mirror the doctor-side quirk: when the active project is a
     // standalone (no `core/`), we pass `None` as the repo-root hint
     // so the plugin-json probe falls through to the user-global
-    // candidates. Same behaviour as the C++ `cmd_doctor` path.
+    // candidates. Same behavior as the C++ `cmd_doctor` path.
     let repo_root = if is_standalone { None } else { root.as_deref() };
     let plugin_path = plugin_json::locate(repo_root, None).unwrap_or_default();
 
@@ -99,7 +99,7 @@ pub fn emit_json(snap: &VersionSnapshot) -> String {
     serde_json::to_string_pretty(&Value::Object(obj)).unwrap_or_else(|_| "{}".to_owned())
 }
 
-/// Normalise a path to forward slashes to match the doctor writer.
+/// Normalize a path to forward slashes to match the doctor writer.
 fn generic(p: &Path) -> String {
     if p.as_os_str().is_empty() {
         return String::new();
@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn cli_version_defaults_to_baked_version_when_env_unset() {
-        // Serialise every test that mutates process-wide env via
+        // Serialize every test that mutates process-wide env via
         // the shared `ENV_LOCK` in `crate::test_support` so
         // `cmd::upgrade` tests and this one don't collide.
         let _guard = ENV_LOCK

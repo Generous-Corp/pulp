@@ -23,7 +23,7 @@
 // This file deliberately does NOT cover:
 //   - NaN/Inf input policy — that's test_negative_path.cpp's turf.
 //   - SR × block matrix — #48 / test_audio_determinism_matrix.cpp.
-//   - Per-processor golden behaviour — per-example test_*.cpp.
+//   - Per-processor golden behavior — per-example test_*.cpp.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>

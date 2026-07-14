@@ -9,17 +9,17 @@ namespace pulp::view {
 /// Derives native-widget skin styling from a captured design asset (a flat
 /// PNG exported by a design tool such as the Figma plugin).
 ///
-/// Rationale: the figma-plugin export ships a single flat PNG per recognised
+/// Rationale: the figma-plugin export ships a single flat PNG per recognized
 /// widget — a fader baked at its captured value, a meter baked at its captured
 /// level. Skinning the native widget with that image verbatim would FREEZE the
 /// control (the thumb / fill couldn't move). Instead we *sample* the captured
-/// pixels to recover the underlying style (track / fill / thumb colours for a
+/// pixels to recover the underlying style (track / fill / thumb colors for a
 /// fader; the gradient stops for a meter) and hand those to the widget, which
 /// redraws them procedurally — value-driven, so the thumb still moves with
 /// set_value() and the fill still tracks set_level().
 ///
 /// This is a GENERALIZABLE importer rule: it reads the design data (the actual
-/// exported pixels) and derives style. It hardcodes no per-instance colours,
+/// exported pixels) and derives style. It hardcodes no per-instance colors,
 /// pixel offsets, or widget names.
 
 /// Minimal RGBA8 image view consumed by the derivation. Row-major,
@@ -64,7 +64,7 @@ struct FaderSkin {
     // control extent.
     float housing_height_px = 0.0f;
     bool has_housing_height = false;
-    // Normalised thumb position recovered from the capture (0 = bottom, 1 =
+    // Normalized thumb position recovered from the capture (0 = bottom, 1 =
     // top), i.e. where the design actually drew the thumb. An audio fader's
     // value→position map is non-linear (a taper), so a linear (value-min)/(max-
     // min) seed lands the thumb in the wrong place; seeding from the captured
@@ -75,32 +75,32 @@ struct FaderSkin {
 };
 
 /// Derived meter skin: gradient stops ordered low→high (bottom→top), plus an
-/// optional background colour. `gradient` is empty when no gradient could be
+/// optional background color. `gradient` is empty when no gradient could be
 /// recovered (caller should then leave the meter on its default look).
 struct MeterSkin {
     std::vector<canvas::Color> gradient;  // low → high
     canvas::Color background{};
     bool has_background = false;
-    // Horizontal extent of the coloured bar, in ASSET PIXELS (the importer
+    // Horizontal extent of the colored bar, in ASSET PIXELS (the importer
     // divides by the asset scale to get logical px). Recovered from the bar's
     // own vertical region so faint label glyphs below it don't widen it.
     float bar_width_px = 0.0f;
     bool has_bar_width = false;
     // Height of the meter housing (the tallest opaque run — the dark channel +
-    // coloured fill), in ASSET PIXELS. Like the fader, the captured PNG bakes
+    // colored fill), in ASSET PIXELS. Like the fader, the captured PNG bakes
     // the value-stack text below the control, so the declared height spans
     // control+labels; using it verbatim stretches the meter to ~2× its real
     // height (and doubles the absolute fill). This is the real control extent.
     float housing_height_px = 0.0f;
     bool has_housing_height = false;
-    // Fraction of the housing's cross-axis width occupied by the coloured fill
+    // Fraction of the housing's cross-axis width occupied by the colored fill
     // (colored-bar width / full housing width, 0..1). The captured meter recesses
-    // a narrow coloured bar inside a wider dark housing slot; this ratio lets the
+    // a narrow colored bar inside a wider dark housing slot; this ratio lets the
     // skinned meter reproduce that inset instead of painting edge-to-edge. 1.0
     // when the fill spans the full housing.
     float bar_fill_ratio = 1.0f;
     bool has_bar_fill_ratio = false;
-    // Normalised fill level recovered from the capture (0 = empty, 1 = full):
+    // Normalized fill level recovered from the capture (0 = empty, 1 = full):
     // the height of the contiguous saturated fill from the bottom of the bar.
     // Like the fader, a meter's dB→position map is non-linear, so seed the
     // initial level from where the capture actually filled to.

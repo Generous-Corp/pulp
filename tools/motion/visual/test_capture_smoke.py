@@ -132,7 +132,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-    print("capture-smoke OK (gate behaviour verified)")
+    print("capture-smoke OK (gate behavior verified)")
     return 0
 
 

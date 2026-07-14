@@ -12,7 +12,7 @@
 //      sha256 is recorded in the manifest. The downloader fetches the
 //      archive, verifies sha256, unpacks into the cache. The runner only
 //      accepts the bundle when its on-disk hash matches the pin. This is
-//      the default behaviour for the canonical free set (Surge XT, Dexed).
+//      the default behavior for the canonical free set (Surge XT, Dexed).
 //
 //   2. Developer-supplied lane (for auth-gated / non-redistributable
 //      plugins, e.g. Vital, OB-Xd, Diva, Pro-Q4, Serum)

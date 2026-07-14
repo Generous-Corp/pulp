@@ -15,7 +15,7 @@ config, the CLI/MCP command builders, shell build scripts, CI workflows) and
 fails on a ``--parallel`` / ``-j`` with no following count. Commands assembled
 at runtime (e.g. the CLI's lease-derived job count) are bounded by their own
 code + unit tests, not by this scan. Deliberately low-false-positive: comment
-lines are ignored and the bounded forms below are recognised explicitly.
+lines are ignored and the bounded forms below are recognized explicitly.
 
 Usage:
     build_parallelism_guard.py                 # scan the default surfaces

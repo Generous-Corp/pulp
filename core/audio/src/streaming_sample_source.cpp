@@ -318,7 +318,7 @@ void StreamingSampleSource::reader_loop() noexcept {
         std::unique_lock<std::mutex> lock(mutex_);
         // Self-paced poll: a ring sized for tens of ms is refilled long before
         // it drains, so a short sleep keeps the audio thread free of any
-        // wake-up signalling (notify from the audio thread would not be
+        // wake-up signaling (notify from the audio thread would not be
         // RT-safe). Wakes immediately on shutdown.
         cv_.wait_for(lock, pushed > 0 ? 1ms : 5ms,
                      [this] { return !run_.load(std::memory_order_acquire); });

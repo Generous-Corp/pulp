@@ -832,7 +832,7 @@ TEST_CASE("ProcessContext defaults represent stopped 4/4 playback at 120 BPM",
 
     // Item 1.3 extensions — every new field defaults to the documented
     // "host did not provide" sentinel so existing adapters that don't
-    // populate them keep their pre-extension behaviour.
+    // populate them keep their pre-extension behavior.
     REQUIRE(c.bar == 0);
     REQUIRE_FALSE(c.is_looping);
     REQUIRE(c.loop_start_beats == 0.0);

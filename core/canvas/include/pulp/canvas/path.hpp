@@ -12,7 +12,7 @@
 //   Path icon = Path::from_svg_string("M0 0 L10 0 L5 8 Z");   // once
 //   ...
 //   void paint(Canvas& c) {                                    // every frame
-//       c.set_fill_color(colour);
+//       c.set_fill_color(color);
 //       c.fill_path(icon, FillRule::nonzero);
 //   }
 //

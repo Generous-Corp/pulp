@@ -1,4 +1,4 @@
-// Shell-out CLI behaviour tests for `pulp`.
+// Shell-out CLI behavior tests for `pulp`.
 //
 // Per CLAUDE.md: "CLI behavior changes — shell out to the built binary,
 // assert exit code + stderr content." Before this file, the CLI had
@@ -518,7 +518,7 @@ TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
           "[cli][shellout][issue-562]") {
     // #562: `pulp config foo` previously
     // fell through to usage() which returned 0, so scripts/CI could
-    // not detect a typo'd subcommand. The new behaviour returns
+    // not detect a typo'd subcommand. The new behavior returns
     // exit code 2 with an "Unknown config subcommand" diagnostic on
     // stderr. Known subcommands (get/set/list/help) keep exit 0.
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -1847,7 +1847,7 @@ TEST_CASE("pulp build validates js engine option before compatibility checks",
 // ~/.pulp. The test creates the config file directly rather than
 // shelling out to `pulp config set` so we can reason about the
 // sequence (`pulp config set` itself clears the snooze file — we want
-// to isolate the dispatch-path behaviour).
+// to isolate the dispatch-path behavior).
 TEST_CASE("pulp with update.mode=off never prints a banner",
           "[cli][shellout][update-mode][issue-550]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

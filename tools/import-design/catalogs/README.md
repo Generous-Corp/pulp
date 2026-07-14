@@ -72,7 +72,7 @@ manual on purpose to avoid baking a flaky scraper into CI.
 
 - **Quarterly** baseline refresh.
 - **On demand** when an `import-design` consumer (Spectr, etc.) reports
-  a prop the bridge doesn't recognise — add the row, file the gap, run
+  a prop the bridge doesn't recognize — add the row, file the gap, run
   the harness against it.
 - **Before each Pulp minor release** as part of the bridge-hardening
   checklist.

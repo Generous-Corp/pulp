@@ -247,7 +247,7 @@ struct BidiScriptSegment {
 
 #ifdef PULP_HAS_SKIA
 // Walk both ICU iterators in lockstep, emitting one segment per
-// (bidi, script) tuple. Modelled on Skia's own `RunIteratorQueue`
+// (bidi, script) tuple. Modeled on Skia's own `RunIteratorQueue`
 // (SkShaper_harfbuzz.cpp): at each step, find the iterator with the
 // earlier `endOfCurrentRun()`, read both currently-active states,
 // advance any iterator whose run ends at the chosen endpoint. This

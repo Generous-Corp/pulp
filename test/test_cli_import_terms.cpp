@@ -222,7 +222,7 @@ TEST_CASE("import terms: no terms declared → gate passes through",
     REQUIRE(r == terms::GateResult::NoTermsToAccept);
 }
 
-// ── End-to-end gate behaviour through the built CLI ──
+// ── End-to-end gate behavior through the built CLI ──
 
 #if defined(PULP_CLI_BINARY) && !defined(_WIN32)
 namespace {

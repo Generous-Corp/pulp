@@ -61,7 +61,7 @@ from pathlib import Path
 # here so the merge step honours the same exclude set as the per-OS
 # cobertura generation. The Windows leg was leaking test/ files into
 # the cobertura because its IGNORE_REGEX matched on `/test/` only and
-# the Windows path separator is `\` — after this script normalises
+# the Windows path separator is `\` — after this script normalizes
 # backslashes to forward slashes (above), the same regex applies
 # cleanly. Regression guard for #660.
 _IGNORE_RE = re.compile(
@@ -111,7 +111,7 @@ def parse_xml(path: Path) -> dict[str, dict[int, int]]:
         filename = cls.get("filename")
         if not filename:
             continue
-        # Normalise Windows backslash separators to forward slashes so
+        # Normalize Windows backslash separators to forward slashes so
         # the same logical source file from different OSes hashes to a
         # single key in the merge. Without this, the Windows artifact
         # produces e.g. "core\format\src\clap_adapter.cpp" and the
@@ -129,7 +129,7 @@ def parse_xml(path: Path) -> dict[str, dict[int, int]]:
         # COVERAGE_IGNORE_REGEX in run_coverage.sh, but the Windows
         # leg historically leaked `test\*` entries because its regex
         # matched on `/test/` only — backslash paths slipped past. Now
-        # filtered uniformly here after slash normalisation.
+        # filtered uniformly here after slash normalization.
         if _is_ignored(filename):
             continue
         per_line = out.setdefault(filename, {})
@@ -236,7 +236,7 @@ def render(merged: dict[str, dict[int, int]]) -> ET.ElementTree:
 #: The CI workflow branches on this exact code to render the diff-cover
 #: empty-report fallback. Real failures (parse errors, IO errors,
 #: programming bugs) deliberately use exit code 1 (uncaught exceptions
-#: + the default Python behaviour) so they fail the required gate.
+#: + the default Python behavior) so they fail the required gate.
 #: Regression guard for #660 — see the docstring of the
 #: `CorruptCoberturaError` class.
 EXIT_ALL_INPUTS_MISSING = 2

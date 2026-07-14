@@ -26,7 +26,7 @@ TEST_CASE("macOS key_code_from_ns maps ; and ' (Musical Typing top keys)", "[vie
     using pulp::view::mac_geometry::key_code_from_ns;
     CHECK(key_code_from_ns(41) == KeyCode::semicolon);   // kVK_ANSI_Semicolon
     CHECK(key_code_from_ns(39) == KeyCode::apostrophe);  // kVK_ANSI_Quote
-    CHECK(key_code_from_ns(35) == KeyCode::p);           // unchanged neighbour key
+    CHECK(key_code_from_ns(35) == KeyCode::p);           // unchanged neighbor key
 }
 
 TEST_CASE("macOS WindowHost reports content size and fires resize callbacks",

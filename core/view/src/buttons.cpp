@@ -71,7 +71,7 @@ void TextButton::paint(canvas::Canvas& canvas) {
 
 void TextButton::paint_label(canvas::Canvas& canvas) {
     const float w = bounds().width, h = bounds().height;
-    // Label colour per variant: primary uses on-accent (ink) text; ghost uses
+    // Label color per variant: primary uses on-accent (ink) text; ghost uses
     // accent text; secondary uses the standard primary text.
     auto text_color =
         !enabled_ ? resolve_color("text.disabled", canvas::Color::rgba8(120, 120, 130))

@@ -97,7 +97,7 @@ struct LinearPaintState : ControlPaintState {
     double value_max = 1.0;
 };
 
-/// A push / toggle button. `background` is the colour the widget itself would
+/// A push / toggle button. `background` is the color the widget itself would
 /// have used, offered so a skin can tint rather than replace it.
 struct ButtonPaintState : ControlPaintState {
     bool toggled = false;

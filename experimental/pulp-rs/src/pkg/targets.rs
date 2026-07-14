@@ -102,7 +102,7 @@ pub fn defaults() -> Vec<PlatformTarget> {
 /// - Missing / empty `pulp.toml` → [`defaults`].
 /// - `[project] targets = [...]` present → parse each entry.
 /// - `[project] platforms = [...]` fallback → expand to default arch.
-/// - No recognised key → [`defaults`].
+/// - No recognized key → [`defaults`].
 #[must_use]
 pub fn read(project_root: &Path) -> Vec<PlatformTarget> {
     let toml_path = project_root.join("pulp.toml");

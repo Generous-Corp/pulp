@@ -176,7 +176,7 @@ std::vector<Entry> entries() {
         bc->set_bounds({16, 14, 268, 24}); c.add_child(std::move(bc));
     });
     add("Sidebar", 220, 200, [](Cell& c) {
-        // The Figma "sidebar" is a labelled vertical nav list with a teal-tinted
+        // The Figma "sidebar" is a labeled vertical nav list with a teal-tinted
         // selected row — rendered here with ListBox's opt-in accent selection +
         // leading icons (Pulp's Sidebar class is a slide container, not a list).
         auto nav = std::make_unique<ListBox>();

@@ -59,7 +59,7 @@ CanvasRenderingContext2D.prototype.measureText = function(text) {
 // without re-decoding.
 CanvasRenderingContext2D.prototype.drawImage = function(img, a, b, c, d, e, f, g, h) {
     if (typeof canvasDrawImage !== "function") return;
-    // Flush imageSmoothing state so Skia / CG honour the current
+    // Flush imageSmoothing state so Skia / CG honor the current
     // ctx.imageSmoothingEnabled + Quality on this draw.
     this._syncImageSmoothingState();
     // Flush filter state so the chosen image filter (blur, grayscale, …)

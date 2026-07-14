@@ -46,7 +46,7 @@ NOT_IMPL_MARKERS = (
     "no binding",
     "no bridge",
     "not modeled",
-    "not modelled",
+    "not modeled",
     "no constructor surface",
     "no actual `new event(",
 )

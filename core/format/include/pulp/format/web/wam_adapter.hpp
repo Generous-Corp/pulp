@@ -298,7 +298,7 @@ public:
     // channel. Web Audio is already planar and the Pulp Processor is planar, so
     // the processor renders straight from `inputs` into `outputs` with no
     // interleave round-trip (the four transposes the interleaved single-pointer
-    // ABI used to do all cancelled, so removing them is behaviour-preserving).
+    // ABI used to do all cancelled, so removing them is behavior-preserving).
     void process(const float* const* inputs, float* const* outputs,
                  int num_channels, int num_frames);
 

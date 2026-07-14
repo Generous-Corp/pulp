@@ -33,7 +33,7 @@
 //!    hermetic.
 //! 2. **Git-dirty probe uses `git -C <path> status --porcelain -- CMakeLists.txt`**
 //!    via a subprocess, identical to C++ semantics. Missing `git` is
-//!    treated as "not a git repo" — same as the C++ behaviour.
+//!    treated as "not a git repo" — same as the C++ behavior.
 //! 3. **Migration-note rendering is stubbed.** The C++ side links
 //!    `migration_runtime.cpp` to print per-hop migration notes after a
 //!    successful bump. Rust prints a one-line pointer instead so users
@@ -963,8 +963,8 @@ fn run_verify_build(project_path: &Path) -> Result<()> {
 /// 2. Try standalone-mode pin first: `git show origin/main:pulp.toml`
 ///    and look for `sdk_version = "X.Y.Z"`.
 /// 3. Fall back to source-tree pin: `git show origin/main:CMakeLists.txt`
-///    and walk the recognised CMake pin-site shapes.
-/// 4. Normalise to a clean `X.Y.Z` triple; anything else → `None`.
+///    and walk the recognized CMake pin-site shapes.
+/// 4. Normalize to a clean `X.Y.Z` triple; anything else → `None`.
 #[must_use]
 pub(crate) fn probe_origin_main_pin(project_path: &Path) -> Option<String> {
     if !project_path.join(".git").exists() {
@@ -1018,7 +1018,7 @@ fn git_show(project_path: &Path, spec: &str) -> Option<String> {
 
 /// Pull a quoted string value out of a TOML-ish source without
 /// requiring a full parse. Matches the C++ `find_toml_string_value`
-/// behaviour: line-scan for `<key> = "VALUE"` at top level, return
+/// behavior: line-scan for `<key> = "VALUE"` at top level, return
 /// `VALUE` verbatim (with the `v` prefix stripped). `None` on any
 /// missing / malformed case so the caller treats it as "no pin".
 #[must_use]

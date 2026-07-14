@@ -15,7 +15,7 @@ For each fixture:
 - `projects.json` (where present) is the input planted at
   `$PULP_HOME/projects.json` before running the CLI.
 - `expected_human.txt` was captured from the C++ `pulp projects list`
-  binary and then normalised: the `Registry:` line's absolute path is
+  binary and then normalized: the `Registry:` line's absolute path is
   replaced with the placeholder `<REGISTRY>`. Test drivers perform the
   same substitution on the Rust CLI's output before diffing.
 - `expected.json` is the shape the Rust `pulp-rs projects list --json`

@@ -58,7 +58,7 @@ def edges(gray):
     return ((gx + gy) > 32)  # binary edge map, threshold robust to soft noise
 
 def _dilate(mask, r=2):
-    """Grow a binary mask by r pixels (4-neighbour), so structural agreement
+    """Grow a binary mask by r pixels (4-neighbor), so structural agreement
     tolerates sub-pixel edge shifts from GPU AA / legit rounding — without
     which a 1px-shifted thin edge wrongly reads as a structural mismatch."""
     np = _np(); out = mask.copy()

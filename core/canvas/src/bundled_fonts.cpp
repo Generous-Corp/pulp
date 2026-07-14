@@ -94,7 +94,7 @@ const std::array<BundledBlob, 2>& bundled_blobs() {
 // we trust Skia's name table parse over our naming convention). Lookup is
 // O(1) average.
 //
-// The `mgr` argument is forwarded only on the initialising call; subsequent
+// The `mgr` argument is forwarded only on the initializing call; subsequent
 // callers reuse the cache regardless of which font manager they hand in.
 // We deliberately do NOT call `std::call_once` here: if the very first
 // caller passes a null manager (e.g. a unit test that is verifying graceful
@@ -258,7 +258,7 @@ void bump_generation() noexcept {
 // DirectWrite, Android, fontconfig, and custom-empty (Emscripten) managers.
 //
 // Constructed through a function-local static so concurrent first callers all
-// block on one initialisation. A hand-rolled `tried` flag is NOT safe here: a
+// block on one initialization. A hand-rolled `tried` flag is NOT safe here: a
 // second thread can observe `tried == true` while the first is still building
 // the manager and walk away with a null one, which silently drops the whole
 // bundled + platform cascade and measures every string at zero advance.

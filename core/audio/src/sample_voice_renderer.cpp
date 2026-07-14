@@ -210,7 +210,7 @@ float fade_out_gain(std::uint32_t position,
 // Block renderer, specialized per interpolation mode. Resolves per-channel
 // source pointers and loop bounds once, then runs the inlined interp_read<Mode>
 // kernel across the block instead of dispatching an out-of-line, switch-per-
-// sample read every frame. Behaviour (position walk, one-shot termination,
+// sample read every frame. Behavior (position walk, one-shot termination,
 // envelope/fade gain, finished/silent accounting) is identical to the previous
 // scalar loops; only the inner read is faster.
 template <LoopInterpolationMode Mode>

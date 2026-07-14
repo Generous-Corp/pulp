@@ -61,7 +61,7 @@ CGContextRef cg_make_bitmap(int w, int h, std::vector<uint8_t>& pixels) {
 }
 } // namespace
 
-// `createConicGradient` on CG must produce angle-varying colour instead of a
+// `createConicGradient` on CG must produce angle-varying color instead of a
 // first-stop solid fallback. We fill a 64x64 square
 // with a 4-stop conic spanning red / green / blue / red and sample the four
 // cardinal directions from the center. Each cardinal must hit a different
@@ -108,7 +108,7 @@ TEST_CASE("CoreGraphicsCanvas createConicGradient sweeps angle through stops",
     REQUIRE(west[3]  == 255);
 }
 
-// `createRadialGradient` two-circle form must honour the inner circle. Dropping
+// `createRadialGradient` two-circle form must honor the inner circle. Dropping
 // (x0,y0,r0) and forwarding only the outer circle makes a gradient with an
 // *offset* inner circle paint as if inner_center==outer_center — visually the
 // same as a single-circle radial.
@@ -160,7 +160,7 @@ TEST_CASE("CoreGraphicsCanvas radial two-circle form honours inner circle",
 }
 
 // `createPattern` on CG must install a real CGPattern instead of falling back
-// to the active solid colour. A 1x2 image (red top half, blue bottom half)
+// to the active solid color. A 1x2 image (red top half, blue bottom half)
 // tiled with `repeat` should produce alternating red/blue horizontal bands when
 // filled across a tall rectangle.
 TEST_CASE("CoreGraphicsCanvas set_fill_pattern installs a real CGPattern",
@@ -221,7 +221,7 @@ TEST_CASE("CoreGraphicsCanvas set_fill_pattern installs a real CGPattern",
 
     // Step 2 — fill a 32x32 destination canvas with the pattern (`repeat`
     // both axes) and verify the image content shows BOTH red and blue bands.
-    // A solid-fill fallback would show exactly one colour.
+    // A solid-fill fallback would show exactly one color.
     std::vector<uint8_t> pixels;
     CGContextRef ctx = cg_make_bitmap(W, H, pixels);
     REQUIRE(ctx != nullptr);
@@ -237,9 +237,9 @@ TEST_CASE("CoreGraphicsCanvas set_fill_pattern installs a real CGPattern",
     CGContextRelease(ctx);
     std::remove(tile_path_str.c_str());
 
-    // Verify the pattern actually rendered both colours from the tile —
+    // Verify the pattern actually rendered both colors from the tile —
     // not the green sentinel (which would mean the pattern fell back to
-    // solid fill_color_) and not a single colour from one half (which
+    // solid fill_color_) and not a single color from one half (which
     // would mean the tile didn't repeat correctly across the canvas).
     CgPixelGrid grid{pixels, W, H};
     int red_count = 0, blue_count = 0, green_count = 0;
@@ -255,13 +255,13 @@ TEST_CASE("CoreGraphicsCanvas set_fill_pattern installs a real CGPattern",
     // Pattern fired: both red and blue must be present from the tile.
     REQUIRE(red_count > 16);
     REQUIRE(blue_count > 16);
-    // Sentinel green must NOT appear; that colour survives only if the pattern
+    // Sentinel green must NOT appear; that color survives only if the pattern
     // silently degrades to set_fill_color.
     REQUIRE(green_count == 0);
 }
 
 // `set_fill_pattern("")` clears any active pattern back to the
-// solid fill colour. Mirrors clear_fill_gradient's reset semantics so a JS
+// solid fill color. Mirrors clear_fill_gradient's reset semantics so a JS
 // fillStyle string assignment after a pattern fillStyle reverts cleanly.
 TEST_CASE("CoreGraphicsCanvas set_fill_pattern clears on empty src",
           "[canvas][cg][issue-1524]") {
@@ -287,12 +287,12 @@ TEST_CASE("CoreGraphicsCanvas set_fill_pattern clears on empty src",
     REQUIRE(pixels[2] == 0);    // B
 }
 
-// CoreGraphicsCanvas::fill_text must honour an active fill gradient. Glyph fills
+// CoreGraphicsCanvas::fill_text must honor an active fill gradient. Glyph fills
 // use kCGTextClip and then paint the active gradient inside the clip; routing a
 // solid `fill_color_` into kCGTextFill would silently drop the gradient set via
 // set_fill_gradient_linear. Test renders glyphs with a horizontal red→blue
-// linear gradient and probes left vs right pixels to confirm the colour ramp
-// lands on glyph pixels (not solid stroke colour).
+// linear gradient and probes left vs right pixels to confirm the color ramp
+// lands on glyph pixels (not solid stroke color).
 TEST_CASE("CoreGraphicsCanvas::fill_text honours active fill gradient",
           "[canvas][cg][issue-1666]") {
     constexpr int W = 128;
@@ -350,7 +350,7 @@ TEST_CASE("CoreGraphicsCanvas::fill_text honours active fill gradient",
     REQUIRE(any_glyph_with_dominant_channel(W - 16, W, /*b*/2, /*r*/0));
 }
 
-// CoreGraphicsCanvas stroke ops must honour an active stroke gradient set via
+// CoreGraphicsCanvas stroke ops must honor an active stroke gradient set via
 // set_stroke_gradient_linear. Stroke methods short-circuit to
 // stroke_with_active_paint(), which clips to the stroked outline and draws the
 // gradient; routing solid `stroke_color_` through apply_stroke_color() would

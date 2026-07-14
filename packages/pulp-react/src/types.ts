@@ -482,7 +482,7 @@ export interface ComboProps extends BaseProps {
 // ── Ink & Signal design-system widgets ──────────────────────────────
 
 /// Compact status pill (counts, format/sample-rate chips). Text comes from
-/// the `text` prop or string children; `tone` selects the semantic colour.
+/// the `text` prop or string children; `tone` selects the semantic color.
 export interface BadgeProps extends BaseProps {
     text?: string;
     tone?: 'neutral' | 'info' | 'success' | 'warning' | 'danger';

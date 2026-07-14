@@ -394,7 +394,7 @@ class VerifierEndToEndTest(unittest.TestCase):
         """pulp #1524 — createConicGradient promoted DIVERGE → PASS.
         Skia: SkGradientShader::MakeSweep. CG: software-rasterised
         CGImage of the active clip's bounding box (per-pixel atan2
-        sweep + colour-stop interpolation), painted via
+        sweep + color-stop interpolation), painted via
         CGContextDrawImage."""
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}

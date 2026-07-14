@@ -22,7 +22,7 @@ CLI flags:
                         (default 8). Use 0 for unlimited.
 
 Outputs (under --output):
-    analysis.json        metrics, keyframes, diff catalogue, version stamp
+    analysis.json        metrics, keyframes, diff catalog, version stamp
     summary.md           agent-facing summary
     diff/*.png           pairwise diff heatmaps
     keyframes.png        horizontal sprite of selected keyframes
@@ -341,7 +341,7 @@ def compute_confidence(
 
     for i, p in enumerate(pairs):
         score = base_band(p.ssim)
-        # Neighbour agreement (compare to the average of immediate neighbours).
+        # Neighbor agreement (compare to the average of immediate neighbours).
         neighbours = []
         if i > 0:
             neighbours.append(pairs[i - 1].ssim)
@@ -355,7 +355,7 @@ def compute_confidence(
             elif disagreement > 0.3:
                 score -= 0.15
         if expected_diff is not None and expected_diff > 0:
-            # Normalise the per-pair mean diff into a pixel-space
+            # Normalize the per-pair mean diff into a pixel-space
             # proxy and compare against the affine estimate.
             proxy = p.pixel_diff_mean * 255.0
             ratio = (proxy + 1.0) / (expected_diff + 1.0)
@@ -488,7 +488,7 @@ def detect_motion_window(
         (p for p in reversed(pairs) if p.pixel_diff_mean > threshold), None,
     )
     if first_active is None or last_active is None:
-        # Sequence is entirely idle — nothing to analyse meaningfully.
+        # Sequence is entirely idle — nothing to analyze meaningfully.
         return 0, 0
     lead = first_active.from_index
     trail = (n_frames - 1) - last_active.to_index
@@ -566,7 +566,7 @@ def write_summary_md(report: Report, output_dir: Path) -> None:
         md.append(f"- `frame_{k.index:04d}` — {k.role}")
     md.append("")
 
-    md.append("## Diff catalogue\n")
+    md.append("## Diff catalog\n")
     md.append("Each row cites: pair, artifact (`diff/<file>`), and "
               "confidence. Confidence < 0.7 → escalate.\n")
     for p in report.pairs:

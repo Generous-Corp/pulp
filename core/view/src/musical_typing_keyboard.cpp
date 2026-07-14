@@ -130,7 +130,7 @@ void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
         // ("C-2", "106", "−20") lines up on the right and never jumps left over its
         // label. The value_label renderer auto-shrinks any reading wider than its
         // rect, so a 3-char value fits the gap instead of overflowing onto the
-        // neighbouring button/label. (Boxes widened from the 1–2 char baked slots.)
+        // neighboring button/label. (Boxes widened from the 1–2 char baked slots.)
         add("octave",   72, 211, 34, 21);   // "OCTAVE C2/C-2"  right edge 106 (z pad @114)
         add("velocity", 284, 211, 34, 21);  // "VELOCITY 98/106" right edge 318 (c pad @321)
         add("pitchbend", 76, 66, 30, 18);   // "PITCH BEND 0/−20" right edge 106 (1-pad @108)
@@ -601,7 +601,7 @@ void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
     float x0, x1; strip_bounds(x0, x1);
     auto vx = [&](float px) { return t.ox + px * t.scale; };
     auto vy = [&](float py) { return t.oy + py * t.scale; };
-    // Faithful strip colours — must match the baked SVG exactly (not theme
+    // Faithful strip colors — must match the baked SVG exactly (not theme
     // tokens), so they're deliberate literals. token-lint:allow
     const auto bg   = canvas::Color::rgba8(0xEB, 0xEE, 0xF1);          // strip key color  token-lint:allow
     const auto dark = canvas::Color::rgba(0, 0, 0, 0.16f);            // white-key divider  token-lint:allow

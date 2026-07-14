@@ -180,7 +180,7 @@ TEST_CASE("GpuConvolver worker fallback does not advance realtime fallback state
 // BUG 1 (stale history): the RT fallback must be a CORRECT CONTINUATION when it
 // takes over after a run of GPU hits — its overlap-add tail must carry the IR
 // energy of the preceding (primed) blocks. A fallback fed only on the miss block
-// (the old behaviour) starts cold and is missing that tail.
+// (the old behavior) starts cold and is missing that tail.
 TEST_CASE("GpuConvolver fallback is a correct continuation after hits",
           "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
@@ -221,7 +221,7 @@ TEST_CASE("GpuConvolver fallback is a correct continuation after hits",
     }
 
     // Prove the tail energy is actually present: a COLD fallback fed only this one
-    // block (the stale-history behaviour) would differ materially.
+    // block (the stale-history behavior) would differ materially.
     pulp::signal::PartitionedConvolver cold;
     cold.load_ir(ir.data(), ir.size(), BS);
     std::vector<float> cold_out(BS, 0.0f);
@@ -409,7 +409,7 @@ TEST_CASE("GpuConvolver worker fallback recovers from a NaN input block",
     REQUIRE(produced_audio);
 }
 
-// Audible-behaviour parity through the real transport: with no worker ever
+// Audible-behavior parity through the real transport: with no worker ever
 // pumping, every block past the primed latency is a miss, so the transport's
 // output IS the fallback stream. It must equal the direct convolution delayed by
 // latency_samples() — the seamless, correct fallback the design promises.

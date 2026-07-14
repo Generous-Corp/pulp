@@ -31,7 +31,7 @@ from tools.motion.visual import analyze_sequence  # noqa: E402
 
 def _synthesize_moving(out_dir: Path, n_motion: int = 6,
                        idle_lead: int = 0, idle_trail: int = 0) -> int:
-    """Render a sequence where a coloured rectangle slides right. The
+    """Render a sequence where a colored rectangle slides right. The
     leading + trailing idle frames are pixel-identical copies of the
     first / last motion frame to exercise the auto-trim curve.
 

@@ -43,7 +43,7 @@ struct IntRect;  // below
 /// not academic: it is the difference between a 7px row's content landing on
 /// the pixel grid and landing between two pixels, where it renders as a blurry
 /// double-width line. Code that computes an integer layout with float maths and
-/// rounds at the end does NOT reproduce integer-rect behaviour, because the
+/// rounds at the end does NOT reproduce integer-rect behavior, because the
 /// truncation has to happen at each step, not once at the end.
 ///
 /// So the two types deliberately do NOT share an implementation. Pick the one
@@ -194,7 +194,7 @@ struct Rect {
     // ── Conversion ───────────────────────────────────────────────────────
     /// Round each edge to the nearest integer. Note this rounds the EDGES, so
     /// the resulting width can differ from `round(width)` by one — which is the
-    /// correct behaviour for a rect being snapped to the pixel grid.
+    /// correct behavior for a rect being snapped to the pixel grid.
     IntRect to_nearest_int() const;
 
     /// Smallest integer rect that fully CONTAINS this one.

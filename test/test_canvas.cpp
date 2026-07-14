@@ -378,7 +378,7 @@ struct NoGradientCanvas : RecordingCanvas {
 TEST_CASE("Canvas gradient fallbacks use first stop when present", "[canvas]") {
     // The contract for a backend that cannot draw gradients: degrade to a solid
     // fill of the first stop rather than draw nothing. A zero-stop gradient has
-    // no colour to fall back TO, so it emits nothing at all.
+    // no color to fall back TO, so it emits nothing at all.
     NoGradientCanvas canvas;
     const Color colors[] = {
         Color::rgba8(12, 34, 56, 78),
@@ -1409,7 +1409,7 @@ TEST_CASE("LottieAnimation composites skottie frames onto a SkiaCanvas",
 namespace {
 
 // Minimal Canvas subclass that records every fill_rect / set_fill_color call
-// so we can assert the documented Canvas::clear_rect default behaviour
+// so we can assert the documented Canvas::clear_rect default behavior
 // (delegates to set_fill_color(transparent) + fill_rect) without coupling to
 // any real GPU/CPU backend.
 class StubCanvas : public Canvas {

@@ -296,7 +296,7 @@ TEST_CASE("CoreGraphicsCanvas Canvas2D path stroke draws (issue 1322)",
 
 // set_fill_gradient_linear must paint a real gradient on CG; the base Canvas
 // fallback collapses to "set fill color = colors[0]" which produces a single
-// colour fill (Spectr's spectrum bg is gradient-driven). Verify that two
+// color fill (Spectr's spectrum bg is gradient-driven). Verify that two
 // different colors actually appear in the output bitmap.
 TEST_CASE("CoreGraphicsCanvas linear gradient paints multiple colors (issue 1322)",
           "[canvas][cg][issue-1322]") {
@@ -393,7 +393,7 @@ TEST_CASE("CoreGraphicsCanvas::fill_rect honors active linear gradient",
 
 // Same test for fill_path. Build a triangle path and verify at least two pixels
 // inside the rendered triangle differ in color, proving the gradient was
-// actually painted (not a single solid colour).
+// actually painted (not a single solid color).
 // A null point array with a plausible count must draw nothing, not walk it. The
 // count guard alone does not stop that: the caller's count is what it is.
 TEST_CASE("CoreGraphicsCanvas path calls survive degenerate input",
@@ -531,7 +531,7 @@ TEST_CASE("CoreGraphicsCanvas::fill_path honors active linear gradient",
 
     // Walk the bitmap and count pixels that look red-dominant vs
     // green-dominant. If fill_path dropped the gradient and fell back to
-    // apply_fill_color(), every painted pixel would be a single colour and
+    // apply_fill_color(), every painted pixel would be a single color and
     // exactly one of these counts would be non-zero.
     int red_dominant = 0;
     int green_dominant = 0;
@@ -780,10 +780,10 @@ TEST_CASE("CoreGraphicsCanvas::set_blend_mode honors all BlendMode values",
 // level depends on Apple's internal LUTs and would be brittle). The
 // invariant we assert instead: applying the blend mode and painting must
 // not crash the CG context, and the result must be reproducible (no
-// undefined behaviour). For most modes the result is non-empty; for
+// undefined behavior). For most modes the result is non-empty; for
 // `source_out` / `destination_out` (where the result IS empty when
 // source and destination cover the same area) we whitelist that as the
-// CSS-spec behaviour. Coverage hits every case branch in the switch.
+// CSS-spec behavior. Coverage hits every case branch in the switch.
 TEST_CASE("CoreGraphicsCanvas::set_blend_mode every enum value round-trips through to_cg_blend",
           "[canvas][cg][blend][issue-1371]") {
     constexpr int W = 4;

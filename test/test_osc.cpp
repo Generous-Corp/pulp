@@ -1472,7 +1472,7 @@ TEST_CASE("OSC decode of unterminated string argument fails closed",
     REQUIRE(decoded.args.empty());
 }
 
-TEST_CASE("OSC decode of truncated colour argument fails closed",
+TEST_CASE("OSC decode of truncated color argument fails closed",
           "[osc][codec][decode-edge]") {
     std::vector<uint8_t> buf;
     const char addr[] = "/c";
@@ -1481,10 +1481,10 @@ TEST_CASE("OSC decode of truncated colour argument fails closed",
     const char tags[] = ",r";
     buf.insert(buf.end(), tags, tags + sizeof(tags));
     while (buf.size() % 4 != 0) buf.push_back(0);
-    buf.insert(buf.end(), {0x11, 0x22});  // only 2 of the 4 colour bytes
+    buf.insert(buf.end(), {0x11, 0x22});  // only 2 of the 4 color bytes
 
     auto decoded = decode(buf.data(), buf.size());
-    REQUIRE(decoded.address.empty());   // truncated 32-bit colour → malformed
+    REQUIRE(decoded.address.empty());   // truncated 32-bit color → malformed
     REQUIRE(decoded.args.empty());
 }
 
@@ -1776,17 +1776,17 @@ TEST_CASE("OSC address pattern covers boundary backtracking failures",
     REQUIRE_FALSE(address_matches("/{alpha,,gamma}/1", "/gamma/1"));
 }
 
-// ── OSC 'r' type tag — RGBA colour argument ─────────────────────────
-// Closes the gap-doc OSC row "Message + Bundle + Argument (..., colour)".
+// ── OSC 'r' type tag — RGBA color argument ─────────────────────────
+// Closes the gap-doc OSC row "Message + Bundle + Argument (..., color)".
 
-TEST_CASE("OSC encode/decode round-trips RGBA colour 'r' tag",
-          "[osc][colour]") {
-    Message msg("/light/colour");
+TEST_CASE("OSC encode/decode round-trips RGBA color 'r' tag",
+          "[osc][color]") {
+    Message msg("/light/color");
     msg.add(ColorRgba{0x11, 0x22, 0x33, 0x44});
 
     auto bytes = encode(msg);
     auto decoded = decode(bytes.data(), bytes.size());
-    REQUIRE(decoded.address == "/light/colour");
+    REQUIRE(decoded.address == "/light/color");
     REQUIRE(decoded.args.size() == 1);
     auto* c = std::get_if<ColorRgba>(&decoded.args[0]);
     REQUIRE(c != nullptr);
@@ -1800,8 +1800,8 @@ TEST_CASE("OSC encode/decode round-trips RGBA colour 'r' tag",
     REQUIRE(decoded.get_colour(5).a == 0xff);
 }
 
-TEST_CASE("OSC mixes RGBA colour with other arg types",
-          "[osc][colour]") {
+TEST_CASE("OSC mixes RGBA color with other arg types",
+          "[osc][color]") {
     Message msg("/scene/set");
     msg.add(int32_t(7));
     msg.add(ColorRgba{255, 0, 0, 255});

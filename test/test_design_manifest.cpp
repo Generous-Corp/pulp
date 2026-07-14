@@ -38,7 +38,7 @@ TEST_CASE("Ink & Signal manifest carries the token allowlist and component contr
     REQUIRE_FALSE(m.tokens.empty());
     REQUIRE_FALSE(m.components.empty());
 
-    // A known control is catalogued with its native class and reskin allowlist.
+    // A known control is cataloged with its native class and reskin allowlist.
     const auto* knob = find_component(m, "Knob");
     REQUIRE(knob != nullptr);
     REQUIRE(knob->native_class == "pulp::view::Knob");

@@ -55,7 +55,7 @@ DecodedRaster checker_rgba(uint32_t w, uint32_t h) {
 
 }  // namespace
 
-TEST_CASE("GifReader::is_gif recognises 87a and 89a signatures",
+TEST_CASE("GifReader::is_gif recognizes 87a and 89a signatures",
           "[image-codecs][gif]") {
     const uint8_t gif87[] = {'G','I','F','8','7','a',0,0,0,0,0,0,0};
     const uint8_t gif89[] = {'G','I','F','8','9','a',0,0,0,0,0,0,0};
@@ -72,7 +72,7 @@ TEST_CASE("GifReader rejects malformed input", "[image-codecs][gif]") {
     REQUIRE_FALSE(r.has_value());
 }
 
-TEST_CASE("GifWriter + GifReader round-trip a solid colour",
+TEST_CASE("GifWriter + GifReader round-trip a solid color",
           "[image-codecs][gif]") {
     auto src = solid_rgba(16, 8, 200, 100, 50);
     auto encoded = GifWriter::encode_still(src);
@@ -84,7 +84,7 @@ TEST_CASE("GifWriter + GifReader round-trip a solid colour",
     REQUIRE(decoded->width == src.width);
     REQUIRE(decoded->height == src.height);
     REQUIRE(decoded->rgba.size() == src.rgba.size());
-    // Solid colour quantises losslessly when palette has the swatch.
+    // Solid color quantises losslessly when palette has the swatch.
     for (std::size_t i = 0; i < src.rgba.size(); i += 4) {
         REQUIRE(decoded->rgba[i + 0] == 200);
         REQUIRE(decoded->rgba[i + 1] == 100);
@@ -125,7 +125,7 @@ TEST_CASE("GifReader::decode_all returns at least one frame",
     REQUIRE(frames->front().raster.height == 8);
 }
 
-TEST_CASE("TiffReader::is_tiff recognises both byte orders",
+TEST_CASE("TiffReader::is_tiff recognizes both byte orders",
           "[image-codecs][tiff]") {
     const uint8_t le[] = {'I','I',42,0,8,0,0,0};
     const uint8_t be[] = {'M','M',0,42,0,0,0,8};

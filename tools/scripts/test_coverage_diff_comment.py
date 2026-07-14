@@ -48,7 +48,7 @@ class RenderTests(unittest.TestCase):
         # Marker must be at the very top so a grep pass sees it even in a
         # raw-text context. Not strictly required for the upsert logic,
         # but the ruleset-drift-check pattern puts it first and we keep
-        # parity to minimise cognitive load.
+        # parity to minimize cognitive load.
         self.assertTrue(body.lstrip().startswith(cdc.COMMENT_MARKER))
 
     def test_advisory_banner_mentions_flip_date_and_threshold(self) -> None:

@@ -6,7 +6,7 @@
 // pulling bytes through the Figma Plugin API stays in `extract.ts`.
 //
 // The extractor has two real consumers — the UI plugin (`code.ts`) and the
-// headless bundle (`headless.ts`) — plus a structural neighbour, the Python REST
+// headless bundle (`headless.ts`) — plus a structural neighbor, the Python REST
 // port at `tools/import-design/figma_rest_export.py`, which mirrors these
 // helpers field-for-field. Co-locating the pure logic makes drift between the
 // language ports visible in one file and reduces the surface area future
@@ -206,7 +206,7 @@ export function isPureVectorIllustration(node: SceneNode): boolean {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Font catalogue — walks the post-extraction IR (not the Figma scene),
+// Font catalog — walks the post-extraction IR (not the Figma scene),
 // so it's already host-neutral and operates only on ExtractedFigmaNode
 // trees. Emitted as the envelope's top-level `font_family_assets`.
 

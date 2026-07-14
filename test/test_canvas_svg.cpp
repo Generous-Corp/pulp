@@ -83,7 +83,7 @@ TEST_CASE("Canvas::draw_svg renders a LINEAR GRADIENT (NanoSVG could not)",
 // class of imported frames came out with holes where the art should be.
 //
 // The fixture is an 8x8 PNG with four distinct quadrants (TL red, TR green,
-// BL blue, BR white), scaled to a 20x20 box. Asserting each quadrant's colour
+// BL blue, BR white), scaled to a 20x20 box. Asserting each quadrant's color
 // separately proves the pixels came from the DECODED image, not from a
 // placeholder or a flat fill that happens to be non-blank.
 #ifdef PULP_HAS_SKRESOURCES

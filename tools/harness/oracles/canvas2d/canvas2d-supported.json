@@ -256,7 +256,7 @@
       "bridge": [
         "canvasSetConicGradient"
       ],
-      "notes": "pulp #1524. Skia routes via SkGradientShader::MakeSweep (real sweep). CG software-rasterises a CGImage of the active clip's bounding box (per-pixel atan2 sweep + colour-stop interpolation) and paints it via CGContextDrawImage."
+      "notes": "pulp #1524. Skia routes via SkGradientShader::MakeSweep (real sweep). CG software-rasterises a CGImage of the active clip's bounding box (per-pixel atan2 sweep + color-stop interpolation) and paints it via CGContextDrawImage."
     },
     "createPattern": {
       "kind": "method",

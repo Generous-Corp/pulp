@@ -2,7 +2,7 @@
 
 Provenance tracks who/what dispatched a CI run — direct vs hosted, which control
 plane, which runner provider/selector, and the run id/URL. Both job records and
-result records carry a `provenance` dict normalised through these helpers so
+result records carry a `provenance` dict normalized through these helpers so
 downstream consumers (status display, evidence) can read a stable shape
 regardless of how the job was submitted.
 

@@ -20,11 +20,11 @@ CanvasGradient.prototype.addColorStop = function(offset, color) {
 // Canvas2D spec:
 //   "repeat" (default), "repeat-x", "repeat-y", "no-repeat"
 // Image source is reduced to a path / data URL string the same way
-// drawImage normalises it. Flushed to the bridge via canvasSetFillPattern
+// drawImage normalizes it. Flushed to the bridge via canvasSetFillPattern
 // when assigned to ctx.fillStyle. The Skia backend renders the real
 // tiled pattern via SkShader::MakeImage with SkTileMode::{kRepeat,kDecal};
 // the CG backend renders fill patterns through CGPattern callbacks. Stroke
-// patterns can still fall back to the active stroke colour on backends
+// patterns can still fall back to the active stroke color on backends
 // without stroke-pattern support.
 function CanvasPattern(src, tileX, tileY) {
     this._kind = "pattern";
@@ -100,7 +100,7 @@ function CanvasRenderingContext2D(canvasEl) {
     // a "color" or a "gradient". When a gradient is active the next
     // canvasFillRect / canvasFillPath uses the bridge's active gradient
     // state; the shim does NOT call canvasSetFillColor before the draw or
-    // the gradient would be overwritten back to a solid colour.
+    // the gradient would be overwritten back to a solid color.
     this._activeFillKind = "color";
     this._activeStrokeKind = "color";
     // Cache of last-pushed font / textAlign / textBaseline / line* / global*
@@ -167,7 +167,7 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
         var pr = fs._params, sr = fs._stops;
         // Prefer the two-circle bridge. Both Skia
         // (MakeTwoPointConical) and CG (CGContextDrawRadialGradient with
-        // both circles) honour the inner circle. Older binaries without
+        // both circles) honor the inner circle. Older binaries without
         // that bridge fall through to the single-circle outer-only path so
         // JS hot-reload doesn't crash.
         if (typeof canvasSetRadialGradientTwoCircles === "function") {
@@ -198,7 +198,7 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
     }
     // ctx.createPattern uses real tiled paint via SkShader::MakeImage with
     // SkTileMode per axis on Skia. CG fills use a CGPattern tile callback;
-    // stroke patterns remain backend-dependent and can fall back to colour.
+    // stroke patterns remain backend-dependent and can fall back to color.
     // We reuse `_activeFillKind = "gradient"` as the "non-color" sentinel
     // so canvasClearGradient resets correctly when the next fillStyle
     // assignment is a plain string.
@@ -207,7 +207,7 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
         this._activeFillKind = "gradient";
         return;
     }
-    // Solid colour. Clear any active gradient so subsequent fills don't pick
+    // Solid color. Clear any active gradient so subsequent fills don't pick
     // up a stale gradient (Canvas2D spec: assigning fillStyle replaces the
     // previous style outright).
     if (this._activeFillKind === "gradient" && typeof canvasClearGradient === "function") {
@@ -230,7 +230,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
     }
     // Gradient strokeStyle mirrors _applyFillStyle: prefer the per-kind
     // stroke-gradient bridge function when present; fall back to the
-    // first-stop solid colour for binaries without that bridge so JS
+    // first-stop solid color for binaries without that bridge so JS
     // hot-reload doesn't crash.
     if (ss && ss._kind === "linear" && typeof canvasSetStrokeLinearGradient === "function") {
         var lp = ss._params, ls = ss._stops;
@@ -271,7 +271,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
     }
     // Fallback: gradient bridge fn missing (older binary), or
     // CanvasPattern with no stroke-pattern bridge. Pull a solid
-    // colour — first stop for gradients, neutral grey for unsupported
+    // color — first stop for gradients, neutral grey for unsupported
     // patterns — so strokes still render visibly.
     var colorStr = "";
     if (ss && (ss._kind === "linear" || ss._kind === "radial" || ss._kind === "conic")) {
@@ -282,7 +282,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
         this._activeStrokeKind = "pattern";
     } else {
         colorStr = String(ss == null ? "" : ss);
-        // Solid-colour assignment after a gradient: clear any active
+        // Solid-color assignment after a gradient: clear any active
         // stroke shader so the next stroke uses set_stroke_color cleanly
         // (mirrors fillStyle's canvasClearGradient flush).
         if (this._activeStrokeKind === "gradient" &&
@@ -320,7 +320,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
 //     letterSpacing: 0                  // shorthand has no letter-spacing
 //   }
 //
-// Unknown tokens are silently dropped — matches browser behaviour where
+// Unknown tokens are silently dropped — matches browser behavior where
 // the entire shorthand is rejected on a hard parse error, but ours is a
 // best-effort parser tuned for real-world copy-CSS values.
 //
@@ -474,7 +474,7 @@ CanvasRenderingContext2D.prototype._syncLineState = function() {
         this._sentLineJoin = this.lineJoin;
     }
     // Push ctx.miterLimit to the bridge so SkPaint::setStrokeMiter /
-    // CGContextSetMiterLimit honour the JS value. Spec: ignore non-finite
+    // CGContextSetMiterLimit honor the JS value. Spec: ignore non-finite
     // / non-positive.
     var ml = +this.miterLimit;
     if (isFinite(ml) && ml > 0 && this._sentMiterLimit !== ml) {
@@ -568,7 +568,7 @@ CanvasRenderingContext2D.prototype._syncDirectionState = function() {
 // parses it into an SkImageFilter chain (blur, grayscale, sepia,
 // brightness, contrast, invert, opacity, saturate, hue-rotate) and
 // applies via SkPaint::setImageFilter on subsequent draws. Backends
-// that don't recognise a particular function silently degrade.
+// that don't recognize a particular function silently degrade.
 //
 // Unlike the CSS `filter` property on a View, this filter is per-2D-context
 // state and stacks with save() / restore().
@@ -1059,7 +1059,7 @@ CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
     this._applyFillStyle();
     // canvasFillText takes (id, text, x, y, size, color, maxWidth). When
     // the active fillStyle is a gradient the bridge keeps the gradient
-    // active on the canvas; canvasFillText still records a colour, so
+    // active on the canvas; canvasFillText still records a color, so
     // pass the gradient's first stop as a graceful approximation.
     var color = this.fillStyle;
     if (color && color._kind) {
@@ -1094,7 +1094,7 @@ CanvasRenderingContext2D.prototype.strokeText = function(text, x, y, maxWidth) {
     if (color && color._kind) {
         // strokeStyle gradient is bridged through _applyStrokeStyle's
         // per-kind setter (canvasSetStrokeLinearGradient, etc.), which
-        // populates stroke_shader_ on the Skia canvas. The colour passed to
+        // populates stroke_shader_ on the Skia canvas. The color passed to
         // canvasStrokeText is only a solid fallback if stroke_shader_ is null
         // at paint time, so use the first stop here.
         color = (color._stops && color._stops.length > 0) ? color._stops[0].color : "#fff";
@@ -1106,7 +1106,7 @@ CanvasRenderingContext2D.prototype.strokeText = function(text, x, y, maxWidth) {
         return;
     }
     // Backwards-compat fallback: older hosts route stroke through fillText
-    // with strokeStyle as the fill colour. Visually close enough for
+    // with strokeStyle as the fill color. Visually close enough for
     // HUD/Filterbank text on legacy builds.
     var savedFill = this.fillStyle;
     this.fillStyle = this.strokeStyle;
@@ -1168,7 +1168,7 @@ CanvasRenderingContext2D.prototype.createPattern = function(image, repetition) {
     else if (rep === "repeat-y") { tx = "no-repeat"; ty = "repeat";  }
     else /* no-repeat */     { tx = "no-repeat"; ty = "no-repeat"; }
     // Image source — accept either a string path / data URI, or an
-    // image-like object with .src / ._src (matches drawImage normalisation).
+    // image-like object with .src / ._src (matches drawImage normalization).
     var src = "";
     if (typeof image === "string") src = image;
     else if (image && typeof image.src === "string") src = image.src;

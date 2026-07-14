@@ -5,7 +5,7 @@
 // plug-in's AraDocumentController and whose function pointers forward
 // into no-op stubs that still satisfy the ABI requirements laid out in
 // ARA_API/ARAInterface.h (non-null function pointers, valid structSize,
-// matching kARA*MinSize thresholds). Real editing behaviour arrives
+// matching kARA*MinSize thresholds). Real editing behavior arrives
 // when plug-in authors subclass AraDocumentController and override the
 // ARA controller callbacks published here.
 
@@ -29,7 +29,7 @@ namespace {
 //
 // Every ARA controller call gets a safe no-op implementation so a host
 // calling through the factory never lands on a null pointer. Plug-ins
-// that want real ARA behaviour override the corresponding method on
+// that want real ARA behavior override the corresponding method on
 // their AraDocumentController subclass.
 
 using ARA::ARADocumentControllerRef;

@@ -52,7 +52,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpEmbedData.cmake")
 #   NAME    — path to the .ttf / .otf, relative to CMAKE_CURRENT_SOURCE_DIR
 #             or absolute. Required.
 #   FAMILY  — optional family-name override. When omitted, the font's own
-#             name table is used (same behaviour as
+#             name table is used (same behavior as
 #             `pulp::canvas::register_font` with an empty `family_override`).
 function(pulp_register_font target)
     cmake_parse_arguments(PRF "" "NAME;FAMILY" "" ${ARGN})
@@ -101,7 +101,7 @@ function(pulp_register_font target)
     #    deliberately keep the call inside an anonymous namespace so the
     #    symbol cannot collide across multiple pulp_register_font() calls
     #    that happened to land in the same translation unit (they don't,
-    #    but defence in depth is cheap).
+    #    but defense in depth is cheap).
     set(_pulp_font_family_literal "")
     if(PRF_FAMILY)
         # Escape backslashes and quotes for a C++ string literal. CMake's

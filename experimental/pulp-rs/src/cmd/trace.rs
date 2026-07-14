@@ -65,7 +65,7 @@ use crate::error::{CliError, Result};
 
 /// Default inspector port — matches `inspect/src/inspector_server.cpp`
 /// `kDefaultPort` (and `motion::DEFAULT_INSPECTOR_PORT`). The C++ side
-/// also honours `PULP_INSPECTOR_PORT`; we honour the same env var here
+/// also honours `PULP_INSPECTOR_PORT`; we honor the same env var here
 /// so a non-default host stays reachable.
 pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;
 

@@ -34,7 +34,7 @@ pub fn fixture_dir(category: &str, name: &str) -> PathBuf {
 /// Rewrite a JSON string field that holds an absolute path so the
 /// machine-specific prefix is replaced by a `<FIXTURE:...>` token.
 /// The fixture directory is `tests/fixtures/<category>/<name>`. Both
-/// forward and backward slashes are matched so the same normalised
+/// forward and backward slashes are matched so the same normalized
 /// output falls out on every platform.
 pub fn normalise_path_field(v: &mut Value, key: &str, category: &str, name: &str) {
     let target = format!("fixtures/{category}/{name}");
@@ -51,9 +51,9 @@ pub fn normalise_path_field(v: &mut Value, key: &str, category: &str, name: &str
     if s.is_empty() {
         return;
     }
-    let normalised = s.replace('\\', "/");
-    if let Some(idx) = normalised.find(&target) {
-        let tail = &normalised[idx + target.len()..];
+    let normalized = s.replace('\\', "/");
+    if let Some(idx) = normalized.find(&target) {
+        let tail = &normalized[idx + target.len()..];
         *item = Value::String(format!("<FIXTURE:{name}>{tail}"));
     } else if let Some(idx) = s.find(&target_back) {
         let tail = &s[idx + target_back.len()..].replace('\\', "/");
