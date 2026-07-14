@@ -381,3 +381,57 @@ TEST_CASE("a delegate can hand back the standard height and keep the stock rhyth
     REQUIRE_THAT(wide_lay.box.height,
                  Catch::Matchers::WithinAbs(stock_lay.box.height, 0.01));
 }
+
+TEST_CASE("every metric hook declines by default", "[view][metrics]") {
+    // The same contract the paint delegate has, and for the same reason: a skin
+    // that only wants wider menus must not be conscripted into sizing buttons,
+    // combo boxes, text fields and carets as well.
+    //
+    // Every hook is called here on a bare delegate. Each must decline AND leave
+    // its out-parameter untouched — a hook that returned false but had already
+    // written to `out` would hand the widget a half-populated value it believes
+    // it is free to ignore, which is precisely how a "declined" metric leaks.
+    struct Bare : WidgetMetrics {};
+    Bare m;
+
+    View v;
+    v.set_bounds({0, 0, 100, 30});
+
+    MenuItemMetricsQuery query;
+    query.text = "Paste";
+    query.standard_height = 24.0f;
+
+    BoxSize size{7.0f, 9.0f};                 // sentinels
+    CHECK_FALSE(m.menu_item_size(query, size, v));
+    CHECK(size.width == 7.0f);                // untouched
+    CHECK(size.height == 9.0f);
+
+    float border = 3.0f;
+    CHECK_FALSE(m.menu_border(border, v));
+    CHECK(border == 3.0f);
+
+    FontSpec font;
+    font.family = "Sentinel";
+    font.size = 11.0f;
+    CHECK_FALSE(m.menu_font(font, v));
+    CHECK_FALSE(m.button_font(font, v));
+    CHECK_FALSE(m.combo_box_font(font, v));
+    CHECK_FALSE(m.text_field_font(font, v));
+    CHECK(font.family == "Sentinel");
+    CHECK(font.size == 11.0f);
+
+    EdgeInsets insets{1.0f, 2.0f, 3.0f, 4.0f};
+    CHECK_FALSE(m.text_field_insets(insets, v));
+    CHECK(insets.top == 1.0f);
+    CHECK(insets.left == 4.0f);
+
+    float caret = 2.5f;
+    CHECK_FALSE(m.caret_width(caret, v));
+    CHECK(caret == 2.5f);
+}
+
+TEST_CASE("EdgeInsets sums the axes a caller actually needs", "[view][metrics]") {
+    const EdgeInsets e{1.0f, 2.0f, 4.0f, 8.0f};   // top right bottom left
+    REQUIRE_THAT(e.horizontal(), Catch::Matchers::WithinAbs(10.0, 1e-6));  // left + right
+    REQUIRE_THAT(e.vertical(), Catch::Matchers::WithinAbs(5.0, 1e-6));     // top + bottom
+}
