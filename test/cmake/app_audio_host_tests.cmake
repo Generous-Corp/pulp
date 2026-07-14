@@ -17,6 +17,11 @@ pulp_add_test_suite(pulp-test-slider-core LIBRARIES pulp::view)
 # control shape reasons in.
 pulp_add_test_suite(pulp-test-widget-painter LIBRARIES pulp::view)
 
+# Bugs that shipped: a button face that never rendered, a wheel notch that moved
+# a quantized control by zero, a field that collapsed to no height in a flex
+# tree, and caret/selection colours no skin could reach.
+pulp_add_test_suite(pulp-test-widget-regressions LIBRARIES pulp::view)
+
 # App framework tests (KeyMapping, MenuBar, Toolbar, AppSettings)
 pulp_add_test_suite(pulp-test-app-framework LIBRARIES pulp::view)
 
