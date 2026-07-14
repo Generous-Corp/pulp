@@ -79,9 +79,8 @@ TEST_CASE("Canvas::draw_svg renders a LINEAR GRADIENT (NanoSVG could not)",
 //      `<image href="data:image/png;base64,...">` with no xlink namespace —
 //      which Skia silently drops, leaving the IRI empty.
 //
-// Design-tool exports carry their bitmap assets exactly this way (the Groei
-// JUCE-import sample has 8 of them), so a whole class of imported frames came
-// out with holes where the art should be.
+// Design-tool exports carry their bitmap assets exactly this way, so a whole
+// class of imported frames came out with holes where the art should be.
 //
 // The fixture is an 8x8 PNG with four distinct quadrants (TL red, TR green,
 // BL blue, BR white), scaled to a 20x20 box. Asserting each quadrant's colour
