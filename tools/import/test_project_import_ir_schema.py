@@ -40,9 +40,13 @@ SPI_FIXTURE_DEFS = {
 }
 
 # Vendor names must never appear in SDK schema, fixtures, or importer README —
-# identity is runtime data only. This guard list is the mainline tripwire for
-# plan §16.2.
-FORBIDDEN_VENDOR_TOKENS = ("juce", "iplug", "steinberg", "projucer", "wdl")
+# identity is runtime DATA only.
+#
+# That guarantee is enforced by tools/scripts/framework_neutrality_check.py, which
+# scans this whole tree (schemas, fixtures and README included) in CI. The token
+# list lives THERE, once. It used to be duplicated here as a literal tuple, which
+# made this file both a second source of truth AND an instance of the very thing
+# it was screening for: the SDK spelling out which frameworks it anticipates.
 FORBIDDEN_NEUTRAL_IMPL_TOKENS = (
     "<pulp/",
     "statetree",
@@ -264,15 +268,6 @@ class ProjectImportIRSchemaTest(unittest.TestCase):
         doc["features"][0]["status"] = "mostly-supported"
         errs = errors_against_def(doc, spi, "compat_matrix")
         self.assertTrue(any("enum" in e for e in errs), errs)
-
-    def test_no_vendor_names_in_schema_fixtures_or_readme(self):
-        files = [README_PATH, SCHEMA_PATH, SPI_SCHEMA_PATH]
-        files += sorted(FIXTURE_DIR.glob("*.json")) + sorted(SPI_FIXTURE_DIR.glob("*.json"))
-        for f in files:
-            blob = f.read_text(encoding="utf-8").lower()
-            for tok in FORBIDDEN_VENDOR_TOKENS:
-                self.assertNotIn(tok, blob,
-                                 f"vendor token {tok!r} leaked into {f.name} — SDK must stay vendor-agnostic (plan §16.2)")
 
     def test_neutral_contract_does_not_leak_pulp_runtime_types(self):
         for def_name in NEUTRAL_SCHEMA_DEFS:

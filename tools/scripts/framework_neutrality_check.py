@@ -70,6 +70,7 @@ SCANNED_ROOTS = [
     "experimental",
     "test",
     "apple",
+    "tools",
 ]
 
 # Directories never worth walking (third-party trees and build output that can
@@ -83,6 +84,11 @@ SCANNED_SUFFIXES = {
     ".h", ".hpp", ".c", ".cc", ".cpp", ".mm", ".m", ".swift",
     ".js", ".mjs", ".ts", ".tsx", ".rs",
     ".txt", ".cmake", ".supp",
+    # Schemas, fixtures, and the tooling that emits them leak just as loudly as
+    # C++ does — a framework named in a JSON schema or a README is still the SDK
+    # announcing which frameworks it anticipates. (docs/ is deliberately NOT a
+    # scanned root: a migration guide is allowed to name what you migrate FROM.)
+    ".json", ".md", ".py",
 }
 
 # Paths whose foreign-framework references are the POINT. Deleting them would be
@@ -97,13 +103,31 @@ EXEMPT_SUBSTRINGS = [
     "host-quirks.json",
     "test/test_host_quirks.cpp",
     "test/test_host_version.cpp",
-    # The importer's own DENYLIST. These tests assert that emitted output is
-    # REJECTED when it contains vendored foreign framework code. The literal
-    # framework names are the thing being screened for — strip them and the
-    # check silently passes everything.
-    "test/test_cli_import.cpp",
-    "test/test_cli_import_emit.cpp",
-    "test/test_cli_import_terms.cpp",
+    # THIS FILE. A gate that screens for foreign-framework names has to contain
+    # them; that is unavoidable and it is the one place they are allowed to live.
+    # It is lint tooling, not SDK source: it is never installed by
+    # `cmake --install` and never reaches a user's project.
+    "tools/scripts/framework_neutrality_check.py",
+    # The build/lint tooling that has to name a foreign toolchain to integrate
+    # with it (an optional SDK the user supplies themselves), plus the vendored
+    # third-party trees under tools/.
+    "tools/cmake/",
+    "tools/deps/",
+    # MIGRATION AND PACKAGING GUIDANCE — a different thing from the import
+    # surface, and legitimately allowed to name a framework.
+    #
+    # The line this gate actually draws: naming a framework in advice about
+    # MOVING to Pulp ("if your project already uses libMTSClient.h, map these
+    # calls") tells a user something useful and implies nothing about what Pulp
+    # ships. Naming one anywhere in the IMPORT surface (tools/import/, tools/cli/)
+    # announces which frameworks the SDK anticipates an importer for — and that
+    # announcement is the leak, whether or not the importer exists. Those two
+    # trees stay strictly neutral; these do not have to.
+    "tools/packages/registry.json",
+    "tools/validation/",
+    "tools/scripts/verify_downstream_",
+    "tools/scripts/cmajor_external.py",
+    "tools/scripts/test_cmajor_external_extra.py",
     # `pulp pkg suggest --alternative <name>` takes a free-form framework name
     # from the user and suggests Pulp packages that cover the same ground. The
     # arg-parsing test has to pass SOME name; that value is user input, not
@@ -284,14 +308,23 @@ def selftest() -> int:
           "// Cross-checked against the iPlug2 quirks audit.\n"},
          0)
 
-    case("importer denylist literals are exempt",
+    # POLICY CHANGE: a hardcoded denylist of framework names is no longer allowed
+    # ANYWHERE in the tree, tests included. The importer's real denylist is
+    # runtime DATA carried by the add-on tool's registry descriptor
+    # (denylist_from_known_frameworks), so the SDK never needs to spell a
+    # framework name to screen for one. A test that hardcodes the list is both a
+    # duplicate source of truth and the very leak this gate exists to prevent.
+    case("hardcoded denylist literals are flagged, tests included",
          {"test/test_cli_import.cpp": '  "juce", "iplug", "steinberg", "wdl",\n'},
-         0)
+         1)
 
-    case("out-of-scope trees are not scanned",
+    # tools/ IS scanned now — the CLI is shipped SDK surface and must be as
+    # neutral as core. docs/ is still out of scope: a migration guide is allowed
+    # to name what you are migrating FROM.
+    case("the CLI tree is scanned; docs are not",
          {"docs/guides/coming-from-juce.md": "Moving a JUCE plugin to Pulp\n",
           "tools/import/terms.cpp": '// map JUCE::Slider -> pulp::view::Slider\n'},
-         0)
+         1)
 
     print()
     if failures:

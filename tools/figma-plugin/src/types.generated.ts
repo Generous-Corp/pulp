@@ -133,7 +133,7 @@ export type InteractiveElement = {
    */
   source_node_id?: string;
   /**
-   * Host-parameter binding key for a geometry-detected control (e.g. "filter.cutoff"). Maps to IRNode.interactive_elements[].param_key → DesignFrameElement::param_key; DesignFrameView routes gestures on it to the framework-agnostic HostParamSurface (JUCE APVTS / iPlug2 / StateStore). Absent for an unbound knob.
+   * Host-parameter binding key for a geometry-detected control (e.g. "filter.cutoff"). Maps to IRNode.interactive_elements[].param_key → DesignFrameElement::param_key; DesignFrameView routes gestures on it to the framework-agnostic HostParamSurface, so the view runs unchanged against whatever parameter system the host provides. Absent for an unbound knob.
    */
   param_key?: string;
 };

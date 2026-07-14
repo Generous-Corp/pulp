@@ -34,6 +34,7 @@ namespace pulp::cli::import_run {
 namespace {
 
 namespace det = pulp::cli::import_detect;
+namespace reg = pulp::cli::tools;
 namespace spi = pulp::cli::import_spi;
 namespace ie = pulp::cli::import_emit;
 namespace ies = pulp::cli::import_emit_scan;
@@ -62,13 +63,21 @@ det::KnownFrameworks load_known_frameworks(std::string* index_path_out) {
     fs::path exe_dir = current_executable_path().parent_path();
     fs::path idx = det::find_index(start, exe_dir);
     if (index_path_out) *index_path_out = idx.string();
-    if (idx.empty()) {
-        det::KnownFrameworks kf;
-        kf.error = "could not locate tools/import/known-frameworks.json "
-                   "(set PULP_KNOWN_FRAMEWORKS to override)";
-        return kf;
+    det::KnownFrameworks kf;
+    if (!idx.empty()) kf = det::load_index(idx);
+
+    // The SDK's own index ships EMPTY on purpose. Detection markers belong to an
+    // add-on importer, which contributes its own index when it is installed. Merge
+    // those in — and note that with nothing installed this adds nothing, so
+    // detection matches nothing and reveals nothing about what could have matched.
+    auto installed = det::merge_installed_indices(reg::pulp_home() / "tools");
+    if (!installed.error.empty()) {
+        if (!kf.error.empty()) kf.error += "; ";
+        kf.error += installed.error;
     }
-    return det::load_index(idx);
+    for (auto& fw : installed.frameworks) kf.frameworks.push_back(std::move(fw));
+
+    return kf;
 }
 
 const det::FrameworkEntry* find_framework(const det::KnownFrameworks& kf,

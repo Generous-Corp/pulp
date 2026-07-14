@@ -3,7 +3,7 @@
 // artifacts the faithful-vector Figma path emits: a DesignFrameView subclass
 // (populated typed element table), the embedded-SVG accessor, and the wiring
 // lines to paste into CMake / the catalog. See annotated_capture.hpp for the
-// manifest schema (aligned with pulp-import-juce's ui_manifest.json).
+// manifest schema (a generic contract any external UI extractor can emit).
 //
 // Usage:
 //   pulp-annotated-capture-import --svg capture.svg --manifest ui_manifest.json \

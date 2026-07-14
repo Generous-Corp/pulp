@@ -194,7 +194,7 @@
         "bg_color": { "type": "string", "description": "text_field: the design's own field background (\"#RRGGBB\") so the overlay edge is seamless." },
         "label": { "type": "string", "description": "Human-readable control name from the design's caption (e.g. \"DEPTH\"); the name a host surfaces for the generated parameter." },
         "source_node_id": { "type": "string", "description": "Figma node id — provenance for the inspector's Wiring lens (maps a control back to its source node). NOT the host-param key; that is param_key." },
-        "param_key": { "type": "string", "description": "Host-parameter binding key for a geometry-detected control (e.g. \"filter.cutoff\"). Maps to IRNode.interactive_elements[].param_key → DesignFrameElement::param_key; DesignFrameView routes gestures on it to the framework-agnostic HostParamSurface (JUCE APVTS / iPlug2 / StateStore). Absent for an unbound knob." }
+        "param_key": { "type": "string", "description": "Host-parameter binding key for a geometry-detected control (e.g. \"filter.cutoff\"). Maps to IRNode.interactive_elements[].param_key → DesignFrameElement::param_key; DesignFrameView routes gestures on it to the framework-agnostic HostParamSurface, so the view runs unchanged against whatever parameter system the host provides. Absent for an unbound knob." }
       },
       "additionalProperties": false,
       "allOf": [

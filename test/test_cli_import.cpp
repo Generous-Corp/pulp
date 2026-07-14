@@ -353,38 +353,104 @@ TEST_CASE("import inspect end-to-end against a mock responder writes ProjectIR",
 
 // ── Vendor-agnostic source guard ──
 
-TEST_CASE("import CLI sources name no vendor token",
-          "[cli][import][vendor-agnostic][issue-290]") {
-    // Scan tools/cli/*import* sources for vendor tokens. The discovery DATA
-    // file (tools/import/known-frameworks.json) is intentionally excluded —
-    // it is the ONE place real markers live.
-    const fs::path cli_dir = fs::path(PULP_SOURCE_DIR) / "tools" / "cli";
-    REQUIRE(fs::exists(cli_dir));
 
-    const std::vector<std::string> banned = {
-        "juce", "iplug", "steinberg", "wdl",
-    };
+// ── The SDK ships no detection markers of its own ───────────────────────────
+//
+// A framework importer is an add-on: installed by URL, bringing its own detection
+// markers with it. The SDK knows only the SHAPE of a marker.
+//
+// The property below is a privacy one, not a plumbing one. With no importer
+// installed, detection must match nothing and REVEAL nothing — it must not be
+// possible to learn from the SDK which importers exist, or whether any given one
+// is public or private. A user with access to some importer and a user without
+// must get identical behaviour out of the SDK itself.
 
-    auto lower = [](std::string s) {
-        for (auto& c : s) c = static_cast<char>(::tolower(c));
-        return s;
-    };
+TEST_CASE("the SDK ships an EMPTY framework index", "[cli][import][vendor-agnostic]") {
+    // If this fails, someone has added a framework's markers to the SDK. The markers
+    // belong to the importer that understands them; shipping them here announces
+    // which frameworks we anticipate, which is precisely what the add-on model exists
+    // to avoid. This replaces the old hardcoded denylist of vendor names — the SDK no
+    // longer needs to spell a framework's name in order to be neutral about it.
+    const fs::path shipped =
+        fs::path(PULP_SOURCE_DIR) / "tools" / "import" / "known-frameworks.json";
+    REQUIRE(fs::exists(shipped));
 
-    int scanned = 0;
-    for (auto& entry : fs::directory_iterator(cli_dir)) {
-        if (!entry.is_regular_file()) continue;
-        std::string name = entry.path().filename().string();
-        if (name.find("import") == std::string::npos) continue;
-        ++scanned;
-        std::ifstream f(entry.path(), std::ios::binary);
-        std::string content((std::istreambuf_iterator<char>(f)),
-                            std::istreambuf_iterator<char>());
-        std::string lc = lower(content);
-        for (const auto& tok : banned) {
-            INFO("file=" << name << " token=" << tok);
-            REQUIRE(lc.find(tok) == std::string::npos);
-        }
-    }
-    // Sanity: we actually scanned the new sources.
-    REQUIRE(scanned >= 3);  // cmd_import.cpp, import_detect.{hpp,cpp}, import_spi.{hpp,cpp}
+    const auto index = det::load_index(shipped);
+    INFO("tools/import/known-frameworks.json must stay EMPTY — markers are the "
+         "importer's, not the SDK's");
+    CHECK(index.error.empty());
+    REQUIRE(index.frameworks.empty());
+}
+
+TEST_CASE("with no importer installed, nothing is known and nothing is hinted at",
+          "[cli][import][vendor-agnostic]") {
+    TempDir tools_root("pulp-tools-empty");   // an empty ~/.pulp/tools
+
+    const auto merged = det::merge_installed_indices(tools_root.path);
+
+    REQUIRE(merged.error.empty());        // absence is not an error...
+    REQUIRE(merged.frameworks.empty());   // ...and it is not a hint, either
+}
+
+TEST_CASE("an installed importer contributes its own markers",
+          "[cli][import][vendor-agnostic]") {
+    TempDir tools_root("pulp-tools-one");
+
+    write_file(tools_root.path / "some-importer" / "known-frameworks.json", R"({
+      "schema": "pulp.import.known_frameworks.v0",
+      "frameworks": [
+        { "framework_id": "fw", "display_name": "FW", "importer_tool_id": "some-importer",
+          "spi_min": 0, "spi_max": 0,
+          "detection": [ { "type": "file_glob", "pattern": "**/*.marker", "weight": 1.0 } ] }
+      ]
+    })");
+
+    const auto merged = det::merge_installed_indices(tools_root.path);
+
+    REQUIRE(merged.error.empty());
+    REQUIRE(merged.frameworks.size() == 1);
+    CHECK(merged.frameworks[0].importer_tool_id == "some-importer");
+    CHECK(merged.frameworks[0].detection.size() == 1);
+}
+
+TEST_CASE("a VERSIONED importer install is not silently invisible",
+          "[cli][import][vendor-agnostic]") {
+    // An importer lands at ~/.pulp/tools/<id>/ or ~/.pulp/tools/<id>/<version>/.
+    // Looking at only one depth would make a versioned install do nothing at all,
+    // with no error — the importer would simply never match anything.
+    TempDir tools_root("pulp-tools-ver");
+
+    write_file(tools_root.path / "some-importer" / "1.2.3" / "known-frameworks.json", R"({
+      "schema": "pulp.import.known_frameworks.v0",
+      "frameworks": [
+        { "framework_id": "fw", "display_name": "FW", "importer_tool_id": "some-importer",
+          "spi_min": 0, "spi_max": 0,
+          "detection": [ { "type": "file_glob", "pattern": "**/*.marker", "weight": 1.0 } ] }
+      ]
+    })");
+
+    const auto merged = det::merge_installed_indices(tools_root.path);
+    REQUIRE(merged.frameworks.size() == 1);
+}
+
+TEST_CASE("one broken importer index does not blind detection to the others",
+          "[cli][import][vendor-agnostic]") {
+    TempDir tools_root("pulp-tools-mixed");
+
+    write_file(tools_root.path / "broken" / "known-frameworks.json", "{ not json");
+    write_file(tools_root.path / "working" / "known-frameworks.json", R"({
+      "schema": "pulp.import.known_frameworks.v0",
+      "frameworks": [
+        { "framework_id": "fw", "display_name": "FW", "importer_tool_id": "working",
+          "spi_min": 0, "spi_max": 0, "detection": [] }
+      ]
+    })");
+
+    const auto merged = det::merge_installed_indices(tools_root.path);
+
+    // The working importer still works...
+    REQUIRE(merged.frameworks.size() == 1);
+    CHECK(merged.frameworks[0].importer_tool_id == "working");
+    // ...and the broken one is reported rather than swallowed.
+    CHECK_FALSE(merged.error.empty());
 }

@@ -45,6 +45,22 @@ KnownFrameworks parse_index(const std::string& json_text);
 // Load the index from `path`. Thin wrapper over parse_index over file read.
 KnownFrameworks load_index(const fs::path& path);
 
+// Merge every index an INSTALLED add-on importer contributes.
+//
+// The SDK ships no detection markers of its own (tools/import/known-frameworks.json
+// has an empty `frameworks` list, deliberately). Markers are the property of an
+// importer, which is installed by URL and drops its own known-frameworks.json into
+// `~/.pulp/tools/<tool_id>/`. This walks that directory and merges what it finds.
+//
+// The consequence, which is the point: with no importer installed, detection matches
+// nothing and reveals nothing. The SDK cannot say which importers exist, nor whether
+// any given one is public or private, because it genuinely does not know — it knows
+// only the SHAPE of a marker. A user with access and a user without get byte-identical
+// behaviour from the SDK.
+//
+// `tools_root` is `~/.pulp/tools` in production; tests pass a temp dir.
+KnownFrameworks merge_installed_indices(const fs::path& tools_root);
+
 // Locate the known-frameworks index. Resolution order:
 //   1. $PULP_KNOWN_FRAMEWORKS (explicit override; tests + custom installs)
 //   2. tools/import/known-frameworks.json walking up from `start_dir`

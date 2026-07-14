@@ -449,31 +449,3 @@ TEST_CASE("provenance check FAILS framework source in a generated file",
 
 // ── Vendor-agnostic source guard ──
 
-TEST_CASE("import terms sources name no vendor token",
-          "[cli][import][terms][vendor-agnostic]") {
-    const fs::path root = fs::path(PULP_SOURCE_DIR);
-    const std::vector<std::string> banned = {
-        "juce", "iplug", "steinberg", "wdl",
-    };
-    auto lower = [](std::string s) {
-        for (auto& c : s) c = static_cast<char>(::tolower(c));
-        return s;
-    };
-
-    const std::vector<fs::path> files = {
-        root / "tools" / "cli" / "import_terms.hpp",
-        root / "tools" / "cli" / "import_terms.cpp",
-        root / "tools" / "scripts" / "check_import_provenance.py",
-    };
-    int scanned = 0;
-    for (const auto& p : files) {
-        REQUIRE(fs::exists(p));
-        ++scanned;
-        std::string lc = lower(read_file(p));
-        for (const auto& tok : banned) {
-            INFO("file=" << p.string() << " token=" << tok);
-            REQUIRE(lc.find(tok) == std::string::npos);
-        }
-    }
-    REQUIRE(scanned == 3);
-}
