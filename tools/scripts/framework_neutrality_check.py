@@ -88,11 +88,11 @@ SCANNED_SUFFIXES = {
 # Paths whose foreign-framework references are the POINT. Deleting them would be
 # a bug, not a cleanup.
 EXEMPT_SUBSTRINGS = [
-    # Clean-room provenance. The prior-art citation IS the audit trail the
-    # Reference-Lineage trailer policy requires; removing it destroys the
-    # provenance it exists to record. Covers the catalog, its schema, and the
-    # tests that pin which rows are LessonOnly (host classifier included — it is
-    # what feeds HostQuirks).
+    # The host-quirk catalog names the DAWs it accommodates, because a quirk row
+    # is meaningless without the host it applies to. Stripping those names would
+    # not make the catalog neutral; it would make it unusable. Covers the
+    # catalog, its schema, and the tests pinning which rows are advisory-only
+    # (the host classifier included — it is what feeds HostQuirks).
     "format/host_quirks/",
     "host-quirks.json",
     "test/test_host_quirks.cpp",

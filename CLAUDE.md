@@ -1224,7 +1224,25 @@ fix is still on the issue tracker.
 
 ## Shared Agent Skills
 
-Skills live in `.agents/skills/` and are read by both Claude Code and Codex CLI. This is the single source of truth — do not duplicate skills into `.claude/skills/` or `.codex/skills/`.
+**`.agents/skills/` is read by BOTH Claude Code and Codex CLI.** It is the single
+source of truth — do not duplicate skills into `.claude/skills/` or
+`.codex/skills/`, and do not assume a skill is Claude-only. When you write a new
+skill, it lands here and every agent gets it.
+
+That cuts both ways, and it is worth being precise about which layer you need:
+
+| You want… | Put it in | Reaches |
+|---|---|---|
+| Guidance an agent should follow | `.agents/skills/<name>/SKILL.md` | Claude **and** Codex — but only when the agent *invokes* it |
+| A rule that must hold no matter who or what is driving | a script + `.githooks/pre-push` | **everyone** — every agent, every human, `gh`, `shipyard`, `pulp pr` |
+
+A skill cannot enforce anything: it is guidance, and it only fires if an agent
+chooses to read it. A human running `gh pr create`, or `shipyard pr` itself, will
+never consult one. If the behaviour genuinely must always happen, it belongs at
+the push — the one choke point every route to a PR passes through. Prefer a skill
+for judgment, and a hook for invariants. (Worked example: `pr-batching` is a
+skill for the *decision*, backed by `tools/scripts/pr_batch_advisor.py` in the
+pre-push hook so the question always gets asked.)
 
 ### Skill Versioning
 
@@ -1274,6 +1292,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
 | `packages` | Third-party audio package search, suggest, add, browse |
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
+| `pr-batching` | Ship 2+ finished branches as ONE PR when they're related — cuts CI runs; heuristics for when NOT to |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
