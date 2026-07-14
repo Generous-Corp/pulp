@@ -118,7 +118,12 @@ private:
     static constexpr float kHPad = 34.0f;   // total horizontal label padding
     static constexpr float kMinWidth = 120.0f;
     static constexpr float kRadius = 4.0f;
-    static constexpr float kSeparatorHeight = 24.0f;
+    /// A separator is a hairline with breathing room, not a row. It was 24 —
+    /// the same as a full label row — which made the `separator ? … : …` branch
+    /// in layout() a no-op and left every divider floating in an empty row's
+    /// worth of space, with the panel taller than its contents by 17px per
+    /// separator.
+    static constexpr float kSeparatorHeight = 7.0f;
     static constexpr float kFontSize = 12.0f;
 };
 

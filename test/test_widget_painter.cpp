@@ -87,7 +87,7 @@ TEST_CASE("a painter installed on a view applies to that view", "[view][painter]
     REQUIRE(v.effective_painter() == p.get());
 }
 
-TEST_CASE("a painter applies to the whole subtree, not just the view it was set on",
+TEST_CASE("a painter applies to the whole subtree and not just the view it was set on",
           "[view][painter]") {
     // This is what makes the seam usable: skin a panel in ONE call and every
     // control inside it follows, without touching any of them.
@@ -183,7 +183,7 @@ TEST_CASE("a delegate that declines a hook falls through to the stock look",
     REQUIRE(asked_text);
 }
 
-TEST_CASE("the rotary hook receives a normalized proportion, not pixels",
+TEST_CASE("the rotary hook receives a normalized proportion rather than pixels",
           "[view][painter]") {
     // A rotary reasons in sweep angle, which is a function of a 0..1 position.
     // Handing it a pixel offset renders plausibly and is wrong at every value.

@@ -478,3 +478,8 @@ pulp_add_test_suite(pulp-test-gap-widgets LIBRARIES pulp::view)
 
 # Widget gallery — themed board of every primitive; builds + renders
 pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
+
+# The sizing delegate, and the two widgets reworked to consult it: a menu that
+# can compute its whole geometry with no canvas and no paint, and a label whose
+# inline editor is a real child view.
+pulp_add_test_suite(pulp-test-widget-metrics LIBRARIES pulp::view)

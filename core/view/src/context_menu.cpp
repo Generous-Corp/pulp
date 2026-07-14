@@ -65,7 +65,10 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
             q.header = it.header;
             q.ticked = it.checked;
             q.has_submenu = it.has_submenu;
-            q.standard_height = 0.0f;   // no caller-forced row height
+            // The height this row WOULD get if the delegate declines. A skin that
+            // only wants to widen a menu can hand this straight back and keep the
+            // stock vertical rhythm instead of having to rediscover it.
+            q.standard_height = it.separator ? kSeparatorHeight : kRowHeight;
             sized = metrics->menu_item_size(q, size, const_cast<ContextMenu&>(*this));
         }
         if (sized && size.width > 0.0f) any_delegated_width = true;
