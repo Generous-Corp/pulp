@@ -23,6 +23,18 @@ Theme derive_theme(const SemanticColors& sc) {
     t.colors["text.secondary"] = blend_colors(sc.foreground, sc.muted, 0.4f);
     t.colors["text.disabled"]  = blend_colors(sc.foreground, sc.muted, 0.7f);
     t.colors["text.link"]      = sc.primary;
+    // The insertion caret tracks the text it sits in, so it stays legible on
+    // any surface the field is placed on. A theme that wants a caret in an
+    // accent colour overrides just this token.
+    t.colors["text.caret"]     = sc.foreground;
+    // Selection is two tokens, not one: the band drawn behind the selected run,
+    // and the colour the text switches to on top of it. Both carry their alpha
+    // as authored -- a theme asking for a translucent band gets a translucent
+    // band, and one asking for a solid band gets a solid one.
+    Color selection_band = sc.primary;
+    selection_band.a = 168.0f / 255.0f;
+    t.colors["text.selection"] = selection_band;
+    t.colors["text.selected"]  = sc.background;
 
     // Accent tokens
     t.colors["accent.primary"]   = sc.primary;

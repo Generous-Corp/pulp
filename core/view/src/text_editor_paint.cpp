@@ -504,7 +504,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         }
         if (!caret_skinned)
             paint_caret_over_text(canvas, caret_style_, m,
-                                  resolve_color("caret", resolve_color("text.primary",
+                                  resolve_color("text.caret", resolve_color("text.primary",
                                                 canvas::Color::hex(0xe0e0e0))),
                                   bg_color, display, text_x);
     }
