@@ -1,15 +1,18 @@
-// ScenePath — retained cubic-Bezier path node.
+// ScenePath — a scene-graph NODE that draws a path.
 //
-// Replaces "stream path commands at every paint" with "build once,
-// paint many" by holding the path operations
-// in a flat command buffer keyed off of `core/canvas::Canvas`'s existing
-// `begin_path` / `move_to` / `line_to` / `quad_to` / `cubic_to` /
-// `close_path` calls. The buffer feeds back to the same Canvas API at
-// paint time, so any backend (Skia, CoreGraphics, RecordingCanvas) sees
-// the identical command stream it would have seen from an immediate-mode
-// caller.
+// The geometry itself lives in `pulp::canvas::Path` (see
+// <pulp/canvas/path.hpp>) — the retained path VALUE type. ScenePath adds what
+// a scene node needs on top of that value: paint style (fill / stroke colours,
+// widths, fill rule), dirty tracking, and a place in the node hierarchy.
+//
+// Path and ScenePath are deliberately not the same thing, and the split matters:
+// a Path is a value you can copy, transform, compare, and hand around freely,
+// with no identity and no parent. Before this split, ScenePath carried its own
+// private command buffer, which meant `pulp::canvas` had two incompatible
+// representations of "a path" and no way to move geometry between them.
 #pragma once
 
+#include <pulp/canvas/path.hpp>
 #include <pulp/canvas/scene/scene_node.hpp>
 
 #include <utility>
@@ -19,22 +22,6 @@ namespace pulp::canvas {
 
 class ScenePath : public SceneNode {
 public:
-    enum class Op : uint8_t {
-        move_to,
-        line_to,
-        quad_to,
-        cubic_to,
-        close,
-    };
-
-    /// Flat command entry — `op` selects which trailing floats are valid.
-    /// move_to/line_to use (x, y); quad_to uses (cpx, cpy, x, y) packed in
-    /// floats 0..3; cubic_to fills all 6; close uses none.
-    struct Command {
-        Op op;
-        float f0 = 0, f1 = 0, f2 = 0, f3 = 0, f4 = 0, f5 = 0;
-    };
-
     ScenePath() : SceneNode(SceneNodeKind::path) {}
 
     /// Whether this path should be filled (default true).
@@ -82,58 +69,63 @@ public:
     }
 
     // ── Path building ────────────────────────────────────────────────────
+    // These forward to the underlying Path value. Kept as members (rather than
+    // making callers reach through `path()`) so existing call sites and the
+    // SVG importer keep working unchanged.
     void clear() {
-        commands_.clear();
+        path_.clear();
         bounds_dirty_ = true;
         bounds_cache_ = SceneRect{};
         mark_dirty();
     }
 
     void move_to(float x, float y) {
-        commands_.push_back({Op::move_to, x, y});
+        path_.move_to(x, y);
         bounds_dirty_ = true;
         mark_dirty();
     }
 
     void line_to(float x, float y) {
-        commands_.push_back({Op::line_to, x, y});
+        path_.line_to(x, y);
         bounds_dirty_ = true;
         mark_dirty();
     }
 
     void quad_to(float cpx, float cpy, float x, float y) {
-        commands_.push_back({Op::quad_to, cpx, cpy, x, y});
+        path_.quad_to(cpx, cpy, x, y);
         bounds_dirty_ = true;
         mark_dirty();
     }
 
     void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y, float x, float y) {
-        commands_.push_back({Op::cubic_to, cp1x, cp1y, cp2x, cp2y, x, y});
+        path_.cubic_to(cp1x, cp1y, cp2x, cp2y, x, y);
         bounds_dirty_ = true;
         mark_dirty();
     }
 
     void close_path() {
-        commands_.push_back({Op::close});
+        path_.close();
         // close doesn't add new geometry; no bounds invalidation needed.
         mark_dirty();
     }
 
-    /// Drop-in helper for callers that already have a command buffer.
-    void set_commands(std::vector<Command> cmds) {
-        commands_ = std::move(cmds);
+    /// The node's geometry, as a value. Copying it out is O(1) (see Path).
+    const Path& path() const { return path_; }
+
+    /// Replace the geometry wholesale — the drop-in for callers that built a
+    /// Path elsewhere (an SVG parse, a shape helper, a transformed copy).
+    void set_path(Path p) {
+        path_ = std::move(p);
         bounds_dirty_ = true;
         mark_dirty();
     }
-
-    const std::vector<Command>& commands() const { return commands_; }
 
     // ── SceneNode overrides ──────────────────────────────────────────────
     SceneRect local_bounds() const override;
     void paint_geometry(Canvas& canvas) const override;
 
 private:
-    std::vector<Command> commands_;
+    Path path_;
     Color fill_color_ = Color::rgba(0, 0, 0, 1);
     Color stroke_color_ = Color::rgba(0, 0, 0, 1);
     float stroke_width_ = 1.0f;

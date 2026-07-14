@@ -711,6 +711,198 @@ void RecordingCanvas::round_rect(float x, float y, float w, float h,
     commands_.push_back(cmd);
 }
 
+// ── Fill gradients ───────────────────────────────────────────────────────────
+// These mirror the stroke-gradient recorders above. Before they existed, the
+// base-class defaults ran instead — and those degrade a gradient to
+// `set_fill_color(colors[0])`. The recording target therefore captured a SOLID
+// FILL for every fill gradient, so a headless test could assert "the fill is
+// #FF0000" and pass whether the gradient plumbing worked or was ripped out.
+
+void RecordingCanvas::set_fill_gradient_linear(float x0, float y0,
+                                               float x1, float y1,
+                                               const Color* colors,
+                                               const float* positions,
+                                               int count) {
+    DrawCommand cmd{DrawCommand::Type::set_fill_gradient_linear};
+    cmd.f[0] = x0; cmd.f[1] = y0; cmd.f[2] = x1; cmd.f[3] = y1;
+    pack_stops(colors, positions, count, cmd.floats);
+    if (count > 0) cmd.color = colors[0];
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
+                                               const Color* colors,
+                                               const float* positions,
+                                               int count) {
+    DrawCommand cmd{DrawCommand::Type::set_fill_gradient_radial};
+    cmd.f[0] = cx; cmd.f[1] = cy; cmd.f[2] = radius;
+    pack_stops(colors, positions, count, cmd.floats);
+    if (count > 0) cmd.color = colors[0];
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_fill_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) {
+    DrawCommand cmd{DrawCommand::Type::set_fill_gradient_radial_two_circles};
+    cmd.f[0] = x0; cmd.f[1] = y0; cmd.f[2] = r0;
+    cmd.f[3] = x1; cmd.f[4] = y1; cmd.f[5] = r1;
+    pack_stops(colors, positions, count, cmd.floats);
+    if (count > 0) cmd.color = colors[0];
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_fill_gradient_conic(float cx, float cy,
+                                              float start_angle,
+                                              const Color* colors,
+                                              const float* positions,
+                                              int count) {
+    DrawCommand cmd{DrawCommand::Type::set_fill_gradient_conic};
+    cmd.f[0] = cx; cmd.f[1] = cy; cmd.f[2] = start_angle;
+    pack_stops(colors, positions, count, cmd.floats);
+    if (count > 0) cmd.color = colors[0];
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::clear_fill_gradient() {
+    commands_.push_back({DrawCommand::Type::clear_fill_gradient});
+}
+
+// ── Retained paths ───────────────────────────────────────────────────────────
+// The path is captured as an SVG `d` string so a test can assert on the exact
+// geometry in one comparison, instead of walking a dozen move_to/cubic_to
+// commands.
+
+void RecordingCanvas::fill_path(const Path& path, FillRule rule) {
+    DrawCommand cmd{DrawCommand::Type::fill_path_object};
+    cmd.text = path.to_svg_string();
+    cmd.f[0] = rule == FillRule::evenodd ? 1.0f : 0.0f;
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::stroke_path(const Path& path, const StrokeStyle& style) {
+    DrawCommand cmd{DrawCommand::Type::stroke_path_object};
+    cmd.text = path.to_svg_string();
+    cmd.f[0] = style.width;
+    cmd.f[1] = static_cast<float>(static_cast<int>(style.cap));
+    cmd.f[2] = static_cast<float>(static_cast<int>(style.join));
+    cmd.f[3] = style.miter_limit;
+    cmd.f[4] = style.dash_phase;
+    cmd.floats = style.dash;
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::clip_path(const Path& path, FillRule rule) {
+    DrawCommand cmd{DrawCommand::Type::clip_path_object};
+    cmd.text = path.to_svg_string();
+    cmd.f[0] = rule == FillRule::evenodd ? 1.0f : 0.0f;
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::draw_path_shadow(const Path& path, float dx, float dy,
+                                       float blur, float spread, Color color) {
+    DrawCommand cmd{DrawCommand::Type::draw_path_shadow};
+    cmd.text = path.to_svg_string();
+    cmd.f[0] = dx; cmd.f[1] = dy; cmd.f[2] = blur; cmd.f[3] = spread;
+    cmd.color = color;
+    commands_.push_back(std::move(cmd));
+}
+
+// ── Retained layers ──────────────────────────────────────────────────────────
+
+RecordingCanvas::LayerRecord* RecordingCanvas::find_layer(uint64_t id) {
+    if (id == 0) return nullptr;
+    for (auto& [lid, rec] : layers_)
+        if (lid == id) return &rec;
+    return nullptr;
+}
+
+const RecordingCanvas::LayerRecord* RecordingCanvas::find_layer(uint64_t id) const {
+    if (id == 0) return nullptr;
+    for (const auto& [lid, rec] : layers_)
+        if (lid == id) return &rec;
+    return nullptr;
+}
+
+Canvas::LayerHandle RecordingCanvas::begin_layer(Rect2D bounds, bool cacheable) {
+    const uint64_t id = next_layer_id_++;
+    layers_.emplace_back(id, LayerRecord{bounds, cacheable, /*sealed=*/false});
+    open_layers_.push_back(id);
+
+    DrawCommand cmd{DrawCommand::Type::begin_layer};
+    cmd.f[0] = bounds.x; cmd.f[1] = bounds.y;
+    cmd.f[2] = bounds.width; cmd.f[3] = bounds.height;
+    cmd.f[4] = cacheable ? 1.0f : 0.0f;
+    cmd.f[5] = static_cast<float>(id);
+    commands_.push_back(cmd);
+    return LayerHandle{id};
+}
+
+Canvas::LayerHandle RecordingCanvas::end_layer() {
+    if (open_layers_.empty()) return LayerHandle{};  // unbalanced — ignore
+    const uint64_t id = open_layers_.back();
+    open_layers_.pop_back();
+    if (LayerRecord* rec = find_layer(id)) rec->sealed = true;
+
+    DrawCommand cmd{DrawCommand::Type::end_layer};
+    cmd.f[0] = static_cast<float>(id);
+    commands_.push_back(cmd);
+    return LayerHandle{id};
+}
+
+void RecordingCanvas::draw_layer(LayerHandle layer, float alpha, BlendMode mode) {
+    DrawCommand cmd{DrawCommand::Type::draw_layer};
+    cmd.f[0] = static_cast<float>(layer.id);
+    cmd.f[1] = alpha;
+    cmd.f[2] = static_cast<float>(static_cast<int>(mode));
+    commands_.push_back(cmd);
+
+    // A non-cacheable layer is consumed by the draw — the GPU backends are
+    // free to recycle its texture immediately, so `layer_valid` must stop
+    // reporting true here or a caller would skip re-recording it next frame.
+    if (LayerRecord* rec = find_layer(layer.id); rec && !rec->cacheable)
+        invalidate_layer(layer);
+}
+
+void RecordingCanvas::draw_layer_fitted(LayerHandle layer, Rect2D dest) {
+    DrawCommand cmd{DrawCommand::Type::draw_layer_fitted};
+    cmd.f[0] = static_cast<float>(layer.id);
+    cmd.f[1] = dest.x; cmd.f[2] = dest.y;
+    cmd.f[3] = dest.width; cmd.f[4] = dest.height;
+    commands_.push_back(cmd);
+    if (LayerRecord* rec = find_layer(layer.id); rec && !rec->cacheable)
+        invalidate_layer(layer);
+}
+
+void RecordingCanvas::draw_layer_rotated(LayerHandle layer, float angle_rad) {
+    DrawCommand cmd{DrawCommand::Type::draw_layer_rotated};
+    cmd.f[0] = static_cast<float>(layer.id);
+    cmd.f[1] = angle_rad;
+    commands_.push_back(cmd);
+    if (LayerRecord* rec = find_layer(layer.id); rec && !rec->cacheable)
+        invalidate_layer(layer);
+}
+
+bool RecordingCanvas::layer_valid(LayerHandle layer) const {
+    const LayerRecord* rec = find_layer(layer.id);
+    return rec != nullptr && rec->sealed;
+}
+
+void RecordingCanvas::invalidate_layer(LayerHandle layer) {
+    if (layer.id == 0) return;
+    DrawCommand cmd{DrawCommand::Type::invalidate_layer};
+    cmd.f[0] = static_cast<float>(layer.id);
+    commands_.push_back(cmd);
+
+    for (auto it = layers_.begin(); it != layers_.end(); ++it) {
+        if (it->first == layer.id) {
+            layers_.erase(it);
+            return;
+        }
+    }
+}
+
 // ── compile_sksl fallback for non-Skia builds ────────────────────────────────
 #ifndef PULP_HAS_SKIA
 std::string Canvas::compile_sksl(const std::string& sksl) {

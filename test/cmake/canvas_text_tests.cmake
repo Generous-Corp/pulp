@@ -249,3 +249,9 @@ if(PULP_HAS_SKIA AND WIN32 AND PULP_D3D_AVAILABLE)
         ${SKIA_INCLUDE_DIRS})
     catch_discover_tests(pulp-test-font-rendering-goldens-d3d)
 endif()
+
+# Path: the retained vector value type. Tight-vs-hull bounds, the two fill rules
+# disagreeing about a twice-enclosed region, and scale_to_fit's centring and its
+# degenerate guard (a zero-width path scaled to a non-zero width is a division by
+# zero, and the "result" is a path of NaNs that renders as nothing, forever).
+pulp_add_test_suite(pulp-test-canvas-path LIBRARIES pulp::canvas)

@@ -29,6 +29,11 @@ CoreGraphicsCanvas::~CoreGraphicsCanvas() {
     release_path();
     release_conic_image();
     release_pattern_image();
+    // Retained compositing layers own CG resources that outlive a frame by
+    // design, so nothing else will free them — a cacheable layer's CGImageRef
+    // would leak for the life of the process without this.
+    for (auto& [id, layer] : layers_) release_layer(layer);
+    layers_.clear();
 }
 
 void CoreGraphicsCanvas::release_conic_image() {

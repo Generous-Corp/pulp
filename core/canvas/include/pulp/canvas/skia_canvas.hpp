@@ -131,6 +131,32 @@ public:
     void fill_path(const Point2D* points, size_t count,
                    FillRule rule = FillRule::nonzero) override;
 
+    // ── Retained paths (pulp::canvas::Path) ──────────────────────────────
+    // Implemented in skia_canvas_path.cpp. Each converts the Path to one
+    // SkPath and issues a single draw, rather than replaying verbs through the
+    // scratch path builder. The `using` declarations keep the polygon
+    // overloads above visible — a same-named override would otherwise hide
+    // them from anyone holding a SkiaCanvas&.
+    using Canvas::fill_path;
+    using Canvas::stroke_path;
+    void fill_path(const Path& path, FillRule rule = FillRule::nonzero) override;
+    void stroke_path(const Path& path, const StrokeStyle& style) override;
+    void clip_path(const Path& path, FillRule rule = FillRule::nonzero) override;
+    void draw_path_shadow(const Path& path, float dx, float dy,
+                          float blur, float spread, Color color) override;
+
+    // ── Retained compositing layers ──────────────────────────────────────
+    // Real offscreen SkSurfaces, sealed to SkImages that OUTLIVE the frame
+    // when `cacheable` — which is the whole point of the handle API.
+    LayerHandle begin_layer(Rect2D bounds, bool cacheable = false) override;
+    LayerHandle end_layer() override;
+    void draw_layer(LayerHandle layer, float alpha = 1.0f,
+                    BlendMode mode = BlendMode::normal) override;
+    void draw_layer_fitted(LayerHandle layer, Rect2D dest) override;
+    void draw_layer_rotated(LayerHandle layer, float angle_rad) override;
+    bool layer_valid(LayerHandle layer) const override;
+    void invalidate_layer(LayerHandle layer) override;
+
     // ── Text ─────────────────────────────────────────────────────────────
     void set_font(const std::string& family, float size) override;
     void set_font_full(const std::string& family, float size,
@@ -509,6 +535,36 @@ private:
     // is null we skip the wrap entirely (the "none" / no-op path).
     std::string filter_source_ = "none";
     sk_sp<SkImageFilter> filter_image_filter_;
+
+    // ── Retained layer state (skia_canvas_path.cpp) ──────────────────────
+    // A sealed layer is an SkImage that survives past end_layer(). Cacheable
+    // layers stay in `layers_` until explicitly invalidated — across frames,
+    // across paints, until the owner says otherwise. Non-cacheable ones are
+    // dropped the first time they are drawn.
+    struct SkiaLayer {
+        sk_sp<SkImage> image;      ///< null until end_layer() seals it
+        sk_sp<SkSurface> surface;  ///< live only while recording
+        Rect2D bounds;               ///< in the user space of begin_layer()
+        float scale_x = 1.0f;      ///< device pixels per user unit at record time
+        float scale_y = 1.0f;
+        bool cacheable = false;
+    };
+    std::vector<std::pair<uint64_t, SkiaLayer>> layers_;
+
+    /// Canvases we redirected away from, innermost last. `canvas_` points at
+    /// the layer surface while recording; these are what we put back.
+    struct OpenLayer {
+        uint64_t id = 0;
+        SkCanvas* previous_canvas = nullptr;
+    };
+    std::vector<OpenLayer> open_layers_;
+    uint64_t next_layer_id_ = 1;
+
+    SkiaLayer* find_layer(uint64_t id);
+    const SkiaLayer* find_layer(uint64_t id) const;
+    /// Shared by draw_layer / draw_layer_fitted / draw_layer_rotated.
+    void draw_layer_common(LayerHandle layer, const SkMatrix& placement,
+                           float alpha, BlendMode mode);
 
 public:
     // Wrap an arbitrary paint with the active ctx.filter

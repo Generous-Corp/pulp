@@ -8,7 +8,7 @@ using namespace pulp::canvas;
 
 namespace {
 
-void require_rect(const Rect& rect, float x, float y, float width, float height) {
+void require_rect(const Rect2D& rect, float x, float y, float width, float height) {
     REQUIRE(rect.x == Catch::Approx(x));
     REQUIRE(rect.y == Catch::Approx(y));
     REQUIRE(rect.width == Catch::Approx(width));
@@ -80,11 +80,11 @@ TEST_CASE("RectangleList subtract handles no-op and full-cover cases",
 
     rl.subtract({20, 20, 5, 5});
     REQUIRE(rl.size() == 1);
-    REQUIRE(rl[0] == Rect{0, 0, 10, 10});
+    REQUIRE(rl[0] == Rect2D{0, 0, 10, 10});
 
     rl.subtract({10, 0, 5, 10});
     REQUIRE(rl.size() == 1);
-    REQUIRE(rl[0] == Rect{0, 0, 10, 10});
+    REQUIRE(rl[0] == Rect2D{0, 0, 10, 10});
 
     rl.subtract({-1, -1, 12, 12});
     REQUIRE(rl.empty());
@@ -113,7 +113,7 @@ TEST_CASE("RectangleList empty clip and subtract are no-ops",
 
     rl.subtract({});
     REQUIRE(rl.size() == 1);
-    REQUIRE(rl[0] == Rect{0, 0, 10, 10});
+    REQUIRE(rl[0] == Rect2D{0, 0, 10, 10});
 
     auto clipped_empty = rl.clipped({});
     REQUIRE(clipped_empty.empty());
@@ -165,9 +165,9 @@ TEST_CASE("RectangleList clipped keeps only intersections", "[canvas][rect][issu
     REQUIRE(clipped[1].height == Catch::Approx(6.0f));
 }
 
-TEST_CASE("Rect intersection", "[canvas][rect]") {
-    Rect a{0, 0, 10, 10};
-    Rect b{5, 5, 10, 10};
+TEST_CASE("Rect2D intersection", "[canvas][rect]") {
+    Rect2D a{0, 0, 10, 10};
+    Rect2D b{5, 5, 10, 10};
     REQUIRE(a.intersects(b));
 
     auto inter = a.intersection(b);
@@ -177,25 +177,25 @@ TEST_CASE("Rect intersection", "[canvas][rect]") {
     REQUIRE(inter.height == Catch::Approx(5.0f));
 }
 
-TEST_CASE("Rect no intersection", "[canvas][rect]") {
-    Rect a{0, 0, 10, 10};
-    Rect b{20, 20, 10, 10};
+TEST_CASE("Rect2D no intersection", "[canvas][rect]") {
+    Rect2D a{0, 0, 10, 10};
+    Rect2D b{20, 20, 10, 10};
     REQUIRE_FALSE(a.intersects(b));
     auto inter = a.intersection(b);
     REQUIRE(inter.empty());
 }
 
-TEST_CASE("Rect contains point", "[canvas][rect]") {
-    Rect r{10, 20, 30, 40};
+TEST_CASE("Rect2D contains point", "[canvas][rect]") {
+    Rect2D r{10, 20, 30, 40};
     REQUIRE(r.contains(15, 25));
     REQUIRE(r.contains(10, 20));       // inclusive at top-left
     REQUIRE_FALSE(r.contains(40, 60)); // exclusive at bottom-right
     REQUIRE_FALSE(r.contains(5, 25));  // outside left
 }
 
-TEST_CASE("Rect enclosing union", "[canvas][rect]") {
-    Rect a{0, 0, 10, 10};
-    Rect b{5, 5, 10, 10};
+TEST_CASE("Rect2D enclosing union", "[canvas][rect]") {
+    Rect2D a{0, 0, 10, 10};
+    Rect2D b{5, 5, 10, 10};
     auto u = a.enclosing_union(b);
     REQUIRE(u.x == Catch::Approx(0.0f));
     REQUIRE(u.y == Catch::Approx(0.0f));
@@ -203,31 +203,31 @@ TEST_CASE("Rect enclosing union", "[canvas][rect]") {
     REQUIRE(u.height == Catch::Approx(15.0f));
 }
 
-TEST_CASE("Rect enclosing union preserves non-empty side",
+TEST_CASE("Rect2D enclosing union preserves non-empty side",
           "[canvas][rect][issue-641]") {
-    Rect empty{};
-    Rect non_empty{3, 4, 5, 6};
+    Rect2D empty{};
+    Rect2D non_empty{3, 4, 5, 6};
 
     REQUIRE(empty.enclosing_union(non_empty) == non_empty);
     REQUIRE(non_empty.enclosing_union(empty) == non_empty);
 }
 
-TEST_CASE("Rect right bottom and empty semantics cover zero and negative extents",
+TEST_CASE("Rect2D right bottom and empty semantics cover zero and negative extents",
           "[canvas][rect]") {
-    Rect normal{2, 3, 4, 5};
+    Rect2D normal{2, 3, 4, 5};
     REQUIRE(normal.right() == Catch::Approx(6.0f));
     REQUIRE(normal.bottom() == Catch::Approx(8.0f));
     REQUIRE_FALSE(normal.empty());
 
-    REQUIRE(Rect{0, 0, 0, 5}.empty());
-    REQUIRE(Rect{0, 0, 5, 0}.empty());
-    REQUIRE(Rect{0, 0, -1, 5}.empty());
-    REQUIRE(Rect{0, 0, 5, -1}.empty());
+    REQUIRE(Rect2D{0, 0, 0, 5}.empty());
+    REQUIRE(Rect2D{0, 0, 5, 0}.empty());
+    REQUIRE(Rect2D{0, 0, -1, 5}.empty());
+    REQUIRE(Rect2D{0, 0, 5, -1}.empty());
 }
 
-TEST_CASE("Rect contains keeps right and bottom edges exclusive",
+TEST_CASE("Rect2D contains keeps right and bottom edges exclusive",
           "[canvas][rect]") {
-    Rect r{-2, -3, 5, 7};
+    Rect2D r{-2, -3, 5, 7};
 
     REQUIRE(r.contains(-2.0f, -3.0f));
     REQUIRE(r.contains(2.999f, 3.999f));
@@ -237,10 +237,10 @@ TEST_CASE("Rect contains keeps right and bottom edges exclusive",
     REQUIRE_FALSE(r.contains(0.0f, -3.001f));
 }
 
-TEST_CASE("Rect intersection is commutative for overlapping rectangles",
+TEST_CASE("Rect2D intersection is commutative for overlapping rectangles",
           "[canvas][rect]") {
-    Rect a{-5, 2, 12, 6};
-    Rect b{0, -1, 4, 10};
+    Rect2D a{-5, 2, 12, 6};
+    Rect2D b{0, -1, 4, 10};
 
     auto ab = a.intersection(b);
     auto ba = b.intersection(a);
@@ -249,18 +249,18 @@ TEST_CASE("Rect intersection is commutative for overlapping rectangles",
     require_rect(ab, 0, 2, 4, 6);
 }
 
-TEST_CASE("Rect intersection of contained rectangle returns contained bounds",
+TEST_CASE("Rect2D intersection of contained rectangle returns contained bounds",
           "[canvas][rect]") {
-    Rect outer{-10, -10, 30, 30};
-    Rect inner{-2, 3, 5, 6};
+    Rect2D outer{-10, -10, 30, 30};
+    Rect2D inner{-2, 3, 5, 6};
 
     REQUIRE(outer.intersection(inner) == inner);
     REQUIRE(inner.intersection(outer) == inner);
 }
 
-TEST_CASE("Rect intersection treats edge and corner contact as empty",
+TEST_CASE("Rect2D intersection treats edge and corner contact as empty",
           "[canvas][rect]") {
-    Rect base{0, 0, 10, 10};
+    Rect2D base{0, 0, 10, 10};
 
     REQUIRE_FALSE(base.intersects({10, 2, 3, 3}));
     REQUIRE_FALSE(base.intersects({2, 10, 3, 3}));
@@ -269,19 +269,19 @@ TEST_CASE("Rect intersection treats edge and corner contact as empty",
     REQUIRE(base.intersection({2, 10, 3, 3}).empty());
 }
 
-TEST_CASE("Rect enclosing union handles negative coordinates",
+TEST_CASE("Rect2D enclosing union handles negative coordinates",
           "[canvas][rect]") {
-    Rect a{-10, 5, 4, 5};
-    Rect b{3, -2, 8, 3};
+    Rect2D a{-10, 5, 4, 5};
+    Rect2D b{3, -2, 8, 3};
 
     auto u = a.enclosing_union(b);
     require_rect(u, -10, -2, 21, 12);
 }
 
-TEST_CASE("Rect enclosing union of two empty rectangles is empty",
+TEST_CASE("Rect2D enclosing union of two empty rectangles is empty",
           "[canvas][rect]") {
-    Rect a{5, 6, 0, 7};
-    Rect b{-1, -2, 8, 0};
+    Rect2D a{5, 6, 0, 7};
+    Rect2D b{-1, -2, 8, 0};
 
     REQUIRE(a.enclosing_union(b).empty());
     REQUIRE(b.enclosing_union(a).empty());
@@ -295,9 +295,9 @@ TEST_CASE("RectangleList preserves insertion order for indexing and iteration",
     rl.add({2, 0, 1, 1});
 
     REQUIRE(rl.size() == 3);
-    REQUIRE(rl[0] == Rect{3, 0, 1, 1});
-    REQUIRE(rl[1] == Rect{1, 0, 1, 1});
-    REQUIRE(rl[2] == Rect{2, 0, 1, 1});
+    REQUIRE(rl[0] == Rect2D{3, 0, 1, 1});
+    REQUIRE(rl[1] == Rect2D{1, 0, 1, 1});
+    REQUIRE(rl[2] == Rect2D{2, 0, 1, 1});
 
     float sum_x = 0.0f;
     for (const auto& rect : rl)
@@ -332,7 +332,7 @@ TEST_CASE("RectangleList bounding box for a single rectangle is that rectangle",
     RectangleList rl;
     rl.add({-4, 8, 6, 2});
 
-    REQUIRE(rl.bounding_box() == Rect{-4, 8, 6, 2});
+    REQUIRE(rl.bounding_box() == Rect2D{-4, 8, 6, 2});
 }
 
 TEST_CASE("RectangleList total_area intentionally double-counts overlaps",
@@ -514,7 +514,7 @@ TEST_CASE("RectangleList clear allows reuse without stale bounds",
     rl.add({5, 6, 7, 8});
 
     REQUIRE(rl.size() == 1);
-    REQUIRE(rl.bounding_box() == Rect{5, 6, 7, 8});
+    REQUIRE(rl.bounding_box() == Rect2D{5, 6, 7, 8});
     REQUIRE(rl.total_area() == Catch::Approx(56.0f));
 }
 

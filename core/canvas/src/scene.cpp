@@ -95,39 +95,18 @@ void SceneGroup::paint_geometry(Canvas& canvas) const {
 
 SceneRect ScenePath::local_bounds() const {
     if (!bounds_dirty_) return bounds_cache_;
-    bool any = false;
-    float minx = 0, miny = 0, maxx = 0, maxy = 0;
-    auto add = [&](float x, float y) {
-        if (!any) {
-            minx = maxx = x; miny = maxy = y; any = true;
-        } else {
-            if (x < minx) minx = x; if (x > maxx) maxx = x;
-            if (y < miny) miny = y; if (y > maxy) maxy = y;
-        }
-    };
-    // AABB over all path control points. Cubic / quad curves are bounded
-    // by their hull, so this slightly over-estimates the *visual* bounds
-    // but never under-estimates them — which is exactly what a repaint
-    // rect needs.
-    for (const auto& cmd : commands_) {
-        switch (cmd.op) {
-            case Op::move_to:
-            case Op::line_to:
-                add(cmd.f0, cmd.f1);
-                break;
-            case Op::quad_to:
-                add(cmd.f0, cmd.f1);
-                add(cmd.f2, cmd.f3);
-                break;
-            case Op::cubic_to:
-                add(cmd.f0, cmd.f1);
-                add(cmd.f2, cmd.f3);
-                add(cmd.f4, cmd.f5);
-                break;
-            case Op::close:
-                break;
-        }
-    }
+
+    // Deliberately the CONTROL-point hull, not Path::bounds()'s tight curve
+    // extrema. This value is a repaint rect: over-estimating costs a few
+    // redrawn pixels, under-estimating leaves rendering artifacts on screen.
+    // The hull is never smaller than the true bounds and is far cheaper (no
+    // derivative roots to solve), so it is the right trade here — whereas
+    // scale_to_fit and hit-testing need Path::bounds()'s exact answer.
+    const Rect2D b = path_.control_bounds();
+    const bool any = !path_.is_empty();
+
+    float minx = b.x, miny = b.y;
+    float maxx = b.x + b.width, maxy = b.y + b.height;
     if (any && stroke_enabled_) {
         const float r = stroke_width_ * 0.5f;
         minx -= r; miny -= r; maxx += r; maxy += r;
@@ -139,26 +118,18 @@ SceneRect ScenePath::local_bounds() const {
 }
 
 void ScenePath::paint_geometry(Canvas& canvas) const {
-    if (commands_.empty()) return;
+    if (path_.is_empty()) return;
     if (fill_enabled_) canvas.set_fill_color(fill_color_);
     if (stroke_enabled_) {
         canvas.set_stroke_color(stroke_color_);
         canvas.set_line_width(stroke_width_);
     }
+    // Replay the retained Path through the immediate-mode builder, exactly as
+    // before. Both fill and stroke must see the same scratch path, so this
+    // cannot use the single-shot Canvas::fill_path(Path) overload (which owns
+    // — and resets — the path it builds).
     canvas.begin_path();
-    for (const auto& cmd : commands_) {
-        switch (cmd.op) {
-            case Op::move_to:  canvas.move_to(cmd.f0, cmd.f1); break;
-            case Op::line_to:  canvas.line_to(cmd.f0, cmd.f1); break;
-            case Op::quad_to:
-                canvas.quad_to(cmd.f0, cmd.f1, cmd.f2, cmd.f3);
-                break;
-            case Op::cubic_to:
-                canvas.cubic_to(cmd.f0, cmd.f1, cmd.f2, cmd.f3, cmd.f4, cmd.f5);
-                break;
-            case Op::close:    canvas.close_path(); break;
-        }
-    }
+    path_.replay(canvas);
     if (fill_enabled_) canvas.fill_current_path(fill_rule_);
     if (stroke_enabled_) canvas.stroke_current_path();
 }
