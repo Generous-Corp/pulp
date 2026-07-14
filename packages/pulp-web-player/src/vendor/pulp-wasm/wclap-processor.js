@@ -139,6 +139,12 @@ const CTRL_RESYNC = 56;
 const FLAG_WORKER_READY = 1 << 0;
 const FLAG_DEVICE_LOST = 1 << 1;
 const FLAG_SHUTDOWN = 1 << 2;
+// Is the GPU the engine the plugin is actually LISTENING to? Set by the main thread
+// from the plugin's Engine parameter. The worker does no GPU work while it is clear —
+// convolving blocks nobody will hear is exactly what "Engine: CPU" must not do. It is a
+// flag rather than a message because the worker reads it once per loop tick and a message
+// would need draining on a thread whose whole job is to not stall.
+const FLAG_ENGINE_GPU = 1 << 3;
 
 // stats — Float64Array(16) over bytes [256,384), written by the worker under the
 // CTRL_STATS_SEQ seqlock, read by the page at ~10 Hz.
@@ -153,6 +159,11 @@ const STAT_GPU_NS_LAST = 7;        // GPU timestamp-query span, 0 when unsupport
 const STAT_QUEUE_SUBMITS = 8;
 const STAT_MAP_RESOLVES = 9;
 const STAT_STATE = 10;             // 0 init, 1 ready, 2 device-lost, 3 failed
+// Blocks replayed to rebuild the convolver's delay line after an Engine=CPU stretch, during
+// which the worker does no GPU work and the line therefore goes stale. Observable on purpose:
+// "the GPU is idle on CPU" and "the flip back is still correct" are two claims, and this is
+// the evidence for the second one.
+const STAT_PRIMED = 11;
 const STATS_DOUBLES = 16;
 
 const STATE_INIT = 0;
@@ -393,6 +404,7 @@ class GpuRing {
     st[STAT_QUEUE_SUBMITS] = s.queueSubmits || 0;
     st[STAT_MAP_RESOLVES] = s.mapResolves || 0;
     st[STAT_STATE] = s.state == null ? STATE_INIT : s.state;
+    st[STAT_PRIMED] = s.primed || 0;
     Atomics.add(c, CTRL_STATS_SEQ, 1);           // even: snapshot complete
   }
 
@@ -409,6 +421,7 @@ class GpuRing {
         lastBlockUs: st[STAT_LAST_BLOCK_US], avgBlockUs: st[STAT_AVG_BLOCK_US],
         gpuNsLast: st[STAT_GPU_NS_LAST], queueSubmits: st[STAT_QUEUE_SUBMITS],
         mapResolves: st[STAT_MAP_RESOLVES], state: st[STAT_STATE],
+        primed: st[STAT_PRIMED],
       };
       if (Atomics.load(c, CTRL_STATS_SEQ) === seq) return snap;
     }
@@ -755,9 +768,13 @@ class RealtimeWclapPlugin {
       // display unit from them (deriveDisplayUnit in wclap-abi.mjs), because
       // clap_param_info carries no unit and the UI formats numbers itself.
       const other = max !== def ? max : min;
+      const pname = h.readCstr(buf + PARAM_INFO.name, 256);
+      // Which parameter selects the offload engine. Captured HERE because this is the one
+      // place the host sees parameter NAMES; everything downstream is ids and floats.
+      if (/^engine$/i.test(pname)) this._engineParamId = id;
       out.push({
         id,
-        name: h.readCstr(buf + PARAM_INFO.name, 256),
+        name: pname,
         min, max, default: def,
         stepped, boolean: stepped && (max - min) === 1,
         textProbes: [{ value: def, text: this.valueToText(id, def) },
@@ -1080,6 +1097,9 @@ class WclapProcessor extends AudioWorkletProcessor {
     this.gpuRing = null;
     this.ready = false;
     this.pendingParams = []; this.pendingMidi = []; this.pendingSysex = [];
+    this._engineParamId = null;      // set when the params are enumerated, by NAME
+    this._engineOn = false;          // the plugin boots on its CPU engine
+    this._engineFlagged = false;     // what the ring currently says, so we only write on change
     this.quanta = 0;
     const reportHz = o.reportHz || 20;
     this.reportEvery = Math.max(1, Math.round(sampleRate / 128 / reportHz));
@@ -1192,8 +1212,50 @@ class WclapProcessor extends AudioWorkletProcessor {
     if (this.pendingMidi.length) { midi = this.pendingMidi; this.pendingMidi = []; }
     if (this.pendingSysex.length) { sysex = this.pendingSysex; this.pendingSysex = []; }
 
+    // ── The GPU works ONLY while the plugin is actually on the GPU engine. ──────────
+    //
+    // Owned HERE, not by the page. The plugin pushes every block across the xfer seam in
+    // both engines (that is what keeps the two paths sample-aligned), so a worker that
+    // convolves whatever it is handed burns the GPU flat out while the user is on CPU —
+    // measured at ~100 dispatches/second producing audio nobody hears. The worker skips all
+    // GPU work while this flag is clear.
+    //
+    // The page must NOT be the one to set it: a page that forgets leaves the worker idle and
+    // the GPU engine silent, which is exactly what happened to the engine-proof fixture the
+    // first time this was wired page-side. The parameter IS the truth — a <select>, a preset,
+    // and a host automation lane are all just ways of moving it — and the audio thread is
+    // where the parameter lands. So every consumer of the lane gets this for free.
+    const engineId = this.plugin ? this.plugin._engineParamId : null;
+    if (this.gpuRing && engineId != null) {
+      for (const pv of params) {
+        if (pv.id === engineId) this._engineOn = pv.value >= 0.5;
+      }
+      if (this._engineOn !== this._engineFlagged) {
+        if (this._engineOn) this.gpuRing.setFlag(FLAG_ENGINE_GPU);
+        else this.gpuRing.clearFlag(FLAG_ENGINE_GPU);
+        this._engineFlagged = this._engineOn;
+      }
+    }
+
     const captured = this.plugin.processQuantum(inCh, frames, params, midi, sysex, out);
-    if (captured.params.length) this.port.postMessage({ type: "paramsChanged", changes: captured.params.slice() });
+    if (captured.params.length) {
+      // The PLUGIN moved a parameter (a preset, a state load, a host automation lane). Engine
+      // is one it can move, so the flag has to follow from this direction too — otherwise a
+      // loaded preset that selects GPU would leave the worker idle and the plugin silent.
+      const engOutId = this.plugin ? this.plugin._engineParamId : null;
+      if (this.gpuRing && engOutId != null) {
+        for (const c of captured.params) {
+          if (c.id !== engOutId) continue;
+          this._engineOn = c.value >= 0.5;
+          if (this._engineOn !== this._engineFlagged) {
+            if (this._engineOn) this.gpuRing.setFlag(FLAG_ENGINE_GPU);
+            else this.gpuRing.clearFlag(FLAG_ENGINE_GPU);
+            this._engineFlagged = this._engineOn;
+          }
+        }
+      }
+      this.port.postMessage({ type: "paramsChanged", changes: captured.params.slice() });
+    }
     if (captured.midi.length) this.port.postMessage({ type: "midiOut", events: captured.midi.map((m) => ({ bytes: m.bytes.slice() })) });
     // Rare by construction — only when the plugin actually rebuilt its IR (a Size move,
     // an uploaded impulse), which is a user action, not a per-block event. The array is

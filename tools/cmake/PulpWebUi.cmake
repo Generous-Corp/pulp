@@ -287,7 +287,7 @@ endif()
 # UI -> host is NOT here: it leaves through EM_JS calls into Module.onParamChange
 # / onGestureBegin / onGestureEnd.
 set(_PULP_WEBUI_EXPORTED_FUNCTIONS
-    "['_malloc','_free','_pulp_ui_add_param','_pulp_ui_init','_pulp_ui_resize','_pulp_ui_set_param','_pulp_ui_get_param','_pulp_ui_set_gpu_status','_pulp_ui_repaint','_pulp_ui_gpu_available','_pulp_ui_widget_rect','_pulp_ui_capture_png','_pulp_ui_shutdown']")
+    "['_malloc','_free','_pulp_ui_add_param','_pulp_ui_init','_pulp_ui_resize','_pulp_ui_set_param','_pulp_ui_get_param','_pulp_ui_repaint','_pulp_ui_gpu_available','_pulp_ui_widget_rect','_pulp_ui_capture_png','_pulp_ui_shutdown']")
 
 # pulp_add_web_ui(<Name> ENTRY <entry.cpp> [INCLUDES <dir>...] [ASSETS <file>...])
 #
