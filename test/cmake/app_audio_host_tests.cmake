@@ -13,6 +13,10 @@ pulp_add_test_suite(pulp-test-param-attachment LIBRARIES pulp::view)
 # law, gesture bracketing, and the notify policy.
 pulp_add_test_suite(pulp-test-slider-core LIBRARIES pulp::view)
 
+# The paint delegate: subtree inheritance, partial override, and the units each
+# control shape reasons in.
+pulp_add_test_suite(pulp-test-widget-painter LIBRARIES pulp::view)
+
 # App framework tests (KeyMapping, MenuBar, Toolbar, AppSettings)
 pulp_add_test_suite(pulp-test-app-framework LIBRARIES pulp::view)
 
