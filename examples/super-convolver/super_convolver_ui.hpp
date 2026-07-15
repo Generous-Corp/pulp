@@ -175,7 +175,10 @@ public:
         canvas.stroke_circle(ix, iy, ir);
         canvas.set_fill_color(tk_label());
         canvas.set_font("Inter", 11.0f * s);
-        centered_text(canvas, "i", ix, iy + 4.0f * s, 11.0f * s);
+        // "i" is a NARROW glyph, so centered_text's char-count width estimate (px * 0.52)
+        // over-measures it and nudges it left of the circle's center. Center on its true
+        // advance (~0.28em) so the stem sits dead-center.
+        canvas.fill_text("i", ix - 11.0f * s * 0.14f, iy + 4.0f * s);
 
         const auto g = proc_.gpu_status();
 
@@ -446,7 +449,11 @@ private:
         // web it is four — Rooms and Flow do not exist there (see build_sliders()) — and
         // dividing by a hardcoded 5 would both leave a dead gap and, worse, index past the
         // end of the list. It did: it faulted paint() out of bounds on the first frame.
-        const float cw = controls_.width / static_cast<float>(sliders_.size() + 1);
+        // Fill the row EVENLY: one cell per visible slider spanning the full control width, so
+        // the group has even left/right padding instead of a dead cell hanging off the right.
+        // (Divide by the LIVE count, never a hardcoded 5 — Rooms/Flow are absent on some builds,
+        // and dividing by 5 both left a gap and indexed past the end, faulting paint().)
+        const float cw = controls_.width / static_cast<float>(sliders_.size());
         const float label_h = 20 * s, value_h = 22 * s, pad = 10 * s;
         for (int i = 0; i < static_cast<int>(sliders_.size()); ++i) {
             Slider& sl = sliders_[static_cast<size_t>(i)];
