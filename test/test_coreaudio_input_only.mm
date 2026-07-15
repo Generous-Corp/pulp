@@ -6,11 +6,26 @@
 // outputs are not open" is a strictly stronger safety guarantee than "the
 // outputs are open but we promise to write zeros".
 //
-// This test is capture-only and read-only: it never emits a sample and never
-// repoints a system default, so it is safe on shared CI. It skips cleanly (with
-// a reason) when the host has no input-capable device — e.g. a headless Mac with
-// no microphone. When an input device IS present it runs for real, so it is not
-// a no-op on CI.
+// This test never emits a sample and never repoints a system default. But
+// opening a device is not free of side effects: every open()/start() cycle
+// re-clocks the selected hardware, and a pro interface like an Apogee Symphony
+// audibly clicks its output relay each time. A test has no business doing that
+// to whatever the developer is listening through, nor to a shared self-hosted
+// CI Mac. So every section here that opens a device is opt-in, exactly like the
+// live device switch in test_coreaudio_default_follow.mm:
+//
+//   * PULP_TEST_AUDIO_OPEN_HARDWARE=1 — required to open ANY real device. Unset
+//     (the default, CI included) skips every opening section with a reason, so
+//     `ctest -R coreaudio` touches no hardware and re-clocks nothing.
+//   * PULP_TEST_AUDIO_DEVICE_UID=<DeviceInfo::id> — optional. Pins exactly which
+//     device the opening sections may touch (e.g. a virtual/aggregate loopback
+//     such as BlackHole) instead of the auto-selected default/first device; a
+//     section that cannot fill its channel role with the pinned device skips
+//     rather than reaching for the system default.
+//
+// A single opt-in check at the top of the test case gates every one of them:
+// with the opt-in unset nothing is enumerated or opened. When it IS set, the
+// -10851 pure-input and -10868 input-only regression guards assert in full.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,6 +33,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
@@ -26,13 +42,34 @@ using namespace pulp::audio;
 
 namespace {
 
+// Opening a real device re-clocks user-facing hardware (see the file header), so
+// every section that calls open()/start() is opt-in. Unset by default — shared
+// CI included — which keeps `ctest -R coreaudio` from clicking an interface's
+// output relay. Mirrors PULP_TEST_AUDIO_DEVICE_SWITCH in
+// test_coreaudio_default_follow.mm.
+bool audio_hardware_open_enabled() {
+    return std::getenv("PULP_TEST_AUDIO_OPEN_HARDWARE") != nullptr;
+}
+
+// Optional pin: when PULP_TEST_AUDIO_DEVICE_UID is set, only a device whose
+// DeviceInfo::id equals it is eligible to be opened, so a run can target a
+// known-safe virtual/loopback device instead of the system default. A section
+// that cannot fill its channel role with the pinned device skips rather than
+// falling back. Unset means "use the role's auto-selected device". DeviceInfo::id
+// is the SDK's platform-unique identifier (on CoreAudio the AudioDeviceID
+// string) — there is no separate stable UID field to match against.
+bool device_matches_pin(const DeviceInfo& d) {
+    const char* pin = std::getenv("PULP_TEST_AUDIO_DEVICE_UID");
+    return pin == nullptr || d.id == pin;
+}
+
 // First input-capable device, preferring the system default input.
 bool find_input_device(AudioSystem& sys, DeviceInfo& out) {
     const auto devs = sys.enumerate_devices();
     for (const auto& d : devs)
-        if (d.max_input_channels > 0 && d.is_default_input) { out = d; return true; }
+        if (d.max_input_channels > 0 && d.is_default_input && device_matches_pin(d)) { out = d; return true; }
     for (const auto& d : devs)
-        if (d.max_input_channels > 0) { out = d; return true; }
+        if (d.max_input_channels > 0 && device_matches_pin(d)) { out = d; return true; }
     return false;
 }
 
@@ -48,7 +85,7 @@ bool find_input_device(AudioSystem& sys, DeviceInfo& out) {
 // while input-only capture was broken for every real microphone.
 bool find_pure_input_device(AudioSystem& sys, DeviceInfo& out) {
     for (const auto& d : sys.enumerate_devices())
-        if (d.max_input_channels > 0 && d.max_output_channels == 0) { out = d; return true; }
+        if (d.max_input_channels > 0 && d.max_output_channels == 0 && device_matches_pin(d)) { out = d; return true; }
     return false;
 }
 
@@ -65,7 +102,7 @@ bool find_pure_input_device(AudioSystem& sys, DeviceInfo& out) {
 std::vector<DeviceInfo> non_default_output_devices(AudioSystem& sys) {
     std::vector<DeviceInfo> out;
     for (const auto& d : sys.enumerate_devices())
-        if (d.max_output_channels >= 2 && !d.is_default_output) out.push_back(d);
+        if (d.max_output_channels >= 2 && !d.is_default_output && device_matches_pin(d)) out.push_back(d);
     return out;
 }
 
@@ -135,6 +172,20 @@ RunObservation run_briefly(AudioDevice& dev) {
 
 TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
           "[audio][coreaudio][input-only]") {
+    // Opt-in gate. Opening any device below re-clocks user-facing hardware — a pro
+    // interface audibly clicks its output relay — so skip the whole case unless the
+    // developer explicitly asks for it. Same shape as the live-switch gate in
+    // test_coreaudio_default_follow.mm. A single top-level return (rather than one
+    // per SECTION) is deliberate: an early return inside a SECTION hides every
+    // later sibling SECTION from Catch2's discovery, so a per-section gate would
+    // silently stop the -10868 / output / duplex guards from ever running.
+    if (!audio_hardware_open_enabled()) {
+        SUCCEED("set PULP_TEST_AUDIO_OPEN_HARDWARE=1 to open a real audio device — "
+                "skipping every open()/start() section so the suite never re-clocks "
+                "the developer's interface or a shared CI Mac");
+        return;
+    }
+
     auto sys = create_audio_system();
     REQUIRE(sys);
 
@@ -145,8 +196,9 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
     }
 
     // The regression guard for the AUHAL EnableIO/CurrentDevice ordering bug.
-    // The section above can pass on a duplex default input even when this is
-    // broken; only a device with ZERO output streams exercises the failure.
+    // The default-input capture case (next section) can pass on a duplex default
+    // input even when this is broken; only a device with ZERO output streams
+    // exercises the failure.
     SECTION("input-only open succeeds on a device with NO output channels") {
         DeviceInfo pure;
         if (!find_pure_input_device(*sys, pure)) {
@@ -270,7 +322,7 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
         DeviceInfo duplex;
         bool have_duplex = false;
         for (const auto& d : sys->enumerate_devices()) {
-            if (d.max_input_channels > 0 && d.max_output_channels > 0) {
+            if (d.max_input_channels > 0 && d.max_output_channels > 0 && device_matches_pin(d)) {
                 duplex = d;
                 have_duplex = true;
                 break;
