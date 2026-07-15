@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06700"></a>
+## [0.670.0] - 2026-07-14
+
+- audit/source provenance examples dsp ux 20260714 ([#6126](https://github.com/danielraffel/pulp/pull/6126))
+- docs: note the neutrality + US-English gates in the versioning guide ([#6123](https://github.com/danielraffel/pulp/pull/6123))
+- docs(hosting): align host-demo + guide with multi-format loading ([#6125](https://github.com/danielraffel/pulp/pull/6125))
+
 <a id="v06691"></a>
 ## [0.669.1] - 2026-07-14
 
@@ -6390,6 +6397,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.670.0]: https://github.com/danielraffel/pulp/releases/tag/v0.670.0
 [0.669.1]: https://github.com/danielraffel/pulp/releases/tag/v0.669.1
 [0.669.0]: https://github.com/danielraffel/pulp/releases/tag/v0.669.0
 [0.668.0]: https://github.com/danielraffel/pulp/releases/tag/v0.668.0
