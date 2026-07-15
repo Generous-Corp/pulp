@@ -54,6 +54,28 @@ summary/watch commands.
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
 
+## Test lanes — what gates the required `macos` check
+
+Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
+`macos` check goes red on a test unrelated to the diff, check the label:
+
+- `slow` and `validation`-labeled tests are **excluded** from the required gate
+  (`.shipyard/config.toml` `test = "ctest ... --label-exclude \"validation|slow\""`,
+  matching `build.yml`'s PR ctest and `cross-platform-check.yml`). The required
+  gate also runs `--repeat until-pass:2`, so a single timing-flake self-heals.
+- **`validation` is example-only** — the `pluginval-*` / `auval-*` /
+  `clap-dlopen-*` validators under `examples/`. They do NOT gate core PRs; they
+  gate on the **`example-validation`** lane
+  (`.github/workflows/examples-validation.yml`), which blocks PRs touching
+  `examples/**` and internally skips otherwise (required-safe: always reports).
+- Example **compile** is still gated (the required gate builds
+  `PULP_BUILD_EXAMPLES=ON`); only the runtime validators moved off.
+
+So a red required gate should NOT be an example `pluginval`/`auval` timeout — if
+it is, the exclusion regressed. The `example-validation` lane is **not yet in
+`required_status_checks`**; promote it once it is green on a real `examples/**`
+run.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a

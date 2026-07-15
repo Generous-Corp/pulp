@@ -663,6 +663,19 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 | Build matrix | Builds on all platforms | GitHub Actions CI | Every PR |
 | DAW compatibility | Plugin works in real DAWs | Manual + automated (future) | Before releases |
 
+### Test Lanes — what gates the required `macos` check
+
+Not every test runs on the per-PR required gate. Tests route by CTest `LABELS`:
+`slow` (long, e.g. iOS try-compile) and `validation` (the **example** plugins'
+real-host `pluginval`/`auval`/`clap-dlopen` validators — the only users of that
+label) are **excluded** from the required gate and enforced elsewhere. Example
+*compile* is still gated (the gate builds `PULP_BUILD_EXAMPLES=ON`); example
+runtime *validation* runs on the path-filtered `example-validation` lane (blocks
+PRs that touch `examples/**`) and nightly. Before moving any test off the required
+gate by labeling it `slow`/`validation`, confirm something still enforces it — the
+nightly is an informational backstop, not a gate. Full model, label taxonomy, and
+how to add tests: **[docs/guides/test-lanes.md](docs/guides/test-lanes.md)**.
+
 ### Automated Testing Process
 
 **When modifying view/widget/input code, you MUST:**
