@@ -1,5 +1,9 @@
 # Interrogating and Comparing Third-Party Plugins
 
+> **Building a plugin host?** See [Hosting Plugins in Pulp](hosting.md) for the
+> C++ `pulp::host` APIs. This guide covers automated inspection, rendering, and
+> comparison through the CLI and MCP.
+
 Pulp can inspect and render installed CLAP, VST3, Audio Unit, AUv3, and LV2
 plugins without a DAW or audio device when the matching loader/platform support
 is compiled into the CLI. This makes a plugin's **observable host contract**
@@ -102,6 +106,3 @@ starting point. Editor launch, accessibility-driven interaction, screenshot
 capture, and gesture recording/replay can be layered on later for controls that
 are truly GUI-only; they should complement, not replace, the deterministic host
 API path.
-
-For embedding the host APIs in a C++ application, see [Hosting Plugins in
-Pulp](hosting.md).

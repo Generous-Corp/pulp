@@ -1,5 +1,9 @@
 # Hosting Plugins in Pulp
 
+> **Looking to analyze or compare a plugin?** Use the
+> [Plugin Interrogation guide](plugin-interrogation.md) for the ready-to-use
+> CLI and MCP workflow. This guide covers embedding the C++ hosting APIs.
+
 Pulp can both *be* a plugin and *host* plugins. The hosting APIs live in
 `pulp::host` and let you load VST3 / AU / CLAP / LV2 binaries, wire them
 into a DAG, and process audio through the chain.
@@ -13,10 +17,6 @@ editor, and extension support are not identical across loaders.
 compensation are implemented over the same `PluginSlot` interface.
 The VST3 and AU loaders are not stubs: both instantiate and process third-party
 plug-ins in supported desktop builds.
-
-For a ready-to-use, isolated CLI/MCP workflow that discovers parameters and
-renders controlled A/B experiments, see [Interrogating and Comparing
-Third-Party Plugins](plugin-interrogation.md).
 
 ## Quick start
 
