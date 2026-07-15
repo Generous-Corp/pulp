@@ -128,6 +128,18 @@ buffer with non-zero samples, call `process`, assert the output buffer
 has non-zero energy. A gain plug-in is the cheapest target — one param,
 predictable output, no MIDI.
 
+For a quick manual load/inspect of one installed plug-in, `examples/plugin-host-demo`
+doubles as a format-neutral analyzer. `--path <bundle>` loads a CLAP / VST3 / LV2
+by inferring the format from the bundle extension; an Audio Unit has no bundle
+path, so select it with `--id TYPE:SUBT:MANU` (the OSType triplet printed by
+`--list`). `--path` deliberately skips the full installed-plugin scan — a bulk
+scan runs third-party discovery code across the machine, which is unrelated to a
+trusted, user-named probe. Two extension gotchas when inferring format from a
+path: shell tab-completion appends a trailing `/` to a bundle *directory*, which
+empties `std::filesystem::path::extension()` (step up via `parent_path()` when
+`filename()` is empty), and a plain `dlopen` of a relative bundle path triggers
+the `@rpath` search dance — pass an absolute path.
+
 ## Signal graph gotchas
 
 - `SignalGraph` dispatches plugin nodes through the additive

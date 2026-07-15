@@ -7,8 +7,9 @@
 // Usage:
 //   pulp-plugin-host-demo                      # auto-pick first scanned CLAP
 //   pulp-plugin-host-demo --list               # list scanned plugins and exit
-//   pulp-plugin-host-demo --path <bundle>      # pick a scanned bundle path
-//   pulp-plugin-host-demo --id <plugin-id>     # pick a scanned descriptor by id
+//   pulp-plugin-host-demo --path <bundle>      # load a CLAP/VST3/LV2 bundle directly
+//   pulp-plugin-host-demo --id <plugin-id>     # select a scanned descriptor by id
+//                                              # (required for path-less AU components)
 //   pulp-plugin-host-demo --manage             # headless plugin-manager UX
 //                                              # (issue #494 demo)
 //
@@ -27,6 +28,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -333,6 +335,28 @@ PluginInfo pick_plugin(const std::vector<PluginInfo>& plugins,
     return {};
 }
 
+// Map a bundle's extension to its plugin format. Audio Units have no bundle
+// path (they are identified by an OSType triplet), so they are not inferable
+// here and must be selected with --id.
+bool infer_bundle_format(const std::filesystem::path& bundle, PluginFormat& format) {
+    auto extension = bundle.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (extension == ".clap") {
+        format = PluginFormat::CLAP;
+        return true;
+    }
+    if (extension == ".vst3") {
+        format = PluginFormat::VST3;
+        return true;
+    }
+    if (extension == ".lv2") {
+        format = PluginFormat::LV2;
+        return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -364,28 +388,45 @@ int main(int argc, char** argv) {
     if (list_only) return list_plugins();
     if (manage_mode) return manage_demo();
 
-    PluginScanner scanner;
-    ScanOptions opts;
-    opts.scan_lv2 = false;
-    auto plugins = scanner.scan(opts);
-
     PluginInfo chosen;
-    if (!filter_path.empty() || !filter_id.empty()) {
-        chosen = pick_plugin(plugins, filter_path, filter_id);
-        if (chosen.path.empty() && !filter_path.empty()) {
-            // User passed an explicit path that the scanner may not have found
-            // (outside default dirs). The demo's direct path fallback is
-            // CLAP-only; other formats should come from scanned descriptors.
-            chosen.path   = filter_path;
-            chosen.format = PluginFormat::CLAP;
-            chosen.name   = filter_path.substr(filter_path.find_last_of('/') + 1);
+    if (!filter_path.empty()) {
+        // An explicit bundle path is enough to load a CLAP/VST3/LV2 directly.
+        // Skip the full installed-plugin scan: bulk discovery executes
+        // third-party bundle code across the machine and is unrelated to this
+        // trusted, user-named probe. A --id alongside --path still selects a
+        // specific descriptor inside a multi-plugin bundle.
+        std::filesystem::path bundle(filter_path);
+        // Shell tab-completion often appends a trailing '/' to a .vst3/.clap
+        // bundle directory, which empties filename()/extension(); step up to
+        // the real bundle component so name and format both resolve.
+        if (bundle.filename().empty()) bundle = bundle.parent_path();
+        chosen.path      = bundle.string();
+        chosen.unique_id = filter_id;
+        chosen.name      = bundle.filename().string();
+        if (!infer_bundle_format(bundle, chosen.format)) {
+            std::fprintf(stderr,
+                "Cannot infer plugin format from '%s'. Audio Units have no "
+                "bundle path — select them with --id instead.\n",
+                filter_path.c_str());
+            return 2;
         }
     } else {
-        // Prefer CLAP for the default demo because it is the most portable
-        // validated fixture path. Explicit --path/--id filters can still select
-        // other scanned formats when their host loaders are compiled in.
-        for (const auto& p : plugins) {
-            if (p.format == PluginFormat::CLAP) { chosen = p; break; }
+        PluginScanner scanner;
+        ScanOptions opts;
+        opts.scan_lv2 = false;
+        auto plugins = scanner.scan(opts);
+
+        if (!filter_id.empty()) {
+            // A path-less --id (e.g. an AU OSType triplet) resolves against the
+            // scanned descriptors.
+            chosen = pick_plugin(plugins, {}, filter_id);
+        } else {
+            // Prefer CLAP for the no-argument demo because it is the most
+            // portable validated fixture path and its open SDK is enabled in
+            // the default desktop build.
+            for (const auto& p : plugins) {
+                if (p.format == PluginFormat::CLAP) { chosen = p; break; }
+            }
         }
     }
 

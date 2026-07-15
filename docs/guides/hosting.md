@@ -28,7 +28,8 @@ if (!slot) {
     return 1;
 }
 slot->prepare(48000.0, 512);
-slot->process(out_buffer, in_buffer, midi_in, midi_out, 512);
+pulp::host::ParameterEventQueue parameter_events;  // sample-accurate param changes; empty is fine
+slot->process(out_buffer, in_buffer, midi_in, midi_out, parameter_events, 512);
 slot->release();
 ```
 
@@ -53,6 +54,57 @@ for (auto& info : scanner.scan(pulp::host::PluginFormat::CLAP)) {
 
 Format-specific scanners (e.g. `scanner_clap.cpp`) read bundle metadata so
 name / vendor / version / unique id come back populated.
+
+For applications that scan arbitrary third-party installations, prefer
+`IsolatedPluginScanner` (`pulp/host/isolated_scanner.hpp`). It runs the scan in
+the `pulp-scan-worker` child process, so a crash, hang, or timeout comes back as
+a structured `ScanResult` / `ScanStatus` instead of taking down the host. That
+isolation covers discovery; a tool that performs deeper analysis by
+instantiating and processing untrusted plug-ins should run that probe in a child
+process too.
+
+## Analyzer-style inspection
+
+Once a scanner has returned a `PluginInfo`, the same format-neutral `PluginSlot`
+API inspects an AU, VST3, CLAP, or LV2 plug-in through one code path:
+
+```cpp
+auto slot = pulp::host::PluginSlot::load(info);
+if (!slot || !slot->prepare(48'000.0, 512)) {
+    return 1;
+}
+
+std::cout << slot->info().name << "\n"
+          << "parameters: " << slot->parameters().size() << "\n"
+          << "latency: " << slot->latency_samples() << " samples\n"
+          << "tail: " << slot->tail_samples() << " samples\n"
+          << "state bytes: " << slot->save_state().size() << "\n";
+
+slot->release();
+```
+
+The repository includes the runnable
+[`plugin-host-demo`](../../examples/plugin-host-demo/) host/analyzer example. It
+lists the installed plug-ins, prints metadata and the first parameters, runs a
+synthetic audio block, and reports the output peak:
+
+```bash
+cmake --build build --target pulp-plugin-host-demo
+./build/examples/plugin-host-demo/pulp-plugin-host-demo --list
+./build/examples/plugin-host-demo/pulp-plugin-host-demo \
+  --path "/Library/Audio/Plug-Ins/VST3/MyPlugin.vst3"
+```
+
+An Audio Unit has no bundle path, so select it by the component identity printed
+by `--list`:
+
+```bash
+./build/examples/plugin-host-demo/pulp-plugin-host-demo --id TYPE:SUBT:MANU
+```
+
+This example loads the plug-in in-process and is meant for trusted local
+testing. An unattended analyzer should put the load / prepare / process / state
+probes behind a child-process timeout, as noted above.
 
 ## Signal graph
 
