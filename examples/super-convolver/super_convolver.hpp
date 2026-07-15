@@ -468,6 +468,13 @@ public:
                              .range = {0.0f, 1.0f, 0.0f, 1.0f},
                              .kind = state::ParamKind::Toggle,
                              .value_labels = {"Off", "On"}});
+        // Flow drives the living field — the editor reads kFlow to set how much the field
+        // moves. It is declared on the web GPU variant so the editor shows its Flow slider
+        // (the fourth control alongside Mix/Size/Gain) and the field responds to it, matching
+        // the native editor. The multi-room moving-PAN audio effect stays native-only; on the
+        // web Flow steers the field visualization, which is exactly what the field IS.
+        store.add_parameter({.id = kFlow, .name = "Flow", .unit = "%",
+                             .range = {0.0f, 100.0f, 0.0f, 0.1f}});
 #endif
 
         // Rooms/Flow are deliberately NOT offered on the web GPU lane.
