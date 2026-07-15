@@ -284,18 +284,29 @@ The click must also still be **synchronous inside the user gesture** — the who
 canvas-pointer → wasm → `EM_JS` → `click()` path is synchronous, so that holds; do not
 defer it behind a promise/`setTimeout`.
 
-## Landmine: a control-surface canvas eats page scroll on touch — opt into `pan-y`
+## Landmine: a control-surface canvas eats page scroll — opt into `pan-y`, and it's TWO paths
 
-`web_input.cpp` sets `canvas.style.touchAction = 'none'` and `preventDefault`s
-pointerdown so a knob drag never pans the page — correct for a standalone plugin. But
-an editor **embedded in a scrollable page** (only horizontal sliders, no vertical
-drags) then swallows every touch and the page cannot be scrolled from on top of the
-plugin. Opt in by setting `canvas.style.touchAction = 'pan-y'` after mount (see
-`pulp-ui.js`): the input layer checks the live `touch-action` and, for a **touch** on a
-pannable canvas, skips capture + preventDefault so a VERTICAL drag scrolls the page
-while a HORIZONTAL drag or tap still drives a slider (`pan-y` claims only the vertical
-axis). Do NOT flip the default to `pan-y` — a knob-heavy plugin needs the vertical axis
-for its own drags.
+`web_input.cpp` sets `canvas.style.touchAction = 'none'` and `preventDefault`s BOTH
+pointerdown AND wheel so a knob drag / wheel-over-knob never pans the page — correct for a
+standalone plugin. But an editor **embedded in a scrollable page** (only horizontal
+sliders, no vertical drags) then swallows every gesture and the page cannot be scrolled
+from on top of the plugin. Opt in by setting `canvas.style.touchAction = 'pan-y'` after
+mount (see `pulp-ui.js`); the input layer checks the live `touch-action` and, on a
+pannable canvas:
+
+- **touch** (mobile): skips pointer capture + `preventDefault` on pointerdown, so a
+  VERTICAL drag scrolls the page while a HORIZONTAL drag or tap still drives a slider
+  (`pan-y` claims only the vertical axis).
+- **wheel** (DESKTOP trackpad/mouse — a SEPARATE path, easy to forget): still forwards the
+  wheel to the view but does NOT `preventDefault`, so the page scrolls. **The touch fix
+  alone leaves desktop broken** — the "big screen, can't scroll over the plugin" bug is the
+  wheel handler, not touch-action.
+
+Do NOT flip the default to `pan-y` — a knob-heavy plugin needs both axes for its own
+drags. VERIFY IN WEBKIT, not just Chromium: `playwright-core`'s `webkit` IS Safari's
+engine (`Version/…Safari/605`), and `page.mouse.wheel(0, 600)` over the canvas must move
+`window.scrollY` (measured 0→209 on the SuperConvolver editor). Chromium-only "it scrolls"
+is not proof for the browser the user is actually on.
 
 ## Landmine: a WebCLAP host must READ parameters back, not mirror them
 

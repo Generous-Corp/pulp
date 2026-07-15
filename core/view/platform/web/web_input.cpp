@@ -215,9 +215,15 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
     state.selectstart = function(e) { e.preventDefault(); };
     state.dblclick = function(e) { e.preventDefault(); };
     state.wheel = function(e) {
+        // On a pannable canvas (an editor embedded in a scrollable page — it opted in
+        // with a non-'none' touch-action), let the wheel/trackpad scroll the PAGE: still
+        // forward it to the view (a wheel-zoom curve can react) but do NOT preventDefault,
+        // so the host page scrolls when the view does nothing with it. A control surface
+        // keeps touch-action:none and eats the wheel so wheel-over-knob adjusts the knob.
+        var pannable = canvas.style.touchAction && canvas.style.touchAction !== 'none';
         var p = pos(e);
         _pulp_web_on_wheel(p[0], p[1], e.deltaX, e.deltaY, e.deltaMode | 0, mods(e));
-        e.preventDefault();
+        if (!pannable) e.preventDefault();
     };
     state.keydown = function(e) {
         var p = stringToNewUTF8(e.key);
