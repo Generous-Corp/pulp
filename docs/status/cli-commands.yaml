@@ -2287,6 +2287,26 @@ commands:
           - name: --accept-importer-terms
             kind: flag
             description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
+      - name: install
+        summary: Clone an add-on importer from a git URL with the user's own git credentials, read its tool.json + terms from the cloned repo (never a shipped registry), enforce the SPI version window, run the accept-to-run terms gate, and install it under ~/.pulp/tools/<id>/ with an install record. A failed fetch is surfaced with git's own error and a single URL-agnostic message; the SDK never reveals whether a repo exists or is public/private.
+        args:
+          - name: url
+            kind: positional
+            required: true
+            description: Git URL (or local path) of the importer add-on repository
+          - name: --accept-importer-terms
+            kind: flag
+            description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
+          - name: --force
+            kind: flag
+            description: Reinstall even when an up-to-date install record already exists
+      - name: uninstall
+        summary: Remove an installed importer by id — deletes the install tree under ~/.pulp/tools/<id>/, the install record, and any installed skill.
+        args:
+          - name: id
+            kind: positional
+            required: true
+            description: Installed importer id (from the repo's tool.json)
     docs: reference/cli.md#import
 
   - name: identity

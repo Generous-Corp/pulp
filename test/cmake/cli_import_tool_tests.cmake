@@ -59,6 +59,27 @@ target_link_libraries(pulp-test-cli-importer-install PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-importer-install)
 
+# URL-driven importer install: clones a REAL LOCAL git repo (no network, no
+# shipped registry) and drives the tool.json read, SPI-window enforcement, the
+# accept-to-run terms gate, install/uninstall, and the privacy invariant (an
+# unreachable URL leaks nothing). Links the git-install path plus the terms gate,
+# the compat check (importer_install.cpp), and the registry helpers it reuses.
+add_executable(pulp-test-cli-import-install
+    test_cli_import_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_git_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_terms.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_spi.cpp
+)
+target_include_directories(pulp-test-cli-import-install PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-import-install PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-import-install)
+
 # CLI project bump: pure-logic tests for the
 # CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /
 # downgrade guard, and the undo-batch JSON round-trip. project_bump.cpp

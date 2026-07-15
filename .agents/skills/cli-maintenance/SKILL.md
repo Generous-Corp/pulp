@@ -456,6 +456,48 @@ Gotchas / invariants when touching this surface:
   into `gates.sh` as an **opt-in** lane (`PULP_IMPORT_PROVENANCE_DIRS`) so it's a
   no-op for normal Pulp-repo pushes and only fires on a PR that lands a scaffold.
 
+### `pulp import install <url>` / `uninstall <id>` — URL-driven importer install
+
+`tools/cli/importer_git_install.{hpp,cpp}` (namespace `pulp::cli::import_install`)
+is the install path an importer add-on actually reaches in practice: cloned from
+a git URL, not resolved from the shipped registry. `cmd_import.cpp` dispatches
+`install`/`uninstall` as the first token (a different arg shape from the
+detect/inspect/emit verbs). This is DISTINCT from `pulp tool install <importer>`
+below (registry entry + per-platform sha256-pinned artifact) — same install tree
+(`~/.pulp/tools/<id>/`) and record dir (`~/.pulp/importers/`), different source.
+
+Gotchas / invariants when touching this surface:
+
+- **Everything the SDK learns comes from the CLONED repo, never a shipped
+  registry.** `install_from_git` runs `git clone --depth 1 <url>` with the user's
+  own git (so a private repo works iff they can clone it), then reads `tool.json`
+  (`parse_tool_manifest`: `id`, `category=="importer"`, `spi_min/max`,
+  `terms_version`, `terms_file`, `pinned_version`) and the terms body from the
+  repo's `terms_file`. There is no shipped `tool.json`, no artifact, no sha256.
+- **PRIVACY INVARIANT — a failed fetch must leak nothing.** On clone failure the
+  SDK-authored `error` is a single fixed URL-agnostic string ("could not fetch
+  importer from the provided URL"); git's own words go in a SEPARATE `git_output`
+  field (surfaced verbatim so a human sees the real reason, but it is git's claim,
+  not the SDK's). The SDK must NEVER state/infer/record whether a repo exists or
+  is public/private — a user with access and one without get identical
+  SDK-authored text. `test_cli_import_install.cpp` asserts two different
+  unreachable URLs produce byte-identical `error` and that it contains none of
+  `private`/`public`/`exists`/`not found`/`permission`. Keep the `Fetch` stage
+  URL-agnostic; only the LATER stages (which run after a successful clone) may
+  reference repo contents.
+- **The SPI-window + terms gates are REUSED, not re-implemented.** SPI enforcement
+  goes through `tools::check_importer_compat` (the SDK speaks the degenerate
+  `[kSpiVersion, kSpiVersion]` window); the accept-to-run gate is
+  `import_terms::run_gate` against `acceptance_store_path()`. `--accept-importer-terms`
+  is the CI path; `--force` reinstalls over an up-to-date record. Uninstall reuses
+  `tools::uninstall_importer(id)`. The clone is staged under `tools_dir()/.staging`
+  (same filesystem → atomic rename into place) and removed on any pre-placement
+  failure, so a declined terms gate or bad manifest leaves nothing behind.
+- **Tests clone a REAL local git repo** (git-init a temp dir with `tool.json` +
+  `TERMS.md`), so the git path itself is exercised with no network. Terms IO is
+  injected via `GateIo`. Keep this file (and the test) vendor-free — it is under
+  the `pulp-test-cli-import*` neutrality scan.
+
 ### `pulp tool install <importer>` — importer add-on packaging
 
 The install-side contract for framework-importer add-ons lives in

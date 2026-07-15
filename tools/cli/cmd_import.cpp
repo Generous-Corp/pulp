@@ -22,6 +22,7 @@
 
 #include "cli_common.hpp"
 #include "import_run.hpp"
+#include "importer_git_install.hpp"
 
 #include <iostream>
 #include <string>
@@ -39,7 +40,12 @@ void print_usage() {
         "  inspect --from <fw> <dir>    Run an importer's SPI analyze → write ProjectIR\n"
         "  emit    --from <fw> <dir> --output <out>\n"
         "                               analyze → emit → materialise a buildable scaffold\n"
+        "  install <url>                Clone an add-on importer from a git URL and register it\n"
+        "  uninstall <id>               Remove an installed importer by id\n"
         "  <dir>                        Alias for `detect <dir>`\n\n"
+        "install options:\n"
+        "  --accept-importer-terms      Accept the importer's terms non-interactively (CI)\n"
+        "  --force                      Reinstall even if the importer is already present\n\n"
         "inspect / emit options:\n"
         "  --from <framework>           Framework id (see `pulp import detect`)\n"
         "  --framework-path <path>      The user's own framework checkout (read-only)\n"
@@ -64,6 +70,15 @@ int cmd_import(const std::vector<std::string>& args) {
         print_usage();
         return 0;
     }
+
+    // Install / uninstall drive an add-on importer by git URL — a distinct
+    // argument shape from the detect/inspect/emit verbs, so dispatch them first.
+    if (first == "install")
+        return pulp::cli::import_install::run_import_install(
+            {args.begin() + 1, args.end()});
+    if (first == "uninstall")
+        return pulp::cli::import_install::run_import_uninstall(
+            {args.begin() + 1, args.end()});
 
     // Subcommand detection. `detect`, `inspect`, `emit` are explicit; any other
     // first token that is an existing path is treated as `detect <dir>`.

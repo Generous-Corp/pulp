@@ -84,6 +84,7 @@ add_executable(pulp-cli
     import_emit.cpp
     import_emit_scan.cpp
     import_terms.cpp
+    importer_git_install.cpp
     content_commands.cpp
     kit_commands.cpp
     cmd_pr.cpp
