@@ -4,6 +4,11 @@
 # Reusable layout-tree parity oracle for design-import live/baked modes.
 pulp_add_test_suite(pulp-test-layout-snapshot LIBRARIES pulp::view)
 
+# Rect / IntRect layout geometry primitives: slicing, insets, unions,
+# hit-testing, and the float-vs-integer center truncation that is the whole
+# reason the two rect types do not share an implementation.
+pulp_add_test_suite(pulp-test-view-geometry LIBRARIES pulp::view)
+
 # CanvasWidget tests (JS-driven custom drawing)
 pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 
