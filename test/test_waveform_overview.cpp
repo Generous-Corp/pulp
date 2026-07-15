@@ -428,8 +428,9 @@ TEST_CASE("deserialize_overview rejects bad magic / truncated blobs",
     REQUIRE_FALSE(deserialize_overview(garbage.data(), garbage.size()).has_value());
     REQUIRE_FALSE(deserialize_overview(nullptr, 0).has_value());
 
-    // Correct magic + bumped version → still rejected.
-    std::vector<uint8_t> wrong_version{'P', 'T', 'H', 'M',
+    // Correct magic + bumped version -> still rejected. Uses the REAL magic so
+    // this genuinely exercises the version check, not the magic check.
+    std::vector<uint8_t> wrong_version{'P', 'W', 'O', 'V',
                                        0xFF, 0xFF};
     REQUIRE_FALSE(deserialize_overview(wrong_version.data(),
                                         wrong_version.size()).has_value());
