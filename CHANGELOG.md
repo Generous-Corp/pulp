@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06701"></a>
+## [0.670.1] - 2026-07-15
+
+- fix(webui): restore the wasm UI build — 8 dropped TUs + a real web clipboard ([#6131](https://github.com/danielraffel/pulp/pull/6131))
+- git-hygiene: safe-push wrapper + detached-HEAD/empty-diff pre-push guards ([#6134](https://github.com/danielraffel/pulp/pull/6134))
+- skill(friction-report): add Step 0.5 — verify the fix's MECHANISM ([#6133](https://github.com/danielraffel/pulp/pull/6133))
+- urgent/remove public provenance reports ([#6130](https://github.com/danielraffel/pulp/pull/6130))
+- ci(release): make every release leg individually routable — local pool, one machine, or GitHub ([#6101](https://github.com/danielraffel/pulp/pull/6101))
+- ci(intel): bound the native-Intel build in-step so nightly-intel concludes at all ([#6100](https://github.com/danielraffel/pulp/pull/6100))
+- test(super-convolver): raise pluginval CTest timeout 30s->120s ([#6127](https://github.com/danielraffel/pulp/pull/6127))
+- skill(friction-report): turn friction into a durable, actionable report ([#6118](https://github.com/danielraffel/pulp/pull/6118))
+
 <a id="v06700"></a>
 ## [0.670.0] - 2026-07-14
 
@@ -6397,6 +6409,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.670.1]: https://github.com/danielraffel/pulp/releases/tag/v0.670.1
 [0.670.0]: https://github.com/danielraffel/pulp/releases/tag/v0.670.0
 [0.669.1]: https://github.com/danielraffel/pulp/releases/tag/v0.669.1
 [0.669.0]: https://github.com/danielraffel/pulp/releases/tag/v0.669.0
