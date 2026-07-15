@@ -330,7 +330,15 @@ function(pulp_add_web_ui NAME)
         PULP_HAS_SKIA=1
         PULP_HAS_TEXT_SHAPING=1
         PULP_HAS_YOGA=1
-        PULP_ENABLE_JS=0)
+        PULP_ENABLE_JS=0
+        # This build compiles AND arms the rAF RenderLoop (render_loop.cpp +
+        # render_loop_emscripten.cpp above; window_host_web starts it). Without this macro,
+        # WindowHost::schedule_repaint() cannot see the loop and falls back to a SYNCHRONOUS
+        # repaint() — so a view that calls request_repaint() during paint (any continuously
+        # animating editor, e.g. SuperConvolver's living field) re-enters paint immediately
+        # and recurses until the JS stack overflows. Native defines this on pulp-view-core;
+        # the hand-listed wasm build must define it too.
+        PULP_VIEW_HAS_RENDER_LOOP=1)
     # NOTE: SK_TRIVIAL_ABI=[[clang::trivial_abi]] is REQUIRED against the wasm
     # Skia slice (it is built with gn `is_trivial_abi = true`; without the macro
     # wasm-ld silently links a trapping stub for every cross-boundary sk_sp

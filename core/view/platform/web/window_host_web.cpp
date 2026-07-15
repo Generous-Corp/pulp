@@ -312,15 +312,36 @@ private:
 
     bool render_frame() {
         if (!skia_) return false;
+        // RE-ENTRANCY GUARD. A view that calls request_repaint() from inside paint() — any
+        // continuously animating editor, e.g. SuperConvolver's living field — routes through
+        // WindowHost::mark_dirty() -> schedule_repaint(). Before the rAF RenderLoop is
+        // attached (run_event_loop() calls show() -> mark_dirty() BEFORE it creates the loop),
+        // or on any build where schedule_repaint() falls back to a direct repaint(), that path
+        // calls render_frame() SYNCHRONOUSLY — re-entering paint from within paint and
+        // recursing until the JS stack overflows (the crash then lands in whatever draw the
+        // over-deep stack happens to hit, e.g. a gradient/texture upload, which is a red
+        // herring). Swallow the nested call and leave the surface dirty so the NEXT real frame
+        // repaints — the animation keeps flowing, one frame per tick, never nested.
+        if (rendering_) { reentrant_dirty_ = true; return false; }
+        rendering_ = true;
         auto* canvas = skia_->begin_frame();
-        if (!canvas) return false;
+        if (!canvas) { rendering_ = false; return false; }
         paint_scene(*canvas);
         // Ganesh flushes and submits here; the browser composites the canvas
         // element, so there is no separate present step.
         skia_->end_frame();
         clear_pending_dirty();
+        rendering_ = false;
+        // A repaint requested DURING this paint (see the guard above) is honoured on the NEXT
+        // frame, not by re-entering — one frame per tick, never nested.
+        if (reentrant_dirty_) {
+            reentrant_dirty_ = false;
+            if (render_loop_owned_) render_loop_owned_->request_frame();
+        }
         return true;
     }
+    bool rendering_ = false;
+    bool reentrant_dirty_ = false;
 
     bool render_and_read(render::HeadlessSurface::Rgba& out) {
         if (!skia_) return false;
