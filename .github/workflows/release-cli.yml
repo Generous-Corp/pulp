@@ -98,27 +98,42 @@ jobs:
     name: Resolve macOS runner — ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     runs-on: ubuntu-latest
     outputs:
+      # Kept for the Namespace-profile step below, which still asks "did the macOS
+      # leg resolve to a Namespace runner?".
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+      # platform -> runs-on. Every build/smoke leg indexes this by matrix.platform,
+      # so routing is data, not a chain of ternaries in the `runs-on:` key.
+      map: ${{ steps.resolve.outputs.map }}
     steps:
+      # The resolver is a repo script (so it can be unit-tested), so it needs the
+      # repo. Always resolve from the DEFAULT branch's copy, never the tag's: a
+      # backfill of an old tag must use today's routing, not whatever routing
+      # existed when that tag was cut.
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
       - id: resolve
         env:
-          RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
-          LOCAL_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
+          # Per-leg overrides. UNSET = today's GitHub-hosted label, so this whole
+          # mechanism is a no-op until someone opts a leg in, and unsetting a
+          # variable is a complete revert. That fluidity is the point: routing a
+          # release leg on or off the local pool must never need a code change.
+          DARWIN_ARM64: ${{ vars.PULP_RELEASE_DARWIN_ARM64_RUNS_ON_JSON || vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
+          DARWIN_X64: ${{ vars.PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON || vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON }}
+          LINUX_X64: ${{ vars.PULP_RELEASE_LINUX_X64_RUNS_ON_JSON }}
+          LINUX_ARM64: ${{ vars.PULP_RELEASE_LINUX_ARM64_RUNS_ON_JSON }}
+          WINDOWS_X64: ${{ vars.PULP_RELEASE_WINDOWS_X64_RUNS_ON_JSON }}
+          WINDOWS_ARM64: ${{ vars.PULP_RELEASE_WINDOWS_ARM64_RUNS_ON_JSON }}
+          # Legacy macOS fallbacks, honoured so an existing config keeps working.
+          LOCAL_MACOS: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        shell: bash
         run: |
-          if [ -n "${RELEASE_JSON:-}" ]; then
-            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
-            echo "Routing macOS release-cli via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
-          elif [ -n "${LOCAL_JSON:-}" ]; then
-            echo "runs_on_json=${LOCAL_JSON}" >> "$GITHUB_OUTPUT"
-            echo "Routing macOS release-cli via self-hosted PULP_LOCAL_MACOS_RUNS_ON_JSON: ${LOCAL_JSON}"
-          elif [ -n "${NAMESPACE_JSON:-}" ]; then
-            echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
-            echo "Routing macOS release-cli through Namespace: ${NAMESPACE_JSON}"
-          else
-            echo 'runs_on_json=["macos-15"]' >> "$GITHUB_OUTPUT"
-            echo "Routing macOS release-cli through GitHub-hosted macos-15"
-          fi
+          set -euo pipefail
+          # Logic lives in tools/scripts/resolve_release_runners.py so it is unit
+          # tested (test_resolve_release_runners.py) rather than buried in YAML.
+          python3 tools/scripts/resolve_release_runners.py --github-output >> "$GITHUB_OUTPUT"
 
   build-cli:
     needs: resolve-macos-runner
@@ -167,12 +182,12 @@ jobs:
     # (the Intel cross-compile leg) → pinned hosted arm64 pool via
     # PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON (default ["macos-15"]), never the
     # Studios; every other matrix.os runs on its literal label.
-    runs-on: >-
-      ${{ matrix.os == 'macos-15'
-          && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json)
-          || (matrix.os == 'macos-15-xcompile'
-              && fromJSON(vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON || '["macos-15"]'))
-          || matrix.os }}
+    # Routing is DATA: resolve-macos-runner emits a platform -> runs-on map, and
+    # each leg indexes it. Previously only the macOS legs were variable-driven and
+    # everything else fell through to `|| matrix.os` — a literal GitHub-hosted
+    # label — which is the only reason Linux/Windows releases could not use the
+    # self-hosted VMs that were already running and idle.
+    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)[matrix.platform] }}
     # Every current leg is required. GitHub's 360-min default cap applies.
     timeout-minutes: 360
     # Empty for non-container cells (mac/win/linux-arm64) = run directly on the runner.
@@ -829,12 +844,12 @@ jobs:
           - os: windows-11-arm
             platform: windows-arm64
             artifact: pulp.exe
-    runs-on: >-
-      ${{ matrix.os == 'macos-15'
-          && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json)
-          || (matrix.os == 'macos-15-xcompile'
-              && fromJSON(vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON || '["macos-15"]'))
-          || matrix.os }}
+    # Routing is DATA: resolve-macos-runner emits a platform -> runs-on map, and
+    # each leg indexes it. Previously only the macOS legs were variable-driven and
+    # everything else fell through to `|| matrix.os` — a literal GitHub-hosted
+    # label — which is the only reason Linux/Windows releases could not use the
+    # self-hosted VMs that were already running and idle.
+    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)[matrix.platform] }}
     timeout-minutes: 360
     name: Smoke ${{ matrix.platform }}
 
