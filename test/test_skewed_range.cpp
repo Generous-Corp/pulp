@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/state/parameter.hpp>
 
 #include <cmath>
@@ -343,4 +344,88 @@ TEST_CASE("SkewedRange step snapping lands every value on the interval grid",
     REQUIRE(r.snap(19.0) == 24.0);
     REQUIRE(r.snap(-5.0) == 0.0);
     REQUIRE(r.snap(999.0) == 120.0);
+}
+
+// ── Derivation check: the curve is the standard exponential skew ─────────────
+//
+// These cases pin the mapping to its INDEPENDENT mathematical definition, not to
+// any particular implementation. A skewed parameter range is the textbook
+// exponential control curve:
+//
+//     normalize(v)   = ((v - min) / (max - min))^skew      (v in [min, max])
+//     denormalize(p) = min + (max - min) * p^(1/skew)      (p in [0, 1])
+//
+// (Pulp's convention: `skew` is the exponent applied in the value->proportion
+//  direction, so a `skew > 1` pushes more proportion range toward `min`. The
+//  two directions are exact inverses of each other.)
+//
+// and the symmetric variant applies that curve to |2p - 1| and mirrors the sign.
+// The expected values below are computed here from std::pow, so the test passes
+// only if the implementation realizes that exact equation — which is what makes
+// "it matches" mean "it is the standard curve", nothing more.
+
+namespace {
+double expected_denorm(double mn, double mx, double p, double skew) {
+    return mn + (mx - mn) * std::pow(p, 1.0 / skew);
+}
+double expected_norm(double mn, double mx, double v, double skew) {
+    return std::pow((v - mn) / (mx - mn), skew);
+}
+}  // namespace
+
+TEST_CASE("SkewedRange denormalize equals min + span * p^(1/skew)",
+          "[state][skewed-range][derivation]") {
+    const double mn = 20.0, mx = 20000.0;
+    for (double skew : {0.25, 0.5, 1.0, 2.0, 3.5}) {
+        SkewedRange<double> r{mn, mx, /*step*/ 0.0, skew};
+        for (int i = 0; i <= 20; ++i) {
+            const double p = i / 20.0;
+            REQUIRE(r.denormalize(p) ==
+                    Catch::Approx(expected_denorm(mn, mx, p, skew)).epsilon(1e-9));
+        }
+    }
+}
+
+TEST_CASE("SkewedRange normalize equals ((v-min)/span)^skew",
+          "[state][skewed-range][derivation]") {
+    const double mn = -24.0, mx = 12.0;
+    for (double skew : {0.4, 1.0, 2.2}) {
+        SkewedRange<double> r{mn, mx, /*step*/ 0.0, skew};
+        for (int i = 1; i < 20; ++i) {           // skip endpoints (0^neg / boundary)
+            const double v = mn + (mx - mn) * (i / 20.0);
+            REQUIRE(r.normalize(v) ==
+                    Catch::Approx(expected_norm(mn, mx, v, skew)).epsilon(1e-9));
+        }
+    }
+}
+
+TEST_CASE("SkewedRange with_center derives skew = log(0.5)/log(proportion)",
+          "[state][skewed-range][derivation]") {
+    // The ONLY skew that satisfies denormalize(0.5) == center is the one that
+    // solves 0.5^skew = (center - min)/(max - min). This is not a stylistic
+    // choice; it is the unique solution, computed here from the logs.
+    const double mn = 20.0, mx = 20000.0, center = 632.0;
+    const double proportion = (center - mn) / (mx - mn);
+    const double expected_skew = std::log(0.5) / std::log(proportion);
+
+    auto r = ParamRange::with_center(static_cast<float>(mn), static_cast<float>(mx),
+                                     static_cast<float>(center));
+    REQUIRE(static_cast<double>(r.skew) ==
+            Catch::Approx(expected_skew).epsilon(1e-6));
+    // ...and the defining property holds: half travel lands on the center.
+    REQUIRE(static_cast<double>(r.denormalize(0.5f)) ==
+            Catch::Approx(center).epsilon(1e-4));
+}
+
+TEST_CASE("SkewedRange round-trips to machine precision for every skew",
+          "[state][skewed-range][derivation]") {
+    // normalize(denormalize(p)) == p is forced by the curve being a bijection;
+    // if the two directions used different math this would drift.
+    for (double skew : {0.2, 0.7, 1.0, 1.9, 4.0}) {
+        SkewedRange<double> r{5.0, 5000.0, /*step*/ 0.0, skew};
+        for (int i = 0; i <= 40; ++i) {
+            const double p = i / 40.0;
+            REQUIRE(r.normalize(r.denormalize(p)) == Catch::Approx(p).margin(1e-9));
+        }
+    }
 }
