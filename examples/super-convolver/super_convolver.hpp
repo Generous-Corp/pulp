@@ -468,23 +468,26 @@ public:
                              .range = {0.0f, 1.0f, 0.0f, 1.0f},
                              .kind = state::ParamKind::Toggle,
                              .value_labels = {"Off", "On"}});
-        // Flow drives the living field — the editor reads kFlow to set how much the field
-        // moves. It is declared on the web GPU variant so the editor shows its Flow slider
-        // (the fourth control alongside Mix/Size/Gain) and the field responds to it, matching
-        // the native editor. The multi-room moving-PAN audio effect stays native-only; on the
-        // web Flow steers the field visualization, which is exactly what the field IS.
+        // Rooms and Flow drive the living field — the editor reads them to set how
+        // DENSE the field is (Rooms → emitter count) and how much it MOVES (Flow).
+        // Both are declared on the web GPU variant so the editor shows the same five
+        // controls as the native editor (Mix / Size / Gain / Rooms / Flow) and the
+        // field responds to them. The audio side of Rooms/Flow — the batched
+        // multi-room moving-pan reverb — stays native-only (the whole GpuMultiConvolver
+        // stack is `#if !defined(PULP_WASM)`); on the web these two steer the field
+        // VISUALIZATION, which is exactly what that field IS. Rooms>20 flips the engine
+        // to GPU, mirroring the native "past the CPU's room cap → GPU" behaviour.
+        store.add_parameter({.id = kRooms, .name = "Rooms", .unit = "",
+                             .range = {1.0f, 128.0f, 16.0f, 1.0f}});
         store.add_parameter({.id = kFlow, .name = "Flow", .unit = "%",
                              .range = {0.0f, 100.0f, 0.0f, 0.1f}});
 #endif
 
-        // Rooms/Flow are deliberately NOT offered on the web GPU lane.
-        // GpuMultiConvolver runs MissPolicy::Silence with no CPU net, so a
-        // throttled background tab would simply drop out with nothing to cover it;
-        // and its batched multi-IR spectra are the op most likely to exceed a
-        // browser's storage-buffer binding limit. The WAM lane gets no GPU engine
-        // at all for a different reason: it is served from GitHub Pages, which
-        // cannot set COOP/COEP, so SharedArrayBuffer — the only way an
-        // AudioWorklet can reach a WebGPU worker — throws there.
+        // The WAM lane gets no GPU engine at all: it is served from GitHub Pages,
+        // which cannot set COOP/COEP, so SharedArrayBuffer — the only way an
+        // AudioWorklet can reach a WebGPU worker — throws there. That lane declares
+        // only Mix/Size/Gain (see the shared block above), so its editor shows three
+        // sliders and no engine chip.
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block

@@ -132,6 +132,20 @@ public:
         return has(id) ? store_.get_value(id) : fallback;
     }
 
+    /// The active engine's emitter cap: 128 rooms on the GPU, 20 on the CPU.
+    int emitter_cap() const { return value_or(kEngine, 0.0f) >= 0.5f ? 128 : 20; }
+
+    /// The live emitter count — what fills the field and the header readout. Rooms
+    /// is the field's density on every build that declares it (native AND the web
+    /// GPU variant, where Rooms steers the field visualization even though the
+    /// multi-room AUDIO stays native-only). A build without Rooms (the plain
+    /// WAM/WebCLAP lane) shows no engine chip anyway, so 0 simply leaves the field at
+    /// its base density. Never read get_value(kRooms) unguarded — it is UB when the
+    /// id is unregistered, and that was the bug that pinned the readout at zero.
+    int emitter_count() const {
+        return has(kRooms) ? static_cast<int>(std::lround(value_or(kRooms, 1.0f))) : 0;
+    }
+
     /// Show the info card (same overlay the header "i" glyph toggles). For
     /// headless capture / tests; a click anywhere dismisses it at runtime.
     void open_info() { show_info_ = true; }
@@ -155,8 +169,7 @@ public:
         field_time_ += 1.0 / 60.0;
         const float field_flow = std::clamp(
             static_cast<float>(value_or(kFlow, 0.0f)) * 0.01f, 0.0f, 1.0f);
-        const int field_density = std::min(96,
-            std::max(1, static_cast<int>(std::lround(value_or(kRooms, 1.0f)))));
+        const int field_density = std::min(96, std::max(1, emitter_count()));
         pulp::superconvolver::draw_acoustic_field(
             canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy(),
             viz_mode_);
@@ -189,8 +202,8 @@ public:
             const float rx = local_bounds().width - 24 * s;
             const bool gpu = store_.get_value(kEngine) >= 0.5f;
             const char* eng = gpu ? "GPU" : "CPU";
-            const int cap = gpu ? 128 : 20;
-            const int now = static_cast<int>(std::lround(store_.get_value(kRooms)));
+            const int cap = emitter_cap();
+            const int now = emitter_count();
             canvas.set_fill_color(tk_text());
             canvas.set_font("Inter", 12.0f * s);
             right_text(canvas, eng, rx, 29 * s, 12.0f * s);

@@ -757,14 +757,15 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
     /* #panel.pulp is the player's centered column, capped at 640px by default. Widen it and
        everything inside (the editor canvas fills its width) to a wide, padded band. */
     #panel.pulp{max-width:min(1200px, 94vw) !important}
-    /* The live readout sits in a FIXED slot between the editor and the scope: one
-       centered line, reserved height, no wrap. Its height never changes when the
-       engine flips CPU<->GPU (empty CPU line vs. full GPU metrics), so the page
-       below — the waveform scope — never jumps. overflow:hidden clips rather than
-       wraps if a very narrow phone can't fit the whole metrics sentence. */
+    /* The live readout sits in a FIXED slot between the editor and the scope.
+       It ALWAYS reserves two lines' worth of height and centres its content, so
+       nothing bumps: not when the metrics wrap to a second line on a narrow phone,
+       and not when the engine flips CPU<->GPU (short CPU line vs. long GPU line).
+       The text WRAPS — never truncates — so a phone that can't fit the sentence on
+       one line shows all of it across two, inside the already-reserved box. */
     .engine-stats{max-width:min(1200px, 94vw) !important; margin:12px auto 2px;
-                  font-size:13px; text-align:center; white-space:nowrap;
-                  overflow:hidden; height:24px; line-height:24px}
+                  font-size:13px; line-height:1.5; text-align:center;
+                  min-height:3.2em; display:grid; place-items:center}
     .engine-stats #es-cpu{color:#8b96a3}
     #pulp-ui-canvas{height:clamp(420px, 60vh, 680px) !important}
   </style>
@@ -995,6 +996,8 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       // readout must not freeze at the moment it gets interesting.
       let timer = 0;
       let lastProduced = 0;
+      let gpuStall = 0;          // consecutive 100ms polls with no new GPU block
+      let gpuCarrying = false;   // debounced "GPU is the emitting engine" state
       pending.then((ui) => {
         if (!ui) return;
         timer = setInterval(() => {
@@ -1012,6 +1015,15 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           // 100 % of what you hear.
           const producedNow = (stats.produced || 0) > lastProduced;
           lastProduced = stats.produced || 0;
+          // HYSTERESIS. producedNow is a single 100ms window, and on mobile Safari the
+          // worker's block cadence and this timer drift out of phase — so an isolated
+          // poll lands with no NEW block even while the GPU is steadily carrying. Taken
+          // raw, that strobed the readout back to "Convolving on the CPU" for one tick.
+          // So: flip to GPU the instant a block lands, but require ~0.8s of continuous
+          // silence (8 polls) before conceding back to CPU. A real engine switch stalls
+          // the counter forever and still crosses that threshold; a phase blip never does.
+          if (producedNow) { gpuStall = 0; gpuCarrying = true; }
+          else if (++gpuStall >= 8) { gpuCarrying = false; }
 
           // AND the engine must actually BE the GPU. The worker keeps turning under
           // Engine=CPU — deliberately: the plugin drives the ring on every block so the
@@ -1030,7 +1042,7 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           // test relied on a page-side engineIsGpu flag that the removed dropdown used to set;
           // the editor's own CPU/GPU chip is the switcher now, and the GPU's own produced
           // counter is a truer "is the shader carrying the audio" than any page param mirror.
-          const gpuIsCarrying = producedNow;
+          const gpuIsCarrying = gpuCarrying;
           // budget_us and rt_percent are derived HERE, by the same arithmetic
           // native gpu_status() uses (super_convolver.hpp), so the browser and
           // the native build print the same numbers computed the same way.
