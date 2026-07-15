@@ -99,6 +99,11 @@ docs:
     kind: guide
     summary: Local and SSH-backed CI queue, host validation, and PR workflow
 
+  - slug: test-lanes
+    path: guides/test-lanes.md
+    kind: guide
+    summary: Test lane model — required gate vs example-validation vs nightly, and the label taxonomy
+
   - slug: webview
     path: guides/webview.md
     kind: guide

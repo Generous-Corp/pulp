@@ -427,6 +427,10 @@ component_management:
         - "!core/platform/platform/mac/**"
         - "!core/platform/platform/linux/**"
         - "!core/platform/platform/win/**"
+        # Web platform files (e.g. platform/web/clipboard_web.cpp) are owned
+        # by the `web` component (`core/**/platform/web/**`); exclude them here
+        # so they land in exactly one bucket instead of double-counting.
+        - "!core/platform/platform/web/**"
         - "!core/platform/src/android/**"
         - "!core/platform/include/pulp/platform/android/**"
         - "!core/platform/include/pulp/platform/win/**"
