@@ -28,7 +28,17 @@ namespace pulp::signal {
 /// @endcode
 struct FastMath {
 
-    /// Fast tanh approximation (Padé, max error ~3e-5 for |x| < 4).
+    /// Fast tanh approximation using the [7/6] Padé form (max error ~3e-5
+    /// for |x| < 4).
+    ///
+    /// The coefficients follow by truncating Lambert's continued fraction
+    /// through denominator 13:
+    ///
+    ///     tanh(x) = x / (1 + x^2 / (3 + x^2 / (5 + ... + x^2 / 13)))
+    ///
+    /// Reducing that fraction and applying Horner's rule gives the numerator
+    /// and denominator evaluated below. Published derivation:
+    /// https://varietyofsound.wordpress.com/2011/02/14/efficient-tanh-computation-using-lamberts-continued-fraction/
     static float tanh(float x) {
         // Clamp to avoid overflow in the polynomial
         if (x < -4.0f) return -1.0f;
