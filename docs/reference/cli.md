@@ -1797,6 +1797,8 @@ The command is **vendor-agnostic**: framework identity is runtime DATA loaded fr
 ```bash
 pulp import detect ./MyProject                                  # Rank candidates; print install hint
 pulp import ./MyProject                                         # Alias for detect
+pulp import install https://example.com/owner/importer.git      # Clone an add-on importer + register it
+pulp import uninstall <importer-id>                             # Remove an installed importer
 pulp import inspect --from <framework> ./MyProject -o ir.json   # Resolve importer → SPI analyze → ProjectIR
 pulp import inspect --from <framework> ./MyProject --importer-cmd "python3 spi.py"
 pulp import emit --from <framework> ./MyProject --output ./scaffold
@@ -1807,8 +1809,14 @@ Subcommands:
 | Subcommand | Description |
 |------------|-------------|
 | `detect <dir>` | Scan the directory against the known-frameworks markers and print ranked candidates (framework id + confidence + evidence) plus the install hint for the top match. Works with **no importer installed**. |
+| `install <url>` | Clone an add-on importer from a git URL with the user's own git credentials, read its `tool.json` + terms **from the cloned repo** (never from anything the SDK ships), enforce the SPI version window, run the accept-to-run terms gate, and install the tree under `~/.pulp/tools/<id>/` with an install record. Detection merges the installed importer's own `known-frameworks.json` on the next `pulp import detect`. A private repo works exactly when the user can `git clone` it. |
+| `uninstall <id>` | Remove an installed importer by id: deletes the install tree under `~/.pulp/tools/<id>/`, the install record under `~/.pulp/importers/`, and any installed skill. |
 | `inspect --from <fw> <dir>` | Resolve the importer (tool registry or `--importer-cmd`) and run its SPI `analyze` verb to produce a ProjectIR. When no importer is resolvable, prints the install hint and exits non-zero. ProjectIR can include `integration_requirements` for optional packages, SDK/provider options, and source assets the scaffold needs to preserve. |
 | `emit --from <fw> <dir> --output <out>` | Resolves the importer, runs its SPI `analyze` then `emit` verbs to get an **EmissionManifest**, then the **SDK writes** a buildable Pulp migration scaffold under `<out>`. The importer only proposes files (generated/stub carry inline content; verbatim portable-core copies and safe source assets carry an absolute `copy_from`); the SDK materialises them, runs a clean-room output scan over every generated file, and writes `migration_status.json` + a `.pulp-import-provenance.json` marker. Skewed/symmetric source parameter curves emit as shaped `ParamRange`s (skew + symmetric fields), no longer downgraded to linear. |
+
+**`install` flags:** `--accept-importer-terms` accepts the terms non-interactively for CI (still recorded under `~/.pulp`); `--force` reinstalls even when an up-to-date record already exists.
+
+**Privacy invariant.** The SDK only ever knows the URL it was handed. A clone that fails is surfaced with git's own error plus a single URL-agnostic message ("could not fetch importer from the provided URL"). The SDK never states, infers, or records whether a given repository exists, or whether it is public or private — a user with access and a user without get the same SDK-authored failure text. This is what lets an importer stay entirely private: installing one by URL reveals nothing to anyone without the URL and the credentials to fetch it.
 
 `inspect` / `emit` flags:
 
