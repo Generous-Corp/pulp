@@ -512,7 +512,7 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
       // under the knobs on a desktop and collapsed to ~100px on a phone (where the view
       // then sheared its own labels through each other). Neither was a tuning problem; the
       // measurement was simply of the wrong thing.
-      canvas.style.cssText = "width:100%;height:210px;display:block";
+      canvas.style.cssText = "width:100%;height:clamp(420px,60vh,680px);display:block";
       container.appendChild(canvas);
       const pending = mountPulpUi(canvas, adapter, { moduleUrl: "./${UI_MODULE}.js" });
       // The shell handles the rejection (it restores the grid); this keeps the
@@ -748,7 +748,17 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
     .engine-stats .es-pct{min-width:5ch}
     .engine-stats .es-eng{display:inline-block;min-width:3.5ch;color:#2bd4be;font-weight:600}
     .engine-stats .es-sep{opacity:.55}
-    .engine-off{max-width:640px;margin:0 auto 14px;font:13px/1.6 system-ui;color:#e0b070}
+    .engine-off{max-width:960px;margin:0 auto 14px;font:13px/1.6 system-ui;color:#e0b070}
+    /* ── Hero layout ──────────────────────────────────────────────────────────────────
+       The editor is a beautiful thing and demands the room; the default 640px player panel
+       boxes it in. Widen the player's whole column (and the stats that sit under the editor)
+       to a wide, centered, padded band, and give the editor canvas a tall aspect. Everything
+       stays centered with breathing room — full-bleed would touch the window edges. */
+    /* #panel.pulp is the player's centered column, capped at 640px by default. Widen it and
+       everything inside (the editor canvas fills its width) to a wide, padded band. */
+    #panel.pulp{max-width:min(1200px, 94vw) !important}
+    .engine-stats{max-width:min(1200px, 94vw) !important; margin:14px auto 0; font-size:13px; text-align:center}
+    #pulp-ui-canvas{height:clamp(420px, 60vh, 680px) !important}
   </style>
 </head>
 <body>
@@ -872,13 +882,6 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
         if (laneAttached) return;      // already up
         laneAttached = true;
         offNote.remove();
-        const row = document.createElement("div");
-        row.className = "engine-row";
-        row.innerHTML =
-          '<label for="engine">Engine</label>' +
-          '<select id="engine"><option value="0">CPU</option>' +
-          '<option value="1">GPU (WebGPU compute)</option></select>';
-
         // THE LIVE METRICS, as separate elements with FIXED-WIDTH numeric slots.
         //
         // Built as spans, not a concatenated sentence. A sentence re-flows every time a
@@ -889,7 +892,7 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
         const stats = document.createElement("div");
         stats.className = "engine-stats";
         stats.innerHTML =
-          '<span id="es-cpu">Convolving on the CPU — a real-FFT partitioned convolver.</span>' +
+          '<span id="es-cpu"></span>' +
           '<span id="es-gpu" hidden>' +
             '<span class="es-num" id="es-blocks">—</span><span class="es-lab"> blocks on the GPU</span>' +
             '<span class="es-sep"> · </span>' +
@@ -900,27 +903,11 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
             '<span class="es-num es-pct" id="es-pct">—</span><span class="es-lab"> of the real-time budget</span>' +
           '</span>';
 
-        const note = document.createElement("p");
-        note.className = "engine-note";
-        note.textContent =
-          "CPU is the default and always the fallback — a GPU block that misses its " +
-          "deadline is covered, so you never hear a gap.";
-        container.appendChild(row);
+        // Only the STATS. The editor draws its own CPU/GPU switch (top-right chip) and its
+        // own Mix/Size/Gain/Flow, so a page-level Engine dropdown + blurb would just duplicate
+        // it. The stats stay — they are the one thing the editor does NOT show and they prove
+        // the GPU is really carrying the audio; shown only while GPU is the emitting engine.
         container.appendChild(stats);
-        container.appendChild(note);
-
-        const select = row.querySelector("select");
-        select.addEventListener("change", async () => {
-          const params = (await adapter.getParameterInfo()) || [];
-          const engine = params.find((p) => /^engine$/i.test(p.label || ""));
-          if (engine) adapter.setParameterValue(engine.id, Number(select.value));
-        });
-        window.__engineSelect = select;
-
-        // Which engine is actually EMITTING. Kept in sync from both directions: this
-        // control, and the plugin itself (a preset or a host can move the parameter).
-        setEngineGpu(Number(select.value) >= 1);
-        select.addEventListener("change", () => setEngineGpu(Number(select.value) >= 1));
       };
 
       // What the page says while there is no working GPU lane — and what it keeps saying
@@ -949,8 +936,6 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           const i = list.findIndex((x) => /^engine$/i.test(x.label || ""));
           if (i >= 0 && values && typeof values[i] === "number") {
             setEngineGpu(values[i] >= 0.5);
-            const sel = document.querySelector("#engine");
-            if (sel) sel.value = engineIsGpu ? "1" : "0";
           }
         } catch (err) { /* a readout must never take the audio down */ }
         if (prevParamsChanged) prevParamsChanged(values, infos);
@@ -981,7 +966,7 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       // under the knobs on a desktop and collapsed to ~100px on a phone (where the view
       // then sheared its own labels through each other). Neither was a tuning problem; the
       // measurement was simply of the wrong thing.
-      canvas.style.cssText = "width:100%;height:210px;display:block";
+      canvas.style.cssText = "width:100%;height:clamp(420px,60vh,680px);display:block";
       container.appendChild(canvas);
 
       // Engine and "GPU only" are rendered BELOW as a <select> and a checkbox — real
@@ -1029,7 +1014,13 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           // you were hearing came from the shader. The readout must describe the audio
           // that is being EMITTED, not the work that is being thrown away — a status line
           // that overstates the GPU is the exact failure this whole demo exists to avoid.
-          const gpuIsCarrying = engineIsGpu && producedNow;
+          // producedNow ALONE is the honest signal now. The worklet's engine gate keeps the
+          // GPU worker fully IDLE while Engine=CPU (it submits nothing), so the worker produces
+          // blocks ONLY when GPU is the emitting engine. The old engineIsGpu-AND-producedNow
+          // test relied on a page-side engineIsGpu flag that the removed dropdown used to set;
+          // the editor's own CPU/GPU chip is the switcher now, and the GPU's own produced
+          // counter is a truer "is the shader carrying the audio" than any page param mirror.
+          const gpuIsCarrying = producedNow;
           // budget_us and rt_percent are derived HERE, by the same arithmetic
           // native gpu_status() uses (super_convolver.hpp), so the browser and
           // the native build print the same numbers computed the same way.
@@ -1076,13 +1067,10 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
         ? { gpuSab: lane.sab, gpuLatencyBlocks: lane.latencyBlocks }
         : {});
     },
-    // The same uploader the CPU pages get. It is the same plugin and it takes the same
-    // impulse response — and on THIS page it does more than on the others: the plugin
-    // republishes its rebuilt IR (pulp_ir_*), the page forwards it with lane.setIr(), and
-    // the GPU worker re-prepares. So dropping a file here changes the kernel the compute
-    // shader is convolving with, live. Withholding the control on the one page where it is
-    // most interesting would have been an odd place to stop.
-    fileUpload: irFileUpload(),
+    // NO separate upload area on the GPU page: the fancy editor's own "SOURCE" chip opens the
+    // file dialog (see the pluginState wiring above), and it does the full live thing — the
+    // plugin republishes its rebuilt IR (pulp_ir_*), the page forwards it with lane.setIr(),
+    // the GPU worker re-prepares — so a second page-level loader would just duplicate the chip.
   });
 </script>
 <p style="max-width:640px;margin:0 auto;padding:0 20px 40px;
