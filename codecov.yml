@@ -427,6 +427,9 @@ component_management:
         - "!core/platform/platform/mac/**"
         - "!core/platform/platform/linux/**"
         - "!core/platform/platform/win/**"
+        # The web platform subtree (clipboard_web.cpp, ...) is owned by the `web`
+        # component, like the other OS subtrees above — otherwise it double-counts.
+        - "!core/platform/platform/web/**"
         - "!core/platform/src/android/**"
         - "!core/platform/include/pulp/platform/android/**"
         - "!core/platform/include/pulp/platform/win/**"
