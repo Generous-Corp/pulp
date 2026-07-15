@@ -24,6 +24,7 @@ endif()
 
 # PulpGain: minimal gain effect plugin
 add_subdirectory(pulp-gain)
+add_subdirectory(eq-curve-demo)
 
 # PulpRustGain — a Rust DSP core packaged as a CLAP plugin (native-components
 # capstone). Opt-in: needs a Rust toolchain and the Cargo staticlib lane.

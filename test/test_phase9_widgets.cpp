@@ -171,6 +171,113 @@ TEST_CASE("spectrum bins resample onto the log axis", "[view][eq_curve][graph_sc
     REQUIRE(narrow.back() <= pulp::signal::min_response_db);
 }
 
+TEST_CASE("EqCurveView shelf response honors Q (view matches audio)",
+          "[view][eq_curve]") {
+    // A shelf's Q shapes its transition. The drawn curve must respond to Q, or
+    // it silently disagrees with the audio path (which designs shelves with Q).
+    // Regression for the shelf-drops-Q bug: the curve was designed with a fixed
+    // slope and ignored Q entirely.
+    EqCurveView eq;
+    eq.set_sample_rate(48000.0f);
+
+    // Sweep near (not AT) the corner — at the corner |H| is gain/2 dB for any
+    // Q, so the resonance a high Q adds only shows to either side.
+    const std::vector<float> probes{150.0f, 200.0f, 450.0f, 600.0f, 900.0f};
+    eq.set_bands({{300.0f, 8.0f, 0.5f, EqCurveView::FilterType::low_shelf, true}});
+    std::vector<float> wide;
+    for (float f : probes) wide.push_back(eq.magnitude_db_at(f));
+    eq.set_bands({{300.0f, 8.0f, 4.0f, EqCurveView::FilterType::low_shelf, true}});
+    float max_diff = 0.0f;
+    for (size_t i = 0; i < probes.size(); ++i)
+        max_diff = std::max(max_diff, std::abs(wide[i] - eq.magnitude_db_at(probes[i])));
+
+    // Changing Q must change the drawn shelf. (If Q were dropped — the bug —
+    // every probe would be identical.)
+    REQUIRE(max_diff > 1.0f);
+}
+
+TEST_CASE("EqCurveView scroll wheel adjusts Q and clamps", "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 800, 400});
+    eq.set_sample_rate(48000.0f);
+    eq.set_bands({{1000.0f, 6.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+    const float hx = fs.to_x(1000.0f);
+    const float hy = gs.to_y(6.0f);
+
+    auto wheel = [&](float delta) {
+        MouseEvent e{};
+        e.position = {hx, hy};
+        e.is_wheel = true;
+        e.scroll_delta_y = delta;
+        eq.on_mouse_event(e);
+    };
+
+    wheel(-1.0f);  // scroll up → narrower (higher Q)
+    REQUIRE(eq.bands()[0].q > 2.0f);
+    const float up_q = eq.bands()[0].q;
+    wheel(1.0f);   // scroll down → wider
+    REQUIRE(eq.bands()[0].q < up_q);
+
+    // Clamps at the bounds no matter how far you scroll.
+    for (int i = 0; i < 100; ++i) wheel(-1.0f);
+    REQUIRE(eq.bands()[0].q <= 12.0f);
+    for (int i = 0; i < 100; ++i) wheel(1.0f);
+    REQUIRE(eq.bands()[0].q >= 0.1f);
+}
+
+TEST_CASE("EqCurveView double-click resets gain but keeps the band selected",
+          "[view][eq_curve]") {
+    // Regression: the platform pairs a press with the double-click, and the
+    // gain reset moves the handle — the follow-up on_mouse_down must not miss
+    // and deselect the band it just reset.
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 800, 400});
+    eq.set_sample_rate(48000.0f);
+    eq.set_bands({{1000.0f, 9.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+    const float hx = fs.to_x(1000.0f);
+    const float hy = gs.to_y(9.0f);
+
+    MouseEvent dbl{};
+    dbl.position = {hx, hy};
+    dbl.is_down = true;
+    dbl.click_count = 2;
+    eq.on_mouse_event(dbl);
+    REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(0.0, 1e-4));
+    REQUIRE(eq.selected_band() == 0);
+
+    // The platform's paired drag-start press (at the now-stale position) must be
+    // swallowed, leaving the selection intact rather than clearing it.
+    eq.on_mouse_down({hx, hy});
+    REQUIRE(eq.selected_band() == 0);
+}
+
+TEST_CASE("EqCurveView tracks the hovered band", "[view][eq_curve]") {
+    // Hover arrives via on_hover_move on real hosts, not on_mouse_event.
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 800, 400});
+    eq.set_sample_rate(48000.0f);
+    eq.set_bands({{1000.0f, 6.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+    eq.on_hover_move({fs.to_x(1000.0f), gs.to_y(6.0f)});
+    REQUIRE(eq.hovered_band() == 0);
+
+    eq.on_hover_move({fs.to_x(1000.0f), gs.to_y(-15.0f)});  // away from the handle
+    REQUIRE(eq.hovered_band() == -1);
+
+    eq.on_hover_move({fs.to_x(1000.0f), gs.to_y(6.0f)});
+    REQUIRE(eq.hovered_band() == 0);
+    eq.on_mouse_leave();
+    REQUIRE(eq.hovered_band() == -1);
+}
+
 // ── EqCurveView ─────────────────────────────────────────────────────────────
 
 TEST_CASE("EqCurveView band management", "[view][eq_curve]") {

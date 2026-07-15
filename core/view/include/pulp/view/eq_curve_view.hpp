@@ -29,7 +29,11 @@ public:
         float q = 1.0f;             // Q factor (0.1 to 30)
         FilterType type = FilterType::peak;
         bool enabled = true;
-        Color color{};               // Per-band color (if empty, uses accent)
+        // Per-band color. Left fully transparent by default as the "unset"
+        // sentinel — the view then assigns one from band_palette_color(). A
+        // plain Color{} is opaque BLACK (alpha defaults to 1), which would read
+        // as an explicitly-chosen black, so the sentinel must zero alpha.
+        Color color{0.0f, 0.0f, 0.0f, 0.0f};
     };
 
     EqCurveView();
@@ -72,6 +76,24 @@ public:
     void set_show_grid(bool show) { show_grid_ = show; }
     bool show_grid() const { return show_grid_; }
 
+    // Per-band curves + translucent fills, each in the band's color, drawn under
+    // the composite so every handle sits on its own curve. On by default.
+    void set_show_band_curves(bool show) { show_band_curves_ = show; }
+    bool show_band_curves() const { return show_band_curves_; }
+
+    // dB (vertical) and frequency (horizontal) axis labels. On by default.
+    void set_show_labels(bool show) { show_labels_ = show; }
+    bool show_labels() const { return show_labels_; }
+
+    // Live readout (frequency / gain / Q) of the band under the pointer or being
+    // dragged. On by default.
+    void set_show_readout(bool show) { show_readout_ = show; }
+    bool show_readout() const { return show_readout_; }
+
+    // Default color assigned to band i when its Band::color is unset, from a
+    // built-in palette. Exposed so callers can match handles or legends to it.
+    static Color band_palette_color(size_t index);
+
     // Spectrum analyzer overlay (optional)
     void set_spectrum(const float* magnitudes_db, size_t bin_count);
     void clear_spectrum();
@@ -84,11 +106,19 @@ public:
     int selected_band() const { return selected_band_; }
     void set_selected_band(int index) { selected_band_ = index; }
 
+    // Band currently under the pointer (-1 if none). Drives the hover highlight
+    // and readout; exposed so hosts/tests can observe hover state.
+    int hovered_band() const { return hovered_band_; }
+
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_up(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    // Passive hover (no button) arrives here on real hosts, NOT through
+    // on_mouse_event — so the hover highlight + readout must track it here.
+    void on_hover_move(Point local_pos) override;
+    void on_mouse_leave() override;
     bool wants_mouse_input() const override { return true; }
 
 private:
@@ -99,9 +129,16 @@ private:
     float max_db_ = 24.0f;
     float sample_rate_ = 48000.0f;
     bool show_grid_ = true;
+    bool show_band_curves_ = true;
+    bool show_labels_ = true;
+    bool show_readout_ = true;
     std::vector<float> spectrum_;
     int selected_band_ = -1;
     int dragging_band_ = -1;
+    int hovered_band_ = -1;
+    // A double-click both resets a band AND is followed by a drag-start press
+    // from the platform; this suppresses that one spurious on_mouse_down.
+    bool suppress_next_down_ = false;
     Point drag_start_{};
 
     // Coefficients of the enabled bands, rebuilt only when a band or the
@@ -111,6 +148,8 @@ private:
     // allocation across frames instead of allocating on every repaint.
     mutable std::vector<float> curve_db_;
     mutable std::vector<float> spectrum_db_;
+    mutable std::vector<float> band_db_;
+    mutable std::vector<canvas::Canvas::Point2D> fill_poly_;
 
     void rebuild_coefficients();
     float freq_to_x(float freq) const;
