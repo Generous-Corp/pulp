@@ -139,6 +139,30 @@ BASE="${PULP_PREPUSH_BASE:-origin/main}"
 
 fail=0
 
+# --- git-state guards (shared-worktree topology) ---------------------------
+# This .git is shared across 100+ worktrees. `git checkout -B <branch>` can leave
+# HEAD DETACHED while the branch ref lags, and a subsequent `git push origin
+# <branch>` then silently pushes nothing. This hook cannot catch that no-op push
+# (a no-op push never fires pre-push) — the real fix is tools/scripts/git_safe_push.sh
+# — but it CAN refuse the two states that make a push meaningless, as a backstop.
+# See planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md.
+if ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
+    echo "✗ pre-push: HEAD is DETACHED. Your commits are on an anonymous HEAD, not a" >&2
+    echo "  branch — in this shared-worktree repo that is how a push silently no-ops." >&2
+    echo "  Attach to a branch first, or push via tools/scripts/git_safe_push.sh." >&2
+    fail=1
+fi
+# Empty diff vs base: a rebase/merge mishap can flatten a branch to zero changes
+# (happened 2026-07-15). Pushing nothing-vs-main is almost never intended.
+if [ "$fail" -eq 0 ] && git rev-parse --verify -q "$BASE" >/dev/null 2>&1; then
+    if git diff --quiet "$BASE"...HEAD 2>/dev/null; then
+        echo "✗ pre-push: HEAD has NO changes vs $BASE. A rebase/merge likely flattened" >&2
+        echo "  this branch to zero files. Nothing to push — check your branch state." >&2
+        fail=1
+    fi
+fi
+# ---------------------------------------------------------------------------
+
 # Source-tree pollution — block the CMakeLists.txt-becomes-Clock-fixture
 # regression from PR #1755 (root cause: a CLI test left a /tmp Clock
 # fixture in the source tree). Cheap (file-list grep + content check on

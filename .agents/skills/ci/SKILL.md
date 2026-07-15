@@ -4117,3 +4117,23 @@ Facts worth keeping (measured):
 - **Host-label hygiene matters for pinning.** A supervisor advertising two host labels
   (e.g. both `pulp-host-m5` and `pulp-host-macstudio`) makes `pin` land somewhere you
   did not choose. Check the labels before trusting a pin.
+
+## Git-safe push in the shared-worktree repo (2026-07-15)
+
+This `.git` is shared across 100+ worktrees. In that topology `git push origin <branch>`
+has silent failure modes — a *no-op push* (HEAD detached, branch ref lags, git reports
+"Everything up-to-date" while pushing nothing) and stale behind/ahead reasoning. A pre-push
+hook cannot catch the no-op push (a no-op push never fires it), so the real fix is a wrapper.
+
+**Prefer `tools/scripts/git_safe_push.sh` over a bare `git push`** for PR branches:
+
+```bash
+tools/scripts/git_safe_push.sh [<branch>] [-- <extra git push args>]   # e.g. -- --force-with-lease
+```
+
+It refuses on detached HEAD, fetches the target first, always pushes `HEAD:<branch>` (what
+you built, never a lagging bare ref), and verifies `remote == local HEAD` afterward — failing
+loud on a no-op. The pre-push hook (`.githooks/pre-push`) adds two backstop guards for bare
+pushes: it refuses a **detached-HEAD** push and an **empty-diff-vs-base** push (the latter
+catches a rebase that flattened a branch to zero files). Root cause + the four-fix plan:
+`planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md`.
