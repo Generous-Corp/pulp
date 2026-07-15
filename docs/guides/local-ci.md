@@ -11,6 +11,15 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
 
+The required `macos` gate runs the shipyard `mac` target
+(`.shipyard/config.toml`, `[validation.default]`). Its `test` step is
+`ctest ... --repeat until-pass:2 --label-exclude "validation|slow"` — it excludes
+the long `slow` tests and the example plugins' `validation` format-validators
+(these gate on the path-filtered `example-validation` lane instead), and retries a
+single flake once so timing-flakes don't redden the gate. The full lane model —
+what runs where, the label taxonomy, and how to route a new test — is
+[docs/guides/test-lanes.md](test-lanes.md).
+
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
 ./tools/install-shipyard.sh --status     # compare installed vs pinned

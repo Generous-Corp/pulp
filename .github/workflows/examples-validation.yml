@@ -1,0 +1,133 @@
+# Example-plugin format validation — the path-filtered GATING lane.
+#
+# The example plugins' real-host format-validators (`pluginval-*`, `auval-*`,
+# `clap-dlopen-*`, all tagged `LABELS "validation"`) are excluded from the
+# per-PR required `macos` gate (see .shipyard/config.toml + docs/guides/
+# test-lanes.md): they are slow and flaky under load and must not gate unrelated
+# core PRs. But they must still be ENFORCED when an example itself changes —
+# not deferred to the informational nightly. This lane does exactly that:
+# it runs them (and BLOCKS) only on PRs that touch `examples/**`.
+#
+# Required-safe shape: the workflow ALWAYS runs (no top-level `paths:` filter),
+# a cheap `changes` job decides whether examples were touched, and a final
+# `gate` job always reports a stable `example-validation` status. That way this
+# can be made a required branch-protection context without the
+# "Expected — waiting for status" dead-lock GitHub imposes on a required check
+# that a `paths:` filter skipped. It stays OUT of required_status_checks until a
+# real-runner run proves green (see docs/guides/test-lanes.md).
+name: Example validation
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: example-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect example changes
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    outputs:
+      examples: ${{ steps.filter.outputs.examples }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            # merge_group / workflow_dispatch: no PR base — run to be safe.
+            echo "examples=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base"...HEAD | grep -qE '^examples/'; then
+            echo "examples=true" >> "$GITHUB_OUTPUT"
+            echo "examples/** changed — will run example validators."
+          else
+            echo "examples=false" >> "$GITHUB_OUTPUT"
+            echo "no examples/** changes — skipping example validators."
+          fi
+
+  validate:
+    name: Validate examples (macOS)
+    needs: changes
+    if: needs.changes.outputs.examples == 'true'
+    # Route to the self-hosted studio runners where pluginval / auval actually
+    # exist (they are conditionally registered via find_program, so a runner
+    # WITHOUT the tools would register nothing and pass trivially — a false
+    # green). Falls back to macos-15 only for forks that set no local routing.
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch Skia (darwin-arm64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+      - name: Deps
+        shell: bash
+        run: ./setup.sh --ci --deps-only
+      - name: Configure (examples ON)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
+      - name: Build
+        shell: bash
+        run: tools/ci/governed-build.sh cmake --build build
+      - name: Run example validators (ctest -L validation)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the `validation`-labeled example format-validators. --repeat
+          # until-pass:2 lets a single timing-flake self-heal; each attempt is
+          # bounded by the test's own TIMEOUT. This lane gates: a real
+          # validation regression fails the PR that introduced it.
+          # --no-tests=ignore: a runner without pluginval/auval registers no
+          # `validation` tests (they are find_program-conditional), and bare
+          # `ctest -L` exits 8 on "no tests" — that must not FALSE-FAIL an
+          # example PR. On the self-hosted studio runners the tools exist, so
+          # real validators do run and gate.
+          ctest --test-dir build --output-on-failure --repeat until-pass:2 \
+            --no-tests=ignore -L validation -j4
+      - name: Surface ctest failures
+        if: failure()
+        shell: bash
+        run: |
+          tdir="build/Testing/Temporary"
+          { [ -f "$tdir/LastTestsFailed.log" ] && { echo "=== failed example validators ==="; cat "$tdir/LastTestsFailed.log"; }; } || \
+            echo "_no ctest result log — failed before ctest (configure/build)_"
+
+  gate:
+    name: example-validation
+    needs: [changes, validate]
+    if: always()
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    steps:
+      - name: Report gate outcome
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="${{ needs.changes.outputs.examples }}"
+          result="${{ needs.validate.result }}"
+          if [ "$changed" != "true" ]; then
+            echo "No examples/** changes — example validation not required. PASS."
+            exit 0
+          fi
+          if [ "$result" = "success" ]; then
+            echo "Example validators passed. PASS."
+            exit 0
+          fi
+          echo "Example validators did not pass (validate=$result). FAIL."
+          exit 1
