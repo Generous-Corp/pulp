@@ -54,7 +54,13 @@ git fetch --quiet "$remote" "$branch" 2>/dev/null || true
 # 3. Push what you actually built: HEAD -> <branch>. Never a bare branch name,
 #    which can resolve to a lagging ref.
 head_sha="$(git rev-parse HEAD)"
-git push "$remote" "HEAD:refs/heads/$branch" "${extra[@]}"
+if [ "${#extra[@]}" -gt 0 ]; then
+  git push "$remote" "HEAD:refs/heads/$branch" "${extra[@]}"
+else
+  # Bash 3.2 treats an empty-array expansion as an unbound variable under
+  # `set -u`, so do not expand the optional vector when it is empty.
+  git push "$remote" "HEAD:refs/heads/$branch"
+fi
 
 # 4. Verify. "Everything up-to-date" is not proof — compare SHAs.
 git fetch --quiet "$remote" "$branch" 2>/dev/null || true
