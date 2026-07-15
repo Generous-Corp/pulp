@@ -91,6 +91,35 @@ State it explicitly, in the report:
 
 **If you cannot answer this, you have a hypothesis, not a proposal.**
 
+### 0.5 — VERIFY THE MECHANISM: can the fix actually catch the failure?
+
+**This step exists because a report failed without it.** A git-state report proposed a
+*pre-push hook* to catch a silent no-op push — but a no-op push pushes nothing, so the hook
+**never fires.** The fix was proposed for a failure its own mechanism was structurally blind
+to. It read as confident and specific and it was wrong, and it was only caught because a human
+pushed back.
+
+> **Before you write a fix down, prove its mechanism can detect the failure it targets.**
+> A check cannot catch what does not run. A pre-push hook cannot see a commit-time problem. A
+> level-triggered alarm cannot see a transition. Assume nothing about what a mechanism can
+> observe — test it.
+
+**Map each failure to the ONE mechanism that actually catches it**, and say why the others do
+not:
+
+    | failure | mechanism that WORKS | why not the alternatives |
+    |---------|----------------------|--------------------------|
+    | ...     | ...                  | ...                      |
+
+If a fix bundles several failures under one mechanism ("a preflight will catch all of these"),
+that is the smell. Split it. Usually the failures need *different* mechanisms — a wrapper for
+one, a hook for another, a habit for a third — and some may have **no clean mechanism at all**,
+which you must say plainly rather than paper over.
+
+*(This is the same discipline as the personal `verify-the-instrument` skill, applied to the
+FIX rather than to a measurement: prove the instrument can report the thing before you trust
+it. If that skill is available in your environment, use it here.)*
+
 ---
 
 ## Confidence — state it, and say what would raise it
