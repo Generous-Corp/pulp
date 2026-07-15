@@ -316,6 +316,68 @@ public:
         // Dim the field so the card reads.
         canvas.set_fill_color(cv::Color::rgba8(4, 5, 8, 190));
         canvas.fill_rect(0, 0, W, H);
+
+        // {label, description}: label in paper, description in dim. A blank label is
+        // a full-width intro sentence in dim.
+        static const std::pair<const char*, const char*> kRows[] = {
+            {"", "A convolution reverb that convolves your signal against a"},
+            {"", "cloud of decorrelated rooms in one batched GPU pass."},
+            {"Source", "load an impulse response, or use the synthetic room"},
+            {"Rooms", "how many decorrelated rooms fill the stereo field"},
+            {"Flow", "drift each room's pan into a living, moving field"},
+            {"Size", "length of the synthetic room's tail"},
+            {"CPU / GPU", "tap the badge to switch engines"},
+        };
+        const cv::Color bone = cv::Color::rgba8(188, 194, 204);
+        const cv::Color paper = cv::Color::rgba8(237, 239, 243);
+        const cv::Color dim = cv::Color::rgba8(140, 146, 156);
+
+        if (narrow_) {
+            // Phone: the desktop two-column label/description does not fit, so each
+            // labeled row STACKS (label over an indented description) and the card
+            // spans nearly the full width. Clipped to the card so a long line is
+            // trimmed at the edge instead of spilling onto the field.
+            const float pad = 18 * s, line = 18 * s, fs = 11.0f * s;
+            int lines = 0;
+            for (const auto& [l, d] : kRows) { (void)d; lines += l[0] ? 2 : 1; }
+            const float cw = W - 24 * s;
+            const float chh = pad * 2 + 24 * s + lines * line + 22 * s;
+            const float cx = (W - cw) * 0.5f, cy = (H - chh) * 0.5f;
+            canvas.set_fill_color(cv::Color::rgba8(9, 11, 15, 245));
+            canvas.fill_rounded_rect(cx, cy, cw, chh, 14 * s);
+            canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 34));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(cx, cy, cw, chh, 14 * s);
+            canvas.save();
+            canvas.clip_rect(cx, cy, cw, chh);
+            const float tx = cx + pad;
+            float ty = cy + pad + 14 * s;
+            canvas.set_fill_color(bone);
+            tracked_text(canvas, "SuperConvolver", tx, ty, 13.0f * s, 0.14f);
+            ty += 26 * s;
+            for (const auto& [label, desc] : kRows) {
+                if (label[0] == '\0') {
+                    canvas.set_font("Inter", fs);
+                    canvas.set_fill_color(dim);
+                    canvas.fill_text(desc, tx, ty);
+                    ty += line;
+                } else {
+                    canvas.set_font("Inter", fs);
+                    canvas.set_fill_color(paper);
+                    canvas.fill_text(label, tx, ty);
+                    ty += line * 0.86f;
+                    canvas.set_fill_color(dim);
+                    canvas.fill_text(desc, tx + 10 * s, ty);
+                    ty += line;
+                }
+            }
+            canvas.set_fill_color(dim);
+            canvas.set_font("Inter", 10.0f * s);
+            canvas.fill_text("Tap anywhere to close", tx, cy + chh - 16 * s);
+            canvas.restore();
+            return;
+        }
+
         const float cw = std::min(W - 80 * s, 460 * s), chh = 250 * s;
         const float cx = (W - cw) * 0.5f, cy = (H - chh) * 0.5f;
         canvas.set_fill_color(cv::Color::rgba8(9, 11, 15, 245));
@@ -326,24 +388,13 @@ public:
 
         const float tx = cx + 28 * s;
         float ty = cy + 40 * s;
-        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));  // --bone
+        canvas.set_fill_color(bone);
         tracked_text(canvas, "SuperConvolver", tx, ty, 14.0f * s, 0.16f);
         ty += 30 * s;
-        // {label, description}: label in paper, description in dim. A blank label
-        // is a full-width intro sentence in dim.
-        static const std::pair<const char*, const char*> kRows[] = {
-            {"", "A convolution reverb that convolves your signal against a"},
-            {"", "cloud of decorrelated rooms in one batched GPU pass."},
-            {"Source", "load an impulse response, or use the synthetic room"},
-            {"Rooms", "how many decorrelated rooms fill the stereo field"},
-            {"Flow", "drift each room's pan into a living, moving field"},
-            {"Size", "length of the synthetic room's tail"},
-            {"CPU / GPU", "tap the badge to switch engines"},
-        };
         for (const auto& [label, desc] : kRows) {
             canvas.set_font("Inter", 11.5f * s);
             if (label[0] != '\0') {
-                canvas.set_fill_color(cv::Color::rgba8(237, 239, 243));  // --paper
+                canvas.set_fill_color(paper);
                 canvas.fill_text(label, tx, ty);
                 canvas.set_fill_color(cv::Color::rgba8(120, 126, 136));  // --dim
                 canvas.fill_text(desc, tx + 92 * s, ty);

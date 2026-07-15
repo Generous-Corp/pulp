@@ -272,6 +272,31 @@ per-ABI entry point for it.** Go through the plugin's own state:
   AudioContext. `customUi` is the wrong hook for this: it *replaces* the parameter
   grid and falls back to it on failure.
 
+## Landmine: iOS Safari ignores `.click()` on a `display:none` file input
+
+The page's IR/sample picker is a `<input type=file>` the plugin's Source affordance
+triggers (editor → `load_ir_path({})` → `Module.onRequestIr` → `filePicker.click()`).
+Hiding that input with `hidden` / `display:none` works on **desktop** Safari and
+Chrome but **iOS Safari silently drops the `.click()`** — the tap does nothing and it
+reads as a broken control. Keep the input in the render tree and hide it visually
+instead (`position:fixed; width:1px; height:1px; opacity:0; pointer-events:none`).
+The click must also still be **synchronous inside the user gesture** — the whole
+canvas-pointer → wasm → `EM_JS` → `click()` path is synchronous, so that holds; do not
+defer it behind a promise/`setTimeout`.
+
+## Landmine: a control-surface canvas eats page scroll on touch — opt into `pan-y`
+
+`web_input.cpp` sets `canvas.style.touchAction = 'none'` and `preventDefault`s
+pointerdown so a knob drag never pans the page — correct for a standalone plugin. But
+an editor **embedded in a scrollable page** (only horizontal sliders, no vertical
+drags) then swallows every touch and the page cannot be scrolled from on top of the
+plugin. Opt in by setting `canvas.style.touchAction = 'pan-y'` after mount (see
+`pulp-ui.js`): the input layer checks the live `touch-action` and, for a **touch** on a
+pannable canvas, skips capture + preventDefault so a VERTICAL drag scrolls the page
+while a HORIZONTAL drag or tap still drives a slider (`pan-y` claims only the vertical
+axis). Do NOT flip the default to `pan-y` — a knob-heavy plugin needs the vertical axis
+for its own drags.
+
 ## Landmine: a WebCLAP host must READ parameters back, not mirror them
 
 A host that remembers what it last *sent* (`values.set(id, v)`) goes stale the

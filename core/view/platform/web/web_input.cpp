@@ -181,9 +181,19 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
 
     var state = {};
     state.pointerdown = function(e) {
+        // Panning opt-in. A control surface keeps the default touch-action:none and
+        // captures every gesture. But an editor embedded in a scrollable page (only
+        // horizontal controls, no vertical drags) can set touch-action:pan-y so a
+        // VERTICAL touch-drag scrolls the page. Capturing the pointer or
+        // preventDefault-ing here would cancel that scroll, so for a touch on a
+        // pannable canvas we let the browser arbitrate: vertical → page scroll,
+        // horizontal drag or tap → stays with the canvas (pan-y claims only the
+        // vertical axis, so the pointer stream still drives a horizontal slider).
+        var pannable = e.pointerType === 'touch' &&
+                       canvas.style.touchAction && canvas.style.touchAction !== 'none';
         // Pointer capture keeps drag ticks and the release coming to the canvas
         // once the pointer leaves it mid-gesture (knob drags routinely do).
-        if (canvas.setPointerCapture) {
+        if (!pannable && canvas.setPointerCapture) {
             try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
         }
         // preventScroll is load-bearing: focus() otherwise scrolls the canvas
@@ -193,7 +203,7 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
             try { canvas.focus({ preventScroll: true }); } catch (err) { canvas.focus(); }
         }
         pointer(e, 0);
-        e.preventDefault();
+        if (!pannable) e.preventDefault();
     };
     state.pointermove = function(e) { pointer(e, 1); };
     state.pointerup = function(e) { pointer(e, 2); e.preventDefault(); };

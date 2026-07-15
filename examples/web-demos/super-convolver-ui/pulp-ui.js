@@ -96,6 +96,14 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
     Module._free(selector);
     if (!ok) throw new Error("mountPulpUi: _pulp_ui_init failed (no window host / no WebGL2 context)");
 
+    // This editor has only horizontal sliders and taps — no vertical drags — and it
+    // is embedded in a scrollable page. Opt into `pan-y` (the input layer defaults a
+    // control surface to `touch-action:none`) so a vertical touch-drag over the plugin
+    // scrolls the PAGE, while a horizontal drag still adjusts a slider and a tap still
+    // hits a control. Without this the canvas swallowed every touch and the page could
+    // not be scrolled from on top of the plugin.
+    canvasEl.style.touchAction = "pan-y";
+
     // host -> UI. The plugin changing its own parameters (preset load, host
     // automation) is the only way values arrive from the other side.
     const previousOnParamsChanged = adapter.onParamsChanged;
@@ -203,7 +211,12 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
         filePicker = document.createElement("input");
         filePicker.type = "file";
         filePicker.accept = "audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg";
-        filePicker.hidden = true;
+        // NOT `hidden`/`display:none`: iOS Safari silently ignores .click() on a
+        // file input that is not in the render tree, which is exactly why the Source
+        // chip opened the picker on desktop but did nothing on mobile Safari. Keep it
+        // in the layout but visually gone and out of the way.
+        filePicker.style.cssText =
+            "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;";
         filePicker.addEventListener("change", () => {
             const file = filePicker.files && filePicker.files[0];
             filePicker.value = "";   // so re-picking the same file fires `change` again
