@@ -1,7 +1,7 @@
 {
   "$schema": "./skill_path_map.schema.json",
   "schema_version": 1,
-  "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing. Dual/triple ownership is permitted — and expected — for files that span multiple domains: e.g. core/format/src/au_adapter.mm is owned by both `auv3` (the adapter) and `view-bridge` (editor attach lifecycle), because a change to that file reasonably requires guidance updates on both sides. Dual ownership is not a mistake to collapse; use it when a single file legitimately teaches two skills.",
+  "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing. Dual/triple ownership is permitted \u2014 and expected \u2014 for files that span multiple domains: e.g. core/format/src/au_adapter.mm is owned by both `auv3` (the adapter) and `view-bridge` (editor attach lifecycle), because a change to that file reasonably requires guidance updates on both sides. Dual ownership is not a mistake to collapse; use it when a single file legitimately teaches two skills.",
   "skills": {
     "aax": {
       "paths": [
@@ -11,7 +11,7 @@
         "tools/cmake/PulpAAX.cmake"
       ],
       "_doc": {
-        "empty-ok": "external/AAX-SDK/** intentionally empty — AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
+        "empty-ok": "external/AAX-SDK/** intentionally empty \u2014 AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
       }
     },
     "android": {
@@ -35,7 +35,7 @@
         "external/ara-sdk/**"
       ],
       "_doc": {
-        "empty-ok": "external/ara-sdk/** intentionally empty — ARA SDK is developer-supplied per the ara skill"
+        "empty-ok": "external/ara-sdk/** intentionally empty \u2014 ARA SDK is developer-supplied per the ara skill"
       }
     },
     "audio-harness": {
@@ -142,7 +142,7 @@
     "code-comments": {
       "paths": [],
       "_doc": {
-        "empty-ok": "Process/guidance skill (how to write durable source comments + test names/tags) — applies when writing any code, not tied to a source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+        "empty-ok": "Process/guidance skill (how to write durable source comments + test names/tags) \u2014 applies when writing any code, not tied to a source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
       }
     },
     "content": {
@@ -172,7 +172,7 @@
         "external/quickjs*/**"
       ],
       "_doc": {
-        "empty-ok": "external/quickjs*/** intentionally empty — QuickJS is fetched at configure time, not vendored"
+        "empty-ok": "external/quickjs*/** intentionally empty \u2014 QuickJS is fetched at configure time, not vendored"
       }
     },
     "faust": {
@@ -302,13 +302,13 @@
     "pr-batching": {
       "paths": [],
       "_doc": {
-        "empty-ok": "pr-batching is process guidance for the ship step (combine vs split finished branches to cut CI runs). It is not owned by any source path — no file edit should force a SKILL.md update. It is invoked by the shipping workflow, alongside the ci skill."
+        "empty-ok": "pr-batching is process guidance for the ship step (combine vs split finished branches to cut CI runs). It is not owned by any source path \u2014 no file edit should force a SKILL.md update. It is invoked by the shipping workflow, alongside the ci skill."
       }
     },
     "pr-review-sweep": {
       "paths": [],
       "_doc": {
-        "empty-ok": "Process skill (sweep a PR's review comments and act on them) — not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+        "empty-ok": "Process skill (sweep a PR's review comments and act on them) \u2014 not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
       }
     },
     "prototype-loop": {
@@ -514,6 +514,7 @@
       "paths": [
         "examples/webview-*/**"
       ]
-    }
+    },
+    "friction-report": []
   }
 }
