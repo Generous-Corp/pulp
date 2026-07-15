@@ -428,12 +428,22 @@ private:
     void layout() {
         const float W = local_bounds().width, H = local_bounds().height;
         const float s = scale();
-        const float m = 20 * s, top = 64 * s;
+        const float m = 20 * s;
+        // Narrow (phone) mode. `scale()` keys off HEIGHT, so a tall, skinny phone
+        // canvas has a LARGE s and a SMALL W — and the one-line header (wordmark
+        // left, centered mode tabs, engine chip right) no longer fits: the tabs
+        // collide with the wordmark and the chip. Below this logical width, drop
+        // the tabs to their own row and stack each slider's label over its value.
+        // Desktop sits far above the threshold and is untouched.
+        narrow_ = W < 680.0f * s;
+        const float top = narrow_ ? 132 * s : 64 * s;
         const float avail = H - top - m;
 
-        // The Source chip (top-left, below the wordmark) IS the loader — click it
-        // to open the picker. Rect shared by paint (draw) and pointer (hit-test).
-        load_ir_btn_ = {24 * s, 44 * s, 196 * s, 38 * s};
+        // The Source chip (below the wordmark) IS the loader — click it to open the
+        // picker. Rect shared by paint (draw) and pointer (hit-test). On a phone it
+        // spans its own full-width row (row 3) so it never sits under the tabs.
+        load_ir_btn_ = narrow_ ? vw::Rect{m, 92 * s, W - 2 * m, 36 * s}
+                               : vw::Rect{24 * s, 44 * s, 196 * s, 38 * s};
 
         // Hero IR waveform (largest), then spectrum, then the control strip.
         const float ir_h   = avail * 0.42f;
@@ -472,10 +482,14 @@ private:
         // rather than being offered and doing nothing.
         engine_ = has(kEngine) ? vw::Rect{W - 200 * s, 12 * s, 176 * s, 44 * s} : vw::Rect{};
         bypass_ = {};
-        const float tab_w = 92 * s, tab_h = 26 * s, tab_y = 16 * s;
+        // Mode tabs: centered on desktop; on a phone they drop to their own row
+        // (row 2, under the wordmark and clear of the chip) so nothing overlaps.
+        const float tab_w = narrow_ ? std::min(92 * s, (W - 2 * m) / 3.0f) : 92 * s;
+        const float tab_h = 26 * s;
+        const float tab_y = narrow_ ? 50 * s : 16 * s;
+        const float tabs_x0 = W * 0.5f - tab_w * 1.5f;
         for (int i = 0; i < 3; ++i)
-            tabs_[static_cast<size_t>(i)] =
-                {W * 0.5f - tab_w * 1.5f + i * tab_w, tab_y, tab_w, tab_h};
+            tabs_[static_cast<size_t>(i)] = {tabs_x0 + i * tab_w, tab_y, tab_w, tab_h};
         layout_dirty_ = false;
     }
 
@@ -731,7 +745,7 @@ private:
         // linear fade at the bottom keeps labels legible over bright modes without
         // the banding a stepped fill would show (esp. in Field mode).
         {
-            const float top = c.y - 26 * s, bot = c.bottom();
+            const float top = c.y - (narrow_ ? 44.0f : 26.0f) * s, bot = c.bottom();
             const cv::Color gcols[2] = {cv::Color::rgba8(5, 6, 9, 0),
                                         cv::Color::rgba8(4, 5, 8, 224)};
             const float gpos[2] = {0.0f, 1.0f};
@@ -745,18 +759,31 @@ private:
             const auto& t = sl.track;
             const bool active = (active_slider_ == i);
 
-            // Label at the track's left — uppercase, tracked, dim #787E88; value
-            // right-aligned at the track's right — bold #EDEFF3. Concept tokens.
-            canvas.set_fill_color(tk_label());
-            canvas.set_font("Inter", 9.5f * s);
-            tracked_text(canvas, sl.label, t.x, t.y - 12 * s, 9.5f * s, 0.26f);
             char buf[40];
             std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
                           static_cast<double>(slider_value(i)),
                           sl.unit[0] ? " " : "", sl.unit);
-            canvas.set_fill_color(tk_text());
-            canvas.set_font("Inter", 14.0f * s);
-            right_text(canvas, buf, t.x + t.width, t.y - 11 * s, 14.0f * s);
+            if (narrow_) {
+                // Phone: a quarter-width column cannot fit "MIX" and "35 %" on one
+                // line — they overlapped. Stack the label over the value, both
+                // centered in the cell, with the track below.
+                const float cx = t.x + t.width * 0.5f;
+                canvas.set_fill_color(tk_label());
+                canvas.set_font("Inter", 9.5f * s);
+                centered_text(canvas, sl.label, cx, t.y - 30 * s, 9.5f * s);
+                canvas.set_fill_color(tk_text());
+                canvas.set_font("Inter", 13.0f * s);
+                centered_text(canvas, buf, cx, t.y - 13 * s, 13.0f * s);
+            } else {
+                // Desktop: label at the track's left — uppercase, tracked, dim
+                // #787E88; value right-aligned at the track's right — bold #EDEFF3.
+                canvas.set_fill_color(tk_label());
+                canvas.set_font("Inter", 9.5f * s);
+                tracked_text(canvas, sl.label, t.x, t.y - 12 * s, 9.5f * s, 0.26f);
+                canvas.set_fill_color(tk_text());
+                canvas.set_font("Inter", 14.0f * s);
+                right_text(canvas, buf, t.x + t.width, t.y - 11 * s, 14.0f * s);
+            }
 
             const float frac = value_frac(i);
             const float hx = t.x + frac * t.width;
@@ -907,6 +934,7 @@ private:
     int active_slider_ = -1;
     bool pointer_down_ = false;
     bool layout_dirty_ = true;
+    bool narrow_ = false;       // phone-width layout (set in layout())
     double field_time_ = 0.0;   // advances per repaint → the field's animation clock
     int viz_mode_ = 0;          // 0 Tracers · 1 Currents · 2 Field
     vw::Rect tabs_[3]{};        // mode-tab hit rects

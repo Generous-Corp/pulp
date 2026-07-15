@@ -757,7 +757,15 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
     /* #panel.pulp is the player's centered column, capped at 640px by default. Widen it and
        everything inside (the editor canvas fills its width) to a wide, padded band. */
     #panel.pulp{max-width:min(1200px, 94vw) !important}
-    .engine-stats{max-width:min(1200px, 94vw) !important; margin:14px auto 0; font-size:13px; text-align:center}
+    /* The live readout sits in a FIXED slot between the editor and the scope: one
+       centered line, reserved height, no wrap. Its height never changes when the
+       engine flips CPU<->GPU (empty CPU line vs. full GPU metrics), so the page
+       below — the waveform scope — never jumps. overflow:hidden clips rather than
+       wraps if a very narrow phone can't fit the whole metrics sentence. */
+    .engine-stats{max-width:min(1200px, 94vw) !important; margin:12px auto 2px;
+                  font-size:13px; text-align:center; white-space:nowrap;
+                  overflow:hidden; height:24px; line-height:24px}
+    .engine-stats #es-cpu{color:#8b96a3}
     #pulp-ui-canvas{height:clamp(420px, 60vh, 680px) !important}
   </style>
 </head>
@@ -881,45 +889,23 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       const mountEngineToggle = () => {
         if (laneAttached) return;      // already up
         laneAttached = true;
-        offNote.remove();
-        // THE LIVE METRICS, as separate elements with FIXED-WIDTH numeric slots.
-        //
-        // Built as spans, not a concatenated sentence. A sentence re-flows every time a
-        // number gains a digit — the labels and separators shuffle, and on a narrow screen
-        // the whole line rewraps several times a second. Each number gets its own slot,
-        // sized for its widest plausible value, with tabular figures so the digits are all
-        // the same width. It reads as one sentence and nothing moves but the digits.
-        const stats = document.createElement("div");
-        stats.className = "engine-stats";
-        stats.innerHTML =
-          '<span id="es-cpu"></span>' +
-          '<span id="es-gpu" hidden>' +
-            '<span class="es-num" id="es-blocks">—</span><span class="es-lab"> blocks on the GPU</span>' +
-            '<span class="es-sep"> · </span>' +
-            '<span class="es-num" id="es-covered">—</span><span class="es-lab"> covered by the CPU</span>' +
-            '<span class="es-sep"> · </span>' +
-            '<span class="es-num" id="es-us">—</span><span class="es-lab"> µs/block</span>' +
-            '<span class="es-sep"> · </span>' +
-            '<span class="es-num es-pct" id="es-pct">—</span><span class="es-lab"> of the real-time budget</span>' +
-          '</span>';
-
-        // Only the STATS. The editor draws its own CPU/GPU switch (top-right chip) and its
-        // own Mix/Size/Gain/Flow, so a page-level Engine dropdown + blurb would just duplicate
-        // it. The stats stay — they are the one thing the editor does NOT show and they prove
-        // the GPU is really carrying the audio; shown only while GPU is the emitting engine.
-        container.appendChild(stats);
+        // The GPU lane is live. Swap the transient "starting…" line for the steady CPU
+        // note; the poll loop replaces it with the GPU metrics whenever the shader is the
+        // emitting engine. NOTHING is added or removed here — the stats slot was reserved
+        // at mount below — so the scope below the editor never jumps on the flip.
+        const cpu = document.getElementById("es-cpu");
+        if (cpu) cpu.textContent = "Convolving on the CPU.";
       };
 
-      // What the page says while there is no working GPU lane — and what it keeps saying
-      // if one never arrives. Named reason, never a generic "unavailable".
-      const offNote = document.createElement("p");
-      offNote.className = "engine-off";
-      offNote.textContent = !gpuOk
-        ? "GPU engine unavailable (" + handshake.reason + ") — running the CPU convolver."
+      // The CPU-side status text (rendered into the reserved #es-cpu slot below the
+      // editor). If the GPU lane never arrives this is what the line keeps saying — a
+      // named reason, never a generic "unavailable". Once the lane attaches,
+      // mountEngineToggle() swaps it for the steady CPU note.
+      const cpuStatusText = !gpuOk
+        ? "GPU unavailable (" + handshake.reason + ") — convolving on the CPU."
         : !ringAttached
-          ? "GPU engine unavailable (no-gpu-lane-in-worklet) — running the CPU convolver."
-          : "GPU engine starting — waiting for the plugin's impulse response. Running the CPU convolver.";
-      container.appendChild(offNote);
+          ? "GPU unavailable (no-gpu-lane-in-worklet) — convolving on the CPU."
+          : "Starting the GPU engine — convolving on the CPU meanwhile.";
 
       // The plugin can move Engine without going through the control above (a preset, a
       // host automation lane). Follow it, or the status line and the audio disagree — which
@@ -968,6 +954,30 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       // measurement was simply of the wrong thing.
       canvas.style.cssText = "width:100%;height:clamp(420px,60vh,680px);display:block";
       container.appendChild(canvas);
+
+      // The live readout, in its OWN fixed-height slot directly below the editor and
+      // above the shell's waveform scope. Built once and ALWAYS present, so flipping
+      // CPU<->GPU only swaps which child span is visible — the slot's height never
+      // changes and the scope below never moves. Spans, not a sentence: each number
+      // has a fixed-width tabular slot, so only the digits change (a concatenated
+      // sentence re-flows every tick and, at phone width, rewraps several times a
+      // second). It proves the GPU is really carrying the audio — the one thing the
+      // editor's own chrome cannot show.
+      const stats = document.createElement("div");
+      stats.className = "engine-stats";
+      stats.innerHTML =
+        '<span id="es-cpu"></span>' +
+        '<span id="es-gpu" hidden>' +
+          '<span class="es-num" id="es-blocks">—</span><span class="es-lab"> blocks on the GPU</span>' +
+          '<span class="es-sep"> · </span>' +
+          '<span class="es-num" id="es-covered">—</span><span class="es-lab"> covered by the CPU</span>' +
+          '<span class="es-sep"> · </span>' +
+          '<span class="es-num" id="es-us">—</span><span class="es-lab"> µs/block</span>' +
+          '<span class="es-sep"> · </span>' +
+          '<span class="es-num es-pct" id="es-pct">—</span><span class="es-lab"> of the real-time budget</span>' +
+        '</span>';
+      container.appendChild(stats);
+      document.getElementById("es-cpu").textContent = cpuStatusText;
 
       // Engine and "GPU only" are rendered BELOW as a <select> and a checkbox — real
       // controls with words on them. Drawing them again as knobs would be two controls for
