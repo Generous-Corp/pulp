@@ -201,6 +201,19 @@ Steps:
    `twitter:image` → the colocated og.png (the `og_meta` consume). Edit the
    shared page template once, not each page by hand.
 
+### Landmine: `assemble-gallery.mjs` + `wrangler deploy` does NOT refresh `og.png`
+
+`og.png` is content-hash cached — `gen-og-images.mjs` writes an `og.png.key` beside each
+image and SKIPS a page whose inputs (its own HTML + the assets it loads: wasm module,
+player, `pulp-ui.js`) are unchanged, re-shooting only pages whose hash moved. The trap:
+the normal deploy loop is `assemble-gallery.mjs` → `wrangler pages deploy`, and **neither
+runs `gen-og-images.mjs`.** So after you change an editor and redeploy, the share card
+keeps showing the OLD capture — a full-canvas editor shipped for a while with an og.png of
+the pre-editor knob grid. To refresh: run `gen-og-images.mjs` (or delete the page's
+`og.png` + `og.png.key` to force a re-shoot) BEFORE deploying. A full-canvas Skia editor
+only renders under the ANGLE/GPU Chrome flags, and the shot is a DEFAULT-state capture — it
+will not reflect interactive states (a knob moved, an engine toggled).
+
 ## 4. Consistency + backfill
 
 - Both galleries mirror the SAME example-plugin repos, so keep the OG head block
