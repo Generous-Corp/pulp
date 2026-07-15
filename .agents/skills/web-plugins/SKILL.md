@@ -424,3 +424,26 @@ editor's model + clipboard + context-menu TUs, and finally into `pulp::platform:
 which had no web impl at all). Build locally against `origin/main` before trusting it — the
 cascade is real, and your local linker matches CI (verify the first layer agrees before chasing
 the next).
+
+## Landmine: an animating web editor recurses paint→repaint unless the render loop is armed
+
+A view that calls `request_repaint()` from inside `paint()` — any continuously animating editor
+(SuperConvolver's living field) — routes through `WindowHost::mark_dirty()` →
+`schedule_repaint()`. That method only requests an async rAF frame when `PULP_VIEW_HAS_RENDER_LOOP`
+is defined; otherwise it falls back to a SYNCHRONOUS `repaint()`, which re-enters `paint()` from
+within `paint()` and recurses until the JS stack overflows. Two traps compound it:
+
+1. **The macro is native-only by default.** `PULP_VIEW_HAS_RENDER_LOOP=1` is set on the native
+   `pulp-view-core` target. The wasm UI build (`PulpWebUi.cmake`) hand-lists its sources and does
+   NOT inherit it — even though it DOES compile and arm the rAF `RenderLoop`. Define it in
+   `PulpWebUi.cmake` or every animating editor deadlocks on first paint.
+2. **`run_event_loop()` marks dirty before the loop exists.** It calls `show()` → `mark_dirty()`
+   BEFORE creating the render loop, so the first paint is synchronous even with the macro. The
+   browser `WindowHost::render_frame()` carries a re-entrancy guard (`rendering_` flag): a repaint
+   requested during paint is deferred to the next frame, never nested.
+
+The crash is a red herring generator: the stack overflows in whatever draw is executing when it
+tips (a gradient FP, a texture upload), so the symbolized top frames point AWAY from the cause.
+Count the repeating frame — it was 662× `View::paint_all` — to find the real cycle. The static
+generated grid never animates, so this stays hidden until a real animating editor mounts. **A
+new custom editor must be exercised by the browser fixture (it mounts and must not overflow).**
