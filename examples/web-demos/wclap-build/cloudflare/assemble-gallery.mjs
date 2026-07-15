@@ -759,6 +759,11 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   import { mountPulpUi } from "./pulp-ui.js?v=${v}";
   import { probe, startGpuLane } from "./gpu-bridge.mjs";
   import { irFileUpload } from "./ir-source.js?v=${v}";
+  // The plugin-state container is how the editor's own IR loader (the "SOURCE" chip) writes a
+  // chosen impulse response WITHOUT resetting the knobs: it swaps only the plugin-owned IR blob
+  // inside the state, leaving the parameter bytes intact. Passing it to mountPulpUi is what
+  // wires the chip's file dialog at all — without it Module.onRequestIr is never set.
+  import * as pluginState from "../vendor-player/state/plugin-state.js?v=${v}";
 
   // Both constants are the plugin's, restated here because the ring is allocated
   // on this side: kInternalBlock and kWebGpuLatencyBlocks in
@@ -985,6 +990,8 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       const pending = mountPulpUi(canvas, adapter, {
         moduleUrl: "./${UI_MODULE}.js",
         hideParams: ["Engine", "GPU only"],
+        // Wire the editor's own "SOURCE" chip as the IR loader (its file dialog).
+        pluginState,
       });
       pending.catch((err) => { console.warn("Pulp UI failed to mount:", err); });
 
