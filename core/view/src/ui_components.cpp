@@ -34,20 +34,30 @@ float fit_combo_label(std::string& text, float avail, float base, float min,
 
 // ── ComboBox ─────────────────────────────────────────────────────────────
 
-void ComboBox::set_selected_impl(int index, bool notify) {
+void ComboBox::set_selected_impl(int index, Notify notify) {
     if (index >= 0 && index < static_cast<int>(items_.size()) && index != selected_) {
         selected_ = index;
         set_access_value(items_[static_cast<size_t>(index)]);
-        if (notify && on_change) on_change(index);
+        if (notify == Notify::sync) {
+            if (on_change) on_change(index);
+        } else if (notify == Notify::async && on_change) {
+            auto fn = on_change;
+            const int i = index;
+            queue_async_notification([fn, i] { fn(i); });
+        }
     }
 }
 
 void ComboBox::set_selected(int index) {
-    set_selected_impl(index, true);
+    set_selected_impl(index, Notify::sync);
+}
+
+void ComboBox::set_selected(int index, Notify notify) {
+    set_selected_impl(index, notify);
 }
 
 void ComboBox::set_selected_silent(int index) {
-    set_selected_impl(index, false);
+    set_selected_impl(index, Notify::none);
 }
 
 const std::string& ComboBox::selected_text() const {
@@ -790,7 +800,7 @@ void TabPanel::add_tab(std::string title, std::unique_ptr<View> content) {
     tabs_.push_back({std::move(title), nullptr}); // content ptr managed by parent
 }
 
-void TabPanel::set_active_tab(int index) {
+void TabPanel::set_active_tab(int index, Notify notify) {
     if (index == active_ || index < 0 || index >= static_cast<int>(tabs_.size())) return;
 
     // Hide old, show new
@@ -800,7 +810,13 @@ void TabPanel::set_active_tab(int index) {
     if (active_ < static_cast<int>(child_count()))
         child_at(static_cast<size_t>(active_))->set_visible(true);
 
-    if (on_tab_change) on_tab_change(index);
+    if (notify == Notify::sync) {
+        if (on_tab_change) on_tab_change(index);
+    } else if (notify == Notify::async && on_tab_change) {
+        auto fn = on_tab_change;
+        const int i = index;
+        queue_async_notification([fn, i] { fn(i); });
+    }
 }
 
 std::string_view TabPanel::tab_title(int index) const {
@@ -815,10 +831,10 @@ int TabPanel::find_tab(std::string_view title) const {
     return -1;
 }
 
-bool TabPanel::set_active_tab(std::string_view title) {
+bool TabPanel::set_active_tab(std::string_view title, Notify notify) {
     const int index = find_tab(title);
     if (index < 0) return false;
-    set_active_tab(index);
+    set_active_tab(index, notify);
     return true;
 }
 
@@ -877,12 +893,22 @@ void TabPanel::on_mouse_event(const MouseEvent& event) {
 // ── SegmentedControl ───────────────────────────────────────────────────────
 
 void SegmentedControl::set_selected(int index) {
+    set_selected(index, Notify::sync);
+}
+
+void SegmentedControl::set_selected(int index, Notify notify) {
     if (segments_.empty()) return;
     index = std::clamp(index, 0, static_cast<int>(segments_.size()) - 1);
     if (index == selected_) return;
     selected_ = index;
     request_repaint();
-    if (on_change) on_change(selected_);
+    if (notify == Notify::sync) {
+        if (on_change) on_change(selected_);
+    } else if (notify == Notify::async && on_change) {
+        auto fn = on_change;
+        const int i = selected_;
+        queue_async_notification([fn, i] { fn(i); });
+    }
 }
 
 void SegmentedControl::set_selected_silent(int index) {
@@ -1346,10 +1372,16 @@ void ScrollView::on_mouse_drag(Point pos) {
 
 // ── ListBox ──────────────────────────────────────────────────────────────
 
-void ListBox::set_selected(int index) {
+void ListBox::set_selected(int index, Notify notify) {
     if (index != selected_) {
         selected_ = index;
-        if (on_select) on_select(index);
+        if (notify == Notify::sync) {
+            if (on_select) on_select(index);
+        } else if (notify == Notify::async && on_select) {
+            auto fn = on_select;
+            const int i = index;
+            queue_async_notification([fn, i] { fn(i); });
+        }
     }
 }
 

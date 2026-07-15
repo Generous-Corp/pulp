@@ -1128,3 +1128,136 @@ TEST_CASE("Breadcrumb show_background toggles the card", "[view][breadcrumb]") {
     REQUIRE(card_count(true) >= 1);    // card present
     REQUIRE(card_count(false) == 0);   // flat — no card
 }
+
+// ── Notify on programmatic selection setters ─────────────────────────────────
+//
+// Selection setters that can reach a callback take a Notify: none writes the
+// selection silently, sync fires the callback now, async defers it to
+// flush_async_notifications(). Each fires exactly once per real change.
+
+TEST_CASE("ComboBox::set_selected Notify::none selects silently",
+          "[view][notify]") {
+    ComboBox combo;
+    combo.set_items({"Sine", "Saw", "Square"});
+    int fired = 0;
+    combo.on_change = [&](int) { ++fired; };
+
+    combo.set_selected(2, Notify::none);
+    REQUIRE(combo.selected() == 2);
+    REQUIRE(combo.selected_text() == "Square");
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("ComboBox::set_selected Notify::sync / async", "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    ComboBox combo;
+    combo.set_items({"Sine", "Saw", "Square"});
+    std::vector<int> seen;
+    combo.on_change = [&](int i) { seen.push_back(i); };
+
+    combo.set_selected(1, Notify::sync);
+    combo.set_selected(1, Notify::sync);   // no-op — same index
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == 1);
+
+    combo.set_selected(2, Notify::async);
+    REQUIRE(seen.size() == 1);
+    pulp::view::flush_async_notifications();
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.back() == 2);
+}
+
+TEST_CASE("SegmentedControl::set_selected Notify::none is silent",
+          "[view][notify]") {
+    SegmentedControl seg;
+    seg.set_segments({"Amp", "EQ", "Comp"});
+    int fired = 0;
+    seg.on_change = [&](int) { ++fired; };
+
+    seg.set_selected(2, Notify::none);
+    REQUIRE(seg.selected() == 2);
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("SegmentedControl::set_selected Notify::sync / async",
+          "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    SegmentedControl seg;
+    seg.set_segments({"Amp", "EQ", "Comp"});
+    std::vector<int> seen;
+    seg.on_change = [&](int i) { seen.push_back(i); };
+
+    seg.set_selected(1, Notify::sync);
+    seg.set_selected(1, Notify::sync);   // no-op
+    REQUIRE(seen.size() == 1);
+
+    seg.set_selected(2, Notify::async);
+    REQUIRE(seen.size() == 1);
+    pulp::view::flush_async_notifications();
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.back() == 2);
+}
+
+TEST_CASE("ListBox::set_selected Notify::none is silent", "[view][notify]") {
+    ListBox list;
+    list.set_items({"A", "B", "C"});
+    int fired = 0;
+    list.on_select = [&](int) { ++fired; };
+
+    list.set_selected(1, Notify::none);
+    REQUIRE(list.selected() == 1);
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("ListBox::set_selected Notify::sync / async", "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    ListBox list;
+    list.set_items({"A", "B", "C"});
+    std::vector<int> seen;
+    list.on_select = [&](int i) { seen.push_back(i); };
+
+    list.set_selected(0, Notify::sync);
+    list.set_selected(0, Notify::sync);  // no-op — same index
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == 0);
+
+    list.set_selected(2, Notify::async);
+    REQUIRE(seen.size() == 1);
+    pulp::view::flush_async_notifications();
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.back() == 2);
+}
+
+TEST_CASE("TabPanel::set_active_tab Notify::none switches silently",
+          "[view][notify]") {
+    TabPanel tabs;
+    tabs.add_tab("One", std::make_unique<View>());
+    tabs.add_tab("Two", std::make_unique<View>());
+    int fired = 0;
+    tabs.on_tab_change = [&](int) { ++fired; };
+
+    tabs.set_active_tab(1, Notify::none);
+    REQUIRE(tabs.active_tab() == 1);
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("TabPanel::set_active_tab Notify::sync / async", "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    TabPanel tabs;
+    tabs.add_tab("One", std::make_unique<View>());
+    tabs.add_tab("Two", std::make_unique<View>());
+    tabs.add_tab("Three", std::make_unique<View>());
+    std::vector<int> seen;
+    tabs.on_tab_change = [&](int i) { seen.push_back(i); };
+
+    tabs.set_active_tab(1, Notify::sync);
+    tabs.set_active_tab(1, Notify::sync);  // no-op
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == 1);
+
+    tabs.set_active_tab(2, Notify::async);
+    REQUIRE(seen.size() == 1);
+    pulp::view::flush_async_notifications();
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.back() == 2);
+}
