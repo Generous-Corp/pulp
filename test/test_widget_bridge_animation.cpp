@@ -201,9 +201,12 @@ TEST_CASE("WidgetBridge shader and schema APIs apply to knob, fader, and toggle"
         createKnob('gain', 10, 10, 48, 48);
         createFader('volume', 70, 10, 24, 120, 'vertical');
         createToggle('bypass', 110, 10, 50, 30);
-        setWidgetShader('gain', 'half4 main(float2 coord) { return half4(1); }');
-        setWidgetShader('volume', 'half4 main(float2 coord) { return half4(1); }');
-        setWidgetShader('bypass', 'half4 main(float2 coord) { return half4(1); }');
+        globalThis.gainShader =
+            setWidgetShader('gain', 'half4 main(float2 coord) { return half4(1); }');
+        globalThis.volumeShader =
+            setWidgetShader('volume', 'half4 main(float2 coord) { return half4(1); }');
+        globalThis.bypassShader =
+            setWidgetShader('bypass', 'half4 main(float2 coord) { return half4(1); }');
         setWidgetSchema('gain', '{"elements":[{"type":"circle","radius":"20%","color":"accent.primary"}]}');
         setWidgetSchema('volume', '{"elements":[{"type":"rect","cornerRadius":"4","color":"control.fill"}]}');
         setWidgetSchema('bypass', '{"elements":[{"type":"rect","cornerRadius":"10","color":"control.track"}]}');
@@ -216,9 +219,24 @@ TEST_CASE("WidgetBridge shader and schema APIs apply to knob, fader, and toggle"
     REQUIRE(fader != nullptr);
     REQUIRE(toggle != nullptr);
 
+#ifdef PULP_HAS_SKIA
+    REQUIRE(engine.evaluate("gainShader.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("volumeShader.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("bypassShader.success").getWithDefault<bool>(false));
     REQUIRE(knob->has_custom_shader());
     REQUIRE(fader->has_custom_shader());
     REQUIRE(toggle->has_custom_shader());
+#else
+    REQUIRE_FALSE(engine.evaluate("gainShader.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("volumeShader.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("bypassShader.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("gainShader.error").toString().empty());
+    REQUIRE_FALSE(engine.evaluate("volumeShader.error").toString().empty());
+    REQUIRE_FALSE(engine.evaluate("bypassShader.error").toString().empty());
+    REQUIRE_FALSE(knob->has_custom_shader());
+    REQUIRE_FALSE(fader->has_custom_shader());
+    REQUIRE_FALSE(toggle->has_custom_shader());
+#endif
     REQUIRE_FALSE(knob->widget_schema().empty());
     REQUIRE_FALSE(fader->widget_schema().empty());
     REQUIRE_FALSE(toggle->widget_schema().empty());
