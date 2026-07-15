@@ -5,20 +5,12 @@
 
 #include "cmd_audio_plugin_inspect.hpp"
 
-#include "au_info_plist.hpp"
-#include "cli_common.hpp"
+#include "cmd_audio_plugin_common.hpp"
 
-#include <pulp/audio/buffer.hpp>
-#include <pulp/events/message_loop_integration.hpp>
 #include <pulp/host/plugin_slot.hpp>
-#include <pulp/host/scanner.hpp>
-#include <pulp/midi/buffer.hpp>
-#include <pulp/platform/child_process.hpp>
-#include <pulp/state/parameter_event_queue.hpp>
 
 #include <algorithm>
 #include <charconv>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -29,11 +21,9 @@
 #include <iostream>
 #include <limits>
 #include <optional>
-#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 namespace {
@@ -48,8 +38,6 @@ struct Request {
     std::uint32_t block = 512;
     std::optional<std::uint32_t> warmup_ms;
     std::uint32_t timeout_ms = 0;
-    bool json = false;
-    bool worker = false;
     fs::path result_file;
 };
 
@@ -63,8 +51,8 @@ void usage() {
         << "  --block <frames>                  Prepare block size (default: 512)\n"
         << "  --warmup-ms <n>                   Initialization/event pre-roll\n"
         << "                                      (default: 1000 for AU, 0 otherwise)\n"
-        << "  --timeout-ms <n>                  Worker timeout (default: 30000)\n"
-        << "  --json                            Emit machine-readable JSON\n";
+        << "  --timeout-ms <n>                  Worker timeout (default: 30000)\n\n"
+        << "Output is always pulp.audio.plugin-inspect.v1 JSON.\n";
 }
 
 template <typename T>
@@ -77,11 +65,10 @@ std::optional<T> parse_unsigned(std::string_view value) {
     return static_cast<T>(parsed);
 }
 
-bool parse_request(const std::vector<std::string>& args, Request& out, std::string& error) {
+bool parse_request(const std::vector<std::string>& args, Request& out, std::string& error,
+                   bool allow_internal = false) {
     for (std::size_t i = 0; i < args.size(); ++i) {
         const auto& key = args[i];
-        if (key == "--json") { out.json = true; continue; }
-        if (key == "--worker") { out.worker = true; continue; }
         if (key == "--help" || key == "-h") { error = "help"; return false; }
         auto value = [&]() -> std::optional<std::string> {
             if (i + 1 >= args.size() ||
@@ -122,6 +109,7 @@ bool parse_request(const std::vector<std::string>& args, Request& out, std::stri
             if (!n || *n == 0) { error = "--timeout-ms must be positive"; return false; }
             out.timeout_ms = *n;
         } else if (key == "--result-file") {
+            if (!allow_internal) { error = "unknown flag: " + key; return false; }
             auto v = value(); if (!v) { error = "--result-file requires a value"; return false; }
             out.result_file = *v;
         } else {
@@ -130,25 +118,10 @@ bool parse_request(const std::vector<std::string>& args, Request& out, std::stri
         }
     }
     if (out.plugin.empty()) { error = "--plugin <bundle> is required"; return false; }
-    if (out.worker && out.result_file.empty()) {
+    if (allow_internal && out.result_file.empty()) {
         error = "worker result path is required"; return false;
     }
     return true;
-}
-
-PluginFormat format_from_string(std::string_view value, bool& valid) {
-    valid = true;
-    if (value == "clap") return PluginFormat::CLAP;
-    if (value == "vst3") return PluginFormat::VST3;
-    if (value == "au") return PluginFormat::AudioUnit;
-    if (value == "auv3") return PluginFormat::AudioUnitV3;
-    if (value == "lv2") return PluginFormat::LV2;
-    valid = false;
-    return PluginFormat::CLAP;
-}
-
-bool is_au(PluginFormat format) {
-    return format == PluginFormat::AudioUnit || format == PluginFormat::AudioUnitV3;
 }
 
 std::string json_escape(std::string_view input) {
@@ -181,28 +154,6 @@ const char* latency_status(pulp::host::PluginSlot::LatencyQuery query) {
 void append_json_number(std::ostringstream& out, float value) {
     if (std::isfinite(value)) out << value;
     else out << "null";
-}
-
-void warm_up(pulp::host::PluginSlot& slot, std::uint32_t duration_ms,
-             std::uint32_t inputs, std::uint32_t outputs, std::uint32_t block) {
-    if (duration_ms == 0) return;
-    pulp::audio::Buffer<float> input(inputs, block), output(outputs, block);
-    input.clear(); output.clear();
-    pulp::midi::MidiBuffer midi_in, midi_out;
-    pulp::state::ParameterEventQueue params;
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(duration_ms);
-    while (std::chrono::steady_clock::now() < deadline) {
-        auto out = output.view();
-        const auto in = static_cast<const pulp::audio::Buffer<float>&>(input).view();
-        slot.process(out, in, midi_in, midi_out, params, static_cast<int>(block));
-        const auto result = pulp::events::MessageLoopIntegration::pump_main_loop_for(
-            std::chrono::milliseconds(10));
-        if (result == pulp::events::MainLoopPumpResult::Unsupported ||
-            result == pulp::events::MainLoopPumpResult::Finished ||
-            result == pulp::events::MainLoopPumpResult::Stopped)
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
 }
 
 std::string build_result_json(const pulp::host::PluginSlot& slot) {
@@ -274,42 +225,20 @@ bool atomic_write(const fs::path& path, const std::string& contents) {
 }
 
 int worker_main(const Request& request, PluginFormat format) {
-    pulp::host::PluginInfo info;
-    info.path = request.plugin;
-    info.format = format;
-    info.unique_id = request.unique_id;
-    if (info.unique_id.empty() && is_au(format))
-        info.unique_id = pulp::cli::au_info_plist::unique_id_from_bundle(request.plugin);
-
-    // AU component metadata (notably instrument/effect and bus shape) comes
-    // from AudioComponent enumeration rather than the bundle Info.plist. Keep
-    // load and enumeration in this same disposable worker.
-    if (is_au(format) && !info.unique_id.empty()) {
-        pulp::host::ScanOptions options;
-        options.scan_vst3 = false;
-        options.scan_clap = false;
-        options.scan_lv2 = false;
-        const auto installed = pulp::host::PluginScanner{}.scan(options);
-        const auto found = std::find_if(installed.begin(), installed.end(),
-            [&](const pulp::host::PluginInfo& candidate) {
-                return candidate.format == format &&
-                       candidate.unique_id == info.unique_id;
-            });
-        if (found != installed.end()) {
-            const auto requested_path = info.path;
-            info = *found;
-            if (info.path.empty()) info.path = requested_path;
-        }
-    }
+    auto info = pulp::cli::plugin_lab::resolve_plugin_info(
+        request.plugin, format, request.unique_id);
 
     auto slot = pulp::host::PluginSlot::load(info);
     if (!slot) { std::fprintf(stderr, "plugin-inspect: load failed\n"); return 10; }
     if (!slot->prepare(request.sample_rate, static_cast<int>(request.block))) {
         std::fprintf(stderr, "plugin-inspect: prepare failed\n"); return 11;
     }
-    const auto warmup = request.warmup_ms.value_or(is_au(format) ? 1000u : 0u);
-    warm_up(*slot, warmup, static_cast<std::uint32_t>(std::max(0, slot->info().num_inputs)),
-            static_cast<std::uint32_t>(std::max(1, slot->info().num_outputs)), request.block);
+    const auto warmup = request.warmup_ms.value_or(
+        pulp::cli::plugin_lab::default_warmup_ms(format));
+    pulp::cli::plugin_lab::process_discarded_preroll(
+        *slot, warmup,
+        static_cast<std::uint32_t>(std::max(0, slot->info().num_inputs)),
+        static_cast<std::uint32_t>(std::max(1, slot->info().num_outputs)), request.block);
     const auto json = build_result_json(*slot);
     slot->release();
     if (!atomic_write(request.result_file, json)) {
@@ -319,18 +248,11 @@ int worker_main(const Request& request, PluginFormat format) {
 }
 
 int coordinator_main(const Request& request) {
-    const auto self = current_executable_path();
-    if (self.empty()) { std::fprintf(stderr, "plugin-inspect: cannot resolve executable\n"); return 1; }
-    std::random_device random;
-    const auto dir = fs::temp_directory_path() /
-        ("pulp-plugin-inspect-" + std::to_string(random()) + "-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::error_code ec;
-    fs::create_directories(dir, ec);
-    if (ec) { std::fprintf(stderr, "plugin-inspect: cannot create temporary directory\n"); return 1; }
-    const auto result_path = dir / "result.json";
+    auto temp = pulp::cli::plugin_lab::PrivateTempDirectory::create("pulp-plugin-inspect");
+    if (!temp) { std::fprintf(stderr, "plugin-inspect: cannot create temporary directory\n"); return 1; }
+    const auto result_path = temp->path() / "result.json";
 
-    std::vector<std::string> child{"audio", "plugin-inspect", "--worker",
+    std::vector<std::string> child{"audio", "__plugin-inspect-worker",
         "--result-file", result_path.string(), "--plugin", request.plugin,
         "--format", request.format, "--sample-rate", std::to_string(request.sample_rate),
         "--block", std::to_string(request.block)};
@@ -338,45 +260,48 @@ int coordinator_main(const Request& request) {
     if (request.warmup_ms) {
         child.push_back("--warmup-ms"); child.push_back(std::to_string(*request.warmup_ms));
     }
-    pulp::platform::ProcessOptions options;
-    options.timeout_ms = static_cast<int>(std::min<std::uint32_t>(
+    const auto timeout_ms = static_cast<int>(std::min<std::uint32_t>(
         request.timeout_ms == 0 ? 30000u : request.timeout_ms,
         static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
-    options.max_output_bytes = 4u << 20;
-    const auto result = pulp::platform::ChildProcess::run(self.string(), child, options);
+    const auto result = pulp::cli::plugin_lab::run_disposable_worker(child, timeout_ms);
     if (!result.stderr_output.empty()) std::cerr << result.stderr_output;
     if (result.timed_out) std::fprintf(stderr, "plugin-inspect: worker timed out\n");
 
     std::ifstream file(result_path, std::ios::binary);
     std::ostringstream json;
     json << file.rdbuf();
-    fs::remove_all(dir, ec);
     if (result.timed_out || result.exit_code != 0 || json.str().empty()) {
         if (!result.timed_out)
             std::fprintf(stderr, "plugin-inspect: worker failed (exit %d)\n", result.exit_code);
         return 1;
     }
-    if (request.json) std::cout << json.str();
-    else std::cout << json.str();  // v1 stays machine-readable in both modes.
+    std::cout << json.str();
     return 0;
 }
 
 }  // namespace
 
-int cmd_audio_plugin_inspect(const std::vector<std::string>& args) {
+int run_plugin_inspect(const std::vector<std::string>& args, bool worker) {
     Request request;
     std::string error;
-    if (!parse_request(args, request, error)) {
+    if (!parse_request(args, request, error, worker)) {
         if (error == "help") { usage(); return 0; }
         std::fprintf(stderr, "pulp audio plugin-inspect: %s\n", error.c_str());
         return 2;
     }
-    bool valid_format = false;
-    const auto format = format_from_string(request.format, valid_format);
-    if (!valid_format) {
+    const auto format = pulp::cli::plugin_lab::parse_format(request.format);
+    if (!format) {
         std::fprintf(stderr, "pulp audio plugin-inspect: unknown format '%s'\n",
                      request.format.c_str());
         return 2;
     }
-    return request.worker ? worker_main(request, format) : coordinator_main(request);
+    return worker ? worker_main(request, *format) : coordinator_main(request);
+}
+
+int cmd_audio_plugin_inspect(const std::vector<std::string>& args) {
+    return run_plugin_inspect(args, false);
+}
+
+int cmd_audio_plugin_inspect_worker(const std::vector<std::string>& args) {
+    return run_plugin_inspect(args, true);
 }

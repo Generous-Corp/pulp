@@ -104,7 +104,7 @@ already cache via a local. When adding a new format backend that calls
 For unattended, scriptable interrogation prefer the isolated CLI/MCP surfaces:
 
 ```bash
-pulp audio plugin-inspect --plugin /path/to/plugin.component --format au --json
+pulp audio plugin-inspect --plugin /path/to/plugin.component --format au
 pulp audio render --plugin /path/to/plugin.component --format au \
   --input-signal noise:7 --duration-ms 1000 --warmup-ms 1000 \
   --initial-param 12=0.5 --settle-ms 250 --wav-format float32 --out /tmp/out.wav

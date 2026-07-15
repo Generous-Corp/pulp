@@ -8,8 +8,7 @@
 
 #include "cmd_audio_render.hpp"
 
-#include "au_info_plist.hpp"
-#include "cli_common.hpp"
+#include "cmd_audio_plugin_common.hpp"
 #include "cmd_audio_render_step.hpp"
 
 #include <pulp/audio/analysis/audio_artifacts.hpp>
@@ -19,10 +18,8 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/events/message_loop_integration.hpp>
 #include <pulp/host/plugin_slot.hpp>
-#include <pulp/host/scanner.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
-#include <pulp/platform/child_process.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <algorithm>
@@ -36,16 +33,15 @@
 #include <limits>
 #include <numbers>
 #include <optional>
-#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 namespace pulp::cli {
 namespace {
 
+namespace fs = std::filesystem;
 namespace analysis = pulp::test::audio;
 
 void print_render_usage() {
@@ -113,80 +109,24 @@ void print_render_usage() {
         "        --input-signal noise --param 3=1 --latency-report /tmp/latency.json\n";
 }
 
-host::PluginFormat parse_format(std::string_view s, bool& known) {
-    known = true;
-    if (s == "clap" || s == "CLAP") return host::PluginFormat::CLAP;
-    if (s == "vst3" || s == "VST3") return host::PluginFormat::VST3;
-    if (s == "au" || s == "AU") return host::PluginFormat::AudioUnit;
-    if (s == "auv3" || s == "AUv3") return host::PluginFormat::AudioUnitV3;
-    if (s == "lv2" || s == "LV2") return host::PluginFormat::LV2;
-    known = false;
-    return host::PluginFormat::CLAP;
-}
-
-bool is_apple_audio_unit(host::PluginFormat format) {
-    return format == host::PluginFormat::AudioUnit ||
-           format == host::PluginFormat::AudioUnitV3;
-}
-
-void service_discarded_preroll(host::PluginSlot& slot,
-                               std::uint32_t duration_ms,
-                               std::uint32_t input_channels,
-                               std::uint32_t output_channels,
-                               std::uint32_t block) {
-    if (duration_ms == 0) return;
-
-    audio::Buffer<float> input(input_channels, block);
-    audio::Buffer<float> output(output_channels, block);
-    input.clear();
-    output.clear();
-    midi::MidiBuffer midi_in, midi_out;
-    state::ParameterEventQueue params;
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(duration_ms);
-    while (std::chrono::steady_clock::now() < deadline) {
-        auto out = output.view();
-        const auto in = static_cast<const audio::Buffer<float>&>(input).view();
-        slot.process(out, in, midi_in, midi_out, params, static_cast<int>(block));
-        const auto pump = events::MessageLoopIntegration::pump_main_loop_for(
-            std::chrono::milliseconds(10));
-        if (pump == events::MainLoopPumpResult::Unsupported ||
-            pump == events::MainLoopPumpResult::Finished ||
-            pump == events::MainLoopPumpResult::Stopped) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-    }
-}
-
 int run_isolated_render(const std::vector<std::string>& args,
                         const ParseAudioRenderResult& req,
                         host::PluginFormat format) {
-    auto self = current_executable_path();
-    if (self.empty()) {
-        std::fprintf(stderr, "pulp audio render: cannot resolve the current executable\n");
-        return 1;
-    }
-
-    std::vector<std::string> worker_args{"audio", "render", "--worker"};
+    std::vector<std::string> worker_args{"audio", "__render-worker"};
     worker_args.insert(worker_args.end(), args.begin(), args.end());
 
     // Vendor libraries sometimes print directly to stdout. Keep `--json`
     // machine-readable by making the file artifact the worker protocol and
     // printing it from the coordinator only after a clean exit.
-    fs::path private_result_dir;
+    std::optional<plugin_lab::PrivateTempDirectory> private_result_dir;
     fs::path json_result = req.manifest_path;
     if (req.json && json_result.empty()) {
-        std::error_code ec;
-        std::random_device random;
-        private_result_dir = fs::temp_directory_path() /
-            ("pulp-audio-render-" + std::to_string(random()) + "-" +
-             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        fs::create_directories(private_result_dir, ec);
-        if (ec) {
+        private_result_dir = plugin_lab::PrivateTempDirectory::create("pulp-audio-render");
+        if (!private_result_dir) {
             std::fprintf(stderr, "pulp audio render: cannot create JSON result directory\n");
             return 1;
         }
-        json_result = private_result_dir / "metrics.json";
+        json_result = private_result_dir->path() / "metrics.json";
         worker_args.push_back("--manifest");
         worker_args.push_back(json_result.string());
     }
@@ -194,36 +134,31 @@ int run_isolated_render(const std::vector<std::string>& args,
     const std::uint64_t measured_ms = static_cast<std::uint64_t>(std::ceil(
         static_cast<double>(req.duration_frames + req.tail_frames) /
         req.sample_rate * 1000.0));
-    const auto warmup = req.warmup_ms.value_or(is_apple_audio_unit(format) ? 1000u : 0u);
+    const auto warmup = req.warmup_ms.value_or(plugin_lab::default_warmup_ms(format));
     const auto settle = req.settle_ms.value_or(
-        is_apple_audio_unit(format) && !req.initial_params.empty() ? 250u : 0u);
+        plugin_lab::default_settle_ms(format, !req.initial_params.empty()));
     const std::uint64_t derived = std::max<std::uint64_t>(
         30'000, (measured_ms + warmup + settle) * 10 + 10'000);
 
-    platform::ProcessOptions options;
-    options.timeout_ms = static_cast<int>(std::min<std::uint64_t>(
+    const auto timeout_ms = static_cast<int>(std::min<std::uint64_t>(
         req.timeout_ms == 0 ? derived : req.timeout_ms,
         static_cast<std::uint64_t>(std::numeric_limits<int>::max())));
-    options.max_output_bytes = 4u << 20;
-    const auto result = platform::ChildProcess::run(self.string(), worker_args, options);
+    const auto result = plugin_lab::run_disposable_worker(worker_args, timeout_ms);
     if (!req.json && !result.stdout_output.empty()) std::cout << result.stdout_output;
     if (!result.stderr_output.empty()) std::cerr << result.stderr_output;
     if (result.timed_out) {
         std::fprintf(stderr, "pulp audio render: isolated plugin worker timed out after %d ms\n",
-                     options.timeout_ms);
+                     timeout_ms);
         if (req.json && !result.stdout_output.empty()) std::cerr << result.stdout_output;
-        if (!private_result_dir.empty()) fs::remove_all(private_result_dir);
         return 1;
     }
     if (result.exit_code < 0) {
         std::fprintf(stderr, "pulp audio render: isolated plugin worker crashed or failed to start\n");
         if (req.json && !result.stdout_output.empty()) std::cerr << result.stdout_output;
-        if (!private_result_dir.empty()) fs::remove_all(private_result_dir);
         return 1;
     }
     if (result.exit_code != 0) {
         if (req.json && !result.stdout_output.empty()) std::cerr << result.stdout_output;
-        if (!private_result_dir.empty()) fs::remove_all(private_result_dir);
         return result.exit_code;
     }
     if (req.json) {
@@ -232,13 +167,11 @@ int run_isolated_render(const std::vector<std::string>& args,
         json << file.rdbuf();
         if (json.str().empty()) {
             std::fprintf(stderr, "pulp audio render: worker produced no metrics JSON\n");
-            if (!private_result_dir.empty()) fs::remove_all(private_result_dir);
             return 1;
         }
         std::cout << json.str();
         if (json.str().back() != '\n') std::cout << '\n';
     }
-    if (!private_result_dir.empty()) fs::remove_all(private_result_dir);
     return 0;
 }
 
@@ -331,7 +264,7 @@ analysis::LatencyReportStatus to_report_status(host::PluginSlot::LatencyQuery qu
 }  // namespace
 }  // namespace pulp::cli
 
-int cmd_audio_render(const std::vector<std::string>& args) {
+static int cmd_audio_render_impl(const std::vector<std::string>& args, bool worker) {
     using namespace pulp::cli;
     using namespace pulp;
 
@@ -350,25 +283,20 @@ int cmd_audio_render(const std::vector<std::string>& args) {
         return req.exit_code;
     }
 
-    bool format_known = false;
-    const auto format = parse_format(req.format, format_known);
-    if (!format_known) {
+    const auto parsed_format = plugin_lab::parse_format(req.format);
+    if (!parsed_format) {
         std::fprintf(stderr, "pulp audio render: unknown --format '%s'\n",
                      req.format.c_str());
         return 2;
     }
+    const auto format = *parsed_format;
 
     // Loading and processing arbitrary vendor code is always disposable. The
-    // coordinator itself never instantiates the plugin; --worker is private to
-    // the child and deliberately omitted from public examples.
-    if (!req.worker) return run_isolated_render(args, req, format);
+    // coordinator itself never instantiates the plugin. The worker is reached
+    // only through cmd_audio's hidden __render-worker dispatch.
+    if (!worker) return run_isolated_render(args, req, format);
 
-    host::PluginInfo info;
-    info.path = req.plugin_path;
-    info.format = format;
-    info.unique_id = req.unique_id;
-    if (info.unique_id.empty() && is_apple_audio_unit(format))
-        info.unique_id = pulp::cli::au_info_plist::unique_id_from_bundle(req.plugin_path);
+    auto info = plugin_lab::resolve_plugin_info(req.plugin_path, format, req.unique_id);
 
     auto slot = host::PluginSlot::load(info);
     if (!slot) {
@@ -387,9 +315,9 @@ int cmd_audio_render(const std::vector<std::string>& args) {
         return 2;
     }
 
-    const auto warmup_ms = req.warmup_ms.value_or(is_apple_audio_unit(format) ? 1000u : 0u);
-    service_discarded_preroll(*slot, warmup_ms, req.in_channels,
-                              req.out_channels, req.block);
+    const auto warmup_ms = req.warmup_ms.value_or(plugin_lab::default_warmup_ms(format));
+    plugin_lab::process_discarded_preroll(*slot, warmup_ms, req.in_channels,
+                                          req.out_channels, req.block);
 
     const auto parameter_info = slot->parameters();
     for (const auto& requested : req.initial_params) {
@@ -407,9 +335,9 @@ int cmd_audio_render(const std::vector<std::string>& args) {
         slot->set_parameter(requested.id, requested.value);
     }
     const auto settle_ms = req.settle_ms.value_or(
-        is_apple_audio_unit(format) && !req.initial_params.empty() ? 250u : 0u);
-    service_discarded_preroll(*slot, settle_ms, req.in_channels,
-                              req.out_channels, req.block);
+        plugin_lab::default_settle_ms(format, !req.initial_params.empty()));
+    plugin_lab::process_discarded_preroll(*slot, settle_ms, req.in_channels,
+                                          req.out_channels, req.block);
 
     bool input_ok = true;
     const audio::Buffer<float> input = materialize_input(req, input_ok);
@@ -485,7 +413,7 @@ int cmd_audio_render(const std::vector<std::string>& args) {
         // Offline AU hosts have no AppKit event loop. Service a bounded slice
         // between blocks so XPC/license callbacks continue to advance without
         // ever pumping from a realtime callback.
-        if (is_apple_audio_unit(format)) {
+        if (plugin_lab::is_apple_audio_unit(format)) {
             events::MessageLoopIntegration::pump_main_loop_for(
                 std::chrono::milliseconds(1));
         }
@@ -637,4 +565,12 @@ int cmd_audio_render(const std::vector<std::string>& args) {
     }
 
     return 0;
+}
+
+int cmd_audio_render(const std::vector<std::string>& args) {
+    return cmd_audio_render_impl(args, false);
+}
+
+int cmd_audio_render_worker(const std::vector<std::string>& args) {
+    return cmd_audio_render_impl(args, true);
 }

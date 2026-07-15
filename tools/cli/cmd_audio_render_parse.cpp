@@ -196,10 +196,6 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
             r.json = true;
             continue;
         }
-        if (key == "--worker") {
-            r.worker = true;
-            continue;
-        }
 
         // Flags below all require a value (inline `=` or the next token).
         auto take_value = [&](std::optional<std::string>& dst) -> bool {

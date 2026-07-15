@@ -2065,8 +2065,6 @@ commands:
             kind: option
           - name: --timeout-ms
             kind: option
-          - name: --json
-            kind: flag
       - name: render
         summary: "Isolated offline scenario render of a plugin bundle (no DAW, no audio device): warm up, apply initial state, settle, drive it from declarative flags, append an optional tail, write an int16/int24/float32 WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
         args:

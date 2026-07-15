@@ -1537,7 +1537,7 @@ pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamen
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
 pulp audio validate assert <audio-run-dir-or-assertions.json>
 pulp audio compare <reference.wav> <candidate.wav> [--profile tonal-balance|added-hf|noise-roughness|graininess|stereo-width|transient-integrity] [--reference-role peer|golden] [--align none|latency|varispeed:R|stretch:R|pitch:S|ratio:auto] [--threshold <t>] [--json report.json]
-pulp audio plugin-inspect --plugin <bundle> [--format clap|vst3|au|auv3|lv2] [--json]
+pulp audio plugin-inspect --plugin <bundle> [--format clap|vst3|au|auv3|lv2]
 pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]
 ```
 

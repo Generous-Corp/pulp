@@ -996,7 +996,7 @@ std::string handle_audio_plugin_inspect(const std::string& params_json) {
         return arg_error("Error: plugin is required and must be a bundle path");
 
     std::string cmd = shell_quote(source_build_cli_path(root).string()) +
-                      " audio plugin-inspect --json --plugin " + shell_quote(plugin);
+                      " audio plugin-inspect --plugin " + shell_quote(plugin);
     auto add_str = [&](const char* key, const char* flag) {
         const auto value = extract_string(params_json, key);
         if (!value.empty()) cmd += std::string(" ") + flag + " " + shell_quote(value);
@@ -1028,11 +1028,24 @@ std::string handle_audio_plugin_inspect(const std::string& params_json) {
             return arg_error("Error: sample_rate must be positive");
         cmd += " --sample-rate " + std::to_string(rate);
     }
-    cmd += " 2>&1";
-
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty())
+        return arg_error("Error: " + temp_error);
+    const auto diagnostics_path = temp.directory / "diagnostics.txt";
+    // Keep stdout as the JSON protocol. Vendor libraries and the host scanner
+    // may write diagnostics to stderr even on success.
+    cmd += " 2> " + shell_quote(diagnostics_path.string());
     const auto run = exec_with_status(cmd);
-    if (run.failed())
-        return arg_error("Error: isolated plugin inspection failed.\n" + run.output);
+    const auto diagnostics = read_text_file(diagnostics_path);
+    std::error_code remove_ec;
+    fs::remove_all(temp.directory, remove_ec);
+    if (run.failed()) {
+        std::string message = "Error: isolated plugin inspection failed.";
+        if (!diagnostics.empty()) message += "\n" + diagnostics;
+        if (!run.output.empty()) message += "\n" + run.output;
+        return arg_error(message);
+    }
     std::string normalized;
     std::string parse_error;
     if (!normalize_structured_json(run.output, normalized, parse_error))

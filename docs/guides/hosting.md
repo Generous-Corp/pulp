@@ -101,8 +101,8 @@ cmake --build build --target pulp-plugin-host-demo
   --path "/Library/Audio/Plug-Ins/VST3/MyPlugin.vst3"
 ```
 
-An Audio Unit has no bundle path, so select it by the component identity printed
-by `--list`:
+AudioComponent enumeration may return an Audio Unit descriptor without a bundle
+path, so the demo can select it by the component identity printed by `--list`:
 
 ```bash
 ./build/examples/plugin-host-demo/pulp-plugin-host-demo --id TYPE:SUBT:MANU

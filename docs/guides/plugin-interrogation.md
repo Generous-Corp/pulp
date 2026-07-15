@@ -1,9 +1,10 @@
 # Interrogating and Comparing Third-Party Plugins
 
 Pulp can inspect and render installed CLAP, VST3, Audio Unit, AUv3, and LV2
-plugins without a DAW or audio device. This makes a plugin's **observable host
-contract** available to scripts and agents: parameters, audio/MIDI behavior,
-latency, tails, and deterministic output under controlled stimuli.
+plugins without a DAW or audio device when the matching loader/platform support
+is compiled into the CLI. This makes a plugin's **observable host contract**
+available to scripts and agents: parameters, audio/MIDI behavior, latency,
+tails, and repeatable controlled stimuli.
 
 It does not reveal source code or prove which internal algorithm a plugin uses.
 It lets you form and test useful black-box hypotheses: whether a control changes
@@ -16,7 +17,7 @@ First discover the API the plugin exposes to every host:
 
 ```bash
 pulp audio plugin-inspect \
-  --plugin "/path/to/Reference.component" --format au --json \
+  --plugin "/path/to/Reference.component" --format au \
   > /tmp/reference-params.json
 ```
 
@@ -65,8 +66,9 @@ it never silently downloads a dependency.
 - Render a reference plugin and your implementation from one scenario, then use
   residual checks for intended parity and Quality Lab axes for perceptual
   differences such as graininess or transient integrity.
-- Repeat the same scenario across commits to create golden renders and catch
-  regressions in sound, latency, state initialization, or automation timing.
+- Repeat the same scenario across commits to create golden renders for plugins
+  that are themselves deterministic, and catch regressions in sound, latency,
+  state initialization, or automation timing.
 
 A good experiment changes one independent variable at a time. Similar output is
 evidence about behavior, not evidence that two implementations share an
@@ -87,6 +89,9 @@ sandbox for malicious code. AU workers also service bounded native event-loop
 slices during warm-up and between blocks so asynchronous initialization can
 advance. Warm-up and settling remain configurable because no generic host API
 can declare when a particular licensed plugin is ready.
+If callbacks are still completing during capture, block boundaries can vary with
+wall-clock timing; increase warm-up/settling until repeated captures stabilize
+before treating a third-party render as a golden.
 
 ## What is not automated yet
 

@@ -36,7 +36,7 @@ What you get:
   - `pulp audio validate assert audio-run/assertions.json` — re-check stored assertions, nonzero on failure
 - **Third-party plugin interrogation** — discover the host API, then render an
   explicit plugin through `PluginSlot`, no DAW or audio device:
-  - `pulp audio plugin-inspect --plugin <bundle> --format <format> --json`
+  - `pulp audio plugin-inspect --plugin <bundle> --format <format>` (always JSON)
   - `pulp audio render --plugin <bundle> --out out.wav --duration-ms 1000`
   - both commands isolate vendor code behind a child-process timeout
   - drive renders with `--input-signal`, `--input`, repeatable `--param`, and repeatable `--midi`

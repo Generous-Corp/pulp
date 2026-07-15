@@ -106,8 +106,6 @@ struct ParseAudioRenderResult {
     std::optional<std::uint32_t> settle_ms;
     std::uint32_t timeout_ms = 0;  ///< 0 derives a bounded coordinator timeout.
     AudioRenderWavFormat wav_format = AudioRenderWavFormat::Int16;
-    bool worker = false;           ///< Internal child-process mode.
-
     std::string out_wav;
     std::string manifest_path;
     bool json = false;
@@ -123,3 +121,4 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
 
 // Entry point wired into `cmd_audio` dispatch.
 int cmd_audio_render(const std::vector<std::string>& args);
+int cmd_audio_render_worker(const std::vector<std::string>& args);
