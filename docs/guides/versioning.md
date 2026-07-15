@@ -103,6 +103,19 @@ The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env 
 
 `.github/workflows/version-skill-check.yml` runs on every PR to `main` or `develop`. It fetches full history (so `origin/base_ref` is reachable) and invokes the two scripts in `report` mode. Failure blocks merge.
 
+Alongside the version and skill gates, this same workflow enforces two house
+invariants over Pulp's own source, both hard-failing:
+
+- **Framework-neutrality** (`framework_neutrality_check.py`): Pulp's source names
+  no other framework and adopts none of their type names. See the guard's own
+  header for scope and exemptions.
+- **US-English** (`us_english_check.py`): identifiers and prose use American
+  spelling. Run `us_english_check.py --fix` locally to apply the house spelling;
+  the dictionary is conservative (only unambiguous forms). See the Repo Standards
+  section of `CLAUDE.md`.
+
+Both also run in the pre-push `gates.sh`, so a violation is caught before the push.
+
 There is deliberately no bypass in CI other than the commit trailers. The audit trail lives in git, not in GitHub labels or PR-body text.
 
 ### fix/feat-needs-bump (issue #1009)
